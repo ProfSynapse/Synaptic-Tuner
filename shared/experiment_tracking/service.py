@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import stat
 from datetime import datetime, timezone
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from threading import RLock
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from .experiment import (
     Experiment,
@@ -22,9 +23,37 @@ from .registry import RunRegistry, _PathLock
 from .schema import RunRecord
 from tuner.project import PathRef, ProjectContext, ResolvedConfig, SourceLock
 
+if TYPE_CHECKING:
+    from tuner.cloud.hf_run_approval import HFRunApproval, HFSubmissionClaim
+
 
 class ProvenanceIntegrityError(ValueError):
     """Persisted experiment provenance is missing, unsafe, or inconsistent."""
+
+
+HF_CANCELLATION_SCHEMA_VERSION = "synaptic-hf-cancellation-attempt/v1"
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+_CANONICAL_UTC_RE = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$"
+)
+
+
+@dataclass(frozen=True)
+class HFCancellationClaimResult:
+    """Immutable outcome of the durable cancellation-attempt CAS."""
+
+    event_id: str
+    event_uri: str
+    event_sha256: str
+    provider_attempt_authorized: bool
+    _document_json: str
+
+    @property
+    def document(self) -> dict[str, object]:
+        """Return a detached copy of the immutable canonical claim document."""
+
+        return json.loads(self._document_json)
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -326,6 +355,7 @@ class TrackingService:
                 expected_sha256=experiment.source_lock_sha256,
             )
         self.verify_source_transport_provenance(experiment)
+        self.verify_hf_submission_provenance(experiment)
 
     def verify_source_transport_provenance(self, experiment: Experiment) -> None:
         """Verify immutable HF descriptor/evidence references when present."""
@@ -390,6 +420,385 @@ class TrackingService:
             raise ProvenanceIntegrityError(
                 "HF source transport is not verified as CONSUMABLE"
             )
+
+    def verify_hf_submission_provenance(self, experiment: Experiment) -> None:
+        """Verify the separate approval and append-only submission-event head."""
+
+        experiment.__post_init__()
+        if experiment.hf_run_approval_uri is None:
+            return
+        approval = self._verify_hf_run_approval_artifact(
+            uri=experiment.hf_run_approval_uri,
+            expected_sha256=experiment.hf_run_approval_sha256,
+            experiment_id=experiment.experiment_id,
+        )
+        if approval.authorization_id != experiment.hf_authorization_id:
+            raise ProvenanceIntegrityError(
+                "HF approval authorization ID does not match the experiment"
+            )
+        self._require_hf_approval_bindings(experiment, approval.document)
+        if experiment.hf_submission_state == "APPROVED":
+            return
+        event = self._verify_hf_submission_event_artifact(
+            uri=experiment.hf_submission_event_uri,
+            expected_sha256=experiment.hf_submission_event_sha256,
+            approval=approval,
+        )
+        if event.authorization_id != experiment.hf_authorization_id:
+            raise ProvenanceIntegrityError(
+                "HF submission event authorization ID does not match the experiment"
+            )
+        if event.state.value != experiment.hf_submission_state:
+            raise ProvenanceIntegrityError(
+                "HF submission event state does not match the experiment"
+            )
+        if event.document["approval"] != {
+            "uri": experiment.hf_run_approval_uri,
+            "sha256": experiment.hf_run_approval_sha256,
+        }:
+            raise ProvenanceIntegrityError(
+                "HF submission event does not bind the immutable approval"
+            )
+        if experiment.hf_submission_state in {"SUBMITTED", "AMBIGUOUS"}:
+            previous_reference = event.document["previous_event"]
+            previous = self._verify_hf_submission_event_artifact(
+                uri=previous_reference["uri"],
+                expected_sha256=previous_reference["sha256"],
+                approval=approval,
+            )
+            if previous.state.value != "SUBMITTING":
+                raise ProvenanceIntegrityError(
+                    "Terminal HF submission event must follow SUBMITTING"
+                )
+            try:
+                from tuner.cloud.hf_run_approval import validate_hf_submission_claim
+
+                validate_hf_submission_claim(
+                    event,
+                    approval=approval,
+                    previous_event=previous,
+                )
+            except Exception as exc:
+                raise ProvenanceIntegrityError(
+                    "Terminal HF submission event does not bind its claimed predecessor"
+                ) from exc
+        if experiment.hf_cancellation_state is not None:
+            if experiment.hf_submission_state != "SUBMITTED":
+                raise ProvenanceIntegrityError(
+                    "HF cancellation claim requires a durable SUBMITTED event"
+                )
+            self._verify_hf_cancellation_event_artifact(
+                uri=experiment.hf_cancellation_event_uri,
+                expected_sha256=experiment.hf_cancellation_event_sha256,
+                experiment=experiment,
+                submitted_event=event,
+            )
+
+    def record_hf_run_approval(
+        self,
+        experiment: Experiment,
+        approval: Mapping[str, object] | HFRunApproval,
+    ) -> Experiment:
+        """Persist one immutable exact-run approval and project APPROVED.
+
+        Approval does not change the source-transport lifecycle. The transport
+        must already be exactly CONSUMABLE and remains CONSUMABLE afterward.
+        """
+
+        try:
+            from tuner.cloud.hf_run_approval import validate_hf_run_approval
+
+            validated = validate_hf_run_approval(approval)
+        except Exception as exc:
+            raise ProvenanceIntegrityError("HF run approval is invalid") from exc
+        document = validated.to_dict()
+        if document["experiment_id"] != experiment.experiment_id:
+            raise ProvenanceIntegrityError("HF run approval belongs to another experiment")
+        try:
+            from tuner.cloud.hf_run_approval import canonical_json_bytes
+
+            serialized = canonical_json_bytes(document)
+        except Exception as exc:
+            raise ProvenanceIntegrityError("HF run approval is not canonical") from exc
+        digest = hashlib.sha256(serialized).hexdigest()
+        relative = (
+            Path("experiments")
+            / experiment.experiment_id
+            / "cloud"
+            / "hf"
+            / "submission"
+            / "approvals"
+            / f"{validated.approval_id}.json"
+        )
+        path = self.base_dir / relative
+        uri = self.tracking_uri(path)
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock:
+            with _PathLock(experiment_path):
+                durable = self._load_durable_experiment_for_hf_transition(experiment)
+                if durable.source_transport_state != "CONSUMABLE":
+                    raise ProvenanceIntegrityError(
+                        "HF run approval requires source transport state CONSUMABLE"
+                    )
+                if durable.hf_submission_state is not None:
+                    raise ProvenanceIntegrityError(
+                        "HF run approval cannot be replayed or replaced"
+                    )
+                self._require_hf_approval_bindings(durable, document)
+                self._persist_immutable_hf_artifact(path, serialized)
+                candidate = replace(
+                    durable,
+                    hf_run_approval_uri=uri,
+                    hf_run_approval_sha256=digest,
+                    hf_authorization_id=validated.authorization_id,
+                    hf_submission_state="APPROVED",
+                )
+                self.verify_experiment_provenance(candidate)
+                _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+                self._copy_hf_submission_projection(candidate, experiment)
+                self._stamp_snapshot(experiment, candidate)
+        return experiment
+
+    def claim_hf_submission(
+        self,
+        experiment: Experiment,
+        submitting_event: Mapping[str, object] | HFSubmissionClaim,
+    ) -> Experiment:
+        """Irreversibly consume one authorization by persisting SUBMITTING."""
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock:
+            with _PathLock(experiment_path):
+                durable = self._load_durable_experiment_for_hf_transition(experiment)
+                if durable.hf_submission_state != "APPROVED":
+                    raise ProvenanceIntegrityError(
+                        "HF authorization is already claimed or is not approved"
+                    )
+                approval = self._verify_hf_run_approval_artifact(
+                    uri=durable.hf_run_approval_uri,
+                    expected_sha256=durable.hf_run_approval_sha256,
+                    experiment_id=durable.experiment_id,
+                )
+                try:
+                    from tuner.cloud.hf_run_approval import validate_hf_submission_claim
+
+                    event = validate_hf_submission_claim(
+                        submitting_event,
+                        approval=approval,
+                    )
+                except Exception as exc:
+                    raise ProvenanceIntegrityError(
+                        "HF SUBMITTING event is invalid"
+                    ) from exc
+                if event.state.value != "SUBMITTING":
+                    raise ProvenanceIntegrityError(
+                        "Claim requires an HF SUBMITTING event"
+                    )
+                self._require_hf_event_identity(durable, event.document)
+                uri, digest = self._persist_hf_submission_event(
+                    durable,
+                    event_id=event.event_id,
+                    document=event.to_dict(),
+                )
+                candidate = replace(
+                    durable,
+                    hf_submission_event_uri=uri,
+                    hf_submission_event_sha256=digest,
+                    hf_submission_state="SUBMITTING",
+                )
+                self.verify_experiment_provenance(candidate)
+                _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+                self._copy_hf_submission_projection(candidate, experiment)
+                self._stamp_snapshot(experiment, candidate)
+        return experiment
+
+    def record_hf_submission_terminal(
+        self,
+        experiment: Experiment,
+        terminal_event: Mapping[str, object] | HFSubmissionClaim,
+    ) -> Experiment:
+        """Record the only terminal outcome: SUBMITTED or AMBIGUOUS."""
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock:
+            with _PathLock(experiment_path):
+                durable = self._load_durable_experiment_for_hf_transition(experiment)
+                if durable.hf_submission_state != "SUBMITTING":
+                    raise ProvenanceIntegrityError(
+                        "HF submission terminal event requires an active SUBMITTING claim"
+                    )
+                approval = self._verify_hf_run_approval_artifact(
+                    uri=durable.hf_run_approval_uri,
+                    expected_sha256=durable.hf_run_approval_sha256,
+                    experiment_id=durable.experiment_id,
+                )
+                previous = self._verify_hf_submission_event_artifact(
+                    uri=durable.hf_submission_event_uri,
+                    expected_sha256=durable.hf_submission_event_sha256,
+                    approval=approval,
+                )
+                try:
+                    from tuner.cloud.hf_run_approval import validate_hf_submission_claim
+
+                    event = validate_hf_submission_claim(
+                        terminal_event,
+                        approval=approval,
+                        previous_event=previous,
+                    )
+                except Exception as exc:
+                    raise ProvenanceIntegrityError(
+                        "HF terminal submission event is invalid"
+                    ) from exc
+                if event.state.value not in {"SUBMITTED", "AMBIGUOUS"}:
+                    raise ProvenanceIntegrityError(
+                        "HF terminal event must be SUBMITTED or AMBIGUOUS"
+                    )
+                self._require_hf_event_identity(durable, event.document)
+                if event.document["previous_event"] != {
+                    "uri": durable.hf_submission_event_uri,
+                    "sha256": durable.hf_submission_event_sha256,
+                }:
+                    raise ProvenanceIntegrityError(
+                        "HF terminal event does not bind the durable SUBMITTING event"
+                    )
+                uri, digest = self._persist_hf_submission_event(
+                    durable,
+                    event_id=event.event_id,
+                    document=event.to_dict(),
+                )
+                candidate = replace(
+                    durable,
+                    hf_submission_event_uri=uri,
+                    hf_submission_event_sha256=digest,
+                    hf_submission_state=event.state.value,
+                )
+                self.verify_experiment_provenance(candidate)
+                _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+                self._copy_hf_submission_projection(candidate, experiment)
+                self._stamp_snapshot(experiment, candidate)
+        return experiment
+
+    def build_hf_cancellation_attempt_event(
+        self,
+        experiment: Experiment,
+        *,
+        occurred_at: str,
+    ) -> dict[str, object]:
+        """Build a cancellation event from durable SUBMITTED provider identity."""
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock:
+            with _PathLock(experiment_path):
+                durable = self._load_durable_experiment_for_hf_transition(experiment)
+                if durable.hf_submission_state != "SUBMITTED":
+                    raise ProvenanceIntegrityError(
+                        "HF cancellation requires submission state SUBMITTED"
+                    )
+                approval = self._verify_hf_run_approval_artifact(
+                    uri=durable.hf_run_approval_uri,
+                    expected_sha256=durable.hf_run_approval_sha256,
+                    experiment_id=durable.experiment_id,
+                )
+                submitted = self._verify_hf_submission_event_artifact(
+                    uri=durable.hf_submission_event_uri,
+                    expected_sha256=durable.hf_submission_event_sha256,
+                    approval=approval,
+                )
+                return self._build_hf_cancellation_document(
+                    durable,
+                    submitted_event=submitted,
+                    occurred_at=occurred_at,
+                )
+
+    def claim_hf_cancellation(
+        self,
+        experiment: Experiment,
+        event: Mapping[str, object],
+    ) -> HFCancellationClaimResult:
+        """Claim at-most-once authority to attempt provider cancellation.
+
+        The first durable creator receives ``provider_attempt_authorized=True``.
+        Identity-equal resumes receive the same immutable claim with ``False``.
+        """
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock:
+            with _PathLock(experiment_path):
+                durable = self._load_durable_experiment_for_cancellation(experiment)
+                if durable.hf_submission_state != "SUBMITTED":
+                    raise ProvenanceIntegrityError(
+                        "HF cancellation requires submission state SUBMITTED"
+                    )
+                approval = self._verify_hf_run_approval_artifact(
+                    uri=durable.hf_run_approval_uri,
+                    expected_sha256=durable.hf_run_approval_sha256,
+                    experiment_id=durable.experiment_id,
+                )
+                submitted = self._verify_hf_submission_event_artifact(
+                    uri=durable.hf_submission_event_uri,
+                    expected_sha256=durable.hf_submission_event_sha256,
+                    approval=approval,
+                )
+                validated = self._validate_hf_cancellation_document(
+                    event,
+                    experiment=durable,
+                    submitted_event=submitted,
+                )
+                serialized = self._canonical_hf_authorization_bytes(validated)
+                digest = hashlib.sha256(serialized).hexdigest()
+                event_id = str(validated["event_id"])
+                path = (
+                    self.base_dir
+                    / "experiments"
+                    / durable.experiment_id
+                    / "cloud"
+                    / "hf"
+                    / "submission"
+                    / "events"
+                    / f"{event_id}.json"
+                )
+                uri = self.tracking_uri(path)
+                if durable.hf_cancellation_state == "CLAIMED":
+                    stored = self._verify_hf_cancellation_event_artifact(
+                        uri=durable.hf_cancellation_event_uri,
+                        expected_sha256=durable.hf_cancellation_event_sha256,
+                        experiment=durable,
+                        submitted_event=submitted,
+                    )
+                    if stored != validated or (
+                        durable.hf_cancellation_event_uri,
+                        durable.hf_cancellation_event_sha256,
+                    ) != (uri, digest):
+                        raise ProvenanceIntegrityError(
+                            "HF cancellation claim cannot be replayed or replaced"
+                        )
+                    self._copy_hf_cancellation_projection(durable, experiment)
+                    self._stamp_snapshot(experiment, durable)
+                    return self._cancellation_claim_result(
+                        validated,
+                        uri=uri,
+                        sha256=digest,
+                        provider_attempt_authorized=False,
+                    )
+                if durable.hf_cancellation_state is not None:
+                    raise ProvenanceIntegrityError("Unknown durable HF cancellation state")
+                self._persist_immutable_hf_artifact(path, serialized)
+                candidate = replace(
+                    durable,
+                    hf_cancellation_event_uri=uri,
+                    hf_cancellation_event_sha256=digest,
+                    hf_cancellation_state="CLAIMED",
+                )
+                self.verify_experiment_provenance(candidate)
+                _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+                self._copy_hf_cancellation_projection(candidate, experiment)
+                self._stamp_snapshot(experiment, candidate)
+                return self._cancellation_claim_result(
+                    validated,
+                    uri=uri,
+                    sha256=digest,
+                    provider_attempt_authorized=True,
+                )
 
     def record_source_transport_prepared(
         self,
@@ -514,6 +923,413 @@ class TrackingService:
             experiment.source_transport_state,
         )
 
+    def _load_durable_experiment_for_hf_transition(
+        self, caller: Experiment
+    ) -> Experiment:
+        try:
+            durable = load_experiment(caller.experiment_id, self.base_dir)
+        except (FileNotFoundError, OSError, ValueError, TypeError) as exc:
+            raise ProvenanceIntegrityError(
+                "Durable experiment record is unavailable or invalid"
+            ) from exc
+        self._require_same_protected_projection(durable, caller)
+        self.verify_experiment_provenance(durable)
+        return durable
+
+    def _load_durable_experiment_for_cancellation(
+        self, caller: Experiment
+    ) -> Experiment:
+        try:
+            durable = load_experiment(caller.experiment_id, self.base_dir)
+        except (FileNotFoundError, OSError, ValueError, TypeError) as exc:
+            raise ProvenanceIntegrityError(
+                "Durable experiment record is unavailable or invalid"
+            ) from exc
+        if durable.experiment_id != caller.experiment_id:
+            raise ProvenanceIntegrityError("Experiment identity changed during cancellation")
+        cancellation_fields = set(self._hf_cancellation_field_names())
+        caller_cancellation = tuple(
+            getattr(caller, field_name) for field_name in self._hf_cancellation_field_names()
+        )
+        durable_cancellation = tuple(
+            getattr(durable, field_name) for field_name in self._hf_cancellation_field_names()
+        )
+        if caller_cancellation not in {
+            (None, None, None),
+            durable_cancellation,
+        }:
+            raise ProvenanceIntegrityError(
+                "Experiment cancellation projection conflicts with durable claim"
+            )
+        for field_name in self._protected_field_names():
+            durable_value = getattr(durable, field_name)
+            caller_value = getattr(caller, field_name)
+            if field_name in cancellation_fields:
+                continue
+            elif durable_value != caller_value:
+                raise ProvenanceIntegrityError(
+                    f"Experiment {field_name} conflicts with durable protected provenance"
+                )
+        self.verify_experiment_provenance(durable)
+        return durable
+
+    @staticmethod
+    def _hf_cancellation_field_names() -> tuple[str, ...]:
+        return (
+            "hf_cancellation_event_uri",
+            "hf_cancellation_event_sha256",
+            "hf_cancellation_state",
+        )
+
+    @staticmethod
+    def _canonical_hf_authorization_bytes(value: Mapping[str, object]) -> bytes:
+        try:
+            from tuner.cloud.hf_run_approval import canonical_json_bytes
+
+            return canonical_json_bytes(dict(value))
+        except Exception as exc:
+            raise ProvenanceIntegrityError(
+                "HF cancellation event is not canonical JSON data"
+            ) from exc
+
+    def _build_hf_cancellation_document(
+        self,
+        experiment: Experiment,
+        *,
+        submitted_event: Any,
+        occurred_at: str,
+    ) -> dict[str, object]:
+        document: dict[str, object] = {
+            "schema_version": HF_CANCELLATION_SCHEMA_VERSION,
+            "event_id": "0" * 64,
+            "authorization_id": experiment.hf_authorization_id,
+            "approval": {
+                "uri": experiment.hf_run_approval_uri,
+                "sha256": experiment.hf_run_approval_sha256,
+            },
+            "submitted_event": {
+                "uri": experiment.hf_submission_event_uri,
+                "sha256": experiment.hf_submission_event_sha256,
+            },
+            "provider_job": dict(submitted_event.document["provider_job"]),
+            "occurred_at": occurred_at,
+        }
+        document["event_id"] = self._hf_cancellation_event_id(document)
+        return self._validate_hf_cancellation_document(
+            document,
+            experiment=experiment,
+            submitted_event=submitted_event,
+        )
+
+    def _validate_hf_cancellation_document(
+        self,
+        value: Mapping[str, object],
+        *,
+        experiment: Experiment,
+        submitted_event: Any,
+    ) -> dict[str, object]:
+        if not isinstance(value, Mapping):
+            raise ProvenanceIntegrityError("HF cancellation event must be an object")
+        document = json.loads(self._canonical_hf_authorization_bytes(value))
+        expected_keys = {
+            "schema_version",
+            "event_id",
+            "authorization_id",
+            "approval",
+            "submitted_event",
+            "provider_job",
+            "occurred_at",
+        }
+        if set(document) != expected_keys:
+            raise ProvenanceIntegrityError("HF cancellation event has an unknown or missing field")
+        if document["schema_version"] != HF_CANCELLATION_SCHEMA_VERSION:
+            raise ProvenanceIntegrityError("HF cancellation event schema version is invalid")
+        if not isinstance(document["event_id"], str) or not _SHA256_RE.fullmatch(
+            document["event_id"]
+        ):
+            raise ProvenanceIntegrityError("HF cancellation event ID is invalid")
+        if document["event_id"] != self._hf_cancellation_event_id(document):
+            raise ProvenanceIntegrityError(
+                "HF cancellation event ID does not match its canonical document"
+            )
+        expected_identity = {
+            "authorization_id": experiment.hf_authorization_id,
+            "approval": {
+                "uri": experiment.hf_run_approval_uri,
+                "sha256": experiment.hf_run_approval_sha256,
+            },
+            "submitted_event": {
+                "uri": experiment.hf_submission_event_uri,
+                "sha256": experiment.hf_submission_event_sha256,
+            },
+            "provider_job": submitted_event.document["provider_job"],
+        }
+        for field_name, expected in expected_identity.items():
+            if document[field_name] != expected:
+                raise ProvenanceIntegrityError(
+                    f"HF cancellation event changed durable {field_name} identity"
+                )
+        provider_job = document["provider_job"]
+        if not isinstance(provider_job, dict) or set(provider_job) != {
+            "namespace",
+            "job_id",
+        }:
+            raise ProvenanceIntegrityError("HF cancellation provider job is invalid")
+        if any(
+            not isinstance(provider_job[field_name], str)
+            or not _PROVIDER_ID_RE.fullmatch(provider_job[field_name])
+            for field_name in ("namespace", "job_id")
+        ):
+            raise ProvenanceIntegrityError("HF cancellation provider identity is invalid")
+        occurred_at = document["occurred_at"]
+        if not isinstance(occurred_at, str) or not _CANONICAL_UTC_RE.fullmatch(occurred_at):
+            raise ProvenanceIntegrityError(
+                "HF cancellation occurred_at must be canonical UTC"
+            )
+        try:
+            occurred = datetime.fromisoformat(occurred_at[:-1] + "+00:00")
+            submitted_at = datetime.fromisoformat(
+                str(submitted_event.document["occurred_at"])[:-1] + "+00:00"
+            )
+        except ValueError as exc:
+            raise ProvenanceIntegrityError("HF cancellation timestamp is invalid") from exc
+        normalized = occurred.isoformat(
+            timespec="microseconds" if occurred.microsecond else "seconds"
+        ).replace("+00:00", "Z")
+        if normalized != occurred_at:
+            raise ProvenanceIntegrityError("HF cancellation timestamp is not canonical")
+        if occurred < submitted_at:
+            raise ProvenanceIntegrityError(
+                "HF cancellation event predates the SUBMITTED event"
+            )
+        return document
+
+    def _hf_cancellation_event_id(self, document: Mapping[str, object]) -> str:
+        body = {key: value for key, value in document.items() if key != "event_id"}
+        return hashlib.sha256(self._canonical_hf_authorization_bytes(body)).hexdigest()
+
+    def _verify_hf_cancellation_event_artifact(
+        self,
+        *,
+        uri: str | None,
+        expected_sha256: str | None,
+        experiment: Experiment,
+        submitted_event: Any,
+    ) -> dict[str, object]:
+        canonical = self._verify_provenance_artifact(
+            kind="HF cancellation event",
+            uri=uri,
+            expected_sha256=expected_sha256,
+        )
+        try:
+            payload = json.loads(
+                canonical,
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ProvenanceIntegrityError("Stored HF cancellation event is malformed") from exc
+        return self._validate_hf_cancellation_document(
+            payload,
+            experiment=experiment,
+            submitted_event=submitted_event,
+        )
+
+    @staticmethod
+    def _cancellation_claim_result(
+        document: Mapping[str, object],
+        *,
+        uri: str,
+        sha256: str,
+        provider_attempt_authorized: bool,
+    ) -> HFCancellationClaimResult:
+        canonical = json.dumps(
+            document,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        return HFCancellationClaimResult(
+            event_id=str(document["event_id"]),
+            event_uri=uri,
+            event_sha256=sha256,
+            provider_attempt_authorized=provider_attempt_authorized,
+            _document_json=canonical,
+        )
+
+    def _require_hf_approval_bindings(
+        self, durable: Experiment, document: Mapping[str, Any]
+    ) -> None:
+        expected_pairs = {
+            "source_lock": (
+                durable.source_lock_uri,
+                durable.source_lock_sha256,
+            ),
+            "descriptor": (
+                durable.source_transport_uri,
+                durable.source_transport_sha256,
+            ),
+            "provisioning_evidence": (
+                durable.provisioning_evidence_uri,
+                durable.provisioning_evidence_sha256,
+            ),
+        }
+        for key, (uri, sha256) in expected_pairs.items():
+            value = document.get(key)
+            if value is None:
+                continue
+            if value != {"uri": uri, "sha256": sha256}:
+                raise ProvenanceIntegrityError(
+                    f"HF run approval does not bind the durable {key.replace('_', ' ')}"
+                )
+        descriptor = self._verify_hf_tracking_artifact(
+            kind="source transport",
+            uri=durable.source_transport_uri,
+            expected_sha256=durable.source_transport_sha256,
+            schema_version="synaptic-hf-source-transport/v1",
+            experiment_id=durable.experiment_id,
+        )
+        expected_digests = {
+            "bundle_sha256": descriptor["bundle"]["content_sha256"],
+            "capsule_manifest_sha256": descriptor["capsule"]["manifest"]["sha256"],
+            "checkout_policy_sha256": descriptor["checkout_policy"]["sha256"],
+        }
+        for field_name, expected in expected_digests.items():
+            if document.get(field_name) != expected:
+                raise ProvenanceIntegrityError(
+                    f"HF run approval does not bind the descriptor {field_name}"
+                )
+
+    @staticmethod
+    def _require_hf_event_identity(
+        durable: Experiment, document: Mapping[str, Any]
+    ) -> None:
+        if document.get("authorization_id") != durable.hf_authorization_id:
+            raise ProvenanceIntegrityError(
+                "HF submission event uses another authorization"
+            )
+        if document.get("experiment_id") != durable.experiment_id:
+            raise ProvenanceIntegrityError(
+                "HF submission event belongs to another experiment"
+            )
+        if document.get("approval") != {
+            "uri": durable.hf_run_approval_uri,
+            "sha256": durable.hf_run_approval_sha256,
+        }:
+            raise ProvenanceIntegrityError(
+                "HF submission event does not bind the immutable approval"
+            )
+
+    def _persist_hf_submission_event(
+        self,
+        experiment: Experiment,
+        *,
+        event_id: str,
+        document: Mapping[str, Any],
+    ) -> tuple[str, str]:
+        try:
+            from tuner.cloud.hf_run_approval import canonical_json_bytes
+
+            serialized = canonical_json_bytes(dict(document))
+        except Exception as exc:
+            raise ProvenanceIntegrityError("HF submission event is not canonical") from exc
+        digest = hashlib.sha256(serialized).hexdigest()
+        relative = (
+            Path("experiments")
+            / experiment.experiment_id
+            / "cloud"
+            / "hf"
+            / "submission"
+            / "events"
+            / f"{event_id}.json"
+        )
+        path = self.base_dir / relative
+        self._persist_immutable_hf_artifact(path, serialized)
+        return self.tracking_uri(path), digest
+
+    def _persist_immutable_hf_artifact(self, path: Path, serialized: bytes) -> None:
+        root = self.base_dir.resolve(strict=False)
+        if not _contained(path, root):
+            raise ProvenanceIntegrityError("HF submission artifact escapes tracking root")
+        relative = path.resolve(strict=False).relative_to(root)
+        current = root
+        for part in relative.parts:
+            current = current / part
+            if current.exists() and _is_link_or_reparse(current):
+                raise ProvenanceIntegrityError(
+                    "HF submission artifacts cannot use symlinks or reparse points"
+                )
+        if path.exists():
+            try:
+                existing = path.read_bytes()
+            except OSError as exc:
+                raise ProvenanceIntegrityError(
+                    "Existing HF submission artifact is unreadable"
+                ) from exc
+            if existing != serialized:
+                raise ProvenanceIntegrityError(
+                    "Immutable HF submission artifact cannot be replaced"
+                )
+            return
+        _atomic_write_bytes(path, serialized)
+
+    def _verify_hf_run_approval_artifact(
+        self,
+        *,
+        uri: str | None,
+        expected_sha256: str | None,
+        experiment_id: str,
+    ) -> Any:
+        canonical = self._verify_provenance_artifact(
+            kind="HF run approval",
+            uri=uri,
+            expected_sha256=expected_sha256,
+        )
+        try:
+            payload = json.loads(
+                canonical,
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+            from tuner.cloud.hf_run_approval import validate_hf_run_approval
+
+            approval = validate_hf_run_approval(
+                payload,
+                at=payload.get("issued_at"),
+            )
+        except Exception as exc:
+            raise ProvenanceIntegrityError(
+                "Stored HF run approval does not match its exact schema"
+            ) from exc
+        if approval.document["experiment_id"] != experiment_id:
+            raise ProvenanceIntegrityError(
+                "Stored HF run approval belongs to another experiment"
+            )
+        return approval
+
+    def _verify_hf_submission_event_artifact(
+        self,
+        *,
+        uri: str | None,
+        expected_sha256: str | None,
+        approval: Any,
+    ) -> Any:
+        canonical = self._verify_provenance_artifact(
+            kind="HF submission event",
+            uri=uri,
+            expected_sha256=expected_sha256,
+        )
+        try:
+            payload = json.loads(
+                canonical,
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+            from tuner.cloud.hf_run_approval import validate_hf_submission_claim
+
+            return validate_hf_submission_claim(payload, approval=approval)
+        except Exception as exc:
+            raise ProvenanceIntegrityError(
+                "Stored HF submission event does not match its exact schema"
+            ) from exc
+
     @classmethod
     def _protected_identity(cls, experiment: Experiment) -> tuple[str | None, ...]:
         return tuple(
@@ -533,6 +1349,23 @@ class TrackingService:
             setattr(target, field_name, getattr(source, field_name))
 
     @staticmethod
+    def _copy_hf_submission_projection(source: Experiment, target: Experiment) -> None:
+        for field_name in (
+            "hf_run_approval_uri",
+            "hf_run_approval_sha256",
+            "hf_authorization_id",
+            "hf_submission_event_uri",
+            "hf_submission_event_sha256",
+            "hf_submission_state",
+        ):
+            setattr(target, field_name, getattr(source, field_name))
+
+    @staticmethod
+    def _copy_hf_cancellation_projection(source: Experiment, target: Experiment) -> None:
+        for field_name in TrackingService._hf_cancellation_field_names():
+            setattr(target, field_name, getattr(source, field_name))
+
+    @staticmethod
     def _require_same_immutable_tracking_identity(
         durable: Experiment,
         caller: Experiment,
@@ -549,6 +1382,15 @@ class TrackingService:
             "source_lock_sha256",
             "resolved_config_uri",
             "resolved_config_sha256",
+            "hf_run_approval_uri",
+            "hf_run_approval_sha256",
+            "hf_authorization_id",
+            "hf_submission_event_uri",
+            "hf_submission_event_sha256",
+            "hf_submission_state",
+            "hf_cancellation_event_uri",
+            "hf_cancellation_event_sha256",
+            "hf_cancellation_state",
         ):
             if getattr(durable, field_name) != getattr(caller, field_name):
                 raise ProvenanceIntegrityError(
@@ -629,9 +1471,22 @@ class TrackingService:
             raise ProvenanceIntegrityError(f"Stored {kind} is unreadable or malformed") from exc
         if not isinstance(payload, dict):
             raise ProvenanceIntegrityError(f"Stored {kind} must be a JSON object")
-        if kind in {"source transport", "provisioning evidence"}:
+        if kind in {
+            "source transport",
+            "provisioning evidence",
+            "HF run approval",
+            "HF submission event",
+            "HF cancellation event",
+        }:
             try:
-                from tuner.cloud.hf_provisioning import canonical_json_bytes
+                if kind in {
+                    "HF run approval",
+                    "HF submission event",
+                    "HF cancellation event",
+                }:
+                    from tuner.cloud.hf_run_approval import canonical_json_bytes
+                else:
+                    from tuner.cloud.hf_provisioning import canonical_json_bytes
 
                 canonical = canonical_json_bytes(payload)
             except Exception as exc:
@@ -822,6 +1677,15 @@ class TrackingService:
             "provisioning_evidence_uri",
             "provisioning_evidence_sha256",
             "source_transport_state",
+            "hf_run_approval_uri",
+            "hf_run_approval_sha256",
+            "hf_authorization_id",
+            "hf_submission_event_uri",
+            "hf_submission_event_sha256",
+            "hf_submission_state",
+            "hf_cancellation_event_uri",
+            "hf_cancellation_event_sha256",
+            "hf_cancellation_state",
         )
 
     @classmethod

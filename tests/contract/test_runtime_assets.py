@@ -134,6 +134,7 @@ ENGINE_CHECKOUT_FAMILIES = (
             "Evaluator/cloud_hf_job.py",
             "Evaluator/cloud_hf_job_vllm.py",
             "MechInterp/cloud/modal_runner.py",
+            "tuner/cloud/hf_bootstrap_smoke.py",
         ),
     ),
     AssetFamily(
@@ -262,6 +263,7 @@ def test_required_runtime_asset_families_are_present_in_source() -> None:
     assert "SynthChat/config/validation.yaml" in assets
     assert "MechInterp/configs/templates/pipeline.yaml" in assets
     assert "docker/mechinterp-runner/print_provenance.py" in assets
+    assert "tuner/cloud/hf_bootstrap_smoke.py" in assets
 
 
 def test_bootstrap_capsule_assets_are_explicit_and_run_agnostic() -> None:

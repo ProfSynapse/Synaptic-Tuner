@@ -5,6 +5,7 @@ import hashlib
 import multiprocessing
 import queue
 import threading
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,6 +27,14 @@ from tuner.project import (
     RepositoryLocation,
     SourceLock,
     resolve_config_layers,
+)
+from tuner.cloud.hf_run_approval import (
+    HFRunApproval,
+    build_hf_ambiguous_event,
+    build_hf_run_approval,
+    build_hf_submitted_event,
+    build_hf_submitting_event,
+    canonical_json_bytes as canonical_approval_bytes,
 )
 
 
@@ -156,6 +165,44 @@ def _set_derived_output_process(
         results.put(("ok", key, dict(experiment.derived_outputs)))
     except Exception as exc:
         results.put(("error", key, type(exc).__name__))
+
+
+def _claim_submission_process(
+    base_dir: str,
+    experiment_id: str,
+    event: dict,
+    start,
+    results,
+) -> None:
+    service = TrackingService(Path(base_dir))
+    experiment = service.load_experiment(experiment_id)
+    if not start.wait(timeout=10):
+        results.put(("timeout", "start"))
+        return
+    try:
+        service.claim_hf_submission(experiment, event)
+        results.put(("ok", experiment.hf_submission_event_sha256))
+    except Exception as exc:
+        results.put(("error", type(exc).__name__))
+
+
+def _claim_cancellation_process(
+    base_dir: str,
+    experiment_id: str,
+    event: dict,
+    start,
+    results,
+) -> None:
+    service = TrackingService(Path(base_dir))
+    experiment = service.load_experiment(experiment_id)
+    if not start.wait(timeout=10):
+        results.put(("timeout", "start"))
+        return
+    try:
+        outcome = service.claim_hf_cancellation(experiment, event)
+        results.put(("ok", outcome.provider_attempt_authorized, outcome.event_sha256))
+    except Exception as exc:
+        results.put(("error", type(exc).__name__))
 
 
 def test_tracking_service_creates_and_updates_experiment(tmp_path: Path):
@@ -321,6 +368,11 @@ def test_loading_historical_experiment_does_not_rewrite_bytes(tmp_path: Path):
 
     assert loaded.source_lock_uri is None
     assert loaded.resolved_config_uri is None
+    assert loaded.hf_run_approval_uri is None
+    assert loaded.hf_authorization_id is None
+    assert loaded.hf_submission_state is None
+    assert loaded.hf_cancellation_event_uri is None
+    assert loaded.hf_cancellation_state is None
     assert path.read_bytes() == original
 
 
@@ -606,6 +658,11 @@ def test_historical_hf_record_remains_readable_unchanged_but_not_consumable(tmp_
 
     assert path.read_bytes() == original
     assert experiment.source_transport_uri is None
+    assert experiment.hf_run_approval_uri is None
+    assert experiment.hf_submission_event_uri is None
+    assert experiment.hf_submission_state is None
+    assert experiment.hf_cancellation_event_uri is None
+    assert experiment.hf_cancellation_state is None
     with pytest.raises(ProvenanceIntegrityError, match="not verified as CONSUMABLE"):
         service.require_consumable_hf_transport(experiment)
     assert path.read_bytes() == original
@@ -870,6 +927,751 @@ def _make_consumable_transport(
     )
     service.mark_source_transport_consumable(experiment)
     return experiment, stale
+
+
+def _approval(experiment: Experiment, *, run_id: str = "hf-smoke-1"):
+    return build_hf_run_approval(
+        experiment_id=experiment.experiment_id,
+        run_id=run_id,
+        descriptor_uri=experiment.source_transport_uri or "",
+        descriptor_sha256=experiment.source_transport_sha256 or "",
+        provisioning_evidence_uri=experiment.provisioning_evidence_uri or "",
+        provisioning_evidence_sha256=experiment.provisioning_evidence_sha256 or "",
+        source_lock_uri=experiment.source_lock_uri or "",
+        source_lock_sha256=experiment.source_lock_sha256 or "",
+        bundle_sha256="5" * 64,
+        capsule_manifest_sha256="3" * 64,
+        checkout_policy_sha256="4" * 64,
+        hardware_flavor="cpu-basic",
+        user_authorization_reference="conversation-2026-08-20-one-hf-smoke",
+        issued_at="2026-08-20T12:00:00Z",
+        expires_at="2026-08-20T13:00:00Z",
+        hourly_price_usd="0.01",
+        projected_cost_usd="0.01",
+        quoted_at="2026-08-20T11:59:00Z",
+    )
+
+
+def _make_approved_submission(
+    service: TrackingService,
+) -> tuple[Experiment, HFRunApproval]:
+    experiment, _ = _make_consumable_transport(service)
+    approval = _approval(experiment)
+    service.record_hf_run_approval(experiment, approval)
+    return experiment, approval
+
+
+def _make_submitted_submission(
+    service: TrackingService,
+) -> tuple[Experiment, HFRunApproval, object]:
+    experiment, approval = _make_approved_submission(service)
+    submitting = build_hf_submitting_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        occurred_at="2026-08-20T12:01:00Z",
+    )
+    service.claim_hf_submission(experiment, submitting)
+    submitted = build_hf_submitted_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        previous_event=submitting,
+        previous_event_uri=experiment.hf_submission_event_uri or "",
+        occurred_at="2026-08-20T12:02:00Z",
+        provider_namespace="professorsynapse",
+        provider_job_id="job-smoke-1",
+    )
+    service.record_hf_submission_terminal(experiment, submitted)
+    return experiment, approval, submitted
+
+
+def test_hf_cancellation_claim_is_durable_exclusive_and_identity_equal_on_resume(
+    tmp_path: Path,
+):
+    service = TrackingService(tmp_path)
+    experiment, _, _ = _make_submitted_submission(service)
+    before_claim = service.load_experiment(experiment.experiment_id)
+    event = service.build_hf_cancellation_attempt_event(
+        before_claim,
+        occurred_at="2026-08-20T12:12:00Z",
+    )
+
+    first = service.claim_hf_cancellation(before_claim, event)
+    assert first.provider_attempt_authorized is True
+    assert first.document == event
+    detached = first.document
+    detached["occurred_at"] = "2099-01-01T00:00:00Z"
+    assert first.document == event
+    with pytest.raises(FrozenInstanceError):
+        first.provider_attempt_authorized = False
+    assert before_claim.hf_cancellation_state == "CLAIMED"
+    assert service.resolve_uri(first.event_uri).read_bytes().endswith(b"\n")
+
+    stale_resume = service.load_experiment(experiment.experiment_id)
+    second = TrackingService(tmp_path).claim_hf_cancellation(stale_resume, event)
+    third = TrackingService(tmp_path).claim_hf_cancellation(before_claim, event)
+
+    assert second.provider_attempt_authorized is False
+    assert third.provider_attempt_authorized is False
+    assert second.document == first.document == third.document
+    assert second.event_uri == first.event_uri == third.event_uri
+    assert second.event_sha256 == first.event_sha256 == third.event_sha256
+    durable = service.load_experiment(experiment.experiment_id)
+    assert durable.hf_submission_state == "SUBMITTED"
+    assert durable.source_transport_state == "CONSUMABLE"
+    service.verify_experiment_provenance(durable)
+
+
+def test_hf_cancellation_rejects_non_submitted_replacement_and_caller_provider_identity(
+    tmp_path: Path,
+):
+    service = TrackingService(tmp_path)
+    approved, _ = _make_approved_submission(service)
+    with pytest.raises(ProvenanceIntegrityError, match="SUBMITTED"):
+        service.build_hf_cancellation_attempt_event(
+            approved,
+            occurred_at="2026-08-20T12:12:00Z",
+        )
+
+    experiment, _, _ = _make_submitted_submission(service)
+    event = service.build_hf_cancellation_attempt_event(
+        experiment,
+        occurred_at="2026-08-20T12:12:00Z",
+    )
+    first = service.claim_hf_cancellation(experiment, event)
+    record_path = service._experiment_path(experiment.experiment_id)
+    durable_before = record_path.read_bytes()
+
+    replacement = dict(event)
+    replacement["occurred_at"] = "2026-08-20T12:13:00Z"
+    replacement["event_id"] = service._hf_cancellation_event_id(replacement)
+    with pytest.raises(ProvenanceIntegrityError, match="replayed or replaced"):
+        service.claim_hf_cancellation(experiment, replacement)
+
+    hostile = dict(event)
+    hostile["provider_job"] = {
+        "namespace": "attacker",
+        "job_id": "different-job",
+    }
+    hostile["event_id"] = service._hf_cancellation_event_id(hostile)
+    with pytest.raises(ProvenanceIntegrityError, match="provider_job"):
+        service.claim_hf_cancellation(experiment, hostile)
+
+    assert first.provider_attempt_authorized is True
+    assert record_path.read_bytes() == durable_before
+
+
+def test_competing_thread_hf_cancellation_claims_grant_one_provider_attempt(
+    tmp_path: Path,
+):
+    service = TrackingService(tmp_path)
+    experiment, _, _ = _make_submitted_submission(service)
+    event = service.build_hf_cancellation_attempt_event(
+        experiment,
+        occurred_at="2026-08-20T12:12:00Z",
+    )
+    callers = [service.load_experiment(experiment.experiment_id) for _ in range(2)]
+    barrier = threading.Barrier(3)
+    outcomes: list[bool] = []
+    errors: list[str] = []
+
+    def claim(caller: Experiment) -> None:
+        barrier.wait(timeout=5)
+        try:
+            result = TrackingService(tmp_path).claim_hf_cancellation(caller, event)
+            outcomes.append(result.provider_attempt_authorized)
+        except Exception as exc:
+            errors.append(type(exc).__name__)
+
+    threads = [threading.Thread(target=claim, args=(caller,)) for caller in callers]
+    for thread in threads:
+        thread.start()
+    barrier.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert not errors
+    assert sorted(outcomes) == [False, True]
+    assert service.load_experiment(experiment.experiment_id).hf_cancellation_state == "CLAIMED"
+
+
+def test_spawned_hf_cancellation_claims_grant_one_provider_attempt(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment, _, _ = _make_submitted_submission(service)
+    event = service.build_hf_cancellation_attempt_event(
+        experiment,
+        occurred_at="2026-08-20T12:12:00Z",
+    )
+    context = multiprocessing.get_context("spawn")
+    start = context.Event()
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_claim_cancellation_process,
+            args=(
+                str(tmp_path),
+                experiment.experiment_id,
+                event,
+                start,
+                results,
+            ),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    start.set()
+    try:
+        outcomes = [results.get(timeout=15) for _ in processes]
+    except queue.Empty:
+        pytest.fail("spawned HF cancellation process did not report within timeout")
+    finally:
+        for process in processes:
+            process.join(timeout=10)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+        results.close()
+        results.join_thread()
+
+    assert all(process.exitcode == 0 for process in processes)
+    assert all(outcome[0] == "ok" for outcome in outcomes)
+    assert sorted(outcome[1] for outcome in outcomes) == [False, True]
+    assert len({outcome[2] for outcome in outcomes}) == 1
+    assert service.load_experiment(experiment.experiment_id).hf_cancellation_state == "CLAIMED"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "save",
+        "mark_stage",
+        "update_stage_details",
+        "set_artifact_root",
+        "set_derived_output",
+        "attach_run",
+    ],
+)
+def test_generic_mutations_cannot_erase_hf_cancellation_claim(
+    tmp_path: Path, mutation: str
+):
+    service = TrackingService(tmp_path)
+    experiment, _, _ = _make_submitted_submission(service)
+    stale = service.load_experiment(experiment.experiment_id)
+    event = service.build_hf_cancellation_attempt_event(
+        experiment,
+        occurred_at="2026-08-20T12:12:00Z",
+    )
+    service.claim_hf_cancellation(experiment, event)
+    record_path = service._experiment_path(experiment.experiment_id)
+    durable_before = record_path.read_bytes()
+    registry_before = service.registry.path.read_bytes() if service.registry.path.exists() else None
+
+    with pytest.raises(ProvenanceIntegrityError, match="protected provenance"):
+        if mutation == "save":
+            stale.name = "stale cancellation overwrite"
+            service.save_experiment(stale)
+        elif mutation == "mark_stage":
+            service.mark_stage(stale, "training", "running")
+        elif mutation == "update_stage_details":
+            service.update_stage_details(stale, "training", job_ref="job-stale")
+        elif mutation == "set_artifact_root":
+            service.set_artifact_root(stale, "training", "artifact://stale")
+        elif mutation == "set_derived_output":
+            service.set_derived_output(stale, "features_csv", "artifact://stale.csv")
+        else:
+            service.attach_run(
+                stale,
+                RunRecord(
+                    run_id="stale-cancellation-run",
+                    run_type="cloud_sft",
+                    name="stale",
+                    timestamp="2026-08-20T12:13:00Z",
+                    status="running",
+                    output_dir="artifact://runs/stale",
+                ),
+            )
+
+    assert record_path.read_bytes() == durable_before
+    assert (
+        service.registry.path.read_bytes() if service.registry.path.exists() else None
+    ) == registry_before
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("hf_cancellation_event_uri", "tracking://replacement-cancellation.json"),
+        ("hf_cancellation_event_sha256", "9" * 64),
+        ("hf_cancellation_state", None),
+    ],
+)
+def test_public_save_protects_every_hf_cancellation_projection_field(
+    tmp_path: Path, field_name: str, value: str | None
+):
+    service = TrackingService(tmp_path)
+    experiment, _, _ = _make_submitted_submission(service)
+    event = service.build_hf_cancellation_attempt_event(
+        experiment,
+        occurred_at="2026-08-20T12:12:00Z",
+    )
+    service.claim_hf_cancellation(experiment, event)
+    record_path = service._experiment_path(experiment.experiment_id)
+    durable_before = record_path.read_bytes()
+    setattr(experiment, field_name, value)
+
+    with pytest.raises((ProvenanceIntegrityError, ValueError)):
+        service.save_experiment(experiment)
+
+    assert record_path.read_bytes() == durable_before
+
+
+def test_attach_run_propagates_hf_cancellation_claim(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment, _, _ = _make_submitted_submission(service)
+    event = service.build_hf_cancellation_attempt_event(
+        experiment,
+        occurred_at="2026-08-20T12:12:00Z",
+    )
+    claim = service.claim_hf_cancellation(experiment, event)
+    service.attach_run(
+        experiment,
+        RunRecord(
+            run_id="cancellation-claimed-run",
+            run_type="cloud_sft",
+            name="claimed",
+            timestamp="2026-08-20T12:13:00Z",
+            status="running",
+            output_dir="artifact://runs/claimed",
+        ),
+    )
+
+    stored = service.registry.get_run("cancellation-claimed-run")
+    assert stored is not None
+    assert stored.hf_cancellation_event_uri == claim.event_uri
+    assert stored.hf_cancellation_event_sha256 == claim.event_sha256
+    assert stored.hf_cancellation_state == "CLAIMED"
+
+
+@pytest.mark.parametrize("terminal_state", ["SUBMITTED", "AMBIGUOUS"])
+def test_hf_submission_claim_is_separate_durable_and_terminal(
+    tmp_path: Path, terminal_state: str
+):
+    service = TrackingService(tmp_path)
+    experiment, approval = _make_approved_submission(service)
+
+    assert experiment.source_transport_state == "CONSUMABLE"
+    assert experiment.hf_submission_state == "APPROVED"
+    assert experiment.hf_authorization_id == approval.authorization_id
+    approval_path = service.resolve_uri(experiment.hf_run_approval_uri or "")
+    assert approval_path.read_bytes() == canonical_approval_bytes(approval.to_dict())
+
+    submitting = build_hf_submitting_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        occurred_at="2026-08-20T12:01:00Z",
+    )
+    service.claim_hf_submission(experiment, submitting)
+    submitting_uri = experiment.hf_submission_event_uri
+    submitting_sha256 = experiment.hf_submission_event_sha256
+    assert experiment.hf_submission_state == "SUBMITTING"
+    assert experiment.source_transport_state == "CONSUMABLE"
+
+    if terminal_state == "SUBMITTED":
+        terminal = build_hf_submitted_event(
+            approval,
+            approval_uri=experiment.hf_run_approval_uri or "",
+            previous_event=submitting,
+            previous_event_uri=submitting_uri or "",
+            occurred_at="2026-08-20T12:02:00Z",
+            provider_namespace="professorsynapse",
+            provider_job_id="job-smoke-1",
+        )
+    else:
+        terminal = build_hf_ambiguous_event(
+            approval,
+            approval_uri=experiment.hf_run_approval_uri or "",
+            previous_event=submitting,
+            previous_event_uri=submitting_uri or "",
+            occurred_at="2026-08-20T12:02:00Z",
+            reason_code="SUBMISSION_RESPONSE_LOST",
+        )
+    service.record_hf_submission_terminal(experiment, terminal)
+
+    durable = service.load_experiment(experiment.experiment_id)
+    assert durable.hf_submission_state == terminal_state
+    assert durable.source_transport_state == "CONSUMABLE"
+    assert durable.hf_submission_event_uri != submitting_uri
+    assert service.resolve_uri(submitting_uri or "").is_file()
+    assert hashlib.sha256(service.resolve_uri(submitting_uri or "").read_bytes()).hexdigest() == (
+        submitting_sha256
+    )
+    service.verify_experiment_provenance(durable)
+
+
+def test_hf_approval_and_submission_replay_replacement_and_backward_transitions_fail(
+    tmp_path: Path,
+):
+    service = TrackingService(tmp_path)
+    experiment, approval = _make_approved_submission(service)
+    record_path = service._experiment_path(experiment.experiment_id)
+    approved_bytes = record_path.read_bytes()
+
+    with pytest.raises(ProvenanceIntegrityError, match="replayed or replaced"):
+        service.record_hf_run_approval(experiment, approval)
+    assert record_path.read_bytes() == approved_bytes
+
+    submitting = build_hf_submitting_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        occurred_at="2026-08-20T12:01:00Z",
+    )
+    service.claim_hf_submission(experiment, submitting)
+    claimed_bytes = record_path.read_bytes()
+    with pytest.raises(ProvenanceIntegrityError, match="already claimed"):
+        service.claim_hf_submission(experiment, submitting)
+    with pytest.raises(ProvenanceIntegrityError, match="terminal submission event is invalid"):
+        service.record_hf_submission_terminal(
+            service.load_experiment(experiment.experiment_id),
+            submitting,
+        )
+    assert record_path.read_bytes() == claimed_bytes
+
+    ambiguous = build_hf_ambiguous_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        previous_event=submitting,
+        previous_event_uri=experiment.hf_submission_event_uri or "",
+        occurred_at="2026-08-20T12:02:00Z",
+        reason_code="PROVIDER_STATUS_UNKNOWN",
+    )
+    service.record_hf_submission_terminal(experiment, ambiguous)
+    terminal_bytes = record_path.read_bytes()
+    with pytest.raises(ProvenanceIntegrityError, match="active SUBMITTING"):
+        service.record_hf_submission_terminal(experiment, ambiguous)
+    with pytest.raises(ProvenanceIntegrityError, match="already claimed"):
+        service.claim_hf_submission(experiment, submitting)
+    assert record_path.read_bytes() == terminal_bytes
+
+
+def test_hf_terminal_event_must_bind_exact_durable_submitting_head(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment, approval = _make_approved_submission(service)
+    submitting = build_hf_submitting_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        occurred_at="2026-08-20T12:01:00Z",
+    )
+    service.claim_hf_submission(experiment, submitting)
+    record_path = service._experiment_path(experiment.experiment_id)
+    before = record_path.read_bytes()
+
+    terminal = build_hf_ambiguous_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        previous_event=submitting,
+        previous_event_uri="tracking://wrong-submitting-event.json",
+        occurred_at="2026-08-20T12:02:00Z",
+        reason_code="PROVIDER_STATUS_UNKNOWN",
+    )
+    with pytest.raises(ProvenanceIntegrityError, match="durable SUBMITTING"):
+        service.record_hf_submission_terminal(experiment, terminal)
+
+    assert record_path.read_bytes() == before
+    assert service.load_experiment(experiment.experiment_id).hf_submission_state == "SUBMITTING"
+
+
+def test_competing_thread_hf_claims_are_exclusive_by_authorization_id(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment, approval = _make_approved_submission(service)
+    event = build_hf_submitting_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        occurred_at="2026-08-20T12:01:00Z",
+    ).to_dict()
+    callers = [service.load_experiment(experiment.experiment_id) for _ in range(2)]
+    barrier = threading.Barrier(3)
+    outcomes: list[str] = []
+
+    def claim(caller: Experiment) -> None:
+        barrier.wait(timeout=5)
+        try:
+            TrackingService(tmp_path).claim_hf_submission(caller, event)
+            outcomes.append("ok")
+        except ProvenanceIntegrityError:
+            outcomes.append("error")
+
+    threads = [threading.Thread(target=claim, args=(caller,)) for caller in callers]
+    for thread in threads:
+        thread.start()
+    barrier.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert sorted(outcomes) == ["error", "ok"]
+    durable = service.load_experiment(experiment.experiment_id)
+    assert durable.hf_submission_state == "SUBMITTING"
+    assert durable.hf_authorization_id == approval.authorization_id
+
+
+def test_competing_terminal_events_use_the_durable_submission_head(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment, approval = _make_approved_submission(service)
+    submitting = build_hf_submitting_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        occurred_at="2026-08-20T12:01:00Z",
+    )
+    service.claim_hf_submission(experiment, submitting)
+    previous_uri = experiment.hf_submission_event_uri or ""
+    submitted = build_hf_submitted_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        previous_event=submitting,
+        previous_event_uri=previous_uri,
+        occurred_at="2026-08-20T12:02:00Z",
+        provider_namespace="professorsynapse",
+        provider_job_id="job-smoke-1",
+    )
+    ambiguous = build_hf_ambiguous_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        previous_event=submitting,
+        previous_event_uri=previous_uri,
+        occurred_at="2026-08-20T12:02:00Z",
+        reason_code="PROVIDER_STATUS_UNKNOWN",
+    )
+    callers = [service.load_experiment(experiment.experiment_id) for _ in range(2)]
+    barrier = threading.Barrier(3)
+    outcomes: list[str] = []
+
+    def finish(caller: Experiment, event) -> None:
+        barrier.wait(timeout=5)
+        try:
+            TrackingService(tmp_path).record_hf_submission_terminal(caller, event)
+            outcomes.append("ok")
+        except ProvenanceIntegrityError:
+            outcomes.append("error")
+
+    threads = [
+        threading.Thread(target=finish, args=(callers[0], submitted)),
+        threading.Thread(target=finish, args=(callers[1], ambiguous)),
+    ]
+    for thread in threads:
+        thread.start()
+    barrier.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert sorted(outcomes) == ["error", "ok"]
+    durable = service.load_experiment(experiment.experiment_id)
+    assert durable.hf_submission_state in {"SUBMITTED", "AMBIGUOUS"}
+    service.verify_experiment_provenance(durable)
+
+
+def test_spawned_hf_claim_is_exclusive_and_crash_after_claim_stays_consumed(
+    tmp_path: Path,
+):
+    service = TrackingService(tmp_path)
+    experiment, approval = _make_approved_submission(service)
+    event = build_hf_submitting_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        occurred_at="2026-08-20T12:01:00Z",
+    ).to_dict()
+    context = multiprocessing.get_context("spawn")
+    start = context.Event()
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_claim_submission_process,
+            args=(
+                str(tmp_path),
+                experiment.experiment_id,
+                event,
+                start,
+                results,
+            ),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    start.set()
+    try:
+        outcomes = [results.get(timeout=15) for _ in processes]
+    except queue.Empty:
+        pytest.fail("spawned HF claim process did not report within timeout")
+    finally:
+        for process in processes:
+            process.join(timeout=10)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+        results.close()
+        results.join_thread()
+
+    assert all(process.exitcode == 0 for process in processes)
+    assert sorted(outcome[0] for outcome in outcomes) == ["error", "ok"]
+    durable = service.load_experiment(experiment.experiment_id)
+    assert durable.hf_submission_state == "SUBMITTING"
+    assert service.resolve_uri(durable.hf_submission_event_uri or "").is_file()
+
+    # A worker disappearing after the durable claim cannot return the approval
+    # to APPROVED or permit a paid retry.
+    with pytest.raises(ProvenanceIntegrityError, match="already claimed"):
+        TrackingService(tmp_path).claim_hf_submission(durable, event)
+    assert service.load_experiment(experiment.experiment_id).hf_submission_state == "SUBMITTING"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "save",
+        "mark_stage",
+        "update_stage_details",
+        "set_artifact_root",
+        "set_derived_output",
+        "attach_run",
+    ],
+)
+def test_generic_mutations_cannot_erase_or_roll_back_hf_claim(
+    tmp_path: Path, mutation: str
+):
+    service = TrackingService(tmp_path)
+    experiment, approval = _make_approved_submission(service)
+    stale = service.load_experiment(experiment.experiment_id)
+    event = build_hf_submitting_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        occurred_at="2026-08-20T12:01:00Z",
+    )
+    service.claim_hf_submission(experiment, event)
+    record_path = service._experiment_path(experiment.experiment_id)
+    durable_before = record_path.read_bytes()
+    registry_before = service.registry.path.read_bytes() if service.registry.path.exists() else None
+
+    with pytest.raises(ProvenanceIntegrityError, match="protected provenance"):
+        if mutation == "save":
+            stale.name = "stale approval overwrite"
+            service.save_experiment(stale)
+        elif mutation == "mark_stage":
+            service.mark_stage(stale, "training", "running")
+        elif mutation == "update_stage_details":
+            service.update_stage_details(stale, "training", job_ref="job-stale")
+        elif mutation == "set_artifact_root":
+            service.set_artifact_root(stale, "training", "artifact://stale")
+        elif mutation == "set_derived_output":
+            service.set_derived_output(stale, "features_csv", "artifact://stale.csv")
+        else:
+            service.attach_run(
+                stale,
+                RunRecord(
+                    run_id="stale-hf-claim-run",
+                    run_type="sft",
+                    name="stale",
+                    timestamp="2026-08-20T12:02:00Z",
+                    status="running",
+                    output_dir="artifact://runs/stale",
+                ),
+            )
+
+    assert record_path.read_bytes() == durable_before
+    assert (
+        service.registry.path.read_bytes() if service.registry.path.exists() else None
+    ) == registry_before
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("hf_run_approval_uri", "tracking://replacement-approval.json"),
+        ("hf_run_approval_sha256", "9" * 64),
+        ("hf_authorization_id", "8" * 64),
+        ("hf_submission_event_uri", "tracking://replacement-event.json"),
+        ("hf_submission_event_sha256", "7" * 64),
+        ("hf_submission_state", "APPROVED"),
+    ],
+)
+def test_public_save_protects_every_hf_submission_projection_field(
+    tmp_path: Path, field_name: str, value: str
+):
+    service = TrackingService(tmp_path)
+    experiment, approval = _make_approved_submission(service)
+    event = build_hf_submitting_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        occurred_at="2026-08-20T12:01:00Z",
+    )
+    service.claim_hf_submission(experiment, event)
+    record_path = service._experiment_path(experiment.experiment_id)
+    durable_before = record_path.read_bytes()
+    setattr(experiment, field_name, value)
+
+    with pytest.raises((ProvenanceIntegrityError, ValueError)):
+        service.save_experiment(experiment)
+
+    assert record_path.read_bytes() == durable_before
+
+
+def test_attach_run_propagates_exact_hf_submission_projection_and_rejects_replacement(
+    tmp_path: Path,
+):
+    service = TrackingService(tmp_path)
+    experiment, approval = _make_approved_submission(service)
+    event = build_hf_submitting_event(
+        approval,
+        approval_uri=experiment.hf_run_approval_uri or "",
+        occurred_at="2026-08-20T12:01:00Z",
+    )
+    service.claim_hf_submission(experiment, event)
+
+    with pytest.raises(ProvenanceIntegrityError, match="hf_authorization_id"):
+        service.attach_run(
+            experiment,
+            RunRecord(
+                run_id="wrong-authorization-run",
+                run_type="cloud_sft",
+                name="wrong",
+                timestamp="2026-08-20T12:02:00Z",
+                status="running",
+                output_dir="artifact://runs/wrong",
+                source_transport_uri=experiment.source_transport_uri,
+                source_transport_sha256=experiment.source_transport_sha256,
+                provisioning_evidence_uri=experiment.provisioning_evidence_uri,
+                provisioning_evidence_sha256=experiment.provisioning_evidence_sha256,
+                source_transport_state="CONSUMABLE",
+                hf_run_approval_uri=experiment.hf_run_approval_uri,
+                hf_run_approval_sha256=experiment.hf_run_approval_sha256,
+                hf_authorization_id="9" * 64,
+                hf_submission_event_uri=experiment.hf_submission_event_uri,
+                hf_submission_event_sha256=experiment.hf_submission_event_sha256,
+                hf_submission_state="SUBMITTING",
+            ),
+        )
+    assert service.registry.get_run("wrong-authorization-run") is None
+
+    service.attach_run(
+        experiment,
+        RunRecord(
+            run_id="claimed-run",
+            run_type="cloud_sft",
+            name="claimed",
+            timestamp="2026-08-20T12:02:00Z",
+            status="running",
+            output_dir="artifact://runs/claimed",
+        ),
+    )
+    stored = service.registry.get_run("claimed-run")
+    assert stored is not None
+    assert stored.hf_run_approval_uri == experiment.hf_run_approval_uri
+    assert stored.hf_run_approval_sha256 == experiment.hf_run_approval_sha256
+    assert stored.hf_authorization_id == approval.authorization_id
+    assert stored.hf_submission_event_uri == experiment.hf_submission_event_uri
+    assert stored.hf_submission_event_sha256 == experiment.hf_submission_event_sha256
+    assert stored.hf_submission_state == "SUBMITTING"
 
 
 @pytest.mark.parametrize(

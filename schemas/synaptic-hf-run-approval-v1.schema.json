@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-hf-run-approval-v1.schema.json",
+  "title": "Synaptic Hugging Face exact run approval v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "approval_id", "authorization_id", "experiment_id", "run_id", "provider", "action", "descriptor", "provisioning_evidence", "source_lock", "bundle_sha256", "capsule_manifest_sha256", "checkout_policy_sha256", "workload", "execution", "timeouts", "cost", "authorization", "secrets", "issued_at", "expires_at"],
+  "properties": {
+    "schema_version": {"const": "synaptic-hf-run-approval/v1"},
+    "approval_id": {"$ref": "#/$defs/sha256"},
+    "authorization_id": {"$ref": "#/$defs/sha256"},
+    "experiment_id": {"$ref": "#/$defs/segment"},
+    "run_id": {"$ref": "#/$defs/segment"},
+    "provider": {"const": "hf_jobs"},
+    "action": {"const": "hf.bootstrap.verify"},
+    "descriptor": {"$ref": "#/$defs/artifactRef"},
+    "provisioning_evidence": {"$ref": "#/$defs/artifactRef"},
+    "source_lock": {"$ref": "#/$defs/artifactRef"},
+    "bundle_sha256": {"$ref": "#/$defs/sha256"},
+    "capsule_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "checkout_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sha256", "declaration"],
+      "properties": {
+        "kind": {"const": "bootstrap_verification"},
+        "sha256": {"const": "0d1d3454d079ea994a1e3a24b59b772bd4adb40cb441e00cc5801faf5d220841"},
+        "declaration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "kind", "runtime", "hardware", "limits", "network", "retries", "effects"],
+          "properties": {
+            "schema_version": {"const": "synaptic-hf-bootstrap-smoke-workload/v1"},
+            "kind": {"const": "bootstrap_verification"},
+            "runtime": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["image"],
+              "properties": {"image": {"const": "python:3.12"}}
+            },
+            "hardware": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["flavor"],
+              "properties": {"flavor": {"const": "cpu-basic"}}
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["provider_timeout_seconds", "cancel_after_seconds", "outer_observation_seconds", "projected_compute_usd", "hard_total_usd"],
+              "properties": {
+                "provider_timeout_seconds": {"const": 600},
+                "cancel_after_seconds": {"const": 720},
+                "outer_observation_seconds": {"const": 900},
+                "projected_compute_usd": {"const": "0.01"},
+                "hard_total_usd": {"const": "2.00"}
+              }
+            },
+            "network": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["ports", "ssh"],
+              "properties": {
+                "ports": {"type": "array", "maxItems": 0},
+                "ssh": {"const": false}
+              }
+            },
+            "retries": {"const": 0},
+            "effects": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["training", "publication"],
+              "properties": {
+                "training": {"const": false},
+                "publication": {"const": false}
+              }
+            }
+          }
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "image", "hardware", "bootstrap_only", "training", "publication", "ssh", "ports", "maximum_submissions", "retry_count"],
+      "properties": {
+        "runtime": {"const": "python:3.12"},
+        "image": {"const": "python:3.12"},
+        "hardware": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["flavor"],
+          "properties": {
+            "flavor": {"const": "cpu-basic"}
+          }
+        },
+        "bootstrap_only": {"const": true},
+        "training": {"const": false},
+        "publication": {"const": false},
+        "ssh": {"const": false},
+        "ports": {"type": "array", "maxItems": 0},
+        "maximum_submissions": {"const": 1},
+        "retry_count": {"const": 0}
+      }
+    },
+    "timeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_seconds", "cancel_after_seconds", "observe_until_seconds"],
+      "properties": {
+        "provider_seconds": {"const": 600},
+        "cancel_after_seconds": {"const": 720},
+        "observe_until_seconds": {"const": 900}
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "maximum_projected_cost_usd", "hard_cap_usd", "quote"],
+      "properties": {
+        "currency": {"const": "USD"},
+        "maximum_projected_cost_usd": {"const": "0.01"},
+        "hard_cap_usd": {"const": "2.00"},
+        "quote": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["hourly_price_usd", "projected_cost_usd", "billing_increment_seconds", "quoted_at"],
+          "properties": {
+            "hourly_price_usd": {"$ref": "#/$defs/decimal"},
+            "projected_cost_usd": {"$ref": "#/$defs/decimal"},
+            "billing_increment_seconds": {"const": 60},
+            "quoted_at": {"$ref": "#/$defs/timestamp"}
+          }
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "reference"],
+      "properties": {
+        "subject": {"const": "joseph-rosenbaum"},
+        "reference": {"$ref": "#/$defs/reference"}
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "name"],
+          "properties": {
+            "provider": {"const": "env"},
+            "name": {"const": "HF_TOKEN"}
+          }
+        }
+      ],
+      "items": false
+    },
+    "issued_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "segment": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "trackingUri": {"type": "string", "pattern": "^tracking://[A-Za-z0-9][A-Za-z0-9._/-]*$", "maxLength": 2048},
+    "reference": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}$"},
+    "timestamp": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$", "maxLength": 32},
+    "decimal": {"type": "string", "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$", "maxLength": 32},
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256"],
+      "properties": {
+        "uri": {"$ref": "#/$defs/trackingUri"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

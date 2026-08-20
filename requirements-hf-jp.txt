@@ -1,0 +1,6 @@
+# Isolated Hugging Face JP launcher only. Do not install into trainer runtimes.
+huggingface_hub==1.27.0
+jsonschema==4.23.0
+packaging==24.1
+python-dotenv==1.0.1
+PyYAML==6.0.2

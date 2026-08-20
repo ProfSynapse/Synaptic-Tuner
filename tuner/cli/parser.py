@@ -29,6 +29,21 @@ class _SynapticArgumentParser(argparse.ArgumentParser):
         command = getattr(parsed, "command", None)
         capability_id = getattr(parsed, "capability_id", None)
 
+        if command == "hf-smoke":
+            if getattr(parsed, "subcommand", None) not in {"approve", "execute", "observe"}:
+                self.error("hf-smoke requires an action: approve, execute, or observe")
+            if getattr(parsed, "auto_confirm", False):
+                self.error("hf-smoke does not accept --yes or --auto-confirm")
+            if capability_id is not None:
+                self.error(f"unrecognized arguments: {capability_id}")
+            return parsed
+        if command == "hf-source":
+            if getattr(parsed, "subcommand", None) not in {None, "provision"}:
+                self.error("hf-source accepts only the provision action")
+            if capability_id is not None:
+                self.error(f"unrecognized arguments: {capability_id}")
+            return parsed
+
         if command != "capabilities":
             if capability_id is not None:
                 self.error(f"unrecognized arguments: {capability_id}")
@@ -117,6 +132,8 @@ Commands:
   surgery     LoRA weight surgery (eval-guided post-training optimization)
   project     Inspect or validate the selected host project
   capabilities Discover agent-readable capabilities and their effects
+  hf-source   Provision one exact immutable HF Profile-C source transport
+  hf-smoke    Approve, execute, or observe one fixed bootstrap-only HF smoke
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
 
@@ -173,7 +190,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -212,6 +229,22 @@ Examples:
         "--env-file",
         help="Explicit dotenv file; selected instead of the host or engine .env.",
     )
+    parser.add_argument("--actor", help="Non-secret operator identity for hf-source provisioning.")
+    parser.add_argument(
+        "--authority",
+        choices=["operator", "protected_workflow"],
+        default="operator",
+        help="Bounded hf-source provisioning authority.",
+    )
+    parser.add_argument(
+        "--authorization-reference",
+        help="Exact user-authorization reference for hf-smoke approve.",
+    )
+    parser.add_argument("--issued-at", help="Canonical UTC issuance time for hf-smoke approval.")
+    parser.add_argument("--expires-at", help="Canonical UTC expiry time for hf-smoke approval.")
+    parser.add_argument("--quoted-at", help="Canonical UTC HF price-quote time.")
+    parser.add_argument("--hourly-price-usd", help="Exact decimal CPU Basic hourly price.")
+    parser.add_argument("--projected-cost-usd", help="Exact decimal projected smoke cost.")
     parser.add_argument(
         "--profile",
         help="Named project configuration profile.",

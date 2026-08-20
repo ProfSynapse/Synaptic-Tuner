@@ -185,18 +185,27 @@ def main(argv=None):
         # values loaded from the selected project/engine env file.
         context = build_project_context(args)
         explicit_env = _explicit_env_path(args, context.invocation_cwd)
-        args._env_loaded = load_env_file(
-            context=context,
-            explicit_path=explicit_env,
-        )
-        if explicit_env is not None and not args._env_loaded:
-            raise EnvironmentFileSupportError(
-                "Explicit env file requires python-dotenv support",
-                details={
-                    "path": str(explicit_env),
-                    "dependency": "python-dotenv",
-                },
+        protected_hf_command = getattr(args, "command", None) in {"hf-source", "hf-smoke"}
+        if protected_hf_command:
+            # These handlers own an effect-aware authorization boundary. Keep
+            # the selected file metadata available, but do not place secrets
+            # in process state before their explicit claim/provisioning gate.
+            args._env_loaded = False
+            args._env_loading_deferred = True
+            args._explicit_env_path = explicit_env
+        else:
+            args._env_loaded = load_env_file(
+                context=context,
+                explicit_path=explicit_env,
             )
+            if explicit_env is not None and not args._env_loaded:
+                raise EnvironmentFileSupportError(
+                    "Explicit env file requires python-dotenv support",
+                    details={
+                        "path": str(explicit_env),
+                        "dependency": "python-dotenv",
+                    },
+                )
 
         # Route to handler and exit with its code
         exit_code = route_command(args, context=context)

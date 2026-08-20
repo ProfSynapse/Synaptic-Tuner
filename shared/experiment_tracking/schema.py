@@ -15,7 +15,11 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from .experiment import HF_SOURCE_TRANSPORT_STATES, _validate_reference_pair
+from .experiment import (
+    HF_SOURCE_TRANSPORT_STATES,
+    HF_SUBMISSION_STATES,
+    _validate_reference_pair,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +84,15 @@ class RunRecord:
     provisioning_evidence_uri: str | None = None
     provisioning_evidence_sha256: str | None = None
     source_transport_state: str | None = None
+    hf_run_approval_uri: str | None = None
+    hf_run_approval_sha256: str | None = None
+    hf_authorization_id: str | None = None
+    hf_submission_event_uri: str | None = None
+    hf_submission_event_sha256: str | None = None
+    hf_submission_state: str | None = None
+    hf_cancellation_event_uri: str | None = None
+    hf_cancellation_event_sha256: str | None = None
+    hf_cancellation_state: str | None = None
 
     def __post_init__(self) -> None:
         _validate_reference_pair(
@@ -91,6 +104,21 @@ class RunRecord:
             kind="Provisioning evidence",
             uri=self.provisioning_evidence_uri,
             sha256=self.provisioning_evidence_sha256,
+        )
+        _validate_reference_pair(
+            kind="HF approval",
+            uri=self.hf_run_approval_uri,
+            sha256=self.hf_run_approval_sha256,
+        )
+        _validate_reference_pair(
+            kind="HF submission event",
+            uri=self.hf_submission_event_uri,
+            sha256=self.hf_submission_event_sha256,
+        )
+        _validate_reference_pair(
+            kind="HF cancellation event",
+            uri=self.hf_cancellation_event_uri,
+            sha256=self.hf_cancellation_event_sha256,
         )
         if self.source_transport_state is not None:
             if self.source_transport_state not in HF_SOURCE_TRANSPORT_STATES:
@@ -106,6 +134,34 @@ class RunRecord:
                 raise ValueError(
                     f"{self.source_transport_state} source transport requires provisioning evidence"
                 )
+        if self.hf_submission_state is not None:
+            if self.hf_submission_state not in HF_SUBMISSION_STATES:
+                raise ValueError("Unknown HF submission state")
+            if self.hf_run_approval_uri is None or self.hf_authorization_id is None:
+                raise ValueError("HF submission state requires an approval and authorization ID")
+        if self.hf_run_approval_uri is not None:
+            if self.hf_authorization_id is None:
+                raise ValueError("HF approval requires an authorization ID")
+            if self.hf_submission_state is None:
+                raise ValueError("HF approval requires an APPROVED submission state")
+            if self.source_transport_state != "CONSUMABLE":
+                raise ValueError("HF approval requires source transport state CONSUMABLE")
+        elif self.hf_authorization_id is not None:
+            raise ValueError("HF authorization ID requires an approval")
+        if self.hf_submission_event_uri is not None:
+            if self.hf_submission_state not in {"SUBMITTING", "SUBMITTED", "AMBIGUOUS"}:
+                raise ValueError("HF submission event requires a claimed submission state")
+        elif self.hf_submission_state in {"SUBMITTING", "SUBMITTED", "AMBIGUOUS"}:
+            raise ValueError(f"{self.hf_submission_state} requires an HF submission event")
+        if self.hf_cancellation_state is not None:
+            if self.hf_cancellation_state != "CLAIMED":
+                raise ValueError("Unknown HF cancellation state")
+            if self.hf_submission_state != "SUBMITTED":
+                raise ValueError("HF cancellation requires submission state SUBMITTED")
+            if self.hf_cancellation_event_uri is None:
+                raise ValueError("CLAIMED cancellation requires an HF cancellation event")
+        elif self.hf_cancellation_event_uri is not None:
+            raise ValueError("HF cancellation event requires CLAIMED state")
 
     def to_json_line(self) -> str:
         """Serialize to a single JSON line for JSONL storage."""

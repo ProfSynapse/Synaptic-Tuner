@@ -750,9 +750,11 @@ The lifecycle is monotonic and append-only. Exact-pushed source verification is 
 1. **`PREPARED`:** JT persists the immutable local bundle, descriptor URI/digest, the one canonical preflighted source-lock URI/digest, and preparation state. This phase performs no network call, SDK/authentication probe, provider upload, volume creation, or job submission.
 2. **Externally `ACKNOWLEDGED`:** only a separately approved JP operator or protected workflow may provision the exact descriptor and return the bounded evidence document. Receipt of evidence records an acknowledgement; it does not make the bundle consumable and does not authorize a job.
 3. **`CONSUMABLE`:** J1 validates both schemas, every exact binding, immutable tracking identities, the content-addressed volume path, read-only semantics, authority, and receipt shape. Any mismatch, unknown field, missing receipt, reused evidence for another run, changed descriptor, or stale bundle fails closed and remains non-consumable.
-4. **Future approval-gated `SUBMITTED`:** only a new explicit approval for the exact run, descriptor digest, evidence digest, provider, hardware, and estimated cost may eventually permit a submission seam to call `run_job`. This plan revision authorizes no approval object and exposes no lifecycle API that can create `SUBMITTED`; current APIs stop at `CONSUMABLE`, although already persisted future/historical `SUBMITTED` records remain readable. Preparing, acknowledging, validating, or previously approving a different run never implies submission approval.
+4. **Exact-run `APPROVED`:** JP-A persists one closed `synaptic-hf-run-approval/v1` document only after the source transport is `CONSUMABLE`. The approval binds experiment/run identity, descriptor, provisioning evidence, SourceLock, bundle, capsule-manifest, checkout-policy, canonical JP-D workload, `cpu-basic`, `python:3.12`, the exact user-authorization reference, issuance/expiry, quote time, projected cost, and hard limits. It carries only `SecretRef`-style `HF_TOKEN` metadata, never a value.
+5. **One-shot `SUBMITTING`:** JP-B atomically claims the exact approval under the tracking lock. The immutable `synaptic-hf-submission-claim/v1` sequence-1 event consumes the authorization before credential resolution, provider construction, `Volume` construction, or `run_job`. A stale, replayed, replaced, expired, already claimed, or differently bound approval fails closed and preserves durable bytes.
+6. **Terminal `SUBMITTED` or `AMBIGUOUS`:** JP-E records exactly one sequence-2 event. A returned provider namespace/job ID produces `SUBMITTED`; any exception after the provider-call boundary produces `AMBIGUOUS`, never rollback to `APPROVED` and never automatic retry. Preparing, acknowledging, consuming, approving, or submitting a different run never confers authority on this run.
 
-JT originally received five tracking lifecycle rows; after SA6, three moved through a root-mediated transfer to JTR, which also received five newly inventoried API/caller remediation rows. After RA6's import finding, JIR receives one import-facade row from JTR, one HF primitive row from J1, seven newly inventoried Modify rows, and one new regression-test Create row. JT retains two unaffected lifecycle-projection rows; JTR retains seven tracking API/caller rows; J1 retains its remaining descriptor/evidence, transport, stage, backend, and handler seams. JX retains its bounded cloud-extract fixture migration. JX2 owns only four descriptor-consumption integration tests. JX3 owns only the final cloud-pipeline security test surface. JCT owns only the CloudTrain launch-boundary remediation and the `TestCloudTrainHandler` class in its otherwise shared test file. JP is a protected external-effect boundary with no file ownership and no implementation or external-action authorization in this plan revision.
+JT originally received five tracking lifecycle rows; after SA6, three moved through a root-mediated transfer to JTR, which also received five newly inventoried API/caller remediation rows. After RA6's import finding, JIR received one import-facade row from JTR, one HF primitive row from J1, seven newly inventoried Modify rows, and one new regression-test Create row. JT retains two unaffected lifecycle-projection rows; JTR retains seven tracking API/caller rows; J1 retains its remaining descriptor/evidence, transport, stage, backend, and handler seams. JX retains its bounded cloud-extract fixture migration. JX2 owns only four descriptor-consumption integration tests. JX3 owns only the final cloud-pipeline security test surface. JCT owns only the CloudTrain launch-boundary remediation and the `TestCloudTrainHandler` class in its otherwise shared test file. The separately authorized JP implementation is split into JP-A through JP-E; after JP-S1 REVISE, the bounded JP-BR/JP-CR/JP-ER transfers own its security closures. Provider execution remains deferred to JP-LIVE and cannot occur until JP-S2 and final JP-R both return PASS.
 
 ### Canonical `superproject` mode
 
@@ -964,7 +966,7 @@ Deliver:
 - JIR after RA6's import-boundary finding: keep package/registry/handler inspection provider-SDK-free, preserve exact compatibility exports lazily, resolve only selected backend targets, and prove ordering in fresh processes before the RA6 retry.
 - JX, JX2, and JX3: reconcile the cloud-extract and cloud-pipeline fixtures and prove standard evaluator, vLLM evaluator, experiment handler, stage-runner, and pipeline consumption against the same descriptor/evidence contract.
 - JCT: keep CloudTrain JSON output metadata-only and put the unconditional current-submission authorization barrier after source preflight but before provider discovery, menus, backend construction, SDK imports, credential resolution, environment validation, compilation, or submission. Generic `TrainHandler` remains local-only (`rtx`/`mac`) and has no HF route or edit in this wave.
-- JP only after a separate approval: provision the exact immutable bundle externally and return bounded evidence. JP has no implementation authorization in this revision.
+- JP-A through JP-E after the separately recorded approval: add the exact-run approval, durable submission and cancellation claims, isolated pinned Hub 1.27 protected runtime, fixed bootstrap-only smoke, strict provider-job identity, and narrow `run_job(..., volumes=...)` submission/observation seam. These nodes do not enable generic training or `cloud.launch`.
 - Provider-neutral checkout and runtime layout.
 - Host-superproject recursive checkout.
 - Gitlink, commit, config, plug-in, and input verification.
@@ -976,10 +978,10 @@ Gate:
 - J0 exit: capsule builds are byte-deterministic, manifest-bound, size-limited, link/device resistant, copy safely to private scratch, reuse the same bootstrap core as local checkout, and remain unpublished.
 - J1 entry: consume only the accepted J0 capsule, verifier, manifest digest, and shared checkout contract.
 - Hermetic implementation exit: JT/JTR/JIR/J1/JX/JX2/JX3 prove closed schemas, deterministic descriptor/bundle/path generation, monotonic lifecycle transitions, exact descriptor/evidence/source-lock/capsule/policy/volume bindings, fail-closed wrong-run/stale/replayed/tampered/writable/unacknowledged inputs, locked durable tracking mutation under hostile/concurrent callers, and provider-SDK-free import/metadata inspection. JCT proves CloudTrain JSON inspection constructs no backend or credentials and every interactive launch path orders source preflight → authorization barrier → provider-facing work. Generic `TrainHandler` remains demonstrably local-only.
-- Security/release exit: the original SA6 PASS, RA6 REVISE, and impacted SA6 PASS remain distinct chronological records. Final P6R must reconcile inventory/DAG topology without changing the impacted-SA6-approved implementation tree. Only after root accepts final P6R may RA6 retry; RA6 must confirm clean machine output, redaction, zero pre-authorization import/SDK/token/bucket/volume work, exact lifecycle boundaries, focused/adjacent/release gates, inventory consistency, and explicit treatment of the unavailable pinned 304 command.
-- JP entry requires the hermetic exit plus separate approval for the exact descriptor. JP acknowledgement returns bounded evidence but does not authorize job submission.
-- `SUBMITTED` requires another explicit approval binding the exact run, descriptor digest, evidence digest, provider, hardware, and estimated cost. An HF dry-run must first prove the exact remote command and verification sequence.
-- `cloud.launch` remains unavailable throughout this revision. K/L remain blocked until the complete audited hermetic barrier and separately approved JP both pass; neither condition enables submission.
+- Security/release exit: the original SA6 PASS, RA6 REVISE, impacted SA6 PASS, and final RA6 PASS remain distinct chronological records. The accepted Commit 15 tree is the base for JP. JP-S1 is REVISE; JP-BR/JP-CR/JP-ER close its three findings. JP-S2 and final JP-R both PASSed the exact frozen remediated tree. Neither verdict is live installation or provider proof.
+- External-effect gate: Joseph authorized exactly one descriptor validation and at most one paid bootstrap smoke on the cheapest viable hardware, with a 15-minute outer limit and USD $2 hard cap. The frozen implementation narrows that to `cpu-basic`, no training/publication/ports/SSH/retries, a 600-second provider timeout, one cancellation attempt after 720 seconds if nonterminal, and observation only until 900 seconds. Any retry, replacement, broader workload, cost increase, or second submission needs new approval.
+- Provider-proof gate: JP-C may provision only the exact immutable Profile-C prefix. JP-E may claim and submit only the exact JP-A approval. A provider mutation, malformed/mismatched `JobInfo`, submission exception, or cancellation uncertainty is non-retryable. JP-LIVE also requires exact pushed-source proof, a usable explicit `HF_TOKEN` file, the isolated Python 3.12 five-pin launcher plus clean-venv protected help/import gate, and JP-S2 plus final JP-R PASS.
+- `cloud.launch` remains unavailable. The new `hf-source` and `hf-smoke` commands are narrow protected operator surfaces, not a generic cloud-training capability. K/L remain blocked until JP-LIVE evidence is accepted; neither the local implementation nor one bootstrap smoke enables generic training.
 
 ### Phase 7: Modal and RunPod
 
@@ -992,7 +994,7 @@ Deliver:
 Gate:
 
 - No core source-lock schema change is required to add either provider.
-- The complete HF hermetic implementation barrier, recorded original and impacted SA6 PASS, accepted final P6R, fresh RA6 PASS, and separately approved JP must all pass before K or L begins; acknowledgement alone and unapproved local evidence are insufficient.
+- The complete HF hermetic barrier, accepted Commit 15, JP-A–E plus JP-BR/JP-CR/JP-ER, JP-S2 and final JP-R PASS, and accepted JP-LIVE provider evidence must all pass before K or L begins; local fakes, clean-venv help, acknowledgement alone, or an ambiguous provider outcome are insufficient.
 - RunPod integration tests must be hermetic and version-pinned. Runtime feature detection must fail closed on missing or drifted SDK semantics before any network call or paid resource creation; a protected live smoke remains separately approval-gated.
 
 **RunPod research checkpoint — 2026-08-19:** Joseph flagged that RunPod may have recently updated its API. Treat Node L's research/reconciliation as a required entry gate, not optional implementation discovery. Prefer official RunPod API/SDK sources and primary release information; record exact versions and retrieval dates before approving L's teachback.
@@ -1126,6 +1128,75 @@ Residual boundary: all accepted checkout/security evidence is local and hermetic
 
 ---
 
+## PACT JP Implementation Record — 2026-08-20, Exact HF Bootstrap Smoke
+
+Joseph separately authorized JP validation and at most one paid Hugging Face bootstrap smoke. The authorization is not open-ended cloud authority: one submission only, cheapest viable hardware, at most 15 minutes of observation, at most USD $2 total, and no retry without new approval. Official research narrowed the fixed run to `cpu-basic`, `python:3.12`, no ports, no SSH, zero retries, a 600-second provider timeout, cancellation after 720 seconds if still nonterminal, and an outer 900-second observation limit. The canonical workload digest is `0d1d3454d079ea994a1e3a24b59b772bd4adb40cb441e00cc5801faf5d220841`; it performs source/bootstrap/layout verification only and cannot accept arbitrary commands, training, or publication configuration.
+
+### JP-A — exact approval contract
+
+- `synaptic-hf-run-approval/v1` is closed and content-addressed. It binds the authorization/approval IDs; experiment and run IDs; descriptor, provisioning-evidence, and SourceLock URI/digest pairs; bundle, capsule-manifest, checkout-policy, and workload digests; provider/action; execution restrictions; timeout/cancellation/observation limits; cost quote and hard cap; authorization reference; issue/expiry times; and the `HF_TOKEN` secret name without a value.
+- Hardware is exactly `cpu-basic`. The HIGH spend-scope finding showed that accepting an arbitrary flavor plus an attacker-supplied cheap quote would permit a more expensive run under a cheap approval. The remediation closes both schema and runtime to `cpu-basic`, embeds the canonical JP-D declaration/digest in every approval, and requires JP-E to re-check the hardware, image/runtime, workload, limits, and effects before claiming authority.
+- Approval refresh may change only time/quote fields before claim and still yields a new content-derived identity. Approval never calls the provider.
+
+### JP-B — durable one-shot claim
+
+- Tracking adds `APPROVED → SUBMITTING → SUBMITTED|AMBIGUOUS` as a distinct HF submission projection while preserving the source-transport projection. The exact approval artifact and each claim event are immutable `tracking://` artifacts.
+- Claim is a lock-protected fresh-durable compare-and-swap. It writes `SUBMITTING` before credential resolution or any provider construction/call. Replay, stale snapshots, replacement, rollback, duplicate claim, event-chain drift, and public-save mutation fail closed.
+- `AMBIGUOUS` is terminal for this authorization. It records a bounded reason code, never a raw exception/provider response, and cannot be changed back to `APPROVED` or retried automatically.
+- JP-BR extends the same durable boundary to cancellation. `hf_cancellation_event_uri`, `hf_cancellation_event_sha256`, and `hf_cancellation_state=CLAIMED` bind one canonical `synaptic-hf-cancellation-attempt/v1` event to the exact SUBMITTED event and provider job. `build_hf_cancellation_attempt_event()` is pure; `claim_hf_cancellation()` is the locked compare-and-swap. Exactly the first durable creator receives `provider_attempt_authorized: true`; resumed/concurrent observers receive the identical claim with `false`, so provider cancellation can occur at most once per submission even after restart or provider ambiguity.
+
+### JP-C — isolated provisioning operator and official Hub contract
+
+- Provisioning imports provider/runtime dependencies only inside a Python 3.12 launcher environment. JP-CR pins the complete direct dependency set exactly and in order: `huggingface_hub==1.27.0`, `jsonschema==4.23.0`, `packaging==24.1`, `python-dotenv==1.0.1`, and `PyYAML==6.0.2`. `scripts/setup_hf_jp_launcher.py` refuses a non-3.12 interpreter, missing/extra/duplicate/ranged/reordered requirements, or an existing target environment. The main Unsloth/trainer environment remains untouched.
+- After installation, the launcher must pass a clean-venv protected-runtime gate: verify all five installed distribution versions under isolated Python, import both protected handlers without loading Torch/Transformers/Unsloth, and run `hf-source --help` plus `hf-smoke --help` from the exact repository worktree with user-site disabled, bytecode writes disabled, and no credentials/provider effects. This is runtime/import compatibility evidence, not live provider proof.
+- The adapter probes the exact official v1.27.0 surface before the first read or mutation. The frozen signatures are:
+  - `create_bucket(bucket_id: str, *, private: bool | None = None, resource_group_id: str | None = None, region: REPO_REGIONS | None = None, exist_ok: bool = False, token: bool | str | None = None) -> BucketUrl`
+  - `bucket_info(bucket_id, *, token=None) -> BucketInfo`
+  - `list_bucket_tree(bucket_id: str, prefix: str | None = None, *, recursive: bool | None = None, token: str | bool | None = None) -> Iterable[BucketFile | BucketFolder]`
+  - `batch_bucket_files(bucket_id: str, *, add: list[tuple[str | Path | bytes, str]] | None = None, copy: list[tuple[str, str, str, str]] | None = None, delete: list[str] | None = None, token: str | bool | None = None)`
+  - `download_bucket_files(bucket_id: str, files: list[tuple[str | BucketFile, str | Path]], *, raise_on_missing_files: bool = False, token: str | bool | None = None) -> None`
+  - `list_jobs_hardware(token=None)` for the separately researched hardware/pricing preflight.
+- These signatures and semantics are an **official-source contract**, not evidence that this checkout, account, token, bucket, or runtime has successfully exercised them. Runtime feature detection remains fail-closed.
+- Bucket creation uses the exact namespaced descriptor ID, `private=True`, and `exist_ok=True`, followed by identity/privacy readback. The prefix is either absent or exactly descriptor-identical. Unknown tree entry types, unrelated paths, duplicate paths, file/directory collisions, and digest mismatches stop before upload.
+- The official `batch_bucket_files` warning is operationally decisive: “This is a non-transactional operation. If an error occurs, some files may have been uploaded while others haven't.” Therefore bytes are authenticated and frozen locally before handoff, upload is attempted once, every member is read back and hashed, and any creation/upload/readback exception is `mutation_ambiguous` with `retryable: false`.
+- The HIGH credential-authority finding showed that generic dotenv loading with `override=False` plus generic token lookup allowed ambient `HF_TOKEN`/`HF_API_KEY` to outrank the explicitly selected file. The accepted remediation parses only the explicit regular, link-free, project/config-contained file; requires exactly one nonblank file `HF_TOKEN`; rejects file or ambient `HF_API_KEY` and any ambient `HF_TOKEN`; never mutates `os.environ`; and never emits the value.
+
+### JP-D — fixed bootstrap workload
+
+- The declaration is immutable and non-extensible: `python:3.12`, `cpu-basic`, bootstrap verification only, 600/720/900-second time boundaries, projected compute no more than USD $0.01, USD $2 hard cap, no ports/SSH/retries/training/publication.
+- The remote stdlib-only entrypoint validates the authenticated bootstrap result, exact Git commits, logical project/engine aliases, read-only source members, separate writable roots, and deterministic bounded result bytes. It rejects every symlink and Windows reparse point without following it; this closes the audit finding that a directory walk could skip linked source members.
+- `python:3.12` is a mutable image tag. This accepted smoke proves only the resolved provider execution observed for the one run; it is not a digest-pinned supply-chain claim. A future hardened profile must pin an immutable image identity before production use.
+
+### JP-E — narrow submission and observation seam
+
+- `hf-smoke execute` revalidates the complete approval/preparation/workload binding, atomically claims `SUBMITTING`, then resolves the explicit credential and constructs the provider. The v1.27.0 `Volume(type="bucket", source=..., mount_path=..., path=..., read_only=True)` tuple must equal the descriptor. `run_job` receives the fixed command, `python:3.12`, `cpu-basic`, no ports, the exact read-only volume, explicit secret mapping, and `timeout="10m"`.
+- A successful submission records only a normalized namespace/job ID whose embedded owner and declared owner agree exactly. Any malformed or contradictory `JobInfo` is an ambiguous provider response; no automatic retry is possible.
+- JP-ER requires every `inspect_job` `JobInfo` to normalize to the exact recorded namespace and job ID before its status can affect observation, result retrieval, or cancellation. Missing, malformed, contradictory, or different returned identity cannot be treated as the submitted job.
+- Observation permits status/log/result inspection only for that recorded job, durably claims cancellation at 12 minutes, authorizes at most one provider `cancel_job` call across all resumed/concurrent observers, and stops at 15 minutes. A failed or ambiguous cancellation call remains consumed and is never retried.
+- The CLI dotenv-ordering audit found that global CLI bootstrap loaded dotenv before the protected claim. The closure makes `hf-source` and `hf-smoke` skip global dotenv loading entirely. Their handlers resolve credentials only inside their protected post-validation boundary; metadata/help/approval paths import no provider SDK and resolve no token.
+
+### Audit and live-provider state
+
+- Original JP-S security audit: **REVISE** with three findings. JP-S-1 found that cancellation was process-local, so resumed/concurrent observers could each call `cancel_job`; JP-S-2 found that provider-returned `JobInfo` status was not strictly required to agree with the submitted namespace/job ID; JP-S-3 found that the launcher pinned Hub alone even though protected imports/help required four additional direct dependencies and lacked a clean-venv protected-runtime proof.
+- JP-BR/JP-ER/JP-CR remediation status: implemented in the bounded transferred paths described above. This documentation records the remediation contract but does not self-approve it.
+- JP-S2 security re-audit: **PASS** on the frozen 29-file implementation manifest `55e2c876dd8cc282a43248a3eeaf3f445f6e452ce76ab2d7a0b814b460ef0f41`. Evidence: **283 passed, 6 skipped** in the bounded JP selection, **16 hostile checks passed**, and **87 import/generic checks passed**, with no findings. The PASS closes JP-S1's three findings and the prior two HIGH remediations for that exact manifest only; it makes no live launcher installation, credential, network, bucket, volume, job, cancellation, or paid-provider claim.
+- Final JP-R release/inventory re-audit: **PASS** on the frozen post-remediation implementation and reconciled documentation. Evidence: **200 passed, 3 skipped** for affected tests; **393 passed, 15 skipped** for the full JP/HF/import/order selection; **249 passed, 1 skipped** for tracking; **268 passed, 1 skipped** for CLI/capability/project/plugin/contract; **673 passed, 15 skipped** for broad cloud with exactly the same five accepted failures and only two documented exclusions; **26 Python files compiled**; imports were clean; `git diff --check` produced warnings only; public API and `cloud.launch` remained unchanged; and canonical skill sync was clean. This PASS is release/inventory evidence, not live launcher installation, credential, network, bucket, volume, job, cancellation, or paid-provider proof.
+- JP-LIVE remains blocked until the exact implementation is committed and pushed so SourceLock can prove the remote SHA, a clean Python 3.12 environment passes the exact five-pin protected launcher gate, and a usable explicit `HF_TOKEN` file passes the protected preflight. Both required independent audits are PASS. The current branch still has no upstream/push proof and no token was read during implementation or documentation reconciliation.
+- `cloud.launch` and generic HF training submission remain unavailable. These narrow commands prove source provisioning and one fixed bootstrap smoke only. Modal and RunPod remain later nodes. Before RunPod implementation, repeat the dated official API/SDK research gate because Joseph reported a recent API update.
+
+### JP-LIVE operator sequence
+
+1. Freeze and disclose the exact commit, SourceLock, descriptor/evidence, approval/workload digests, client/runtime, bucket prefix, hardware, quote, limits, and stop conditions.
+2. Establish clean exact-pushed proof for the approved commit and create the isolated Python 3.12 five-pin launcher; pass its protected clean-venv import/help gate without modifying trainer dependencies.
+3. Run provider-free validation and both final independent re-audits; stop unless JP-S2 and final JP-R are PASS on the exact remediated tree.
+4. Run `hf-source` once for the exact PREPARED descriptor. Accept only exact readback-verified evidence; stop on `mutation_ambiguous` and do not retry.
+5. Create the exact approval while still provider-free. Confirm `APPROVED`, canonical workload digest, quote, expiry, and authorization reference.
+6. Run `hf-smoke execute` once. The authorization is consumed at `SUBMITTING` even if the provider response is ambiguous.
+7. Observe only `JobInfo` whose normalized namespace/job ID equals the recorded submission. At 12 minutes, obtain the durable cancellation claim; call the provider only if that claim grants the single attempt. Stop observation at 15 minutes.
+8. Capture normalized result, duration, cost, terminal/cancellation state, and immutable event/evidence identities without secrets. Commission a post-live review before changing any capability flag.
+
+---
+
 ## Exhaustive File Inventory
 
 The inventory is intentionally broader than the first draft because root coupling reaches CLI handlers, discovery, batch execution, evaluator/generation entry points, and provider bootstrap. Every Create and Modify row has exactly one DAG owner. Ownership is validated by the plan audit described below; a worker may not edit another node's row without an explicit root-mediated ownership transfer and inventory update.
@@ -1141,6 +1212,8 @@ The inventory is intentionally broader than the first draft because root couplin
 | `schemas/synaptic-bootstrap-capsule-v1.schema.json` | Deterministic capsule manifest, bounded file table, and digest contract | J0 / Worker 2 |
 | `schemas/synaptic-hf-source-transport-v1.schema.json` | Closed immutable profile-C descriptor schema with one canonical source-lock URI and deterministic bundle/volume binding | J1 / Worker 1 |
 | `schemas/synaptic-hf-provisioning-evidence-v1.schema.json` | Closed external provisioning-evidence schema with exact descriptor/digest/volume bindings and bounded authority/receipt fields | J1 / Worker 1 |
+| `schemas/synaptic-hf-run-approval-v1.schema.json` | Closed exact-run approval binding all source/provisioning/workload/hardware/time/cost/authorization identities | JP-A / Worker 1 |
+| `schemas/synaptic-hf-submission-claim-v1.schema.json` | Closed append-only `SUBMITTING → SUBMITTED or AMBIGUOUS` one-shot claim event | JP-B / Worker 2 |
 | `schemas/synaptic-capability-v1.schema.json` | Agent capability schema | H / Worker 3 |
 | `schemas/synaptic-result-v1.schema.json` | Single-result envelope | H / Worker 3 |
 | `schemas/synaptic-event-v1.schema.json` | Streaming event envelope | H / Worker 3 |
@@ -1163,6 +1236,14 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/cloud/runtime_layout.py` | Logical filesystem/mount mapping | I / Worker 1 |
 | `tuner/cloud/hf_volume_transport.py` | J1-owned read-only HF volume request, feature detection, manifest-digest binding, and minimal verifier command | J1 / Worker 1 |
 | `tuner/cloud/hf_provisioning.py` | Pure descriptor/evidence construction and validation, deterministic volume-path derivation, and lifecycle eligibility checks; no provider mutation | J1 / Worker 1 |
+| `tuner/cloud/hf_run_approval.py` | Exact approval/claim construction, canonical identities, expiry/cost/workload validation, and secret-value rejection | JP-A / Worker 1 |
+| `tuner/cloud/hf_provider_adapter.py` | Import-light exact Hub 1.27 Buckets adapter with complete signature probing, private-bucket proof, closed tree entries, immutable-byte upload, and readback | JP-C / Worker 3 |
+| `tuner/cloud/hf_provisioning_operator.py` | Effect-aware exact-prefix provisioning/evidence builder with non-transactional ambiguity and no-retry semantics | JP-C / Worker 3 |
+| `tuner/cloud/hf_bootstrap_smoke.py` | Fixed stdlib-only no-training bootstrap verification declaration, execution, and bounded deterministic result | JP-D / Worker 2 |
+| `tuner/handlers/hf_source_handler.py` | Protected explicit-file credential boundary plus PREPARED provisioning, evidence persistence, and CONSUMABLE transition; never submits | JP-C / Worker 3 |
+| `tuner/handlers/hf_smoke_handler.py` | Protected approve/execute/observe CLI for the one exact bootstrap workload | JP-E / Worker 1 |
+| `requirements-hf-jp.txt` | JP-CR transfer: isolated launcher-only exact direct pins for Hub 1.27, jsonschema 4.23, packaging 24.1, dotenv 1.0.1, and PyYAML 6.0.2; never trainer dependencies | JP-CR / Worker 3 |
+| `scripts/setup_hf_jp_launcher.py` | JP-CR transfer: refuse-overwrite Python 3.12 launcher creation, exact five-pin validation, installed-version/import proof, and clean-venv protected help gate | JP-CR / Worker 3 |
 | `synaptic_tuner/__init__.py` | Supported distribution facade; re-export canonical `1.1.0` version | B / Worker 2 |
 | `synaptic_tuner/_version.py` | Canonical public/distribution/legacy/CLI version source, initially `1.1.0` | B / Worker 2 |
 | `synaptic_tuner/api/__init__.py` | Public API namespace | B / Worker 2 |
@@ -1204,27 +1285,34 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/cloud/test_bootstrap_capsule.py` | Determinism, schema, regular-file/size/hash/copy/race rejection, and no-source-model duplication | J0 / Worker 2 |
 | `tests/cloud/test_hf_volume_transport.py` | Hermetic client feature detection, exact read-only volume request, digest binding, and fail-closed drift behavior | J1 / Worker 1 |
 | `tests/cloud/test_hf_provisioning.py` | Closed schemas, deterministic descriptor/bundle/volume identity, exact evidence binding, transition eligibility, tamper/replay rejection, and zero external calls | J1 / Worker 1 |
+| `tests/cloud/test_hf_run_approval.py` | Closed approval/claim schemas, exact workload/hardware/cost binding, expiry, refresh, redaction, and identity tests | JP-A / Worker 1 |
+| `tests/cloud/test_hf_provider_adapter.py` | Exact Hub 1.27 signature/order/kind/default probing, bucket identity/privacy, entry types, and token-redaction tests | JP-C / Worker 3 |
+| `tests/cloud/test_hf_provisioning_operator.py` | Empty/exact/colliding prefix behavior, immutable-byte handoff, readback digests, mutation ambiguity, and no-retry tests | JP-C / Worker 3 |
+| `tests/cloud/test_hf_bootstrap_smoke.py` | Fixed workload/digest, stdlib boundary, exact source/layout/read-only checks, symlink/reparse rejection, and deterministic output tests | JP-D / Worker 2 |
 | `tests/cloud/test_cloud_import_boundaries.py` | Fresh-process import-light, metadata-only registry, lazy selected-target resolution/cache, dynamic replacement order, and compatibility-facade identity/`__all__` regression contract | JIR / Worker 1 |
 | `tests/contract/test_embedded_host.py` | Nested-host end-to-end contract | C / Worker 3 |
 | `tests/contract/test_engine_read_only.py` | Container and engine-managed no-write contract | C / Worker 3 |
 | `tests/contract/test_native_no_write.py` | Native pre/post tree and Git-diff detection | C / Worker 3 |
 | `tests/contract/test_console_entrypoint.py` | Editable console from unrelated cwd | C / Worker 3 |
-| `tests/contract/test_runtime_assets.py` | J0-owned capsule/runtime-asset completeness and publication gate; historical R ownership remains in the accepted commit record | J0 / Worker 2 |
+| `tests/contract/test_runtime_assets.py` | JP-CR transfer: retain J0 capsule/publication coverage and require the complete five-pin JP launcher/runtime assets; historical R/J0 ownership remains in accepted commits | JP-CR / Worker 3 |
 | `tests/contract/test_source_url_security.py` | Credential/query/host/scheme negative cases | C / Worker 3 |
 | `tests/contract/fixtures/host-project/**` | Directory-owned generic host-fixture surface; node C freezes its complete member list before work starts, and wildcard members are not counted as additional literal files | C / Worker 3 |
 | `tests/handlers/test_ml_handler.py` | Host ML declaring-document inputs, artifact-root outputs, unchanged cwd, no temporary config rewrite, and standalone compatibility | G / Worker 1 |
+| `tests/handlers/test_hf_source_handler.py` | Protected source-provisioning ordering, explicit-file-only credential authority, containment/link rejection, redaction, and no-submission tests | JP-C / Worker 3 |
+| `tests/handlers/test_hf_smoke_handler.py` | Approval/claim/provider ordering, dotenv bypass, protected execution/observation, and bounded output tests | JP-E / Worker 1 |
+| `tests/scripts/test_setup_hf_jp_launcher.py` | JP-CR exact missing/extra/duplicate/range pin rejection, interpreter/target refusal, clean-venv distribution/import checks, and protected help behavior | JP-CR / Worker 3 |
 | `tests/acceptance/submodule_engine/test_acceptance.py` | Independent end-to-end acceptance only | M / independent QA worker |
 | `docs/review/submodule-engine-acceptance.md` | Independent QA/security evidence report | M / independent QA worker |
 
-**Create count after RA6 import-boundary reconciliation: 81 rows.**
+**Create count after JP-A–E reconciliation: 98 rows.**
 
 ### Files to modify
 
 | File | Exact responsibility | DAG owner |
 |---|---|---|
-| `tuner/cli/main.py` | Resolve engine root before dotenv, build context, select the mode-appropriate dotenv, and preserve process values | D / Worker 1 |
-| `tuner/cli/parser.py` | Project/manifest/profile/env-file/event/capability/source flags and canonical CLI version reporting | D / Worker 1 |
-| `tuner/cli/router.py` | Pass context and route new verbs | D / Worker 1 |
+| `tuner/cli/main.py` | JP-E transfer: preserve context-first bootstrap while skipping global dotenv entirely for protected `hf-source`/`hf-smoke`; all other command behavior remains compatible | JP-E / Worker 1 |
+| `tuner/cli/parser.py` | JP-E transfer: add `hf-source` and `hf-smoke approve/execute/observe`, explicit authority/authorization/quote flags, and preserve canonical CLI/version parsing | JP-E / Worker 1 |
+| `tuner/cli/router.py` | JP-E transfer: lazy-route the protected HF handlers without provider imports or credential resolution | JP-E / Worker 1 |
 | `tuner/handlers/__init__.py` | Preserve legacy handler exports through lazy resolution without importing the heavyweight handler graph on capability CLI cold start | D / Worker 1 |
 | `tuner/handlers/base.py` | Context roots, compatibility alias, results/events | D / Worker 1 |
 | `shared/utilities/paths.py` | Separate engine resources from host paths; explicit/process/module engine-root precedence | D / Worker 1 |
@@ -1260,10 +1348,10 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/handlers/experiment_handler.py` | Tracking/config/source-lock lifecycle | E / Worker 2 |
 | `tuner/handlers/experiment_analysis_handler.py` | Portable tracking/artifact/source links | E / Worker 2 |
 | `shared/experiment_tracking/registry.py` | Explicit tracking root and atomic concurrency | E / Worker 2 |
-| `shared/experiment_tracking/service.py` | JTR transfer: sole locked durable mutation boundary, protected-provenance CAS, hostile artifact validation, concurrent derived-output merge, and immutable HF lifecycle enforcement | JTR / Worker 2 |
-| `shared/experiment_tracking/experiment.py` | JTR transfer: backward-readable lifecycle model with private lock-required record persistence and validated immutable provenance pairs | JTR / Worker 2 |
+| `shared/experiment_tracking/service.py` | JP-BR transfer: preserve approval/submission CAS and add immutable cancellation event construction plus once-per-submission locked provider-attempt claim | JP-BR / Worker 2 |
+| `shared/experiment_tracking/experiment.py` | JP-BR transfer: add validated cancellation event URI/digest and `CLAIMED` state bound to exact SUBMITTED state while preserving prior projections | JP-BR / Worker 2 |
 | `shared/experiment_tracking/__init__.py` | JIR transfer: import-light compatibility facade that preserves the TrackingService-only persistence boundary and exact supported export contract | JIR / Worker 1 |
-| `shared/experiment_tracking/schema.py` | Source-lock URI/hash summaries and closed tracking projection for immutable HF descriptor/evidence state | JT / Worker 2 |
+| `shared/experiment_tracking/schema.py` | JP-BR transfer: closed run-summary projection for source/provisioning/approval/submission plus immutable cancellation event/state | JP-BR / Worker 2 |
 | `shared/experiment_tracking/experiment_spec.py` | Config provenance/path refs | E / Worker 2 |
 | `shared/experiment_tracking/experiment_orchestrator.py` | Persist one lock/config across stages | E / Worker 2 |
 | `shared/experiment_tracking/local_tracker.py` | Explicit root and safe writes | E / Worker 2 |
@@ -1275,7 +1363,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/shared/experiment_tracking/test_registry.py` | Tracking root/race regression | E / Worker 2 |
 | `Tools/compare_runs.py` | JTR caller migration from raw record writes to locked `TrackingService` derived-output updates | JTR / Worker 2 |
 | `Tools/judge_sample.py` | JTR caller migration from raw record writes to locked `TrackingService` judge-output updates | JTR / Worker 2 |
-| `tests/shared/experiment_tracking/test_tracking_service.py` | JTR hostile/concurrent coverage for private persistence, durable CAS, immutable references, duplicate/reparse rejection, run attachment, stale callers, and thread/process-safe derived outputs | JTR / Worker 2 |
+| `tests/shared/experiment_tracking/test_tracking_service.py` | JP-BR transfer: retain hostile submission coverage and add idempotent/concurrent/resumed cancellation claim, replacement, linkage, and byte-preservation regressions | JP-BR / Worker 2 |
 | `tests/shared/experiment_tracking/test_compare_runs.py` | JTR regression coverage proving compare-runs callers use the service mutation boundary | JTR / Worker 2 |
 | `tests/shared/experiment_tracking/test_experiment_spec.py` | Config provenance | E / Worker 2 |
 | `tests/shared/experiment_tracking/test_experiment_orchestrator.py` | One lock/config/descriptor identity across stages and monotonic HF lifecycle projection | JT / Worker 2 |
@@ -1320,7 +1408,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/handlers/test_handlers.py` | JCT file-level transfer limited strictly to `TestCloudTrainHandler`: metadata-only inspection, no backend/credential construction, fail-closed barrier ordering, and preserved unrelated test classes | JCT / Worker 1 |
 | `tuner/handlers/cloud_jobs_handler.py` | Sanitized source/job inspection and context | I / Worker 1 |
 | `tuner/backends/training/cloud/base_cloud.py` | Delegate one-repo source logic to source lock | I / Worker 1 |
-| `tuner/cloud/__init__.py` | J0-owned import-light exports for bootstrap core/capsule, checkout/runtime layout, and existing helpers without eager provider imports | J0 / Worker 2 |
+| `tuner/cloud/__init__.py` | JP-E transfer: import-light exports for existing cloud foundations plus JP approval/smoke surfaces without eager provider SDK import | JP-E / Worker 1 |
 | `tests/cloud/test_base_cloud.py` | Source-lock delegation and baseline compatibility | I / Worker 1 |
 | `tuner/handlers/cloud_run_handler.py` | HF source-lock submission only from an exact CONSUMABLE descriptor/evidence pair plus run-specific approval | J1 / Worker 1 |
 | `tuner/handlers/cloud_pipeline_handler.py` | One immutable descriptor identity across HF train/eval; metadata-only JSON and unconditional authorization before backend/environment work, with bound host context and exact source-preparation handoff | J1 / Worker 1 |
@@ -1343,13 +1431,13 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/cloud/test_cloud_eval_handler.py` | Hermetic canonical-source/descriptor fixture for HF evaluation command/submission coverage | J1 / Worker 1 |
 | `tests/cloud/test_hf_jobs_backend.py` | Recursive checkout plus PREPARED/CONSUMABLE/submission gate verification | J1 / Worker 1 |
 | `tests/cloud/test_cloud_extract_handler.py` | J-adjacent verified-source fixture migration after removal of the legacy `RepoCheckoutSpec`/clone path; assigned as a separate bounded reconciliation owner to preserve J's frozen 22-path scope | JX / Worker 2 |
-| `tuner/cloud/hf_jobs.py` | JIR transfer: import-light HF primitives, deferred artifact/provider imports, exact consumable read-only-volume authorization, and secret/label redaction | JIR / Worker 1 |
+| `tuner/cloud/hf_jobs.py` | JP-ER transfer: preserve claim-first fixed submission and add strict submit/inspect JobInfo agreement plus durable cancellation-claim-first bounded observation | JP-ER / Worker 1 |
 | `tuner/backends/__init__.py` | JIR lazy compatibility facade preserving direct export identity without importing concrete or provider backends during inspection | JIR / Worker 1 |
 | `tuner/backends/training/__init__.py` | JIR lazy training facade preserving local/cloud export compatibility without eager provider imports | JIR / Worker 1 |
 | `tuner/backends/training/cloud/__init__.py` | JIR lazy optional-cloud facade that resolves only requested backends and computes availability on explicit access | JIR / Worker 1 |
 | `tuner/backends/registry.py` | JIR ordered metadata-only string-target registry; `list()` imports nothing and `get()` resolves/caches only the selected backend while preserving dynamic registration order | JIR / Worker 1 |
 | `tuner/handlers/stages/__init__.py` | JIR lazy stage-runner facade preserving exact export identity without importing HF stages during package inspection | JIR / Worker 1 |
-| `tests/cloud/test_hf_job_executor.py` | JIR fresh-process primitive/facade import-light regression plus existing executor source-volume and authorization coverage | JIR / Worker 1 |
+| `tests/cloud/test_hf_job_executor.py` | JP-ER transfer: retain submission coverage and verify exact JobInfo agreement, resumed/concurrent once-only cancellation, claim-before-token/provider, ambiguity, and outer bounds | JP-ER / Worker 1 |
 | `Trainers/cloud/cloud_config.yaml` | Declarative profile-C path prefix, namespaced bucket source, mount path, and provisioning policy defaults without credentials or implicit effects | J1 / Worker 1 |
 | `tests/cloud/test_cloud_hf_job.py` | Standard evaluator consumes the exact immutable descriptor/evidence pair and rejects stale, wrong-run, or non-consumable state | JX2 / Worker 3 |
 | `tests/cloud/test_cloud_hf_job_vllm.py` | vLLM evaluator consumes the same exact descriptor/evidence contract without provider-local divergence | JX2 / Worker 3 |
@@ -1361,13 +1449,20 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/cloud/test_runpod_backend.py` | RunPod contract | L / Worker 3 |
 | `tests/contract/test_private_submodule_checkout.py` | Activated local-bare-repository gates for recursive private checkout, credential cleanup, and pre-fetch nested-submodule rejection | C / Worker 3 |
 | `README.md` | Hosting/install/ownership/capabilities | N / Worker 2 |
+| `docs/cloud-training/README.md` | Protected JP operator entrypoint, exact authorization/run sequence, and live-proof limitations ahead of legacy provider material | N / Worker 2 |
 | `.env.example` | Host roots and secret-ref guidance | N / Worker 2 |
 | `.gitignore` | Engine build/test products only | N / Worker 2 |
 | `AGENTS.md` | No-write/source-lock/config-root process | N / Worker 2 |
 | `.skills/fine-tuning/SKILL.md`<br>`.skills/fine-tuning/reference/cloud-training.md`<br>`.skills/fine-tuning/reference/modal-jobs.md`<br>`.skills/fine-tuning/reference/runpod-jobs.md`<br>`.skills/evaluation/SKILL.md`<br>`.skills/evaluation/reference/cli-commands.md`<br>`.skills/synethetic-data-generation/SKILL.md`<br>`.skills/synethetic-data-generation/reference/cli-commands.md`<br>`.skills/upload-deployment/SKILL.md` | Exact canonical host-mode, source-lock, evaluation, generation, deployment, and provider-command guidance; modify only after the corresponding commands exist | N / Worker 2 |
-| `tests/cli/test_parser.py` | New verbs/flags, env-file selection, process-value precedence, pre-dotenv engine-root resolution, legacy parsing, and CLI/legacy canonical-version coherence | D / Worker 1 |
+| `tests/cli/test_parser.py` | JP-E transfer: protected command/flag parsing, hf-route global-dotenv bypass, provider-free help/metadata behavior, and retained legacy/version contracts | JP-E / Worker 1 |
 
-**Modify count after RA6 import-boundary reconciliation: 144 rows.**
+**Modify count after JP-A–E reconciliation: 145 rows.**
+
+**JP reconciliation mechanical evidence:** **98 Create rows**, **145 Modify
+rows**, **251 literal inventory paths**, **0 duplicate paths**, **30 inventory
+owner labels**, and **43 resolved acyclic DAG nodes**. Every changed JP path is
+listed once; historical transfer owners remain documented in the responsibility
+text but no longer share current write ownership.
 
 ### Explicit no-change inventory for this initiative
 
@@ -1395,7 +1490,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/core/interfaces.py` | Internal interfaces are not made public or redesigned in v1 |
 | Existing configs/recipes under `Trainers/`, `Evaluator/`, `SynthChat/`, and `MechInterp/configs/templates/` | Remain bundled defaults/examples; loaders change semantics |
 | Existing `.tracking/**`, run directories, lineage JSON, manifests, and benchmark records | Historical provenance is never rewritten |
-| `.agents/skills/**` and `.claude/skills/**` | Generated mirrors; sync from canonical `.skills/` only |
+| `.agents/skills/**` and `.claude/skills/**`, except generated mirrors of changed canonical skill files | Never edit directly. The corresponding fine-tuning cloud reference mirrors change only through `.skills/scripts/sync_skill_trees.py`; all unrelated mirror files remain byte-identical. |
 | `F:/Code/Epistemic-Humility-Research/**` | Separate downstream PR only |
 
 ---
@@ -1520,17 +1615,21 @@ git status --short
 7. run JX3/JCT call-path tests proving pipeline fail-closed ordering, metadata-only JSON inspection, no backend or credential construction, source-preflight → authorization-barrier → provider ordering, and the generic TrainHandler's local-only `rtx`/`mac` domain;
 8. run JIR fresh-process import, custom/lazy-registry, compatibility-export, and authorization-ordering gates with provider SDK imports actively blocked;
 9. preserve the initial SA6 PASS and RA6 REVISE, close JIR findings, pass the impacted SA6 re-audit, reconcile final P6R, then retry RA6 against the exact impacted-SA6-approved implementation plus accepted plan; neither the pre-SA6 release PASS nor the otherwise-clean RA6 REVISE snapshot is reusable as PASS;
-10. install the repository editable and smoke the `synaptic` console from an unrelated cwd;
-11. build sdist and wheel without publishing;
-12. install the wheel into a fresh isolated environment with no source checkout on `PYTHONPATH`;
-13. assert source, editable, built-distribution, public, legacy, and CLI version surfaces all resolve canonically to `1.1.0`, then run runtime-asset and console/capability smokes from that isolated install;
-14. run canonical skill sync in check mode;
-15. run `git diff --check` and assert the engine checkout is clean after host-mode tests;
-16. upload test/build reports but never capsules, manifests, provisioning evidence, provider receipts, credentials, private source URLs, or private volume identities unless a separately approved sanitized test artifact is required.
+10. run JP-A/JP-B/JP-BR approval, submission claim, durable cancellation claim, replay, expiry, workload/hardware/cost, event-chain, stale/resumed/concurrent observer, hostile-public-save, and byte-preservation tests;
+11. run JP-C/JP-CR exact Hub-signature probes, explicit-file credential authority, closed prefix/tree, immutable-byte upload, readback, ambiguity, no retry, exact five-pin requirements, and clean-venv protected import/help tests with no provider network;
+12. run JP-D/JP-E/JP-ER fixed-workload, symlink/reparse, claim-before-dotenv/token/provider, exact Volume/run_job kwargs, strict submit/inspect JobInfo agreement, timeout, once-only cancellation, ambiguous terminal, and protected CLI ordering tests;
+13. retain original JP-S1 REVISE, then obtain independent JP-S2 and final JP-R PASS against the exact remediated tree; documentation/inventory reconciliation does not satisfy either audit;
+14. install the repository editable and smoke the `synaptic` console from an unrelated cwd;
+15. build sdist and wheel without publishing;
+16. install the wheel into a fresh isolated environment with no source checkout on `PYTHONPATH`;
+17. assert source, editable, built-distribution, public, legacy, and CLI version surfaces all resolve canonically to `1.1.0`, then run runtime-asset and console/capability smokes from that isolated install;
+18. run canonical skill sync in check mode;
+19. run `git diff --check` and assert the engine checkout is clean after host-mode tests;
+20. upload test/build reports but never capsules, manifests, approval/claim documents, provisioning evidence, provider receipts, credentials, private source URLs, or private volume identities unless a separately approved sanitized test artifact is required.
 
-`.github/workflows/provider-smoke.yml` is manual `workflow_dispatch` only, uses a protected environment with required reviewer approval, accepts only a non-secret run identifier, exact descriptor digest, explicit JP action, and `SecretRef` names, and runs provider dry-run/source verification before any optional external effect. HF Jobs is enabled first. JP provisioning requires its own approval and emits only bounded evidence; a second exact-run submission approval is still required. Modal and RunPod remain disabled until the complete JT/JTR/JIR/J1/JX/JX2/JX3/JCT barrier, original and impacted SA6 PASS, accepted final P6R, fresh RA6 PASS, and separately approved JP all pass, followed by their own implementation gates. The workflow cannot synthesize evidence locally, auto-transition to CONSUMABLE or SUBMITTED, publish a package, update a release, merge, cancel unrelated jobs, or launch paid work without the applicable protected-environment approval.
+`.github/workflows/provider-smoke.yml` remains manual `workflow_dispatch` only and is not treated as evidence that the new JP CLI is deployed. Before it can invoke JP-A–E it must be reconciled to accept only non-secret immutable identities, require the protected environment, preserve the one-shot claim, and prohibit synthetic evidence, retries, arbitrary commands, generic training, publication, merge, release, or cancellation of unrelated jobs. The current one-run authorization is recorded for JP-LIVE; it does not authorize a reusable workflow or a second run.
 
-J0 CI is hermetic, provider-agnostic, and cost-free. It validates only capsule determinism, manifest integrity, bounded verifier behavior, private-scratch copying, shared-core parity, runtime-asset completeness, and the no-publication gate. It may not import or instantiate the HF client, inspect job kwargs, upload a capsule, create/mount a volume, authenticate, probe remote behavior, or invoke `run_job`. J1/JIR-owned hermetic tests add fake-client, import-boundary, registry, and job-kwargs coverage. JT/JTR/JIR/J1/JX/JX2/JX3/JCT tests may create only local immutable fixtures and must assert zero provider calls before the accepted authorization boundary. Live provisioning belongs only to separately approved JP; live submission requires a further exact-run approval.
+J0 CI is hermetic, provider-agnostic, and cost-free. It validates only capsule determinism, manifest integrity, bounded verifier behavior, private-scratch copying, shared-core parity, runtime-asset completeness, and the no-publication gate. J1/JIR-owned hermetic tests add fake-client, import-boundary, registry, and job-kwargs coverage. JP tests may use only local fakes before JP-LIVE and must prove zero provider/token work before their protected boundaries. The clean-venv launcher gate may install the five exact direct pins and execute protected imports/help, but it performs no auth, bucket, volume, or job action. Official API/signature documentation, hermetic fake-client success, and clean-venv help/import success are compatibility evidence, never live provider proof.
 
 No package publication workflow is added in this plan. Publication remains prohibited until:
 
@@ -1555,7 +1654,7 @@ Node M must additionally invoke embedded-host ML training from an unrelated cwd,
 
 ### Cloud gate
 
-No paid launch until:
+No JP-LIVE provider effect until:
 
 - the complete JT/JTR/JIR/J1/JX/JX2/JX3/JCT implementation tree retains recorded original and impacted SA6 PASS, final P6R is accepted, and fresh RA6 passes without an intervening implementation edit;
 - dry-run command is inspected;
@@ -1563,13 +1662,16 @@ No paid launch until:
 - gitlink matches engine commit;
 - source lock validates;
 - the immutable descriptor is PREPARED and binds the single canonical source-lock URI;
-- separately approved JP returns closed, exact provisioning evidence and J1 verifies it to CONSUMABLE;
-- the descriptor and evidence digests, provider, hardware, and estimated cost named in the submission approval still match;
+- JP-S2 and final JP-R both PASS on the exact JP-A–E plus JP-BR/JP-CR/JP-ER tree; the original JP-S1 REVISE remains recorded;
+- `hf-source` returns closed, exact provisioning evidence and local validation reaches CONSUMABLE without ambiguity;
+- the exact approval remains unexpired and its descriptor/evidence/SourceLock/bundle/capsule/policy/workload digests, `cpu-basic`, `python:3.12`, quote, time limits, and effects all match;
+- the isolated Python 3.12 launcher proves the exact five direct pins plus protected clean-venv handler imports/help without changing the trainer environment;
+- credential authority comes only from the explicit regular link-free file containing nonblank `HF_TOKEN`, with no ambient HF credential variables;
 - remote checkout bootstrap is idempotent;
 - config/plug-in/input hashes verify;
-- user explicitly approves that exact cost-incurring launch.
+- the recorded one-run authorization still covers the exact cost-incurring launch.
 
-Preparation, JP acknowledgement, or CONSUMABLE validation never implies the final submission approval. Without impacted SA6 PASS, accepted final P6R, fresh RA6 PASS, and separately approved JP, `cloud.launch` remains unavailable and K/L do not start; even after them, `cloud.launch` remains unavailable until a future exact-run submission capability and approval are explicitly designed and accepted.
+Preparation, acknowledgement, CONSUMABLE validation, or approval never implies reusable authority. `SUBMITTING` irreversibly consumes the single authorization. Any ambiguous provisioning/submission outcome stops without retry. `cloud.launch` and generic training remain unavailable after JP-LIVE; K/L do not start until the provider proof is accepted, and RunPod additionally waits for fresh dated official API/SDK research.
 
 ---
 
@@ -1692,14 +1794,15 @@ Each commit is owned by exactly one DAG node and is restricted to that node's in
 | 13 | `feat(cloud): add verified source identity and runtime layout` | I | I-owned source-lock/runtime-layout foundation rows/tests; checkout/capsule transfers are excluded after J0 begins |
 | 14 | `feat(bootstrap): add deterministic verified capsule and shared core` | J0 | All `J0 / Worker 2` rows: shared core, capsule/schema, bounded transport-neutral verifier, transferred checkout/assets/exports, and hermetic non-provider tests |
 | 15 | `feat(hf-jobs): add immutable verified source transport` | J1 + JT + JTR + JIR + JX + JX2 + JX3 + JCT + P6R | Immutable descriptor/evidence and tracking lifecycle; private locked tracking API plus migrated analysis callers; import-light facades/registries and fresh-process regressions; HF backend/builders/stages/handlers/transport; frozen descriptor-consumption fixtures; bounded extract/pipeline reconciliations; final CloudTrain barrier; and accepted SA6/impacted-SA6/P6R evidence. No JP action, submission authorization, provider effect, or live capability is included |
-| 16 | `feat(modal): adopt verified source lock and runtime layout` | K | K-owned Modal runner/tests only |
-| 17 | `feat(runpod): adopt verified source lock and runtime layout` | L | L-owned RunPod backend/tests only |
-| 18 | `test(acceptance): verify embedded engine release candidate` | M | M-exclusive acceptance test/report paths only; no feature-test edits |
-| 19 | `ci(contract): gate submodule and protected provider smoke` | N | N-owned workflow files only |
-| 20 | `docs(adoption): document host api capabilities security and cloud` | N | N-owned README/changelog/docs/example documentation rows |
-| 21 | `docs(skills): update canonical workflows and sync mirrors` | N | N-owned `AGENTS.md`, canonical skills, generated mirrors, and sync evidence |
+| 16 | `feat(hf-jobs): add one-shot approved bootstrap smoke` | JP-A + JP-B + JP-C + JP-D + JP-E + JP-BR + JP-CR + JP-ER | Exact approval/submission/cancellation claims, five-pin isolated Hub 1.27 protected runtime, private-bucket provisioning/readback, fixed workload, strict JobInfo agreement, protected CLI, bounded once-only cancellation, and hermetic tests. Original JP-S1 REVISE is retained; final JP-S2/JP-R PASS and live-provider evidence are not part of the commit |
+| 17 | `feat(modal): adopt verified source lock and runtime layout` | K | K-owned Modal runner/tests only, after accepted JP-LIVE evidence |
+| 18 | `feat(runpod): adopt verified source lock and runtime layout` | L | L-owned RunPod backend/tests only, after accepted JP-LIVE evidence and fresh dated official API/SDK research |
+| 19 | `test(acceptance): verify embedded engine release candidate` | M | M-exclusive acceptance test/report paths only; no feature-test edits |
+| 20 | `ci(contract): gate submodule and protected provider smoke` | N | N-owned workflow files only |
+| 21 | `docs(adoption): document host api capabilities security and cloud` | N | N-owned README/changelog/docs/example documentation rows |
+| 22 | `docs(skills): update canonical workflows and sync mirrors` | N | N-owned `AGENTS.md`, canonical skills, generated mirrors, and sync evidence |
 
-Provider commits remain separate so HF assumptions are reviewable and Modal/RunPod prove the shared abstraction. Commit 15 may checkpoint only after recorded original and impacted SA6 PASS, accepted final P6R, and fresh RA6 PASS against the exact impacted-SA6-approved implementation plus reconciled plan. The prior otherwise-clean RA6 REVISE cannot satisfy this gate. No package-publication commit or workflow may be added until commits 18–21 are green and the runtime-asset decision is closed.
+Provider commits remain separate so HF assumptions are reviewable and Modal/RunPod prove the shared abstraction. Commit 15 is the accepted local checkpoint. Commit 16 is eligible only after JP-S2 and final JP-R audit the exact remediated implementation; JP-LIVE is a separate protected operator action after that commit is clean and exactly pushed. No package-publication commit or workflow may be added until commits 19–22 are green and the runtime-asset decision is closed.
 
 ---
 
@@ -1737,7 +1840,19 @@ P0 Plan approved and baseline pinned
                     │
                     RA6 Fresh release-audit retry
                     │
-                    JP Separate exact-descriptor approval
+                    JP-A Exact approval ── JP-B One-shot claim
+                         ├── JP-C Isolated provisioning
+                         └── JP-D Fixed workload
+                    JP-B + JP-C + JP-D ── JP-E Submit/observe
+                    JP-A + JP-B + JP-C + JP-D + JP-E
+                         └── JP-S1 Security REVISE
+                    JP-S1 ── JP-BR Cancellation claim
+                           ├─ JP-CR Launcher/runtime closure
+                           └─ JP-ER Job identity/observation
+                    JP-BR + JP-CR + JP-ER
+                         ├── JP-S2 Security re-audit
+                         └── JP-R Final release re-audit
+                    JP-S2 + JP-R ── JP-LIVE Exact provider proof
                     │
                     K Modal + L RunPod
                     │
@@ -1774,9 +1889,20 @@ P0 Plan approved and baseline pinned
 | SA6I | Fresh independent security specialist | Read-only impacted re-audit; no inventory row or write scope | JIR | PASS with exact 18 import, 12 custom, 18 ordering, 215/1 tracking, 267/10 HF, and 78/3 J0 evidence |
 | P6R | PACT architect | This plan only; no implementation/test/provider scope | SA6I | Accepted final import-boundary inventory, ownership, DAG, evidence, and gate reconciliation |
 | RA6 | Fresh independent release specialist | Read-only audit; no inventory row or write scope | P6R | Fresh PASS required against the exact impacted-SA6-approved implementation plus final reconciled plan, explicitly classifying the unavailable pinned 304 command |
-| JP | Separately approved operator/protected workflow | No repository file ownership; exact-descriptor external provisioning only if Joseph explicitly approves it | RA6 and separate exact-descriptor approval | Bounded ACKNOWLEDGED evidence only; never submission authorization |
-| K | Worker 2 | Every inventory row labeled `K / Worker 2` | J1, RA6, JP | Modal adoption without a competing source model |
-| L | Worker 3 | Every inventory row labeled `L / Worker 3` | J1, RA6, JP | RunPod adoption without a competing source model, after the dated official-API/SDK research gate |
+| JP-A | Worker 1 | Every inventory row labeled `JP-A / Worker 1` | RA6 and exact user authorization | Closed immutable approval bound to canonical workload, `cpu-basic`, time/cost caps, and all source/provisioning digests |
+| JP-B | Worker 2 | Every inventory row labeled `JP-B / Worker 2` | JP-A | Locked one-shot `APPROVED → SUBMITTING → SUBMITTED or AMBIGUOUS` claim with replay/rollback/replacement resistance |
+| JP-C | Worker 3 | Every inventory row labeled `JP-C / Worker 3` | JP-A | Isolated Python 3.12/Hub 1.27 provisioning operator, exact API probes, explicit-file credential authority, immutable upload bytes, and readback evidence |
+| JP-D | Worker 2 | Every inventory row labeled `JP-D / Worker 2` | JP-A | Canonical fixed bootstrap workload and stdlib-only no-follow verifier/result |
+| JP-E | Worker 1 | Every inventory row labeled `JP-E / Worker 1` | JP-B, JP-C, JP-D | Protected CLI plus claim-first exact Volume/run_job submission and bounded observation/cancellation; no retry |
+| JP-S1 | Fresh independent security specialist, historical | Read-only audit; no inventory row or write scope | JP-A, JP-B, JP-C, JP-D, JP-E | REVISE: process-local cancellation, insufficient JobInfo agreement, and incomplete launcher/runtime proof |
+| JP-BR | Worker 2, bounded security remediation | Every inventory row labeled `JP-BR / Worker 2` | JP-S1, JP-B | Durable exactly-once cancellation-attempt event/claim and resumed/concurrent observer resistance |
+| JP-CR | Worker 3, bounded security remediation | Every inventory row labeled `JP-CR / Worker 3` | JP-S1, JP-C | Complete exact five-pin Python 3.12 launcher plus clean-venv protected import/help proof |
+| JP-ER | Worker 1, bounded security remediation | Every inventory row labeled `JP-ER / Worker 1` | JP-S1, JP-E | Strict submit/inspect JobInfo agreement and durable claim-before-cancel observation |
+| JP-S2 | Fresh independent security specialist | Read-only re-audit; no inventory row or write scope | JP-BR, JP-CR, JP-ER | PASS on frozen 29-file manifest `55e2c876…f0f41`: 283/6, hostile 16, import/generic 87, no findings; no live install/provider proof |
+| JP-R | Fresh independent release specialist | Read-only final re-audit; no inventory row or write scope | JP-BR, JP-CR, JP-ER | PASS: affected 200/3; full JP/HF/import/order 393/15; tracking 249/1; CLI/capability/project/plugin/contract 268/1; broad cloud 673/15 with the same five accepted failures and two exclusions; 26-file compile, clean imports, diff warnings only, unchanged public API/`cloud.launch`, and clean skill sync |
+| JP-LIVE | Separately approved operator/protected workflow | No repository file ownership; one exact provider provisioning/submission/observation sequence | JP-S2 PASS, JP-R PASS, exact pushed proof, explicit credential preflight | Bounded provider evidence for at most one smoke; no retry and no generic capability enablement |
+| K | Worker 2 | Every inventory row labeled `K / Worker 2` | J1, RA6, JP-LIVE | Modal adoption without a competing source model |
+| L | Worker 3 | Every inventory row labeled `L / Worker 3` | J1, RA6, JP-LIVE | RunPod adoption without a competing source model, after the dated official-API/SDK research gate |
 | M | Fresh QA specialist | Only `tests/acceptance/submodule_engine/test_acceptance.py` and `docs/review/submodule-engine-acceptance.md` | C, R, F, G, H, J0, RA6, K, L | Independent cross-platform/security/baseline report, including capsule integrity, unrelated-cwd ML source-cleanliness, and artifact-root acceptance; no fixes |
 | N | Worker 2 | Every inventory row labeled `N / Worker 2` | M | CI, docs, release gates, skills, and sync evidence |
 | O | Separate downstream owner | EHR repository only | N and accepted engine commit/release | Independent EHR migration PR |
@@ -1804,8 +1930,13 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 | 7h | Freeze JIR; accept impacted SA6 PASS and exact evidence | Idle; no edits | SA6I independent impacted security re-audit | Idle; no edits |
 | 7i | Reconcile final JIR inventory/DAG/audit chronology; accept final P6R before retry | Idle; no edits | P6R plan architect, plan-only | Idle; no edits |
 | 7j | Retry RA6 against the exact impacted-SA6-approved implementation plus accepted final plan; checkpoint commit 15 only on PASS | Idle; no edits | RA6 fresh independent release audit | Idle; no edits |
-| 8a | Stop for Joseph's separate exact-descriptor decision; run JP only if explicitly approved | Idle; no provider action | JP approved operator/protected workflow, or remain blocked | Idle; no provider action |
-| 8b | Only after RA6 and approved JP; enforce provider-specific gates | Idle; review only | K Modal | L RunPod after dated official API/SDK research |
+| 8a | Record Joseph's bounded approval and freeze JP contracts | JP-A approval contract | JP-B tracking claim after JP-A | JP-C isolated provider contract after JP-A |
+| 8b | Complete the local fixed-run implementation without provider effects | JP-E submit/observe after B/C/D | JP-D fixed smoke workload | JP-C provider/operator closure |
+| 8c | Freeze the integrated tree; preserve the three-finding verdict | Idle; no edits | JP-S1 independent security audit: REVISE | Idle; no edits |
+| 8d | Apply only the accepted bounded security remediations | JP-ER JobInfo/observer closure | JP-BR durable cancellation claim | JP-CR five-pin launcher/runtime closure |
+| 8e | Freeze remediation and docs; do not launch | Idle; no edits | JP-S2 independent security re-audit: PASS | JP-R final release/inventory re-audit: PASS; live install/provider proof still absent |
+| 8f | Only after JP-S2 PASS, final JP-R PASS, exact pushed proof, and credential preflight | Idle; no edits | JP-LIVE one authorized smoke | Idle; independent observation only |
+| 8g | Only after accepted JP-LIVE evidence; enforce later provider gates | Idle; review only | K Modal | L RunPod after dated official API/SDK research |
 | 9 | Commission fresh QA; accept report or return defects to original node owner | Idle; no feature edits | M independent QA in an isolated worktree/assignment | Idle; no feature edits |
 | 10 | Audit every release gate; merge N | Idle; review only | N docs/CI/release | Idle; review only |
 | 11 | Authorize separate downstream work only after engine release acceptance | O separate EHR owner | — | — |
@@ -1815,8 +1946,8 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 - Root does not edit implementation, tests, workflows, docs, or skills. Root maintains the ownership ledger, enforces barriers, audits diffs, and merges accepted commits.
 - `tuner/project/source_bundle.py` is the only source-lock model. I/J0/J1/K/L consume it and may not introduce provider-local source dataclasses that duplicate it. `bootstrap_core` executes that model; it is not a second model.
 - A owns `tuner/project/__init__.py`, `tuner/project/manifest.py`, `tuner/project/context.py`, `tuner/project/path_refs.py`, `tuner/project/config_layers.py`, `tuner/project/errors.py`, `tuner/project/secrets.py`, and `tuner/project/source_bundle.py`. B owns only `tuner/project/plugins.py`. This is the only intentional split inside `tuner/project/**`, and their waves prevent concurrent edits.
-- Provider boundaries are exclusive: I owns shared source/runtime foundation; J0 owns the shared bootstrap core, capsule, and transferred checkout/asset rows; J1 owns its remaining HF descriptor/provider surfaces and volume transport; JT retains only its two unaffected tracking-projection rows; JTR retains only seven tracking API/caller remediation rows; JIR owns exactly the ten import-boundary paths, including the two explicit transfers; JX/JX2/JX3 own only their named tests; JCT owns only the CloudTrain boundary and its named test class; K owns Modal; L owns RunPod.
-- Before J0 starts, root records one atomic ownership transfer of `tuner/cloud/checkout.py`, `tuner/cloud/__init__.py`, `tests/cloud/test_checkout.py`, `docs/preparation/synaptic-runtime-asset-inventory.md`, and `tests/contract/test_runtime_assets.py`. I and historical R must not edit those paths afterward.
+- Provider boundaries are exclusive: I owns shared source/runtime foundation; J0 owns the shared bootstrap core/capsule; J1 owns its remaining HF descriptor/provider surfaces and volume transport; JX/JX2/JX3/JCT own only their named reconciliations. JP-A–E own the initial approved-run implementation. After JP-S1 REVISE, JP-BR exclusively owns the transferred cancellation tracking paths, JP-CR the transferred launcher/runtime paths, and JP-ER the transferred Jobs observation paths. Historical owners retain accepted commit history but no current write authority over transferred rows. JP-S1/JP-S2/JP-R/JP-LIVE own no files. K owns Modal; L owns RunPod.
+- Before J0 starts, root records one atomic ownership transfer of `tuner/cloud/checkout.py`, `tuner/cloud/__init__.py`, `tests/cloud/test_checkout.py`, `docs/preparation/synaptic-runtime-asset-inventory.md`, and `tests/contract/test_runtime_assets.py`. JP later receives only `tuner/cloud/__init__.py` and `tests/contract/test_runtime_assets.py` for the bounded exports/assets extension; the underlying J0 contract remains unchanged.
 - J0's minimal inline verifier may validate only a bounded manifest and regular-file bytes, reject links/devices/oversize content, and copy verified bytes to private scratch. It may not parse source locks, run Git, resolve credentials, perform checkout, or implement a provider-local source policy.
 - J1 may feature-detect the installed HF client against a hermetic fake/fixture and fail closed when a read-only volume cannot be expressed. It may not silently select the immutable-URL fallback, upload a capsule, or claim live mounted-volume support from unit tests.
 - `tests/handlers/test_handlers.py` has one inventory owner for Wave 6 uniqueness, JCT, but the transfer is semantically limited to `TestCloudTrainHandler`; JCT may not alter or claim unrelated test classes. `tuner/handlers/train_handler.py` stays with its historical owner and remains unchanged because it can select only local `rtx` or `mac` backends.
@@ -1835,9 +1966,10 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 5. J0's deterministic-build, manifest-integrity, private-scratch, no-link/device/oversize, canonical-core-delegation, and no-publication gates must pass before `J1` starts. HF installed-client, `Volume`, fake-client drift, digest-binding, and provider-integration gates belong exclusively to J1 and are J1 exit gates, not J0 prerequisites.
 6. `J0`, `E`, `G`, and `H` must merge before `J1`; JX/JX2/JX3 and JCT start only when their named J1 seams are frozen. JT may proceed from accepted E/J0 contracts but must join J1 before descriptor-consumption integration closes. JTR began only through the root-mediated original-SA6 remediation transfer and now retains seven inventoried tracking/API/caller rows.
 7. The complete pre-import JT/JTR/J1/JX/JX2/JX3/JCT tree passed original SA6, then first P6R, before RA6R returned the eager-import defect. JIR begins only through that root-mediated RA6R transfer and may edit exactly its ten inventoried paths. The impacted SA6I PASS applies to that final remediated implementation tree; final P6R must be accepted before the RA6 retry. Neither the pre-SA6 release PASS nor RA6R's otherwise-clean REVISE result can satisfy RA6, and no later PASS erases prior findings.
-8. JP remains stopped until fresh RA6 passes and Joseph separately approves the exact descriptor. K and L require original and impacted SA6 PASS, accepted final P6R, fresh RA6 PASS, and acknowledged JP evidence; `cloud.launch` still requires a distinct future exact-run submission approval and remains unavailable in this revision. L also requires the dated official RunPod API/SDK research gate before any adapter edit.
-9. K and L must merge before independent QA node `M`; `M` must pass before `N`, and no publication workflow or release is authorized before `N` passes.
-10. `O` begins only after `N` and an accepted engine commit/release.
+8. JP-A–E require fresh RA6 PASS and Joseph's separately recorded bounded authorization. JP-S1 returned REVISE; only JP-BR/JP-CR/JP-ER may change the exact transferred remediation paths. JP-S2 and final JP-R audit the same frozen remediated tree and both must PASS before JP-LIVE.
+9. JP-LIVE additionally requires exact clean pushed-source proof, the isolated exact five-pin launcher, clean-venv protected import/help proof, and explicit credential-file preflight. It may provision and submit at most once; ambiguous mutation/submission/cancellation consumes the relevant authority and cannot be retried. `cloud.launch` remains unavailable afterward unless a future generic capability design is separately accepted.
+10. K and L require accepted JP-LIVE evidence; L also requires the dated official RunPod API/SDK research gate before any adapter edit. K and L must merge before independent QA node `M`; `M` must pass before `N`, and no publication workflow or release is authorized before `N` passes.
+11. `O` begins only after `N` and an accepted engine commit/release.
 
 ---
 
@@ -1905,20 +2037,28 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 - [ ] J1 binds the accepted J0 capsule manifest SHA-256 in the trusted launcher; the inline verifier accepts only bounded regular files and copies verified bytes from the read-only mount to private scratch.
 - [ ] Local checkout and verified-capsule checkout execute the same `bootstrap_core`; no shell, inline, or provider-local checkout model exists.
 - [ ] After J0 passes, J1-owned hermetic HF client fixtures prove explicit `read_only=True` volume construction and fail closed on missing or drifted support without invoking `run_job`.
-- [ ] JT/JTR/JIR/J1 persist and consume one closed immutable descriptor/evidence identity through PREPARED, ACKNOWLEDGED, and CONSUMABLE without exposing a current SUBMITTED API, public raw-save bypass, or eager provider-SDK import.
+- [x] JT/JTR/JIR/J1 persist and consume one closed immutable descriptor/evidence identity through PREPARED, ACKNOWLEDGED, and CONSUMABLE without a public raw-save bypass or eager provider-SDK import.
+- [ ] JP-A/JP-B/JP-BR add the separately authorized exact approval, one-shot submission projection, and one durable cancellation attempt per exact submission without weakening source-transport provenance.
+- [ ] JP-C/JP-CR prove exact official Hub 1.27 signatures before mutation, explicit-file credential authority, immutable-byte upload, terminal non-transactional ambiguity, all five exact launcher pins, and clean-venv protected imports/help.
+- [ ] JP-D fixes the workload to `cpu-basic`/`python:3.12`, no training/publication/ports/SSH/retries, 600/720/900-second limits, and rejects every source symlink/reparse point without following it.
+- [ ] JP-E/JP-ER claim before token/provider work, reconstruct the exact read-only Profile-C volume, reject malformed/mismatched submit/inspect JobInfo, record only `SUBMITTED` or terminal `AMBIGUOUS`, and claim durably before at most one cancellation call.
 - [x] Original SA6 verified locked fresh-durable tracking mutations, hostile provenance rejection, concurrent derived-output merge, and migration of the then-eight JTR paths; earlier REVISE findings remain recorded.
 - [ ] JX3 pipeline assertions and JCT CloudTrain assertions prove zero backend, menu, SDK, token, environment, confirmation, or evaluator work before the accepted exact-run authorization boundary; JSON inspection remains metadata-only.
 - [ ] Generic `TrainHandler` remains local-only (`rtx`/`mac`) and requires no HF-specific edit.
 - [x] SA6 final security PASS applies to the frozen remediated implementation tree with exact 215/1, 52/1, 5, 267/10, and 78/3 evidence; the unavailable pinned 304 command is not claimed.
 - [x] RA6R's otherwise-clean release evidence remains REVISE because eager provider-SDK import crossed the metadata/authorization boundary; it is not reused as PASS.
 - [x] Impacted SA6I PASS proves JIR with exact 18 import, 12 custom, 18 ordering, 215/1 tracking, 267/10 HF, and 78/3 J0 evidence; the pinned 304 command remains unclaimed.
-- [ ] Final P6R is accepted before the RA6 retry; RA6 audits the exact impacted-SA6-approved implementation plus reconciled plan and explicitly classifies the pinned-command limitation instead of reusing either earlier release result.
+- [x] Final P6R was accepted before the fresh RA6 PASS; RA6 audited the exact impacted-SA6-approved implementation plus reconciled plan and explicitly classified the pinned-command limitation instead of reusing either earlier release result.
 - [ ] Profile B immutable-URL transport is never automatic and remains disabled pending a later N approval; profile A digest-pinned images remain a deferred hardened profile.
 - [ ] Canonical checkout clones host and initializes submodules recursively.
 - [ ] Remote bootstrap verifies source/config/plug-in/input hashes before GPU work.
 - [ ] Dual clone still verifies the host gitlink relationship.
-- [ ] HF Jobs remains hermetic first; no live mounted-volume capability is claimed until separately approved JP/provider evidence and the later protected submission gates prove it.
-- [ ] Modal and RunPod remain blocked until the full HF barrier, impacted SA6 PASS, accepted final P6R, fresh RA6 PASS, and separately approved JP pass, then adopt the same lock/layout without schema forks.
+- [x] Original JP-S1 REVISE records the process-local cancellation, JobInfo agreement, and incomplete launcher/runtime findings.
+- [x] JP-S2 PASS applies to frozen 29-file manifest `55e2c876dd8cc282a43248a3eeaf3f445f6e452ce76ab2d7a0b814b460ef0f41` with 283 passed/6 skipped, hostile 16, import/generic 87, and no findings; no live install/provider proof is inferred.
+- [x] Final JP-R independently PASSed the exact remediated JP implementation plus frozen docs; the evidence is recorded above and makes no live installation or provider claim.
+- [ ] JP-LIVE proves the one exact mounted-volume bootstrap smoke under pushed-source, credential, duration, and cost gates; official API research and hermetic fakes alone are not live proof.
+- [ ] `cloud.launch` and generic training remain unavailable after the fixed smoke; capability enablement requires a later accepted architecture/security/release decision.
+- [ ] Modal and RunPod remain blocked until accepted JP-LIVE evidence, then adopt the same lock/layout without schema forks.
 - [ ] Before L edits the RunPod adapter, a dated official API/SDK research record pins current versions, signatures, authentication, lifecycle, volume, secret, logging, and cancellation semantics.
 
 ### Compatibility and evidence
@@ -1946,11 +2086,11 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 
 - **Overall complexity:** Very High
 - **Primary risk:** Cross-cutting filesystem and source-identity assumptions
-- **Planned existing files modified:** 125 inventory rows
-- **Planned new files/surfaces:** 76 inventory rows including schemas, public facade, workflows, docs, bootstrap capsule surfaces, and tests
+- **Planned existing files modified:** 145 inventory rows
+- **Planned new files/surfaces:** 98 inventory rows including schemas, public facade, workflows, docs, bootstrap/JP surfaces, and tests
 - **Provider order:** HF Jobs → Modal → RunPod
 - **Required specialists:** backend/project-context, packaging/API, local runtime/DevOps, cloud provider, test/QA, security, documentation
-- **External dependencies:** None required for the root contract; packaging uses standard Python metadata and `importlib.metadata`
+- **External dependencies:** None required for the root contract; JP alone uses an isolated Python 3.12 environment pinned to `huggingface_hub==1.27.0`, never the trainer environment
 - **Downstream dependency:** A separate Epistemic-Humility-Research migration after engine acceptance
 
 ## Phase Requirements

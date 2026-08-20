@@ -38,6 +38,25 @@ def test_capabilities_parser_supports_list_describe_and_json_placement():
     ) == ("capabilities", "describe", "mechinterp.steer", True)
 
 
+def test_hf_source_and_smoke_parser_are_narrow_and_have_no_yes_bypass():
+    parser = create_parser()
+    source = parser.parse_args([
+        "hf-source", "provision", "--experiment-id", "exp-1", "--actor", "operator-1",
+        "--env-file", ".env",
+    ])
+    smoke = parser.parse_args([
+        "hf-smoke", "execute", "--experiment-id", "exp-1", "--env-file", ".env",
+    ])
+    assert (source.command, source.subcommand) == ("hf-source", "provision")
+    assert (smoke.command, smoke.subcommand) == ("hf-smoke", "execute")
+    assert not hasattr(smoke, "hf_smoke_command")
+    with pytest.raises(SystemExit):
+        parser.parse_args(["hf-smoke", "execute", "--experiment-id", "exp-1", "--yes"])
+    for argv in (["hf-smoke"], ["hf-smoke", "retry"], ["hf-source", "execute"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)
+
+
 def test_tuner_legacy_exports_resolve_lazily_and_preserve_normal_errors(tmp_path):
     engine_root = Path(__file__).parents[2].resolve()
     env = os.environ.copy()
@@ -800,6 +819,89 @@ def test_explicit_env_file_with_installed_support_loads_and_routes(
     assert os.environ["NODE_D_INSTALLED_NEW"] == "loaded"
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["hf-source", "provision", "--experiment-id", "exp-1", "--actor", "operator-1"],
+        ["hf-smoke", "approve", "--experiment-id", "exp-1"],
+        ["hf-smoke", "execute", "--experiment-id", "exp-1"],
+        ["hf-smoke", "observe", "--experiment-id", "exp-1"],
+    ],
+)
+def test_protected_hf_cli_defers_dotenv_until_handler_boundary(
+    tmp_path, monkeypatch, argv
+):
+    env_file = tmp_path / "protected.env"
+    env_file.write_text("HF_TOKEN=hf_must_not_load_before_route\n", encoding="utf-8")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    routed = []
+
+    def record_route(args, *, context):
+        assert "HF_TOKEN" not in os.environ
+        assert args._env_loaded is False
+        assert args._env_loading_deferred is True
+        assert args._explicit_env_path == env_file.resolve()
+        routed.append((args.command, args.subcommand))
+        return 0
+
+    cli_main_module = importlib.import_module("tuner.cli.main")
+    monkeypatch.setattr(cli_main_module, "route_command", record_route)
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main([*argv, "--env-file", str(env_file), "--json"])
+
+    assert exc_info.value.code == 0
+    assert routed == [(argv[0], argv[1])]
+    assert "HF_TOKEN" not in os.environ
+
+
+def test_real_main_and_smoke_handler_reject_ambient_token_before_submit(
+    tmp_path, monkeypatch, capsys
+):
+    from types import SimpleNamespace
+    from tuner.handlers.hf_smoke_handler import HFSmokeHandler
+
+    project = tmp_path / "protected-host"
+    project.mkdir()
+    (project / "experiments").mkdir()
+    engine_root = tmp_path / "engine-checkout"
+    engine_root.mkdir()
+    monkeypatch.setenv("SYNAPTIC_ENGINE_ROOT", str(engine_root))
+    _write_requirement_manifest(project, ">=1.1,<2")
+    env_file = project / "smoke.env"
+    env_file.write_text("HF_TOKEN=hf_file_authority\n", encoding="utf-8")
+    monkeypatch.setenv("HF_TOKEN", "hf_ambient_rejected")
+    monkeypatch.delenv("HF_API_KEY", raising=False)
+    tracking = SimpleNamespace(resolve_uri=lambda uri: env_file)
+    experiment = SimpleNamespace(
+        hf_submission_state="APPROVED",
+        hf_run_approval_uri="tracking://approval.json",
+    )
+    monkeypatch.setattr(
+        HFSmokeHandler, "_state", lambda self: (tracking, experiment, object())
+    )
+    smoke_module = importlib.import_module("tuner.handlers.hf_smoke_handler")
+    monkeypatch.setattr(smoke_module, "load_canonical_json", lambda *args, **kwargs: {})
+    monkeypatch.setattr(smoke_module, "validate_hf_run_approval", lambda value: object())
+    submissions = []
+    monkeypatch.setattr(
+        smoke_module,
+        "submit_approved_bootstrap_smoke",
+        lambda **kwargs: submissions.append(kwargs),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main([
+            "hf-smoke", "execute", "--experiment-id", "exp-1",
+            "--project-root", str(project), "--env-file", str(env_file), "--json",
+        ])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert "ambient" in payload["error"]["message"]
+    assert "hf_ambient_rejected" not in json.dumps(payload)
+    assert submissions == []
+
+
 def _write_requirement_manifest(project_root: Path, requirement: str) -> None:
     (project_root / "synaptic.yaml").write_text(
         f"""schema_version: synaptic-project/v1
@@ -809,6 +911,13 @@ project:
 engine:
   requires: \"{requirement}\"
   api: v1
+paths:
+  configs: project://experiments
+  artifacts: project://.synaptic/artifacts
+  state: project://.synaptic/state
+  tracking: project://.synaptic/tracking
+  cache: project://.synaptic/cache
+  tmp: project://.synaptic/tmp
 """,
         encoding="utf-8",
     )

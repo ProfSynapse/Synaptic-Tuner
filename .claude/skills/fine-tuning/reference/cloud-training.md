@@ -15,6 +15,156 @@ If any of those checks fail, the cloud backend stops before submitting a job.
 
 ---
 
+## Protected HF Source Provisioning and Fixed Bootstrap Smoke
+
+This is a narrow source/bootstrap provider-proof lane, not the normal
+`cloud-run`, `cloud-pipeline`, or `run-experiment` training path. The local
+`hf-source` and `hf-smoke` commands exist. The original JP-S audit returned
+REVISE for process-local cancellation, insufficient `JobInfo` identity
+agreement, and an incomplete launcher/runtime contract. Bounded remediations are
+implemented. JP-S2 passed the frozen 29-file manifest
+`55e2c876dd8cc282a43248a3eeaf3f445f6e452ce76ab2d7a0b814b460ef0f41`
+with 283 passed/6 skipped, 16 hostile checks, 87 import/generic checks, and no
+findings. Final JP-R also PASSed the frozen release/inventory tree. Neither audit
+made a live installation or provider claim. Live use still requires clean exact-pushed proof,
+the five-pin clean-venv gate, and credential preflight. `cloud.launch` and generic
+training remain unavailable.
+
+### Fixed authorization envelope
+
+- At most one paid submission; no retry or replacement without new user approval.
+- `cpu-basic`, `python:3.12`, bootstrap verification only.
+- No training, publication, ports, SSH, or provider retry.
+- Provider timeout 600 seconds; one cancellation attempt after 720 seconds if
+  still nonterminal; stop observing after 900 seconds.
+- Projected compute no more than USD $0.01; hard total cap USD $2.
+- Canonical workload SHA-256:
+  `0d1d3454d079ea994a1e3a24b59b772bd4adb40cb441e00cc5801faf5d220841`.
+
+Any wider workload, second submission, higher cost, longer duration, or retry
+needs new approval. `SUBMITTING` consumes the authorization even if the provider
+response is ambiguous.
+
+### Isolated launcher only
+
+Use a dedicated Python 3.12 environment with exactly these direct pins:
+`huggingface_hub==1.27.0`, `jsonschema==4.23.0`, `packaging==24.1`,
+`python-dotenv==1.0.1`, and `PyYAML==6.0.2`. Never install this JP dependency set
+into the Unsloth/trainer runtime.
+
+```powershell
+python scripts/setup_hf_jp_launcher.py `
+  --python C:\path\to\python3.12.exe `
+  --venv C:\path\to\new\hf-jp-launcher `
+  --repo-root <exact-repository-worktree>
+```
+
+The setup script refuses a non-3.12 interpreter, missing/extra/duplicate/ranged
+or reordered requirements, or an existing target directory. After install it
+checks all five distribution versions in isolated Python, imports both protected
+handlers without Torch/Transformers/Unsloth, and runs `hf-source --help` and
+`hf-smoke --help` from the exact repository worktree with user-site and bytecode
+writes disabled. This is a credential-free/provider-free clean-venv gate, not
+live provider proof. `python:3.12` is a mutable provider image tag; even a
+successful smoke is not digest-pinned image provenance.
+
+### Operator sequence
+
+Only after clean exact-pushed proof, the five-pin clean-venv
+gate, and the explicit credential preflight:
+
+```powershell
+python tuner.py hf-source `
+  --project-root <host-project-root> `
+  --experiment-id <experiment-id> `
+  --actor <non-secret-operator-id> `
+  --authority operator `
+  --env-file <explicit-project-env-file> `
+  --json
+```
+
+`hf-source` requires exact PREPARED tracking state, provisions or verifies only
+the descriptor-bound private Profile-C prefix, persists bounded evidence, and
+then validates CONSUMABLE. It never submits a job. The explicit env file must be
+a regular link-free file inside the project/config boundary and contain exactly
+a nonblank `HF_TOKEN`. File/ambient `HF_API_KEY` and ambient `HF_TOKEN` are
+rejected. The protected handler parses the file without mutating the environment
+or emitting the value.
+
+Create the provider-free exact approval:
+
+```powershell
+python tuner.py hf-smoke approve `
+  --project-root <host-project-root> `
+  --experiment-id <experiment-id> `
+  --authorization-reference <recorded-reference> `
+  --issued-at <UTC-RFC3339> `
+  --expires-at <UTC-RFC3339> `
+  --quoted-at <UTC-RFC3339> `
+  --hourly-price-usd <official-cpu-basic-hourly-price> `
+  --projected-cost-usd <no-more-than-0.01> `
+  --json
+```
+
+Then, for the one authorized submission only:
+
+```powershell
+python tuner.py hf-smoke execute `
+  --project-root <host-project-root> `
+  --experiment-id <experiment-id> `
+  --env-file <explicit-project-env-file> `
+  --json
+
+python tuner.py hf-smoke observe `
+  --project-root <host-project-root> `
+  --experiment-id <experiment-id> `
+  --env-file <explicit-project-env-file> `
+  --json
+```
+
+`execute` revalidates every approval/source/provisioning/workload binding and
+atomically writes `SUBMITTING` before credential or provider work. Success records
+the normalized provider job identity as `SUBMITTED`; an exception after the call
+boundary records terminal `AMBIGUOUS`. Never rerun `execute` after either outcome.
+`observe` accepts status/results only when every returned `JobInfo` normalizes to
+the exact recorded namespace/job ID. At the cancellation boundary it durably
+claims one `synaptic-hf-cancellation-attempt/v1` event. Only the first locked
+claimant may call `cancel_job`; resumed/concurrent observers cannot issue another
+provider attempt, and an ambiguous cancellation remains consumed.
+
+### Official Hub 1.27 compatibility contract
+
+The isolated adapter probes the complete v1.27.0 method parameter names, order,
+kinds, and defaults for `create_bucket`, `bucket_info`, `list_bucket_tree`,
+`batch_bucket_files`, and `download_bucket_files` before its first provider read
+or mutation. It uses `Volume(type="bucket", source=..., mount_path=...,
+path=..., read_only=True)` and the explicit `run_job(..., volumes=...)` surface
+for the fixed smoke. These are official-source expectations and hermetic
+compatibility checks, not live account/bucket/job proof.
+
+`batch_bucket_files` is officially non-transactional. A failure may leave only
+some files uploaded. The operator therefore authenticates immutable byte values
+before the one upload attempt, rejects unknown/duplicate/colliding remote entries,
+downloads and hashes every exact member, and returns non-retryable
+`mutation_ambiguous` for any create/upload/readback uncertainty. Do not retry;
+inspect the exact prefix read-only and obtain new user authority for any later
+action.
+
+### Remaining gates
+
+- Original JP-S verdict: REVISE for cancellation durability, JobInfo agreement,
+  and launcher/runtime completeness.
+- JP-S2 security re-audit: PASS on the frozen manifest above; local security
+  evidence only, with no live install/provider proof.
+- Final JP-R release/inventory re-audit: **PASS**. Evidence: affected **200 passed, 3 skipped**; full JP/HF/import/order **393 passed, 15 skipped**; tracking **249 passed, 1 skipped**; CLI/capability/project/plugin/contract **268 passed, 1 skipped**; broad cloud **673 passed, 15 skipped** with the same five accepted failures and two documented exclusions; **26 Python files compiled**; imports clean; diff check warnings only; public API and `cloud.launch` unchanged; skill sync clean.
+- Exact commit push/upstream proof: pending.
+- Explicit usable `HF_TOKEN` preflight: pending; no value may enter logs/docs.
+- Live provider proof: pending.
+- RunPod remains later and requires fresh dated official API/SDK research before
+  implementation because its API may have changed.
+
+---
+
 ## Provider-Native Storage
 
 Cloud artifacts are durable by default in the provider ecosystem:
@@ -190,6 +340,11 @@ For `hf_jobs`, a few patterns matter enough to treat as hard rules:
   launcher-only venv with `huggingface_hub>=1.5.0`, `transformers` 5.x, and CPU
   `torch` can satisfy local CLI imports and Buckets APIs without upgrading the
   Unsloth/KTO training env, which may still require `huggingface_hub<1.0`.
+- Do not apply that broad legacy launcher recipe to the protected JP lane. JP
+  uses the five exact direct pins listed above under Python 3.12; missing, extra,
+  duplicate, reordered, or ranged requirements change the audited runtime
+  contract. Transformers, Torch, and Unsloth must remain absent from protected
+  launcher imports.
 - Do not upgrade generic project dependencies in the active training image
   during HF Jobs bootstrap. Install missing project deps only; curated Unsloth
   images can carry tightly coupled NumPy/SciPy/Transformers/Unsloth stacks, and

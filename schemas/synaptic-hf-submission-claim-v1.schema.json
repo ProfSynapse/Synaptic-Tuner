@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-hf-submission-claim-v1.schema.json",
+  "title": "Synaptic Hugging Face immutable submission claim event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "authorization_id", "approval", "experiment_id", "run_id", "state", "sequence", "occurred_at"],
+  "properties": {
+    "schema_version": {"const": "synaptic-hf-submission-claim/v1"},
+    "event_id": {"$ref": "#/$defs/sha256"},
+    "authorization_id": {"$ref": "#/$defs/sha256"},
+    "approval": {"$ref": "#/$defs/artifactRef"},
+    "experiment_id": {"$ref": "#/$defs/segment"},
+    "run_id": {"$ref": "#/$defs/segment"},
+    "state": {"enum": ["SUBMITTING", "SUBMITTED", "AMBIGUOUS"]},
+    "sequence": {"enum": [1, 2]},
+    "occurred_at": {"$ref": "#/$defs/timestamp"},
+    "previous_event": {"$ref": "#/$defs/artifactRef"},
+    "provider_job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "job_id"],
+      "properties": {
+        "namespace": {"$ref": "#/$defs/providerId"},
+        "job_id": {"$ref": "#/$defs/providerId"}
+      }
+    },
+    "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"state": {"const": "SUBMITTING"}}, "required": ["state"]},
+      "then": {
+        "properties": {"sequence": {"const": 1}},
+        "not": {"anyOf": [{"required": ["previous_event"]}, {"required": ["provider_job"]}, {"required": ["reason_code"]}]}
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "SUBMITTED"}}, "required": ["state"]},
+      "then": {
+        "properties": {"sequence": {"const": 2}},
+        "required": ["previous_event", "provider_job"],
+        "not": {"required": ["reason_code"]}
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "AMBIGUOUS"}}, "required": ["state"]},
+      "then": {
+        "properties": {"sequence": {"const": 2}},
+        "required": ["previous_event", "reason_code"],
+        "not": {"required": ["provider_job"]}
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "segment": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "trackingUri": {"type": "string", "pattern": "^tracking://[A-Za-z0-9][A-Za-z0-9._/-]*$", "maxLength": 2048},
+    "timestamp": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$", "maxLength": 32},
+    "providerId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"},
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256"],
+      "properties": {
+        "uri": {"$ref": "#/$defs/trackingUri"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}
