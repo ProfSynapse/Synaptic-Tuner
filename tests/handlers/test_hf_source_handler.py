@@ -20,6 +20,7 @@ from tuner.handlers.hf_source_handler import (
     _require_recoverable_bootstrap_experiment,
 )
 from tuner.project import ProjectContext
+from tuner.handlers.stages._util import _verify_current_checkout_identity
 
 
 def _context(root: Path) -> ProjectContext:
@@ -102,6 +103,35 @@ def test_volume_policy_is_parsed_from_exact_committed_blob_not_worktree(tmp_path
     lock = SimpleNamespace(engine_source=source, project_source=source)
     settings = _load_committed_volume_settings(config, context=context, source_lock=lock)
     assert settings == {"source": "owner/bucket", "path_prefix": "committed/source"}
+
+
+def test_recovered_checkout_identity_uses_real_canonicalizer_url_mapping(
+    tmp_path, monkeypatch
+):
+    context = _context(tmp_path)
+    commit = "1" * 40
+    source = SimpleNamespace(
+        commit=commit,
+        branch="main",
+        location=SimpleNamespace(canonical_url="https://example.test/team/engine.git"),
+    )
+    source_lock = SimpleNamespace(
+        mode="standalone", project_source=source, engine_source=source
+    )
+
+    def git(arguments, *, cwd=None, env=None):
+        if arguments == ["rev-parse", "HEAD"]:
+            return commit
+        if arguments == ["branch", "--show-current"]:
+            return "main"
+        if arguments == ["status", "--porcelain", "--untracked-files=normal"]:
+            return ""
+        if arguments == ["config", "--local", "--get", "remote.origin.url"]:
+            return "https://example.test/team/engine.git"
+        raise AssertionError(arguments)
+
+    monkeypatch.setattr("tuner.handlers.stages._util.bootstrap_core.run_git", git)
+    _verify_current_checkout_identity(context, source_lock)
 
 
 @pytest.mark.parametrize(

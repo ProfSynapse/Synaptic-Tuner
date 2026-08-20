@@ -371,7 +371,7 @@ def _verify_current_checkout_identity(context: ProjectContext, source_lock: Sour
                 bootstrap_core.run_git(
                     ["config", "--local", "--get", "remote.origin.url"], cwd=repository
                 )
-            )["canonical_url"]
+            )["url"]
             if (
                 actual_commit.lower() != expected.commit.lower()
                 or actual_branch != expected.branch
