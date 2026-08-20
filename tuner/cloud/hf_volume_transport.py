@@ -280,8 +280,14 @@ try:
  os.chmod(scratch,0o700); target=os.path.join(scratch,"bootstrap_capsule.py")
  with open(target,"xb") as handle: handle.write(code)
  os.chmod(target,0o600)
- spec=importlib.util.spec_from_file_location("synaptic_verified_capsule",target)
- module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+ module_name="synaptic_verified_capsule"
+ spec=importlib.util.spec_from_file_location(module_name,target)
+ if spec is None or spec.loader is None or not callable(getattr(spec.loader,"exec_module",None)): raise RuntimeError("bootstrap verifier import contract is unavailable")
+ module=importlib.util.module_from_spec(spec)
+ if sys.modules.setdefault(module_name,module) is not module: raise RuntimeError("bootstrap verifier module name is already registered")
+ try: spec.loader.exec_module(module)
+ finally:
+  if sys.modules.get(module_name) is module: del sys.modules[module_name]
  result=module.invoke_verified_capsule(root,expected,source_lock_path=lock,source_lock_sha256=lockhash,checkout_policy_path=policy,checkout_policy_sha256=policyhash,destination=destination,scratch_parent=tempfile.gettempdir(),environment=os.environ)
  if result.returncode:
   if result.stderr: sys.stderr.write(result.stderr)

@@ -8,11 +8,14 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
+import tempfile
 from types import SimpleNamespace
 
 import pytest
 
 from tuner.cloud.hf_volume_transport import (
+    _INLINE_VERIFIER,
     HFVerifiedVolume,
     HFVerifiedVolumeSpec,
     build_verified_bootstrap_step,
@@ -164,6 +167,204 @@ def test_inline_verifier_is_deterministic_digest_bound_and_verifies_before_impor
     assert "--logical-project-root /workspace/project" in projection
     assert "--logical-engine-root /workspace/engine" in projection
     assert "git clone" not in projection
+
+
+def _execute_inline_verifier(tmp_path: Path, capsule_source: str) -> None:
+    capsule_root = tmp_path / "capsule"
+    capsule_member = capsule_root / "tuner" / "cloud" / "bootstrap_capsule.py"
+    capsule_member.parent.mkdir(parents=True)
+    capsule_bytes = capsule_source.encode("utf-8")
+    capsule_member.write_bytes(capsule_bytes)
+    manifest = {
+        "schema_version": "synaptic-bootstrap-capsule/v1",
+        "engine_commit": "1" * 40,
+        "files": [
+            {
+                "path": "tuner/cloud/bootstrap_capsule.py",
+                "size": len(capsule_bytes),
+                "sha256": hashlib.sha256(capsule_bytes).hexdigest(),
+                "mode": "0644",
+            },
+            {
+                "path": "tuner/cloud/bootstrap_core.py",
+                "size": 0,
+                "sha256": hashlib.sha256(b"").hexdigest(),
+                "mode": "0644",
+            },
+        ],
+        "limits": {},
+    }
+    manifest_bytes = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("ascii")
+    (capsule_root / "synaptic-bootstrap-capsule.json").write_bytes(manifest_bytes)
+    source_lock = tmp_path / "source-lock.json"
+    checkout_policy = tmp_path / "checkout-policy.json"
+    source_lock.write_bytes(b"lock\n")
+    checkout_policy.write_bytes(b"policy\n")
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    arguments = [
+        "inline-verifier",
+        str(capsule_root),
+        hashlib.sha256(manifest_bytes).hexdigest(),
+        str(source_lock),
+        hashlib.sha256(source_lock.read_bytes()).hexdigest(),
+        str(checkout_policy),
+        hashlib.sha256(checkout_policy.read_bytes()).hexdigest(),
+        str(destination),
+    ]
+    original_argv = sys.argv
+    try:
+        sys.argv = arguments
+        exec(_INLINE_VERIFIER, {"__name__": "__main__"})
+    finally:
+        sys.argv = original_argv
+
+
+def test_inline_verifier_registers_dataclass_module_during_execution_and_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch_parent = tmp_path / "scratch"
+    scratch_parent.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch_parent))
+    capsule_source = '''from dataclasses import dataclass
+import json
+import os
+
+@dataclass(frozen=True)
+class CapsuleResult:
+    returncode: int
+    stdout: str
+    stderr: str = ""
+
+def invoke_verified_capsule(root, expected, **kwargs):
+    destination = kwargs["destination"]
+    document = {
+        "schema_version": "synaptic-bootstrap-result/v1",
+        "project_root": os.path.join(destination, "project"),
+        "engine_root": os.path.join(destination, "engine"),
+        "project_commit": "1" * 40,
+        "engine_commit": "2" * 40,
+    }
+    return CapsuleResult(0, json.dumps(document, sort_keys=True, separators=(",", ":")) + "\\n")
+'''
+
+    assert "synaptic_verified_capsule" not in sys.modules
+    _execute_inline_verifier(tmp_path, capsule_source)
+
+    assert "synaptic_verified_capsule" not in sys.modules
+    assert not list(scratch_parent.glob("synaptic-hf-loader-*"))
+    assert (tmp_path / "destination" / ".synaptic-bootstrap-result.json").is_file()
+
+
+def test_inline_verifier_removes_dataclass_module_after_import_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch_parent = tmp_path / "scratch"
+    scratch_parent.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch_parent))
+    capsule_source = '''from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class CapsuleProbe:
+    value: str
+
+raise RuntimeError("capsule import failed")
+'''
+
+    assert "synaptic_verified_capsule" not in sys.modules
+    with pytest.raises(RuntimeError, match="capsule import failed"):
+        _execute_inline_verifier(tmp_path, capsule_source)
+
+    assert "synaptic_verified_capsule" not in sys.modules
+    assert not list(scratch_parent.glob("synaptic-hf-loader-*"))
+
+
+def test_inline_verifier_preserves_replacement_module_after_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch_parent = tmp_path / "scratch"
+    scratch_parent.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch_parent))
+    capsule_source = '''from dataclasses import dataclass
+from types import SimpleNamespace
+import json
+import os
+import sys
+
+@dataclass(frozen=True)
+class CapsuleResult:
+    returncode: int
+    stdout: str
+    stderr: str = ""
+
+sys.modules[__name__] = SimpleNamespace(marker="success replacement")
+
+def invoke_verified_capsule(root, expected, **kwargs):
+    destination = kwargs["destination"]
+    document = {
+        "schema_version": "synaptic-bootstrap-result/v1",
+        "project_root": os.path.join(destination, "project"),
+        "engine_root": os.path.join(destination, "engine"),
+        "project_commit": "1" * 40,
+        "engine_commit": "2" * 40,
+    }
+    return CapsuleResult(0, json.dumps(document, sort_keys=True, separators=(",", ":")) + "\\n")
+'''
+
+    assert "synaptic_verified_capsule" not in sys.modules
+    try:
+        _execute_inline_verifier(tmp_path, capsule_source)
+        replacement = sys.modules.get("synaptic_verified_capsule")
+        assert getattr(replacement, "marker", None) == "success replacement"
+        assert not list(scratch_parent.glob("synaptic-hf-loader-*"))
+    finally:
+        sys.modules.pop("synaptic_verified_capsule", None)
+
+
+def test_inline_verifier_preserves_replacement_module_after_import_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch_parent = tmp_path / "scratch"
+    scratch_parent.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch_parent))
+    capsule_source = '''from dataclasses import dataclass
+from types import SimpleNamespace
+import sys
+
+@dataclass(frozen=True)
+class CapsuleProbe:
+    value: str
+
+sys.modules[__name__] = SimpleNamespace(marker="failure replacement")
+raise RuntimeError("capsule import failed after replacement")
+'''
+
+    assert "synaptic_verified_capsule" not in sys.modules
+    try:
+        with pytest.raises(RuntimeError, match="capsule import failed after replacement"):
+            _execute_inline_verifier(tmp_path, capsule_source)
+        replacement = sys.modules.get("synaptic_verified_capsule")
+        assert getattr(replacement, "marker", None) == "failure replacement"
+        assert not list(scratch_parent.glob("synaptic-hf-loader-*"))
+    finally:
+        sys.modules.pop("synaptic_verified_capsule", None)
+
+
+def test_inline_verifier_atomically_rejects_preexisting_module_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch_parent = tmp_path / "scratch"
+    scratch_parent.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch_parent))
+    existing = SimpleNamespace(marker="preexisting")
+    sys.modules["synaptic_verified_capsule"] = existing
+    try:
+        with pytest.raises(RuntimeError, match="module name is already registered"):
+            _execute_inline_verifier(tmp_path, "raise AssertionError('must not execute')\n")
+        assert sys.modules["synaptic_verified_capsule"] is existing
+        assert not list(scratch_parent.glob("synaptic-hf-loader-*"))
+    finally:
+        sys.modules.pop("synaptic_verified_capsule", None)
 
 
 def test_metadata_describes_preprovisioned_regular_member_contract_without_local_path(tmp_path: Path) -> None:
