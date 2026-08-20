@@ -24,6 +24,7 @@ BOOTSTRAP_CAPSULE_MEMBERS = (
     "tuner/cloud/bootstrap_capsule.py",
 )
 BOOTSTRAP_CAPSULE_SCHEMA = "schemas/synaptic-bootstrap-capsule-v1.schema.json"
+HF_PROVISIONING_CLAIM_SCHEMA = "schemas/synaptic-hf-provisioning-claim-v1.schema.json"
 
 
 @dataclass(frozen=True)
@@ -258,6 +259,7 @@ def test_required_runtime_asset_families_are_present_in_source() -> None:
     assets = _expanded_assets(SELF_CONTAINED_WHEEL_FAMILIES)
 
     assert "schemas/synaptic-project-v1.schema.json" in assets
+    assert HF_PROVISIONING_CLAIM_SCHEMA in assets
     assert "Trainers/methods.yaml" in assets
     assert "Evaluator/config/eval_run.yaml" in assets
     assert "SynthChat/config/validation.yaml" in assets
@@ -274,6 +276,14 @@ def test_bootstrap_capsule_assets_are_explicit_and_run_agnostic() -> None:
 
     assert CAPSULE_MODULE_PATHS == BOOTSTRAP_CAPSULE_MEMBERS
     assert all("source_lock" not in member and "policy" not in member for member in CAPSULE_MODULE_PATHS)
+
+
+def test_hf_provisioning_claim_schema_is_a_runtime_asset_with_canonical_import_binding() -> None:
+    assert (REPO_ROOT / HF_PROVISIONING_CLAIM_SCHEMA).is_file()
+
+    from tuner.cloud.hf_provisioning_claim import _SCHEMA_PATH
+
+    assert _SCHEMA_PATH.resolve() == (REPO_ROOT / HF_PROVISIONING_CLAIM_SCHEMA).resolve()
 
 
 def test_bootstrap_capsule_does_not_enable_self_contained_wheel_publication() -> None:

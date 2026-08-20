@@ -11,7 +11,7 @@ import synaptic_tuner
 import tuner
 from shared.utilities.env import load_env_file, redact_env_value
 from tuner.cli.main import build_project_context, main as cli_main
-from tuner.cli.parser import create_parser
+from tuner.cli.parser import _PROTECTED_ACTION_OPTIONS, create_parser
 from tuner.cli.router import route_command
 from tuner.project import ProjectContext
 
@@ -42,19 +42,86 @@ def test_hf_source_and_smoke_parser_are_narrow_and_have_no_yes_bypass():
     parser = create_parser()
     source = parser.parse_args([
         "hf-source", "provision", "--experiment-id", "exp-1", "--actor", "operator-1",
-        "--env-file", ".env",
+        "--env-file", ".env", "--base-dir", "C:/external/tracking",
+    ])
+    prepared = parser.parse_args([
+        "hf-source", "prepare", "--source-config", "Trainers/cloud/cloud_config.yaml",
+        "--base-dir", "C:/external/tracking",
     ])
     smoke = parser.parse_args([
         "hf-smoke", "execute", "--experiment-id", "exp-1", "--env-file", ".env",
+        "--base-dir", "C:/external/tracking",
     ])
     assert (source.command, source.subcommand) == ("hf-source", "provision")
+    assert (prepared.command, prepared.subcommand) == ("hf-source", "prepare")
     assert (smoke.command, smoke.subcommand) == ("hf-smoke", "execute")
     assert not hasattr(smoke, "hf_smoke_command")
     with pytest.raises(SystemExit):
         parser.parse_args(["hf-smoke", "execute", "--experiment-id", "exp-1", "--yes"])
-    for argv in (["hf-smoke"], ["hf-smoke", "retry"], ["hf-source", "execute"]):
+    for argv in (["hf-smoke"], ["hf-smoke", "retry"], ["hf-source"], ["hf-source", "execute"]):
         with pytest.raises(SystemExit):
             parser.parse_args(argv)
+
+
+def test_protected_action_option_allowlists_are_frozen():
+    assert _PROTECTED_ACTION_OPTIONS == {
+        ("hf-source", "prepare"): frozenset({
+            "--base-dir", "--experiment-id", "--json", "--manifest",
+            "--project-root", "--source-config", "--source-mode",
+        }),
+        ("hf-source", "provision"): frozenset({
+            "--actor", "--authority", "--base-dir", "--env-file",
+            "--experiment-id", "--json", "--manifest", "--project-root",
+        }),
+        ("hf-smoke", "approve"): frozenset({
+            "--authorization-reference", "--base-dir", "--experiment-id",
+            "--expires-at", "--hourly-price-usd", "--issued-at", "--json",
+            "--manifest", "--project-root", "--projected-cost-usd", "--quoted-at",
+        }),
+        ("hf-smoke", "execute"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+        ("hf-smoke", "observe"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+    }
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["hf-source", "prepare", "--source-config=config.yaml", "--base-dir=C:/external", "--source-mode=standalone", "--json"], ("hf-source", "prepare")),
+        (["hf-source", "provision", "--experiment-id=exp-1", "--actor=operator", "--authority=operator", "--env-file=.env", "--base-dir=C:/external"], ("hf-source", "provision")),
+        (["hf-smoke", "approve", "--experiment-id=exp-1", "--authorization-reference=chat", "--issued-at=2026-08-20T00:00:00Z", "--expires-at=2026-08-20T01:00:00Z", "--quoted-at=2026-08-20T00:00:00Z", "--hourly-price-usd=0.01", "--projected-cost-usd=0.01", "--base-dir=C:/external"], ("hf-smoke", "approve")),
+        (["hf-smoke", "execute", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-smoke", "execute")),
+        (["hf-smoke", "observe", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-smoke", "observe")),
+    ],
+)
+def test_protected_action_allowlists_accept_equals_syntax(argv, expected):
+    parsed = create_parser().parse_args(argv)
+    assert (parsed.command, parsed.subcommand) == expected
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["hf-source", "prepare", "--env-file=.env"],
+        ["hf-source", "prepare", "--profile=unsafe"],
+        ["hf-source", "provision", "--source-config=config.yaml"],
+        ["hf-source", "provision", "--source-mode=standalone"],
+        ["hf-smoke", "approve", "--env-file=.env"],
+        ["hf-smoke", "approve", "--source-mode=standalone"],
+        ["hf-smoke", "execute", "--quoted-at=2026-08-20T00:00:00Z"],
+        ["hf-smoke", "observe", "--authorization-reference=chat"],
+        ["hf-smoke", "execute", "--yes"],
+        ["--profile=unsafe", "hf-smoke", "observe"],
+    ],
+)
+def test_protected_action_allowlists_reject_disallowed_explicit_options(argv):
+    with pytest.raises(SystemExit):
+        create_parser().parse_args(argv)
 
 
 def test_tuner_legacy_exports_resolve_lazily_and_preserve_normal_errors(tmp_path):
@@ -823,7 +890,6 @@ def test_explicit_env_file_with_installed_support_loads_and_routes(
     "argv",
     [
         ["hf-source", "provision", "--experiment-id", "exp-1", "--actor", "operator-1"],
-        ["hf-smoke", "approve", "--experiment-id", "exp-1"],
         ["hf-smoke", "execute", "--experiment-id", "exp-1"],
         ["hf-smoke", "observe", "--experiment-id", "exp-1"],
     ],

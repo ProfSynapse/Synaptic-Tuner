@@ -17,31 +17,90 @@ The parser defines the top-level command structure:
 """
 
 import argparse
+import sys
 
 from shared.utilities.paths import TRAINING_METHODS
+
+
+_PROTECTED_ACTION_OPTIONS = {
+    ("hf-source", "prepare"): frozenset({
+        "--base-dir", "--experiment-id", "--json", "--manifest",
+        "--project-root", "--source-config", "--source-mode",
+    }),
+    ("hf-source", "provision"): frozenset({
+        "--actor", "--authority", "--base-dir", "--env-file",
+        "--experiment-id", "--json", "--manifest", "--project-root",
+    }),
+    ("hf-smoke", "approve"): frozenset({
+        "--authorization-reference", "--base-dir", "--experiment-id",
+        "--expires-at", "--hourly-price-usd", "--issued-at", "--json",
+        "--manifest", "--project-root", "--projected-cost-usd", "--quoted-at",
+    }),
+    ("hf-smoke", "execute"): frozenset({
+        "--base-dir", "--env-file", "--experiment-id", "--json",
+        "--manifest", "--project-root",
+    }),
+    ("hf-smoke", "observe"): frozenset({
+        "--base-dir", "--env-file", "--experiment-id", "--json",
+        "--manifest", "--project-root",
+    }),
+}
+
+
+def _explicit_long_options(arguments: list[str]) -> set[str]:
+    """Return canonical long-option names, including ``--flag=value`` forms."""
+
+    return {
+        token.partition("=")[0]
+        for token in arguments
+        if token.startswith("--")
+    }
+
+
+def _enforce_protected_action_allowlist(
+    parser: argparse.ArgumentParser,
+    arguments: list[str],
+    *,
+    command: str,
+    action: str,
+) -> None:
+    allowed = _PROTECTED_ACTION_OPTIONS[(command, action)]
+    disallowed = sorted(_explicit_long_options(arguments) - allowed)
+    if disallowed:
+        parser.error(
+            f"{command} {action} does not accept explicit option(s): "
+            + ", ".join(disallowed)
+        )
 
 
 class _SynapticArgumentParser(argparse.ArgumentParser):
     """Validate command-specific positionals used by the flat CLI grammar."""
 
     def parse_args(self, args=None, namespace=None):
-        parsed = super().parse_args(args=args, namespace=namespace)
+        arguments = list(sys.argv[1:] if args is None else args)
+        parsed = super().parse_args(args=arguments, namespace=namespace)
         command = getattr(parsed, "command", None)
         capability_id = getattr(parsed, "capability_id", None)
 
         if command == "hf-smoke":
-            if getattr(parsed, "subcommand", None) not in {"approve", "execute", "observe"}:
+            action = getattr(parsed, "subcommand", None)
+            if action not in {"approve", "execute", "observe"}:
                 self.error("hf-smoke requires an action: approve, execute, or observe")
-            if getattr(parsed, "auto_confirm", False):
-                self.error("hf-smoke does not accept --yes or --auto-confirm")
             if capability_id is not None:
                 self.error(f"unrecognized arguments: {capability_id}")
+            _enforce_protected_action_allowlist(
+                self, arguments, command=command, action=action
+            )
             return parsed
         if command == "hf-source":
-            if getattr(parsed, "subcommand", None) not in {None, "provision"}:
-                self.error("hf-source accepts only the provision action")
+            action = getattr(parsed, "subcommand", None)
+            if action not in {"prepare", "provision"}:
+                self.error("hf-source requires an action: prepare or provision")
             if capability_id is not None:
                 self.error(f"unrecognized arguments: {capability_id}")
+            _enforce_protected_action_allowlist(
+                self, arguments, command=command, action=action
+            )
             return parsed
 
         if command != "capabilities":
@@ -132,7 +191,7 @@ Commands:
   surgery     LoRA weight surgery (eval-guided post-training optimization)
   project     Inspect or validate the selected host project
   capabilities Discover agent-readable capabilities and their effects
-  hf-source   Provision one exact immutable HF Profile-C source transport
+  hf-source   Prepare or provision one exact immutable HF Profile-C source transport
   hf-smoke    Approve, execute, or observe one fixed bootstrap-only HF smoke
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
@@ -229,11 +288,15 @@ Examples:
         "--env-file",
         help="Explicit dotenv file; selected instead of the host or engine .env.",
     )
+    parser.add_argument(
+        "--source-config",
+        help="Committed source configuration used only by hf-source prepare.",
+    )
     parser.add_argument("--actor", help="Non-secret operator identity for hf-source provisioning.")
     parser.add_argument(
         "--authority",
         choices=["operator", "protected_workflow"],
-        default="operator",
+        default=None,
         help="Bounded hf-source provisioning authority.",
     )
     parser.add_argument(

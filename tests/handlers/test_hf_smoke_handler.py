@@ -93,6 +93,17 @@ def test_preflight_rejects_outside_root_before_secret_read_or_claim(tmp_path, mo
     assert calls == []
 
 
+def test_preflight_rejects_oversized_secret_without_reading_bytes(tmp_path, monkeypatch):
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HF_API_KEY", raising=False)
+    path = _secret(tmp_path, "HF_TOKEN=" + ("x" * (64 * 1024)) + "\n")
+    calls = []
+    monkeypatch.setattr(Path, "read_bytes", lambda self: calls.append(self))
+    with pytest.raises(CloudProviderError, match="bounded"):
+        _preflight_secret_file(path, context=_context(tmp_path))
+    assert calls == []
+
+
 def test_preflight_rejects_linked_file_or_parent_chain(tmp_path, monkeypatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HF_API_KEY", raising=False)
@@ -158,14 +169,16 @@ def test_post_claim_reader_accepts_only_deterministic_token_forms_without_env_mu
     assert "HF_TOKEN" not in os.environ and "HF_API_KEY" not in os.environ
 
 
-def test_file_change_after_preflight_fails_closed(tmp_path, monkeypatch):
+def test_metadata_selection_stores_no_identity_and_consumes_current_safe_file(
+    tmp_path, monkeypatch
+):
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HF_API_KEY", raising=False)
     path = _secret(tmp_path)
     claim = _preflight_secret_file(path, context=_context(tmp_path))
+    assert not hasattr(claim, "identity")
     path.write_text("HF_TOKEN=hf_changed_and_longer\n", encoding="utf-8")
-    with pytest.raises(CloudProviderError, match="changed"):
-        _read_claimed_hf_token(claim)
+    assert _read_claimed_hf_token(claim) == "hf_changed_and_longer"
 
 
 def test_parent_chain_swap_after_preflight_fails_closed(tmp_path, monkeypatch):

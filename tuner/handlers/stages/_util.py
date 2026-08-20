@@ -206,6 +206,94 @@ def preflight_hf_source_lock(
     return source_lock
 
 
+def finalize_hf_source_lock(
+    context: ProjectContext,
+    *,
+    source_lock: SourceLock,
+    run_id: str,
+    config_path: Path,
+    plugins: Iterable[Path] = (),
+    inputs: Iterable[Path] = (),
+    runtime: Mapping[str, object] | None = None,
+    outputs: Mapping[str, object] | None = None,
+) -> SourceLock:
+    """Bind committed configuration/runtime identity without changing lock time.
+
+    Git push proof belongs to ``preflight_hf_source_lock``.  This function is
+    intentionally provider/network free so an authenticated orphan can be
+    checked and adopted after a local interruption.
+    """
+
+    if not isinstance(source_lock, SourceLock) or source_lock.run_id != run_id:
+        raise CloudProviderError("HF source finalization requires the accepted run SourceLock.")
+    validate_source_lock_for_cloud(source_lock)
+    config_identity = _file_identity(context, config_path)
+    if context.manifest_path is not None:
+        manifest_identity = _file_identity(context, context.manifest_path)
+        engine_requires = source_lock.project.get("engine_requires") or "*"
+    else:
+        manifest_identity = dict(config_identity)
+        engine_requires = "*"
+    finalized = replace(
+        source_lock,
+        project={
+            **dict(source_lock.project),
+            "manifest_uri": manifest_identity["uri"],
+            "manifest_sha256": manifest_identity["sha256"],
+            "engine_requires": engine_requires,
+        },
+        configuration={
+            "resolved_uri": config_identity["uri"],
+            "resolved_sha256": config_identity["sha256"],
+            "documents": [config_identity],
+        },
+        plugins=tuple(
+            {**_file_identity(context, path, key="source"), "name": path.stem}
+            for path in plugins
+        ),
+        inputs=tuple(
+            {**_file_identity(context, path), "name": path.name, "transport": "git"}
+            for path in inputs
+        ),
+        runtime=dict(runtime or {}),
+        outputs=dict(outputs or {}),
+    )
+    _verify_current_checkout_identity(context, finalized)
+    _verify_committed_identities(context, finalized)
+    return finalized
+
+
+def validate_finalized_hf_source_lock(
+    context: ProjectContext,
+    *,
+    source_lock: SourceLock,
+    run_id: str,
+    config_path: Path,
+    source_mode: str | None = None,
+    plugins: Iterable[Path] = (),
+    inputs: Iterable[Path] = (),
+    runtime: Mapping[str, object] | None = None,
+    outputs: Mapping[str, object] | None = None,
+) -> SourceLock:
+    """Authenticate a finalized lock against this invocation, preserving bytes."""
+
+    if source_mode is not None and source_lock.mode != source_mode:
+        raise CloudProviderError("HF recovered SourceLock mode does not match this invocation.")
+    expected = finalize_hf_source_lock(
+        context,
+        source_lock=source_lock,
+        run_id=run_id,
+        config_path=config_path,
+        plugins=plugins,
+        inputs=inputs,
+        runtime=runtime,
+        outputs=outputs,
+    )
+    if expected.to_dict() != source_lock.to_dict():
+        raise CloudProviderError("HF recovered SourceLock does not match this invocation.")
+    return source_lock
+
+
 def _source_uri(context: ProjectContext, path: Path) -> str:
     resolved = path.resolve(strict=True)
     # Prefer engine:// when an in-tree submodule path is contained by both roots;
@@ -266,6 +354,56 @@ def _verify_committed_identities(context: ProjectContext, source_lock: SourceLoc
             raise CloudProviderError("HF source identity does not match its exact committed revision.")
 
 
+def _verify_current_checkout_identity(context: ProjectContext, source_lock: SourceLock) -> None:
+    """Bind recovered bytes to the current clean named local checkouts, offline."""
+
+    pairs = [(context.project_root, source_lock.project_source)]
+    if context.engine_root.resolve() != context.project_root.resolve():
+        pairs.append((context.engine_root, source_lock.engine_source))
+    try:
+        for repository, expected in pairs:
+            actual_commit = bootstrap_core.run_git(["rev-parse", "HEAD"], cwd=repository)
+            actual_branch = bootstrap_core.run_git(["branch", "--show-current"], cwd=repository)
+            actual_status = bootstrap_core.run_git(
+                ["status", "--porcelain", "--untracked-files=normal"], cwd=repository
+            )
+            actual_origin = bootstrap_core.canonicalize_repository_url(
+                bootstrap_core.run_git(
+                    ["config", "--local", "--get", "remote.origin.url"], cwd=repository
+                )
+            )["canonical_url"]
+            if (
+                actual_commit.lower() != expected.commit.lower()
+                or actual_branch != expected.branch
+                or actual_status
+                or actual_origin != expected.location.canonical_url
+            ):
+                raise CloudProviderError(
+                    "HF recovered SourceLock does not match the current clean named checkout."
+                )
+        if source_lock.mode in {"superproject", "dual_clone"}:
+            submodule_path = str(source_lock.engine_source.submodule_path or "")
+            tree = bootstrap_core.run_git(
+                ["ls-tree", source_lock.project_source.commit, "--", submodule_path],
+                cwd=context.project_root,
+            ).split()
+            if (
+                len(tree) < 3
+                or tree[0] != "160000"
+                or tree[1] != "commit"
+                or tree[2].lower() != source_lock.engine_source.commit.lower()
+            ):
+                raise CloudProviderError(
+                    "HF recovered SourceLock does not match the current engine gitlink."
+                )
+    except CloudProviderError:
+        raise
+    except Exception as exc:
+        raise CloudProviderError(
+            "HF recovered SourceLock could not authenticate the current checkout."
+        ) from exc
+
+
 def prepare_hf_source(
     context: ProjectContext,
     *,
@@ -295,40 +433,15 @@ def prepare_hf_source(
         raise CloudProviderError("HF source preparation run_id does not match the accepted SourceLock.")
     validate_source_lock_for_cloud(source_lock)
     runtime_layout = runtime_layout or build_runtime_layout(context)
-    config_identity = _file_identity(context, config_path)
-    if context.manifest_path is not None:
-        manifest_identity = _file_identity(context, context.manifest_path)
-        engine_requires = source_lock.project.get("engine_requires") or "*"
-    else:
-        # Standalone has no host manifest. Bind the explicit primary config as
-        # its deterministic project contract instead of fabricating a hidden file.
-        manifest_identity = dict(config_identity)
-        engine_requires = "*"
-    plugin_identities = tuple(
-        {**_file_identity(context, path, key="source"), "name": path.stem}
-        for path in plugins
-    )
-    input_identities = tuple(
-        {**_file_identity(context, path), "name": path.name, "transport": "git"}
-        for path in inputs
-    )
-    source_lock = replace(
-        source_lock,
-        project={
-            **dict(source_lock.project),
-            "manifest_uri": manifest_identity["uri"],
-            "manifest_sha256": manifest_identity["sha256"],
-            "engine_requires": engine_requires,
-        },
-        configuration={
-            "resolved_uri": config_identity["uri"],
-            "resolved_sha256": config_identity["sha256"],
-            "documents": [config_identity],
-        },
-        plugins=plugin_identities,
-        inputs=input_identities,
-        runtime=dict(runtime or {}),
-        outputs=dict(outputs or {}),
+    source_lock = finalize_hf_source_lock(
+        context,
+        source_lock=source_lock,
+        run_id=run_id,
+        config_path=config_path,
+        plugins=plugins,
+        inputs=inputs,
+        runtime=runtime,
+        outputs=outputs,
     )
     _verify_committed_identities(context, source_lock)
     policy = checkout_policy or checkout_policy_from_context(context, source_lock=source_lock)

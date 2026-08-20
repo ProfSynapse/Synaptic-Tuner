@@ -754,7 +754,7 @@ The lifecycle is monotonic and append-only. Exact-pushed source verification is 
 5. **One-shot `SUBMITTING`:** JP-B atomically claims the exact approval under the tracking lock. The immutable `synaptic-hf-submission-claim/v1` sequence-1 event consumes the authorization before credential resolution, provider construction, `Volume` construction, or `run_job`. A stale, replayed, replaced, expired, already claimed, or differently bound approval fails closed and preserves durable bytes.
 6. **Terminal `SUBMITTED` or `AMBIGUOUS`:** JP-E records exactly one sequence-2 event. A returned provider namespace/job ID produces `SUBMITTED`; any exception after the provider-call boundary produces `AMBIGUOUS`, never rollback to `APPROVED` and never automatic retry. Preparing, acknowledging, consuming, approving, or submitting a different run never confers authority on this run.
 
-JT originally received five tracking lifecycle rows; after SA6, three moved through a root-mediated transfer to JTR, which also received five newly inventoried API/caller remediation rows. After RA6's import finding, JIR received one import-facade row from JTR, one HF primitive row from J1, seven newly inventoried Modify rows, and one new regression-test Create row. JT retains two unaffected lifecycle-projection rows; JTR retains seven tracking API/caller rows; J1 retains its remaining descriptor/evidence, transport, stage, backend, and handler seams. JX retains its bounded cloud-extract fixture migration. JX2 owns only four descriptor-consumption integration tests. JX3 owns only the final cloud-pipeline security test surface. JCT owns only the CloudTrain launch-boundary remediation and the `TestCloudTrainHandler` class in its otherwise shared test file. The separately authorized JP implementation is split into JP-A through JP-E; after JP-S1 REVISE, the bounded JP-BR/JP-CR/JP-ER transfers own its security closures. Provider execution remains deferred to JP-LIVE and cannot occur until JP-S2 and final JP-R both return PASS.
+JT originally received five tracking lifecycle rows; after SA6, three moved through a root-mediated transfer to JTR, which also received five newly inventoried API/caller remediation rows. After RA6's import finding, JIR received one import-facade row from JTR, one HF primitive row from J1, seven newly inventoried Modify rows, and one new regression-test Create row. JT retains two unaffected lifecycle-projection rows; JTR retains seven tracking API/caller rows; J1 retains its remaining descriptor/evidence, transport, stage, backend, and handler seams. JX retains its bounded cloud-extract fixture migration. JX2 owns only four descriptor-consumption integration tests. JX3 owns only the final cloud-pipeline security test surface. JCT owns only the CloudTrain launch-boundary remediation and the `TestCloudTrainHandler` class in its otherwise shared test file. The separately authorized JP implementation is split into JP-A through JP-E; after JP-S1 REVISE, the bounded JP-BR/JP-CR/JP-ER transfers own its security closures. Historical JP-S2 and final JP-R then PASSed that frozen tree. The later JP-PREP changes and their first REVISE re-audits transfer current ownership to JP-PRT-R/JP-PRH-R/JP-PRC-R. Fresh independent security and release re-audits now both PASS that exact tree. Provider execution remains deferred until eligible checkpoint 16R is committed and exactly pushed, a fresh named-branch worktree is created at that pushed commit, the exact five-pin launcher passes there, and explicit-file credential preflight succeeds.
 
 ### Canonical `superproject` mode
 
@@ -978,9 +978,9 @@ Gate:
 - J0 exit: capsule builds are byte-deterministic, manifest-bound, size-limited, link/device resistant, copy safely to private scratch, reuse the same bootstrap core as local checkout, and remain unpublished.
 - J1 entry: consume only the accepted J0 capsule, verifier, manifest digest, and shared checkout contract.
 - Hermetic implementation exit: JT/JTR/JIR/J1/JX/JX2/JX3 prove closed schemas, deterministic descriptor/bundle/path generation, monotonic lifecycle transitions, exact descriptor/evidence/source-lock/capsule/policy/volume bindings, fail-closed wrong-run/stale/replayed/tampered/writable/unacknowledged inputs, locked durable tracking mutation under hostile/concurrent callers, and provider-SDK-free import/metadata inspection. JCT proves CloudTrain JSON inspection constructs no backend or credentials and every interactive launch path orders source preflight → authorization barrier → provider-facing work. Generic `TrainHandler` remains demonstrably local-only.
-- Security/release exit: the original SA6 PASS, RA6 REVISE, impacted SA6 PASS, and final RA6 PASS remain distinct chronological records. The accepted Commit 15 tree is the base for JP. JP-S1 is REVISE; JP-BR/JP-CR/JP-ER close its three findings. JP-S2 and final JP-R both PASSed the exact frozen remediated tree. Neither verdict is live installation or provider proof.
+- Security/release exit: the original SA6 PASS, RA6 REVISE, impacted SA6 PASS, and final RA6 PASS remain distinct chronological records. The accepted Commit 15 tree is the base for JP. JP-S1 is REVISE; JP-BR/JP-CR/JP-ER close its three findings. JP-S2 and final JP-R both PASSed that exact frozen tree. After JP-PREP materially changed it, the first security re-audit returned REVISE on four findings and the first release re-audit also returned REVISE. JP-PRT-R/JP-PRH-R remediation tests did not self-approve; fresh independent security and release re-audits now both PASS the exact JP-PRT-R/JP-PRH-R/JP-PRC-R tree with the evidence recorded below.
 - External-effect gate: Joseph authorized exactly one descriptor validation and at most one paid bootstrap smoke on the cheapest viable hardware, with a 15-minute outer limit and USD $2 hard cap. The frozen implementation narrows that to `cpu-basic`, no training/publication/ports/SSH/retries, a 600-second provider timeout, one cancellation attempt after 720 seconds if nonterminal, and observation only until 900 seconds. Any retry, replacement, broader workload, cost increase, or second submission needs new approval.
-- Provider-proof gate: JP-C may provision only the exact immutable Profile-C prefix. JP-E may claim and submit only the exact JP-A approval. A provider mutation, malformed/mismatched `JobInfo`, submission exception, or cancellation uncertainty is non-retryable. JP-LIVE also requires exact pushed-source proof, a usable explicit `HF_TOKEN` file, the isolated Python 3.12 five-pin launcher plus clean-venv protected help/import gate, and JP-S2 plus final JP-R PASS.
+- Provider-proof gate: JP-C may provision only the exact immutable Profile-C prefix. JP-E may claim and submit only the exact JP-A approval. A provider mutation, malformed/mismatched `JobInfo`, submission exception, or cancellation uncertainty is non-retryable. The fresh independent security/release PASSes are recorded. JP-LIVE still requires checkpoint 16R commit/exact push, a fresh named-branch worktree at that pushed commit, a usable explicit `HF_TOKEN` file, and the isolated Python 3.12 five-pin launcher plus clean-venv protected help/import gate in that worktree.
 - `cloud.launch` remains unavailable. The new `hf-source` and `hf-smoke` commands are narrow protected operator surfaces, not a generic cloud-training capability. K/L remain blocked until JP-LIVE evidence is accepted; neither the local implementation nor one bootstrap smoke enables generic training.
 
 ### Phase 7: Modal and RunPod
@@ -994,7 +994,7 @@ Deliver:
 Gate:
 
 - No core source-lock schema change is required to add either provider.
-- The complete HF hermetic barrier, accepted Commit 15, JP-A–E plus JP-BR/JP-CR/JP-ER, JP-S2 and final JP-R PASS, and accepted JP-LIVE provider evidence must all pass before K or L begins; local fakes, clean-venv help, acknowledgement alone, or an ambiguous provider outcome are insufficient.
+- The complete HF hermetic barrier, accepted Commit 15, JP-A–E plus JP-BR/JP-CR/JP-ER, historical JP-S2/final JP-R evidence, accepted JP-PREP remediation, fresh independent post-remediation security/release PASSes, and accepted JP-LIVE provider evidence must all pass before K or L begins; local fakes, remediation-owner tests, clean-venv help, acknowledgement alone, or an ambiguous provider outcome are insufficient.
 - RunPod integration tests must be hermetic and version-pinned. Runtime feature detection must fail closed on missing or drifted SDK semantics before any network call or paid resource creation; a protected live smoke remains separately approval-gated.
 
 **RunPod research checkpoint — 2026-08-19:** Joseph flagged that RunPod may have recently updated its API. Treat Node L's research/reconciliation as a required entry gate, not optional implementation discovery. Prefer official RunPod API/SDK sources and primary release information; record exact versions and retrieval dates before approving L's teachback.
@@ -1181,19 +1181,129 @@ Joseph separately authorized JP validation and at most one paid Hugging Face boo
 - JP-BR/JP-ER/JP-CR remediation status: implemented in the bounded transferred paths described above. This documentation records the remediation contract but does not self-approve it.
 - JP-S2 security re-audit: **PASS** on the frozen 29-file implementation manifest `55e2c876dd8cc282a43248a3eeaf3f445f6e452ce76ab2d7a0b814b460ef0f41`. Evidence: **283 passed, 6 skipped** in the bounded JP selection, **16 hostile checks passed**, and **87 import/generic checks passed**, with no findings. The PASS closes JP-S1's three findings and the prior two HIGH remediations for that exact manifest only; it makes no live launcher installation, credential, network, bucket, volume, job, cancellation, or paid-provider claim.
 - Final JP-R release/inventory re-audit: **PASS** on the frozen post-remediation implementation and reconciled documentation. Evidence: **200 passed, 3 skipped** for affected tests; **393 passed, 15 skipped** for the full JP/HF/import/order selection; **249 passed, 1 skipped** for tracking; **268 passed, 1 skipped** for CLI/capability/project/plugin/contract; **673 passed, 15 skipped** for broad cloud with exactly the same five accepted failures and only two documented exclusions; **26 Python files compiled**; imports were clean; `git diff --check` produced warnings only; public API and `cloud.launch` remained unchanged; and canonical skill sync was clean. This PASS is release/inventory evidence, not live launcher installation, credential, network, bucket, volume, job, cancellation, or paid-provider proof.
-- JP-LIVE remains blocked until the exact implementation is committed and pushed so SourceLock can prove the remote SHA, a clean Python 3.12 environment passes the exact five-pin protected launcher gate, and a usable explicit `HF_TOKEN` file passes the protected preflight. Both required independent audits are PASS. The current branch still has no upstream/push proof and no token was read during implementation or documentation reconciliation.
+- Those JP-S2 and JP-R PASSes are historical and predate the material JP-PREP implementation changes; they cannot approve the current tree. The first post-JP-PREP security re-audit returned **REVISE** on four findings, and the first release re-audit also returned **REVISE**. JP-PRT-R and JP-PRH-R remediation evidence is recorded below, and JP-PRC-R performed the final documentation/plan reconciliation without self-approval.
+- Fresh post-remediation security re-audit: **PASS**, with **400 passed, 5 skipped**.
+- Fresh post-remediation release re-audit: **PASS**. Evidence: focused **283 passed, 3 skipped**; tracking **263 passed, 1 skipped**; CLI/contract **284 passed, 1 skipped**; broad runnable **624 passed, 16 skipped** plus five historical failures; stale lifecycle fixtures **60 passed, 8 classified**.
+- Checkpoint 16R is eligible. JP-LIVE is next only after 16R is committed and exactly pushed so SourceLock can prove the remote SHA, a fresh named-branch worktree is created from that pushed commit, the exact five-pin launcher passes in that worktree, and a usable explicit `HF_TOKEN` file passes protected preflight. No token was read during implementation, audit, or documentation reconciliation.
 - `cloud.launch` and generic HF training submission remain unavailable. These narrow commands prove source provisioning and one fixed bootstrap smoke only. Modal and RunPod remain later nodes. Before RunPod implementation, repeat the dated official API/SDK research gate because Joseph reported a recent API update.
+
+### JP-PREP remediation reconciliation
+
+The live-readiness attempt exposed one final local integration gap: the only
+route that could create PREPARED state was the general experiment handler,
+whose import graph reached training/Torch and UI package-install behavior. The
+bounded JP-PREP remediation replaces that dependency with an explicit
+`hf-source prepare` action and hardens provisioning as a separately claimed
+at-most-once effect. It does not broaden `cloud.launch`, authorize a provider
+retry, or alter the fixed paid-smoke envelope.
+
+The protected source state machine is now:
+
+1. `hf-source prepare` creates or reuses a neutral bootstrap experiment under
+   an explicit absolute external `--base-dir`, performs exact-pushed Git
+   preflight, parses bootstrap-volume policy from the exact committed config
+   blob, rechecks the regular link-free working config against that commit, and
+   persists the enriched SourceLock, capsule/bundle, descriptor, and PREPARED
+   state without provider SDK, ML/UI, dotenv, or credential imports.
+2. A provisioning attempt atomically records the closed
+   `synaptic-hf-provisioning-claim/v1` `CLAIMED` event before secret-file content
+   access or provider construction. `CLAIMED` consumes that provisioning
+   attempt across processes and resumes.
+3. Every closed claim event carries exact `sequence`, canonical `occurred_at`,
+   predecessor, evidence, `reason_code`, and `provider_effect_possible` fields.
+   `CREDENTIAL_REJECTED` and `LOCAL_POSTCLAIM_FAILURE` map to no possible
+   provider effect. `PROVIDER_OUTCOME_AMBIGUOUS`, `INTERRUPTED_AFTER_CLAIM`, and
+   `RECOVERY_EVIDENCE_INVALID` map to a possible provider effect.
+4. Exact provider success records a bound `SUCCEEDED` terminal event and
+   evidence while advancing PREPARED → ACKNOWLEDGED; local reauthentication
+   then advances to CONSUMABLE. Any post-claim uncertainty records terminal
+   `AMBIGUOUS`, retains PREPARED, emits no evidence, and is never retried under
+   the consumed claim.
+5. Only CONSUMABLE state can proceed to the already accepted approval and
+   submission state machines.
+
+Preparation interruption recovery is deliberately narrower than provisioning
+recovery. A reported experiment ID may be resumed only from neutral,
+SourceLock-only partial, or exact PREPARED state with identical inputs. The
+canonical SourceLock projection is persisted before transport installation. A
+crash-created SourceLock artifact, including the exact copy inside an
+interrupted transport, is adopted only after bounded canonical regular/link-free
+authentication and only when byte-identical; different bytes are never
+overwritten. This closes both interruption sides of the SourceLock-before-
+transport boundary. Incomplete reference pairs, provider evidence,
+ACKNOWLEDGED/CONSUMABLE, approval, or submission state fail closed.
+
+Provisioning resumes only by inspecting the exact durable claim. `SUCCEEDED`
+may finish local consumption without another provider call. A stranded
+`CLAIMED` head receives no provider authority: recovery adopts an exact orphan
+terminal or validates exact persisted evidence and converges to `SUCCEEDED`; if
+no evidence exists it terminalizes as `AMBIGUOUS/INTERRUPTED_AFTER_CLAIM`, and
+invalid or conflicting recovery artifacts terminalize as
+`AMBIGUOUS/RECOVERY_EVIDENCE_INVALID`. Terminal `AMBIGUOUS` never authorizes a
+second attempt.
+
+The shared credential boundary performs metadata-only root/path selection
+before a durable claim and one complete read afterward. POSIX uses held
+handle-relative ancestor traversal and `O_NOFOLLOW`; the guarantee is limited to
+the opened descriptor snapshot, so rename after final open cannot alter bytes
+read from that descriptor but post-read pathname identity is not asserted.
+Windows uses native `CreateFileW` handles with read sharing only, thereby denying
+write/delete sharing during the read, and additionally rejects reparse points
+and verifies final-handle containment and identity.
+
+The flat parser now freezes an explicit-option allowlist for each protected
+action and canonicalizes both `--flag value` and `--flag=value`. A globally
+recognized option remains rejected unless listed for that action. In
+particular, prepare owns config/source-mode, provision owns actor/authority and
+credential selection, approve owns authorization/quote fields, and
+execute/observe own credential selection; no protected action accepts `--yes`
+or generic training/provider overrides.
+
+The initial nested remediation DAG was `JP-PREP → JP-PRT → JP-PRH → JP-PRC`.
+Its first independent security re-audit returned **REVISE** on four findings,
+and its first release re-audit also returned **REVISE**. Current ownership
+therefore transfers through
+`JP-PRT-R → JP-PRH-R → JP-PRC-R`, followed by fresh independent security and
+release re-audits, both now **PASS**. The original nodes remain historical and own no current
+inventory rows. JP-PRT-R owns the provisioning claim schema/module and durable
+tracking projection; JP-PRH-R owns the shared credential helper and
+handler/operator integration; JP-PRC-R owns parser allowlists,
+runtime-asset/import tests, documentation, skill sync, and this mechanical
+reconciliation.
+
+First security re-audit evidence was former-HIGH closure **25 passed, 2 Windows
+link skips**; parser **63 passed**; claim/operator/assets **27 passed**;
+thread/spawn/ambiguity **3 passed**; protected handlers **39 passed, 2 skipped**.
+Verdict: **REVISE**, four findings. First release re-audit evidence was focused
+**270 passed, 3 skipped**; tracking **257 passed, 1 skipped**; broad cloud **679
+passed, 16 skipped, 13 classified failures** (five accepted prior plus eight
+stale lifecycle fixtures); CLI/project/capability/plugin/contract **279 passed,
+1 skipped** plus five MAX_PATH artifacts; affected short-path rerun **16/16
+passed**. Verdict: **REVISE**.
+
+Remediation evidence is recorded without self-approval: JP-PRT-R completed
+**138 passed, 1 skipped** focused, **261 passed, 1 skipped** full tracking, and
+**12 passed** contract checks. JP-PRH-R completed **67 passed, 2 skipped**
+focused, **148 passed, 2 skipped** utilities, and **348 passed, 3 skipped**
+broad, with one classified missing-Transformers environment failure. Fresh
+independent closure is now recorded: the security re-audit **PASSed with 400
+passed, 5 skipped**. The release re-audit **PASSed** with focused **283 passed, 3
+skipped**, tracking **263 passed, 1 skipped**, CLI/contract **284 passed, 1
+skipped**, broad runnable **624 passed, 16 skipped** plus five historical
+failures, and stale lifecycle fixtures **60 passed, 8 classified**. Checkpoint
+16R is eligible; no live provider proof is inferred.
 
 ### JP-LIVE operator sequence
 
-1. Freeze and disclose the exact commit, SourceLock, descriptor/evidence, approval/workload digests, client/runtime, bucket prefix, hardware, quote, limits, and stop conditions.
-2. Establish clean exact-pushed proof for the approved commit and create the isolated Python 3.12 five-pin launcher; pass its protected clean-venv import/help gate without modifying trainer dependencies.
-3. Run provider-free validation and both final independent re-audits; stop unless JP-S2 and final JP-R are PASS on the exact remediated tree.
-4. Run `hf-source` once for the exact PREPARED descriptor. Accept only exact readback-verified evidence; stop on `mutation_ambiguous` and do not retry.
-5. Create the exact approval while still provider-free. Confirm `APPROVED`, canonical workload digest, quote, expiry, and authorization reference.
-6. Run `hf-smoke execute` once. The authorization is consumed at `SUBMITTING` even if the provider response is ambiguous.
-7. Observe only `JobInfo` whose normalized namespace/job ID equals the recorded submission. At 12 minutes, obtain the durable cancellation claim; call the provider only if that claim grants the single attempt. Stop observation at 15 minutes.
-8. Capture normalized result, duration, cost, terminal/cancellation state, and immutable event/evidence identities without secrets. Commission a post-live review before changing any capability flag.
+1. Checkpoint 16R is eligible and both fresh re-audits PASS. Commit 16R, push that exact commit to its named branch, verify the remote SHA, create a fresh named-branch worktree at that pushed commit, and freeze/disclose the exact SourceLock, descriptor/evidence, approval/workload digests, client/runtime, bucket prefix, hardware, quote, limits, and stop conditions.
+2. In that fresh named-branch worktree, create the isolated Python 3.12 five-pin launcher and pass its protected clean-venv import/help gate without modifying trainer dependencies.
+3. Run provider-free validation and explicit-file credential preflight; stop before provider contact unless the credential boundary passes without exposing a value.
+4. Run provider-free `hf-source prepare` with the committed source config and an absolute external base directory; retain its experiment ID and portable digest/URI output.
+5. Run `hf-source provision` once against that exact PREPARED descriptor and the same base directory. Accept only exact readback-verified evidence; stop on terminal provisioning `AMBIGUOUS` and do not retry.
+6. Create the exact approval while still provider-free. Confirm `APPROVED`, canonical workload digest, quote, expiry, and authorization reference.
+7. Run `hf-smoke execute` once. The authorization is consumed at `SUBMITTING` even if the provider response is ambiguous.
+8. Observe only `JobInfo` whose normalized namespace/job ID equals the recorded submission. At 12 minutes, obtain the durable cancellation claim; call the provider only if that claim grants the single attempt. Stop observation at 15 minutes.
+9. Capture normalized result, duration, cost, terminal/cancellation state, and immutable event/evidence identities without secrets. Commission a post-live review before changing any capability flag.
 
 ---
 
@@ -1212,6 +1322,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `schemas/synaptic-bootstrap-capsule-v1.schema.json` | Deterministic capsule manifest, bounded file table, and digest contract | J0 / Worker 2 |
 | `schemas/synaptic-hf-source-transport-v1.schema.json` | Closed immutable profile-C descriptor schema with one canonical source-lock URI and deterministic bundle/volume binding | J1 / Worker 1 |
 | `schemas/synaptic-hf-provisioning-evidence-v1.schema.json` | Closed external provisioning-evidence schema with exact descriptor/digest/volume bindings and bounded authority/receipt fields | J1 / Worker 1 |
+| `schemas/synaptic-hf-provisioning-claim-v1.schema.json` | Closed at-most-once CLAIMED/SUCCEEDED/AMBIGUOUS schema with exact sequence/time/predecessor/evidence/reason/effect fields and experiment/descriptor/SourceLock/actor/authority binding | JP-PRT-R / Worker A |
 | `schemas/synaptic-hf-run-approval-v1.schema.json` | Closed exact-run approval binding all source/provisioning/workload/hardware/time/cost/authorization identities | JP-A / Worker 1 |
 | `schemas/synaptic-hf-submission-claim-v1.schema.json` | Closed append-only `SUBMITTING → SUBMITTED or AMBIGUOUS` one-shot claim event | JP-B / Worker 2 |
 | `schemas/synaptic-capability-v1.schema.json` | Agent capability schema | H / Worker 3 |
@@ -1238,10 +1349,12 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/cloud/hf_provisioning.py` | Pure descriptor/evidence construction and validation, deterministic volume-path derivation, and lifecycle eligibility checks; no provider mutation | J1 / Worker 1 |
 | `tuner/cloud/hf_run_approval.py` | Exact approval/claim construction, canonical identities, expiry/cost/workload validation, and secret-value rejection | JP-A / Worker 1 |
 | `tuner/cloud/hf_provider_adapter.py` | Import-light exact Hub 1.27 Buckets adapter with complete signature probing, private-bucket proof, closed tree entries, immutable-byte upload, and readback | JP-C / Worker 3 |
-| `tuner/cloud/hf_provisioning_operator.py` | Effect-aware exact-prefix provisioning/evidence builder with non-transactional ambiguity and no-retry semantics | JP-C / Worker 3 |
+| `tuner/cloud/hf_provisioning_operator.py` | JP-PRH-R transfer: effect-aware exact-prefix provisioning/evidence with claim-first non-transactional ambiguity and no-retry semantics | JP-PRH-R / Worker B |
+| `tuner/cloud/hf_provisioning_claim.py` | Canonical provisioning claim/terminal-event construction with restored closed fields, reason/effect mapping, validation, digest, and state contract | JP-PRT-R / Worker A |
 | `tuner/cloud/hf_bootstrap_smoke.py` | Fixed stdlib-only no-training bootstrap verification declaration, execution, and bounded deterministic result | JP-D / Worker 2 |
-| `tuner/handlers/hf_source_handler.py` | Protected explicit-file credential boundary plus PREPARED provisioning, evidence persistence, and CONSUMABLE transition; never submits | JP-C / Worker 3 |
-| `tuner/handlers/hf_smoke_handler.py` | Protected approve/execute/observe CLI for the one exact bootstrap workload | JP-E / Worker 1 |
+| `tuner/handlers/hf_source_handler.py` | JP-PRH-R transfer: SourceLock-first prepare/recovery plus claim-first PREPARED provisioning, stranded-CLAIMED terminalization, evidence persistence, and CONSUMABLE transition; never submits | JP-PRH-R / Worker B |
+| `tuner/handlers/_hf_secret_file.py` | Shared import-light metadata preflight and strict post-claim single-HF_TOKEN reader with narrowed POSIX opened-snapshot and native Windows share-mode guarantees | JP-PRH-R / Worker B |
+| `tuner/handlers/hf_smoke_handler.py` | JP-PRH-R transfer: protected approve/execute/observe CLI using the shared post-claim secret-file boundary and external base directory | JP-PRH-R / Worker B |
 | `requirements-hf-jp.txt` | JP-CR transfer: isolated launcher-only exact direct pins for Hub 1.27, jsonschema 4.23, packaging 24.1, dotenv 1.0.1, and PyYAML 6.0.2; never trainer dependencies | JP-CR / Worker 3 |
 | `scripts/setup_hf_jp_launcher.py` | JP-CR transfer: refuse-overwrite Python 3.12 launcher creation, exact five-pin validation, installed-version/import proof, and clean-venv protected help gate | JP-CR / Worker 3 |
 | `synaptic_tuner/__init__.py` | Supported distribution facade; re-export canonical `1.1.0` version | B / Worker 2 |
@@ -1285,33 +1398,34 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/cloud/test_bootstrap_capsule.py` | Determinism, schema, regular-file/size/hash/copy/race rejection, and no-source-model duplication | J0 / Worker 2 |
 | `tests/cloud/test_hf_volume_transport.py` | Hermetic client feature detection, exact read-only volume request, digest binding, and fail-closed drift behavior | J1 / Worker 1 |
 | `tests/cloud/test_hf_provisioning.py` | Closed schemas, deterministic descriptor/bundle/volume identity, exact evidence binding, transition eligibility, tamper/replay rejection, and zero external calls | J1 / Worker 1 |
+| `tests/cloud/test_hf_provisioning_claim.py` | Closed CLAIMED/SUCCEEDED/AMBIGUOUS schema, restored fields and reason/effect mapping, deterministic identity, terminal predecessor, timestamp, tamper, and redaction tests | JP-PRT-R / Worker A |
 | `tests/cloud/test_hf_run_approval.py` | Closed approval/claim schemas, exact workload/hardware/cost binding, expiry, refresh, redaction, and identity tests | JP-A / Worker 1 |
 | `tests/cloud/test_hf_provider_adapter.py` | Exact Hub 1.27 signature/order/kind/default probing, bucket identity/privacy, entry types, and token-redaction tests | JP-C / Worker 3 |
-| `tests/cloud/test_hf_provisioning_operator.py` | Empty/exact/colliding prefix behavior, immutable-byte handoff, readback digests, mutation ambiguity, and no-retry tests | JP-C / Worker 3 |
+| `tests/cloud/test_hf_provisioning_operator.py` | JP-PRH-R transfer: claim-first provider ordering, empty/exact/colliding prefix behavior, immutable-byte handoff, readback, ambiguity, and no-retry tests | JP-PRH-R / Worker B |
 | `tests/cloud/test_hf_bootstrap_smoke.py` | Fixed workload/digest, stdlib boundary, exact source/layout/read-only checks, symlink/reparse rejection, and deterministic output tests | JP-D / Worker 2 |
-| `tests/cloud/test_cloud_import_boundaries.py` | Fresh-process import-light, metadata-only registry, lazy selected-target resolution/cache, dynamic replacement order, and compatibility-facade identity/`__all__` regression contract | JIR / Worker 1 |
+| `tests/cloud/test_cloud_import_boundaries.py` | JP-PRC-R transfer: fresh-process provider/ML-free coverage for provisioning-claim, prepare utilities, and protected handlers while preserving registry/facade regressions | JP-PRC-R / Worker C |
 | `tests/contract/test_embedded_host.py` | Nested-host end-to-end contract | C / Worker 3 |
 | `tests/contract/test_engine_read_only.py` | Container and engine-managed no-write contract | C / Worker 3 |
 | `tests/contract/test_native_no_write.py` | Native pre/post tree and Git-diff detection | C / Worker 3 |
 | `tests/contract/test_console_entrypoint.py` | Editable console from unrelated cwd | C / Worker 3 |
-| `tests/contract/test_runtime_assets.py` | JP-CR transfer: retain J0 capsule/publication coverage and require the complete five-pin JP launcher/runtime assets; historical R/J0 ownership remains in accepted commits | JP-CR / Worker 3 |
+| `tests/contract/test_runtime_assets.py` | JP-PRC-R transfer: retain J0/JP launcher coverage and require the provisioning-claim schema plus canonical module-to-schema runtime binding | JP-PRC-R / Worker C |
 | `tests/contract/test_source_url_security.py` | Credential/query/host/scheme negative cases | C / Worker 3 |
 | `tests/contract/fixtures/host-project/**` | Directory-owned generic host-fixture surface; node C freezes its complete member list before work starts, and wildcard members are not counted as additional literal files | C / Worker 3 |
 | `tests/handlers/test_ml_handler.py` | Host ML declaring-document inputs, artifact-root outputs, unchanged cwd, no temporary config rewrite, and standalone compatibility | G / Worker 1 |
-| `tests/handlers/test_hf_source_handler.py` | Protected source-provisioning ordering, explicit-file-only credential authority, containment/link rejection, redaction, and no-submission tests | JP-C / Worker 3 |
-| `tests/handlers/test_hf_smoke_handler.py` | Approval/claim/provider ordering, dotenv bypass, protected execution/observation, and bounded output tests | JP-E / Worker 1 |
+| `tests/handlers/test_hf_source_handler.py` | JP-PRH-R transfer: SourceLock-first crash recovery, CLAIMED terminalization/reason mapping, provider ordering, containment/link rejection, and no-submission tests | JP-PRH-R / Worker B |
+| `tests/handlers/test_hf_smoke_handler.py` | JP-PRH-R transfer: shared platform-specific credential boundary plus retained approval/submission/observation ordering and bounded output tests | JP-PRH-R / Worker B |
 | `tests/scripts/test_setup_hf_jp_launcher.py` | JP-CR exact missing/extra/duplicate/range pin rejection, interpreter/target refusal, clean-venv distribution/import checks, and protected help behavior | JP-CR / Worker 3 |
 | `tests/acceptance/submodule_engine/test_acceptance.py` | Independent end-to-end acceptance only | M / independent QA worker |
 | `docs/review/submodule-engine-acceptance.md` | Independent QA/security evidence report | M / independent QA worker |
 
-**Create count after JP-A–E reconciliation: 98 rows.**
+**Create count after JP-PRC-R reconciliation: 102 rows.**
 
 ### Files to modify
 
 | File | Exact responsibility | DAG owner |
 |---|---|---|
 | `tuner/cli/main.py` | JP-E transfer: preserve context-first bootstrap while skipping global dotenv entirely for protected `hf-source`/`hf-smoke`; all other command behavior remains compatible | JP-E / Worker 1 |
-| `tuner/cli/parser.py` | JP-E transfer: add `hf-source` and `hf-smoke approve/execute/observe`, explicit authority/authorization/quote flags, and preserve canonical CLI/version parsing | JP-E / Worker 1 |
+| `tuner/cli/parser.py` | JP-PRC-R transfer: frozen explicit-option allowlists for prepare/provision/approve/execute/observe, including `--flag=value`, while preserving canonical CLI/version parsing | JP-PRC-R / Worker C |
 | `tuner/cli/router.py` | JP-E transfer: lazy-route the protected HF handlers without provider imports or credential resolution | JP-E / Worker 1 |
 | `tuner/handlers/__init__.py` | Preserve legacy handler exports through lazy resolution without importing the heavyweight handler graph on capability CLI cold start | D / Worker 1 |
 | `tuner/handlers/base.py` | Context roots, compatibility alias, results/events | D / Worker 1 |
@@ -1348,10 +1462,10 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/handlers/experiment_handler.py` | Tracking/config/source-lock lifecycle | E / Worker 2 |
 | `tuner/handlers/experiment_analysis_handler.py` | Portable tracking/artifact/source links | E / Worker 2 |
 | `shared/experiment_tracking/registry.py` | Explicit tracking root and atomic concurrency | E / Worker 2 |
-| `shared/experiment_tracking/service.py` | JP-BR transfer: preserve approval/submission CAS and add immutable cancellation event construction plus once-per-submission locked provider-attempt claim | JP-BR / Worker 2 |
-| `shared/experiment_tracking/experiment.py` | JP-BR transfer: add validated cancellation event URI/digest and `CLAIMED` state bound to exact SUBMITTED state while preserving prior projections | JP-BR / Worker 2 |
+| `shared/experiment_tracking/service.py` | JP-PRT-R transfer: preserve approval/submission/cancellation CAS and add immutable SourceLock create-or-adopt ordering plus at-most-once provisioning claim/terminal recovery projection | JP-PRT-R / Worker A |
+| `shared/experiment_tracking/experiment.py` | JP-PRT-R transfer: validate provisioning event URI/digest and CLAIMED/SUCCEEDED/AMBIGUOUS state against source-transport lifecycle while preserving prior projections | JP-PRT-R / Worker A |
 | `shared/experiment_tracking/__init__.py` | JIR transfer: import-light compatibility facade that preserves the TrackingService-only persistence boundary and exact supported export contract | JIR / Worker 1 |
-| `shared/experiment_tracking/schema.py` | JP-BR transfer: closed run-summary projection for source/provisioning/approval/submission plus immutable cancellation event/state | JP-BR / Worker 2 |
+| `shared/experiment_tracking/schema.py` | JP-PRT-R transfer: closed run-summary projection for source/provisioning claim/approval/submission/cancellation identities and states | JP-PRT-R / Worker A |
 | `shared/experiment_tracking/experiment_spec.py` | Config provenance/path refs | E / Worker 2 |
 | `shared/experiment_tracking/experiment_orchestrator.py` | Persist one lock/config across stages | E / Worker 2 |
 | `shared/experiment_tracking/local_tracker.py` | Explicit root and safe writes | E / Worker 2 |
@@ -1363,7 +1477,8 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/shared/experiment_tracking/test_registry.py` | Tracking root/race regression | E / Worker 2 |
 | `Tools/compare_runs.py` | JTR caller migration from raw record writes to locked `TrackingService` derived-output updates | JTR / Worker 2 |
 | `Tools/judge_sample.py` | JTR caller migration from raw record writes to locked `TrackingService` judge-output updates | JTR / Worker 2 |
-| `tests/shared/experiment_tracking/test_tracking_service.py` | JP-BR transfer: retain hostile submission coverage and add idempotent/concurrent/resumed cancellation claim, replacement, linkage, and byte-preservation regressions | JP-BR / Worker 2 |
+| `tests/shared/experiment_tracking/test_tracking_service.py` | JP-PRT-R transfer: SourceLock orphan/concurrency recovery plus idempotent/concurrent provisioning claim, terminal discovery/adoption, replacement, linkage, and byte-preservation regressions | JP-PRT-R / Worker A |
+| `tests/shared/experiment_tracking/test_schema.py` | JP-PRT-R transfer: provisioning claim/terminal URI, digest, state, and closed summary-projection coverage | JP-PRT-R / Worker A |
 | `tests/shared/experiment_tracking/test_compare_runs.py` | JTR regression coverage proving compare-runs callers use the service mutation boundary | JTR / Worker 2 |
 | `tests/shared/experiment_tracking/test_experiment_spec.py` | Config provenance | E / Worker 2 |
 | `tests/shared/experiment_tracking/test_experiment_orchestrator.py` | One lock/config/descriptor identity across stages and monotonic HF lifecycle projection | JT / Worker 2 |
@@ -1418,7 +1533,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/handlers/cloud_inspect_handler.py` | Portable artifact/source/descriptor/evidence inspection with bounded redacted output | J1 / Worker 1 |
 | `tuner/handlers/cloud_extract_handler.py` | Secure checkout/runtime layout from the exact consumable descriptor | J1 / Worker 1 |
 | `tuner/handlers/cloud_eval_dashboard.py` | Portable tracking/artifact replay paths without private provider transport material | J1 / Worker 1 |
-| `tuner/handlers/stages/_util.py` | Shared HF stage source/runtime and immutable descriptor-consumption helpers | J1 / Worker 1 |
+| `tuner/handlers/stages/_util.py` | JP-PRH-R finalized-SourceLock validation/recovery helper used by provider-free preparation while preserving shared HF stage descriptor consumption | JP-PRH-R / Worker B |
 | `tuner/handlers/stages/hf_training_stage.py` | Consume/record one source lock and exact descriptor/evidence identity | J1 / Worker 1 |
 | `tuner/handlers/stages/hf_eval_stage.py` | Reuse experiment source lock and consumable descriptor/evidence identity | J1 / Worker 1 |
 | `tuner/handlers/stages/hf_loss_stage.py` | Reuse source/runtime and consumable descriptor/evidence identity | J1 / Worker 1 |
@@ -1449,20 +1564,23 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/cloud/test_runpod_backend.py` | RunPod contract | L / Worker 3 |
 | `tests/contract/test_private_submodule_checkout.py` | Activated local-bare-repository gates for recursive private checkout, credential cleanup, and pre-fetch nested-submodule rejection | C / Worker 3 |
 | `README.md` | Hosting/install/ownership/capabilities | N / Worker 2 |
-| `docs/cloud-training/README.md` | Protected JP operator entrypoint, exact authorization/run sequence, and live-proof limitations ahead of legacy provider material | N / Worker 2 |
+| `docs/cloud-training/README.md` | JP-PRC-R exact landed recovery/claim/credential guarantees, audit chronology, protected sequence, allowlists, and live-proof limitations | JP-PRC-R / Worker C |
 | `.env.example` | Host roots and secret-ref guidance | N / Worker 2 |
 | `.gitignore` | Engine build/test products only | N / Worker 2 |
 | `AGENTS.md` | No-write/source-lock/config-root process | N / Worker 2 |
-| `.skills/fine-tuning/SKILL.md`<br>`.skills/fine-tuning/reference/cloud-training.md`<br>`.skills/fine-tuning/reference/modal-jobs.md`<br>`.skills/fine-tuning/reference/runpod-jobs.md`<br>`.skills/evaluation/SKILL.md`<br>`.skills/evaluation/reference/cli-commands.md`<br>`.skills/synethetic-data-generation/SKILL.md`<br>`.skills/synethetic-data-generation/reference/cli-commands.md`<br>`.skills/upload-deployment/SKILL.md` | Exact canonical host-mode, source-lock, evaluation, generation, deployment, and provider-command guidance; modify only after the corresponding commands exist | N / Worker 2 |
-| `tests/cli/test_parser.py` | JP-E transfer: protected command/flag parsing, hf-route global-dotenv bypass, provider-free help/metadata behavior, and retained legacy/version contracts | JP-E / Worker 1 |
+| `.skills/fine-tuning/SKILL.md`<br>`.skills/fine-tuning/reference/modal-jobs.md`<br>`.skills/fine-tuning/reference/runpod-jobs.md`<br>`.skills/evaluation/SKILL.md`<br>`.skills/evaluation/reference/cli-commands.md`<br>`.skills/synethetic-data-generation/SKILL.md`<br>`.skills/synethetic-data-generation/reference/cli-commands.md`<br>`.skills/upload-deployment/SKILL.md` | Exact canonical host-mode, evaluation, generation, deployment, and remaining provider-command guidance; modify only after the corresponding commands exist | N / Worker 2 |
+| `.skills/fine-tuning/reference/cloud-training.md`<br>`.agents/skills/fine-tuning/reference/cloud-training.md`<br>`.claude/skills/fine-tuning/reference/cloud-training.md` | JP-PRC-R canonical-first landed recovery/claim/platform guidance plus mechanically synchronized mirrors | JP-PRC-R / Worker C |
+| `tests/cli/test_parser.py` | JP-PRC-R transfer: frozen per-action protected allowlists with spaced/equals syntax, dotenv bypass, provider-free help/metadata behavior, and retained legacy/version contracts | JP-PRC-R / Worker C |
 
-**Modify count after JP-A–E reconciliation: 145 rows.**
+**Modify count after JP-PRC-R reconciliation: 147 rows.**
 
-**JP reconciliation mechanical evidence:** **98 Create rows**, **145 Modify
-rows**, **251 literal inventory paths**, **0 duplicate paths**, **30 inventory
-owner labels**, and **43 resolved acyclic DAG nodes**. Every changed JP path is
-listed once; historical transfer owners remain documented in the responsibility
-text but no longer share current write ownership.
+**JP-PRC-R reconciliation mechanical evidence:** **102 Create rows**, **147 Modify
+rows**, **258 literal inventory paths**, **0 duplicate paths**, **32 inventory
+owner labels**, and **49 resolved acyclic DAG nodes**. The four new Create paths,
+two newly explicit generated-mirror paths, and newly explicit tracking-schema
+test account for the seven added literal paths. Every changed JP-PREP path is listed once; historical transfer owners
+remain documented in the responsibility text but no longer share current write
+ownership.
 
 ### Explicit no-change inventory for this initiative
 
@@ -1618,7 +1736,7 @@ git status --short
 10. run JP-A/JP-B/JP-BR approval, submission claim, durable cancellation claim, replay, expiry, workload/hardware/cost, event-chain, stale/resumed/concurrent observer, hostile-public-save, and byte-preservation tests;
 11. run JP-C/JP-CR exact Hub-signature probes, explicit-file credential authority, closed prefix/tree, immutable-byte upload, readback, ambiguity, no retry, exact five-pin requirements, and clean-venv protected import/help tests with no provider network;
 12. run JP-D/JP-E/JP-ER fixed-workload, symlink/reparse, claim-before-dotenv/token/provider, exact Volume/run_job kwargs, strict submit/inspect JobInfo agreement, timeout, once-only cancellation, ambiguous terminal, and protected CLI ordering tests;
-13. retain original JP-S1 REVISE, then obtain independent JP-S2 and final JP-R PASS against the exact remediated tree; documentation/inventory reconciliation does not satisfy either audit;
+13. retain original JP-S1 REVISE and historical JP-S2/final JP-R PASS, retain the first post-JP-PREP security REVISE with four findings and the first release REVISE with its classified evidence, and retain the accepted fresh security **400/5** and release focused **283/3**, tracking **263/1**, CLI/contract **284/1**, broad runnable **624/16 plus five historical**, stale-fixture **60/8 classified** PASS evidence against the exact JP-PRT-R/JP-PRH-R/JP-PRC-R tree;
 14. install the repository editable and smoke the `synaptic` console from an unrelated cwd;
 15. build sdist and wheel without publishing;
 16. install the wheel into a fresh isolated environment with no source checkout on `PYTHONPATH`;
@@ -1658,12 +1776,13 @@ No JP-LIVE provider effect until:
 
 - the complete JT/JTR/JIR/J1/JX/JX2/JX3/JCT implementation tree retains recorded original and impacted SA6 PASS, final P6R is accepted, and fresh RA6 passes without an intervening implementation edit;
 - dry-run command is inspected;
+- checkpoint 16R is committed and exactly pushed to its named branch, the remote SHA agrees, and all remaining checks run from a fresh named-branch worktree at that commit;
 - host and engine commits are clean and pushed;
 - gitlink matches engine commit;
 - source lock validates;
 - the immutable descriptor is PREPARED and binds the single canonical source-lock URI;
-- JP-S2 and final JP-R both PASS on the exact JP-A–E plus JP-BR/JP-CR/JP-ER tree; the original JP-S1 REVISE remains recorded;
-- `hf-source` returns closed, exact provisioning evidence and local validation reaches CONSUMABLE without ambiguity;
+- historical JP-S2 and final JP-R PASS remain bound to the exact JP-A–E plus JP-BR/JP-CR/JP-ER tree, both first post-JP-PREP REVISE verdicts remain recorded, and fresh independent security/release PASSes bind the exact JP-PRT-R/JP-PRH-R/JP-PRC-R tree;
+- `hf-source prepare` returns only portable PREPARED identities, then one claimed `hf-source provision` returns closed exact evidence and local validation reaches CONSUMABLE without ambiguity;
 - the exact approval remains unexpired and its descriptor/evidence/SourceLock/bundle/capsule/policy/workload digests, `cpu-basic`, `python:3.12`, quote, time limits, and effects all match;
 - the isolated Python 3.12 launcher proves the exact five direct pins plus protected clean-venv handler imports/help without changing the trainer environment;
 - credential authority comes only from the explicit regular link-free file containing nonblank `HF_TOKEN`, with no ambient HF credential variables;
@@ -1795,6 +1914,7 @@ Each commit is owned by exactly one DAG node and is restricted to that node's in
 | 14 | `feat(bootstrap): add deterministic verified capsule and shared core` | J0 | All `J0 / Worker 2` rows: shared core, capsule/schema, bounded transport-neutral verifier, transferred checkout/assets/exports, and hermetic non-provider tests |
 | 15 | `feat(hf-jobs): add immutable verified source transport` | J1 + JT + JTR + JIR + JX + JX2 + JX3 + JCT + P6R | Immutable descriptor/evidence and tracking lifecycle; private locked tracking API plus migrated analysis callers; import-light facades/registries and fresh-process regressions; HF backend/builders/stages/handlers/transport; frozen descriptor-consumption fixtures; bounded extract/pipeline reconciliations; final CloudTrain barrier; and accepted SA6/impacted-SA6/P6R evidence. No JP action, submission authorization, provider effect, or live capability is included |
 | 16 | `feat(hf-jobs): add one-shot approved bootstrap smoke` | JP-A + JP-B + JP-C + JP-D + JP-E + JP-BR + JP-CR + JP-ER | Exact approval/submission/cancellation claims, five-pin isolated Hub 1.27 protected runtime, private-bucket provisioning/readback, fixed workload, strict JobInfo agreement, protected CLI, bounded once-only cancellation, and hermetic tests. Original JP-S1 REVISE is retained; final JP-S2/JP-R PASS and live-provider evidence are not part of the commit |
+| 16R | `fix(hf-jobs): close protected source preparation recovery` | JP-PRT-R + JP-PRH-R + JP-PRC-R | SourceLock-before-transport crash convergence, restored closed provisioning event fields and reason/effect mapping, stranded-CLAIMED terminalization, shared platform-specific post-claim credential read, frozen allowlists, runtime assets, docs/plan reconciliation, and fresh-audit eligibility; no provider effect or live evidence |
 | 17 | `feat(modal): adopt verified source lock and runtime layout` | K | K-owned Modal runner/tests only, after accepted JP-LIVE evidence |
 | 18 | `feat(runpod): adopt verified source lock and runtime layout` | L | L-owned RunPod backend/tests only, after accepted JP-LIVE evidence and fresh dated official API/SDK research |
 | 19 | `test(acceptance): verify embedded engine release candidate` | M | M-exclusive acceptance test/report paths only; no feature-test edits |
@@ -1802,7 +1922,7 @@ Each commit is owned by exactly one DAG node and is restricted to that node's in
 | 21 | `docs(adoption): document host api capabilities security and cloud` | N | N-owned README/changelog/docs/example documentation rows |
 | 22 | `docs(skills): update canonical workflows and sync mirrors` | N | N-owned `AGENTS.md`, canonical skills, generated mirrors, and sync evidence |
 
-Provider commits remain separate so HF assumptions are reviewable and Modal/RunPod prove the shared abstraction. Commit 15 is the accepted local checkpoint. Commit 16 is eligible only after JP-S2 and final JP-R audit the exact remediated implementation; JP-LIVE is a separate protected operator action after that commit is clean and exactly pushed. No package-publication commit or workflow may be added until commits 19–22 are green and the runtime-asset decision is closed.
+Provider commits remain separate so HF assumptions are reviewable and Modal/RunPod prove the shared abstraction. Commits 15 and 16 are accepted historical checkpoints. Fresh independent security and release audits PASS the exact JP-PRT-R/JP-PRH-R/JP-PRC-R tree, so checkpoint 16R is eligible. JP-LIVE remains a separate protected operator action only after 16R is committed and exactly pushed, a fresh named-branch worktree is created at that pushed commit, the exact five-pin launcher passes there, and explicit-file credential preflight succeeds. No package-publication commit or workflow may be added until commits 19–22 are green and the runtime-asset decision is closed.
 
 ---
 
@@ -1852,7 +1972,16 @@ P0 Plan approved and baseline pinned
                     JP-BR + JP-CR + JP-ER
                          ├── JP-S2 Security re-audit
                          └── JP-R Final release re-audit
-                    JP-S2 + JP-R ── JP-LIVE Exact provider proof
+                    JP-S2 + JP-R ── JP-PREP Gap discovery
+                         └── JP-PRT Provisioning claim/tracking
+                              └── JP-PRH Prepare/handler hardening
+                                   └── JP-PRC CLI/docs reconciliation
+                                        └── First security + release re-audits: REVISE
+                                             └── JP-PRT-R Tracking remediation
+                                                  └── JP-PRH-R Handler remediation
+                                                       └── JP-PRC-R Docs/plan reconciliation
+                                                            └── Fresh security + release re-audits: PASS
+                                                                 └── JP-LIVE Exact provider proof
                     │
                     K Modal + L RunPod
                     │
@@ -1900,7 +2029,13 @@ P0 Plan approved and baseline pinned
 | JP-ER | Worker 1, bounded security remediation | Every inventory row labeled `JP-ER / Worker 1` | JP-S1, JP-E | Strict submit/inspect JobInfo agreement and durable claim-before-cancel observation |
 | JP-S2 | Fresh independent security specialist | Read-only re-audit; no inventory row or write scope | JP-BR, JP-CR, JP-ER | PASS on frozen 29-file manifest `55e2c876…f0f41`: 283/6, hostile 16, import/generic 87, no findings; no live install/provider proof |
 | JP-R | Fresh independent release specialist | Read-only final re-audit; no inventory row or write scope | JP-BR, JP-CR, JP-ER | PASS: affected 200/3; full JP/HF/import/order 393/15; tracking 249/1; CLI/capability/project/plugin/contract 268/1; broad cloud 673/15 with the same five accepted failures and two exclusions; 26-file compile, clean imports, diff warnings only, unchanged public API/`cloud.launch`, and clean skill sync |
-| JP-LIVE | Separately approved operator/protected workflow | No repository file ownership; one exact provider provisioning/submission/observation sequence | JP-S2 PASS, JP-R PASS, exact pushed proof, explicit credential preflight | Bounded provider evidence for at most one smoke; no retry and no generic capability enablement |
+| JP-PRT | Worker A, historical nested JP-PREP tracking contract | No current inventory rows; original scope transferred to JP-PRT-R after first post-JP-PREP audits returned REVISE | JP-PREP completed discovery checkpoint | Historical initial provisioning-claim/tracking implementation |
+| JP-PRH | Worker B, historical nested JP-PREP handler integration | No current inventory rows; original scope transferred to JP-PRH-R after first post-JP-PREP audits returned REVISE | JP-PRT | Historical initial prepare/secret/provisioning integration |
+| JP-PRC | Worker C, historical nested JP-PREP CLI/docs reconciliation | No current inventory rows; original scope transferred to JP-PRC-R after first post-JP-PREP audits returned REVISE | JP-PRH | Historical initial allowlist/assets/docs reconciliation |
+| JP-PRT-R | Worker A, bounded post-audit remediation | Provisioning-claim schema/module and tracking rows labeled `JP-PRT-R / Worker A` | JP-PRC and first post-JP-PREP security/release REVISE checkpoint | SourceLock-before-transport create/adopt recovery, restored closed event fields/reason mapping, terminal projection, and concurrency evidence |
+| JP-PRH-R | Worker B, bounded post-audit remediation | Shared utility/secret/helper/operator/handler rows labeled `JP-PRH-R / Worker B` | JP-PRT-R | CLAIMED terminalization plus narrowed POSIX opened-snapshot and native Windows share-mode guarantees |
+| JP-PRC-R | Worker C, bounded post-audit reconciliation | Parser/runtime-asset/import/docs/skill rows labeled `JP-PRC-R / Worker C` | JP-PRH-R | Preserve frozen allowlists, reconcile exact landed contracts/evidence/status, sync skills, and close inventory/DAG mechanically |
+| JP-LIVE | Separately approved operator/protected workflow | No repository file ownership; one exact provider provisioning/submission/observation sequence | JP-PRC-R, fresh independent post-remediation security/release PASSes, eligible 16R committed/exactly pushed, fresh named-branch worktree, five-pin launcher gate, explicit credential preflight | Bounded provider evidence for at most one smoke; no retry and no generic capability enablement |
 | K | Worker 2 | Every inventory row labeled `K / Worker 2` | J1, RA6, JP-LIVE | Modal adoption without a competing source model |
 | L | Worker 3 | Every inventory row labeled `L / Worker 3` | J1, RA6, JP-LIVE | RunPod adoption without a competing source model, after the dated official-API/SDK research gate |
 | M | Fresh QA specialist | Only `tests/acceptance/submodule_engine/test_acceptance.py` and `docs/review/submodule-engine-acceptance.md` | C, R, F, G, H, J0, RA6, K, L | Independent cross-platform/security/baseline report, including capsule integrity, unrelated-cwd ML source-cleanliness, and artifact-root acceptance; no fixes |
@@ -1935,8 +2070,12 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 | 8c | Freeze the integrated tree; preserve the three-finding verdict | Idle; no edits | JP-S1 independent security audit: REVISE | Idle; no edits |
 | 8d | Apply only the accepted bounded security remediations | JP-ER JobInfo/observer closure | JP-BR durable cancellation claim | JP-CR five-pin launcher/runtime closure |
 | 8e | Freeze remediation and docs; do not launch | Idle; no edits | JP-S2 independent security re-audit: PASS | JP-R final release/inventory re-audit: PASS; live install/provider proof still absent |
-| 8f | Only after JP-S2 PASS, final JP-R PASS, exact pushed proof, and credential preflight | Idle; no edits | JP-LIVE one authorized smoke | Idle; independent observation only |
-| 8g | Only after accepted JP-LIVE evidence; enforce later provider gates | Idle; review only | K Modal | L RunPod after dated official API/SDK research |
+| 8f | Implement JP-PREP prepare/provision separation and freeze the first nested tree | JP-PRT claim/tracking | JP-PRH handler integration after JP-PRT | JP-PRC CLI/docs after JP-PRH |
+| 8g | Preserve both first post-JP-PREP verdicts and exact evidence | Idle; no edits | Independent security re-audit: REVISE on four findings | Independent release re-audit: REVISE with classified failures/artifacts |
+| 8h | Apply the bounded post-audit remediation DAG | JP-PRT-R tracking/event/recovery closure | JP-PRH-R handler/credential closure after JP-PRT-R | JP-PRC-R docs/plan closure after JP-PRH-R |
+| 8i | Freeze and audit the exact remediated tree | Idle; no edits | Fresh security re-audit PASS: 400/5 | Fresh release re-audit PASS: focused 283/3, tracking 263/1, CLI/contract 284/1, broad runnable 624/16 + five historical, stale fixtures 60/8 classified |
+| 8j | Only after eligible 16R commit/exact push, fresh named-branch worktree, five-pin launcher, and credential preflight | Idle; no edits | JP-LIVE one authorized smoke | Idle; independent observation only |
+| 8k | Only after accepted JP-LIVE evidence; enforce later provider gates | Idle; review only | K Modal | L RunPod after dated official API/SDK research |
 | 9 | Commission fresh QA; accept report or return defects to original node owner | Idle; no feature edits | M independent QA in an isolated worktree/assignment | Idle; no feature edits |
 | 10 | Audit every release gate; merge N | Idle; review only | N docs/CI/release | Idle; review only |
 | 11 | Authorize separate downstream work only after engine release acceptance | O separate EHR owner | — | — |
@@ -1946,7 +2085,7 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 - Root does not edit implementation, tests, workflows, docs, or skills. Root maintains the ownership ledger, enforces barriers, audits diffs, and merges accepted commits.
 - `tuner/project/source_bundle.py` is the only source-lock model. I/J0/J1/K/L consume it and may not introduce provider-local source dataclasses that duplicate it. `bootstrap_core` executes that model; it is not a second model.
 - A owns `tuner/project/__init__.py`, `tuner/project/manifest.py`, `tuner/project/context.py`, `tuner/project/path_refs.py`, `tuner/project/config_layers.py`, `tuner/project/errors.py`, `tuner/project/secrets.py`, and `tuner/project/source_bundle.py`. B owns only `tuner/project/plugins.py`. This is the only intentional split inside `tuner/project/**`, and their waves prevent concurrent edits.
-- Provider boundaries are exclusive: I owns shared source/runtime foundation; J0 owns the shared bootstrap core/capsule; J1 owns its remaining HF descriptor/provider surfaces and volume transport; JX/JX2/JX3/JCT own only their named reconciliations. JP-A–E own the initial approved-run implementation. After JP-S1 REVISE, JP-BR exclusively owns the transferred cancellation tracking paths, JP-CR the transferred launcher/runtime paths, and JP-ER the transferred Jobs observation paths. Historical owners retain accepted commit history but no current write authority over transferred rows. JP-S1/JP-S2/JP-R/JP-LIVE own no files. K owns Modal; L owns RunPod.
+- Provider boundaries are exclusive: I owns shared source/runtime foundation; J0 owns the shared bootstrap core/capsule; J1 owns its remaining HF descriptor/provider surfaces and volume transport; JX/JX2/JX3/JCT own only their named reconciliations. JP-A–E own the initial approved-run implementation. After JP-S1 REVISE, JP-BR exclusively owns the transferred cancellation tracking paths, JP-CR the transferred launcher/runtime paths, and JP-ER the transferred Jobs observation paths. After the first post-JP-PREP audits returned REVISE, JP-PRT-R, JP-PRH-R, and JP-PRC-R exclusively own the current rows transferred from their corresponding historical JP-PRT/JP-PRH/JP-PRC nodes. Historical owners retain accepted commit history but no current write authority over transferred rows. JP-S1/JP-S2/JP-R/JP-LIVE and all re-auditors own no files. K owns Modal; L owns RunPod.
 - Before J0 starts, root records one atomic ownership transfer of `tuner/cloud/checkout.py`, `tuner/cloud/__init__.py`, `tests/cloud/test_checkout.py`, `docs/preparation/synaptic-runtime-asset-inventory.md`, and `tests/contract/test_runtime_assets.py`. JP later receives only `tuner/cloud/__init__.py` and `tests/contract/test_runtime_assets.py` for the bounded exports/assets extension; the underlying J0 contract remains unchanged.
 - J0's minimal inline verifier may validate only a bounded manifest and regular-file bytes, reject links/devices/oversize content, and copy verified bytes to private scratch. It may not parse source locks, run Git, resolve credentials, perform checkout, or implement a provider-local source policy.
 - J1 may feature-detect the installed HF client against a hermetic fake/fixture and fail closed when a read-only volume cannot be expressed. It may not silently select the immutable-URL fallback, upload a capsule, or claim live mounted-volume support from unit tests.
@@ -1966,8 +2105,8 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 5. J0's deterministic-build, manifest-integrity, private-scratch, no-link/device/oversize, canonical-core-delegation, and no-publication gates must pass before `J1` starts. HF installed-client, `Volume`, fake-client drift, digest-binding, and provider-integration gates belong exclusively to J1 and are J1 exit gates, not J0 prerequisites.
 6. `J0`, `E`, `G`, and `H` must merge before `J1`; JX/JX2/JX3 and JCT start only when their named J1 seams are frozen. JT may proceed from accepted E/J0 contracts but must join J1 before descriptor-consumption integration closes. JTR began only through the root-mediated original-SA6 remediation transfer and now retains seven inventoried tracking/API/caller rows.
 7. The complete pre-import JT/JTR/J1/JX/JX2/JX3/JCT tree passed original SA6, then first P6R, before RA6R returned the eager-import defect. JIR begins only through that root-mediated RA6R transfer and may edit exactly its ten inventoried paths. The impacted SA6I PASS applies to that final remediated implementation tree; final P6R must be accepted before the RA6 retry. Neither the pre-SA6 release PASS nor RA6R's otherwise-clean REVISE result can satisfy RA6, and no later PASS erases prior findings.
-8. JP-A–E require fresh RA6 PASS and Joseph's separately recorded bounded authorization. JP-S1 returned REVISE; only JP-BR/JP-CR/JP-ER may change the exact transferred remediation paths. JP-S2 and final JP-R audit the same frozen remediated tree and both must PASS before JP-LIVE.
-9. JP-LIVE additionally requires exact clean pushed-source proof, the isolated exact five-pin launcher, clean-venv protected import/help proof, and explicit credential-file preflight. It may provision and submit at most once; ambiguous mutation/submission/cancellation consumes the relevant authority and cannot be retried. `cloud.launch` remains unavailable afterward unless a future generic capability design is separately accepted.
+8. JP-A–E require fresh RA6 PASS and Joseph's separately recorded bounded authorization. JP-S1 returned REVISE; only JP-BR/JP-CR/JP-ER may change those exact transferred remediation paths. Historical JP-S2 and final JP-R PASS apply only to their earlier frozen tree. The later JP-PREP tree's first independent audits returned REVISE; only JP-PRT-R/JP-PRH-R/JP-PRC-R own the current transferred rows. Fresh independent security and release re-audits now both PASS that exact remediated tree, making checkpoint 16R eligible.
+9. JP-LIVE additionally requires 16R commit/exact named-branch push, a fresh named-branch worktree at that pushed commit, the isolated exact five-pin launcher and clean-venv protected import/help proof there, and explicit credential-file preflight. It may provision and submit at most once; absent/invalid stranded-CLAIMED recovery terminalizes without provider retry, and ambiguous mutation/submission/cancellation consumes the relevant authority and cannot be retried. `cloud.launch` remains unavailable afterward unless a future generic capability design is separately accepted.
 10. K and L require accepted JP-LIVE evidence; L also requires the dated official RunPod API/SDK research gate before any adapter edit. K and L must merge before independent QA node `M`; `M` must pass before `N`, and no publication workflow or release is authorized before `N` passes.
 11. `O` begins only after `N` and an accepted engine commit/release.
 
@@ -2056,6 +2195,9 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 - [x] Original JP-S1 REVISE records the process-local cancellation, JobInfo agreement, and incomplete launcher/runtime findings.
 - [x] JP-S2 PASS applies to frozen 29-file manifest `55e2c876dd8cc282a43248a3eeaf3f445f6e452ce76ab2d7a0b814b460ef0f41` with 283 passed/6 skipped, hostile 16, import/generic 87, and no findings; no live install/provider proof is inferred.
 - [x] Final JP-R independently PASSed the exact remediated JP implementation plus frozen docs; the evidence is recorded above and makes no live installation or provider claim.
+- [x] The first post-JP-PREP security REVISE with four findings and release REVISE with classified evidence are preserved exactly above; neither historical PASS is reused for the changed tree.
+- [x] JP-PRT-R and JP-PRH-R remediation evidence is recorded without self-approval, including SourceLock-before-transport recovery, restored event fields/reason mapping, CLAIMED terminalization, and the narrowed platform-specific credential guarantees.
+- [x] Fresh independent security and release re-audits both PASS the exact JP-PRT-R/JP-PRH-R/JP-PRC-R tree: security 400/5; release focused 283/3, tracking 263/1, CLI/contract 284/1, broad runnable 624/16 plus five historical failures, and stale fixtures 60/8 classified.
 - [ ] JP-LIVE proves the one exact mounted-volume bootstrap smoke under pushed-source, credential, duration, and cost gates; official API research and hermetic fakes alone are not live proof.
 - [ ] `cloud.launch` and generic training remain unavailable after the fixed smoke; capability enablement requires a later accepted architecture/security/release decision.
 - [ ] Modal and RunPod remain blocked until accepted JP-LIVE evidence, then adopt the same lock/layout without schema forks.
@@ -2086,8 +2228,8 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 
 - **Overall complexity:** Very High
 - **Primary risk:** Cross-cutting filesystem and source-identity assumptions
-- **Planned existing files modified:** 145 inventory rows
-- **Planned new files/surfaces:** 98 inventory rows including schemas, public facade, workflows, docs, bootstrap/JP surfaces, and tests
+- **Planned existing files modified:** 147 inventory rows
+- **Planned new files/surfaces:** 102 inventory rows including schemas, public facade, workflows, docs, bootstrap/JP surfaces, and tests
 - **Provider order:** HF Jobs → Modal → RunPod
 - **Required specialists:** backend/project-context, packaging/API, local runtime/DevOps, cloud provider, test/QA, security, documentation
 - **External dependencies:** None required for the root contract; JP alone uses an isolated Python 3.12 environment pinned to `huggingface_hub==1.27.0`, never the trainer environment

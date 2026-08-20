@@ -18,20 +18,26 @@ PROVIDER_ROOTS = {
     "modal",
     "runpod",
     "transformers",
+    "torch",
+    "unsloth",
 }
 IMPORT_LIGHT_MODULES = (
     "tuner.cloud",
     "tuner.cloud.hf_jobs",
+    "tuner.cloud.hf_provisioning_claim",
     "tuner.backends",
     "tuner.backends.training",
     "tuner.backends.training.cloud",
     "tuner.backends.registry",
     "tuner.handlers.stages",
+    "tuner.handlers.stages._util",
     "Evaluator",
     "shared.experiment_tracking",
     "tuner.handlers.cloud_train_handler",
     "tuner.handlers.cloud_pipeline_handler",
     "tuner.handlers.cloud_run_handler",
+    "tuner.handlers.hf_source_handler",
+    "tuner.handlers.hf_smoke_handler",
 )
 
 

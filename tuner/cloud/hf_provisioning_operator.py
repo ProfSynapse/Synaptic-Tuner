@@ -34,6 +34,10 @@ _MEMBERS = (
 _MAX_MEMBER_BYTES = 4 * 1024 * 1024
 
 
+class _ProviderReadUncertain(Exception):
+    """Provider read failed after the potentially mutating bucket boundary."""
+
+
 @dataclass(frozen=True)
 class HFProvisioningFailure:
     code: str
@@ -85,21 +89,31 @@ def provision_hf_source_transport(
     )
 
     # This probe covers all reads and mutations and must precede create_bucket.
-    provider.probe_signatures()
     try:
+        provider.probe_signatures()
         canonical_bucket = provider.ensure_private_bucket(bucket_id)
     except Exception:
         # create_bucket(exist_ok=True) can still have created the bucket before
         # a response/readback failure. Its outcome is therefore mutation-ambiguous.
         return _ambiguous_outcome()
-    remote = provider.list_members(canonical_bucket, prefix=prefix)
     expected_paths = {
         f"{prefix}/{member}": digest for member, (_content, digest) in local.items()
     }
 
+    try:
+        remote = provider.list_members(canonical_bucket, prefix=prefix)
+    except Exception:
+        # The preceding exist_ok bucket call may have created the bucket even
+        # when this first read fails.  Once that call boundary is crossed the
+        # protected authorization cannot safely be replayed.
+        return _ambiguous_outcome()
+
     if remote:
-        _require_exact_remote_paths(remote, expected_paths, prefix=prefix)
-        _verify_remote_bytes(provider, canonical_bucket, remote, expected_paths)
+        try:
+            _require_exact_remote_paths(remote, expected_paths, prefix=prefix)
+            _verify_remote_bytes(provider, canonical_bucket, remote, expected_paths)
+        except Exception:
+            return _ambiguous_outcome()
         return HFProvisioningOutcome(
             evidence=evidence,
             evidence_sha256=document_sha256(evidence),
@@ -132,7 +146,7 @@ def _ambiguous_outcome() -> HFProvisioningOutcome:
     return HFProvisioningOutcome(
         mutated=True,
         failure=HFProvisioningFailure(
-            code="mutation_ambiguous",
+            code="PROVIDER_OUTCOME_AMBIGUOUS",
             message=(
                 "HF JP provider mutation outcome is ambiguous; inspect the exact immutable "
                 "target read-only and do not retry automatically."
@@ -201,7 +215,10 @@ def _verify_remote_bytes(
             local = root / f"member-{index}"
             downloads.append((member.provider_object, local))
             local_by_remote[member.path] = local
-        provider.download_members(bucket_id, files=downloads)
+        try:
+            provider.download_members(bucket_id, files=downloads)
+        except Exception as exc:
+            raise _ProviderReadUncertain from exc
         for remote_path, expected_digest in expected.items():
             actual = hashlib.sha256(_read_regular(local_by_remote[remote_path])).hexdigest()
             if actual != expected_digest:

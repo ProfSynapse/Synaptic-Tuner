@@ -151,8 +151,8 @@ def test_nonempty_divergent_prefix_stops_without_mutation(tmp_path, monkeypatch)
     prepared = _prepared(tmp_path)
     prefix = prepared.descriptor["volume"]["path"]
     client = BucketClient({f"{prefix}/unexpected": b"x"})
-    with pytest.raises(CloudProviderError, match="not exactly"):
-        _run(monkeypatch, prepared, client)
+    outcome = _run(monkeypatch, prepared, client)
+    assert outcome.failure.code == "PROVIDER_OUTCOME_AMBIGUOUS"
     assert "upload" not in client.calls
 
 
@@ -161,8 +161,8 @@ def test_identical_paths_with_wrong_bytes_stop_without_mutation(tmp_path, monkey
     store = _remote_store(prepared)
     store[next(iter(store))] = b"wrong"
     client = BucketClient(store)
-    with pytest.raises(CloudProviderError, match="digest"):
-        _run(monkeypatch, prepared, client)
+    outcome = _run(monkeypatch, prepared, client)
+    assert outcome.failure.code == "PROVIDER_OUTCOME_AMBIGUOUS"
     assert "upload" not in client.calls
 
 
@@ -172,7 +172,7 @@ def test_upload_ambiguity_returns_bounded_failure_without_evidence_or_retry(tmp_
     outcome = _run(monkeypatch, prepared, client)
     assert not outcome.succeeded
     assert outcome.evidence is None and outcome.evidence_sha256 is None
-    assert outcome.failure.code == "mutation_ambiguous"
+    assert outcome.failure.code == "PROVIDER_OUTCOME_AMBIGUOUS"
     assert not outcome.failure.retryable
     assert "secret-value" not in outcome.failure.message
     assert client.calls.count("upload") == 1
@@ -188,9 +188,49 @@ def test_bucket_creation_ambiguity_returns_no_evidence_and_no_upload(tmp_path, m
 
     client = CreateFailure()
     outcome = _run(monkeypatch, prepared, client)
-    assert outcome.failure.code == "mutation_ambiguous"
+    assert outcome.failure.code == "PROVIDER_OUTCOME_AMBIGUOUS"
     assert outcome.evidence is None
     assert client.calls == ["create"]
+
+
+def test_first_tree_read_uncertainty_after_bucket_call_is_terminal_ambiguous(
+    tmp_path, monkeypatch
+) -> None:
+    prepared = _prepared(tmp_path)
+
+    class ListFailure(BucketClient):
+        def list_bucket_tree(self, bucket_id, prefix=None, *, recursive=None, token=None):
+            self.calls.append("list")
+            raise RuntimeError(f"uncertain {token}")
+
+    client = ListFailure()
+    outcome = _run(monkeypatch, prepared, client)
+    assert not outcome.succeeded
+    assert outcome.failure.code == "PROVIDER_OUTCOME_AMBIGUOUS"
+    assert outcome.failure.retryable is False
+    assert "secret-value" not in outcome.failure.message
+    assert client.calls == ["create", "info", "list"]
+
+
+def test_existing_prefix_readback_uncertainty_is_terminal_ambiguous(
+    tmp_path, monkeypatch
+) -> None:
+    prepared = _prepared(tmp_path)
+
+    class DownloadFailure(BucketClient):
+        def download_bucket_files(
+            self, bucket_id, files, *, raise_on_missing_files=False, token=None
+        ):
+            self.calls.append("download")
+            raise RuntimeError(f"uncertain {token}")
+
+    client = DownloadFailure(_remote_store(prepared))
+    outcome = _run(monkeypatch, prepared, client)
+    assert not outcome.succeeded
+    assert outcome.failure.code == "PROVIDER_OUTCOME_AMBIGUOUS"
+    assert outcome.failure.retryable is False
+    assert "secret-value" not in outcome.failure.message
+    assert client.calls == ["create", "info", "list", "download"]
 
 
 def test_invalid_evidence_identity_fails_before_any_provider_call(tmp_path, monkeypatch) -> None:
@@ -259,8 +299,18 @@ def test_unknown_or_unrelated_tree_entries_fail_closed(tmp_path, monkeypatch, ex
             entries.append(SimpleNamespace(type=extra.type, path=path))
             return entries
 
-    with pytest.raises(CloudProviderError, match="inspect|descriptor-identical"):
-        _run(monkeypatch, prepared, ExtraEntryClient(_remote_store(prepared)))
+    if extra.type == "symlink":
+        # The provider adapter intentionally collapses malformed tree entries
+        # and transport failures into the same bounded inspection error.  The
+        # preceding exist_ok bucket call may have mutated, so this is terminal
+        # ambiguity rather than retryable validation.
+        outcome = _run(monkeypatch, prepared, ExtraEntryClient(_remote_store(prepared)))
+        assert not outcome.succeeded
+        assert outcome.failure.code == "PROVIDER_OUTCOME_AMBIGUOUS"
+        assert outcome.failure.retryable is False
+    else:
+        outcome = _run(monkeypatch, prepared, ExtraEntryClient(_remote_store(prepared)))
+        assert outcome.failure.code == "PROVIDER_OUTCOME_AMBIGUOUS"
 
 
 def test_file_directory_path_collision_fails_closed(tmp_path, monkeypatch) -> None:
@@ -276,8 +326,8 @@ def test_file_directory_path_collision_fails_closed(tmp_path, monkeypatch) -> No
             )
             return entries
 
-    with pytest.raises(CloudProviderError, match="colliding"):
-        _run(monkeypatch, prepared, CollisionClient(_remote_store(prepared)))
+    outcome = _run(monkeypatch, prepared, CollisionClient(_remote_store(prepared)))
+    assert outcome.failure.code == "PROVIDER_OUTCOME_AMBIGUOUS"
 
 
 def test_upload_handoff_uses_authenticated_immutable_bytes_not_mutable_paths(tmp_path, monkeypatch) -> None:

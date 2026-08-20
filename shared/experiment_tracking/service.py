@@ -4,10 +4,11 @@ import json
 import hashlib
 import re
 import stat
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
-from threading import RLock
+from threading import RLock, local
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from .experiment import (
@@ -56,6 +57,22 @@ class HFCancellationClaimResult:
         return json.loads(self._document_json)
 
 
+@dataclass(frozen=True)
+class HFProvisioningClaimResult:
+    """Immutable outcome/current head of the durable provisioning claim."""
+
+    event_id: str
+    event_uri: str
+    event_sha256: str
+    state: str
+    provider_attempt_authorized: bool
+    _document_json: str
+
+    @property
+    def document(self) -> dict[str, object]:
+        return json.loads(self._document_json)
+
+
 def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -97,6 +114,8 @@ class TrackingService:
         self.base_dir = self._resolve_base_dir(base_dir)
         self.registry = registry or RunRegistry(self.base_dir / "registry.jsonl")
         self._lock = RLock()
+        self._provisioning_execution = local()
+        self._source_preparation_execution = local()
 
     def _resolve_base_dir(self, base_dir: str | Path | None) -> Path:
         if self.project_context is None:
@@ -228,7 +247,9 @@ class TrackingService:
             serialized=serialized,
         )
 
-    def persist_source_lock(self, experiment: Experiment, source_lock: SourceLock) -> None:
+    def persist_source_lock(
+        self, experiment: Experiment, source_lock: SourceLock
+    ) -> SourceLock:
         if source_lock.run_id != experiment.experiment_id:
             raise ValueError("Source lock run_id must match the experiment_id")
         serialized = _canonical_json_bytes(source_lock.to_dict())
@@ -244,7 +265,26 @@ class TrackingService:
             sha256=digest,
             path=path,
             serialized=serialized,
+            adopt_identical_orphan=True,
         )
+        return self.load_source_lock(experiment)
+
+    def load_source_lock(self, experiment: Experiment) -> SourceLock:
+        """Load and authenticate the exact immutable SourceLock projection."""
+
+        canonical = self._verify_provenance_artifact(
+            kind="source lock",
+            uri=experiment.source_lock_uri,
+            expected_sha256=experiment.source_lock_sha256,
+        )
+        try:
+            payload = json.loads(canonical, object_pairs_hook=_reject_duplicate_json_keys)
+            source_lock = SourceLock.from_dict(payload)
+        except Exception as exc:
+            raise ProvenanceIntegrityError("Stored source lock is invalid") from exc
+        if source_lock.run_id != experiment.experiment_id:
+            raise ProvenanceIntegrityError("Stored source lock belongs to another experiment")
+        return source_lock
 
     def _persist_provenance_pair(
         self,
@@ -257,6 +297,7 @@ class TrackingService:
         sha256: str,
         path: Path,
         serialized: bytes,
+        adopt_identical_orphan: bool = False,
     ) -> None:
         experiment_path = self._experiment_path(experiment.experiment_id)
         with self._lock:
@@ -313,7 +354,12 @@ class TrackingService:
                         f"{kind.title()} must be established from neutral durable state"
                     )
                 self.verify_experiment_provenance(durable)
-                _atomic_write_bytes(path, serialized)
+                if adopt_identical_orphan and path.exists():
+                    self._require_identical_immutable_orphan(
+                        path, serialized, kind=kind
+                    )
+                else:
+                    _atomic_write_bytes(path, serialized)
                 candidate = replace(
                     durable,
                     **{uri_field: uri, sha256_field: sha256},
@@ -324,6 +370,41 @@ class TrackingService:
                     candidate, experiment, set(self._protected_field_names())
                 )
                 self._stamp_snapshot(experiment, candidate)
+
+    def _require_identical_immutable_orphan(
+        self, path: Path, serialized: bytes, *, kind: str
+    ) -> None:
+        root = self.base_dir.resolve(strict=False)
+        try:
+            relative = path.absolute().relative_to(root)
+        except (OSError, ValueError):
+            raise ProvenanceIntegrityError(f"{kind.title()} artifact escapes tracking root")
+        if not _contained(path, root):
+            raise ProvenanceIntegrityError(f"{kind.title()} artifact escapes tracking root")
+        current = root
+        for part in relative.parts:
+            current = current / part
+            if current.exists() and _is_link_or_reparse(current):
+                raise ProvenanceIntegrityError(
+                    f"{kind.title()} artifact cannot use symlinks or reparse points"
+                )
+        try:
+            info = path.stat()
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
+                raise ProvenanceIntegrityError(
+                    f"Existing {kind} orphan must be a bounded regular file"
+                )
+            existing = path.read_bytes()
+        except ProvenanceIntegrityError:
+            raise
+        except OSError as exc:
+            raise ProvenanceIntegrityError(
+                f"Existing {kind} orphan is unreadable"
+            ) from exc
+        if existing != serialized:
+            raise ProvenanceIntegrityError(
+                f"Existing {kind} orphan is not byte-identical"
+            )
 
     def prepare_experiment_provenance(
         self,
@@ -355,7 +436,69 @@ class TrackingService:
                 expected_sha256=experiment.source_lock_sha256,
             )
         self.verify_source_transport_provenance(experiment)
+        self.verify_hf_provisioning_provenance(experiment)
         self.verify_hf_submission_provenance(experiment)
+
+    def verify_hf_provisioning_provenance(self, experiment: Experiment) -> None:
+        """Verify the durable provisioning event head and all predecessor bindings."""
+
+        experiment.__post_init__()
+        if experiment.hf_provisioning_state is None:
+            return
+        event = self._verify_hf_provisioning_event_artifact(
+            uri=experiment.hf_provisioning_event_uri,
+            expected_sha256=experiment.hf_provisioning_event_sha256,
+        )
+        if event["state"] != experiment.hf_provisioning_state:
+            raise ProvenanceIntegrityError(
+                "HF provisioning event state does not match the experiment"
+            )
+        if event["experiment_id"] != experiment.experiment_id:
+            raise ProvenanceIntegrityError(
+                "HF provisioning event belongs to another experiment"
+            )
+        descriptor = self._verify_hf_tracking_artifact(
+            kind="source transport",
+            uri=experiment.source_transport_uri,
+            expected_sha256=experiment.source_transport_sha256,
+            schema_version="synaptic-hf-source-transport/v1",
+            experiment_id=experiment.experiment_id,
+        )
+        capsule = descriptor["capsule"]
+        expected = {
+            "descriptor": {
+                "uri": experiment.source_transport_uri,
+                "sha256": experiment.source_transport_sha256,
+            },
+            "source_lock": {
+                "uri": experiment.source_lock_uri,
+                "sha256": experiment.source_lock_sha256,
+            },
+            "volume": {
+                key: descriptor["volume"][key]
+                for key in ("source", "path", "type", "read_only")
+            },
+            "bundle_sha256": descriptor["bundle"]["content_sha256"],
+            "capsule_manifest_sha256": capsule["manifest"]["sha256"],
+            "checkout_policy_sha256": descriptor["checkout_policy"]["sha256"],
+        }
+        for field_name, expected_value in expected.items():
+            if event[field_name] != expected_value:
+                raise ProvenanceIntegrityError(
+                    f"HF provisioning event does not bind durable {field_name}"
+                )
+        expected_evidence = (
+            {
+                "uri": experiment.provisioning_evidence_uri,
+                "sha256": experiment.provisioning_evidence_sha256,
+            }
+            if experiment.hf_provisioning_state == "SUCCEEDED"
+            else None
+        )
+        if event["evidence"] != expected_evidence:
+            raise ProvenanceIntegrityError(
+                "HF provisioning event evidence does not match the experiment"
+            )
 
     def verify_source_transport_provenance(self, experiment: Experiment) -> None:
         """Verify immutable HF descriptor/evidence references when present."""
@@ -397,7 +540,10 @@ class TrackingService:
                 raise ProvenanceIntegrityError(
                     "Provisioning evidence does not reference the experiment source transport"
                 )
-            if experiment.source_transport_state in {"CONSUMABLE", "SUBMITTED"}:
+            if (
+                experiment.source_transport_state in {"CONSUMABLE", "SUBMITTED"}
+                or experiment.hf_provisioning_state == "SUCCEEDED"
+            ):
                 try:
                     from tuner.cloud.hf_provisioning import validate_hf_evidence_binding
 
@@ -413,13 +559,24 @@ class TrackingService:
                     ) from exc
 
     def require_consumable_hf_transport(self, experiment: Experiment) -> None:
-        """Fail closed unless an HF run has a verified consumable transport."""
+        """Authorize protected use only after durable successful provisioning."""
 
         self.verify_experiment_provenance(experiment)
-        if experiment.source_transport_state not in {"CONSUMABLE", "SUBMITTED"}:
+        self._require_authorized_hf_provisioning(experiment)
+
+    def _require_authorized_hf_provisioning(self, experiment: Experiment) -> None:
+        """Require the exact authenticated provisioning chain used by protected calls."""
+
+        if experiment.source_transport_state != "CONSUMABLE":
             raise ProvenanceIntegrityError(
                 "HF source transport is not verified as CONSUMABLE"
             )
+        if experiment.hf_provisioning_state != "SUCCEEDED":
+            raise ProvenanceIntegrityError(
+                "HF protected operation requires durable SUCCEEDED provisioning"
+            )
+        self.verify_source_transport_provenance(experiment)
+        self.verify_hf_provisioning_provenance(experiment)
 
     def verify_hf_submission_provenance(self, experiment: Experiment) -> None:
         """Verify the separate approval and append-only submission-event head."""
@@ -427,6 +584,7 @@ class TrackingService:
         experiment.__post_init__()
         if experiment.hf_run_approval_uri is None:
             return
+        self._require_authorized_hf_provisioning(experiment)
         approval = self._verify_hf_run_approval_artifact(
             uri=experiment.hf_run_approval_uri,
             expected_sha256=experiment.hf_run_approval_sha256,
@@ -536,10 +694,7 @@ class TrackingService:
         with self._lock:
             with _PathLock(experiment_path):
                 durable = self._load_durable_experiment_for_hf_transition(experiment)
-                if durable.source_transport_state != "CONSUMABLE":
-                    raise ProvenanceIntegrityError(
-                        "HF run approval requires source transport state CONSUMABLE"
-                    )
+                self._require_authorized_hf_provisioning(durable)
                 if durable.hf_submission_state is not None:
                     raise ProvenanceIntegrityError(
                         "HF run approval cannot be replayed or replaced"
@@ -570,6 +725,7 @@ class TrackingService:
         with self._lock:
             with _PathLock(experiment_path):
                 durable = self._load_durable_experiment_for_hf_transition(experiment)
+                self._require_authorized_hf_provisioning(durable)
                 if durable.hf_submission_state != "APPROVED":
                     raise ProvenanceIntegrityError(
                         "HF authorization is already claimed or is not approved"
@@ -623,6 +779,7 @@ class TrackingService:
         with self._lock:
             with _PathLock(experiment_path):
                 durable = self._load_durable_experiment_for_hf_transition(experiment)
+                self._require_authorized_hf_provisioning(durable)
                 if durable.hf_submission_state != "SUBMITTING":
                     raise ProvenanceIntegrityError(
                         "HF submission terminal event requires an active SUBMITTING claim"
@@ -709,6 +866,380 @@ class TrackingService:
                     submitted_event=submitted,
                     occurred_at=occurred_at,
                 )
+
+    @contextmanager
+    def hf_source_preparation_execution_lock(self, experiment_id: str):
+        """Serialize provider-free source preparation across threads/processes."""
+
+        held = getattr(self._source_preparation_execution, "experiment_ids", set())
+        if experiment_id in held:
+            raise ProvenanceIntegrityError(
+                "HF source preparation execution lock is not reentrant"
+            )
+        lock_path = (
+            self.base_dir
+            / "experiments"
+            / experiment_id
+            / "cloud"
+            / "hf"
+            / "source-preparation"
+            / "execution.lock"
+        )
+        with _PathLock(lock_path):
+            current = set(
+                getattr(self._source_preparation_execution, "experiment_ids", set())
+            )
+            current.add(experiment_id)
+            self._source_preparation_execution.experiment_ids = current
+            try:
+                yield
+            finally:
+                current = set(
+                    getattr(self._source_preparation_execution, "experiment_ids", set())
+                )
+                current.discard(experiment_id)
+                self._source_preparation_execution.experiment_ids = current
+
+    @contextmanager
+    def hf_provisioning_execution_lock(self, experiment_id: str):
+        """Hold the kernel-backed lock spanning claim, provider call, and terminal CAS."""
+
+        held = getattr(self._provisioning_execution, "experiment_ids", set())
+        if experiment_id in held:
+            raise ProvenanceIntegrityError("HF provisioning execution lock is not reentrant")
+        lock_path = (
+            self.base_dir
+            / "experiments"
+            / experiment_id
+            / "cloud"
+            / "hf"
+            / "provisioning"
+            / "execution.lock"
+        )
+        with _PathLock(lock_path):
+            current = set(getattr(self._provisioning_execution, "experiment_ids", set()))
+            current.add(experiment_id)
+            self._provisioning_execution.experiment_ids = current
+            try:
+                yield
+            finally:
+                current = set(getattr(self._provisioning_execution, "experiment_ids", set()))
+                current.discard(experiment_id)
+                self._provisioning_execution.experiment_ids = current
+
+    def claim_hf_provisioning(
+        self,
+        experiment: Experiment,
+        claim: Mapping[str, object],
+    ) -> HFProvisioningClaimResult:
+        """Durably consume at-most-once provider authority for source provisioning."""
+
+        self._require_provisioning_execution_lock(experiment.experiment_id)
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock:
+            with _PathLock(experiment_path):
+                durable = self._load_durable_experiment_for_provisioning(experiment)
+                accepted = self._validate_hf_provisioning_claim_identity(durable, claim)
+                serialized = self._canonical_hf_provisioning_bytes(accepted)
+                digest = hashlib.sha256(serialized).hexdigest()
+                path = self._hf_provisioning_event_path(
+                    durable.experiment_id, str(accepted["event_id"])
+                )
+                uri = self.tracking_uri(path)
+
+                if durable.hf_provisioning_state is not None:
+                    current = self._verify_hf_provisioning_event_artifact(
+                        uri=durable.hf_provisioning_event_uri,
+                        expected_sha256=durable.hf_provisioning_event_sha256,
+                    )
+                    original = current
+                    original_uri = durable.hf_provisioning_event_uri or ""
+                    original_sha256 = durable.hf_provisioning_event_sha256 or ""
+                    if current["state"] != "CLAIMED":
+                        previous = current.get("previous_event")
+                        if not isinstance(previous, dict):
+                            raise ProvenanceIntegrityError(
+                                "HF provisioning terminal event has no claim predecessor"
+                            )
+                        original = self._verify_hf_provisioning_event_artifact(
+                            uri=str(previous.get("uri") or ""),
+                            expected_sha256=str(previous.get("sha256") or ""),
+                        )
+                        original_uri = str(previous.get("uri") or "")
+                        original_sha256 = str(previous.get("sha256") or "")
+                    if original != accepted or (original_uri, original_sha256) != (
+                        uri,
+                        digest,
+                    ):
+                        raise ProvenanceIntegrityError(
+                            "HF provisioning claim cannot be replayed or replaced"
+                        )
+                    self._copy_hf_provisioning_projection(durable, experiment)
+                    self._copy_transport_projection(durable, experiment)
+                    self._stamp_snapshot(experiment, durable)
+                    return self._hf_provisioning_claim_result(
+                        current,
+                        uri=durable.hf_provisioning_event_uri or "",
+                        sha256=durable.hf_provisioning_event_sha256 or "",
+                        provider_attempt_authorized=False,
+                    )
+
+                if durable.source_transport_state != "PREPARED":
+                    raise ProvenanceIntegrityError(
+                        "HF provisioning claim requires PREPARED source transport"
+                    )
+
+                self._persist_immutable_hf_artifact(path, serialized)
+                candidate = replace(
+                    durable,
+                    hf_provisioning_event_uri=uri,
+                    hf_provisioning_event_sha256=digest,
+                    hf_provisioning_state="CLAIMED",
+                )
+                self.verify_experiment_provenance(candidate)
+                _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+                self._copy_hf_provisioning_projection(candidate, experiment)
+                self._stamp_snapshot(experiment, candidate)
+                return self._hf_provisioning_claim_result(
+                    accepted,
+                    uri=uri,
+                    sha256=digest,
+                    provider_attempt_authorized=True,
+                )
+
+    def find_hf_provisioning_terminal(
+        self, experiment: Experiment
+    ) -> HFProvisioningClaimResult | None:
+        """Discover at most one exact orphan terminal for a durable CLAIMED head."""
+
+        self._require_provisioning_execution_lock(experiment.experiment_id)
+        durable = self._load_durable_experiment_for_provisioning(experiment)
+        if durable.hf_provisioning_state != "CLAIMED":
+            return None
+        claim = self._verify_hf_provisioning_event_artifact(
+            uri=durable.hf_provisioning_event_uri,
+            expected_sha256=durable.hf_provisioning_event_sha256,
+        )
+        events_dir = self._hf_provisioning_event_path(
+            durable.experiment_id, str(claim["event_id"])
+        ).parent
+        if not events_dir.exists():
+            return None
+        if _is_link_or_reparse(events_dir) or not events_dir.is_dir():
+            raise ProvenanceIntegrityError(
+                "HF provisioning event directory must be a regular directory"
+            )
+        candidates: list[HFProvisioningClaimResult] = []
+        count = 0
+        try:
+            entries = events_dir.iterdir()
+            for path in entries:
+                count += 1
+                if count > 8:
+                    raise ProvenanceIntegrityError(
+                        "HF provisioning terminal discovery exceeded its fixed bound"
+                    )
+                if (
+                    _is_link_or_reparse(path)
+                    or not path.is_file()
+                    or not re.fullmatch(r"[0-9a-f]{64}\.json", path.name)
+                    or path.stat().st_size > 64 * 1024
+                ):
+                    raise ProvenanceIntegrityError(
+                        "HF provisioning event directory contains an unknown artifact"
+                    )
+                uri = self.tracking_uri(path)
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                document = self._verify_hf_provisioning_event_artifact(
+                    uri=uri,
+                    expected_sha256=digest,
+                )
+                if path.stem != document["event_id"]:
+                    raise ProvenanceIntegrityError(
+                        "HF provisioning event filename does not match its event ID"
+                    )
+                if document["state"] == "CLAIMED":
+                    if document != claim or (uri, digest) != (
+                        durable.hf_provisioning_event_uri,
+                        durable.hf_provisioning_event_sha256,
+                    ):
+                        raise ProvenanceIntegrityError(
+                            "HF provisioning event directory contains a conflicting claim"
+                        )
+                    continue
+                if document["previous_event"] != {
+                    "uri": durable.hf_provisioning_event_uri,
+                    "sha256": durable.hf_provisioning_event_sha256,
+                }:
+                    raise ProvenanceIntegrityError(
+                        "HF provisioning orphan terminal does not bind the durable claim"
+                    )
+                self._validate_hf_provisioning_terminal(
+                    durable, document, previous_event=claim
+                )
+                candidates.append(
+                    self._hf_provisioning_claim_result(
+                        document,
+                        uri=uri,
+                        sha256=digest,
+                        provider_attempt_authorized=False,
+                    )
+                )
+        except ProvenanceIntegrityError:
+            raise
+        except OSError as exc:
+            raise ProvenanceIntegrityError(
+                "HF provisioning terminal discovery could not authenticate its directory"
+            ) from exc
+        if len(candidates) > 1:
+            raise ProvenanceIntegrityError(
+                "HF provisioning terminal discovery found multiple terminal events"
+            )
+        return candidates[0] if candidates else None
+
+    def record_hf_provisioning_succeeded(
+        self,
+        experiment: Experiment,
+        terminal_event: Mapping[str, object],
+        *,
+        evidence_uri: str,
+        evidence_sha256: str,
+    ) -> Experiment:
+        """Atomically bind verified evidence, SUCCEEDED, and PREPARED→ACKNOWLEDGED."""
+
+        return self._record_hf_provisioning_terminal(
+            experiment,
+            terminal_event,
+            state="SUCCEEDED",
+            evidence_uri=evidence_uri,
+            evidence_sha256=evidence_sha256,
+        )
+
+    def record_hf_provisioning_ambiguous(
+        self,
+        experiment: Experiment,
+        terminal_event: Mapping[str, object],
+    ) -> Experiment:
+        """Record terminal provider ambiguity without evidence or retry authority."""
+
+        return self._record_hf_provisioning_terminal(
+            experiment,
+            terminal_event,
+            state="AMBIGUOUS",
+            evidence_uri=None,
+            evidence_sha256=None,
+        )
+
+    def _record_hf_provisioning_terminal(
+        self,
+        experiment: Experiment,
+        terminal_event: Mapping[str, object],
+        *,
+        state: str,
+        evidence_uri: str | None,
+        evidence_sha256: str | None,
+    ) -> Experiment:
+        self._require_provisioning_execution_lock(experiment.experiment_id)
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock:
+            with _PathLock(experiment_path):
+                durable = self._load_durable_experiment_for_provisioning(experiment)
+                current = self._verify_hf_provisioning_event_artifact(
+                    uri=durable.hf_provisioning_event_uri,
+                    expected_sha256=durable.hf_provisioning_event_sha256,
+                )
+                if durable.hf_provisioning_state == state:
+                    accepted = self._validate_hf_provisioning_terminal(
+                        durable, terminal_event, previous_event=None
+                    )
+                    if current != accepted:
+                        raise ProvenanceIntegrityError(
+                            "HF provisioning terminal event cannot be replaced"
+                        )
+                    self._copy_transport_projection(durable, experiment)
+                    self._copy_hf_provisioning_projection(durable, experiment)
+                    self._stamp_snapshot(experiment, durable)
+                    return experiment
+                if durable.hf_provisioning_state != "CLAIMED":
+                    raise ProvenanceIntegrityError(
+                        "HF provisioning terminal event requires durable CLAIMED state"
+                    )
+                accepted = self._validate_hf_provisioning_terminal(
+                    durable, terminal_event, previous_event=current
+                )
+                if accepted["state"] != state:
+                    raise ProvenanceIntegrityError(
+                        f"HF provisioning terminal event must be {state}"
+                    )
+                expected_previous = {
+                    "uri": durable.hf_provisioning_event_uri,
+                    "sha256": durable.hf_provisioning_event_sha256,
+                }
+                if accepted["previous_event"] != expected_previous:
+                    raise ProvenanceIntegrityError(
+                        "HF provisioning terminal event does not bind durable CLAIMED event"
+                    )
+                expected_evidence = (
+                    {"uri": evidence_uri, "sha256": evidence_sha256}
+                    if state == "SUCCEEDED"
+                    else None
+                )
+                if accepted["evidence"] != expected_evidence:
+                    raise ProvenanceIntegrityError(
+                        "HF provisioning terminal event evidence binding is invalid"
+                    )
+                if state == "SUCCEEDED":
+                    descriptor = self._verify_hf_tracking_artifact(
+                        kind="source transport",
+                        uri=durable.source_transport_uri,
+                        expected_sha256=durable.source_transport_sha256,
+                        schema_version="synaptic-hf-source-transport/v1",
+                        experiment_id=durable.experiment_id,
+                    )
+                    evidence = self._verify_hf_tracking_artifact(
+                        kind="provisioning evidence",
+                        uri=evidence_uri,
+                        expected_sha256=evidence_sha256,
+                        schema_version="synaptic-hf-provisioning-evidence/v1",
+                        experiment_id=durable.experiment_id,
+                    )
+                    try:
+                        from tuner.cloud.hf_provisioning import validate_hf_evidence_binding
+
+                        validate_hf_evidence_binding(
+                            descriptor,
+                            evidence,
+                            descriptor_uri=durable.source_transport_uri or "",
+                            descriptor_sha256=durable.source_transport_sha256 or "",
+                        )
+                    except Exception as exc:
+                        raise ProvenanceIntegrityError(
+                            "Provisioning evidence does not bind the experiment source transport"
+                        ) from exc
+                serialized = self._canonical_hf_provisioning_bytes(accepted)
+                digest = hashlib.sha256(serialized).hexdigest()
+                path = self._hf_provisioning_event_path(
+                    durable.experiment_id, str(accepted["event_id"])
+                )
+                uri = self.tracking_uri(path)
+                self._persist_immutable_hf_artifact(path, serialized)
+                candidate = replace(
+                    durable,
+                    hf_provisioning_event_uri=uri,
+                    hf_provisioning_event_sha256=digest,
+                    hf_provisioning_state=state,
+                    provisioning_evidence_uri=evidence_uri,
+                    provisioning_evidence_sha256=evidence_sha256,
+                    source_transport_state=(
+                        "ACKNOWLEDGED" if state == "SUCCEEDED" else "PREPARED"
+                    ),
+                )
+                self.verify_experiment_provenance(candidate)
+                _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+                self._copy_transport_projection(candidate, experiment)
+                self._copy_hf_provisioning_projection(candidate, experiment)
+                self._stamp_snapshot(experiment, candidate)
+        return experiment
 
     def claim_hf_cancellation(
         self,
@@ -972,6 +1503,214 @@ class TrackingService:
                 )
         self.verify_experiment_provenance(durable)
         return durable
+
+    def _require_provisioning_execution_lock(self, experiment_id: str) -> None:
+        held = getattr(self._provisioning_execution, "experiment_ids", set())
+        if experiment_id not in held:
+            raise ProvenanceIntegrityError(
+                "HF provisioning transition requires its execution lock"
+            )
+
+    def _load_durable_experiment_for_provisioning(
+        self, caller: Experiment
+    ) -> Experiment:
+        try:
+            durable = load_experiment(caller.experiment_id, self.base_dir)
+        except (FileNotFoundError, OSError, ValueError, TypeError) as exc:
+            raise ProvenanceIntegrityError(
+                "Durable experiment record is unavailable or invalid"
+            ) from exc
+        if durable.experiment_id != caller.experiment_id:
+            raise ProvenanceIntegrityError("Experiment identity changed during provisioning")
+        provisioning_fields = set(self._hf_provisioning_field_names())
+        caller_projection = tuple(
+            getattr(caller, name) for name in self._hf_provisioning_field_names()
+        )
+        durable_projection = tuple(
+            getattr(durable, name) for name in self._hf_provisioning_field_names()
+        )
+        if caller_projection not in {(None, None, None), durable_projection}:
+            raise ProvenanceIntegrityError(
+                "Experiment provisioning projection conflicts with durable claim"
+            )
+        for field_name in self._protected_field_names():
+            if field_name in provisioning_fields:
+                continue
+            # A stale PREPARED caller is permitted to recover the terminal head;
+            # all immutable descriptor/evidence identities remain checked below.
+            if field_name in {
+                "provisioning_evidence_uri",
+                "provisioning_evidence_sha256",
+                "source_transport_state",
+            } and durable.hf_provisioning_state == "SUCCEEDED":
+                continue
+            if getattr(durable, field_name) != getattr(caller, field_name):
+                raise ProvenanceIntegrityError(
+                    f"Experiment {field_name} conflicts with durable protected provenance"
+                )
+        self.verify_experiment_provenance(durable)
+        return durable
+
+    @staticmethod
+    def _hf_provisioning_field_names() -> tuple[str, ...]:
+        return (
+            "hf_provisioning_event_uri",
+            "hf_provisioning_event_sha256",
+            "hf_provisioning_state",
+        )
+
+    def _validate_hf_provisioning_claim_identity(
+        self, experiment: Experiment, value: Mapping[str, object]
+    ) -> dict[str, object]:
+        try:
+            from tuner.cloud.hf_provisioning_claim import validate_hf_provisioning_event
+
+            document = validate_hf_provisioning_event(value)
+        except Exception as exc:
+            raise ProvenanceIntegrityError(
+                "HF provisioning claim does not match its exact schema"
+            ) from exc
+        if document["state"] != "CLAIMED":
+            raise ProvenanceIntegrityError("HF provisioning claim must be CLAIMED")
+        descriptor = self._verify_hf_tracking_artifact(
+            kind="source transport",
+            uri=experiment.source_transport_uri,
+            expected_sha256=experiment.source_transport_sha256,
+            schema_version="synaptic-hf-source-transport/v1",
+            experiment_id=experiment.experiment_id,
+        )
+        capsule = descriptor["capsule"]
+        expected = {
+            "experiment_id": experiment.experiment_id,
+            "run_id": experiment.experiment_id,
+            "descriptor": {
+                "uri": experiment.source_transport_uri,
+                "sha256": experiment.source_transport_sha256,
+            },
+            "source_lock": {
+                "uri": experiment.source_lock_uri,
+                "sha256": experiment.source_lock_sha256,
+            },
+            "volume": {
+                key: descriptor["volume"][key]
+                for key in ("source", "path", "type", "read_only")
+            },
+            "bundle_sha256": descriptor["bundle"]["content_sha256"],
+            "capsule_manifest_sha256": capsule["manifest"]["sha256"],
+            "checkout_policy_sha256": descriptor["checkout_policy"]["sha256"],
+        }
+        for field_name, expected_value in expected.items():
+            if document[field_name] != expected_value:
+                raise ProvenanceIntegrityError(
+                    f"HF provisioning claim changed durable {field_name} identity"
+                )
+        return document
+
+    def _validate_hf_provisioning_terminal(
+        self,
+        experiment: Experiment,
+        value: Mapping[str, object],
+        *,
+        previous_event: Mapping[str, object] | None,
+    ) -> dict[str, object]:
+        try:
+            from tuner.cloud.hf_provisioning_claim import validate_hf_provisioning_event
+
+            if previous_event is None:
+                # Idempotent terminal replay: recover and validate its predecessor.
+                previous_ref = value.get("previous_event")
+                if not isinstance(previous_ref, Mapping):
+                    raise ValueError("missing previous event")
+                previous_event = self._verify_hf_provisioning_event_artifact(
+                    uri=str(previous_ref.get("uri") or ""),
+                    expected_sha256=str(previous_ref.get("sha256") or ""),
+                )
+            document = validate_hf_provisioning_event(
+                value, previous_event=previous_event
+            )
+        except Exception as exc:
+            raise ProvenanceIntegrityError(
+                "HF provisioning terminal event does not match its exact transition"
+            ) from exc
+        self._validate_hf_provisioning_claim_identity(experiment, previous_event)
+        return document
+
+    @staticmethod
+    def _canonical_hf_provisioning_bytes(value: Mapping[str, object]) -> bytes:
+        try:
+            from tuner.cloud.hf_provisioning_claim import canonical_json_bytes
+
+            return canonical_json_bytes(value)
+        except Exception as exc:
+            raise ProvenanceIntegrityError(
+                "HF provisioning event is not canonical JSON data"
+            ) from exc
+
+    def _hf_provisioning_event_path(self, experiment_id: str, event_id: str) -> Path:
+        return (
+            self.base_dir
+            / "experiments"
+            / experiment_id
+            / "cloud"
+            / "hf"
+            / "provisioning"
+            / "events"
+            / f"{event_id}.json"
+        )
+
+    def _verify_hf_provisioning_event_artifact(
+        self,
+        *,
+        uri: str | None,
+        expected_sha256: str | None,
+    ) -> dict[str, object]:
+        canonical = self._verify_provenance_artifact(
+            kind="HF provisioning event",
+            uri=uri,
+            expected_sha256=expected_sha256,
+        )
+        try:
+            payload = json.loads(canonical, object_pairs_hook=_reject_duplicate_json_keys)
+            from tuner.cloud.hf_provisioning_claim import validate_hf_provisioning_event
+
+            # Stored terminal transitions are validated against their predecessor
+            # by verify_hf_provisioning_provenance, where the exact ref is known.
+            if payload.get("state") == "CLAIMED":
+                return validate_hf_provisioning_event(payload)
+            previous = payload.get("previous_event")
+            if not isinstance(previous, Mapping):
+                raise ValueError("missing predecessor")
+            predecessor = self._verify_hf_provisioning_event_artifact(
+                uri=str(previous.get("uri") or ""),
+                expected_sha256=str(previous.get("sha256") or ""),
+            )
+            return validate_hf_provisioning_event(
+                payload, previous_event=predecessor
+            )
+        except Exception as exc:
+            raise ProvenanceIntegrityError(
+                "Stored HF provisioning event does not match its exact schema"
+            ) from exc
+
+    @staticmethod
+    def _hf_provisioning_claim_result(
+        document: Mapping[str, object],
+        *,
+        uri: str,
+        sha256: str,
+        provider_attempt_authorized: bool,
+    ) -> HFProvisioningClaimResult:
+        canonical = json.dumps(
+            document, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        )
+        return HFProvisioningClaimResult(
+            event_id=str(document["event_id"]),
+            event_uri=uri,
+            event_sha256=sha256,
+            state=str(document["state"]),
+            provider_attempt_authorized=provider_attempt_authorized,
+            _document_json=canonical,
+        )
 
     @staticmethod
     def _hf_cancellation_field_names() -> tuple[str, ...]:
@@ -1361,6 +2100,11 @@ class TrackingService:
             setattr(target, field_name, getattr(source, field_name))
 
     @staticmethod
+    def _copy_hf_provisioning_projection(source: Experiment, target: Experiment) -> None:
+        for field_name in TrackingService._hf_provisioning_field_names():
+            setattr(target, field_name, getattr(source, field_name))
+
+    @staticmethod
     def _copy_hf_cancellation_projection(source: Experiment, target: Experiment) -> None:
         for field_name in TrackingService._hf_cancellation_field_names():
             setattr(target, field_name, getattr(source, field_name))
@@ -1382,6 +2126,9 @@ class TrackingService:
             "source_lock_sha256",
             "resolved_config_uri",
             "resolved_config_sha256",
+            "hf_provisioning_event_uri",
+            "hf_provisioning_event_sha256",
+            "hf_provisioning_state",
             "hf_run_approval_uri",
             "hf_run_approval_sha256",
             "hf_authorization_id",
@@ -1474,12 +2221,15 @@ class TrackingService:
         if kind in {
             "source transport",
             "provisioning evidence",
+            "HF provisioning event",
             "HF run approval",
             "HF submission event",
             "HF cancellation event",
         }:
             try:
-                if kind in {
+                if kind == "HF provisioning event":
+                    from tuner.cloud.hf_provisioning_claim import canonical_json_bytes
+                elif kind in {
                     "HF run approval",
                     "HF submission event",
                     "HF cancellation event",
@@ -1677,6 +2427,9 @@ class TrackingService:
             "provisioning_evidence_uri",
             "provisioning_evidence_sha256",
             "source_transport_state",
+            "hf_provisioning_event_uri",
+            "hf_provisioning_event_sha256",
+            "hf_provisioning_state",
             "hf_run_approval_uri",
             "hf_run_approval_sha256",
             "hf_authorization_id",

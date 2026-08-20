@@ -25,10 +25,20 @@ agreement, and an incomplete launcher/runtime contract. Bounded remediations are
 implemented. JP-S2 passed the frozen 29-file manifest
 `55e2c876dd8cc282a43248a3eeaf3f445f6e452ce76ab2d7a0b814b460ef0f41`
 with 283 passed/6 skipped, 16 hostile checks, 87 import/generic checks, and no
-findings. Final JP-R also PASSed the frozen release/inventory tree. Neither audit
-made a live installation or provider claim. Live use still requires clean exact-pushed proof,
-the five-pin clean-venv gate, and credential preflight. `cloud.launch` and generic
-training remain unavailable.
+findings. Final JP-R also PASSed that earlier frozen release/inventory tree. The
+later JP-PREP implementation materially changed the protected tree. Its first
+independent security re-audit returned **REVISE** on four findings, and its first
+release re-audit also returned **REVISE**. JP-PRT-R and JP-PRH-R are implemented,
+and fresh independent security and release re-audits now both **PASS** the exact
+JP-PRT-R/JP-PRH-R/JP-PRC-R tree. Security evidence is **400 passed, 5 skipped**.
+Release evidence is focused **283 passed, 3 skipped**; tracking **263 passed, 1
+skipped**; CLI/contract **284 passed, 1 skipped**; broad runnable **624 passed,
+16 skipped** with five historical failures; and stale lifecycle fixtures **60
+passed, 8 classified**. Checkpoint 16R is eligible. None of this is live
+installation or provider proof. Live use still requires 16R commit/exact push,
+a fresh named-branch worktree at that commit, the five-pin clean-venv launcher
+gate, and credential preflight. `cloud.launch` and generic training remain
+unavailable.
 
 ### Fixed authorization envelope
 
@@ -70,26 +80,80 @@ successful smoke is not digest-pinned image provenance.
 
 ### Operator sequence
 
-Only after clean exact-pushed proof, the five-pin clean-venv
-gate, and the explicit credential preflight:
+Only after clean exact-pushed proof and the five-pin clean-venv gate may the
+preparation step run. Explicit credential preflight is additionally required
+before provisioning or execution:
 
 ```powershell
-python tuner.py hf-source `
+python tuner.py hf-source prepare `
+  --project-root <host-project-root> `
+  --source-config <committed-cloud-config> `
+  --source-mode <standalone-or-discovered-host-mode> `
+  --base-dir <absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-source provision `
   --project-root <host-project-root> `
   --experiment-id <experiment-id> `
   --actor <non-secret-operator-id> `
   --authority operator `
   --env-file <explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
   --json
 ```
 
-`hf-source` requires exact PREPARED tracking state, provisions or verifies only
-the descriptor-bound private Profile-C prefix, persists bounded evidence, and
-then validates CONSUMABLE. It never submits a job. The explicit env file must be
+`hf-source prepare` is provider-, credential-, ML-, and UI-free. It creates or
+recovers a neutral bootstrap experiment, performs exact-pushed Git preflight,
+parses the volume policy from the exact committed config blob, rechecks the
+working config against that commit, durably creates or adopts the canonical
+enriched SourceLock before transport preparation, and then persists the
+capsule/bundle, descriptor, and PREPARED state below the explicit absolute
+external base directory. Output is limited to the experiment ID, portable
+tracking URIs/digests, and closed read-only volume metadata.
+
+If creation is interrupted, use the reported experiment ID with the same
+inputs. Recovery accepts only neutral, exact SourceLock-only, or exact PREPARED
+state and converges idempotently. A crash-created SourceLock artifact, including
+the exact copy left inside an interrupted transport, is adopted only after
+bounded canonical regular/link-free/run-bound authentication and only when its
+bytes are identical. The durable SourceLock projection precedes transport
+installation, so interruption on either side of that boundary can converge
+without overwriting different bytes. Provider evidence, approval/submission
+state, or incomplete/mismatched references fail closed.
+
+`hf-source provision` requires exact PREPARED tracking state and the same
+`--base-dir`. It verifies durable provenance and independently reauthenticates
+the descriptor/SourceLock/policy/capsule/bundle before secret-file content or
+provider imports. It provisions or verifies only the descriptor-bound private
+Profile-C prefix, persists bounded evidence, and then validates CONSUMABLE. It
+never submits a job. The explicit env file must be
 a regular link-free file inside the project/config boundary and contain exactly
-a nonblank `HF_TOKEN`. File/ambient `HF_API_KEY` and ambient `HF_TOKEN` are
-rejected. The protected handler parses the file without mutating the environment
-or emitting the value.
+a nonblank `HF_TOKEN`. Metadata preflight stores only root/path selection and
+reads no bytes; the one complete content read occurs after the durable claim.
+File/ambient `HF_API_KEY` and ambient `HF_TOKEN` are rejected. The protected
+handler parses the file without mutating the environment or emitting the value.
+On POSIX, held ancestor descriptors plus `O_NOFOLLOW` bind the read to the opened
+regular file; rename after final open cannot alter bytes read through that
+descriptor, but pathname identity after the read is not promised. On Windows,
+native `CreateFileW` handles allow only read sharing, deny write/delete sharing
+for the read, reject reparse points, and verify final-handle containment and
+identity.
+
+Provisioning atomically records a closed
+`synaptic-hf-provisioning-claim/v1` `CLAIMED` event before credential content or
+provider construction. Its closed events include exact sequence, canonical
+time, predecessor, evidence, `reason_code`, and `provider_effect_possible`.
+`CREDENTIAL_REJECTED` and `LOCAL_POSTCLAIM_FAILURE` map to no possible provider
+effect; `PROVIDER_OUTCOME_AMBIGUOUS`, `INTERRUPTED_AFTER_CLAIM`, and
+`RECOVERY_EVIDENCE_INVALID` map to possible provider effect. Verified success
+records `SUCCEEDED` plus exact evidence; post-claim uncertainty records terminal
+`AMBIGUOUS`, retains PREPARED, and is not retryable. A resumed `CLAIMED` head
+never gets provider authority: it adopts and verifies an exact orphan terminal
+or persisted evidence and converges to `SUCCEEDED`, otherwise it terminalizes as
+`AMBIGUOUS` with `INTERRUPTED_AFTER_CLAIM` for absent evidence or
+`RECOVERY_EVIDENCE_INVALID` for invalid/conflicting recovery artifacts. Durable
+`SUCCEEDED` may finish local consumption without a provider call; terminal
+`AMBIGUOUS` never authorizes another attempt.
 
 Create the provider-free exact approval:
 
@@ -103,6 +167,7 @@ python tuner.py hf-smoke approve `
   --quoted-at <UTC-RFC3339> `
   --hourly-price-usd <official-cpu-basic-hourly-price> `
   --projected-cost-usd <no-more-than-0.01> `
+  --base-dir <same-absolute-external-tracking-root> `
   --json
 ```
 
@@ -113,14 +178,22 @@ python tuner.py hf-smoke execute `
   --project-root <host-project-root> `
   --experiment-id <experiment-id> `
   --env-file <explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
   --json
 
 python tuner.py hf-smoke observe `
   --project-root <host-project-root> `
   --experiment-id <experiment-id> `
   --env-file <explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
   --json
 ```
+
+The parser uses a frozen per-action explicit-option allowlist and treats
+`--flag=value` exactly like `--flag value`. Globally recognized options are
+rejected when absent from the selected protected action's allowlist. No action
+accepts `--yes`, retry, hardware, image, command, publication, port, or generic
+training overrides.
 
 `execute` revalidates every approval/source/provisioning/workload binding and
 atomically writes `SUBMITTING` before credential or provider work. Success records
@@ -157,7 +230,26 @@ action.
 - JP-S2 security re-audit: PASS on the frozen manifest above; local security
   evidence only, with no live install/provider proof.
 - Final JP-R release/inventory re-audit: **PASS**. Evidence: affected **200 passed, 3 skipped**; full JP/HF/import/order **393 passed, 15 skipped**; tracking **249 passed, 1 skipped**; CLI/capability/project/plugin/contract **268 passed, 1 skipped**; broad cloud **673 passed, 15 skipped** with the same five accepted failures and two documented exclusions; **26 Python files compiled**; imports clean; diff check warnings only; public API and `cloud.launch` unchanged; skill sync clean.
-- Exact commit push/upstream proof: pending.
+- Those PASSes predate JP-PREP and do not approve its changed tree.
+- First post-JP-PREP security re-audit: **REVISE** on four findings. Evidence:
+  former-HIGH closure **25 passed, 2 Windows link skips**; parser **63**;
+  claim/operator/assets **27**; thread/spawn/ambiguity **3**; protected handlers
+  **39 passed, 2 skipped**.
+- First post-JP-PREP release re-audit: **REVISE**. Evidence: focused **270/3**;
+  tracking **257/1**; broad cloud **679 passed, 16 skipped, 13 classified
+  failures** (five accepted prior plus eight stale lifecycle fixtures);
+  CLI/project/capability/plugin/contract **279/1** plus five MAX_PATH artifacts;
+  affected short-path rerun **16/16 passed**.
+- JP-PRT-R evidence: focused **138/1**, full tracking **261/1**, contract **12**.
+- JP-PRH-R evidence: focused **67/2**, utilities **148/2**, broad **348/3**,
+  plus one classified missing-Transformers environment failure.
+- Fresh post-remediation security re-audit: **PASS**, **400 passed, 5 skipped**.
+- Fresh post-remediation release re-audit: **PASS**. Evidence: focused **283/3**;
+  tracking **263/1**; CLI/contract **284/1**; broad runnable **624/16** plus five
+  historical failures; stale lifecycle fixtures **60 passed, 8 classified**.
+- Checkpoint 16R is eligible. JP-LIVE is next only after 16R commit/exact push,
+  a fresh named-branch worktree at that commit, the exact five-pin launcher gate,
+  and explicit-file credential preflight.
 - Explicit usable `HF_TOKEN` preflight: pending; no value may enter logs/docs.
 - Live provider proof: pending.
 - RunPod remains later and requires fresh dated official API/SDK research before

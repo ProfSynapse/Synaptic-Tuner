@@ -195,6 +195,19 @@ class TestRunRecord:
         loaded = RunRecord.from_dict(data)
         assert loaded.experiment_id is None
         assert loaded.per_example_losses_path is None
+        assert loaded.hf_provisioning_event_uri is None
+        assert loaded.hf_provisioning_event_sha256 is None
+        assert loaded.hf_provisioning_state is None
+
+    def test_provisioning_projection_requires_closed_consistent_state(self):
+        with pytest.raises(ValueError, match="requires an event"):
+            _make_record(hf_provisioning_state="CLAIMED")
+        with pytest.raises(ValueError, match="Unknown HF provisioning state"):
+            _make_record(
+                hf_provisioning_event_uri="tracking://event.json",
+                hf_provisioning_event_sha256="1" * 64,
+                hf_provisioning_state="RETRYABLE",
+            )
 
 # ===========================================================================
 # RunFilter

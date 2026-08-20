@@ -36,6 +36,12 @@ from tuner.cloud.hf_run_approval import (
     build_hf_submitting_event,
     canonical_json_bytes as canonical_approval_bytes,
 )
+from tuner.cloud.hf_provisioning_claim import (
+    build_hf_provisioning_ambiguous_event,
+    build_hf_provisioning_claim,
+    build_hf_provisioning_succeeded_event,
+    canonical_json_bytes as canonical_provisioning_bytes,
+)
 
 
 def _source_lock(run_id: str) -> SourceLock:
@@ -201,6 +207,33 @@ def _claim_cancellation_process(
     try:
         outcome = service.claim_hf_cancellation(experiment, event)
         results.put(("ok", outcome.provider_attempt_authorized, outcome.event_sha256))
+    except Exception as exc:
+        results.put(("error", type(exc).__name__))
+
+
+def _claim_provisioning_process(
+    base_dir: str,
+    experiment_id: str,
+    claim: dict,
+    start,
+    results,
+) -> None:
+    service = TrackingService(Path(base_dir))
+    experiment = service.load_experiment(experiment_id)
+    if not start.wait(timeout=10):
+        results.put(("timeout", "start"))
+        return
+    try:
+        with service.hf_provisioning_execution_lock(experiment_id):
+            outcome = service.claim_hf_provisioning(experiment, claim)
+        results.put(
+            (
+                "ok",
+                outcome.provider_attempt_authorized,
+                outcome.event_sha256,
+                outcome.state,
+            )
+        )
     except Exception as exc:
         results.put(("error", type(exc).__name__))
 
@@ -538,7 +571,8 @@ def test_hf_transport_lifecycle_is_monotonic_verified_and_propagated(tmp_path: P
     )
     service.mark_source_transport_consumable(experiment)
     service.mark_source_transport_consumable(experiment)
-    service.require_consumable_hf_transport(experiment)
+    with pytest.raises(ProvenanceIntegrityError, match="SUCCEEDED provisioning"):
+        service.require_consumable_hf_transport(experiment)
 
     with pytest.raises(ValueError, match="source_transport_uri"):
         service.attach_run(
@@ -592,7 +626,8 @@ def test_hf_transport_lifecycle_is_monotonic_verified_and_propagated(tmp_path: P
     future_record = service.load_experiment(experiment.experiment_id)
     assert future_record.source_transport_state == "SUBMITTED"
     service.verify_source_transport_provenance(future_record)
-    service.require_consumable_hf_transport(future_record)
+    with pytest.raises(ProvenanceIntegrityError, match="CONSUMABLE"):
+        service.require_consumable_hf_transport(future_record)
 
 
 def test_hf_transport_rejects_partial_wrong_order_replay_tamper_and_extensions(tmp_path: Path):
@@ -658,6 +693,9 @@ def test_historical_hf_record_remains_readable_unchanged_but_not_consumable(tmp_
 
     assert path.read_bytes() == original
     assert experiment.source_transport_uri is None
+    assert experiment.hf_provisioning_event_uri is None
+    assert experiment.hf_provisioning_event_sha256 is None
+    assert experiment.hf_provisioning_state is None
     assert experiment.hf_run_approval_uri is None
     assert experiment.hf_submission_event_uri is None
     assert experiment.hf_submission_state is None
@@ -929,6 +967,460 @@ def _make_consumable_transport(
     return experiment, stale
 
 
+def _make_prepared_provisioning_claim(
+    service: TrackingService,
+) -> tuple[Experiment, dict[str, object]]:
+    experiment = service.create_experiment(
+        name="provisioning-claim",
+        dataset_path="data.jsonl",
+        dataset_hash="abc",
+        base_model_name="model",
+        provider="hf_jobs",
+    )
+    service.persist_source_lock(experiment, _source_lock(experiment.experiment_id))
+    descriptor = _descriptor(experiment)
+    descriptor_uri, descriptor_sha = _write_canonical(
+        service,
+        f"experiments/{experiment.experiment_id}/cloud/hf/source-transport/descriptor.json",
+        descriptor,
+    )
+    service.record_source_transport_prepared(
+        experiment, uri=descriptor_uri, sha256=descriptor_sha
+    )
+    claim = build_hf_provisioning_claim(
+        experiment_id=experiment.experiment_id,
+        descriptor_uri=descriptor_uri,
+        descriptor_sha256=descriptor_sha,
+        descriptor=descriptor,
+        actor="test-operator",
+        authority="operator",
+        occurred_at="2026-08-20T12:00:00Z",
+    )
+    return experiment, claim
+
+
+def test_hf_provisioning_claim_requires_execution_lock_and_authorizes_only_first(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    with pytest.raises(ProvenanceIntegrityError, match="execution lock"):
+        service.claim_hf_provisioning(experiment, claim)
+
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        first = service.claim_hf_provisioning(experiment, claim)
+    assert first.provider_attempt_authorized is True
+    assert first.state == "CLAIMED"
+    assert experiment.hf_provisioning_state == "CLAIMED"
+
+    resumed = TrackingService(tmp_path).load_experiment(experiment.experiment_id)
+    resume_service = TrackingService(tmp_path)
+    with resume_service.hf_provisioning_execution_lock(experiment.experiment_id):
+        second = resume_service.claim_hf_provisioning(resumed, claim)
+    assert second.provider_attempt_authorized is False
+    assert second.event_sha256 == first.event_sha256
+
+    replacement = dict(claim)
+    replacement["actor"] = "another-operator"
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        with pytest.raises(ProvenanceIntegrityError):
+            service.claim_hf_provisioning(experiment, replacement)
+
+
+def test_hf_provisioning_success_atomically_binds_evidence_and_acknowledges(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    evidence_uri, evidence_sha = _write_canonical(
+        service,
+        f"experiments/{experiment.experiment_id}/cloud/hf/source-transport/evidence.json",
+        _evidence(experiment, experiment.source_transport_uri or "", experiment.source_transport_sha256 or ""),
+    )
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        claimed = service.claim_hf_provisioning(experiment, claim)
+        terminal = build_hf_provisioning_succeeded_event(
+            claimed.document,
+            claim_uri=claimed.event_uri,
+            claim_sha256=claimed.event_sha256,
+            evidence_uri=evidence_uri,
+            evidence_sha256=evidence_sha,
+            occurred_at="2026-08-20T12:01:00Z",
+        )
+        service.record_hf_provisioning_succeeded(
+            experiment,
+            terminal,
+            evidence_uri=evidence_uri,
+            evidence_sha256=evidence_sha,
+        )
+    assert experiment.hf_provisioning_state == "SUCCEEDED"
+    assert experiment.source_transport_state == "ACKNOWLEDGED"
+    assert experiment.provisioning_evidence_sha256 == evidence_sha
+    service.verify_experiment_provenance(experiment)
+
+    recovery = TrackingService(tmp_path)
+    stale = Experiment.from_dict({
+        **experiment.to_dict(),
+        "hf_provisioning_event_uri": None,
+        "hf_provisioning_event_sha256": None,
+        "hf_provisioning_state": None,
+        "provisioning_evidence_uri": None,
+        "provisioning_evidence_sha256": None,
+        "source_transport_state": "PREPARED",
+    })
+    with recovery.hf_provisioning_execution_lock(experiment.experiment_id):
+        recovered = recovery.claim_hf_provisioning(stale, claim)
+    assert recovered.provider_attempt_authorized is False
+    assert recovered.state == "SUCCEEDED"
+    assert stale.provisioning_evidence_sha256 == evidence_sha
+
+
+def test_threaded_provisioning_claim_authorizes_exactly_one_provider_attempt(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    barrier = threading.Barrier(3)
+    outcomes: list[bool] = []
+
+    def run_claim() -> None:
+        claimant = TrackingService(tmp_path)
+        caller = claimant.load_experiment(experiment.experiment_id)
+        barrier.wait(timeout=5)
+        with claimant.hf_provisioning_execution_lock(experiment.experiment_id):
+            outcomes.append(
+                claimant.claim_hf_provisioning(
+                    caller, claim
+                ).provider_attempt_authorized
+            )
+
+    threads = [threading.Thread(target=run_claim) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    barrier.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=10)
+    assert all(not thread.is_alive() for thread in threads)
+    assert sorted(outcomes) == [False, True]
+
+
+def test_hf_provisioning_ambiguity_is_terminal_without_evidence(tmp_path: Path) -> None:
+    service = TrackingService(tmp_path)
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        claimed = service.claim_hf_provisioning(experiment, claim)
+        terminal = build_hf_provisioning_ambiguous_event(
+            claimed.document,
+            claim_uri=claimed.event_uri,
+            claim_sha256=claimed.event_sha256,
+            reason_code="PROVIDER_OUTCOME_AMBIGUOUS",
+            occurred_at="2026-08-20T12:01:00Z",
+        )
+        service.record_hf_provisioning_ambiguous(experiment, terminal)
+    assert experiment.hf_provisioning_state == "AMBIGUOUS"
+    assert experiment.source_transport_state == "PREPARED"
+    assert experiment.provisioning_evidence_uri is None
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        recovered = service.claim_hf_provisioning(experiment, claim)
+    assert recovered.provider_attempt_authorized is False
+    assert recovered.state == "AMBIGUOUS"
+
+
+def test_source_lock_identical_orphan_is_adopted_but_mismatch_is_never_overwritten(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    experiment = service.create_experiment(
+        name="source-lock-orphan",
+        dataset_path="data.jsonl",
+        dataset_hash="abc",
+        base_model_name="model",
+    )
+    source_lock = _source_lock(experiment.experiment_id)
+    path = service._experiment_path(experiment.experiment_id).with_name("source-lock.json")
+    exact = (json.dumps(source_lock.to_dict(), sort_keys=True, separators=(",", ":")) + "\n").encode()
+    path.write_bytes(exact)
+
+    adopted = service.persist_source_lock(experiment, source_lock)
+    assert adopted == source_lock
+    assert service.load_source_lock(experiment) == source_lock
+    assert path.read_bytes() == exact
+
+    other = service.create_experiment(
+        name="source-lock-conflict",
+        dataset_path="data.jsonl",
+        dataset_hash="abc",
+        base_model_name="model",
+    )
+    other_path = service._experiment_path(other.experiment_id).with_name("source-lock.json")
+    hostile = b'{"hostile":true}\n'
+    other_path.write_bytes(hostile)
+    record_before = service._experiment_path(other.experiment_id).read_bytes()
+    with pytest.raises(ProvenanceIntegrityError, match="not byte-identical"):
+        service.persist_source_lock(other, _source_lock(other.experiment_id))
+    assert other_path.read_bytes() == hostile
+    assert service._experiment_path(other.experiment_id).read_bytes() == record_before
+    assert service.load_experiment(other.experiment_id).source_lock_uri is None
+
+
+def test_source_preparation_execution_lock_is_thread_exclusive_and_nonreentrant(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    experiment_id = "exp-preparation-lock"
+    with service.hf_source_preparation_execution_lock(experiment_id):
+        with pytest.raises(ProvenanceIntegrityError, match="not reentrant"):
+            with service.hf_source_preparation_execution_lock(experiment_id):
+                pass
+    entered = threading.Event()
+    release = threading.Event()
+    second_entered = threading.Event()
+
+    def first() -> None:
+        with service.hf_source_preparation_execution_lock(experiment_id):
+            entered.set()
+            release.wait(timeout=5)
+
+    def second() -> None:
+        entered.wait(timeout=5)
+        with TrackingService(tmp_path).hf_source_preparation_execution_lock(experiment_id):
+            second_entered.set()
+
+    first_thread = threading.Thread(target=first)
+    second_thread = threading.Thread(target=second)
+    first_thread.start()
+    assert entered.wait(timeout=5)
+    second_thread.start()
+    assert not second_entered.wait(timeout=0.2)
+    release.set()
+    first_thread.join(timeout=5)
+    second_thread.join(timeout=5)
+    assert not first_thread.is_alive() and not second_thread.is_alive()
+    assert second_entered.is_set()
+
+
+def test_concurrent_identical_source_lock_persistence_is_create_or_adopt(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    experiment = service.create_experiment(
+        name="source-lock-concurrent",
+        dataset_path="data.jsonl",
+        dataset_hash="abc",
+        base_model_name="model",
+    )
+    callers = [service.load_experiment(experiment.experiment_id) for _ in range(2)]
+    source_lock = _source_lock(experiment.experiment_id)
+    barrier = threading.Barrier(3)
+    outcomes: list[str] = []
+
+    def persist(caller: Experiment) -> None:
+        barrier.wait(timeout=5)
+        try:
+            loaded = TrackingService(tmp_path).persist_source_lock(caller, source_lock)
+            outcomes.append("ok" if loaded == source_lock else "wrong")
+        except Exception as exc:
+            outcomes.append(type(exc).__name__)
+
+    threads = [threading.Thread(target=persist, args=(caller,)) for caller in callers]
+    for thread in threads:
+        thread.start()
+    barrier.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=10)
+    assert all(not thread.is_alive() for thread in threads)
+    assert outcomes == ["ok", "ok"]
+    durable = service.load_experiment(experiment.experiment_id)
+    assert service.load_source_lock(durable) == source_lock
+
+
+def test_bounded_orphan_terminal_discovery_and_atomic_adoption(tmp_path: Path) -> None:
+    service = TrackingService(tmp_path)
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    evidence_uri, evidence_sha = _write_canonical(
+        service,
+        f"experiments/{experiment.experiment_id}/cloud/hf/source-transport/evidence.json",
+        _evidence(
+            experiment,
+            experiment.source_transport_uri or "",
+            experiment.source_transport_sha256 or "",
+        ),
+    )
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        claimed = service.claim_hf_provisioning(experiment, claim)
+        assert service.find_hf_provisioning_terminal(experiment) is None
+        terminal = build_hf_provisioning_succeeded_event(
+            claimed.document,
+            claim_uri=claimed.event_uri,
+            claim_sha256=claimed.event_sha256,
+            evidence_uri=evidence_uri,
+            evidence_sha256=evidence_sha,
+            occurred_at="2026-08-20T12:01:00Z",
+        )
+        terminal_path = service._hf_provisioning_event_path(
+            experiment.experiment_id, str(terminal["event_id"])
+        )
+        terminal_path.write_bytes(canonical_provisioning_bytes(terminal))
+        recovered = service.find_hf_provisioning_terminal(experiment)
+        assert recovered is not None
+        assert recovered.state == "SUCCEEDED"
+        assert recovered.provider_attempt_authorized is False
+        service.record_hf_provisioning_succeeded(
+            experiment,
+            recovered.document,
+            evidence_uri=evidence_uri,
+            evidence_sha256=evidence_sha,
+        )
+    assert experiment.hf_provisioning_state == "SUCCEEDED"
+    assert experiment.source_transport_state == "ACKNOWLEDGED"
+
+
+def test_orphan_terminal_discovery_rejects_unknown_and_conflicting_artifacts(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        claimed = service.claim_hf_provisioning(experiment, claim)
+        events_dir = service._hf_provisioning_event_path(
+            experiment.experiment_id, claimed.event_id
+        ).parent
+        unknown = events_dir / "unknown.tmp"
+        unknown.write_bytes(b"x")
+        with pytest.raises(ProvenanceIntegrityError, match="unknown artifact"):
+            service.find_hf_provisioning_terminal(experiment)
+        unknown.unlink()
+        first = build_hf_provisioning_ambiguous_event(
+            claimed.document,
+            claim_uri=claimed.event_uri,
+            claim_sha256=claimed.event_sha256,
+            reason_code="LOCAL_POSTCLAIM_FAILURE",
+            occurred_at="2026-08-20T12:01:00Z",
+        )
+        second = build_hf_provisioning_ambiguous_event(
+            claimed.document,
+            claim_uri=claimed.event_uri,
+            claim_sha256=claimed.event_sha256,
+            reason_code="PROVIDER_OUTCOME_AMBIGUOUS",
+            occurred_at="2026-08-20T12:01:01Z",
+        )
+        for event in (first, second):
+            service._hf_provisioning_event_path(
+                experiment.experiment_id, str(event["event_id"])
+            ).write_bytes(canonical_provisioning_bytes(event))
+        with pytest.raises(ProvenanceIntegrityError, match="multiple terminal"):
+            service.find_hf_provisioning_terminal(experiment)
+
+
+def test_generic_mutation_cannot_erase_or_replace_provisioning_projection(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    stale = service.load_experiment(experiment.experiment_id)
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        service.claim_hf_provisioning(experiment, claim)
+    record_path = service._experiment_path(experiment.experiment_id)
+    durable_before = record_path.read_bytes()
+    stale.name = "hostile stale mutation"
+    with pytest.raises(ProvenanceIntegrityError, match="protected provenance"):
+        service.save_experiment(stale)
+    assert record_path.read_bytes() == durable_before
+
+
+def test_spawned_provisioning_claim_is_kernel_exclusive_and_crash_durable(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    context = multiprocessing.get_context("spawn")
+    start = context.Event()
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_claim_provisioning_process,
+            args=(str(tmp_path), experiment.experiment_id, claim, start, results),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    start.set()
+    try:
+        outcomes = [results.get(timeout=20) for _ in processes]
+    except queue.Empty:
+        pytest.fail("spawned provisioning claimant did not report within timeout")
+    finally:
+        for process in processes:
+            process.join(timeout=10)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+        results.close()
+        results.join_thread()
+    assert all(process.exitcode == 0 for process in processes)
+    assert sorted(outcome[1] for outcome in outcomes) == [False, True]
+    durable = service.load_experiment(experiment.experiment_id)
+    assert durable.hf_provisioning_state == "CLAIMED"
+    assert durable.provisioning_evidence_uri is None
+
+
+def test_legacy_consumable_record_is_readable_but_cannot_claim_provider_authority(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    evidence_uri, evidence_sha = _write_canonical(
+        service,
+        "legacy-evidence.json",
+        _evidence(experiment, experiment.source_transport_uri or "", experiment.source_transport_sha256 or ""),
+    )
+    service.record_provisioning_acknowledged(
+        experiment, uri=evidence_uri, sha256=evidence_sha
+    )
+    service.mark_source_transport_consumable(experiment)
+    legacy = service.load_experiment(experiment.experiment_id)
+    assert legacy.hf_provisioning_state is None
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        with pytest.raises(ProvenanceIntegrityError, match="requires PREPARED"):
+            service.claim_hf_provisioning(legacy, claim)
+
+
+def test_legacy_consumable_cannot_create_approval_or_submission_artifacts(
+    tmp_path: Path,
+) -> None:
+    service = TrackingService(tmp_path)
+    legacy, _ = _make_consumable_transport(service)
+    assert legacy.source_transport_state == "CONSUMABLE"
+    assert legacy.hf_provisioning_state is None
+    approval = _approval(legacy)
+    submitting = build_hf_submitting_event(
+        approval,
+        approval_uri="tracking://hostile-approval.json",
+        occurred_at="2026-08-20T12:01:00Z",
+    )
+    record_path = service._experiment_path(legacy.experiment_id)
+    before_bytes = record_path.read_bytes()
+    before_files = {
+        path.relative_to(tmp_path): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+
+    with pytest.raises(ProvenanceIntegrityError, match="SUCCEEDED provisioning"):
+        service.record_hf_run_approval(legacy, approval)
+    with pytest.raises(ProvenanceIntegrityError, match="SUCCEEDED provisioning"):
+        service.claim_hf_submission(legacy, submitting)
+
+    assert record_path.read_bytes() == before_bytes
+    assert service.load_experiment(legacy.experiment_id).hf_submission_state is None
+    assert {
+        path.relative_to(tmp_path): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    } == before_files
+
+
 def _approval(experiment: Experiment, *, run_id: str = "hf-smoke-1"):
     return build_hf_run_approval(
         experiment_id=experiment.experiment_id,
@@ -955,7 +1447,33 @@ def _approval(experiment: Experiment, *, run_id: str = "hf-smoke-1"):
 def _make_approved_submission(
     service: TrackingService,
 ) -> tuple[Experiment, HFRunApproval]:
-    experiment, _ = _make_consumable_transport(service)
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    evidence_uri, evidence_sha = _write_canonical(
+        service,
+        f"experiments/{experiment.experiment_id}/cloud/hf/source-transport/evidence.json",
+        _evidence(
+            experiment,
+            experiment.source_transport_uri or "",
+            experiment.source_transport_sha256 or "",
+        ),
+    )
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        claimed = service.claim_hf_provisioning(experiment, claim)
+        terminal = build_hf_provisioning_succeeded_event(
+            claimed.document,
+            claim_uri=claimed.event_uri,
+            claim_sha256=claimed.event_sha256,
+            evidence_uri=evidence_uri,
+            evidence_sha256=evidence_sha,
+            occurred_at="2026-08-20T12:00:30Z",
+        )
+        service.record_hf_provisioning_succeeded(
+            experiment,
+            terminal,
+            evidence_uri=evidence_uri,
+            evidence_sha256=evidence_sha,
+        )
+    service.mark_source_transport_consumable(experiment)
     approval = _approval(experiment)
     service.record_hf_run_approval(experiment, approval)
     return experiment, approval
@@ -1643,6 +2161,9 @@ def test_attach_run_propagates_exact_hf_submission_projection_and_rejects_replac
                 provisioning_evidence_uri=experiment.provisioning_evidence_uri,
                 provisioning_evidence_sha256=experiment.provisioning_evidence_sha256,
                 source_transport_state="CONSUMABLE",
+                hf_provisioning_event_uri=experiment.hf_provisioning_event_uri,
+                hf_provisioning_event_sha256=experiment.hf_provisioning_event_sha256,
+                hf_provisioning_state="SUCCEEDED",
                 hf_run_approval_uri=experiment.hf_run_approval_uri,
                 hf_run_approval_sha256=experiment.hf_run_approval_sha256,
                 hf_authorization_id="9" * 64,
