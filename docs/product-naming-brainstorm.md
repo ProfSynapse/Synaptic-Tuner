@@ -147,3 +147,92 @@ product self-documents. Illustrative, using Myelin:
       GitHub org, npm/PyPI namespace, X and LinkedIn handles
 - [ ] Say each finalist out loud in a sentence: "We built it on ___." /
       "___ trained the model." — the one that survives casual speech wins
+
+---
+
+# Round 2 — Landscape research + revised direction
+
+> Added after ICP clarification (regulated/mission-driven orgs; open-core
+> architecture) and feedback that the round-1 shortlist was off-register.
+
+## 8. How this space actually names itself
+
+Six observable registers:
+
+| Register | Examples | What it signals |
+|---|---|---|
+| **Mythic / literary referent** | Palantir (Tolkien seeing-stone), Anduril (Tolkien reforged sword), Prime Intellect (Roger Williams novel), Sauron | ambition, inevitability, "we are the protagonists" |
+| **Historical figure** | Vannevar Labs (Vannevar Bush) | intellectual lineage, institutional seriousness |
+| **Greek / philosophical abstract** | Nous Research (*nous* = intellect), EleutherAI (*eleutheria* = freedom), Anthropic | seriousness without swagger; ideas-first |
+| **Nature / collective metaphor** | Sakana (Japanese "fish" — school of fish as collective intelligence), Cohere | emergence, systems thinking |
+| **Compressed infra-descriptive** | Predibase, Baseten, Together, Fireworks, Anyscale, OpenPipe, Modal, Lamini | commodity tier; interchangeable |
+| **Compliance-plain** | Hathr AI, HIPAA Vault | trustworthy, forgettable |
+
+**Round 1 sat in a seventh register — craft/plain/institutional — that basically
+nobody in this category uses.** That's why it read wrong.
+
+## 9. The trap in the register you like
+
+Mythic-referent names are now **politically coded**. Palantir and Anduril have
+made Tolkien-naming shorthand for surveillance and defense tech. The ICP here is
+health systems, nonprofits, government, civil society — the exact audience most
+primed to pattern-match a mythic name to Palantir. Prime Intellect gets away
+with it because it sells compute to researchers; you would be selling to a
+nonprofit ED or a public-health CIO.
+
+**So: take the register, drop the mythos.** The adjacent register with the same
+gravity and none of the coding is **Greek/Latin philosophical abstraction** —
+Nous, Eleuther, Anthropic. It also opens virtue and civic vocabulary, which the
+mission half of the ICP responds to and the defense-coded names can't touch.
+
+## 10. Candidates in-register
+
+### Two-word, Prime Intellect structure ([qualifier] + [faculty of mind])
+
+| Name | Thesis it encodes |
+|---|---|
+| **Tacit Intellect** | Polanyi's tacit knowledge — "we know more than we can tell." Exactly what you extract from an org and encode into a model. "Tacit" also reads as discreet/unspoken -> privacy, without a compliance word. |
+| **Practical Wisdom** | Plain-English *phronesis*. The distinction between knowing-in-general and knowing-what-to-do-here is the whole small-model argument. Accessible; slightly soft. |
+| **Latent Reason** | What's already implicit in the org's data, made explicit. Nods at latent space without being jargon. |
+
+### Single classical word
+
+| Name | Thesis it encodes |
+|---|---|
+| **Phronesis** | Aristotle's *practical wisdom* — right action in a particular situation, explicitly distinguished from *episteme* (abstract theory) and *techne* (craft). This is the frontier-model-vs-domain-specialist distinction, named 2,300 years ago. Best pure concept fit of anything generated. Spelling is the tax. |
+| **Paideia** | The formation of a person into their full civic role — training toward a function, with a public/civic charge built in. Lands hard with gov and nonprofit. |
+| **Vernacular** | The local tongue of a specific community, as against the official/imperial one. Your model speaks your org's vernacular; the frontier lab's speaks the empire's. Anti-imperial framing that mission orgs will love. English word, easy spelling. |
+| **Anamnesis** | Plato: learning as recollection, drawing out what was latent. *Also* the clinical term for the patient history a physician takes. Double meaning lands precisely on the health ICP. |
+| **Custos** | Latin: guardian, keeper, custodian (*quis custodiet*). Stewardship + custody, in one classical word, without saying "secure." |
+| **Ingenium** | Latin: innate character and natural capacity; the root of both "engine" and "ingenious." Grand, ownable, ambiguous enough to grow into. |
+
+## 11. Revised recommendation
+
+1. **Tacit Intellect** — closest to the register you responded to, and the thesis
+   is exactly right. Clips to "Tacit," which is a good standalone.
+2. **Vernacular** — best positioning story against frontier labs, easiest to
+   spell and say, strongest fit for mission-driven buyers.
+3. **Phronesis** — deepest concept fit; highest spelling/pronunciation tax.
+4. **Anamnesis** — the health-specific play, if health is the beachhead.
+
+## 12. Open-core naming
+
+Prime Intellect's shape is worth copying: company **Prime Intellect**, OSS stack
+`prime`, model family `INTELLECT-1/2`. Direct analogue here:
+
+| Layer | Name |
+|---|---|
+| Company / product | new name (above) |
+| OSS core (submodule) | **Synaptic Tuner** — keep it; "tuner" is *correct* for a library and humble names are an asset in OSS |
+| Model family | **Nexus** — keep |
+| Creator brand | **Professor Synapse** — distribution channel |
+
+## 13. Sources
+
+- https://en.wikipedia.org/wiki/The_Metamorphosis_of_Prime_Intellect
+- https://en.wikipedia.org/wiki/Vannevar_Labs
+- https://en.wikipedia.org/wiki/EleutherAI
+- https://en.wikipedia.org/wiki/Sakana_AI
+- https://research.contrary.com/company/goodfire
+- https://www.thebulwark.com/p/how-the-tech-right-learned-to-love-mordor-jrr-tolkien-palantir-thiel
+- https://techcrunch.com/2026/01/28/tiny-startup-arcee-ai-built-a-400b-open-source-llm-from-scratch-to-best-metas-llama/
