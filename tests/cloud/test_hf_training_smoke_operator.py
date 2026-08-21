@@ -172,7 +172,7 @@ def test_provider_rejects_ambient_authority(name: str) -> None:
         create_provider("hf_secret", environment={name: "hostile"}, huggingface_hub=hub, httpx=httpx)
 
 
-@pytest.mark.parametrize("unit", [True, 0, 16667, 1.5])
+@pytest.mark.parametrize("unit", [True, 0, 16668, 1.5])
 def test_quote_rejects_invalid_exact_microusd(unit: object) -> None:
     hub, httpx, _ = _modules()
     provider = create_provider("hf_secret", environment={}, huggingface_hub=hub, httpx=httpx)
@@ -181,6 +181,17 @@ def test_quote_rejects_invalid_exact_microusd(unit: object) -> None:
     ]
     with pytest.raises(CloudProviderError):
         provider.quote_a10g()
+
+
+def test_quote_accepts_live_a10g_integer_rounding() -> None:
+    hub, httpx, _ = _modules()
+    provider = create_provider("hf_secret", environment={}, huggingface_hub=hub, httpx=httpx)
+    provider._api.list_jobs_hardware = lambda *, token: [
+        {"name": "a10g-small", "unit_cost_micro_usd": 16_667, "unit_label": "minute"}
+    ]
+    quote = provider.quote_a10g(now=lambda: "2026-08-21T12:00:00Z")
+    assert quote.hourly_cost_micro_usd == 1_000_020
+    assert quote.timeout_cost_micro_usd == 500_010
 
 
 def test_wrong_hub_version_fails_before_client_construction() -> None:

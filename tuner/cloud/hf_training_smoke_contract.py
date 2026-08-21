@@ -29,9 +29,12 @@ ARTIFACT_SLOT_DOMAIN = b"synaptic-hf-training-artifact-slot/v1\x00"
 HARDWARE_QUOTE_ENDPOINT = "https://huggingface.co"
 HARDWARE_QUOTE_UNIT_LABEL = "minute"
 HARDWARE_QUOTE_MAX_AGE_SECONDS = 900
-HARDWARE_QUOTE_MAX_UNIT_COST_MICRO_USD = 16_666
-HARDWARE_MAX_HOURLY_COST_MICRO_USD = 1_000_000
-HARDWARE_MAX_TIMEOUT_COST_MICRO_USD = 500_000
+# Hugging Face represents the displayed USD $1/hour A10G price as an integer
+# per-minute quote rounded to the nearest micro-dollar.  Preserve that exact
+# provider value and its mechanically derived 60/30 minute bounds.
+HARDWARE_QUOTE_MAX_UNIT_COST_MICRO_USD = 16_667
+HARDWARE_MAX_HOURLY_COST_MICRO_USD = 1_000_020
+HARDWARE_MAX_TIMEOUT_COST_MICRO_USD = 500_010
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")

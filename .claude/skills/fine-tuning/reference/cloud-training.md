@@ -355,9 +355,11 @@ pass first:
    identity and hardware reads; and durably records the accepted bindings.
 5. The preflight quote resolves exactly one `a10g-small` price from the provider
    in integer micro-USD. The quote binds unit price per minute, derived hourly
-   cost, the fixed 30-minute timeout cost, and provider fetch time. It must be no
-   more than 15 minutes old when approval is issued and still fresh at
-   submission.
+   cost, the fixed 30-minute timeout cost, and provider fetch time. The live
+   provider represents its displayed USD $1/hour price as 16,667 micro-USD per
+   minute, so the exact derived bounds are 1,000,020 micro-USD/hour and 500,010
+   micro-USD/30 minutes. It must be no more than 15 minutes old when approval is
+   issued and still fresh at submission.
 6. `approve` binds that exact preflight digest, quote, source, workload, runtime,
    artifact destination, and authorization window. Only then may `execute` be
    invoked once.

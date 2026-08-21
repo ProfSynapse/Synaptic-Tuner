@@ -305,6 +305,29 @@ def test_hardware_quote_is_integer_exact_fresh_ordered_and_preflight_bound(mutat
         validate_approval(auth, preflight=pf)
 
 
+def test_live_a10g_quote_rounding_is_accepted_exactly() -> None:
+    pf = preflight()
+    pf["hardware"] = {
+        **pf["hardware"],
+        "unit_cost_micro_usd": 16_667,
+        "hourly_cost_micro_usd": 1_000_020,
+        "timeout_cost_micro_usd": 500_010,
+    }
+    pf = _seal(pf, "preflight_id")
+    assert validate_preflight(pf)["hardware"] == pf["hardware"]
+
+    auth = approval(pf)
+    auth["hardware_quote"] = {
+        "preflight_sha256": document_sha256(pf),
+        "unit_cost_micro_usd": 16_667,
+        "hourly_cost_micro_usd": 1_000_020,
+        "timeout_cost_micro_usd": 500_010,
+        "fetched_at": TS,
+    }
+    auth = _seal(auth, "authorization_id")
+    assert validate_approval(auth, preflight=pf)["hardware_quote"] == auth["hardware_quote"]
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
