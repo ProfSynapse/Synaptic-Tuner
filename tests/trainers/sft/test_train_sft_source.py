@@ -66,6 +66,20 @@ def test_train_sft_honors_config_level_max_steps() -> None:
     assert '"max_steps": effective_max_steps' in source
 
 
+def test_train_sft_threads_protected_revision_and_evidence_without_ambient_token_fallback() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+
+    assert '"--model-revision"' in source
+    assert '"--anonymous-model"' in source
+    assert '"--protected-smoke-config"' in source
+    assert '"--protected-smoke-evidence"' in source
+    assert 'model_revision=getattr(config.model, "model_revision", None)' in source
+    assert 'require_resolved_revision=bool(args.protected_smoke_evidence)' in source
+    assert "Protected smoke rejects ambient Hugging Face credentials" in source
+    assert "capture_trainable_snapshot(model)" in source
+    assert "finalize_protected_evidence(" in source
+
+
 def test_train_sft_exposes_aux_head_cli_flags() -> None:
     # train_sft imports unsloth at module load, so verify the local-run lane's
     # aux_head argparse surface at the source level. All 12 flags must exist so

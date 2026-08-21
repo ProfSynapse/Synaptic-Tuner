@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-hf-training-approval-v1.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "authorization_id", "kind", "experiment_id", "run_id", "tracking_root_id", "preflight", "user_authorization_reference", "issued_at", "expires_at", "hardware", "hardware_quote", "provider_timeout_seconds", "cancel_after_seconds", "observe_until_seconds", "maximum_submissions", "maximum_retries", "publication", "ssh", "ports", "wandb", "launcher_auth", "job_secrets", "bindings"],
+  "properties": {
+    "schema_version": {"const": "synaptic-hf-training-approval/v1"}, "authorization_id": {"$ref": "#/$defs/sha256"}, "kind": {"const": "hf.training-smoke"},
+    "experiment_id": {"$ref": "#/$defs/segment"}, "run_id": {"$ref": "#/$defs/segment"}, "tracking_root_id": {"$ref": "#/$defs/sha256"}, "preflight": {"$ref": "#/$defs/artifactRef"}, "user_authorization_reference": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$"},
+    "issued_at": {"$ref": "#/$defs/timestamp"}, "expires_at": {"$ref": "#/$defs/timestamp"},
+    "hardware": {"const": "a10g-small"}, "hardware_quote": {"type": "object", "additionalProperties": false, "required": ["preflight_sha256", "unit_cost_micro_usd", "hourly_cost_micro_usd", "timeout_cost_micro_usd", "fetched_at"], "properties": {"preflight_sha256": {"$ref": "#/$defs/sha256"}, "unit_cost_micro_usd": {"type": "integer", "minimum": 1, "maximum": 16666}, "hourly_cost_micro_usd": {"type": "integer", "minimum": 60, "maximum": 1000000}, "timeout_cost_micro_usd": {"type": "integer", "minimum": 30, "maximum": 500000}, "fetched_at": {"$ref": "#/$defs/timestamp"}}},
+    "provider_timeout_seconds": {"const": 1800}, "cancel_after_seconds": {"const": 1500}, "observe_until_seconds": {"const": 2100},
+    "maximum_submissions": {"const": 1}, "maximum_retries": {"const": 0}, "publication": {"const": false}, "ssh": {"const": false}, "ports": {"const": false}, "wandb": {"const": false},
+    "launcher_auth": {"type": "object", "additionalProperties": false, "required": ["mode", "expected_namespace"], "properties": {"mode": {"const": "explicit_file"}, "expected_namespace": {"$ref": "#/$defs/providerId"}}},
+    "job_secrets": {"type": "array", "maxItems": 0},
+    "bindings": {"type": "object", "additionalProperties": false, "required": ["source_lock_sha256", "workload_digest", "runtime_lock_sha256", "model_revision", "dataset_sha256", "image_child_digest", "remote_argv_sha256", "provider_command_sha256", "source_bucket_id", "source_prefix", "artifact_bucket_id", "artifact_base_prefix", "artifact_slot_id", "artifact_prefix"], "properties": {"source_lock_sha256": {"$ref": "#/$defs/sha256"}, "workload_digest": {"$ref": "#/$defs/sha256"}, "runtime_lock_sha256": {"$ref": "#/$defs/sha256"}, "model_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "dataset_sha256": {"$ref": "#/$defs/sha256"}, "image_child_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "remote_argv_sha256": {"$ref": "#/$defs/sha256"}, "provider_command_sha256": {"$ref": "#/$defs/sha256"}, "source_bucket_id": {"$ref": "#/$defs/bucketId"}, "source_prefix": {"$ref": "#/$defs/relativePath"}, "artifact_bucket_id": {"$ref": "#/$defs/bucketId"}, "artifact_base_prefix": {"$ref": "#/$defs/relativePath"}, "artifact_slot_id": {"$ref": "#/$defs/sha256"}, "artifact_prefix": {"$ref": "#/$defs/relativePath"}}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "segment": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"}, "providerId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "timestamp": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"},
+    "artifactRef": {"type": "object", "additionalProperties": false, "required": ["uri", "sha256"], "properties": {"uri": {"type": "string", "pattern": "^tracking://[A-Za-z0-9][A-Za-z0-9._/-]*$"}, "sha256": {"$ref": "#/$defs/sha256"}}},
+    "bucketId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "relativePath": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "maxLength": 1024}
+  }
+}

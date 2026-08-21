@@ -257,6 +257,168 @@ action.
 
 ---
 
+## Protected HF A10G Training Smoke
+
+This is the checked-in, approval-bound operator for the narrow paid training
+smoke. It is separate from both the CPU bootstrap smoke above and the normal
+`cloud-run`, `cloud-pipeline`, and `run-experiment` paths. Do not replace it
+with an ad hoc `run_job` call or a manual bucket download.
+
+The command family is:
+
+```powershell
+python tuner.py hf-training-smoke preflight `
+  --project-root <exact-clean-worktree> `
+  --manifest <committed-protected-manifest> `
+  --experiment-id <experiment-id> `
+  --expected-namespace <hf-namespace> `
+  --source-bucket-id <namespace/source-bucket> `
+  --source-prefix <authenticated-source-prefix> `
+  --artifact-bucket-id <namespace/artifact-bucket> `
+  --artifact-prefix <private-artifact-base-prefix> `
+  --env-file <explicit-project-env-file> `
+  --base-dir <absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-training-smoke approve `
+  --project-root <same-exact-clean-worktree> `
+  --manifest <same-committed-protected-manifest> `
+  --experiment-id <same-experiment-id> `
+  --authorization-reference <recorded-reference> `
+  --issued-at <UTC-RFC3339> `
+  --expires-at <UTC-RFC3339> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-training-smoke execute `
+  --project-root <same-exact-clean-worktree> `
+  --manifest <same-committed-protected-manifest> `
+  --experiment-id <same-experiment-id> `
+  --env-file <same-explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-training-smoke recover `
+  --project-root <same-exact-clean-worktree> `
+  --manifest <same-committed-protected-manifest> `
+  --experiment-id <same-experiment-id> `
+  --env-file <same-explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-training-smoke observe `
+  --project-root <same-exact-clean-worktree> `
+  --manifest <same-committed-protected-manifest> `
+  --experiment-id <same-experiment-id> `
+  --env-file <same-explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-training-smoke verify `
+  --project-root <same-exact-clean-worktree> `
+  --manifest <same-committed-protected-manifest> `
+  --experiment-id <same-experiment-id> `
+  --env-file <same-explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+```
+
+Each action has a closed option allowlist. There are no operator overrides for
+image, command, hardware, timeout, retry count, price, artifact slot, provider,
+publication, ports, or SSH.
+
+### Gates before any paid execution
+
+Do not run `execute` merely because the command exists. All of these gates must
+pass first:
+
+1. The current protected code tree has independent security and release PASS
+   verdicts for the exact files that will be committed.
+2. Those exact files are committed and pushed from a named branch, and the
+   operator runs from a fresh clean worktree at that pushed commit.
+3. The host launcher passes its isolated CPython 3.12.7 contract. Create it only
+   from the checked-in hashed lock, installed allowlist, and an external
+   wheelhouse:
+
+   ```powershell
+   python scripts/setup_hf_training_smoke_launcher.py `
+     --python C:\path\to\python-3.12.7.exe `
+     --venv C:\path\to\fresh\hf-training-smoke-launcher `
+     --wheelhouse C:\path\to\authenticated\wheelhouse `
+     --repo-root <same-exact-clean-worktree>
+   ```
+
+   This host launcher is distinct from the digest-pinned remote training image,
+   whose authenticated runtime is recorded in its canonical runtime lock.
+4. `preflight` authenticates the exact source, manifest, runtime lock, buckets,
+   namespace, and derived destination binding; performs the live provider
+   identity and hardware reads; and durably records the accepted bindings.
+5. The preflight quote resolves exactly one `a10g-small` price from the provider
+   in integer micro-USD. The quote binds unit price per minute, derived hourly
+   cost, the fixed 30-minute timeout cost, and provider fetch time. It must be no
+   more than 15 minutes old when approval is issued and still fresh at
+   submission.
+6. `approve` binds that exact preflight digest, quote, source, workload, runtime,
+   artifact destination, and authorization window. Only then may `execute` be
+   invoked once.
+
+Until code, security, release, exact-commit push, clean-worktree, launcher,
+preflight, and approval gates all pass, this lane is **not live-eligible**.
+
+### Frozen safety contract
+
+- **Exact pushed source:** the no-shell launcher authenticates and reconstructs
+  the exact pushed SourceLock commits before importing or executing repository
+  code. The provider command and remote argv are independently hashed and bound
+  into the protected workload.
+- **Isolated provider client:** the host uses the pinned Hub client and fixed
+  HTTPS endpoint with ambient proxy, endpoint, CA, and credential overrides
+  rejected. Credential contents are read only after the required durable claim.
+- **No remote credential:** the local token authorizes provider API calls and
+  volume access only. The remote job receives `secrets={}` and no `HF_TOKEN`,
+  `HF_API_KEY`, or other credential in its command or environment.
+- **Domain-separated artifact slot:** the operator derives the 64-hex slot from
+  canonical JSON under the `synaptic-hf-training-artifact-slot/v1` domain. The
+  input binds the experiment, run, tracking root, source lock, workload, runtime
+  lock, artifact bucket, and artifact base prefix. The full destination is the
+  approved base prefix plus that derived slot; the CLI cannot choose it.
+  `execute` requires that exact slot to be empty immediately before the one
+  provider submission call.
+- **One submission, no retry:** `execute` durably consumes authority before the
+  provider call. A definite local pre-call failure records `NOT_SUBMITTED`; an
+  uncertain post-call outcome records `AMBIGUOUS`. Never rerun `execute` after
+  an ambiguous outcome and never submit a replacement under the same approval.
+- **Read-only recovery:** `recover` never submits or cancels. It can confirm
+  `SUBMITTED` only from exactly one matching provider job whose full identity
+  and spec reauthenticate. Zero matches leaves the outcome `AMBIGUOUS`; it does
+  not restore submission authority. Multiple, malformed, or mismatched matches
+  also fail closed as ambiguous.
+- **One cancel attempt:** observation reauthenticates the complete job spec on
+  every poll. At the 25-minute cancellation boundary it claims the attempt,
+  reinspects for a terminal race, and may call cancel exactly once. Provider
+  timeout is 30 minutes and observation stops after 35 minutes. An uncertain
+  cancellation remains consumed and is never retried.
+- **Exact bounded readback:** verification first lists the destination and
+  accepts exactly these 15 files:
+  `source-lock.json`, `exclusive-sentinel.json`,
+  `checkpoint-1/adapter_model.safetensors`,
+  `checkpoint-1/adapter_config.json`,
+  `checkpoint-1/trainer_state.json`, `checkpoint-1/optimizer.pt`,
+  `checkpoint-1/scheduler.pt`, `final_model/adapter_model.safetensors`,
+  `final_model/adapter_config.json`, `final_model/tokenizer_config.json`,
+  `training_lineage.json`, `step-evidence.json`, `result.json`, `manifest.json`,
+  and `inventory.json`. An owned, deadline-bounded child downloads only that
+  prelisted set. Pre- and post-download inventories must be identical before
+  strict local artifact verification may return `VERIFIED`.
+- **No bulk sync:** the protected lane never calls `sync_bucket`; broad pull or
+  sync commands are not an acceptable substitute for `verify`.
+
+`preflight`, `recover`, `observe`, and `verify` may perform authenticated
+provider reads. Only `execute` may submit, and its durable one-shot authority is
+not widened by any later action.
+
+---
+
 ## Provider-Native Storage
 
 Cloud artifacts are durable by default in the provider ecosystem:

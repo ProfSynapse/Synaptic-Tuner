@@ -25,6 +25,14 @@ from tuner.cloud.bootstrap_capsule import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_bootstrap_capsule_remains_minimal_and_excludes_training_runtime() -> None:
+    assert CAPSULE_MODULE_PATHS == (
+        "tuner/cloud/bootstrap_core.py",
+        "tuner/cloud/bootstrap_capsule.py",
+    )
+    assert "tuner/cloud/hf_training_smoke_remote_entry.py" not in CAPSULE_MODULE_PATHS
+
+
 def _git(repository: Path, *arguments: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repository), *arguments], check=True, capture_output=True, text=True,

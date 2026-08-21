@@ -98,6 +98,10 @@ def route_command(args: Namespace, context: ProjectContext | None = None) -> int
         from tuner.handlers.hf_smoke_handler import HFSmokeHandler
         return HFSmokeHandler(args=args, context=context).handle()
 
+    if command == "hf-training-smoke":
+        from tuner.handlers.hf_training_smoke_handler import HFTrainingSmokeHandler
+        return HFTrainingSmokeHandler(args=args, context=context).handle()
+
     if command == "batch-generate":
         from tuner.handlers.batch_generate_handler import BatchGenerateHandler
         return _bind_context(BatchGenerateHandler(args=args), context).handle()

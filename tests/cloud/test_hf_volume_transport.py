@@ -16,13 +16,18 @@ import pytest
 
 from tuner.cloud.hf_volume_transport import (
     _INLINE_VERIFIER,
+    FIXED_STDLIB_TRAINING_LAUNCHER,
+    HFArtifactVolumeSpec,
     HFVerifiedVolume,
     HFVerifiedVolumeSpec,
     build_verified_bootstrap_step,
+    build_training_provider_command,
     build_runtime_projection_step,
     prove_read_only_volume,
+    prove_writable_artifact_volume,
     project_runtime_layout,
     transport_metadata,
+    validate_disjoint_volume_prefixes,
 )
 from tuner.core.exceptions import CloudProviderError
 from tuner.cloud.hf_jobs import CloudJobSpec, HFJobExecutor
@@ -79,7 +84,6 @@ def _spec(tmp_path: Path) -> HFVerifiedVolumeSpec:
 def test_proves_exact_read_only_volume_without_run_job(tmp_path: Path) -> None:
     client = SimpleNamespace(Volume=RecordingVolume, run_job=_run_job)
     proven = prove_read_only_volume(client, _spec(tmp_path))
-
     assert proven.provider_volume.to_dict() == {
         "type": "bucket",
         "source": "owner/bootstrap-bucket",
@@ -88,6 +92,67 @@ def test_proves_exact_read_only_volume_without_run_job(tmp_path: Path) -> None:
         "path": "prepared/run-123",
     }
     assert inspect.signature(client.run_job).parameters["volumes"]
+
+
+def test_training_provider_command_is_fixed_no_shell_and_exactly_bound(tmp_path: Path) -> None:
+    spec = _spec(tmp_path)
+    remote = ("--recipe", "/workspace/project/recipe.yaml")
+    command = build_training_provider_command(
+        spec, remote_argv=remote,
+        expected_project_root="/workspace/source/project",
+        expected_engine_root="/workspace/source/engine",
+        expected_project_commit="1" * 40, expected_engine_commit="2" * 40,
+        expected_mode="dual_clone",
+    )
+    assert command[:4] == ("python", "-I", "-c", FIXED_STDLIB_TRAINING_LAUNCHER)
+    assert command[-3:] == ("--", *remote)
+    assert all(value not in {"sh", "bash", "cmd", "powershell"} for value in command)
+    assert "HF_TOKEN" not in "".join(command)
+
+
+def test_training_provider_command_rejects_unbound_inputs(tmp_path: Path) -> None:
+    with pytest.raises(CloudProviderError, match="provider argv"):
+        build_training_provider_command(
+            _spec(tmp_path), remote_argv=["--recipe", "x"],  # type: ignore[arg-type]
+            expected_project_root="/workspace/source/project",
+            expected_engine_root="/workspace/source/engine",
+            expected_project_commit="1" * 40, expected_engine_commit="2" * 40,
+            expected_mode="dual_clone",
+        )
+
+def test_proves_exact_writable_artifact_volume_without_run_job() -> None:
+    client = SimpleNamespace(Volume=RecordingVolume, run_job=_run_job)
+    spec = HFArtifactVolumeSpec(
+        source="owner/artifacts", path="synaptic/training-smoke/v1/experiment/slot",
+    )
+    volume = prove_writable_artifact_volume(client, spec)
+    assert volume.provider_volume.to_dict() == {
+        "type": "bucket", "source": "owner/artifacts",
+        "path": "synaptic/training-smoke/v1/experiment/slot",
+        "mountPath": "/workspace/artifacts", "readOnly": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("source_prefix", "artifact_prefix"),
+    [
+        ("prepared/run", "prepared/run"),
+        ("prepared/run", "prepared/run/artifacts"),
+        ("prepared/run/source", "prepared/run"),
+    ],
+)
+def test_rejects_source_artifact_prefix_overlap(tmp_path: Path, source_prefix: str, artifact_prefix: str) -> None:
+    source = _spec(tmp_path)
+    object.__setattr__(source, "path", source_prefix)
+    artifact = HFArtifactVolumeSpec(source=source.source, path=artifact_prefix)
+    with pytest.raises(CloudProviderError, match="overlap"):
+        validate_disjoint_volume_prefixes(source, artifact)
+
+
+def test_accepts_disjoint_source_artifact_prefixes(tmp_path: Path) -> None:
+    source = _spec(tmp_path)
+    artifact = HFArtifactVolumeSpec(source=source.source, path="artifacts/run-123")
+    validate_disjoint_volume_prefixes(source, artifact)
 
 
 @pytest.mark.parametrize("missing", ["Volume", "run_job"])

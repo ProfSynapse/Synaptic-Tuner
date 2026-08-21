@@ -52,13 +52,26 @@ def test_hf_source_and_smoke_parser_are_narrow_and_have_no_yes_bypass():
         "hf-smoke", "execute", "--experiment-id", "exp-1", "--env-file", ".env",
         "--base-dir", "C:/external/tracking",
     ])
+    training_smoke = parser.parse_args([
+        "hf-training-smoke", "execute", "--experiment-id", "exp-1",
+        "--env-file", ".env", "--base-dir", "C:/external/tracking",
+    ])
     assert (source.command, source.subcommand) == ("hf-source", "provision")
     assert (prepared.command, prepared.subcommand) == ("hf-source", "prepare")
     assert (smoke.command, smoke.subcommand) == ("hf-smoke", "execute")
+    assert (training_smoke.command, training_smoke.subcommand) == (
+        "hf-training-smoke", "execute"
+    )
     assert not hasattr(smoke, "hf_smoke_command")
     with pytest.raises(SystemExit):
         parser.parse_args(["hf-smoke", "execute", "--experiment-id", "exp-1", "--yes"])
-    for argv in (["hf-smoke"], ["hf-smoke", "retry"], ["hf-source"], ["hf-source", "execute"]):
+    with pytest.raises(SystemExit):
+        parser.parse_args(["hf-training-smoke", "execute", "--yes"])
+    for argv in (
+        ["hf-smoke"], ["hf-smoke", "retry"], ["hf-source"],
+        ["hf-source", "execute"], ["hf-training-smoke"],
+        ["hf-training-smoke", "retry"],
+    ):
         with pytest.raises(SystemExit):
             parser.parse_args(argv)
 
@@ -86,6 +99,33 @@ def test_protected_action_option_allowlists_are_frozen():
             "--base-dir", "--env-file", "--experiment-id", "--json",
             "--manifest", "--project-root",
         }),
+        ("hf-training-smoke", "preflight"): frozenset({
+            "--artifact-bucket-id", "--artifact-prefix", "--base-dir",
+            "--env-file", "--expected-namespace", "--experiment-id", "--json",
+            "--manifest", "--project-root", "--source-bucket-id",
+            "--source-prefix",
+        }),
+        ("hf-training-smoke", "approve"): frozenset({
+            "--authorization-reference", "--base-dir", "--experiment-id",
+            "--expires-at", "--issued-at", "--json", "--manifest",
+            "--project-root",
+        }),
+        ("hf-training-smoke", "execute"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+        ("hf-training-smoke", "recover"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+        ("hf-training-smoke", "observe"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+        ("hf-training-smoke", "verify"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
     }
 
 
@@ -97,6 +137,12 @@ def test_protected_action_option_allowlists_are_frozen():
         (["hf-smoke", "approve", "--experiment-id=exp-1", "--authorization-reference=chat", "--issued-at=2026-08-20T00:00:00Z", "--expires-at=2026-08-20T01:00:00Z", "--quoted-at=2026-08-20T00:00:00Z", "--hourly-price-usd=0.01", "--projected-cost-usd=0.01", "--base-dir=C:/external"], ("hf-smoke", "approve")),
         (["hf-smoke", "execute", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-smoke", "execute")),
         (["hf-smoke", "observe", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-smoke", "observe")),
+        (["hf-training-smoke", "preflight", "--experiment-id=exp-1", "--expected-namespace=owner", "--source-bucket-id=owner/source", "--source-prefix=source/exact", "--artifact-bucket-id=owner/artifacts", "--artifact-prefix=training/smoke", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "preflight")),
+        (["hf-training-smoke", "approve", "--experiment-id=exp-1", "--authorization-reference=chat", "--issued-at=2026-08-21T00:00:00Z", "--expires-at=2026-08-21T00:15:00Z", "--base-dir=C:/external"], ("hf-training-smoke", "approve")),
+        (["hf-training-smoke", "execute", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "execute")),
+        (["hf-training-smoke", "recover", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "recover")),
+        (["hf-training-smoke", "observe", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "observe")),
+        (["hf-training-smoke", "verify", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "verify")),
     ],
 )
 def test_protected_action_allowlists_accept_equals_syntax(argv, expected):
@@ -117,11 +163,47 @@ def test_protected_action_allowlists_accept_equals_syntax(argv, expected):
         ["hf-smoke", "observe", "--authorization-reference=chat"],
         ["hf-smoke", "execute", "--yes"],
         ["--profile=unsafe", "hf-smoke", "observe"],
+        ["hf-training-smoke", "preflight", "--hardware=a10g-large"],
+        ["hf-training-smoke", "preflight", "--train-gpu=a100-large"],
+        ["hf-training-smoke", "preflight", "--hourly-price-usd=0.01"],
+        ["hf-training-smoke", "approve", "--env-file=.env"],
+        ["hf-training-smoke", "approve", "--artifact-prefix=chosen"],
+        ["hf-training-smoke", "approve", "--max-hourly-price=0.01"],
+        ["hf-training-smoke", "execute", "--expected-namespace=owner"],
+        ["hf-training-smoke", "execute", "--timeout=60"],
+        ["hf-training-smoke", "execute", "--timeout-hours=1"],
+        ["hf-training-smoke", "execute", "--train-cloud-image=mutable:latest"],
+        ["hf-training-smoke", "execute", "--provider=modal"],
+        ["hf-training-smoke", "execute", "--auto-confirm"],
+        ["hf-training-smoke", "recover", "--yes"],
+        ["hf-training-smoke", "observe", "--authorization-reference=chat"],
+        ["hf-training-smoke", "verify", "--source-prefix=other"],
+        ["--profile=unsafe", "hf-training-smoke", "observe"],
     ],
 )
 def test_protected_action_allowlists_reject_disallowed_explicit_options(argv):
     with pytest.raises(SystemExit):
         create_parser().parse_args(argv)
+
+
+def test_hf_training_smoke_router_uses_protected_handler(tmp_path, monkeypatch):
+    from tuner.handlers.hf_training_smoke_handler import HFTrainingSmokeHandler
+
+    args = create_parser().parse_args([
+        "hf-training-smoke", "verify", "--experiment-id", "exp-1",
+        "--env-file", ".env", "--base-dir", "C:/external",
+    ])
+    context = ProjectContext.standalone(engine_root=tmp_path)
+    seen = []
+
+    def handle(handler):
+        seen.append((handler.args, handler.context))
+        return 17
+
+    monkeypatch.setattr(HFTrainingSmokeHandler, "handle", handle)
+
+    assert route_command(args, context=context) == 17
+    assert seen == [(args, context)]
 
 
 def test_tuner_legacy_exports_resolve_lazily_and_preserve_normal_errors(tmp_path):
@@ -892,6 +974,11 @@ def test_explicit_env_file_with_installed_support_loads_and_routes(
         ["hf-source", "provision", "--experiment-id", "exp-1", "--actor", "operator-1"],
         ["hf-smoke", "execute", "--experiment-id", "exp-1"],
         ["hf-smoke", "observe", "--experiment-id", "exp-1"],
+        ["hf-training-smoke", "preflight", "--experiment-id", "exp-1"],
+        ["hf-training-smoke", "execute", "--experiment-id", "exp-1"],
+        ["hf-training-smoke", "recover", "--experiment-id", "exp-1"],
+        ["hf-training-smoke", "observe", "--experiment-id", "exp-1"],
+        ["hf-training-smoke", "verify", "--experiment-id", "exp-1"],
     ],
 )
 def test_protected_hf_cli_defers_dotenv_until_handler_boundary(

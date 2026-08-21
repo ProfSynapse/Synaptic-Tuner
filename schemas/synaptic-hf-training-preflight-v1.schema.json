@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-hf-training-preflight-v1.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "preflight_id", "experiment_id", "run_id", "tracking_root_id", "occurred_at", "status", "source", "runtime_lock", "workload_digest", "model", "dataset", "image", "hardware", "artifact_slot_input", "artifact_slot_id", "volumes", "command", "launcher_auth", "job_secrets"],
+  "properties": {
+    "schema_version": {"const": "synaptic-hf-training-preflight/v1"},
+    "preflight_id": {"$ref": "#/$defs/sha256"}, "experiment_id": {"$ref": "#/$defs/segment"}, "run_id": {"$ref": "#/$defs/segment"}, "tracking_root_id": {"$ref": "#/$defs/sha256"},
+    "occurred_at": {"$ref": "#/$defs/timestamp"}, "status": {"const": "PASS"},
+    "source": {"type": "object", "additionalProperties": false, "required": ["descriptor", "source_lock", "provisioning_evidence", "bundle_sha256", "capsule_manifest_sha256", "checkout_policy_sha256", "project_commit", "engine_commit"], "properties": {"descriptor": {"$ref": "#/$defs/artifactRef"}, "source_lock": {"$ref": "#/$defs/artifactRef"}, "provisioning_evidence": {"$ref": "#/$defs/artifactRef"}, "bundle_sha256": {"$ref": "#/$defs/sha256"}, "capsule_manifest_sha256": {"$ref": "#/$defs/sha256"}, "checkout_policy_sha256": {"$ref": "#/$defs/sha256"}, "project_commit": {"$ref": "#/$defs/gitSha"}, "engine_commit": {"$ref": "#/$defs/gitSha"}}},
+    "runtime_lock": {"$ref": "#/$defs/artifactRef"}, "workload_digest": {"$ref": "#/$defs/sha256"},
+    "model": {"type": "object", "additionalProperties": false, "required": ["repository", "revision"], "properties": {"repository": {"type": "string", "minLength": 3, "maxLength": 255}, "revision": {"$ref": "#/$defs/gitSha"}}},
+    "dataset": {"type": "object", "additionalProperties": false, "required": ["path", "sha256", "git_blob", "bytes", "row_count", "row_sha256"], "properties": {"path": {"$ref": "#/$defs/relativePath"}, "sha256": {"$ref": "#/$defs/sha256"}, "git_blob": {"$ref": "#/$defs/gitSha"}, "bytes": {"type": "integer", "minimum": 1, "maximum": 10485760}, "row_count": {"const": 1}, "row_sha256": {"$ref": "#/$defs/sha256"}}},
+    "image": {"$ref": "#/$defs/imageIdentity"},
+    "hardware": {"type": "object", "additionalProperties": false, "required": ["endpoint", "flavor", "unit_cost_micro_usd", "unit_label", "hourly_cost_micro_usd", "timeout_cost_micro_usd", "fetched_at"], "properties": {"endpoint": {"const": "https://huggingface.co"}, "flavor": {"const": "a10g-small"}, "unit_cost_micro_usd": {"type": "integer", "minimum": 1, "maximum": 16666}, "unit_label": {"const": "minute"}, "hourly_cost_micro_usd": {"type": "integer", "minimum": 60, "maximum": 1000000}, "timeout_cost_micro_usd": {"type": "integer", "minimum": 30, "maximum": 500000}, "fetched_at": {"$ref": "#/$defs/timestamp"}}},
+    "artifact_slot_input": {"$ref": "#/$defs/artifactSlotInput"}, "artifact_slot_id": {"$ref": "#/$defs/sha256"},
+    "volumes": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"allOf": [{"$ref": "#/$defs/volume"}, {"properties": {"mount_path": {"const": "/workspace/synaptic-bootstrap-input"}, "read_only": {"const": true}}}]}, {"allOf": [{"$ref": "#/$defs/volume"}, {"properties": {"mount_path": {"const": "/workspace/artifacts"}, "read_only": {"const": false}}}]}], "items": false},
+    "command": {"type": "object", "additionalProperties": false, "required": ["remote_argv_sha256", "provider_command_sha256"], "properties": {"remote_argv_sha256": {"$ref": "#/$defs/sha256"}, "provider_command_sha256": {"$ref": "#/$defs/sha256"}}},
+    "launcher_auth": {"type": "object", "additionalProperties": false, "required": ["mode", "expected_namespace"], "properties": {"mode": {"const": "explicit_file"}, "expected_namespace": {"$ref": "#/$defs/providerId"}}},
+    "job_secrets": {"type": "array", "maxItems": 0}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "gitSha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "segment": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"}, "providerId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "timestamp": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"},
+    "relativePath": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "maxLength": 1024},
+    "artifactRef": {"type": "object", "additionalProperties": false, "required": ["uri", "sha256"], "properties": {"uri": {"type": "string", "pattern": "^tracking://[A-Za-z0-9][A-Za-z0-9._/-]*$"}, "sha256": {"$ref": "#/$defs/sha256"}}},
+    "volume": {"type": "object", "additionalProperties": false, "required": ["bucket_id", "prefix", "mount_path", "read_only"], "properties": {"bucket_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"}, "prefix": {"$ref": "#/$defs/relativePath"}, "mount_path": {"enum": ["/workspace/synaptic-bootstrap-input", "/workspace/artifacts"]}, "read_only": {"type": "boolean"}}},
+    "artifactSlotInput": {"type": "object", "additionalProperties": false, "required": ["schema_version", "experiment_id", "run_id", "tracking_root_id", "source_lock_sha256", "workload_digest", "runtime_lock_sha256", "artifact_bucket_id", "artifact_base_prefix"], "properties": {"schema_version": {"const": "synaptic-hf-training-artifact-slot-input/v1"}, "experiment_id": {"$ref": "#/$defs/segment"}, "run_id": {"$ref": "#/$defs/segment"}, "tracking_root_id": {"$ref": "#/$defs/sha256"}, "source_lock_sha256": {"$ref": "#/$defs/sha256"}, "workload_digest": {"$ref": "#/$defs/sha256"}, "runtime_lock_sha256": {"$ref": "#/$defs/sha256"}, "artifact_bucket_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"}, "artifact_base_prefix": {"$ref": "#/$defs/relativePath"}}},
+    "layerDescriptor": {"type": "object", "additionalProperties": false, "required": ["media_type", "digest", "size"], "properties": {"media_type": {"enum": ["application/vnd.oci.image.layer.v1.tar", "application/vnd.oci.image.layer.v1.tar+gzip", "application/vnd.oci.image.layer.v1.tar+zstd", "application/vnd.docker.image.rootfs.diff.tar.gzip", "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip"]}, "digest": {"$ref": "#/$defs/digest"}, "size": {"type": "integer", "minimum": 1, "maximum": 1099511627776}}},
+    "imageIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["registry_repository", "provider_repository", "requested_digest", "requested_media_type", "requested_kind", "index_digest", "index_media_type", "child_digest", "child_media_type", "config_digest", "config_media_type", "config_size", "platform", "layers", "provider_reference"],
+      "properties": {
+        "registry_repository": {"const": "docker.io/unsloth/unsloth"}, "provider_repository": {"const": "unsloth/unsloth"},
+        "requested_digest": {"$ref": "#/$defs/digest"}, "requested_media_type": {"enum": ["application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json", "application/vnd.docker.distribution.manifest.v2+json"]}, "requested_kind": {"enum": ["index", "manifest"]},
+        "index_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}, "index_media_type": {"anyOf": [{"enum": ["application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"]}, {"type": "null"}]},
+        "child_digest": {"$ref": "#/$defs/digest"}, "child_media_type": {"const": "application/vnd.docker.distribution.manifest.v2+json"},
+        "config_digest": {"$ref": "#/$defs/digest"}, "config_media_type": {"enum": ["application/vnd.oci.image.config.v1+json", "application/vnd.docker.container.image.v1+json"]}, "config_size": {"type": "integer", "minimum": 1, "maximum": 4194304},
+        "platform": {"const": "linux/amd64"}, "layers": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/layerDescriptor"}}, "provider_reference": {"type": "string", "pattern": "^unsloth/unsloth@sha256:[0-9a-f]{64}$"}
+      },
+      "allOf": [
+        {"if": {"properties": {"requested_kind": {"const": "index"}}}, "then": {"properties": {"requested_media_type": {"enum": ["application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"]}, "index_digest": {"$ref": "#/$defs/digest"}, "index_media_type": {"enum": ["application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"]}}}},
+        {"if": {"properties": {"requested_kind": {"const": "manifest"}}}, "then": {"properties": {"requested_media_type": {"const": "application/vnd.docker.distribution.manifest.v2+json"}, "index_digest": {"type": "null"}, "index_media_type": {"type": "null"}}}}
+      ]
+    }
+  }
+}

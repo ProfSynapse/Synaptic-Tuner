@@ -185,7 +185,7 @@ def main(argv=None):
         # values loaded from the selected project/engine env file.
         context = build_project_context(args)
         explicit_env = _explicit_env_path(args, context.invocation_cwd)
-        protected_hf_command = getattr(args, "command", None) in {"hf-source", "hf-smoke"}
+        protected_hf_command = getattr(args, "command", None) in {"hf-source", "hf-smoke", "hf-training-smoke"}
         if protected_hf_command:
             # These handlers own an effect-aware authorization boundary. Keep
             # the selected file metadata available, but do not place secrets

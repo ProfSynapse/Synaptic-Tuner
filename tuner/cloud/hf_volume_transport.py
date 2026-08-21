@@ -28,6 +28,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _BUCKET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 _MOUNT_ROOT = "/workspace/synaptic-bootstrap-input"
+_ARTIFACT_MOUNT_ROOT = "/workspace/artifacts"
 _CHECKOUT_ROOT = "/workspace/source"
 _BOOTSTRAP_RESULT = ".synaptic-bootstrap-result.json"
 
@@ -104,6 +105,28 @@ class HFVerifiedVolume:
     verification_context: Any = None
 
 
+@dataclass(frozen=True)
+class HFArtifactVolumeSpec:
+    """Approval-bound writable artifact prefix for the protected smoke only."""
+
+    source: str
+    path: str
+    mount_path: str = _ARTIFACT_MOUNT_ROOT
+
+    def __post_init__(self) -> None:
+        if not _BUCKET_RE.fullmatch(self.source):
+            raise CloudProviderError("HF artifact volume requires a sanitized namespaced bucket id.")
+        if self.mount_path != _ARTIFACT_MOUNT_ROOT:
+            raise CloudProviderError("HF artifact volume mount path is fixed by the protected contract.")
+        _validate_canonical_prefix(self.path, label="artifact prefix")
+
+
+@dataclass(frozen=True)
+class HFVerifiedArtifactVolume:
+    spec: HFArtifactVolumeSpec
+    provider_volume: Any
+
+
 def _validate_relative_member(value: str, *, label: str) -> None:
     if not isinstance(value, str) or not value or "\\" in value or "\x00" in value:
         raise CloudProviderError(f"HF bootstrap {label} must be a canonical relative POSIX path.")
@@ -112,6 +135,39 @@ def _validate_relative_member(value: str, *, label: str) -> None:
         raise CloudProviderError(f"HF bootstrap {label} must be a contained relative path.")
     if path.as_posix() != value:
         raise CloudProviderError(f"HF bootstrap {label} must be canonically encoded.")
+
+
+def _validate_canonical_prefix(value: str, *, label: str) -> tuple[str, ...]:
+    if not isinstance(value, str) or not value or len(value) > 512 or "\\" in value or "\x00" in value:
+        raise CloudProviderError(f"HF {label} must be a canonical bounded POSIX prefix.")
+    parts = value.split("/")
+    if any(
+        not part or part in {".", ".."} or len(part) > 96
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", part) is None
+        for part in parts
+    ):
+        raise CloudProviderError(f"HF {label} contains a noncanonical segment.")
+    if "/".join(parts) != value:
+        raise CloudProviderError(f"HF {label} is not canonically encoded.")
+    return tuple(parts)
+
+
+def validate_disjoint_volume_prefixes(
+    source_spec: HFVerifiedVolumeSpec, artifact_spec: HFArtifactVolumeSpec,
+) -> None:
+    """Reject equal, ancestor, or descendant prefixes in the same bucket."""
+
+    if source_spec.mount_path == artifact_spec.mount_path:
+        raise CloudProviderError("HF source and artifact mounts must be distinct.")
+    if source_spec.source != artifact_spec.source:
+        return
+    if source_spec.path is None:
+        raise CloudProviderError("HF source bucket-root mount overlaps the artifact prefix.")
+    source = _validate_canonical_prefix(source_spec.path, label="source prefix")
+    artifact = _validate_canonical_prefix(artifact_spec.path, label="artifact prefix")
+    shared = min(len(source), len(artifact))
+    if source[:shared] == artifact[:shared]:
+        raise CloudProviderError("HF source and artifact prefixes overlap.")
 
 
 def _explicit_keyword(signature: inspect.Signature, name: str) -> bool:
@@ -247,6 +303,40 @@ def validate_read_only_volume_object(volume: Any, spec: HFVerifiedVolumeSpec) ->
         raise CloudProviderError("Installed huggingface_hub cannot prove an explicit read-only mount.")
 
 
+def prove_writable_artifact_volume(
+    huggingface_hub: Any, spec: HFArtifactVolumeSpec,
+) -> HFVerifiedArtifactVolume:
+    """Construct and inspect an explicit writable provider volume; never submit."""
+
+    volume_type = getattr(huggingface_hub, "Volume", None)
+    run_job = getattr(huggingface_hub, "run_job", None)
+    if not callable(volume_type) or not callable(run_job):
+        raise CloudProviderError("Installed huggingface_hub lacks verified Jobs volume support.")
+    try:
+        signature = inspect.signature(run_job)
+    except (TypeError, ValueError) as exc:
+        raise CloudProviderError("Installed huggingface_hub Jobs signature cannot be verified.") from exc
+    if not _explicit_keyword(signature, "volumes"):
+        raise CloudProviderError("Installed huggingface_hub run_job does not explicitly support volumes.")
+    try:
+        volume = volume_type(
+            type="bucket", source=spec.source, path=spec.path,
+            mount_path=spec.mount_path, read_only=False,
+        )
+        wire = volume.to_dict() if callable(getattr(volume, "to_dict", None)) else None
+    except Exception as exc:
+        raise CloudProviderError("Installed huggingface_hub writable Volume contract could not be constructed.") from exc
+    expected = {
+        "type": "bucket", "source": spec.source, "path": spec.path,
+        "mountPath": spec.mount_path, "readOnly": False,
+    }
+    if not isinstance(wire, Mapping) or dict(wire) != expected or type(wire.get("readOnly")) is not bool:
+        raise CloudProviderError("Installed huggingface_hub writable Volume serialization semantics drifted.")
+    if getattr(volume, "read_only", None) is not False:
+        raise CloudProviderError("Installed huggingface_hub cannot prove an explicit writable mount.")
+    return HFVerifiedArtifactVolume(spec=spec, provider_volume=volume)
+
+
 # Trusted launcher code.  This duplicates only the bounded authentication
 # needed before importing J0.  The verified J0 module then performs complete
 # capsule verification/private copying and invokes the sole bootstrap core.
@@ -307,6 +397,66 @@ try:
  with open(os.path.join(destination,".synaptic-bootstrap-result.json"),"xb") as handle: handle.write(raw)
 finally: shutil.rmtree(scratch)
 '''
+
+
+# This suffix executes only after ``_INLINE_VERIFIER`` authenticated and invoked
+# the mounted bootstrap capsule.  It deliberately remains standard-library-only
+# and hands control to mounted project code only through the final isolated
+# ``runpy`` shim.
+_TRAINING_LAUNCHER_SUFFIX = r'''
+expected_project,expected_engine,project_commit,engine_commit,mode,logical_project,logical_engine=sys.argv[8:15]
+if sys.argv[15]!="--": raise RuntimeError("training launcher argument boundary is invalid")
+remote_argv=sys.argv[16:]
+if not remote_argv or any(not isinstance(v,str) or not v or "\x00" in v for v in remote_argv): raise RuntimeError("training launcher remote argv is invalid")
+project=os.path.realpath(doc["project_root"]); engine=os.path.realpath(doc["engine_root"])
+if project!=os.path.realpath(expected_project) or engine!=os.path.realpath(expected_engine): raise RuntimeError("training launcher topology drifted")
+if doc["project_commit"]!=project_commit or doc["engine_commit"]!=engine_commit: raise RuntimeError("training launcher commit drifted")
+valid=(mode=="standalone" and project==engine) or (mode=="superproject" and project!=engine and os.path.commonpath((project,engine))==project) or (mode=="dual_clone" and project!=engine and os.path.commonpath((project,engine))==os.path.commonpath((os.path.dirname(project),os.path.dirname(engine))))
+if not valid: raise RuntimeError("training launcher mode drifted")
+for logical,physical in ((logical_project,project),(logical_engine,engine)):
+ if not os.path.isabs(logical) or os.path.lexists(logical) or not os.path.isdir(os.path.dirname(logical)): raise RuntimeError("training launcher logical root is unavailable")
+ os.symlink(os.path.relpath(physical,os.path.dirname(logical)),logical,target_is_directory=True)
+ if os.path.realpath(logical)!=physical: raise RuntimeError("training launcher logical root drifted")
+allowed=("CUDA_VISIBLE_DEVICES","NVIDIA_VISIBLE_DEVICES","NVIDIA_DRIVER_CAPABILITIES","PATH","HOME","TMPDIR","LANG","LC_ALL")
+child_env={key:os.environ[key] for key in allowed if key in os.environ and isinstance(os.environ[key],str)}
+child_env["PYTHONDONTWRITEBYTECODE"]="1"
+shim="import runpy,sys;root=sys.argv.pop(1);sys.path.insert(0,root);runpy.run_module('tuner.cloud.hf_training_smoke_remote_entry',run_name='__main__')"
+os.execve(sys.executable,[sys.executable,"-I","-c",shim,logical_engine,*remote_argv],child_env)
+'''
+
+FIXED_STDLIB_TRAINING_LAUNCHER = _INLINE_VERIFIER + _TRAINING_LAUNCHER_SUFFIX
+
+
+def build_training_provider_command(
+    spec: HFVerifiedVolumeSpec, *, remote_argv: tuple[str, ...],
+    expected_project_root: str, expected_engine_root: str,
+    expected_project_commit: str, expected_engine_commit: str,
+    expected_mode: str,
+) -> tuple[str, ...]:
+    """Build the sole fixed, no-shell provider argv for protected training."""
+
+    if (
+        type(remote_argv) is not tuple
+        or not remote_argv
+        or any(type(value) is not str or not value or "\x00" in value for value in remote_argv)
+        or not _COMMIT_RE.fullmatch(expected_project_commit)
+        or not _COMMIT_RE.fullmatch(expected_engine_commit)
+        or expected_mode not in {"standalone", "superproject", "dual_clone"}
+    ):
+        raise CloudProviderError("HF protected training provider argv is invalid.")
+    for root in (expected_project_root, expected_engine_root):
+        if not isinstance(root, str) or not root.startswith("/workspace/source/"):
+            raise CloudProviderError("HF protected training physical root is invalid.")
+    return (
+        "python", "-I", "-c", FIXED_STDLIB_TRAINING_LAUNCHER,
+        spec.mounted(spec.capsule_path), spec.capsule_manifest_sha256,
+        spec.mounted(spec.source_lock_path), spec.source_lock_sha256,
+        spec.mounted(spec.checkout_policy_path), spec.checkout_policy_sha256,
+        _CHECKOUT_ROOT,
+        expected_project_root, expected_engine_root,
+        expected_project_commit, expected_engine_commit, expected_mode,
+        "/workspace/project", "/workspace/engine", "--", *remote_argv,
+    )
 
 
 def build_verified_bootstrap_step(
@@ -654,7 +804,8 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "HFVerifiedVolume", "HFVerifiedVolumeSpec", "build_verified_bootstrap_step",
+    "FIXED_STDLIB_TRAINING_LAUNCHER", "HFArtifactVolumeSpec", "HFVerifiedArtifactVolume", "HFVerifiedVolume", "HFVerifiedVolumeSpec", "build_training_provider_command", "build_verified_bootstrap_step",
+    "prove_writable_artifact_volume", "validate_disjoint_volume_prefixes",
     "prove_preprovisioned_members", "prove_read_only_volume", "transport_metadata",
     "verify_reconstructed_identities", "build_runtime_projection_step", "project_runtime_layout",
     "validate_read_only_volume_object",

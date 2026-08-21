@@ -19,6 +19,7 @@ from shared.experiment_tracking.experiment import (
     _atomic_write_text,
 )
 from shared.experiment_tracking.service import ProvenanceIntegrityError
+from shared.experiment_tracking.root_identity import ensure_tracking_root_identity
 from shared.experiment_tracking.schema import RunRecord
 from tuner.project import (
     ConfigDocument,
@@ -41,6 +42,14 @@ from tuner.cloud.hf_provisioning_claim import (
     build_hf_provisioning_claim,
     build_hf_provisioning_succeeded_event,
     canonical_json_bytes as canonical_provisioning_bytes,
+)
+from tuner.cloud.hf_training_smoke_contract import (
+    ARTIFACT_SLOT_INPUT_SCHEMA,
+    canonical_json_bytes as canonical_training_bytes,
+    derive_hf_training_artifact_prefix,
+    derive_hf_training_artifact_slot,
+    document_sha256,
+    seal_training_document,
 )
 
 
@@ -2616,6 +2625,564 @@ def test_threaded_generic_mutations_merge_against_fresh_durable_state(tmp_path: 
         "judge_scores": "artifact://judge_scores",
     }
     assert any(len(caller.derived_outputs) == 2 for caller in callers)
+
+
+def _training_seal(document: dict[str, object], field: str) -> dict[str, object]:
+    document[field] = "0" * 64
+    document[field] = document_sha256({key: value for key, value in document.items() if key != field})
+    return document
+
+
+def _training_runtime_lock() -> dict[str, object]:
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "Trainers"
+        / "cloud"
+        / "runtime-locks"
+        / "hf_training_smoke_unsloth_2026_1_2.json"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _make_training_ready(service: TrackingService) -> Experiment:
+    experiment, claim = _make_prepared_provisioning_claim(service)
+    evidence_uri, evidence_sha = _write_canonical(
+        service,
+        f"experiments/{experiment.experiment_id}/cloud/hf/source-transport/evidence.json",
+        _evidence(experiment, experiment.source_transport_uri or "", experiment.source_transport_sha256 or ""),
+    )
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        claimed = service.claim_hf_provisioning(experiment, claim)
+        terminal = build_hf_provisioning_succeeded_event(
+            claimed.document,
+            claim_uri=claimed.event_uri,
+            claim_sha256=claimed.event_sha256,
+            evidence_uri=evidence_uri,
+            evidence_sha256=evidence_sha,
+            occurred_at="2026-08-20T12:00:30Z",
+        )
+        service.record_hf_provisioning_succeeded(
+            experiment, terminal, evidence_uri=evidence_uri, evidence_sha256=evidence_sha
+        )
+    service.mark_source_transport_consumable(experiment)
+    return experiment
+
+
+def _training_preflight(
+    experiment: Experiment, root_id: str, runtime_lock_ref: dict[str, str]
+) -> dict[str, object]:
+    slot_input = {
+        "schema_version": ARTIFACT_SLOT_INPUT_SCHEMA,
+        "experiment_id": experiment.experiment_id,
+        "run_id": "training-smoke-1",
+        "tracking_root_id": root_id,
+        "source_lock_sha256": experiment.source_lock_sha256,
+        "workload_digest": "b" * 64,
+        "runtime_lock_sha256": runtime_lock_ref["sha256"],
+        "artifact_bucket_id": "owner/bucket",
+        "artifact_base_prefix": "training/artifacts",
+    }
+    slot_id = derive_hf_training_artifact_slot(slot_input)
+    return _training_seal(
+        {
+            "schema_version": "synaptic-hf-training-preflight/v1",
+            "experiment_id": experiment.experiment_id, "run_id": "training-smoke-1", "tracking_root_id": root_id,
+            "occurred_at": "2026-08-20T12:01:00Z", "status": "PASS",
+            "source": {
+                "descriptor": {"uri": experiment.source_transport_uri, "sha256": experiment.source_transport_sha256},
+                "source_lock": {"uri": experiment.source_lock_uri, "sha256": experiment.source_lock_sha256},
+                "provisioning_evidence": {"uri": experiment.provisioning_evidence_uri, "sha256": experiment.provisioning_evidence_sha256},
+                "bundle_sha256": "5" * 64, "capsule_manifest_sha256": "3" * 64,
+                "checkout_policy_sha256": "4" * 64, "project_commit": "1" * 40, "engine_commit": "2" * 40,
+            },
+            "runtime_lock": runtime_lock_ref,
+            "workload_digest": "b" * 64,
+            "model": {"repository": "HuggingFaceTB/SmolLM2-135M-Instruct", "revision": "c" * 40},
+            "dataset": {"path": "Datasets/smoke.jsonl", "sha256": "d" * 64, "git_blob": "e" * 40, "bytes": 10, "row_count": 1, "row_sha256": "f" * 64},
+            "image": {
+                "registry_repository": "docker.io/unsloth/unsloth",
+                "provider_repository": "unsloth/unsloth",
+                "requested_digest": f"sha256:{'1' * 64}",
+                "requested_media_type": "application/vnd.docker.distribution.manifest.v2+json",
+                "requested_kind": "manifest",
+                "index_digest": None,
+                "index_media_type": None,
+                "child_digest": f"sha256:{'1' * 64}",
+                "child_media_type": "application/vnd.docker.distribution.manifest.v2+json",
+                "config_digest": f"sha256:{'3' * 64}",
+                "config_media_type": "application/vnd.docker.container.image.v1+json",
+                "config_size": 123,
+                "platform": "linux/amd64",
+                "layers": [{
+                    "media_type": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                    "digest": f"sha256:{'4' * 64}",
+                    "size": 456,
+                }],
+                "provider_reference": f"unsloth/unsloth@sha256:{'1' * 64}",
+            },
+            "hardware": {"endpoint": "https://huggingface.co", "flavor": "a10g-small", "unit_cost_micro_usd": 16000, "unit_label": "minute", "hourly_cost_micro_usd": 960000, "timeout_cost_micro_usd": 480000, "fetched_at": "2026-08-20T12:00:00Z"},
+            "artifact_slot_input": slot_input, "artifact_slot_id": slot_id,
+            "volumes": [
+                {"bucket_id": "owner/bucket", "prefix": "source/capsule", "mount_path": "/workspace/synaptic-bootstrap-input", "read_only": True},
+                {"bucket_id": "owner/bucket", "prefix": derive_hf_training_artifact_prefix("training/artifacts", slot_id), "mount_path": "/workspace/artifacts", "read_only": False},
+            ],
+            "command": {"remote_argv_sha256": "4" * 64, "provider_command_sha256": "5" * 64},
+            "launcher_auth": {"mode": "explicit_file", "expected_namespace": "owner"}, "job_secrets": [],
+        },
+        "preflight_id",
+    )
+
+
+def _training_approval(experiment: Experiment) -> dict[str, object]:
+    runtime_lock_sha256 = document_sha256(_training_runtime_lock())
+    slot_input = {
+        "schema_version": ARTIFACT_SLOT_INPUT_SCHEMA,
+        "experiment_id": experiment.experiment_id,
+        "run_id": experiment.hf_training_run_id,
+        "tracking_root_id": experiment.hf_training_root_id,
+        "source_lock_sha256": experiment.source_lock_sha256,
+        "workload_digest": "b" * 64,
+        "runtime_lock_sha256": runtime_lock_sha256,
+        "artifact_bucket_id": "owner/bucket",
+        "artifact_base_prefix": "training/artifacts",
+    }
+    slot_id = derive_hf_training_artifact_slot(slot_input)
+    return _training_seal(
+        {
+            "schema_version": "synaptic-hf-training-approval/v1", "kind": "hf.training-smoke",
+            "experiment_id": experiment.experiment_id, "run_id": experiment.hf_training_run_id, "tracking_root_id": experiment.hf_training_root_id,
+            "preflight": {"uri": experiment.hf_training_preflight_uri, "sha256": experiment.hf_training_preflight_sha256},
+            "user_authorization_reference": "conversation-2026-08-20-training-smoke",
+            "issued_at": "2026-08-20T12:02:00Z", "expires_at": "2026-08-20T13:02:00Z",
+            "hardware": "a10g-small", "hardware_quote": {"preflight_sha256": experiment.hf_training_preflight_sha256, "unit_cost_micro_usd": 16000, "hourly_cost_micro_usd": 960000, "timeout_cost_micro_usd": 480000, "fetched_at": "2026-08-20T12:00:00Z"},
+            "provider_timeout_seconds": 1800, "cancel_after_seconds": 1500, "observe_until_seconds": 2100,
+            "maximum_submissions": 1, "maximum_retries": 0, "publication": False, "ssh": False, "ports": False, "wandb": False,
+            "launcher_auth": {"mode": "explicit_file", "expected_namespace": "owner"}, "job_secrets": [],
+            "bindings": {
+                "source_lock_sha256": experiment.source_lock_sha256, "workload_digest": "b" * 64,
+                "runtime_lock_sha256": runtime_lock_sha256, "model_revision": "c" * 40, "dataset_sha256": "d" * 64,
+                "image_child_digest": f"sha256:{'1' * 64}", "remote_argv_sha256": "4" * 64,
+                "provider_command_sha256": "5" * 64, "source_bucket_id": "owner/bucket",
+                "source_prefix": "source/capsule", "artifact_bucket_id": "owner/bucket",
+                "artifact_base_prefix": "training/artifacts",
+                "artifact_prefix": derive_hf_training_artifact_prefix("training/artifacts", slot_id),
+                "artifact_slot_id": slot_id,
+            },
+        },
+        "authorization_id",
+    )
+
+
+def _make_training_approved(service: TrackingService) -> tuple[Experiment, dict[str, object]]:
+    experiment = _make_training_ready(service)
+    root_id = str(ensure_tracking_root_identity(service.base_dir)["root_id"])
+    runtime_lock_ref = service.snapshot_hf_training_runtime_lock(
+        experiment, _training_runtime_lock()
+    )
+    service.record_hf_training_preflight(
+        experiment, _training_preflight(experiment, root_id, runtime_lock_ref)
+    )
+    approval = _training_approval(experiment)
+    service.record_hf_training_approval(experiment, approval)
+    return experiment, approval
+
+
+def test_hf_training_runtime_lock_snapshot_is_exact_idempotent_and_preflight_gated(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    unready = service.create_experiment(
+        name="unready-runtime-lock", dataset_path="data.jsonl", dataset_hash="abc", base_model_name="model"
+    )
+    with pytest.raises(ProvenanceIntegrityError):
+        service.snapshot_hf_training_runtime_lock(unready, _training_runtime_lock())
+
+    experiment = _make_training_ready(service)
+    runtime_lock = _training_runtime_lock()
+    orphan = (
+        service.base_dir
+        / "experiments"
+        / experiment.experiment_id
+        / "cloud"
+        / "hf"
+        / "training-smoke"
+        / "runtime-locks"
+        / f"{runtime_lock['lock_id']}.json"
+    )
+    orphan.parent.mkdir(parents=True, exist_ok=True)
+    orphan.write_bytes(canonical_training_bytes(runtime_lock))
+    first = service.snapshot_hf_training_runtime_lock(experiment, runtime_lock)
+    second = service.snapshot_hf_training_runtime_lock(experiment, runtime_lock)
+    assert first == second
+    snapshot = service._strict_tracking_file(first["uri"], kind="test runtime lock")
+    assert snapshot.read_bytes() == canonical_training_bytes(runtime_lock)
+    assert hashlib.sha256(snapshot.read_bytes()).hexdigest() == first["sha256"]
+
+    root_id = str(ensure_tracking_root_identity(service.base_dir)["root_id"])
+    service.record_hf_training_preflight(
+        experiment, _training_preflight(experiment, root_id, first)
+    )
+    with pytest.raises(ProvenanceIntegrityError, match="before preflight"):
+        service.snapshot_hf_training_runtime_lock(experiment, runtime_lock)
+
+
+def test_hf_training_runtime_lock_snapshot_rejects_conflicting_orphan(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment = _make_training_ready(service)
+    runtime_lock = _training_runtime_lock()
+    orphan = (
+        service.base_dir
+        / "experiments"
+        / experiment.experiment_id
+        / "cloud"
+        / "hf"
+        / "training-smoke"
+        / "runtime-locks"
+        / f"{runtime_lock['lock_id']}.json"
+    )
+    orphan.parent.mkdir(parents=True, exist_ok=True)
+    orphan.write_bytes(b"{}\n")
+    with pytest.raises(ProvenanceIntegrityError, match="cannot be replaced"):
+        service.snapshot_hf_training_runtime_lock(experiment, runtime_lock)
+
+
+@pytest.mark.parametrize("case", ["wrong_uri", "wrong_digest", "wrong_schema", "noncanonical", "drift"])
+def test_hf_training_preflight_reauthenticates_runtime_lock_snapshot(tmp_path: Path, case: str):
+    service = TrackingService(tmp_path)
+    experiment = _make_training_ready(service)
+    runtime_lock = _training_runtime_lock()
+    reference = service.snapshot_hf_training_runtime_lock(experiment, runtime_lock)
+    snapshot = service._strict_tracking_file(reference["uri"], kind="test runtime lock")
+
+    if case == "wrong_uri":
+        wrong = snapshot.parent / "alternate.json"
+        wrong.write_bytes(snapshot.read_bytes())
+        reference = {"uri": service.tracking_uri(wrong), "sha256": reference["sha256"]}
+    elif case == "wrong_digest":
+        reference = {**reference, "sha256": "f" * 64}
+    elif case == "wrong_schema":
+        hostile = {**runtime_lock, "schema_version": "synaptic-hf-training-result/v1"}
+        snapshot.write_bytes(canonical_training_bytes(hostile))
+        reference = {**reference, "sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest()}
+    elif case == "noncanonical":
+        snapshot.write_text(json.dumps(runtime_lock, indent=2), encoding="utf-8")
+        reference = {**reference, "sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest()}
+    else:
+        hostile = json.loads(canonical_training_bytes(runtime_lock))
+        hostile["image"]["provider_reference"] = f"unsloth/unsloth@sha256:{'f' * 64}"
+        hostile = seal_training_document(
+            {key: value for key, value in hostile.items() if key != "lock_id"}
+        )
+        hostile_path = snapshot.parent / f"{hostile['lock_id']}.json"
+        hostile_path.write_bytes(canonical_training_bytes(hostile))
+        reference = {
+            "uri": service.tracking_uri(hostile_path),
+            "sha256": hashlib.sha256(hostile_path.read_bytes()).hexdigest(),
+        }
+
+    root_id = str(ensure_tracking_root_identity(service.base_dir)["root_id"])
+    preflight = _training_preflight(experiment, root_id, reference)
+    with pytest.raises(ProvenanceIntegrityError):
+        service.record_hf_training_preflight(experiment, preflight)
+
+
+def _training_submission(experiment: Experiment, state: str, previous: tuple[str, str] | None = None) -> dict[str, object]:
+    terminal = state != "SUBMITTING"
+    return _training_seal(
+        {
+            "schema_version": "synaptic-hf-training-submission-event/v1",
+            "authorization_id": experiment.hf_training_authorization_id,
+            "approval": {"uri": experiment.hf_training_approval_uri, "sha256": experiment.hf_training_approval_sha256},
+            "experiment_id": experiment.experiment_id, "run_id": experiment.hf_training_run_id, "tracking_root_id": experiment.hf_training_root_id,
+            "state": state, "sequence": 2 if terminal else 1, "occurred_at": "2026-08-20T12:04:00Z" if terminal else "2026-08-20T12:03:00Z",
+            "previous_event": ({"uri": previous[0], "sha256": previous[1]} if previous else None),
+            "provider_job": ({"namespace": "owner", "job_id": "job-1", "created_at": "2026-08-20T12:03:30Z"} if state == "SUBMITTED" else None),
+            "reason_code": ("INTERRUPTED_AFTER_CLAIM" if state == "AMBIGUOUS" else "PREFIX_NOT_EMPTY" if state == "NOT_SUBMITTED" else None),
+            "provider_effect_possible": state != "NOT_SUBMITTED",
+        },
+        "event_id",
+    )
+
+
+def _claim_training_process(base_dir: str, experiment_id: str, event: dict, results) -> None:
+    service = TrackingService(base_dir)
+    experiment = service.load_experiment(experiment_id)
+    try:
+        outcome = service.claim_hf_training_submission(experiment, event)
+        results.put(("ok", outcome.provider_attempt_authorized))
+    except Exception as exc:
+        results.put(("error", type(exc).__name__))
+
+
+def _cancel_training_process(base_dir: str, experiment_id: str, event: dict, results) -> None:
+    service = TrackingService(base_dir)
+    experiment = service.load_experiment(experiment_id)
+    try:
+        outcome = service.claim_hf_training_cancellation(experiment, event)
+        results.put(("ok", outcome.provider_attempt_authorized))
+    except Exception as exc:
+        results.put(("error", type(exc).__name__))
+
+
+def test_hf_training_projection_is_separate_immutable_and_first_claim_only(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment, approval = _make_training_approved(service)
+    assert experiment.hf_submission_state is None
+    assert experiment.hf_training_submission_state == "APPROVED"
+    before = service._experiment_path(experiment.experiment_id).read_bytes()
+    hostile = _training_seal({**approval, "publication": True}, "authorization_id")
+    with pytest.raises(Exception):
+        service.record_hf_training_approval(experiment, hostile)
+    assert service._experiment_path(experiment.experiment_id).read_bytes() == before
+
+    event = _training_submission(experiment, "SUBMITTING")
+    callers = [service.load_experiment(experiment.experiment_id) for _ in range(2)]
+    barrier = threading.Barrier(3)
+    outcomes: list[bool] = []
+
+    def claim(caller: Experiment) -> None:
+        barrier.wait(timeout=5)
+        outcomes.append(TrackingService(tmp_path).claim_hf_training_submission(caller, event).provider_attempt_authorized)
+
+    threads = [threading.Thread(target=claim, args=(caller,)) for caller in callers]
+    for thread in threads:
+        thread.start()
+    barrier.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=10)
+    assert sorted(outcomes) == [False, True]
+
+
+def test_spawned_hf_training_claim_and_terminal_stale_copy_denial(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment, _ = _make_training_approved(service)
+    event = _training_submission(experiment, "SUBMITTING")
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    processes = [context.Process(target=_claim_training_process, args=(str(tmp_path), experiment.experiment_id, event, results)) for _ in range(2)]
+    for process in processes:
+        process.start()
+    outcomes = [results.get(timeout=15) for _ in processes]
+    for process in processes:
+        process.join(timeout=15)
+    assert sorted(outcomes) == [("ok", False), ("ok", True)]
+
+    durable = service.load_experiment(experiment.experiment_id)
+    terminal = _training_submission(durable, "SUBMITTED", (durable.hf_training_submission_event_uri or "", durable.hf_training_submission_event_sha256 or ""))
+    service.record_hf_training_submission_terminal(durable, terminal)
+    stale = experiment
+    with pytest.raises(ProvenanceIntegrityError):
+        service.record_hf_training_submission_terminal(stale, terminal)
+
+
+def test_hf_training_ambiguous_submission_has_one_confirmed_submitted_recovery(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment, _ = _make_training_approved(service)
+    service.claim_hf_training_submission(experiment, _training_submission(experiment, "SUBMITTING"))
+    stale_submitting = service.load_experiment(experiment.experiment_id)
+    ambiguous = _training_submission(
+        experiment,
+        "AMBIGUOUS",
+        (
+            experiment.hf_training_submission_event_uri or "",
+            experiment.hf_training_submission_event_sha256 or "",
+        ),
+    )
+    service.record_hf_training_submission_terminal(experiment, ambiguous)
+    previous_uri = experiment.hf_training_submission_event_uri or ""
+    previous_sha = experiment.hf_training_submission_event_sha256 or ""
+    recovered = _training_seal(
+        {
+            "schema_version": "synaptic-hf-training-submission-event/v1",
+            "authorization_id": experiment.hf_training_authorization_id,
+            "approval": {"uri": experiment.hf_training_approval_uri, "sha256": experiment.hf_training_approval_sha256},
+            "experiment_id": experiment.experiment_id,
+            "run_id": experiment.hf_training_run_id,
+            "tracking_root_id": experiment.hf_training_root_id,
+            "state": "SUBMITTED",
+            "sequence": 3,
+            "occurred_at": "2026-08-20T12:05:00Z",
+            "previous_event": {"uri": previous_uri, "sha256": previous_sha},
+            "provider_job": {
+                "namespace": "owner",
+                "job_id": "job-1",
+                "created_at": "2026-08-20T12:03:30Z",
+            },
+            "reason_code": "RECOVERY_CONFIRMED_SUBMITTED",
+            "provider_effect_possible": True,
+        },
+        "event_id",
+    )
+    with pytest.raises(ProvenanceIntegrityError, match="Stale HF training projection"):
+        service.recover_hf_training_submission(stale_submitting, recovered)
+    outcome = service.recover_hf_training_submission(experiment, recovered)
+    assert outcome.state == "SUBMITTED"
+    assert outcome.provider_attempt_authorized is False
+    assert experiment.hf_training_submission_state == "SUBMITTED"
+    with pytest.raises(ProvenanceIntegrityError, match="AMBIGUOUS"):
+        service.recover_hf_training_submission(experiment, recovered)
+
+
+def _make_training_submitted(service: TrackingService) -> Experiment:
+    experiment, _ = _make_training_approved(service)
+    service.claim_hf_training_submission(experiment, _training_submission(experiment, "SUBMITTING"))
+    terminal = _training_submission(
+        experiment,
+        "SUBMITTED",
+        (experiment.hf_training_submission_event_uri or "", experiment.hf_training_submission_event_sha256 or ""),
+    )
+    service.record_hf_training_submission_terminal(experiment, terminal)
+    return experiment
+
+
+def _training_common(experiment: Experiment, schema: str) -> dict[str, object]:
+    return {
+        "schema_version": schema,
+        "authorization_id": experiment.hf_training_authorization_id,
+        "approval": {"uri": experiment.hf_training_approval_uri, "sha256": experiment.hf_training_approval_sha256},
+        "submission": {"uri": experiment.hf_training_submission_event_uri, "sha256": experiment.hf_training_submission_event_sha256},
+        "provider_job": {"namespace": "owner", "job_id": "job-1", "created_at": "2026-08-20T12:03:30Z"},
+        "experiment_id": experiment.experiment_id,
+        "run_id": experiment.hf_training_run_id,
+        "tracking_root_id": experiment.hf_training_root_id,
+    }
+
+
+def test_hf_training_cancellation_observation_and_result_recovery(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment = _make_training_submitted(service)
+    cancellation = _training_seal(
+        {
+            **_training_common(experiment, "synaptic-hf-training-cancellation-event/v1"),
+            "state": "CLAIMED", "sequence": 1, "occurred_at": "2026-08-20T12:30:00Z",
+            "previous_event": None, "reason_code": None, "provider_effect_possible": True,
+        },
+        "event_id",
+    )
+    callers = [service.load_experiment(experiment.experiment_id) for _ in range(2)]
+    barrier = threading.Barrier(3)
+    authorities: list[bool] = []
+
+    def cancel(caller: Experiment) -> None:
+        barrier.wait(timeout=5)
+        authorities.append(
+            TrackingService(tmp_path)
+            .claim_hf_training_cancellation(caller, cancellation)
+            .provider_attempt_authorized
+        )
+
+    threads = [threading.Thread(target=cancel, args=(caller,)) for caller in callers]
+    for thread in threads:
+        thread.start()
+    barrier.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=10)
+    assert sorted(authorities) == [False, True]
+    experiment = service.load_experiment(experiment.experiment_id)
+    ambiguous = _training_seal(
+        {
+            **cancellation,
+            "state": "AMBIGUOUS", "sequence": 2,
+            "previous_event": {"uri": experiment.hf_training_cancellation_event_uri, "sha256": experiment.hf_training_cancellation_event_sha256},
+            "reason_code": "INTERRUPTED_AFTER_CLAIM",
+        },
+        "event_id",
+    )
+    service.record_hf_training_cancellation_terminal(experiment, ambiguous)
+
+    observation_common = {
+        **_training_common(experiment, "synaptic-hf-training-observation-event/v1"),
+        "status_intervals": [{"status": "RUNNING", "started_at": "2026-08-20T12:03:30Z", "ended_at": "2026-08-20T12:38:30Z"}],
+        "hourly_price_usd": "1.00", "estimated_cost_usd": "0.583333",
+    }
+    stopped = _training_seal(
+        {**observation_common, "state": "STOPPED", "terminal": False, "occurred_at": "2026-08-20T12:38:30Z", "previous_event": None, "cost_bounded_completion": False},
+        "event_id",
+    )
+    service.record_hf_training_observation(experiment, stopped)
+    wrong_observation_uri = _training_seal(
+        {
+            **observation_common,
+            "state": "COMPLETED", "terminal": True,
+            "occurred_at": "2026-08-20T12:40:00Z",
+            "previous_event": {
+                "uri": "tracking://wrong-observation.json",
+                "sha256": experiment.hf_training_observation_event_sha256,
+            },
+            "cost_bounded_completion": True,
+        },
+        "event_id",
+    )
+    with pytest.raises(ProvenanceIntegrityError, match="predecessor reference changed"):
+        service.record_hf_training_observation(experiment, wrong_observation_uri)
+    completed = _training_seal(
+        {**observation_common, "state": "COMPLETED", "terminal": True, "occurred_at": "2026-08-20T12:40:00Z", "previous_event": {"uri": experiment.hf_training_observation_event_uri, "sha256": experiment.hf_training_observation_event_sha256}, "cost_bounded_completion": True},
+        "event_id",
+    )
+    service.record_hf_training_observation(experiment, completed)
+    assert experiment.hf_training_observation_state == "COMPLETED"
+
+    result_common = {
+        **_training_common(experiment, "synaptic-hf-training-result/v1"),
+        "observation": {"uri": experiment.hf_training_observation_event_uri, "sha256": experiment.hf_training_observation_event_sha256},
+        "occurred_at": "2026-08-20T12:41:00Z",
+        "artifact_prefix": {"bucket_id": "owner/bucket", "base_prefix": "training/artifacts", "slot_id": _training_approval(experiment)["bindings"]["artifact_slot_id"], "prefix": _training_approval(experiment)["bindings"]["artifact_prefix"], "pre_download_inventory_sha256": None, "post_download_inventory_sha256": None, "verified_inventory_sha256": None},
+        "inventory": [], "publication": False, "ssh": False, "ports": False, "wandb": False, "job_secrets": [],
+    }
+    verifying = _training_seal({**result_common, "state": "VERIFYING", "previous_result": None, "optimizer_proof": None, "reason_code": None}, "result_id")
+    service.claim_hf_training_verification(experiment, verifying)
+    inconclusive = _training_seal(
+        {**result_common, "state": "INCONCLUSIVE", "previous_result": {"uri": experiment.hf_training_result_uri, "sha256": experiment.hf_training_result_sha256}, "optimizer_proof": None, "reason_code": "READBACK_INTERRUPTED"},
+        "result_id",
+    )
+    service.record_hf_training_result(experiment, inconclusive)
+    wrong_result_uri = _training_seal(
+        {
+            **result_common,
+            "state": "VERIFYING",
+            "previous_result": {
+                "uri": "tracking://wrong-result.json",
+                "sha256": experiment.hf_training_result_sha256,
+            },
+            "optimizer_proof": None,
+            "reason_code": None,
+        },
+        "result_id",
+    )
+    with pytest.raises(ProvenanceIntegrityError, match="predecessor reference changed"):
+        service.claim_hf_training_verification(experiment, wrong_result_uri)
+    reclaim = _training_seal(
+        {**result_common, "state": "VERIFYING", "previous_result": {"uri": experiment.hf_training_result_uri, "sha256": experiment.hf_training_result_sha256}, "optimizer_proof": None, "reason_code": None},
+        "result_id",
+    )
+    outcome = service.claim_hf_training_verification(experiment, reclaim)
+    assert outcome.state == "VERIFYING"
+
+
+def test_spawned_hf_training_cancellation_claim_authorizes_only_first(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment = _make_training_submitted(service)
+    cancellation = _training_seal(
+        {
+            **_training_common(experiment, "synaptic-hf-training-cancellation-event/v1"),
+            "state": "CLAIMED", "sequence": 1, "occurred_at": "2026-08-20T12:30:00Z",
+            "previous_event": None, "reason_code": None, "provider_effect_possible": True,
+        },
+        "event_id",
+    )
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_cancel_training_process,
+            args=(str(tmp_path), experiment.experiment_id, cancellation, results),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    outcomes = [results.get(timeout=15) for _ in processes]
+    for process in processes:
+        process.join(timeout=15)
+    assert sorted(outcomes) == [("ok", False), ("ok", True)]
 
 
 def test_spawned_generic_mutations_merge_against_fresh_durable_state(tmp_path: Path):

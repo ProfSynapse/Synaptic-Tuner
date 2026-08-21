@@ -21,6 +21,7 @@ from .experiment import (
     load_experiment,
 )
 from .registry import RunRegistry, _PathLock
+from .root_identity import ensure_tracking_root_identity, require_tracking_root_identity
 from .schema import RunRecord
 from tuner.project import PathRef, ProjectContext, ResolvedConfig, SourceLock
 
@@ -65,6 +66,21 @@ class HFProvisioningClaimResult:
     event_uri: str
     event_sha256: str
     state: str
+    provider_attempt_authorized: bool
+    _document_json: str
+
+    @property
+    def document(self) -> dict[str, object]:
+        return json.loads(self._document_json)
+
+
+@dataclass(frozen=True)
+class HFTrainingTransitionResult:
+    """Detached immutable outcome of one protected training CAS transition."""
+
+    state: str
+    uri: str
+    sha256: str
     provider_attempt_authorized: bool
     _document_json: str
 
@@ -438,6 +454,7 @@ class TrackingService:
         self.verify_source_transport_provenance(experiment)
         self.verify_hf_provisioning_provenance(experiment)
         self.verify_hf_submission_provenance(experiment)
+        self.verify_hf_training_provenance(experiment)
 
     def verify_hf_provisioning_provenance(self, experiment: Experiment) -> None:
         """Verify the durable provisioning event head and all predecessor bindings."""
@@ -651,6 +668,837 @@ class TrackingService:
                 experiment=experiment,
                 submitted_event=event,
             )
+
+    def verify_hf_training_provenance(self, experiment: Experiment) -> None:
+        """Authenticate the separate training-smoke projection and event heads."""
+
+        if experiment.hf_training_root_id is None:
+            return
+        try:
+            require_tracking_root_identity(self.base_dir, experiment.hf_training_root_id)
+        except Exception as exc:
+            raise ProvenanceIntegrityError("HF training tracking-root identity is invalid") from exc
+        preflight = None
+        if experiment.hf_training_preflight_uri is not None:
+            preflight = self._verify_hf_training_document(
+                experiment.hf_training_preflight_uri,
+                experiment.hf_training_preflight_sha256,
+            )
+            self._require_hf_training_identity(experiment, preflight)
+            if preflight["schema_version"] != "synaptic-hf-training-preflight/v1":
+                raise ProvenanceIntegrityError("HF training preflight has wrong document kind")
+        approval = None
+        if experiment.hf_training_approval_uri is not None:
+            approval = self._verify_hf_training_document(
+                experiment.hf_training_approval_uri,
+                experiment.hf_training_approval_sha256,
+                preflight=preflight,
+            )
+            self._require_hf_training_identity(experiment, approval)
+            if approval["authorization_id"] != experiment.hf_training_authorization_id:
+                raise ProvenanceIntegrityError("HF training approval authorization is inconsistent")
+            if approval["preflight"] != {
+                "uri": experiment.hf_training_preflight_uri,
+                "sha256": experiment.hf_training_preflight_sha256,
+            }:
+                raise ProvenanceIntegrityError("HF training approval does not bind durable preflight")
+        submission = None
+        if experiment.hf_training_submission_event_uri is not None:
+            submission = self._verify_hf_training_document(
+                experiment.hf_training_submission_event_uri,
+                experiment.hf_training_submission_event_sha256,
+                approval=approval,
+            )
+            self._require_hf_training_identity(experiment, submission)
+            if submission["state"] != experiment.hf_training_submission_state:
+                raise ProvenanceIntegrityError("HF training submission state is inconsistent")
+            if submission["state"] != "SUBMITTING":
+                previous = self._verify_hf_training_document(
+                    submission["previous_event"]["uri"],
+                    submission["previous_event"]["sha256"],
+                    approval=approval,
+                )
+                from tuner.cloud.hf_training_smoke_contract import validate_submission_event
+
+                if submission["sequence"] == 3:
+                    claim = self._verify_hf_training_document(
+                        previous["previous_event"]["uri"],
+                        previous["previous_event"]["sha256"],
+                        approval=approval,
+                    )
+                    validate_submission_event(
+                        previous, approval=approval, previous_event=claim
+                    )
+                validate_submission_event(submission, approval=approval, previous_event=previous)
+        if experiment.hf_training_cancellation_event_uri is not None:
+            cancellation = self._verify_hf_training_document(
+                experiment.hf_training_cancellation_event_uri,
+                experiment.hf_training_cancellation_event_sha256,
+            )
+            self._require_hf_training_identity(experiment, cancellation)
+            if cancellation["state"] != experiment.hf_training_cancellation_state:
+                raise ProvenanceIntegrityError("HF training cancellation state is inconsistent")
+            if cancellation["sequence"] == 2:
+                previous = self._verify_hf_training_document(
+                    cancellation["previous_event"]["uri"],
+                    cancellation["previous_event"]["sha256"],
+                )
+                from tuner.cloud.hf_training_smoke_contract import validate_cancellation_event
+
+                validate_cancellation_event(cancellation, previous_event=previous)
+        if experiment.hf_training_observation_event_uri is not None:
+            observation = self._verify_hf_training_document(
+                experiment.hf_training_observation_event_uri,
+                experiment.hf_training_observation_event_sha256,
+            )
+            self._require_hf_training_identity(experiment, observation)
+            if observation["state"] != experiment.hf_training_observation_state:
+                raise ProvenanceIntegrityError("HF training observation state is inconsistent")
+            if observation["previous_event"] is not None:
+                previous = self._verify_hf_training_document(
+                    observation["previous_event"]["uri"],
+                    observation["previous_event"]["sha256"],
+                )
+                from tuner.cloud.hf_training_smoke_contract import validate_observation_event
+
+                validate_observation_event(observation, previous_event=previous)
+        if experiment.hf_training_result_uri is not None:
+            result = self._verify_hf_training_document(
+                experiment.hf_training_result_uri,
+                experiment.hf_training_result_sha256,
+            )
+            self._require_hf_training_identity(experiment, result)
+            if result["state"] != experiment.hf_training_result_state:
+                raise ProvenanceIntegrityError("HF training result state is inconsistent")
+            if result["previous_result"] is not None:
+                previous = self._verify_hf_training_document(
+                    result["previous_result"]["uri"],
+                    result["previous_result"]["sha256"],
+                )
+                from tuner.cloud.hf_training_smoke_contract import validate_result
+
+                validate_result(result, previous_result=previous)
+
+    def snapshot_hf_training_runtime_lock(
+        self, experiment: Experiment, runtime_lock: Mapping[str, object]
+    ) -> dict[str, str]:
+        """Persist an authenticated canonical runtime lock for a future preflight."""
+
+        from tuner.cloud.hf_training_smoke_contract import (
+            canonical_json_bytes,
+            validate_runtime_lock,
+        )
+
+        try:
+            document = validate_runtime_lock(runtime_lock)
+            serialized = canonical_json_bytes(document)
+        except Exception as exc:
+            raise ProvenanceIntegrityError(
+                "HF training runtime lock is not a canonical reviewed contract"
+            ) from exc
+        digest = hashlib.sha256(serialized).hexdigest()
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_same_protected_projection(durable, experiment)
+            self._require_authorized_hf_provisioning(durable)
+            if durable.hf_training_preflight_uri is not None or durable.hf_training_root_id is not None:
+                raise ProvenanceIntegrityError(
+                    "HF training runtime lock must be snapshotted before preflight"
+                )
+            path = (
+                self.base_dir
+                / "experiments"
+                / durable.experiment_id
+                / "cloud"
+                / "hf"
+                / "training-smoke"
+                / "runtime-locks"
+                / f"{document['lock_id']}.json"
+            )
+            self._persist_immutable_hf_artifact(path, serialized)
+            reference = {"uri": self.tracking_uri(path), "sha256": digest}
+            self._verify_hf_training_runtime_lock_reference(durable, reference)
+            return reference
+
+    def record_hf_training_preflight(
+        self, experiment: Experiment, preflight: Mapping[str, object]
+    ) -> Experiment:
+        from tuner.cloud.hf_training_smoke_contract import validate_preflight
+
+        document = validate_preflight(preflight)
+        root = ensure_tracking_root_identity(self.base_dir)
+        self._require_hf_training_input_identity(experiment, document, str(root["root_id"]))
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_authorized_hf_provisioning(durable)
+            if durable.hf_training_root_id is not None:
+                raise ProvenanceIntegrityError("HF training preflight cannot be replayed or replaced")
+            self._require_hf_training_input_identity(durable, document, str(root["root_id"]))
+            self._verify_hf_training_runtime_lock_reference(
+                durable, document["runtime_lock"]
+            )
+            uri, digest = self._persist_hf_training_document(
+                durable, "preflight", str(document["preflight_id"]), document
+            )
+            candidate = replace(
+                durable,
+                hf_training_root_id=str(root["root_id"]),
+                hf_training_run_id=str(document["run_id"]),
+                hf_training_preflight_uri=uri,
+                hf_training_preflight_sha256=digest,
+                hf_training_preflight_state="PASS",
+            )
+            self.verify_experiment_provenance(candidate)
+            _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+            self._copy_hf_training_projection(candidate, experiment)
+            self._stamp_snapshot(experiment, candidate)
+        return experiment
+
+    def record_hf_training_approval(
+        self, experiment: Experiment, approval: Mapping[str, object]
+    ) -> Experiment:
+        from tuner.cloud.hf_training_smoke_contract import validate_approval
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_matching_hf_training_projection(durable, experiment)
+            self._require_authorized_hf_provisioning(durable)
+            if durable.hf_training_submission_state is not None:
+                raise ProvenanceIntegrityError("HF training approval cannot be replayed or replaced")
+            preflight = self._verify_hf_training_document(
+                durable.hf_training_preflight_uri, durable.hf_training_preflight_sha256
+            )
+            document = validate_approval(approval, preflight=preflight)
+            self._require_hf_training_identity(durable, document)
+            if document["preflight"] != {
+                "uri": durable.hf_training_preflight_uri,
+                "sha256": durable.hf_training_preflight_sha256,
+            }:
+                raise ProvenanceIntegrityError("HF training approval references another preflight")
+            uri, digest = self._persist_hf_training_document(
+                durable, "approvals", str(document["authorization_id"]), document
+            )
+            candidate = replace(
+                durable,
+                hf_training_approval_uri=uri,
+                hf_training_approval_sha256=digest,
+                hf_training_authorization_id=str(document["authorization_id"]),
+                hf_training_submission_state="APPROVED",
+            )
+            self.verify_experiment_provenance(candidate)
+            _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+            self._copy_hf_training_projection(candidate, experiment)
+            self._stamp_snapshot(experiment, candidate)
+        return experiment
+
+    def claim_hf_training_submission(
+        self, experiment: Experiment, event: Mapping[str, object]
+    ) -> HFTrainingTransitionResult:
+        from tuner.cloud.hf_training_smoke_contract import validate_submission_event
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_matching_hf_training_approval(durable, experiment)
+            if durable.hf_training_submission_state == "SUBMITTING":
+                head = self._verify_hf_training_document(
+                    durable.hf_training_submission_event_uri,
+                    durable.hf_training_submission_event_sha256,
+                )
+                return self._hf_training_result(durable, head, False)
+            if durable.hf_training_submission_state != "APPROVED":
+                raise ProvenanceIntegrityError("HF training submission authorization is unavailable")
+            approval = self._verify_hf_training_document(
+                durable.hf_training_approval_uri, durable.hf_training_approval_sha256
+            )
+            document = validate_submission_event(event, approval=approval)
+            self._require_hf_training_identity(durable, document)
+            if document["approval"] != {
+                "uri": durable.hf_training_approval_uri,
+                "sha256": durable.hf_training_approval_sha256,
+            }:
+                raise ProvenanceIntegrityError("HF training submission references another approval")
+            uri, digest = self._persist_hf_training_document(
+                durable, "submission", str(document["event_id"]), document
+            )
+            candidate = replace(
+                durable,
+                hf_training_submission_event_uri=uri,
+                hf_training_submission_event_sha256=digest,
+                hf_training_submission_state="SUBMITTING",
+            )
+            self.verify_experiment_provenance(candidate)
+            _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+            self._copy_hf_training_projection(candidate, experiment)
+            self._stamp_snapshot(experiment, candidate)
+            return self._hf_training_result(candidate, document, True)
+
+    def record_hf_training_submission_terminal(
+        self, experiment: Experiment, event: Mapping[str, object]
+    ) -> HFTrainingTransitionResult:
+        from tuner.cloud.hf_training_smoke_contract import validate_submission_event
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_matching_hf_training_approval(durable, experiment)
+            if durable.hf_training_submission_state != "SUBMITTING":
+                raise ProvenanceIntegrityError("HF training submission has no active claim")
+            approval = self._verify_hf_training_document(
+                durable.hf_training_approval_uri, durable.hf_training_approval_sha256
+            )
+            previous = self._verify_hf_training_document(
+                durable.hf_training_submission_event_uri,
+                durable.hf_training_submission_event_sha256,
+            )
+            document = validate_submission_event(event, approval=approval, previous_event=previous)
+            self._require_hf_training_identity(durable, document)
+            if document["previous_event"] != {
+                "uri": durable.hf_training_submission_event_uri,
+                "sha256": durable.hf_training_submission_event_sha256,
+            }:
+                raise ProvenanceIntegrityError("HF training terminal does not bind durable claim")
+            uri, digest = self._persist_hf_training_document(
+                durable, "submission", str(document["event_id"]), document
+            )
+            candidate = replace(
+                durable,
+                hf_training_submission_event_uri=uri,
+                hf_training_submission_event_sha256=digest,
+                hf_training_submission_state=str(document["state"]),
+            )
+            self.verify_experiment_provenance(candidate)
+            _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+            self._copy_hf_training_projection(candidate, experiment)
+            self._stamp_snapshot(experiment, candidate)
+            return self._hf_training_result(candidate, document, False)
+
+    def recover_hf_training_submission(
+        self, experiment: Experiment, event: Mapping[str, object]
+    ) -> HFTrainingTransitionResult:
+        """Persist the sole allowed recovery: AMBIGUOUS -> confirmed SUBMITTED."""
+
+        from tuner.cloud.hf_training_smoke_contract import validate_submission_event
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_matching_hf_training_projection(durable, experiment)
+            if durable.hf_training_submission_state != "AMBIGUOUS":
+                raise ProvenanceIntegrityError(
+                    "HF training submission recovery requires AMBIGUOUS"
+                )
+            approval = self._verify_hf_training_document(
+                durable.hf_training_approval_uri, durable.hf_training_approval_sha256
+            )
+            previous = self._verify_hf_training_document(
+                durable.hf_training_submission_event_uri,
+                durable.hf_training_submission_event_sha256,
+                approval=approval,
+            )
+            claim = self._verify_hf_training_document(
+                previous["previous_event"]["uri"],
+                previous["previous_event"]["sha256"],
+                approval=approval,
+            )
+            validate_submission_event(previous, approval=approval, previous_event=claim)
+            document = validate_submission_event(
+                event, approval=approval, previous_event=previous
+            )
+            self._require_hf_training_identity(durable, document)
+            if document["previous_event"] != {
+                "uri": durable.hf_training_submission_event_uri,
+                "sha256": durable.hf_training_submission_event_sha256,
+            }:
+                raise ProvenanceIntegrityError(
+                    "HF training recovery does not bind durable ambiguous head"
+                )
+            uri, digest = self._persist_hf_training_document(
+                durable, "submission", str(document["event_id"]), document
+            )
+            candidate = replace(
+                durable,
+                hf_training_submission_event_uri=uri,
+                hf_training_submission_event_sha256=digest,
+                hf_training_submission_state="SUBMITTED",
+            )
+            self.verify_experiment_provenance(candidate)
+            _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+            self._copy_hf_training_projection(candidate, experiment)
+            self._stamp_snapshot(experiment, candidate)
+            return self._hf_training_result(candidate, document, False)
+
+    def record_hf_training_submission_recovery(
+        self, experiment: Experiment, event: Mapping[str, object]
+    ) -> HFTrainingTransitionResult:
+        """Compatibility spelling for the explicit ambiguous-submission recovery boundary."""
+
+        return self.recover_hf_training_submission(experiment, event)
+
+    def claim_hf_training_cancellation(
+        self, experiment: Experiment, event: Mapping[str, object]
+    ) -> HFTrainingTransitionResult:
+        from tuner.cloud.hf_training_smoke_contract import validate_cancellation_event
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_matching_hf_training_approval(durable, experiment)
+            if durable.hf_training_submission_state != "SUBMITTED":
+                raise ProvenanceIntegrityError("HF training cancellation requires SUBMITTED")
+            if durable.hf_training_cancellation_state is not None:
+                head = self._verify_hf_training_document(
+                    durable.hf_training_cancellation_event_uri,
+                    durable.hf_training_cancellation_event_sha256,
+                )
+                return self._hf_training_result(durable, head, False)
+            document = validate_cancellation_event(event)
+            self._require_hf_training_identity(durable, document)
+            self._require_hf_training_downstream_bindings(durable, document)
+            uri, digest = self._persist_hf_training_document(
+                durable, "cancellation", str(document["event_id"]), document
+            )
+            candidate = replace(
+                durable,
+                hf_training_cancellation_event_uri=uri,
+                hf_training_cancellation_event_sha256=digest,
+                hf_training_cancellation_state=str(document["state"]),
+            )
+            self.verify_experiment_provenance(candidate)
+            _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+            self._copy_hf_training_projection(candidate, experiment)
+            self._stamp_snapshot(experiment, candidate)
+            return self._hf_training_result(candidate, document, document["state"] == "CLAIMED")
+
+    def record_hf_training_cancellation_terminal(
+        self, experiment: Experiment, event: Mapping[str, object]
+    ) -> HFTrainingTransitionResult:
+        from tuner.cloud.hf_training_smoke_contract import validate_cancellation_event
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_matching_hf_training_approval(durable, experiment)
+            if durable.hf_training_cancellation_state != "CLAIMED":
+                raise ProvenanceIntegrityError("HF training cancellation has no active claim")
+            previous = self._verify_hf_training_document(
+                durable.hf_training_cancellation_event_uri,
+                durable.hf_training_cancellation_event_sha256,
+            )
+            document = validate_cancellation_event(event, previous_event=previous)
+            self._require_hf_training_identity(durable, document)
+            self._require_hf_training_downstream_bindings(durable, document)
+            uri, digest = self._persist_hf_training_document(
+                durable, "cancellation", str(document["event_id"]), document
+            )
+            candidate = replace(
+                durable,
+                hf_training_cancellation_event_uri=uri,
+                hf_training_cancellation_event_sha256=digest,
+                hf_training_cancellation_state=str(document["state"]),
+            )
+            self.verify_experiment_provenance(candidate)
+            _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+            self._copy_hf_training_projection(candidate, experiment)
+            self._stamp_snapshot(experiment, candidate)
+            return self._hf_training_result(candidate, document, False)
+
+    def record_hf_training_observation(
+        self, experiment: Experiment, event: Mapping[str, object]
+    ) -> HFTrainingTransitionResult:
+        from tuner.cloud.hf_training_smoke_contract import validate_observation_event
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_matching_hf_training_approval(durable, experiment)
+            if durable.hf_training_submission_state != "SUBMITTED":
+                raise ProvenanceIntegrityError("HF training observation requires SUBMITTED")
+            previous = None
+            if durable.hf_training_observation_state is not None:
+                if durable.hf_training_observation_state != "STOPPED":
+                    raise ProvenanceIntegrityError("Terminal HF training observation cannot be replaced")
+                previous = self._verify_hf_training_document(
+                    durable.hf_training_observation_event_uri,
+                    durable.hf_training_observation_event_sha256,
+                )
+            document = validate_observation_event(event, previous_event=previous)
+            if previous is not None and document["previous_event"] != {
+                "uri": durable.hf_training_observation_event_uri,
+                "sha256": durable.hf_training_observation_event_sha256,
+            }:
+                raise ProvenanceIntegrityError("HF training observation predecessor reference changed")
+            self._require_hf_training_identity(durable, document)
+            self._require_hf_training_downstream_bindings(durable, document)
+            uri, digest = self._persist_hf_training_document(
+                durable, "observation", str(document["event_id"]), document
+            )
+            candidate = replace(
+                durable,
+                hf_training_observation_event_uri=uri,
+                hf_training_observation_event_sha256=digest,
+                hf_training_observation_state=str(document["state"]),
+            )
+            self.verify_experiment_provenance(candidate)
+            _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+            self._copy_hf_training_projection(candidate, experiment)
+            self._stamp_snapshot(experiment, candidate)
+            return self._hf_training_result(candidate, document, False)
+
+    def claim_hf_training_verification(
+        self, experiment: Experiment, result: Mapping[str, object]
+    ) -> HFTrainingTransitionResult:
+        from tuner.cloud.hf_training_smoke_contract import validate_result
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_matching_hf_training_approval(durable, experiment)
+            if durable.hf_training_observation_state != "COMPLETED":
+                raise ProvenanceIntegrityError("Artifact verification requires completed observation")
+            if durable.hf_training_result_state == "VERIFYING":
+                head = self._verify_hf_training_document(
+                    durable.hf_training_result_uri, durable.hf_training_result_sha256
+                )
+                return self._hf_training_result(durable, head, False)
+            if durable.hf_training_result_state not in {None, "INCONCLUSIVE"}:
+                raise ProvenanceIntegrityError("HF training artifact result is terminal")
+            previous = None
+            if durable.hf_training_result_state == "INCONCLUSIVE":
+                previous = self._verify_hf_training_document(
+                    durable.hf_training_result_uri, durable.hf_training_result_sha256
+                )
+            document = validate_result(result, previous_result=previous)
+            if document["state"] != "VERIFYING":
+                raise ProvenanceIntegrityError("Artifact verification claim must be VERIFYING")
+            if previous is not None and document["previous_result"] != {
+                "uri": durable.hf_training_result_uri,
+                "sha256": durable.hf_training_result_sha256,
+            }:
+                raise ProvenanceIntegrityError("HF training result predecessor reference changed")
+            self._require_hf_training_identity(durable, document)
+            self._require_hf_training_downstream_bindings(durable, document)
+            uri, digest = self._persist_hf_training_document(
+                durable, "results", str(document["result_id"]), document
+            )
+            candidate = replace(
+                durable,
+                hf_training_result_uri=uri,
+                hf_training_result_sha256=digest,
+                hf_training_result_state="VERIFYING",
+            )
+            self.verify_experiment_provenance(candidate)
+            _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+            self._copy_hf_training_projection(candidate, experiment)
+            self._stamp_snapshot(experiment, candidate)
+            return self._hf_training_result(candidate, document, False)
+
+    def record_hf_training_result(
+        self, experiment: Experiment, result: Mapping[str, object]
+    ) -> HFTrainingTransitionResult:
+        from tuner.cloud.hf_training_smoke_contract import validate_result
+
+        experiment_path = self._experiment_path(experiment.experiment_id)
+        with self._lock, _PathLock(experiment_path):
+            durable = load_experiment(experiment.experiment_id, self.base_dir)
+            self._require_matching_hf_training_approval(durable, experiment)
+            if durable.hf_training_result_state != "VERIFYING":
+                raise ProvenanceIntegrityError("HF training result requires VERIFYING claim")
+            previous = self._verify_hf_training_document(
+                durable.hf_training_result_uri, durable.hf_training_result_sha256
+            )
+            document = validate_result(result, previous_result=previous)
+            if document["previous_result"] != {
+                "uri": durable.hf_training_result_uri,
+                "sha256": durable.hf_training_result_sha256,
+            }:
+                raise ProvenanceIntegrityError("HF training result predecessor reference changed")
+            self._require_hf_training_identity(durable, document)
+            self._require_hf_training_downstream_bindings(durable, document)
+            uri, digest = self._persist_hf_training_document(
+                durable, "results", str(document["result_id"]), document
+            )
+            candidate = replace(
+                durable,
+                hf_training_result_uri=uri,
+                hf_training_result_sha256=digest,
+                hf_training_result_state=str(document["state"]),
+            )
+            self.verify_experiment_provenance(candidate)
+            _save_experiment_unlocked_after_validation(candidate, self.base_dir)
+            self._copy_hf_training_projection(candidate, experiment)
+            self._stamp_snapshot(experiment, candidate)
+            return self._hf_training_result(candidate, document, False)
+
+    def _persist_hf_training_document(
+        self,
+        experiment: Experiment,
+        group: str,
+        document_id: str,
+        document: Mapping[str, object],
+    ) -> tuple[str, str]:
+        from tuner.cloud.hf_training_smoke_contract import canonical_json_bytes
+
+        serialized = canonical_json_bytes(document)
+        digest = hashlib.sha256(serialized).hexdigest()
+        path = (
+            self.base_dir
+            / "experiments"
+            / experiment.experiment_id
+            / "cloud"
+            / "hf"
+            / "training-smoke"
+            / group
+            / f"{document_id}.json"
+        )
+        self._persist_immutable_hf_artifact(path, serialized)
+        return self.tracking_uri(path), digest
+
+    def _verify_hf_training_document(
+        self,
+        uri: str | None,
+        expected_sha256: str | None,
+        *,
+        preflight: Mapping[str, object] | None = None,
+        approval: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        if uri is None or expected_sha256 is None:
+            raise ProvenanceIntegrityError("HF training document reference is incomplete")
+        path = self._strict_tracking_file(uri, kind="HF training document")
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            raise ProvenanceIntegrityError("HF training document is unreadable") from exc
+        if hashlib.sha256(raw).hexdigest() != expected_sha256:
+            raise ProvenanceIntegrityError("HF training document digest is invalid")
+        try:
+            payload = json.loads(raw, object_pairs_hook=_reject_duplicate_json_keys)
+            if not isinstance(payload, dict):
+                raise TypeError("document is not an object")
+            from tuner.cloud.hf_training_smoke_contract import (
+                APPROVAL_SCHEMA,
+                canonical_json_bytes,
+                validate_approval,
+                validate_training_document_shape,
+            )
+
+            if raw != canonical_json_bytes(payload):
+                raise ValueError("document bytes are not canonical")
+            document = validate_training_document_shape(payload)
+            if document["schema_version"] == APPROVAL_SCHEMA:
+                document = validate_approval(document, preflight=preflight)
+        except Exception as exc:
+            if isinstance(exc, ProvenanceIntegrityError):
+                raise
+            raise ProvenanceIntegrityError("Stored HF training document is invalid") from exc
+        return document
+
+    def _verify_hf_training_runtime_lock_reference(
+        self, experiment: Experiment, reference: object
+    ) -> dict[str, object]:
+        from tuner.cloud.hf_training_smoke_contract import (
+            RUNTIME_LOCK_SCHEMA,
+            validate_runtime_lock,
+        )
+
+        if not isinstance(reference, Mapping) or set(reference) != {"uri", "sha256"}:
+            raise ProvenanceIntegrityError("HF training runtime-lock reference is not closed")
+        document = self._verify_hf_training_document(
+            str(reference["uri"]), str(reference["sha256"])
+        )
+        if document["schema_version"] != RUNTIME_LOCK_SCHEMA:
+            raise ProvenanceIntegrityError("HF training runtime-lock document has wrong schema")
+        try:
+            document = validate_runtime_lock(document)
+        except Exception as exc:
+            raise ProvenanceIntegrityError(
+                "HF training runtime-lock document is semantically invalid"
+            ) from exc
+        expected_path = (
+            self.base_dir
+            / "experiments"
+            / experiment.experiment_id
+            / "cloud"
+            / "hf"
+            / "training-smoke"
+            / "runtime-locks"
+            / f"{document['lock_id']}.json"
+        )
+        if reference != {
+            "uri": self.tracking_uri(expected_path),
+            "sha256": str(reference["sha256"]),
+        }:
+            raise ProvenanceIntegrityError(
+                "HF training runtime-lock URI is outside its immutable snapshot slot"
+            )
+        return document
+
+    @staticmethod
+    def _require_hf_training_input_identity(
+        experiment: Experiment, document: Mapping[str, object], root_id: str
+    ) -> None:
+        if document.get("experiment_id") != experiment.experiment_id:
+            raise ProvenanceIntegrityError("HF training document belongs to another experiment")
+        if document.get("tracking_root_id") != root_id:
+            raise ProvenanceIntegrityError("HF training document belongs to another tracking root")
+
+    @staticmethod
+    def _require_hf_training_identity(
+        experiment: Experiment, document: Mapping[str, object]
+    ) -> None:
+        expected = {
+            "experiment_id": experiment.experiment_id,
+            "run_id": experiment.hf_training_run_id,
+            "tracking_root_id": experiment.hf_training_root_id,
+        }
+        if any(document.get(key) != value for key, value in expected.items()):
+            raise ProvenanceIntegrityError("HF training document identity is inconsistent")
+        if experiment.hf_training_authorization_id is not None and "authorization_id" in document:
+            if document["authorization_id"] != experiment.hf_training_authorization_id:
+                raise ProvenanceIntegrityError("HF training authorization identity is inconsistent")
+
+    @staticmethod
+    def _hf_training_projection_fields() -> tuple[str, ...]:
+        return (
+            "hf_training_root_id",
+            "hf_training_run_id",
+            "hf_training_preflight_uri",
+            "hf_training_preflight_sha256",
+            "hf_training_preflight_state",
+            "hf_training_approval_uri",
+            "hf_training_approval_sha256",
+            "hf_training_authorization_id",
+            "hf_training_submission_event_uri",
+            "hf_training_submission_event_sha256",
+            "hf_training_submission_state",
+            "hf_training_cancellation_event_uri",
+            "hf_training_cancellation_event_sha256",
+            "hf_training_cancellation_state",
+            "hf_training_observation_event_uri",
+            "hf_training_observation_event_sha256",
+            "hf_training_observation_state",
+            "hf_training_result_uri",
+            "hf_training_result_sha256",
+            "hf_training_result_state",
+        )
+
+    @classmethod
+    def _copy_hf_training_projection(cls, source: Experiment, target: Experiment) -> None:
+        for field_name in cls._hf_training_projection_fields():
+            setattr(target, field_name, getattr(source, field_name))
+
+    def _require_matching_hf_training_projection(
+        self, durable: Experiment, caller: Experiment
+    ) -> None:
+        self.verify_hf_training_provenance(durable)
+        for field_name in self._hf_training_projection_fields():
+            if getattr(durable, field_name) != getattr(caller, field_name):
+                raise ProvenanceIntegrityError(
+                    f"Stale HF training projection conflicts on {field_name}"
+                )
+
+    def _require_matching_hf_training_approval(
+        self, durable: Experiment, caller: Experiment
+    ) -> None:
+        self.verify_hf_training_provenance(durable)
+        fields_to_match = (
+            "hf_training_root_id",
+            "hf_training_run_id",
+            "hf_training_preflight_uri",
+            "hf_training_preflight_sha256",
+            "hf_training_approval_uri",
+            "hf_training_approval_sha256",
+            "hf_training_authorization_id",
+        )
+        for field_name in fields_to_match:
+            if getattr(durable, field_name) != getattr(caller, field_name):
+                raise ProvenanceIntegrityError(
+                    f"Stale HF training approval conflicts on {field_name}"
+                )
+
+    def _require_hf_training_downstream_bindings(
+        self, durable: Experiment, document: Mapping[str, object]
+    ) -> None:
+        expected_approval = {
+            "uri": durable.hf_training_approval_uri,
+            "sha256": durable.hf_training_approval_sha256,
+        }
+        if document.get("approval") != expected_approval:
+            raise ProvenanceIntegrityError("HF training event references another approval")
+        if "submission" in document:
+            expected_submission = {
+                "uri": durable.hf_training_submission_event_uri,
+                "sha256": durable.hf_training_submission_event_sha256,
+            }
+            if document["submission"] != expected_submission:
+                raise ProvenanceIntegrityError("HF training event references another submission")
+            submitted = self._verify_hf_training_document(
+                durable.hf_training_submission_event_uri,
+                durable.hf_training_submission_event_sha256,
+            )
+            if document.get("provider_job") != submitted.get("provider_job"):
+                raise ProvenanceIntegrityError("HF training event provider identity is inconsistent")
+        if "observation" in document:
+            expected_observation = {
+                "uri": durable.hf_training_observation_event_uri,
+                "sha256": durable.hf_training_observation_event_sha256,
+            }
+            if document["observation"] != expected_observation:
+                raise ProvenanceIntegrityError("HF training result references another observation")
+        if "artifact_prefix" in document:
+            approval = self._verify_hf_training_document(
+                durable.hf_training_approval_uri,
+                durable.hf_training_approval_sha256,
+            )
+            bindings = approval["bindings"]
+            artifact = document["artifact_prefix"]
+            expected_artifact = {
+                "bucket_id": bindings["artifact_bucket_id"],
+                "base_prefix": bindings["artifact_base_prefix"],
+                "slot_id": bindings["artifact_slot_id"],
+                "prefix": bindings["artifact_prefix"],
+            }
+            if any(artifact.get(key) != value for key, value in expected_artifact.items()):
+                raise ProvenanceIntegrityError(
+                    "HF training result artifact prefix differs from approval"
+                )
+
+    @staticmethod
+    def _hf_training_result(
+        experiment: Experiment,
+        document: Mapping[str, object],
+        provider_attempt_authorized: bool,
+    ) -> HFTrainingTransitionResult:
+        uri_fields = {
+            "synaptic-hf-training-submission-event/v1": (
+                experiment.hf_training_submission_event_uri,
+                experiment.hf_training_submission_event_sha256,
+            ),
+            "synaptic-hf-training-cancellation-event/v1": (
+                experiment.hf_training_cancellation_event_uri,
+                experiment.hf_training_cancellation_event_sha256,
+            ),
+            "synaptic-hf-training-observation-event/v1": (
+                experiment.hf_training_observation_event_uri,
+                experiment.hf_training_observation_event_sha256,
+            ),
+            "synaptic-hf-training-result/v1": (
+                experiment.hf_training_result_uri,
+                experiment.hf_training_result_sha256,
+            ),
+        }
+        uri, digest = uri_fields[str(document["schema_version"])]
+        assert uri is not None and digest is not None
+        return HFTrainingTransitionResult(
+            state=str(document["state"]),
+            uri=uri,
+            sha256=digest,
+            provider_attempt_authorized=provider_attempt_authorized,
+            _document_json=json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        )
 
     def record_hf_run_approval(
         self,
@@ -2439,6 +3287,7 @@ class TrackingService:
             "hf_cancellation_event_uri",
             "hf_cancellation_event_sha256",
             "hf_cancellation_state",
+            *TrackingService._hf_training_projection_fields(),
         )
 
     @classmethod

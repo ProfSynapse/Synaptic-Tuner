@@ -38,7 +38,12 @@ def load_model_and_tokenizer(
     max_seq_length: int = 2048,
     dtype: Optional[str] = None,
     load_in_4bit: bool = True,
-    hf_token: Optional[str] = None
+    hf_token: Optional[str] | bool = None,
+    model_revision: Optional[str] = None,
+    trust_remote_code: Optional[bool] = None,
+    use_safetensors: Optional[bool] = None,
+    cache_dir: Optional[str] = None,
+    require_resolved_revision: bool = False,
 ) -> Tuple:
     """
     Load model and tokenizer with Unsloth optimizations.
@@ -62,13 +67,32 @@ def load_model_and_tokenizer(
     print(f"dtype: {dtype if dtype else 'auto-detect'}")
 
     # Load model and tokenizer
-    model, tokenizer = FastLanguageModel.from_pretrained(
+    load_kwargs = dict(
         model_name=model_name,
         max_seq_length=max_seq_length,
         dtype=dtype,
         load_in_4bit=load_in_4bit,
         token=hf_token,
     )
+    if model_revision is not None:
+        load_kwargs["revision"] = model_revision
+    if trust_remote_code is not None:
+        load_kwargs["trust_remote_code"] = trust_remote_code
+    if use_safetensors is not None:
+        load_kwargs["use_safetensors"] = use_safetensors
+    if cache_dir is not None:
+        load_kwargs["cache_dir"] = cache_dir
+    model, tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
+
+    if require_resolved_revision:
+        if not model_revision:
+            raise RuntimeError("Protected model loading requires an exact revision")
+        resolved = getattr(getattr(model, "config", None), "_commit_hash", None)
+        tokenizer_revision = getattr(tokenizer, "init_kwargs", {}).get("_commit_hash")
+        if resolved != model_revision:
+            raise RuntimeError("Loaded model revision does not match the protected revision")
+        if tokenizer_revision != model_revision:
+            raise RuntimeError("Loaded tokenizer revision does not match the protected revision")
 
     # Note: Chat template is now applied via Unsloth's get_chat_template() in train_sft.py
     # This ensures proper handling for all model types including VL models

@@ -361,6 +361,19 @@ def build_training_lineage(
                 }
             )
 
+    if getattr(args, "protected_smoke_evidence", None):
+        from tuner.cloud.hf_training_smoke_workload import DATASET_SHA256
+
+        lineage.update(
+            {
+                "model_revision": config.model.model_revision,
+                "dataset_sha256": DATASET_SHA256,
+                "max_steps": 1,
+                "gradient_accumulation_steps": 1,
+                "protected_smoke": True,
+            }
+        )
+
     return enrich_training_lineage(lineage, args=args)
 
 
@@ -375,6 +388,12 @@ def parse_args(argv=None):
                        help="Path to custom config file")
     parser.add_argument("--model-name", type=str,
                        help="Override Hugging Face model name/path")
+    parser.add_argument("--model-revision", type=str,
+                       help="Exact Hugging Face model/tokenizer revision")
+    parser.add_argument("--anonymous-model", action="store_true",
+                       help="Disable token use for public model/tokenizer loading")
+    parser.add_argument("--model-cache-dir", type=str,
+                       help="Controlled model/tokenizer cache directory")
 
     # Training parameters
     parser.add_argument("--batch-size", type=int,
@@ -564,6 +583,10 @@ def parse_args(argv=None):
                        help="Target Hugging Face model repo when publishing final_model")
     parser.add_argument("--run-timestamp", type=str,
                        help="Explicit run timestamp for canonical cloud run layout")
+    parser.add_argument("--protected-smoke-evidence", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--protected-smoke-config", type=str,
+                       help=argparse.SUPPRESS)
 
     # UI options
     parser.add_argument("--no-dashboard", action="store_true",
@@ -587,7 +610,12 @@ def run(args: argparse.Namespace):
     }
 
     # Load configuration
-    if args.config:
+    if args.protected_smoke_config:
+        if not args.protected_smoke_evidence or args.config or args.model_size:
+            raise ValueError("Protected smoke config is exclusive to protected evidence mode")
+        config = load_config(args.protected_smoke_config)
+        print("Loading protected YAML configuration")
+    elif args.config:
         # Custom config file
         print(f"Loading custom config from: {args.config}")
         import importlib.util
@@ -727,6 +755,14 @@ def run(args: argparse.Namespace):
         config.lora.lora_dropout = args.lora_dropout
     if args.model_name:
         config.model.model_name = args.model_name
+    if args.model_revision is not None:
+        config.model.model_revision = args.model_revision
+    if args.anonymous_model:
+        config.model.anonymous = True
+        config.model.trust_remote_code = False
+        config.model.use_safetensors = True
+    if args.model_cache_dir is not None:
+        config.model.cache_dir = args.model_cache_dir
     if args.load_in_4bit is not None:
         config.model.load_in_4bit = args.load_in_4bit
     if args.lora_target_modules:
@@ -800,8 +836,19 @@ def run(args: argparse.Namespace):
         if config.use_wandb and args.wandb_run_name:
             config.wandb_run_name = args.wandb_run_name
 
-    # HuggingFace token
-    if not args.hf_token:
+    # Protected anonymous loads never consult ambient credentials. Ordinary
+    # training retains the historical token fallback.
+    if args.protected_smoke_evidence:
+        if not config.model.anonymous or args.hf_token:
+            raise ValueError("Protected smoke requires explicit anonymous model loading")
+        if os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY"):
+            raise ValueError("Protected smoke rejects ambient Hugging Face credentials")
+        if not config.model.model_revision:
+            raise ValueError("Protected smoke requires an exact model revision")
+        if config.model.trust_remote_code is not False or config.model.use_safetensors is not True:
+            raise ValueError("Protected smoke requires trust_remote_code=false and safetensors=true")
+        args.hf_token = False
+    elif not args.hf_token:
         args.hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
 
     # Validate model compatibility BEFORE loading model
@@ -876,7 +923,12 @@ def run(args: argparse.Namespace):
         max_seq_length=config.model.max_seq_length,
         dtype=config.model.dtype,
         load_in_4bit=config.model.load_in_4bit,
-        hf_token=args.hf_token
+        hf_token=args.hf_token,
+        model_revision=getattr(config.model, "model_revision", None),
+        trust_remote_code=getattr(config.model, "trust_remote_code", None),
+        use_safetensors=getattr(config.model, "use_safetensors", None),
+        cache_dir=getattr(config.model, "cache_dir", None),
+        require_resolved_revision=bool(args.protected_smoke_evidence),
     )
 
     # Prefer the pretrained chat template when available; otherwise, apply a
@@ -978,6 +1030,17 @@ def run(args: argparse.Namespace):
         use_dora=config.lora.use_dora,
         init_lora_weights=config.lora.init_lora_weights,
     )
+
+    protected_before = None
+    protected_callback = None
+    if args.protected_smoke_evidence:
+        from src.protected_smoke_evidence import (
+            ProtectedOptimizerBoundaryCallback,
+            capture_trainable_snapshot,
+        )
+
+        protected_before = capture_trainable_snapshot(model)
+        protected_callback = ProtectedOptimizerBoundaryCallback()
 
     # Check initial GPU memory
     check_gpu_memory()
@@ -1092,6 +1155,8 @@ def run(args: argparse.Namespace):
             ),
             CheckpointMonitorCallback()
         ]
+    if protected_callback is not None:
+        callbacks.append(protected_callback)
     if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
         callbacks.append(
             HFBucketSyncCallback(
@@ -1244,6 +1309,20 @@ def run(args: argparse.Namespace):
     # Save final model
     print(f"\nSaving final model to: {final_model_path}")
     trainer.save_model(str(final_model_path))
+    if args.protected_smoke_evidence:
+        tokenizer.save_pretrained(str(final_model_path))
+
+    if protected_callback is not None and protected_before is not None:
+        from src.protected_smoke_evidence import finalize_protected_evidence
+
+        finalize_protected_evidence(
+            model=model,
+            trainer=trainer,
+            callback=protected_callback,
+            before=protected_before,
+            checkpoint_dir=Path(config.training.output_dir) / "checkpoint-1",
+            output_path=Path(args.protected_smoke_evidence),
+        )
 
     # aux_head: trainer.save_model does NOT serialize the separately-held head, so
     # persist it as a portable sidecar (weights + resolved config) alongside the

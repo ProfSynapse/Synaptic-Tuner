@@ -36,6 +36,13 @@ class ModelConfig:
     max_seq_length: int
     dtype: Optional[str]
     load_in_4bit: bool
+    # Optional immutable Hub revision.  Existing configs omit it and retain the
+    # historical loader behavior; protected workloads require it explicitly.
+    model_revision: Optional[str] = None
+    anonymous: bool = False
+    trust_remote_code: Optional[bool] = None
+    use_safetensors: Optional[bool] = None
+    cache_dir: Optional[str] = None
 
 
 @dataclass

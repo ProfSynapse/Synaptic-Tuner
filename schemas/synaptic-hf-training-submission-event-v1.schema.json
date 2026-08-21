@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.synapticlabs.ai/synaptic-hf-training-submission-event-v1.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "event_id", "authorization_id", "approval", "experiment_id", "run_id", "tracking_root_id", "state", "sequence", "occurred_at", "previous_event", "provider_job", "reason_code", "provider_effect_possible"],
+  "properties": {
+    "schema_version": {"const": "synaptic-hf-training-submission-event/v1"}, "event_id": {"$ref": "#/$defs/sha256"}, "authorization_id": {"$ref": "#/$defs/sha256"}, "approval": {"$ref": "#/$defs/artifactRef"},
+    "experiment_id": {"$ref": "#/$defs/segment"}, "run_id": {"$ref": "#/$defs/segment"}, "tracking_root_id": {"$ref": "#/$defs/sha256"},
+    "state": {"enum": ["SUBMITTING", "SUBMITTED", "NOT_SUBMITTED", "AMBIGUOUS"]}, "sequence": {"enum": [1, 2, 3]}, "occurred_at": {"$ref": "#/$defs/timestamp"},
+    "previous_event": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifactRef"}]}, "provider_job": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/providerJob"}]},
+    "reason_code": {"oneOf": [{"type": "null"}, {"enum": ["CREDENTIAL_REJECTED", "OWNER_MISMATCH", "PREFIX_NOT_EMPTY", "APPROVAL_EXPIRED", "QUOTE_STALE", "LOCAL_PRECALL_FAILURE", "PROVIDER_OUTCOME_AMBIGUOUS", "INTERRUPTED_AFTER_CLAIM", "RECOVERY_EVIDENCE_INVALID", "RECOVERY_CONFIRMED_SUBMITTED"]}]}, "provider_effect_possible": {"type": "boolean"}
+  },
+  "allOf": [
+    {"if": {"properties": {"state": {"const": "SUBMITTING"}}}, "then": {"properties": {"sequence": {"const": 1}, "previous_event": {"type": "null"}, "provider_job": {"type": "null"}, "reason_code": {"type": "null"}, "provider_effect_possible": {"const": true}}}},
+    {"if": {"properties": {"state": {"const": "SUBMITTED"}}}, "then": {"properties": {"sequence": {"enum": [2, 3]}, "previous_event": {"$ref": "#/$defs/artifactRef"}, "provider_job": {"$ref": "#/$defs/providerJob"}, "reason_code": {"oneOf": [{"type": "null"}, {"const": "RECOVERY_CONFIRMED_SUBMITTED"}]}, "provider_effect_possible": {"const": true}}}},
+    {"if": {"properties": {"state": {"const": "NOT_SUBMITTED"}}}, "then": {"properties": {"sequence": {"const": 2}, "previous_event": {"$ref": "#/$defs/artifactRef"}, "provider_job": {"type": "null"}, "reason_code": {"type": "string"}, "provider_effect_possible": {"const": false}}}},
+    {"if": {"properties": {"state": {"const": "AMBIGUOUS"}}}, "then": {"properties": {"sequence": {"const": 2}, "previous_event": {"$ref": "#/$defs/artifactRef"}, "provider_job": {"type": "null"}, "reason_code": {"type": "string"}, "provider_effect_possible": {"const": true}}}}
+  ],
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "segment": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"}, "timestamp": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"}, "artifactRef": {"type": "object", "additionalProperties": false, "required": ["uri", "sha256"], "properties": {"uri": {"type": "string", "pattern": "^tracking://[A-Za-z0-9][A-Za-z0-9._/-]*$"}, "sha256": {"$ref": "#/$defs/sha256"}}}, "providerJob": {"type": "object", "additionalProperties": false, "required": ["namespace", "job_id", "created_at"], "properties": {"namespace": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"}, "job_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"}, "created_at": {"$ref": "#/$defs/timestamp"}}}}
+}

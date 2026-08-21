@@ -1,0 +1,79 @@
+schema_version: synaptic-hf-training-smoke-recipe/v1
+name: hf-smollm2-135m-training-smoke
+runtime_lock: Trainers/cloud/runtime-locks/hf_training_smoke_unsloth_2026_1_2.json
+model:
+  model_name: HuggingFaceTB/SmolLM2-135M-Instruct
+  model_revision: a91318be21aeaf0879874faa161dcb40c68847e9
+  max_seq_length: 2048
+  dtype: null
+  load_in_4bit: false
+  anonymous: true
+  trust_remote_code: false
+  use_safetensors: true
+  cache_dir: /workspace/cache/huggingface
+lora:
+  r: 8
+  lora_alpha: 16
+  lora_dropout: 0.0
+  bias: none
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  use_gradient_checkpointing: unsloth
+  random_state: 3407
+  use_rslora: false
+  use_dora: false
+  init_lora_weights: null
+training:
+  output_dir: /workspace/private-training
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0002
+  max_grad_norm: 1.0
+  lr_scheduler_type: linear
+  max_seq_length: 2048
+  packing: false
+  completion_only_loss: true
+  assistant_only_loss: false
+  gradient_checkpointing: true
+  optim: adamw_8bit
+  fp16: false
+  bf16: true
+  num_train_epochs: 1
+  max_steps: 1
+  warmup_ratio: 0.0
+  logging_steps: 1
+  save_steps: 1
+  save_total_limit: 1
+  dataloader_num_workers: 0
+  dataloader_pin_memory: true
+  group_by_length: false
+  eval_strategy: "no"
+  eval_steps: 1
+  chat_template_kwargs: null
+  prompt_render: full_conversation
+dataset:
+  dataset_name: ""
+  dataset_file: ""
+  local_file: /workspace/project/Datasets/tools_datasets/non_thinking/contentManager/smoke_tools_v2.5.jsonl
+  num_proc: 1
+  test_size: 0.0
+  split_dataset: false
+  filter_desirable: false
+wandb:
+  enabled: false
+  project: null
+  run_name: null
+  entity: null
+evolutionary:
+  enabled: false
+aux_head:
+  enabled: false
+seed: 42
+protected:
+  capability: hf.training-smoke
+  dataset_sha256: 1e0d08073ca5f8400899b2cb61c8459177600a10fd30a2c2c53eaa3f4a38d854
+  dataset_git_blob: 1623a48f1980a0e3d39aa5b59fb3856f6d3b2408
+  dataset_rows: 1
+  hardware: a10g-small
+  publication: false
+  retries: 0
+  job_secrets: []

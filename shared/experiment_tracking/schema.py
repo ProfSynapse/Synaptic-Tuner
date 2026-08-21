@@ -19,6 +19,10 @@ from .experiment import (
     HF_PROVISIONING_STATES,
     HF_SOURCE_TRANSPORT_STATES,
     HF_SUBMISSION_STATES,
+    HF_TRAINING_CANCELLATION_STATES,
+    HF_TRAINING_OBSERVATION_STATES,
+    HF_TRAINING_RESULT_STATES,
+    HF_TRAINING_SUBMISSION_STATES,
     _validate_reference_pair,
 )
 
@@ -97,6 +101,26 @@ class RunRecord:
     hf_cancellation_event_uri: str | None = None
     hf_cancellation_event_sha256: str | None = None
     hf_cancellation_state: str | None = None
+    hf_training_root_id: str | None = None
+    hf_training_run_id: str | None = None
+    hf_training_preflight_uri: str | None = None
+    hf_training_preflight_sha256: str | None = None
+    hf_training_preflight_state: str | None = None
+    hf_training_approval_uri: str | None = None
+    hf_training_approval_sha256: str | None = None
+    hf_training_authorization_id: str | None = None
+    hf_training_submission_event_uri: str | None = None
+    hf_training_submission_event_sha256: str | None = None
+    hf_training_submission_state: str | None = None
+    hf_training_cancellation_event_uri: str | None = None
+    hf_training_cancellation_event_sha256: str | None = None
+    hf_training_cancellation_state: str | None = None
+    hf_training_observation_event_uri: str | None = None
+    hf_training_observation_event_sha256: str | None = None
+    hf_training_observation_state: str | None = None
+    hf_training_result_uri: str | None = None
+    hf_training_result_sha256: str | None = None
+    hf_training_result_state: str | None = None
 
     def __post_init__(self) -> None:
         _validate_reference_pair(
@@ -192,6 +216,69 @@ class RunRecord:
                 raise ValueError("CLAIMED cancellation requires an HF cancellation event")
         elif self.hf_cancellation_event_uri is not None:
             raise ValueError("HF cancellation event requires CLAIMED state")
+        for kind, uri, digest in (
+            ("HF training preflight", self.hf_training_preflight_uri, self.hf_training_preflight_sha256),
+            ("HF training approval", self.hf_training_approval_uri, self.hf_training_approval_sha256),
+            ("HF training submission event", self.hf_training_submission_event_uri, self.hf_training_submission_event_sha256),
+            ("HF training cancellation event", self.hf_training_cancellation_event_uri, self.hf_training_cancellation_event_sha256),
+            ("HF training observation event", self.hf_training_observation_event_uri, self.hf_training_observation_event_sha256),
+            ("HF training result", self.hf_training_result_uri, self.hf_training_result_sha256),
+        ):
+            _validate_reference_pair(kind=kind, uri=uri, sha256=digest)
+        training_present = any(
+            value is not None
+            for value in (
+                self.hf_training_preflight_uri,
+                self.hf_training_approval_uri,
+                self.hf_training_submission_event_uri,
+                self.hf_training_cancellation_event_uri,
+                self.hf_training_observation_event_uri,
+                self.hf_training_result_uri,
+            )
+        )
+        if training_present and self.hf_training_root_id is None:
+            raise ValueError("HF training projection requires canonical tracking-root identity")
+        if training_present and self.hf_training_run_id is None:
+            raise ValueError("HF training projection requires protected run identity")
+        if self.hf_training_root_id is not None and (
+            len(self.hf_training_root_id) != 64
+            or any(character not in "0123456789abcdef" for character in self.hf_training_root_id)
+        ):
+            raise ValueError("HF training root ID must be 64 lowercase hexadecimal characters")
+        if self.hf_training_preflight_state not in {None, "PASS"}:
+            raise ValueError("Unknown HF training preflight state")
+        if self.hf_training_preflight_state == "PASS" and self.hf_training_preflight_uri is None:
+            raise ValueError("HF training PASS requires preflight evidence")
+        if self.hf_training_approval_uri is not None:
+            if self.hf_training_preflight_state != "PASS" or self.hf_training_authorization_id is None or self.hf_training_submission_state is None:
+                raise ValueError("HF training approval projection is incomplete")
+        elif self.hf_training_authorization_id is not None:
+            raise ValueError("HF training authorization ID requires approval")
+        if self.hf_training_submission_state not in {None, *HF_TRAINING_SUBMISSION_STATES}:
+            raise ValueError("Unknown HF training submission state")
+        if self.hf_training_submission_state == "APPROVED":
+            if self.hf_training_submission_event_uri is not None:
+                raise ValueError("APPROVED training submission cannot include an event")
+        elif self.hf_training_submission_state is not None and self.hf_training_submission_event_uri is None:
+            raise ValueError("Claimed HF training submission requires an event")
+        if self.hf_training_cancellation_state not in {None, *HF_TRAINING_CANCELLATION_STATES}:
+            raise ValueError("Unknown HF training cancellation state")
+        if self.hf_training_cancellation_state is not None and (
+            self.hf_training_submission_state != "SUBMITTED" or self.hf_training_cancellation_event_uri is None
+        ):
+            raise ValueError("HF training cancellation projection is incomplete")
+        if self.hf_training_observation_state not in {None, *HF_TRAINING_OBSERVATION_STATES}:
+            raise ValueError("Unknown HF training observation state")
+        if self.hf_training_observation_state is not None and (
+            self.hf_training_submission_state != "SUBMITTED" or self.hf_training_observation_event_uri is None
+        ):
+            raise ValueError("HF training observation projection is incomplete")
+        if self.hf_training_result_state not in {None, *HF_TRAINING_RESULT_STATES}:
+            raise ValueError("Unknown HF training result state")
+        if self.hf_training_result_state is not None and (
+            self.hf_training_observation_state is None or self.hf_training_result_uri is None
+        ):
+            raise ValueError("HF training result projection is incomplete")
 
     def to_json_line(self) -> str:
         """Serialize to a single JSON line for JSONL storage."""
