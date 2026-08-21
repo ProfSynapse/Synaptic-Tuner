@@ -21,11 +21,11 @@ from tuner.core.exceptions import CloudProviderError
 
 RECIPE_PATH = "Trainers/recipes/protected/hf_smollm2_135m_training_smoke.yaml"
 RUNTIME_LOCK_PATH = "Trainers/cloud/runtime-locks/hf_training_smoke_unsloth_2026_1_2.json"
-RECIPE_SHA256 = "1d1b898731d8d9cb874c50d6c9770be9f4f02e368c214679e26e5f91bfef2e65"
+RECIPE_SHA256 = "a25f1dcc3377ff9f687ff801616aea35547921eb02d76a3e08e75232739fbdd6"
 MODEL = "HuggingFaceTB/SmolLM2-135M-Instruct"
 MODEL_REVISION = "a91318be21aeaf0879874faa161dcb40c68847e9"
 DATASET = "Datasets/tools_datasets/non_thinking/contentManager/smoke_tools_v2.5.jsonl"
-DATASET_SHA256 = "1e0d08073ca5f8400899b2cb61c8459177600a10fd30a2c2c53eaa3f4a38d854"
+DATASET_SHA256 = "cbf8de1a44ad808bce8da3f231a71bd838dc8ef0734394e2c006be0b31bfca5e"
 DATASET_GIT_BLOB = "1623a48f1980a0e3d39aa5b59fb3856f6d3b2408"
 HARDWARE = "a10g-small"
 SOURCE_MOUNT = "/workspace/synaptic-bootstrap-input"

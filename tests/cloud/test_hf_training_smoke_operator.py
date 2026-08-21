@@ -481,7 +481,7 @@ def test_execute_rejects_future_issued_approval_before_provider_authority(monkey
     assert "create" not in events
 
 
-def test_preflight_snapshots_lock_quotes_and_proves_empty_slot(monkeypatch) -> None:
+def test_preflight_snapshots_lock_quotes_and_proves_empty_slot(monkeypatch, tmp_path) -> None:
     events = []
     repo = Path(__file__).resolve().parents[2]
     experiment = SimpleNamespace(experiment_id="exp-1")
@@ -526,6 +526,15 @@ def test_preflight_snapshots_lock_quotes_and_proves_empty_slot(monkeypatch) -> N
     import shared.experiment_tracking.root_identity as root_module
     monkeypatch.setattr(root_module, "ensure_tracking_root_identity", lambda root: {"root_id": "7" * 64})
     import tuner.cloud.hf_training_smoke_workload as workload_module
+    repository = tmp_path / "repo"
+    runtime_lock = repository / workload_module.RUNTIME_LOCK_PATH
+    runtime_lock.parent.mkdir(parents=True)
+    runtime_lock.write_bytes((repo / workload_module.RUNTIME_LOCK_PATH).read_bytes())
+    dataset = repository / workload_module.DATASET
+    dataset.parent.mkdir(parents=True)
+    dataset.write_bytes(
+        (repo / workload_module.DATASET).read_bytes().replace(b"\r\n", b"\n")
+    )
 
     def workload(*args, **kwargs):
         slot = kwargs["artifact_slot"]
@@ -560,7 +569,7 @@ def test_preflight_snapshots_lock_quotes_and_proves_empty_slot(monkeypatch) -> N
             artifact_bucket_id="owner/artifacts", artifact_prefix="training/artifacts",
             expected_namespace="owner", env_file="secret.env",
         ),
-        SimpleNamespace(project_root=repo),
+        SimpleNamespace(project_root=repository),
     )
     assert result["status"] == "PASS"
     assert events.count("snapshot") == events.count("quote") == events.count("empty") == events.count("record") == 1

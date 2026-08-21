@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from tuner.cloud.hf_training_smoke_workload import (
-    RECIPE_PATH, TrainingSmokeWorkloadError, build_workload,
+    DATASET, DATASET_GIT_BLOB, DATASET_SHA256, RECIPE_PATH,
+    TrainingSmokeWorkloadError, build_workload,
     validate_remote_argv, validate_runtime_lock,
 )
 from tuner.cloud.hf_training_smoke_contract import (
@@ -21,6 +23,26 @@ from tuner.cloud.hf_training_smoke_remote_entry import (
 
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+def test_dataset_identity_is_bound_to_committed_blob_bytes() -> None:
+    content = subprocess.run(
+        ["git", "-c", "core.autocrlf=false", "cat-file", "blob", f"HEAD:{DATASET}"],
+        cwd=REPO,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout
+    blob = subprocess.run(
+        ["git", "hash-object", "--stdin"],
+        cwd=REPO,
+        check=True,
+        input=content,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout.decode("ascii").strip()
+    assert hashlib.sha256(content).hexdigest() == DATASET_SHA256
+    assert blob == DATASET_GIT_BLOB
 
 
 def _accepted_lock(path: Path, requested_kind: str = "manifest") -> Path:

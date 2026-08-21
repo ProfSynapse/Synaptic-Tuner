@@ -70,7 +70,7 @@ aux_head:
 seed: 42
 protected:
   capability: hf.training-smoke
-  dataset_sha256: 1e0d08073ca5f8400899b2cb61c8459177600a10fd30a2c2c53eaa3f4a38d854
+  dataset_sha256: cbf8de1a44ad808bce8da3f231a71bd838dc8ef0734394e2c006be0b31bfca5e
   dataset_git_blob: 1623a48f1980a0e3d39aa5b59fb3856f6d3b2408
   dataset_rows: 1
   hardware: a10g-small
