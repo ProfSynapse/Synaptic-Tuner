@@ -16,6 +16,7 @@
 
 # Hash-bound launcher inputs must retain committed bytes on Windows
 requirements-hf-training-smoke.lock text eol=lf
+Datasets/tools_datasets/non_thinking/contentManager/smoke_tools_v2.5.jsonl text eol=lf
 
 # Windows scripts use CRLF
 *.ps1 text eol=crlf

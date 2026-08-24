@@ -26,6 +26,11 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 def test_dataset_identity_is_bound_to_committed_blob_bytes() -> None:
+    attributes = (REPO / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    assert f"{DATASET} text eol=lf" in attributes
+    checked_out = (REPO / DATASET).read_bytes()
+    assert b"\r" not in checked_out
+    assert hashlib.sha256(checked_out).hexdigest() == DATASET_SHA256
     content = subprocess.run(
         ["git", "-c", "core.autocrlf=false", "cat-file", "blob", f"HEAD:{DATASET}"],
         cwd=REPO,
