@@ -429,13 +429,13 @@ os.execve(sys.executable,[sys.executable,"-I","-c",shim,logical_engine,*remote_a
 FIXED_STDLIB_TRAINING_LAUNCHER = _INLINE_VERIFIER + _TRAINING_LAUNCHER_SUFFIX
 _TRAINING_LAUNCHER_STUB = r'''import base64,json,sys,zlib
 n=int(sys.argv[1])
-document=json.loads(zlib.decompress(base64.b85decode("".join(sys.argv[2:2+n]))))
+document=json.loads(zlib.decompress(base64.b64decode("".join(sys.argv[2:2+n]),validate=True)))
 if type(document) is not list or len(document)<2 or any(type(value) is not str or not value or "\x00" in value for value in document): raise RuntimeError("training launcher envelope is invalid")
 sys.argv=[sys.argv[0],*document[1:]]
 exec(compile(document[0],"<synaptic-hf-training-launcher>","exec"))
 '''
 _MAX_PROVIDER_COMMAND_ITEM_BYTES = 512
-_MAX_PROVIDER_COMMAND_JSON_BYTES = 4096
+_MAX_PROVIDER_COMMAND_JSON_BYTES = 4608
 
 
 def build_training_provider_command(
@@ -471,7 +471,10 @@ def build_training_provider_command(
         [FIXED_STDLIB_TRAINING_LAUNCHER, *launcher_arguments],
         ensure_ascii=True, separators=(",", ":"),
     ).encode("ascii")
-    payload = base64.b85encode(zlib.compress(envelope, level=9)).decode("ascii")
+    # HF Jobs preserves the submitted argv in JobInfo but executes it through a
+    # shell boundary. Keep every payload chunk inside the portable Base64
+    # alphabet so shell metacharacters cannot alter the authenticated envelope.
+    payload = base64.b64encode(zlib.compress(envelope, level=9)).decode("ascii")
     chunks = tuple(
         payload[index:index + _MAX_PROVIDER_COMMAND_ITEM_BYTES]
         for index in range(0, len(payload), _MAX_PROVIDER_COMMAND_ITEM_BYTES)

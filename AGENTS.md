@@ -29,6 +29,7 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 - For the protected paid A10G training smoke, use only `python tuner.py hf-training-smoke {preflight,approve,execute,recover,observe,verify}`: require the exact pushed-source, security/release, isolated CPython 3.12.7 launcher, live quote, and approval gates; allow one submission and one cancel attempt; keep credentials out of the remote job; and verify only the exact 15-file artifact inventory without bulk bucket sync.
 - Remote jobs clone and run the exact pushed commit. If the job log shows an older `HEAD`, stop and relaunch from the right SHA instead of debugging stale code.
+- HF Jobs may preserve submitted argv in JobInfo while shell-processing it at runtime. Protected launcher payload chunks must use a shell-safe alphabet such as standard Base64; do not use Base85 or any encoding whose alphabet contains shell metacharacters.
 - Do not upgrade `huggingface_hub` in the main Unsloth training environment just to get Buckets support. `transformers` in the training stack requires `huggingface-hub<1.0`.
 - If Buckets support needs a newer Hub client, isolate it in a helper path or subprocess and keep the trainer runtime untouched.
 - Pass `HF_TOKEN` into `huggingface_hub.run_job(...)` explicitly with job secrets. Do not assume the cloud job inherits the local shell environment.
