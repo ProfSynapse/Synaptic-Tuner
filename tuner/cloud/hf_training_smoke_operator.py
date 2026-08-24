@@ -82,14 +82,17 @@ _PROVIDER_FAILURE_REASONS = {
 def _provider_failure_reason(error: Exception) -> str:
     """Return one bounded nonsecret class for a post-boundary provider failure."""
 
-    response = getattr(error, "response", None)
-    status = getattr(response, "status_code", None)
-    if type(status) is not int:
+    try:
+        response = getattr(error, "response", None)
+        status = getattr(response, "status_code", None)
+        if type(status) is not int:
+            return "PROVIDER_OUTCOME_AMBIGUOUS"
+        if status in _PROVIDER_FAILURE_REASONS:
+            return _PROVIDER_FAILURE_REASONS[status]
+        if 500 <= status <= 599:
+            return "PROVIDER_SERVICE_ERROR"
+    except BaseException:
         return "PROVIDER_OUTCOME_AMBIGUOUS"
-    if status in _PROVIDER_FAILURE_REASONS:
-        return _PROVIDER_FAILURE_REASONS[status]
-    if 500 <= status <= 599:
-        return "PROVIDER_SERVICE_ERROR"
     return "PROVIDER_OUTCOME_AMBIGUOUS"
 
 
@@ -1179,9 +1182,15 @@ def _execute_action(args: object, context: object) -> dict[str, object]:
     except BaseException as exc:
         if isinstance(exc, Exception):
             if provider_call_started:
-                terminal("AMBIGUOUS", job=None, reason=_provider_failure_reason(exc))
+                state = "AMBIGUOUS"
+                reason = _provider_failure_reason(exc)
             else:
-                terminal("NOT_SUBMITTED", job=None, reason="LOCAL_PRECALL_FAILURE")
+                state = "NOT_SUBMITTED"
+                reason = "LOCAL_PRECALL_FAILURE"
+            try:
+                terminal(state, job=None, reason=reason)
+            except BaseException:
+                raise CloudProviderError("Protected HF training terminal state could not be recorded") from None
             raise CloudProviderError("Protected HF training submission was rejected") from None
         try:
             terminal("AMBIGUOUS", job=None, reason="INTERRUPTED_AFTER_CLAIM")

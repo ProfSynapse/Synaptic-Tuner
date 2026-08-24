@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import io
 import json
 import sys
+import traceback
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -93,6 +94,8 @@ class _Api:
         (401, "PROVIDER_AUTH_REJECTED"),
         (402, "PROVIDER_PAYMENT_REJECTED"),
         (403, "PROVIDER_AUTH_REJECTED"),
+        (404, "PROVIDER_REQUEST_REJECTED"),
+        (409, "PROVIDER_REQUEST_REJECTED"),
         (413, "PROVIDER_REQUEST_REJECTED"),
         (422, "PROVIDER_REQUEST_REJECTED"),
         (429, "PROVIDER_RATE_LIMITED"),
@@ -107,6 +110,16 @@ def test_provider_failure_reason_is_bounded_and_status_only(status, expected) ->
     error = RuntimeError("must never be persisted")
     error.response = SimpleNamespace(status_code=status)
     assert operator._provider_failure_reason(error) == expected
+
+
+def test_provider_failure_reason_survives_hostile_response_accessor() -> None:
+    class HostileError(RuntimeError):
+        @property
+        def response(self):
+            raise RuntimeError("response-accessor-secret")
+
+    assert operator._provider_failure_reason(HostileError("provider-secret")) == "PROVIDER_OUTCOME_AMBIGUOUS"
+
 
 @pytest.mark.parametrize(
     ("action", "experiment"),
@@ -410,7 +423,7 @@ def test_normalizes_exact_v127_bucket_files_and_folders() -> None:
 
 def _execute_fakes(
     monkeypatch, tmp_path: Path, *, submit_error: Exception | None = None,
-    slot_nonempty: bool = False,
+    slot_nonempty: bool = False, terminal_error: BaseException | None = None,
 ):
     events = []
     approval = accepted_approval(accepted_preflight())
@@ -444,6 +457,8 @@ def _execute_fakes(
 
         def record_hf_training_submission_terminal(self, experiment, document):
             events.append(("terminal", document["state"]))
+            if terminal_error:
+                raise terminal_error
 
     class Provider:
         sdk = object()
@@ -500,6 +515,23 @@ def test_execute_provider_uncertainty_records_ambiguous_without_retry(monkeypatc
     assert "secret" not in str(caught.value)
     assert events.count("submit") == 1
     assert ("terminal", "AMBIGUOUS") in events
+
+
+def test_execute_terminal_failure_suppresses_provider_and_journal_details(monkeypatch, tmp_path) -> None:
+    provider_marker = "provider-body-request-id-secret"
+    journal_marker = "journal-path-secret"
+    _execute_fakes(
+        monkeypatch,
+        tmp_path,
+        submit_error=RuntimeError(provider_marker),
+        terminal_error=RuntimeError(journal_marker),
+    )
+    with pytest.raises(CloudProviderError, match="terminal state could not be recorded") as caught:
+        operator._execute_action(SimpleNamespace(env_file="secret.env"), SimpleNamespace(project_root=tmp_path))
+    rendered = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
+    assert caught.value.__suppress_context__ is True
+    assert provider_marker not in rendered
+    assert journal_marker not in rendered
 
 
 def test_execute_rechecks_empty_slot_after_claim_before_submit(monkeypatch, tmp_path) -> None:
