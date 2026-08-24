@@ -390,6 +390,10 @@ preflight, and approval gates all pass, this lane is **not live-eligible**.
   provider call. A definite local pre-call failure records `NOT_SUBMITTED`; an
   uncertain post-call outcome records `AMBIGUOUS`. Never rerun `execute` after
   an ambiguous outcome and never submit a replacement under the same approval.
+  Post-boundary HTTP failures remain terminally ambiguous and nonretryable, but
+  their durable reason may retain only a bounded status class (request, auth,
+  payment, rate limit, or service error). Never persist provider exception text,
+  response bodies, request identifiers, headers, or credential-derived data.
 - **Read-only recovery:** `recover` never submits or cancels. It can confirm
   `SUBMITTED` only from exactly one matching provider job whose full identity
   and spec reauthenticate. Zero matches leaves the outcome `AMBIGUOUS`; it does

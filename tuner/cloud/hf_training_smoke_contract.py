@@ -653,7 +653,16 @@ def validate_submission_event(
     if state == "NOT_SUBMITTED" and effect:
         raise CloudProviderError("NOT_SUBMITTED requires provider effect to be impossible")
     local_reasons = {"CREDENTIAL_REJECTED", "OWNER_MISMATCH", "PREFIX_NOT_EMPTY", "APPROVAL_EXPIRED", "QUOTE_STALE", "LOCAL_PRECALL_FAILURE"}
-    ambiguous_reasons = {"PROVIDER_OUTCOME_AMBIGUOUS", "INTERRUPTED_AFTER_CLAIM", "RECOVERY_EVIDENCE_INVALID"}
+    ambiguous_reasons = {
+        "PROVIDER_OUTCOME_AMBIGUOUS",
+        "PROVIDER_REQUEST_REJECTED",
+        "PROVIDER_AUTH_REJECTED",
+        "PROVIDER_PAYMENT_REJECTED",
+        "PROVIDER_RATE_LIMITED",
+        "PROVIDER_SERVICE_ERROR",
+        "INTERRUPTED_AFTER_CLAIM",
+        "RECOVERY_EVIDENCE_INVALID",
+    }
     if state == "NOT_SUBMITTED" and document["reason_code"] not in local_reasons:
         raise CloudProviderError("NOT_SUBMITTED reason does not prove a pre-call failure")
     if state == "AMBIGUOUS" and document["reason_code"] not in ambiguous_reasons:

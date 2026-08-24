@@ -66,6 +66,31 @@ _PROVIDER_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _PROVIDER_LABEL_DIGEST_PREFIX = 48
 _DOWNLOAD_PASS = b'{"schema_version":"synaptic-hf-training-download-child/v1","status":"PASS"}\n'
 _PROVIDER_STAGES = frozenset({"SCHEDULING", "RUNNING", "COMPLETED", "ERROR", "DELETED", "CANCELED"})
+_PROVIDER_FAILURE_REASONS = {
+    400: "PROVIDER_REQUEST_REJECTED",
+    401: "PROVIDER_AUTH_REJECTED",
+    402: "PROVIDER_PAYMENT_REJECTED",
+    403: "PROVIDER_AUTH_REJECTED",
+    404: "PROVIDER_REQUEST_REJECTED",
+    409: "PROVIDER_REQUEST_REJECTED",
+    413: "PROVIDER_REQUEST_REJECTED",
+    422: "PROVIDER_REQUEST_REJECTED",
+    429: "PROVIDER_RATE_LIMITED",
+}
+
+
+def _provider_failure_reason(error: Exception) -> str:
+    """Return one bounded nonsecret class for a post-boundary provider failure."""
+
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    if type(status) is not int:
+        return "PROVIDER_OUTCOME_AMBIGUOUS"
+    if status in _PROVIDER_FAILURE_REASONS:
+        return _PROVIDER_FAILURE_REASONS[status]
+    if 500 <= status <= 599:
+        return "PROVIDER_SERVICE_ERROR"
+    return "PROVIDER_OUTCOME_AMBIGUOUS"
 
 
 def _close_provider_preserving_pending(provider: object) -> None:
@@ -1154,7 +1179,7 @@ def _execute_action(args: object, context: object) -> dict[str, object]:
     except BaseException as exc:
         if isinstance(exc, Exception):
             if provider_call_started:
-                terminal("AMBIGUOUS", job=None, reason="PROVIDER_OUTCOME_AMBIGUOUS")
+                terminal("AMBIGUOUS", job=None, reason=_provider_failure_reason(exc))
             else:
                 terminal("NOT_SUBMITTED", job=None, reason="LOCAL_PRECALL_FAILURE")
             raise CloudProviderError("Protected HF training submission was rejected") from None

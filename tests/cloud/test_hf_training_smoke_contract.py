@@ -554,6 +554,53 @@ def test_submission_and_cancellation_transitions_bind_predecessors_and_effects()
         validate_submission_event(hostile, approval=auth, previous_event=ambiguous_submission)
 
 
+@pytest.mark.parametrize(
+    "reason_code",
+    [
+        "PROVIDER_OUTCOME_AMBIGUOUS",
+        "PROVIDER_REQUEST_REJECTED",
+        "PROVIDER_AUTH_REJECTED",
+        "PROVIDER_PAYMENT_REJECTED",
+        "PROVIDER_RATE_LIMITED",
+        "PROVIDER_SERVICE_ERROR",
+    ],
+)
+def test_ambiguous_submission_accepts_only_bounded_provider_failure_classes(reason_code):
+    auth = approval(preflight())
+    submitting = _seal(
+        {
+            **event_base("synaptic-hf-training-submission-event/v1", auth),
+            "state": "SUBMITTING",
+            "sequence": 1,
+            "previous_event": None,
+            "provider_job": None,
+            "reason_code": None,
+            "provider_effect_possible": True,
+        },
+        "event_id",
+    )
+    ambiguous = _seal(
+        {
+            **event_base("synaptic-hf-training-submission-event/v1", auth),
+            "state": "AMBIGUOUS",
+            "sequence": 2,
+            "previous_event": {
+                "uri": "tracking://submitting.json",
+                "sha256": document_sha256(submitting),
+            },
+            "provider_job": None,
+            "reason_code": reason_code,
+            "provider_effect_possible": True,
+        },
+        "event_id",
+    )
+
+    assert validate_submission_event(
+        ambiguous,
+        approval=auth,
+        previous_event=submitting,
+    )["reason_code"] == reason_code
+
 def test_stopped_observation_is_nonterminal_and_can_refine():
     auth = approval(preflight())
     base = event_base("synaptic-hf-training-observation-event/v1", auth)

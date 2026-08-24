@@ -87,6 +87,28 @@ class _Api:
 
 
 @pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (400, "PROVIDER_REQUEST_REJECTED"),
+        (401, "PROVIDER_AUTH_REJECTED"),
+        (402, "PROVIDER_PAYMENT_REJECTED"),
+        (403, "PROVIDER_AUTH_REJECTED"),
+        (413, "PROVIDER_REQUEST_REJECTED"),
+        (422, "PROVIDER_REQUEST_REJECTED"),
+        (429, "PROVIDER_RATE_LIMITED"),
+        (500, "PROVIDER_SERVICE_ERROR"),
+        (599, "PROVIDER_SERVICE_ERROR"),
+        (418, "PROVIDER_OUTCOME_AMBIGUOUS"),
+        (None, "PROVIDER_OUTCOME_AMBIGUOUS"),
+        ("400", "PROVIDER_OUTCOME_AMBIGUOUS"),
+    ],
+)
+def test_provider_failure_reason_is_bounded_and_status_only(status, expected) -> None:
+    error = RuntimeError("must never be persisted")
+    error.response = SimpleNamespace(status_code=status)
+    assert operator._provider_failure_reason(error) == expected
+
+@pytest.mark.parametrize(
     ("action", "experiment"),
     [
         (operator._execute_action, SimpleNamespace(hf_training_submission_state="PREFLIGHTED")),
