@@ -411,8 +411,11 @@ preflight, and approval gates all pass, this lane is **not live-eligible**.
   command carries the same closed fields. Only then may it submit with the exact
   derived slot mounted writable. The credential-free remote entrypoint must
   require that exact anchor, retain its verified file identity through
-  consumption, create `exclusive-sentinel.json` atomically with `O_EXCL`, and
-  remove only that one-use file before writing anything else. A concurrent
+  consumption and create `exclusive-sentinel.json` atomically with `O_EXCL`.
+  HF mount releases before v0.9.2 reject unlink-while-open, so the remote must
+  atomically rename the verified open anchor with no-replace, verify the same
+  identity through that claim, close and recheck it, and unlink only the claimed
+  name before writing anything else. A concurrent
   protected execution selects a different anchor path; extra entries or a fixed-
   sentinel collision fail closed without overwrite or submission. Never upload
   the fixed sentinel through the overwriting Buckets batch API or mount the

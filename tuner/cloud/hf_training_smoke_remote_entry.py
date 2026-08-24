@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 from contextlib import contextmanager
 import hashlib
 import importlib.metadata
@@ -172,6 +173,38 @@ def _write_exclusive_json(path: Path, value: object) -> None:
         raise RemoteTrainingSmokeError("Protected exclusive artifact write changed bytes")
 
 
+def _rename_noreplace(source: Path, destination: Path) -> None:
+    """Atomically claim one anchor name without replacing another entry."""
+
+    if source.parent != destination.parent:
+        raise RemoteTrainingSmokeError("Protected anchor claim crossed directories")
+    if os.name == "nt":
+        os.rename(source, destination)
+        return
+    if sys.platform != "linux":
+        os.link(source, destination, follow_symlinks=False)
+        source.unlink()
+        return
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise RemoteTrainingSmokeError("Protected atomic anchor claim is unavailable")
+    renameat2.argtypes = [
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint,
+    ]
+    renameat2.restype = ctypes.c_int
+    at_fdcwd = -100
+    rename_noreplace = 1
+    result = renameat2(
+        at_fdcwd, os.fsencode(source), at_fdcwd, os.fsencode(destination),
+        rename_noreplace,
+    )
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number), str(destination))
+
+
 def _sha256_file(path: Path, maximum: int = 512 * 1024 * 1024) -> str:
     info = path.lstat()
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
@@ -301,15 +334,29 @@ def _require_reserved_artifact_slot(
         current = anchor.lstat()
         if identity != (current.st_dev, current.st_ino, current.st_size):
             raise RemoteTrainingSmokeError("Protected artifact reservation changed before consumption")
-        # The protected runtime is Linux. Close first only on Windows so local
-        # unit tests can exercise the same validation on filesystems that deny
-        # unlinking an open file.
+        consumed = artifact_root / f".synaptic-consumed-anchor-{expected_nonce}.json"
+        # Older HF bucket mounts reject unlink of every open file. Atomically
+        # rename the verified anchor without replacement while its descriptor
+        # remains open, then close and remove only that claimed name.
         if os.name == "nt":
             os.close(descriptor)
             descriptor = None
-        anchor.unlink()
-        if descriptor is not None and _sha256_descriptor(descriptor, 4096) != expected_anchor_sha256:
+        _rename_noreplace(anchor, consumed)
+        claimed = consumed.lstat()
+        if identity != (claimed.st_dev, claimed.st_ino, claimed.st_size):
             raise RemoteTrainingSmokeError("Protected artifact reservation changed during consumption")
+        if descriptor is not None:
+            if _sha256_descriptor(descriptor, 4096) != expected_anchor_sha256:
+                raise RemoteTrainingSmokeError("Protected artifact reservation changed during consumption")
+            os.close(descriptor)
+            descriptor = None
+        after_close = consumed.lstat()
+        if (
+            _sha256_file(consumed, 4096) != expected_anchor_sha256
+            or identity != (after_close.st_dev, after_close.st_ino, after_close.st_size)
+        ):
+            raise RemoteTrainingSmokeError("Protected artifact reservation changed during consumption")
+        consumed.unlink()
     finally:
         if descriptor is not None:
             os.close(descriptor)

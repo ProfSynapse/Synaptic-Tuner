@@ -18,7 +18,35 @@ def _make_job(command):
         url="https://hf.co/jobs/job-123",
         labels={"task": "evaluation", "provider": "hf_jobs"},
         command=command,
+        volumes=[],
     )
+
+
+def test_normalize_job_includes_safe_volume_metadata(repo_root):
+    handler = CloudJobsHandler(args=Namespace())
+    handler._repo_root = repo_root
+    job = _make_job(["python", "-c", "pass"])
+    job.volumes = [
+        SimpleNamespace(
+            type="bucket",
+            source="professorsynapse/toolset-training-artifacts",
+            path="synaptic/training-smoke/v1/slot",
+            mount_path="/workspace/artifacts",
+            read_only=False,
+        )
+    ]
+
+    normalized = handler._normalize_job(job)
+
+    assert normalized["volumes"] == [
+        {
+            "type": "bucket",
+            "source": "professorsynapse/toolset-training-artifacts",
+            "path": "synaptic/training-smoke/v1/slot",
+            "mount_path": "/workspace/artifacts",
+            "read_only": False,
+        }
+    ]
 
 
 def test_resolve_stage_artifact_root_from_eval_command(repo_root):
