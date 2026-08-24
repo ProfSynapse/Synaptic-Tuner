@@ -58,6 +58,17 @@ class CloudJobsHandler(BaseHandler):
         created_at = getattr(job, "created_at", None)
         command = getattr(job, "command", None) or []
         labels = getattr(job, "labels", None) or {}
+        volumes = []
+        for volume in getattr(job, "volumes", None) or []:
+            volumes.append(
+                {
+                    "type": getattr(volume, "type", None),
+                    "source": getattr(volume, "source", None),
+                    "path": getattr(volume, "path", None),
+                    "mount_path": getattr(volume, "mount_path", None),
+                    "read_only": getattr(volume, "read_only", None),
+                }
+            )
         normalized = {
             "id": getattr(job, "id", ""),
             "stage": getattr(status, "stage", None),
@@ -69,6 +80,7 @@ class CloudJobsHandler(BaseHandler):
             "url": getattr(job, "url", None),
             "labels": labels,
             "command": command,
+            "volumes": volumes,
         }
         source_mode = labels.get("source_mode")
         if source_mode in {"standalone", "superproject", "dual_clone"}:

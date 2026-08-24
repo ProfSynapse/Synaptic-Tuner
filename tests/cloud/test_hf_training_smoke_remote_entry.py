@@ -201,6 +201,19 @@ def test_substituted_valid_anchor_is_rejected(tmp_path: Path) -> None:
         )
 
 
+def test_atomic_anchor_claim_never_replaces_collision(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    destination = tmp_path / "destination.json"
+    source.write_bytes(b"source")
+    destination.write_bytes(b"collision")
+
+    with pytest.raises(FileExistsError):
+        remote._rename_noreplace(source, destination)
+
+    assert source.read_bytes() == b"source"
+    assert destination.read_bytes() == b"collision"
+
+
 def test_exclusive_sentinel_creation_never_overwrites_collision(tmp_path: Path) -> None:
     sentinel = tmp_path / "exclusive-sentinel.json"
     sentinel.write_bytes(b"concurrent-data")
