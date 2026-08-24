@@ -18,6 +18,7 @@ import pytest
 
 from tuner.cloud.hf_volume_transport import (
     _INLINE_VERIFIER,
+    _TRAINING_LAUNCHER_STUB,
     FIXED_STDLIB_TRAINING_LAUNCHER,
     HFArtifactVolumeSpec,
     HFVerifiedVolume,
@@ -110,14 +111,31 @@ def test_training_provider_command_is_fixed_no_shell_and_exactly_bound(tmp_path:
     assert "base64.b85decode" in command[3]
     chunk_count = int(command[4])
     payload = "".join(command[5:5 + chunk_count])
-    assert zlib.decompress(base64.b85decode(payload)).decode("ascii") == (
-        FIXED_STDLIB_TRAINING_LAUNCHER
-    )
-    assert max(len(value.encode("utf-8")) for value in command) <= 2048
-    assert len(payload) < len(FIXED_STDLIB_TRAINING_LAUNCHER)
-    assert command[-3:] == ("--", *remote)
+    document = json.loads(zlib.decompress(base64.b85decode(payload)))
+    assert document[0] == FIXED_STDLIB_TRAINING_LAUNCHER
+    assert document[-3:] == ["--", *remote]
+    assert max(len(value.encode("utf-8")) for value in command) <= 512
+    assert len(payload) < len(json.dumps(document, separators=(",", ":")))
+    assert len(command) <= 16
+    assert len(json.dumps(list(command), separators=(",", ":")).encode("ascii")) <= 4096
     assert all(value not in {"sh", "bash", "cmd", "powershell"} for value in command)
     assert "HF_TOKEN" not in "".join(command)
+
+
+def test_training_provider_command_stub_rehydrates_closed_envelope() -> None:
+    document = [
+        "import json,sys;print(json.dumps(sys.argv[1:],separators=(',',':')))",
+        "--alpha", "value",
+    ]
+    payload = base64.b85encode(
+        zlib.compress(json.dumps(document, separators=(",", ":")).encode("ascii"), level=9)
+    ).decode("ascii")
+    chunks = tuple(payload[index:index + 512] for index in range(0, len(payload), 512))
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", _TRAINING_LAUNCHER_STUB, str(len(chunks)), *chunks],
+        check=True, capture_output=True, text=True, timeout=10,
+    )
+    assert completed.stdout.strip() == '["--alpha","value"]'
 
 
 def test_training_provider_command_rejects_unbound_inputs(tmp_path: Path) -> None:

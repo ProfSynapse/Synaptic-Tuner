@@ -427,19 +427,15 @@ os.execve(sys.executable,[sys.executable,"-I","-c",shim,logical_engine,*remote_a
 '''
 
 FIXED_STDLIB_TRAINING_LAUNCHER = _INLINE_VERIFIER + _TRAINING_LAUNCHER_SUFFIX
-_TRAINING_LAUNCHER_STUB = (
-    "import base64,sys,zlib;n=int(sys.argv.pop(1));payload=''.join("
-    "sys.argv.pop(1) for _ in range(n));exec(compile(zlib.decompress("
-    "base64.b85decode(payload)),'<synaptic-hf-training-launcher>','exec'))"
-)
-_TRAINING_LAUNCHER_PAYLOAD = base64.b85encode(
-    zlib.compress(FIXED_STDLIB_TRAINING_LAUNCHER.encode("ascii"), level=9)
-).decode("ascii")
-_MAX_PROVIDER_COMMAND_ITEM_BYTES = 2048
-_TRAINING_LAUNCHER_PAYLOAD_CHUNKS = tuple(
-    _TRAINING_LAUNCHER_PAYLOAD[index:index + _MAX_PROVIDER_COMMAND_ITEM_BYTES]
-    for index in range(0, len(_TRAINING_LAUNCHER_PAYLOAD), _MAX_PROVIDER_COMMAND_ITEM_BYTES)
-)
+_TRAINING_LAUNCHER_STUB = r'''import base64,json,sys,zlib
+n=int(sys.argv[1])
+document=json.loads(zlib.decompress(base64.b85decode("".join(sys.argv[2:2+n]))))
+if type(document) is not list or len(document)<2 or any(type(value) is not str or not value or "\x00" in value for value in document): raise RuntimeError("training launcher envelope is invalid")
+sys.argv=[sys.argv[0],*document[1:]]
+exec(compile(document[0],"<synaptic-hf-training-launcher>","exec"))
+'''
+_MAX_PROVIDER_COMMAND_ITEM_BYTES = 512
+_MAX_PROVIDER_COMMAND_JSON_BYTES = 4096
 
 
 def build_training_provider_command(
@@ -462,9 +458,7 @@ def build_training_provider_command(
     for root in (expected_project_root, expected_engine_root):
         if not isinstance(root, str) or not root.startswith("/workspace/source/"):
             raise CloudProviderError("HF protected training physical root is invalid.")
-    command = (
-        "python", "-I", "-c", _TRAINING_LAUNCHER_STUB,
-        str(len(_TRAINING_LAUNCHER_PAYLOAD_CHUNKS)), *_TRAINING_LAUNCHER_PAYLOAD_CHUNKS,
+    launcher_arguments = (
         spec.mounted(spec.capsule_path), spec.capsule_manifest_sha256,
         spec.mounted(spec.source_lock_path), spec.source_lock_sha256,
         spec.mounted(spec.checkout_policy_path), spec.checkout_policy_sha256,
@@ -473,8 +467,24 @@ def build_training_provider_command(
         expected_project_commit, expected_engine_commit, expected_mode,
         "/workspace/project", "/workspace/engine", "--", *remote_argv,
     )
-    if any(len(value.encode("utf-8")) > _MAX_PROVIDER_COMMAND_ITEM_BYTES for value in command):
-        raise CloudProviderError("HF protected training provider argv item exceeds its bound.")
+    envelope = json.dumps(
+        [FIXED_STDLIB_TRAINING_LAUNCHER, *launcher_arguments],
+        ensure_ascii=True, separators=(",", ":"),
+    ).encode("ascii")
+    payload = base64.b85encode(zlib.compress(envelope, level=9)).decode("ascii")
+    chunks = tuple(
+        payload[index:index + _MAX_PROVIDER_COMMAND_ITEM_BYTES]
+        for index in range(0, len(payload), _MAX_PROVIDER_COMMAND_ITEM_BYTES)
+    )
+    command = (
+        "python", "-I", "-c", _TRAINING_LAUNCHER_STUB, str(len(chunks)), *chunks,
+    )
+    if (
+        any(len(value.encode("utf-8")) > _MAX_PROVIDER_COMMAND_ITEM_BYTES for value in command)
+        or len(json.dumps(list(command), ensure_ascii=True, separators=(",", ":")).encode("ascii"))
+        > _MAX_PROVIDER_COMMAND_JSON_BYTES
+    ):
+        raise CloudProviderError("HF protected training provider argv exceeds its bounds.")
     return command
 
 

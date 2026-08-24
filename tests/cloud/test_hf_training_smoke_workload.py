@@ -204,7 +204,8 @@ def test_provider_command_and_remote_argv_hashes_are_deterministic(tmp_path: Pat
         expected_mode="dual_clone",
     )
     assert workload.provider_command
-    assert max(len(value.encode("utf-8")) for value in workload.provider_command) <= 2048
+    assert max(len(value.encode("utf-8")) for value in workload.provider_command) <= 512
+    assert len(json.dumps(list(workload.provider_command), separators=(",", ":")).encode("ascii")) <= 4096
     assert workload.remote_argv == workload.argv
     assert workload.remote_argv_sha256 == hashlib.sha256(
         (json.dumps(list(workload.remote_argv), sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")

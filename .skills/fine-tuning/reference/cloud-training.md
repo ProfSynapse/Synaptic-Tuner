@@ -372,10 +372,10 @@ preflight, and approval gates all pass, this lane is **not live-eligible**.
 - **Exact pushed source:** the no-shell launcher authenticates and reconstructs
   the exact pushed SourceLock commits before importing or executing repository
   code. The provider command and remote argv are independently hashed and bound
-  into the protected workload. The fixed standard-library launcher is carried
-  as a deterministic zlib/base85 payload behind a tiny no-shell decoder, and
-  every provider command item is capped at 2048 UTF-8 bytes so the API request
-  does not contain an oversized multiline command argument.
+  into the protected workload. The fixed standard-library launcher and every authenticated launcher
+  argument are carried together in one deterministic zlib/base85 envelope
+  behind a tiny no-shell decoder. Its canonical serialized argv is capped at
+  4096 bytes, and every provider command item is capped at 512 UTF-8 bytes.
 - **Isolated provider client:** the host uses the pinned Hub client and fixed
   HTTPS endpoint with ambient proxy, endpoint, CA, and credential overrides
   rejected. Credential contents are read only after the required durable claim.
