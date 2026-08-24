@@ -7,7 +7,7 @@
     "experiment_id": {"$ref": "#/$defs/segment"}, "run_id": {"$ref": "#/$defs/segment"}, "tracking_root_id": {"$ref": "#/$defs/sha256"},
     "state": {"enum": ["SUBMITTING", "SUBMITTED", "NOT_SUBMITTED", "AMBIGUOUS"]}, "sequence": {"enum": [1, 2, 3]}, "occurred_at": {"$ref": "#/$defs/timestamp"},
     "previous_event": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifactRef"}]}, "provider_job": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/providerJob"}]},
-    "reason_code": {"oneOf": [{"type": "null"}, {"enum": ["CREDENTIAL_REJECTED", "OWNER_MISMATCH", "PREFIX_NOT_EMPTY", "APPROVAL_EXPIRED", "QUOTE_STALE", "LOCAL_PRECALL_FAILURE", "PROVIDER_OUTCOME_AMBIGUOUS", "PROVIDER_REQUEST_REJECTED", "PROVIDER_AUTH_REJECTED", "PROVIDER_PAYMENT_REJECTED", "PROVIDER_RATE_LIMITED", "PROVIDER_SERVICE_ERROR", "INTERRUPTED_AFTER_CLAIM", "RECOVERY_EVIDENCE_INVALID", "RECOVERY_CONFIRMED_SUBMITTED"]}]}, "provider_effect_possible": {"type": "boolean"}
+    "reason_code": {"oneOf": [{"type": "null"}, {"enum": ["CREDENTIAL_REJECTED", "OWNER_MISMATCH", "PREFIX_NOT_EMPTY", "APPROVAL_EXPIRED", "QUOTE_STALE", "LOCAL_PRECALL_FAILURE", "PROVIDER_OUTCOME_AMBIGUOUS", "PROVIDER_REQUEST_REJECTED", "PROVIDER_AUTH_REJECTED", "PROVIDER_PAYMENT_REJECTED", "PROVIDER_RATE_LIMITED", "PROVIDER_SERVICE_ERROR", "PROVIDER_TRANSPORT_ERROR", "INTERRUPTED_AFTER_CLAIM", "RECOVERY_EVIDENCE_INVALID", "RECOVERY_CONFIRMED_SUBMITTED"]}]}, "provider_effect_possible": {"type": "boolean"}
   },
   "allOf": [
     {"if": {"properties": {"state": {"const": "SUBMITTING"}}}, "then": {"properties": {"sequence": {"const": 1}, "previous_event": {"type": "null"}, "provider_job": {"type": "null"}, "reason_code": {"type": "null"}, "provider_effect_possible": {"const": true}}}},

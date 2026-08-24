@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import inspect
 import json
@@ -10,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zlib
 from types import SimpleNamespace
 
 import pytest
@@ -104,7 +106,15 @@ def test_training_provider_command_is_fixed_no_shell_and_exactly_bound(tmp_path:
         expected_project_commit="1" * 40, expected_engine_commit="2" * 40,
         expected_mode="dual_clone",
     )
-    assert command[:4] == ("python", "-I", "-c", FIXED_STDLIB_TRAINING_LAUNCHER)
+    assert command[:3] == ("python", "-I", "-c")
+    assert "base64.b85decode" in command[3]
+    chunk_count = int(command[4])
+    payload = "".join(command[5:5 + chunk_count])
+    assert zlib.decompress(base64.b85decode(payload)).decode("ascii") == (
+        FIXED_STDLIB_TRAINING_LAUNCHER
+    )
+    assert max(len(value.encode("utf-8")) for value in command) <= 2048
+    assert len(payload) < len(FIXED_STDLIB_TRAINING_LAUNCHER)
     assert command[-3:] == ("--", *remote)
     assert all(value not in {"sh", "bash", "cmd", "powershell"} for value in command)
     assert "HF_TOKEN" not in "".join(command)

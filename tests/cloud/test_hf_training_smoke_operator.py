@@ -147,6 +147,9 @@ def _modules():
     made = []
 
     class HTTPX:
+        class RequestError(RuntimeError):
+            pass
+
         class Timeout:
             def __init__(self, **kwargs):
                 self.kwargs = kwargs
@@ -199,6 +202,30 @@ def test_provider_is_pinned_isolated_and_passes_token_explicitly() -> None:
     assert made[0].closed
 
 
+def test_provider_transport_failure_is_bounded_without_exception_details() -> None:
+    hub, httpx, _ = _modules()
+    provider = create_provider("hf_secret", environment={}, huggingface_hub=hub, httpx=httpx)
+
+    def fail_transport(
+        *, image, command, env, secrets, flavor, timeout, name, labels,
+        volumes, expose, ssh, namespace, token,
+    ):
+        raise httpx.RequestError("provider-body-request-id-secret")
+
+    provider._api.run_job = fail_transport
+    with pytest.raises(Exception) as caught:
+        provider.submit(
+            image="unsloth/unsloth@sha256:" + "a" * 64,
+            command=("python", "-I", "-c", "pass"),
+            name="synaptic-hf-training-smoke-" + "a" * 12,
+            labels={"synaptic-kind": "hf-training-smoke", "synaptic-auth": "a" * 48},
+            volumes=(_Volume("source"), _Volume("artifact")), namespace="synaptic",
+        )
+    rendered = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
+    assert operator._provider_failure_reason(caught.value) == "PROVIDER_TRANSPORT_ERROR"
+    assert "provider-body-request-id-secret" not in rendered
+
+
 @pytest.mark.parametrize("name", ["HF_TOKEN", "HTTPS_PROXY", "SSL_CERT_FILE", "HF_ENDPOINT"])
 def test_provider_rejects_ambient_authority(name: str) -> None:
     hub, httpx, _ = _modules()
@@ -234,6 +261,15 @@ def test_wrong_hub_version_fails_before_client_construction() -> None:
     with pytest.raises(CloudProviderError, match="wrong version"):
         create_provider("hf_secret", environment={}, huggingface_hub=hub, httpx=httpx)
     assert made == []
+
+def test_provider_rejects_missing_transport_exception_contract() -> None:
+    hub, httpx, made = _modules()
+    delattr(httpx, "RequestError")
+    with pytest.raises(CloudProviderError, match="HTTP provider client is incomplete"):
+        create_provider("hf_secret", environment={}, huggingface_hub=hub, httpx=httpx)
+    assert made == []
+
+
 
 
 def test_inspection_reauthenticates_full_immutable_job_spec() -> None:
@@ -457,6 +493,7 @@ def _execute_fakes(
 
         def record_hf_training_submission_terminal(self, experiment, document):
             events.append(("terminal", document["state"]))
+            events.append(("reason", document["reason_code"]))
             if terminal_error:
                 raise terminal_error
 
@@ -515,6 +552,16 @@ def test_execute_provider_uncertainty_records_ambiguous_without_retry(monkeypatc
     assert "secret" not in str(caught.value)
     assert events.count("submit") == 1
     assert ("terminal", "AMBIGUOUS") in events
+
+def test_execute_persists_bounded_transport_reason(monkeypatch, tmp_path) -> None:
+    failure = operator._ProviderSubmissionFailure("PROVIDER_TRANSPORT_ERROR")
+    events, _ = _execute_fakes(monkeypatch, tmp_path, submit_error=failure)
+    with pytest.raises(CloudProviderError, match="submission was rejected"):
+        operator._execute_action(
+            SimpleNamespace(env_file="secret.env"), SimpleNamespace(project_root=tmp_path),
+        )
+    assert ("reason", "PROVIDER_TRANSPORT_ERROR") in events
+
 
 
 def test_execute_terminal_failure_suppresses_provider_and_journal_details(monkeypatch, tmp_path) -> None:

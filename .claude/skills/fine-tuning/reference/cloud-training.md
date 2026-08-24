@@ -372,7 +372,10 @@ preflight, and approval gates all pass, this lane is **not live-eligible**.
 - **Exact pushed source:** the no-shell launcher authenticates and reconstructs
   the exact pushed SourceLock commits before importing or executing repository
   code. The provider command and remote argv are independently hashed and bound
-  into the protected workload.
+  into the protected workload. The fixed standard-library launcher is carried
+  as a deterministic zlib/base85 payload behind a tiny no-shell decoder, and
+  every provider command item is capped at 2048 UTF-8 bytes so the API request
+  does not contain an oversized multiline command argument.
 - **Isolated provider client:** the host uses the pinned Hub client and fixed
   HTTPS endpoint with ambient proxy, endpoint, CA, and credential overrides
   rejected. Credential contents are read only after the required durable claim.
@@ -392,7 +395,7 @@ preflight, and approval gates all pass, this lane is **not live-eligible**.
   an ambiguous outcome and never submit a replacement under the same approval.
   Post-boundary HTTP failures remain terminally ambiguous and nonretryable, but
   their durable reason may retain only a bounded status class (request, auth,
-  payment, rate limit, or service error). Never persist provider exception text,
+  payment, rate limit, service, or transport error). Never persist provider exception text,
   response bodies, request identifiers, headers, or credential-derived data.
 - **Read-only recovery:** `recover` never submits or cancels. It can confirm
   `SUBMITTED` only from exactly one matching provider job whose full identity

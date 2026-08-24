@@ -77,11 +77,30 @@ _PROVIDER_FAILURE_REASONS = {
     422: "PROVIDER_REQUEST_REJECTED",
     429: "PROVIDER_RATE_LIMITED",
 }
+_SAFE_PROVIDER_FAILURE_REASONS = frozenset({
+    *_PROVIDER_FAILURE_REASONS.values(),
+    "PROVIDER_SERVICE_ERROR",
+    "PROVIDER_TRANSPORT_ERROR",
+})
+
+
+class _ProviderSubmissionFailure(Exception):
+    """Carry only a closed nonsecret failure class across the submit boundary."""
+
+    __slots__ = ("reason_code",)
+
+    def __init__(self, reason_code: str) -> None:
+        if reason_code not in _SAFE_PROVIDER_FAILURE_REASONS:
+            reason_code = "PROVIDER_TRANSPORT_ERROR"
+        self.reason_code = reason_code
+        super().__init__("HF provider submission failed")
 
 
 def _provider_failure_reason(error: Exception) -> str:
     """Return one bounded nonsecret class for a post-boundary provider failure."""
 
+    if type(error) is _ProviderSubmissionFailure:
+        return error.reason_code
     try:
         response = getattr(error, "response", None)
         status = getattr(response, "status_code", None)
@@ -612,13 +631,17 @@ def _timestamp(value: object) -> str:
 class HFTrainingSmokeProvider:
     """Pinned HF 1.27 adapter; every authenticated call receives ``token`` explicitly."""
 
-    def __init__(self, *, token: str, hub: ModuleType, api: object, clients: list[object]) -> None:
+    def __init__(
+        self, *, token: str, hub: ModuleType, api: object, clients: list[object],
+        request_error_type: type[Exception],
+    ) -> None:
         if not isinstance(token, str) or not token or len(token) > 4096 or any(c in token for c in "\r\n"):
             raise CloudProviderError("HF provider credential is invalid")
         self._token = token
         self._hub = hub
         self._api = api
         self._clients = clients
+        self._request_error_type = request_error_type
         for method, parameters in (
             (getattr(api, "whoami", None), ("token",)),
             (getattr(api, "list_jobs_hardware", None), ("token",)),
@@ -698,12 +721,15 @@ class HFTrainingSmokeProvider:
             raise CloudProviderError("HF provider job identity is not exact")
         method = self._api.run_job
         _explicit_parameter(method, "token")
-        job = method(
-            image=image, command=list(command), env=dict(FIXED_NONSECRET_ENV), secrets={},
-            flavor=HARDWARE_FLAVOR, timeout=PROVIDER_TIMEOUT_SECONDS, name=name,
-            labels=dict(labels), volumes=list(volumes), expose=[], ssh=False,
-            namespace=namespace, token=self._token,
-        )
+        try:
+            job = method(
+                image=image, command=list(command), env=dict(FIXED_NONSECRET_ENV), secrets={},
+                flavor=HARDWARE_FLAVOR, timeout=PROVIDER_TIMEOUT_SECONDS, name=name,
+                labels=dict(labels), volumes=list(volumes), expose=[], ssh=False,
+                namespace=namespace, token=self._token,
+            )
+        except self._request_error_type:
+            raise _ProviderSubmissionFailure("PROVIDER_TRANSPORT_ERROR") from None
         submitted = self._normalize_job(job, namespace=namespace)
         expectation = ProviderJobExpectation(
             image=image, command=command, name=name,
@@ -854,6 +880,13 @@ def create_provider(
     probe_provider_contract(huggingface_hub)
     clients: list[object] = []
 
+    request_error_type = getattr(httpx, "RequestError", None)
+    if (
+        not isinstance(request_error_type, type)
+        or not issubclass(request_error_type, Exception)
+    ):
+        raise CloudProviderError("Installed HTTP provider client is incomplete")
+
     def factory():
         client = httpx.Client(
             base_url=HF_ENDPOINT,
@@ -866,7 +899,10 @@ def create_provider(
     try:
         huggingface_hub.set_client_factory(factory)
         api = huggingface_hub.HfApi(endpoint=HF_ENDPOINT, token=False)
-        return HFTrainingSmokeProvider(token=token, hub=huggingface_hub, api=api, clients=clients)
+        return HFTrainingSmokeProvider(
+            token=token, hub=huggingface_hub, api=api, clients=clients,
+            request_error_type=request_error_type,
+        )
     except BaseException:
         for client in clients:
             try:

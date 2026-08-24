@@ -563,6 +563,7 @@ def test_submission_and_cancellation_transitions_bind_predecessors_and_effects()
         "PROVIDER_PAYMENT_REJECTED",
         "PROVIDER_RATE_LIMITED",
         "PROVIDER_SERVICE_ERROR",
+        "PROVIDER_TRANSPORT_ERROR",
     ],
 )
 def test_ambiguous_submission_accepts_only_bounded_provider_failure_classes(reason_code):

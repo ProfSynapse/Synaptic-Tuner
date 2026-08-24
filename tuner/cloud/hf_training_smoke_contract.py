@@ -660,6 +660,7 @@ def validate_submission_event(
         "PROVIDER_PAYMENT_REJECTED",
         "PROVIDER_RATE_LIMITED",
         "PROVIDER_SERVICE_ERROR",
+        "PROVIDER_TRANSPORT_ERROR",
         "INTERRUPTED_AFTER_CLAIM",
         "RECOVERY_EVIDENCE_INVALID",
     }

@@ -7,6 +7,7 @@ responsibilities remain in the J0 capsule and ``bootstrap_core``.
 
 from __future__ import annotations
 
+import base64
 import inspect
 import json
 import posixpath
@@ -17,6 +18,7 @@ import os
 import stat
 import argparse
 import sys
+import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
@@ -425,6 +427,19 @@ os.execve(sys.executable,[sys.executable,"-I","-c",shim,logical_engine,*remote_a
 '''
 
 FIXED_STDLIB_TRAINING_LAUNCHER = _INLINE_VERIFIER + _TRAINING_LAUNCHER_SUFFIX
+_TRAINING_LAUNCHER_STUB = (
+    "import base64,sys,zlib;n=int(sys.argv.pop(1));payload=''.join("
+    "sys.argv.pop(1) for _ in range(n));exec(compile(zlib.decompress("
+    "base64.b85decode(payload)),'<synaptic-hf-training-launcher>','exec'))"
+)
+_TRAINING_LAUNCHER_PAYLOAD = base64.b85encode(
+    zlib.compress(FIXED_STDLIB_TRAINING_LAUNCHER.encode("ascii"), level=9)
+).decode("ascii")
+_MAX_PROVIDER_COMMAND_ITEM_BYTES = 2048
+_TRAINING_LAUNCHER_PAYLOAD_CHUNKS = tuple(
+    _TRAINING_LAUNCHER_PAYLOAD[index:index + _MAX_PROVIDER_COMMAND_ITEM_BYTES]
+    for index in range(0, len(_TRAINING_LAUNCHER_PAYLOAD), _MAX_PROVIDER_COMMAND_ITEM_BYTES)
+)
 
 
 def build_training_provider_command(
@@ -447,8 +462,9 @@ def build_training_provider_command(
     for root in (expected_project_root, expected_engine_root):
         if not isinstance(root, str) or not root.startswith("/workspace/source/"):
             raise CloudProviderError("HF protected training physical root is invalid.")
-    return (
-        "python", "-I", "-c", FIXED_STDLIB_TRAINING_LAUNCHER,
+    command = (
+        "python", "-I", "-c", _TRAINING_LAUNCHER_STUB,
+        str(len(_TRAINING_LAUNCHER_PAYLOAD_CHUNKS)), *_TRAINING_LAUNCHER_PAYLOAD_CHUNKS,
         spec.mounted(spec.capsule_path), spec.capsule_manifest_sha256,
         spec.mounted(spec.source_lock_path), spec.source_lock_sha256,
         spec.mounted(spec.checkout_policy_path), spec.checkout_policy_sha256,
@@ -457,6 +473,9 @@ def build_training_provider_command(
         expected_project_commit, expected_engine_commit, expected_mode,
         "/workspace/project", "/workspace/engine", "--", *remote_argv,
     )
+    if any(len(value.encode("utf-8")) > _MAX_PROVIDER_COMMAND_ITEM_BYTES for value in command):
+        raise CloudProviderError("HF protected training provider argv item exceeds its bound.")
+    return command
 
 
 def build_verified_bootstrap_step(
