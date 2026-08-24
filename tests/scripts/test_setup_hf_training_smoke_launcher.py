@@ -60,6 +60,9 @@ def test_direct_requirements_reject_drift_and_injection(tmp_path: Path, lines) -
 def test_checked_in_lock_and_allowlist_are_exact_reviewed_contract() -> None:
     root = Path(setup.__file__).resolve().parents[1]
     lock = root / "requirements-hf-training-smoke.lock"
+    attributes = (root / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    assert "requirements-hf-training-smoke.lock text eol=lf" in attributes
+    assert b"\r" not in lock.read_bytes()
     locked = setup.validate_hashed_lock(lock)
     installed = setup.validate_installed_allowlist(
         root / "requirements-hf-training-smoke-installed.json",
