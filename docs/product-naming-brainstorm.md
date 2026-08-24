@@ -236,3 +236,97 @@ Prime Intellect's shape is worth copying: company **Prime Intellect**, OSS stack
 - https://research.contrary.com/company/goodfire
 - https://www.thebulwark.com/p/how-the-tech-right-learned-to-love-mordor-jrr-tolkien-palantir-thiel
 - https://techcrunch.com/2026/01/28/tiny-startup-arcee-ai-built-a-400b-open-source-llm-from-scratch-to-best-metas-llama/
+
+---
+
+# Round 3 — The blacksmith lexicon
+
+## 14. Why this can work where round 1's metallurgy didn't
+
+Round 1 offered Temper, Kiln, Forge, Anneal — the *common* words. Common craft
+words read as homey and generic, which is why they landed badly.
+
+But the obscure end of the smithing lexicon behaves completely differently. Words
+like *swage*, *stithy*, *billet* have the same property that made **Phronesis**
+appealing: **you have to know something to get it.** That's the actual quality
+being responded to in the Prime Intellect register — not "mythic," but
+"earned." An obscure trade term earns it through craft knowledge instead of
+classical education, and it does so without the Palantir/Anduril coding problem.
+
+Note that Anduril is *literally a forged sword*. Mythic smith names (Wayland,
+Vulcan, Mjolnir, Ilmarinen) are the single most defense-coded corner available.
+Avoid the smith-gods entirely; mine the tools and processes instead.
+
+## 15. The lexicon, mapped to the pipeline
+
+| Smithing term | What it means | What it maps to |
+|---|---|---|
+| **Swage** | a shaped die that imposes a specific repeatable profile on hot metal; a *swage block* holds many profiles at once | fine-tuning, exactly. And a swage block = a platform of many specialist forms |
+| **Wrought** | worked by hand, individually shaped (opposite of *cast*, which is poured into a mold at scale) | the whole positioning: cast = frontier model, wrought = yours |
+| **Billet** | the stacked, forge-welded stock drawn out into a blade; in pattern-welding, the accumulated layers | base model + dataset + adapters, accumulated |
+| **Stithy** | archaic for smithy (Shakespeare, *Hamlet*: "Vulcan's stithy") | the workshop itself |
+| **Heat** | one heating-and-working cycle; smiths count work in heats | an epoch / a training run |
+| **Hardy** | the tool seated in the anvil's hardy hole; also the adjective (robust) | a fixed tool the work is shaped against |
+| **Fuller** | tool that spreads and grooves metal | shaping |
+| **Mandrel** | the form you shape material around | a target spec |
+| **Scarf** | the joint shaped before forge-welding two pieces into one | model merging |
+| **Welding heat** | the temperature at which two pieces become one metal | LoRA merge |
+| **Normalize** | heat and air-cool to relieve stress and refine grain | (real ML homonym, but too generic a word) |
+| **Running the colors** | watching oxide run straw -> bronze -> purple -> blue to judge temper | eval / monitoring |
+| **Pritchel** | the round hole in the anvil, and the punch for it | — |
+| **Tuyere** | the pipe feeding air into the fire | the inference proxy, arguably |
+
+## 16. Picks
+
+1. **Swage** — best conceptual fit in the entire lexicon. A swage imposes a
+   specific, repeatable form on general stock; a swage block holds many forms in
+   one body. That is a fine-tuning platform, described in one syllable. Obscure,
+   ownable, sounds technical rather than cute. Verified: no AI company on it.
+2. **Wrought** — carries the strongest *pitch*, not just the strongest name.
+   Cast iron is poured into a mold at scale, identical every time, and brittle.
+   Wrought iron is worked individually, and it's tough. Cast vs. wrought **is**
+   frontier-model vs. trained-for-you. Ordinary English, no spelling tax, and
+   "well-wrought" carries quality. Verified clean.
+3. **Billet** — short, concrete, physical. The layered stock before it becomes a
+   blade. Reads well next to `Nexus` as a model family. Verified clean.
+4. **Stithy** — the literary bridge: archaic, Shakespearean, and a workshop.
+   Almost certainly available. Highest obscurity, so highest explanation cost.
+5. **Hardy** — warm and reassuring for regulated buyers via the adjective, but
+   reads as a surname (Thomas/Tom Hardy).
+
+## 17. Dead on arrival
+
+| Name | Why |
+|---|---|
+| **Anvil** | four tech companies, incl. anvil.ai (defense/public safety — wrong neighbors for this ICP) and useanvil.com (document AI) |
+| **Flux** | Black Forest Labs' FLUX image models |
+| **Bloom** | BigScience's BLOOM LLM |
+| **Wayland** | the Linux display server protocol |
+| **Forge / Foundry / Crucible / Smith** | saturated; Palantir and Azure own "Foundry" |
+| **Sampo** | Finnish financial group |
+| Smith-gods generally | Vulcan/Mjolnir/Ilmarinen — maximally defense-coded |
+
+*Minor flag:* Swagelok (fluid systems, est. 1947) exists and could complicate a
+"Swage" word mark. Different class, but worth a real search.
+
+## 18. The system underneath
+
+The lexicon's real value may be as **internal vocabulary** regardless of the
+top-level name — it gives the product a coherent voice most competitors lack:
+
+| Surface | Term |
+|---|---|
+| a training run | a **heat** |
+| the workshop / project view | the **stithy** |
+| base model + data + adapters | the **billet** |
+| the target form being trained toward | the **swage** |
+| model merging | **forge weld** / **welding heat** |
+| eval dashboard | **running the colors** |
+| the finished model | **wrought** |
+
+## 19. Sources (round 3)
+
+- https://ca.linkedin.com/company/anvil-ai
+- https://www.useanvil.com/
+- https://www.anvilworks.com/about
+- https://en.wikipedia.org/wiki/Swagelok
