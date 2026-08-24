@@ -102,6 +102,13 @@ python tuner.py hf-source provision `
   --json
 ```
 
+For an exact engine-repository worktree operating in `standalone` mode, omit both
+`--project-root` and `--manifest` from `hf-source` and `hf-training-smoke`
+commands and invoke them from that worktree. Supplying `--project-root` selects host
+project mode, which requires `<project-root>/synaptic.yaml`; use that selector only
+for a real host project. The standalone SourceLock records the committed
+`--source-config` as its logical project configuration.
+
 `hf-source prepare` is provider-, credential-, ML-, and UI-free. It creates or
 recovers a neutral bootstrap experiment, performs exact-pushed Git preflight,
 parses the volume policy from the exact committed config blob, rechecks the
@@ -378,8 +385,10 @@ preflight, and approval gates all pass, this lane is **not live-eligible**.
   4608 bytes, and every provider command item is capped at 512 UTF-8 bytes.
 - **Closed remote failure stages:** the silenced remote entrypoint may expose only
   `REMOTE_CREDENTIAL_REJECTED` (120), `REMOTE_RUNTIME_REJECTED` (121),
-  `REMOTE_ARTIFACT_REJECTED` (122), or `REMOTE_TRAINER_REJECTED` (123).
-  Unexpected failures remain `REMOTE_TRAINING_SMOKE_REJECTED` (125). Never emit
+  `REMOTE_ARTIFACT_REJECTED` (122), `REMOTE_TRAINER_REJECTED` (123), or
+  `REMOTE_INPUT_REJECTED` (124).
+  Failures outside a classified phase remain `REMOTE_TRAINING_SMOKE_REJECTED`
+  (125). Never emit
   exception text, tracebacks, provider response data, or credential-derived details.
 - **Isolated provider client:** the host uses the pinned Hub client and fixed
   HTTPS endpoint with ambient proxy, endpoint, CA, and credential overrides

@@ -182,8 +182,9 @@ def test_remote_entry_rejects_credentials_without_echoing_value(monkeypatch) -> 
 
 
 def test_remote_entry_rejects_noncanonical_argv_before_filesystem_access() -> None:
-    with pytest.raises(RemoteTrainingSmokeError, match="arguments are invalid"):
+    with pytest.raises(RemoteTrainingSmokeError, match="remote phase failed") as caught:
         run_remote(["--recipe=hostile"])
+    assert caught.value.stage == "input"
 
 
 def test_provider_command_and_remote_argv_hashes_are_deterministic(tmp_path: Path) -> None:

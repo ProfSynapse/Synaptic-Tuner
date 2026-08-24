@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import importlib.metadata
 import inspect
@@ -30,6 +31,7 @@ _FAILURE_STAGES = {
     "runtime": ("REMOTE_RUNTIME_REJECTED", 121),
     "artifact": ("REMOTE_ARTIFACT_REJECTED", 122),
     "trainer": ("REMOTE_TRAINER_REJECTED", 123),
+    "input": ("REMOTE_INPUT_REJECTED", 124),
 }
 
 
@@ -39,6 +41,22 @@ class RemoteTrainingSmokeError(RuntimeError):
             raise ValueError("Protected failure stage is invalid")
         super().__init__(message)
         self.stage = stage
+
+
+@contextmanager
+def _failure_stage(stage: str):
+    """Map every in-phase failure to one closed non-secret diagnostic."""
+
+    if stage not in _FAILURE_STAGES:
+        raise ValueError("Protected failure stage is invalid")
+    try:
+        yield
+    except RemoteTrainingSmokeError as exc:
+        if exc.stage is not None:
+            raise
+        raise RemoteTrainingSmokeError("Protected remote phase failed", stage=stage) from exc
+    except BaseException as exc:
+        raise RemoteTrainingSmokeError("Protected remote phase failed", stage=stage) from exc
 
 
 _GPU_RUNTIME_SENTINEL = "GPU_RUNTIME_REQUIRED"
@@ -390,115 +408,125 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def run(argv: list[str]) -> dict[str, object]:
-    try:
-        validate_remote_argv(argv)
-    except TrainingSmokeWorkloadError as exc:
-        raise RemoteTrainingSmokeError("Protected remote arguments are invalid") from exc
-    args = _parser().parse_args(argv)
+    with _failure_stage("input"):
+        try:
+            validate_remote_argv(argv)
+        except TrainingSmokeWorkloadError as exc:
+            raise RemoteTrainingSmokeError("Protected remote arguments are invalid") from exc
+        args = _parser().parse_args(argv)
     _reject_remote_credentials()
-    project = Path(args.project_root)
-    engine = Path(args.engine_root)
-    if project.as_posix() != "/workspace/project" or engine.as_posix() != "/workspace/engine":
-        raise RemoteTrainingSmokeError("Protected logical source roots drifted")
-    recipe = Path(args.recipe)
-    runtime_lock = Path(args.runtime_lock)
-    source_lock = Path(args.source_lock)
-    if args.recipe_sha256 != RECIPE_SHA256 or _sha256_file(recipe, 64 * 1024) != RECIPE_SHA256:
-        raise RemoteTrainingSmokeError("Protected recipe identity mismatch")
-    if _sha256_file(runtime_lock, 128 * 1024) != args.runtime_lock_sha256:
-        raise RemoteTrainingSmokeError("Protected runtime-lock identity mismatch", stage="runtime")
-    if _sha256_file(source_lock, 4 * 1024 * 1024) != args.source_lock_sha256:
-        raise RemoteTrainingSmokeError("Protected source-lock identity mismatch")
-    runtime_evidence = _runtime_evidence(runtime_lock)
-    dataset = project / DATASET
-    _validate_dataset(dataset)
-    workload = build_workload(
-        project, source_lock_sha256=args.source_lock_sha256,
-        artifact_slot=args.artifact_slot, runtime_lock_path=runtime_lock,
-    )
-    if tuple(argv) != workload.argv:
-        raise RemoteTrainingSmokeError("Executed argv does not match the protected workload")
 
-    artifact_root = Path(args.artifact_root)
-    if artifact_root.as_posix() != "/workspace/artifacts" or not artifact_root.is_dir():
-        raise RemoteTrainingSmokeError("Protected artifact mount is unavailable", stage="artifact")
-    if any(artifact_root.iterdir()):
-        raise RemoteTrainingSmokeError("Protected artifact prefix must be empty", stage="artifact")
-    _copy_regular(source_lock, artifact_root / "source-lock.json", maximum=4 * 1024 * 1024)
-    _write_json(
-        artifact_root / "exclusive-sentinel.json",
-        {"schema_version": "synaptic-hf-training-exclusive-sentinel/v1", "artifact_slot": args.artifact_slot},
-    )
+    with _failure_stage("input"):
+        project = Path(args.project_root)
+        engine = Path(args.engine_root)
+        if project.as_posix() != "/workspace/project" or engine.as_posix() != "/workspace/engine":
+            raise RemoteTrainingSmokeError("Protected logical source roots drifted")
+        recipe = Path(args.recipe)
+        runtime_lock = Path(args.runtime_lock)
+        source_lock = Path(args.source_lock)
+        if args.recipe_sha256 != RECIPE_SHA256 or _sha256_file(recipe, 64 * 1024) != RECIPE_SHA256:
+            raise RemoteTrainingSmokeError("Protected recipe identity mismatch")
+        if _sha256_file(source_lock, 4 * 1024 * 1024) != args.source_lock_sha256:
+            raise RemoteTrainingSmokeError("Protected source-lock identity mismatch")
 
-    private_root = Path("/workspace/private-training")
-    run_root = private_root / args.artifact_slot
-    evidence_path = run_root / "step-evidence.json"
-    environment = {
-        key: value for key, value in os.environ.items()
-        if key not in {"HF_TOKEN", "HF_API_KEY", "WANDB_API_KEY", "HUGGING_FACE_HUB_TOKEN"}
-    }
-    environment.update(
-        {
-            "HOME": "/workspace/empty-home", "HF_HOME": "/workspace/cache/huggingface",
-            "HF_TOKEN_PATH": "/workspace/empty-home/no-token",
-            "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1", "WANDB_DISABLED": "true",
-            "PYTHONNOUSERSITE": "1",
+    with _failure_stage("runtime"):
+        if _sha256_file(runtime_lock, 128 * 1024) != args.runtime_lock_sha256:
+            raise RemoteTrainingSmokeError("Protected runtime-lock identity mismatch")
+        runtime_evidence = _runtime_evidence(runtime_lock)
+
+    with _failure_stage("input"):
+        dataset = project / DATASET
+        _validate_dataset(dataset)
+        workload = build_workload(
+            project, source_lock_sha256=args.source_lock_sha256,
+            artifact_slot=args.artifact_slot, runtime_lock_path=runtime_lock,
+        )
+        if tuple(argv) != workload.argv:
+            raise RemoteTrainingSmokeError("Executed argv does not match the protected workload")
+
+    with _failure_stage("artifact"):
+        artifact_root = Path(args.artifact_root)
+        if artifact_root.as_posix() != "/workspace/artifacts" or not artifact_root.is_dir():
+            raise RemoteTrainingSmokeError("Protected artifact mount is unavailable")
+        if any(artifact_root.iterdir()):
+            raise RemoteTrainingSmokeError("Protected artifact prefix must be empty")
+        _copy_regular(source_lock, artifact_root / "source-lock.json", maximum=4 * 1024 * 1024)
+        _write_json(
+            artifact_root / "exclusive-sentinel.json",
+            {"schema_version": "synaptic-hf-training-exclusive-sentinel/v1", "artifact_slot": args.artifact_slot},
+        )
+
+    with _failure_stage("trainer"):
+        private_root = Path("/workspace/private-training")
+        run_root = private_root / args.artifact_slot
+        evidence_path = run_root / "step-evidence.json"
+        environment = {
+            key: value for key, value in os.environ.items()
+            if key not in {"HF_TOKEN", "HF_API_KEY", "WANDB_API_KEY", "HUGGING_FACE_HUB_TOKEN"}
         }
-    )
-    command = [
-        sys.executable, str(project / "Trainers/sft/train_sft.py"),
-        "--protected-smoke-config", str(recipe),
-        "--protected-smoke-evidence", str(evidence_path),
-        "--output-root", str(private_root), "--run-timestamp", args.artifact_slot,
-        "--no-dashboard", "--quiet",
-    ]
-    completed = subprocess.run(
-        command, cwd=project, env=environment, check=False, timeout=1500,
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    if completed.returncode != 0:
-        raise RemoteTrainingSmokeError("Protected trainer exited unsuccessfully", stage="trainer")
+        environment.update(
+            {
+                "HOME": "/workspace/empty-home", "HF_HOME": "/workspace/cache/huggingface",
+                "HF_TOKEN_PATH": "/workspace/empty-home/no-token",
+                "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1", "WANDB_DISABLED": "true",
+                "PYTHONNOUSERSITE": "1",
+            }
+        )
+        command = [
+            sys.executable, str(project / "Trainers/sft/train_sft.py"),
+            "--protected-smoke-config", str(recipe),
+            "--protected-smoke-evidence", str(evidence_path),
+            "--output-root", str(private_root), "--run-timestamp", args.artifact_slot,
+            "--no-dashboard", "--quiet",
+        ]
+        completed = subprocess.run(
+            command, cwd=project, env=environment, check=False, timeout=1500,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        if completed.returncode != 0:
+            raise RemoteTrainingSmokeError("Protected trainer exited unsuccessfully")
 
-    checkpoint = run_root / "checkpoints" / "checkpoint-1"
-    final_model = run_root / "final_model"
-    copies = {
-        checkpoint / "adapter_model.safetensors": artifact_root / "checkpoint-1/adapter_model.safetensors",
-        checkpoint / "adapter_config.json": artifact_root / "checkpoint-1/adapter_config.json",
-        checkpoint / "trainer_state.json": artifact_root / "checkpoint-1/trainer_state.json",
-        checkpoint / "optimizer.pt": artifact_root / "checkpoint-1/optimizer.pt",
-        checkpoint / "scheduler.pt": artifact_root / "checkpoint-1/scheduler.pt",
-        final_model / "adapter_model.safetensors": artifact_root / "final_model/adapter_model.safetensors",
-        final_model / "adapter_config.json": artifact_root / "final_model/adapter_config.json",
-        final_model / "tokenizer_config.json": artifact_root / "final_model/tokenizer_config.json",
-        run_root / "training_lineage.json": artifact_root / "training_lineage.json",
-        evidence_path: artifact_root / "step-evidence.json",
-    }
-    for source, destination in copies.items():
-        _copy_regular(source, destination)
-    checkpoint_identity = safetensors_identity(artifact_root / "checkpoint-1/adapter_model.safetensors")
-    final_identity = safetensors_identity(artifact_root / "final_model/adapter_model.safetensors")
-    if checkpoint_identity != final_identity:
-        raise RemoteTrainingSmokeError("Protected checkpoint and final adapter differ", stage="artifact")
-    evidence = json.loads((artifact_root / "step-evidence.json").read_text(encoding="utf-8"))
-    evidence["serialized_adapter_identity"] = final_identity
-    _write_json(artifact_root / "step-evidence.json", evidence)
-    runtime_lock_document = json.loads(runtime_lock.read_text(encoding="ascii"))
-    result = {
-        "schema_version": "synaptic-hf-training-job-result/v1", "status": "COMPLETED",
-        "publication": False, "model_revision": MODEL_REVISION,
-        "dataset_sha256": DATASET_SHA256, "workload_sha256": workload.workload_sha256,
-        "adapter_identity": final_identity, "artifact_slot": args.artifact_slot,
-        "runtime_lock_id": runtime_lock_document["lock_id"],
-        "runtime": runtime_evidence,
-    }
-    manifest = {
-        "schema_version": "synaptic-hf-training-manifest/v1", "status": "COMPLETED",
-        "publication": False, "workload_sha256": workload.workload_sha256,
-        "artifact_slot": args.artifact_slot,
-    }
-    _write_json(artifact_root / "result.json", result)
-    _write_json(artifact_root / "manifest.json", manifest)
-    _write_json(artifact_root / "inventory.json", build_inventory(artifact_root))
+    with _failure_stage("artifact"):
+        checkpoint = run_root / "checkpoints" / "checkpoint-1"
+        final_model = run_root / "final_model"
+        copies = {
+            checkpoint / "adapter_model.safetensors": artifact_root / "checkpoint-1/adapter_model.safetensors",
+            checkpoint / "adapter_config.json": artifact_root / "checkpoint-1/adapter_config.json",
+            checkpoint / "trainer_state.json": artifact_root / "checkpoint-1/trainer_state.json",
+            checkpoint / "optimizer.pt": artifact_root / "checkpoint-1/optimizer.pt",
+            checkpoint / "scheduler.pt": artifact_root / "checkpoint-1/scheduler.pt",
+            final_model / "adapter_model.safetensors": artifact_root / "final_model/adapter_model.safetensors",
+            final_model / "adapter_config.json": artifact_root / "final_model/adapter_config.json",
+            final_model / "tokenizer_config.json": artifact_root / "final_model/tokenizer_config.json",
+            run_root / "training_lineage.json": artifact_root / "training_lineage.json",
+            evidence_path: artifact_root / "step-evidence.json",
+        }
+        for source, destination in copies.items():
+            _copy_regular(source, destination)
+        checkpoint_identity = safetensors_identity(artifact_root / "checkpoint-1/adapter_model.safetensors")
+        final_identity = safetensors_identity(artifact_root / "final_model/adapter_model.safetensors")
+        if checkpoint_identity != final_identity:
+            raise RemoteTrainingSmokeError("Protected checkpoint and final adapter differ")
+        evidence = json.loads((artifact_root / "step-evidence.json").read_text(encoding="utf-8"))
+        evidence["serialized_adapter_identity"] = final_identity
+        _write_json(artifact_root / "step-evidence.json", evidence)
+        runtime_lock_document = json.loads(runtime_lock.read_text(encoding="ascii"))
+        result = {
+            "schema_version": "synaptic-hf-training-job-result/v1", "status": "COMPLETED",
+            "publication": False, "model_revision": MODEL_REVISION,
+            "dataset_sha256": DATASET_SHA256, "workload_sha256": workload.workload_sha256,
+            "adapter_identity": final_identity, "artifact_slot": args.artifact_slot,
+            "runtime_lock_id": runtime_lock_document["lock_id"],
+            "runtime": runtime_evidence,
+        }
+        manifest = {
+            "schema_version": "synaptic-hf-training-manifest/v1", "status": "COMPLETED",
+            "publication": False, "workload_sha256": workload.workload_sha256,
+            "artifact_slot": args.artifact_slot,
+        }
+        _write_json(artifact_root / "result.json", result)
+        _write_json(artifact_root / "manifest.json", manifest)
+        _write_json(artifact_root / "inventory.json", build_inventory(artifact_root))
     return result
 
 

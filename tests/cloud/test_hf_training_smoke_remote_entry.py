@@ -441,6 +441,7 @@ def test_main_sanitizes_all_failure_details(monkeypatch, capfd) -> None:
         ("runtime", "REMOTE_RUNTIME_REJECTED", 121),
         ("artifact", "REMOTE_ARTIFACT_REJECTED", 122),
         ("trainer", "REMOTE_TRAINER_REJECTED", 123),
+        ("input", "REMOTE_INPUT_REJECTED", 124),
     ],
 )
 def test_main_exposes_only_closed_failure_stage(
@@ -471,12 +472,41 @@ def test_remote_failure_stage_must_be_from_closed_set() -> None:
         remote.RemoteTrainingSmokeError("private", stage="unexpected")
 
 
-def test_main_sanitizes_argparse_boundary(capfd) -> None:
-    assert remote.main(["--unknown", "hf_secret"]) == 125
+@pytest.mark.parametrize(
+    "failure_type", [remote.RemoteTrainingSmokeError, RuntimeError, KeyboardInterrupt]
+)
+def test_failure_stage_classifies_every_unstaged_failure(failure_type) -> None:
+    secret = "private-phase-detail"
+
+    with pytest.raises(remote.RemoteTrainingSmokeError) as captured:
+        with remote._failure_stage("artifact"):
+            raise failure_type(secret)
+
+    assert captured.value.stage == "artifact"
+    assert str(captured.value) == "Protected remote phase failed"
+    assert secret not in str(captured.value)
+
+
+def test_failure_stage_preserves_preclassified_failure() -> None:
+    failure = remote.RemoteTrainingSmokeError("private", stage="trainer")
+
+    with pytest.raises(remote.RemoteTrainingSmokeError) as captured:
+        with remote._failure_stage("artifact"):
+            raise failure
+
+    assert captured.value is failure
+    assert captured.value.stage == "trainer"
+
+
+def test_main_classifies_argparse_boundary_as_input(capfd) -> None:
+    assert remote.main(["--unknown", "hf_secret"]) == 124
     captured = capfd.readouterr()
     assert captured.out == ""
-    assert captured.err == remote._PRIVATE_FAILURE_BYTES.decode("ascii")
-    assert json.loads(captured.err)["reason_code"] == "REMOTE_TRAINING_SMOKE_REJECTED"
+    assert json.loads(captured.err) == {
+        "reason_code": "REMOTE_INPUT_REJECTED",
+        "schema_version": "synaptic-hf-training-private-error/v1",
+    }
+    assert "hf_secret" not in captured.err
 
 
 def test_main_discards_incidental_success_output(monkeypatch, capfd) -> None:
