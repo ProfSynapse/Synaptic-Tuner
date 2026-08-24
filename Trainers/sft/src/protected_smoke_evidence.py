@@ -95,9 +95,25 @@ def compare_trainable_snapshot(before: Mapping[str, Any], model: Any) -> dict[st
 class ProtectedOptimizerBoundaryCallback:
     """Transformers callback-compatible observer for actual optimizer steps."""
 
+    _PASSTHROUGH_EVENTS = frozenset({
+        "on_epoch_begin", "on_epoch_end", "on_evaluate", "on_init_end",
+        "on_pre_optimizer_step", "on_predict", "on_prediction_step", "on_save",
+        "on_step_begin", "on_step_end", "on_substep_end", "on_train_begin",
+        "on_train_end",
+    })
+
     def __init__(self) -> None:
         self.optimizer_boundaries = 0
         self.step_one_losses: list[float] = []
+
+    @staticmethod
+    def _passthrough(args, state, control, **kwargs):  # noqa: ANN001
+        return control
+
+    def __getattr__(self, name: str):
+        if name in self._PASSTHROUGH_EVENTS:
+            return self._passthrough
+        raise AttributeError(name)
 
     def on_optimizer_step(self, args, state, control, **kwargs):  # noqa: ANN001
         self.optimizer_boundaries += 1

@@ -69,7 +69,7 @@ class _Api:
                 "status": {"stage": "RUNNING", "expose_urls": [], "ssh_url": None},
                 "docker_image": values["image"], "space_id": None,
                 "command": values["command"], "arguments": [], "environment": values["env"],
-                "secrets": None, "flavor": values["flavor"],
+                "secrets": getattr(self, "returned_secrets", []), "flavor": values["flavor"],
                 "labels": {**values["labels"], "name": values["name"]},
                 "volumes": values["volumes"], "endpoint": HF_ENDPOINT,
             }
@@ -200,6 +200,20 @@ def test_provider_is_pinned_isolated_and_passes_token_explicitly() -> None:
     assert client.kwargs["trust_env"] is False
     provider.close()
     assert made[0].closed
+
+
+def test_provider_rejects_nonempty_returned_secrets() -> None:
+    hub, httpx, _ = _modules()
+    provider = create_provider("hf_secret", environment={}, huggingface_hub=hub, httpx=httpx)
+    provider._api.returned_secrets = ["HF_TOKEN"]
+    with pytest.raises(CloudProviderError, match="not approval-authenticated"):
+        provider.submit(
+            image="unsloth/unsloth@sha256:" + "a" * 64,
+            command=("python", "-I", "-c", "pass"),
+            name="synaptic-hf-training-smoke-" + "a" * 12,
+            labels={"synaptic-kind": "hf-training-smoke", "synaptic-auth": "a" * 48},
+            volumes=(_Volume("source"), _Volume("artifact")), namespace="synaptic",
+        )
 
 
 def test_provider_transport_failure_is_bounded_without_exception_details() -> None:

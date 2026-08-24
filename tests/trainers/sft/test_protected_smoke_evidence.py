@@ -40,3 +40,18 @@ def test_callback_counts_real_optimizer_boundaries_and_one_finite_loss() -> None
     callback.on_log(None, SimpleNamespace(global_step=2), control, logs={"loss": 1.0})
     assert callback.optimizer_boundaries == 1
     assert callback.step_one_losses == [1.25]
+
+
+def test_callback_supports_the_pinned_transformers_event_surface() -> None:
+    callback = ProtectedOptimizerBoundaryCallback()
+    control = object()
+    events = {
+        "on_epoch_begin", "on_epoch_end", "on_evaluate", "on_init_end",
+        "on_pre_optimizer_step", "on_predict", "on_prediction_step", "on_save",
+        "on_step_begin", "on_step_end", "on_substep_end", "on_train_begin",
+        "on_train_end",
+    }
+    for event in events:
+        assert getattr(callback, event)(None, SimpleNamespace(global_step=0), control) is control
+    with pytest.raises(AttributeError):
+        getattr(callback, "unreviewed_event")

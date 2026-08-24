@@ -856,10 +856,18 @@ class HFTrainingSmokeProvider:
         actual = {key: _field(job, key) for key in exact}
         actual["volumes"] = rendered
         status = _field(job, "status")
+        returned_secrets = _field(job, "secrets")
+        secrets_are_empty = (
+            returned_secrets is None
+            or isinstance(returned_secrets, Mapping) and not returned_secrets
+            or isinstance(returned_secrets, Sequence)
+            and not isinstance(returned_secrets, (str, bytes))
+            and not returned_secrets
+        )
         if (
             actual != exact
             or _field(_field(job, "owner"), "name") != expected.namespace
-            or _field(job, "secrets") not in (None, {})
+            or not secrets_are_empty
             or _field(status, "expose_urls") not in (None, [])
             or _field(status, "ssh_url") is not None
         ):

@@ -3,7 +3,9 @@ Model loading with Unsloth optimizations for RTX 3090.
 """
 
 from unsloth import FastLanguageModel, is_bfloat16_supported
+from pathlib import Path
 from typing import Tuple, Optional
+import re
 import torch
 
 
@@ -66,15 +68,38 @@ def load_model_and_tokenizer(
     print(f"4-bit quantization: {load_in_4bit}")
     print(f"dtype: {dtype if dtype else 'auto-detect'}")
 
+    # Protected loads resolve the approved remote revision to one immutable
+    # local snapshot before handing control to Unsloth. Unsloth may otherwise
+    # rewrite a Hub model name to an optimized mirror whose commit identity is
+    # different from the approved source revision.
+    protected_snapshot: Path | None = None
+    if require_resolved_revision:
+        if not isinstance(model_revision, str) or re.fullmatch(r"[0-9a-f]{40}", model_revision) is None:
+            raise RuntimeError("Protected model loading requires an exact revision")
+        from huggingface_hub import snapshot_download
+
+        protected_snapshot = Path(
+            snapshot_download(
+                repo_id=model_name,
+                revision=model_revision,
+                token=hf_token,
+                cache_dir=cache_dir,
+            )
+        ).resolve()
+        if protected_snapshot.name != model_revision:
+            raise RuntimeError("Resolved model snapshot does not match the protected revision")
+
     # Load model and tokenizer
     load_kwargs = dict(
-        model_name=model_name,
+        model_name=str(protected_snapshot) if protected_snapshot is not None else model_name,
         max_seq_length=max_seq_length,
         dtype=dtype,
         load_in_4bit=load_in_4bit,
         token=hf_token,
     )
-    if model_revision is not None:
+    if protected_snapshot is not None:
+        load_kwargs["use_exact_model_name"] = True
+    elif model_revision is not None:
         load_kwargs["revision"] = model_revision
     if trust_remote_code is not None:
         load_kwargs["trust_remote_code"] = trust_remote_code
@@ -85,14 +110,13 @@ def load_model_and_tokenizer(
     model, tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
 
     if require_resolved_revision:
-        if not model_revision:
-            raise RuntimeError("Protected model loading requires an exact revision")
-        resolved = getattr(getattr(model, "config", None), "_commit_hash", None)
-        tokenizer_revision = getattr(tokenizer, "init_kwargs", {}).get("_commit_hash")
-        if resolved != model_revision:
-            raise RuntimeError("Loaded model revision does not match the protected revision")
-        if tokenizer_revision != model_revision:
-            raise RuntimeError("Loaded tokenizer revision does not match the protected revision")
+        assert protected_snapshot is not None
+        model_source = getattr(getattr(model, "config", None), "_name_or_path", None)
+        tokenizer_source = getattr(tokenizer, "name_or_path", None)
+        if not isinstance(model_source, str) or Path(model_source).resolve() != protected_snapshot:
+            raise RuntimeError("Loaded model snapshot does not match the protected revision")
+        if not isinstance(tokenizer_source, str) or Path(tokenizer_source).resolve() != protected_snapshot:
+            raise RuntimeError("Loaded tokenizer snapshot does not match the protected revision")
 
     # Note: Chat template is now applied via Unsloth's get_chat_template() in train_sft.py
     # This ensures proper handling for all model types including VL models
