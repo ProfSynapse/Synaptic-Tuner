@@ -621,6 +621,14 @@ def validate_submission_event(
         accepted = validate_approval(approval)
         if document["authorization_id"] != accepted["authorization_id"]:
             raise CloudProviderError("Submission event authorization is wrong")
+        anchor = document["artifact_anchor"]
+        expected_anchor = canonical_json_bytes({
+            "schema_version": "synaptic-hf-training-mount-anchor/v1",
+            "artifact_slot": accepted["bindings"]["artifact_slot_id"],
+            "nonce": anchor["nonce"],
+        })
+        if hashlib.sha256(expected_anchor).hexdigest() != anchor["sha256"]:
+            raise CloudProviderError("Submission artifact anchor does not bind approval")
     if previous_event is None:
         if state != "SUBMITTING" or document["sequence"] != 1:
             raise CloudProviderError("First submission event must be SUBMITTING")
@@ -645,6 +653,11 @@ def validate_submission_event(
         if not (ordinary or recovery):
             raise CloudProviderError("Submission terminal transition is invalid")
         _same_identity(document, previous)
+        if (
+            document["artifact_anchor"] != previous["artifact_anchor"]
+            or document["provider_command_sha256"] != previous["provider_command_sha256"]
+        ):
+            raise CloudProviderError("Submission provider specification changed")
         if document["previous_event"]["sha256"] != document_sha256(previous):
             raise CloudProviderError("Submission predecessor digest is invalid")
     effect = bool(document["provider_effect_possible"])

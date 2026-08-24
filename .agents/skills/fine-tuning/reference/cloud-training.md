@@ -401,8 +401,23 @@ preflight, and approval gates all pass, this lane is **not live-eligible**.
   input binds the experiment, run, tracking root, source lock, workload, runtime
   lock, artifact bucket, and artifact base prefix. The full destination is the
   approved base prefix plus that derived slot; the CLI cannot choose it.
-  `execute` requires that exact slot to be empty immediately before the one
-  provider submission call.
+  `execute` first consumes its durable claim, then requires that exact slot to
+  be empty immediately before the first provider mutation. Because HF Jobs does
+  not materialize a writable mount for a brand-new empty subprefix, the trusted
+  local provider client then uploads a CSPRNG-named, one-use mount anchor as the
+  first mutation and re-lists the slot, requiring that anchor to be its only
+  member. The durable submission claim records the nonce, canonical anchor
+  digest, and resulting provider-command digest; the exact inspected provider
+  command carries the same closed fields. Only then may it submit with the exact
+  derived slot mounted writable. The credential-free remote entrypoint must
+  require that exact anchor, retain its verified file identity through
+  consumption, create `exclusive-sentinel.json` atomically with `O_EXCL`, and
+  remove only that one-use file before writing anything else. A concurrent
+  protected execution selects a different anchor path; extra entries or a fixed-
+  sentinel collision fail closed without overwrite or submission. Never upload
+  the fixed sentinel through the overwriting Buckets batch API or mount the
+  broader artifact parent. Any uncertainty after the anchor upload boundary is
+  `AMBIGUOUS` and nonretryable.
 - **One submission, no retry:** `execute` durably consumes authority before the
   provider call. A definite local pre-call failure records `NOT_SUBMITTED`; an
   uncertain post-call outcome records `AMBIGUOUS`. Never rerun `execute` after

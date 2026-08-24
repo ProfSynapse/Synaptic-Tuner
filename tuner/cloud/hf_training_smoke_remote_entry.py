@@ -158,6 +158,20 @@ def _write_json(path: Path, value: object) -> None:
     path.write_bytes(_canonical_json(value))
 
 
+def _write_exclusive_json(path: Path, value: object) -> None:
+    payload = _canonical_json(value)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        offset = 0
+        while offset < len(payload):
+            offset += os.write(descriptor, payload[offset:])
+    finally:
+        os.close(descriptor)
+    if _sha256_file(path, 4096) != hashlib.sha256(payload).hexdigest():
+        raise RemoteTrainingSmokeError("Protected exclusive artifact write changed bytes")
+
+
 def _sha256_file(path: Path, maximum: int = 512 * 1024 * 1024) -> str:
     info = path.lstat()
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
@@ -177,6 +191,21 @@ def _sha256_file(path: Path, maximum: int = 512 * 1024 * 1024) -> str:
     finally:
         os.close(descriptor)
     if remaining <= 0 or not stat.S_ISREG(opened.st_mode):
+        raise RemoteTrainingSmokeError("Protected input exceeds its bound")
+    return digest.hexdigest()
+
+
+def _sha256_descriptor(descriptor: int, maximum: int) -> str:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    digest = hashlib.sha256()
+    remaining = maximum + 1
+    while remaining:
+        chunk = os.read(descriptor, min(65536, remaining))
+        if not chunk:
+            break
+        remaining -= len(chunk)
+        digest.update(chunk)
+    if remaining <= 0 or not stat.S_ISREG(os.fstat(descriptor).st_mode):
         raise RemoteTrainingSmokeError("Protected input exceeds its bound")
     return digest.hexdigest()
 
@@ -221,6 +250,76 @@ def _copy_regular(source: Path, destination: Path, *, maximum: int = 512 * 1024 
         raise RemoteTrainingSmokeError("Protected copy source changed during read")
     if source_digest.hexdigest() != _sha256_file(destination, maximum):
         raise RemoteTrainingSmokeError("Protected artifact copy changed bytes")
+
+
+def _require_reserved_artifact_slot(
+    artifact_root: Path, artifact_slot: str, expected_nonce: str,
+    expected_anchor_sha256: str,
+) -> None:
+    if (
+        not artifact_root.is_dir()
+        or len(expected_nonce) != 64
+        or any(character not in "0123456789abcdef" for character in expected_nonce)
+        or len(expected_anchor_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in expected_anchor_sha256)
+    ):
+        raise RemoteTrainingSmokeError("Protected artifact reservation is invalid")
+    anchor = artifact_root / f".synaptic-mount-anchor-{expected_nonce}.json"
+    entries: list[Path] = []
+    for entry in artifact_root.iterdir():
+        entries.append(entry)
+        if len(entries) == 2:
+            break
+    if len(entries) != 1 or entries[0].name != anchor.name:
+        raise RemoteTrainingSmokeError("Protected artifact reservation is not exact")
+    expected_anchor = _canonical_json({
+        "schema_version": "synaptic-hf-training-mount-anchor/v1",
+        "artifact_slot": artifact_slot,
+        "nonce": expected_nonce,
+    })
+    if (
+        hashlib.sha256(expected_anchor).hexdigest() != expected_anchor_sha256
+        or _sha256_file(anchor, 4096) != expected_anchor_sha256
+    ):
+        raise RemoteTrainingSmokeError("Protected artifact reservation is invalid")
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = os.open(anchor, flags)
+    try:
+        anchor_info = anchor.lstat()
+        opened_info = os.fstat(descriptor)
+        identity = (anchor_info.st_dev, anchor_info.st_ino, anchor_info.st_size)
+        if identity != (opened_info.st_dev, opened_info.st_ino, opened_info.st_size):
+            raise RemoteTrainingSmokeError("Protected artifact reservation changed before consumption")
+        if _sha256_descriptor(descriptor, 4096) != expected_anchor_sha256:
+            raise RemoteTrainingSmokeError("Protected artifact reservation changed before consumption")
+        sentinel = artifact_root / "exclusive-sentinel.json"
+        _write_exclusive_json(sentinel, {
+            "schema_version": "synaptic-hf-training-exclusive-sentinel/v1",
+            "artifact_slot": artifact_slot,
+        })
+        current = anchor.lstat()
+        if identity != (current.st_dev, current.st_ino, current.st_size):
+            raise RemoteTrainingSmokeError("Protected artifact reservation changed before consumption")
+        # The protected runtime is Linux. Close first only on Windows so local
+        # unit tests can exercise the same validation on filesystems that deny
+        # unlinking an open file.
+        if os.name == "nt":
+            os.close(descriptor)
+            descriptor = None
+        anchor.unlink()
+        if descriptor is not None and _sha256_descriptor(descriptor, 4096) != expected_anchor_sha256:
+            raise RemoteTrainingSmokeError("Protected artifact reservation changed during consumption")
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    remaining: list[Path] = []
+    for entry in artifact_root.iterdir():
+        remaining.append(entry)
+        if len(remaining) == 2:
+            break
+    if len(remaining) != 1 or remaining[0].name != "exclusive-sentinel.json":
+        raise RemoteTrainingSmokeError("Protected artifact reservation changed during consumption")
 
 
 def _validate_dataset(path: Path) -> None:
@@ -404,6 +503,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifact-slot", required=True)
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--engine-root", required=True)
+    parser.add_argument("--artifact-anchor-nonce", required=True)
+    parser.add_argument("--artifact-anchor-sha256", required=True)
     return parser
 
 
@@ -440,21 +541,21 @@ def run(argv: list[str]) -> dict[str, object]:
         workload = build_workload(
             project, source_lock_sha256=args.source_lock_sha256,
             artifact_slot=args.artifact_slot, runtime_lock_path=runtime_lock,
+            artifact_anchor_nonce=args.artifact_anchor_nonce,
+            artifact_anchor_sha256=args.artifact_anchor_sha256,
         )
         if tuple(argv) != workload.argv:
             raise RemoteTrainingSmokeError("Executed argv does not match the protected workload")
 
     with _failure_stage("artifact"):
         artifact_root = Path(args.artifact_root)
-        if artifact_root.as_posix() != "/workspace/artifacts" or not artifact_root.is_dir():
+        if artifact_root.as_posix() != "/workspace/artifacts":
             raise RemoteTrainingSmokeError("Protected artifact mount is unavailable")
-        if any(artifact_root.iterdir()):
-            raise RemoteTrainingSmokeError("Protected artifact prefix must be empty")
-        _copy_regular(source_lock, artifact_root / "source-lock.json", maximum=4 * 1024 * 1024)
-        _write_json(
-            artifact_root / "exclusive-sentinel.json",
-            {"schema_version": "synaptic-hf-training-exclusive-sentinel/v1", "artifact_slot": args.artifact_slot},
+        _require_reserved_artifact_slot(
+            artifact_root, args.artifact_slot,
+            args.artifact_anchor_nonce, args.artifact_anchor_sha256,
         )
+        _copy_regular(source_lock, artifact_root / "source-lock.json", maximum=4 * 1024 * 1024)
 
     with _failure_stage("trainer"):
         private_root = Path("/workspace/private-training")

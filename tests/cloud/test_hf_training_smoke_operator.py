@@ -47,6 +47,7 @@ class _Api:
     def __init__(self, *, endpoint, token):
         self.init = (endpoint, token)
         self.submit = None
+        self.bucket_entries = []
 
     def whoami(self, *, token):
         self.token = token
@@ -84,7 +85,14 @@ class _Api:
 
     def list_bucket_tree(self, bucket_id, prefix=None, *, recursive=None, token=None):
         self.bucket_args = (bucket_id, prefix, recursive, token)
-        return []
+        return list(self.bucket_entries)
+
+    def batch_bucket_files(self, bucket_id, *, add=None, copy=None, delete=None, token=None):
+        self.batch_args = (bucket_id, add, copy, delete, token)
+        self.bucket_entries = [
+            SimpleNamespace(type="file", path=destination)
+            for _content, destination in (add or [])
+        ]
 
 
 @pytest.mark.parametrize(
@@ -166,7 +174,7 @@ def _modules():
     return hub, HTTPX, made
 
 
-def test_provider_is_pinned_isolated_and_passes_token_explicitly() -> None:
+def test_provider_is_pinned_isolated_and_passes_token_explicitly(monkeypatch) -> None:
     hub, httpx, made = _modules()
     provider = create_provider("hf_secret", environment={}, huggingface_hub=hub, httpx=httpx)
     assert provider.authenticate_namespace("synaptic") == "synaptic"
@@ -191,6 +199,23 @@ def test_provider_is_pinned_isolated_and_passes_token_explicitly() -> None:
     provider.cancel("job-1", namespace="synaptic")
     assert provider.list_jobs(namespace="synaptic", labels={"synaptic-auth": "a" * 48}) == ()
     assert provider.list_bucket_tree(bucket_id="synaptic/artifacts", prefix="training/slot") == ()
+    monkeypatch.setattr(operator.os, "urandom", lambda size: b"\x12" * size)
+    anchor = operator.build_artifact_mount_anchor("b" * 64)
+    provider.reserve_artifact_slot(
+        bucket_id="synaptic/artifacts", prefix="training/slot", artifact_slot="b" * 64,
+        anchor=anchor,
+    )
+    nonce = "12" * 32
+    expected_anchor = operator.canonical_json_bytes({
+        "schema_version": "synaptic-hf-training-mount-anchor/v1",
+        "artifact_slot": "b" * 64,
+        "nonce": nonce,
+    })
+    assert provider._api.batch_args == (
+        "synaptic/artifacts",
+        [(expected_anchor, f"training/slot/.synaptic-mount-anchor-{nonce}.json")],
+        None, None, "hf_secret",
+    )
     assert provider._api.inspect_args[-1] == "hf_secret"
     assert provider._api.cancelled[-1] == "hf_secret"
     assert provider._api.list_args[-1] == "hf_secret"
@@ -200,6 +225,37 @@ def test_provider_is_pinned_isolated_and_passes_token_explicitly() -> None:
     assert client.kwargs["trust_env"] is False
     provider.close()
     assert made[0].closed
+
+
+def test_random_anchor_collision_fails_without_overwriting_concurrent_path(monkeypatch) -> None:
+    hub, httpx, _ = _modules()
+    provider = create_provider("hf_secret", environment={}, huggingface_hub=hub, httpx=httpx)
+    monkeypatch.setattr(operator.os, "urandom", lambda size: b"\x34" * size)
+    concurrent_path = "training/slot/.synaptic-mount-anchor-" + ("56" * 32) + ".json"
+    original_batch = provider._api.batch_bucket_files
+
+    def racing_batch(bucket_id, *, add=None, copy=None, delete=None, token=None):
+        original_batch(
+            bucket_id, add=add, copy=copy, delete=delete, token=token,
+        )
+        provider._api.bucket_entries.append(
+            SimpleNamespace(type="file", path=concurrent_path)
+        )
+
+    provider._api.batch_bucket_files = racing_batch
+    anchor = operator.build_artifact_mount_anchor("b" * 64)
+    with pytest.raises(CloudProviderError, match="reservation is not exact"):
+        provider.reserve_artifact_slot(
+            bucket_id="synaptic/artifacts",
+            prefix="training/slot",
+            artifact_slot="b" * 64,
+            anchor=anchor,
+        )
+    uploaded_path = provider._api.batch_args[1][0][1]
+    assert uploaded_path != concurrent_path
+    assert {entry.path for entry in provider._api.bucket_entries} == {
+        uploaded_path, concurrent_path,
+    }
 
 
 def test_provider_rejects_nonempty_returned_secrets() -> None:
@@ -471,9 +527,25 @@ def test_normalizes_exact_v127_bucket_files_and_folders() -> None:
         normalize_artifact_inventory(values[1:], prefix=prefix)
 
 
+def _submission_binding(approval: dict) -> dict:
+    nonce = "1" * 64
+    payload = operator.canonical_json_bytes({
+        "schema_version": "synaptic-hf-training-mount-anchor/v1",
+        "artifact_slot": approval["bindings"]["artifact_slot_id"],
+        "nonce": nonce,
+    })
+    return {
+        "artifact_anchor": {
+            "nonce": nonce,
+            "sha256": operator.hashlib.sha256(payload).hexdigest(),
+        },
+        "provider_command_sha256": "c" * 64,
+    }
+
 def _execute_fakes(
     monkeypatch, tmp_path: Path, *, submit_error: Exception | None = None,
     slot_nonempty: bool = False, terminal_error: BaseException | None = None,
+    reserve_error: BaseException | None = None,
 ):
     events = []
     approval = accepted_approval(accepted_preflight())
@@ -521,6 +593,11 @@ def _execute_fakes(
             events.append("slot_check")
             return (object(),) if slot_nonempty else ()
 
+        def reserve_artifact_slot(self, **kwargs):
+            events.append("reserve")
+            if reserve_error:
+                raise reserve_error
+
         def submit(self, **kwargs):
             events.append("submit")
             if submit_error:
@@ -538,7 +615,7 @@ def _execute_fakes(
     import tuner.cloud.hf_training_smoke_workload as workload_module
     monkeypatch.setattr(workload_module, "build_workload", lambda *args, **kwargs: SimpleNamespace(
         workload_sha256="a" * 64, remote_argv_sha256="a" * 64,
-        provider_command_sha256="b" * 64,
+        provider_command_sha256=("c" * 64 if kwargs.get("artifact_anchor_nonce") else "b" * 64),
         image="unsloth/unsloth@" + str(approval["bindings"]["image_child_digest"]),
         provider_command=("python", "-I", "-c", "pass"),
     ))
@@ -555,8 +632,23 @@ def test_execute_claims_once_before_token_and_submits_once(monkeypatch, tmp_path
     result = operator._execute_action(SimpleNamespace(env_file="secret.env"), SimpleNamespace(project_root=tmp_path))
     assert result["status"] == "SUBMITTED"
     assert events.count("claim") == 1 and events.count("submit") == 1
-    assert events.index("claim") < events.index("token") < events.index("slot_check") < events.index("submit")
+    assert events.index("claim") < events.index("token") < events.index("slot_check") < events.index("reserve") < events.index("submit")
     assert ("terminal", "SUBMITTED") in events
+
+
+def test_execute_reservation_uncertainty_records_ambiguous_without_submit(
+    monkeypatch, tmp_path,
+) -> None:
+    events, _ = _execute_fakes(
+        monkeypatch, tmp_path, reserve_error=RuntimeError("private provider detail"),
+    )
+    with pytest.raises(CloudProviderError, match="submission was rejected") as caught:
+        operator._execute_action(
+            SimpleNamespace(env_file="secret.env"), SimpleNamespace(project_root=tmp_path),
+        )
+    assert "private provider detail" not in str(caught.value)
+    assert events.count("reserve") == 1 and "submit" not in events
+    assert ("terminal", "AMBIGUOUS") in events
 
 
 def test_execute_provider_uncertainty_records_ambiguous_without_retry(monkeypatch, tmp_path) -> None:
@@ -724,10 +816,12 @@ def test_recovery_only_accepts_one_fully_authenticated_job(
     events = []
     approval = accepted_approval(accepted_preflight())
     claim = operator.build_submission_event(
+        **_submission_binding(approval),
         approval=approval, approval_uri="tracking://approval.json",
         state="SUBMITTING", sequence=1, occurred_at="2026-08-20T12:00:00Z",
     )
     previous = operator.build_submission_event(
+        **_submission_binding(approval),
         approval=approval, approval_uri="tracking://approval.json", state="AMBIGUOUS", sequence=2,
         occurred_at="2026-08-20T12:00:01Z", previous_event=claim,
         previous_event_uri="tracking://claim.json", reason_code="PROVIDER_OUTCOME_AMBIGUOUS",
@@ -759,7 +853,7 @@ def test_recovery_only_accepts_one_fully_authenticated_job(
     monkeypatch.setattr(workload_module, "build_workload", lambda *args, **kwargs: SimpleNamespace(
         workload_sha256=str(approval["bindings"]["workload_digest"]),
         remote_argv_sha256=str(approval["bindings"]["remote_argv_sha256"]),
-        provider_command_sha256=str(approval["bindings"]["provider_command_sha256"]),
+        provider_command_sha256=("c" * 64 if kwargs.get("artifact_anchor_nonce") else str(approval["bindings"]["provider_command_sha256"])),
         image="unsloth/unsloth@" + str(approval["bindings"]["image_child_digest"]),
         provider_command=("python", "-I", "-c", "pass"),
     ))
@@ -790,10 +884,12 @@ def test_verify_claims_pre_downloads_postlists_and_records_distinct_digests(monk
     events = []
     approval = accepted_approval(accepted_preflight())
     submitted = operator.build_submission_event(
+        **_submission_binding(approval),
         approval=approval, approval_uri="tracking://approval.json", state="SUBMITTING",
         sequence=1, occurred_at="2026-08-20T12:00:00Z",
     )
     submission = operator.build_submission_event(
+        **_submission_binding(approval),
         approval=approval, approval_uri="tracking://approval.json", state="SUBMITTED",
         sequence=2, occurred_at="2026-08-20T12:00:01Z", previous_event=submitted,
         previous_event_uri="tracking://claim.json",
@@ -901,10 +997,12 @@ def test_verify_claims_pre_downloads_postlists_and_records_distinct_digests(monk
 def test_verify_reclaim_binds_durable_inconclusive_predecessor(monkeypatch) -> None:
     approval = accepted_approval(accepted_preflight())
     submitted = operator.build_submission_event(
+        **_submission_binding(approval),
         approval=approval, approval_uri="tracking://approval.json", state="SUBMITTING",
         sequence=1, occurred_at="2026-08-20T12:00:00Z",
     )
     submission = operator.build_submission_event(
+        **_submission_binding(approval),
         approval=approval, approval_uri="tracking://approval.json", state="SUBMITTED",
         sequence=2, occurred_at="2026-08-20T12:00:01Z", previous_event=submitted,
         previous_event_uri="tracking://claim.json",
@@ -991,11 +1089,13 @@ def test_observe_preserves_stages_and_rejects_unknown_before_cancel(
     events = []
     approval = accepted_approval(accepted_preflight())
     claim_event = operator.build_submission_event(
+        **_submission_binding(approval),
         approval=approval, approval_uri="tracking://approval.json", state="SUBMITTING",
         sequence=1, occurred_at="2026-08-20T12:00:00Z",
     )
     durable_job = operator.ProviderJob("owner", "job-1", "2026-08-20T12:00:00Z")
     submission = operator.build_submission_event(
+        **_submission_binding(approval),
         approval=approval, approval_uri="tracking://approval.json", state="SUBMITTED",
         sequence=2, occurred_at="2026-08-20T12:05:00Z", previous_event=claim_event,
         previous_event_uri="tracking://claim.json", provider_job=durable_job,
@@ -1054,7 +1154,7 @@ def test_observe_preserves_stages_and_rejects_unknown_before_cancel(
     monkeypatch.setattr(workload_module, "build_workload", lambda *args, **kwargs: SimpleNamespace(
         workload_sha256=str(approval["bindings"]["workload_digest"]),
         remote_argv_sha256=str(approval["bindings"]["remote_argv_sha256"]),
-        provider_command_sha256=str(approval["bindings"]["provider_command_sha256"]),
+        provider_command_sha256=("c" * 64 if kwargs.get("artifact_anchor_nonce") else str(approval["bindings"]["provider_command_sha256"])),
         image="unsloth/unsloth@" + str(approval["bindings"]["image_child_digest"]),
         provider_command=("python", "-I", "-c", "pass"),
     ))
@@ -1092,10 +1192,12 @@ def test_observe_preserves_stages_and_rejects_unknown_before_cancel(
 def test_observation_document_binds_stopped_predecessor() -> None:
     approval = accepted_approval(accepted_preflight())
     claim_event = operator.build_submission_event(
+        **_submission_binding(approval),
         approval=approval, approval_uri="tracking://approval.json", state="SUBMITTING",
         sequence=1, occurred_at="2026-08-20T12:00:00Z",
     )
     submission = operator.build_submission_event(
+        **_submission_binding(approval),
         approval=approval, approval_uri="tracking://approval.json", state="SUBMITTED",
         sequence=2, occurred_at="2026-08-20T12:00:01Z", previous_event=claim_event,
         previous_event_uri="tracking://claim.json",

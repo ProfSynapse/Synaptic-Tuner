@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
@@ -29,6 +30,7 @@ from tuner.cloud.hf_training_smoke_contract import (
     HARDWARE_QUOTE_UNIT_LABEL,
     PREFLIGHT_SCHEMA,
     SUBMISSION_SCHEMA,
+    canonical_json_bytes,
     derive_hf_training_artifact_prefix,
     derive_hf_training_artifact_slot,
     document_sha256,
@@ -347,6 +349,27 @@ class ProviderJob:
 
 
 @dataclass(frozen=True)
+class ArtifactMountAnchor:
+    nonce: str
+    sha256: str
+
+    def identity(self) -> dict[str, str]:
+        return {"nonce": self.nonce, "sha256": self.sha256}
+
+
+def build_artifact_mount_anchor(artifact_slot: str) -> ArtifactMountAnchor:
+    if re.fullmatch(r"[0-9a-f]{64}", artifact_slot) is None:
+        raise CloudProviderError("HF artifact slot identity is invalid")
+    nonce = os.urandom(32).hex()
+    payload = canonical_json_bytes({
+        "schema_version": "synaptic-hf-training-mount-anchor/v1",
+        "artifact_slot": artifact_slot,
+        "nonce": nonce,
+    })
+    return ArtifactMountAnchor(nonce=nonce, sha256=hashlib.sha256(payload).hexdigest())
+
+
+@dataclass(frozen=True)
 class ProviderJobExpectation:
     image: str
     command: tuple[str, ...]
@@ -490,7 +513,9 @@ def build_approval_document(
 
 def build_submission_event(
     *, approval: Mapping[str, object], approval_uri: str, state: str, sequence: int,
-    occurred_at: str, previous_event: Mapping[str, object] | None = None,
+    occurred_at: str, artifact_anchor: Mapping[str, str],
+    provider_command_sha256: str,
+    previous_event: Mapping[str, object] | None = None,
     previous_event_uri: str | None = None, provider_job: ProviderJob | None = None,
     reason_code: str | None = None,
 ) -> dict[str, object]:
@@ -506,10 +531,51 @@ def build_submission_event(
         "tracking_root_id": approval["tracking_root_id"], "state": state,
         "sequence": sequence, "occurred_at": occurred_at, "previous_event": previous_ref,
         "provider_job": provider_job.identity() if provider_job is not None else None,
+        "artifact_anchor": dict(artifact_anchor),
+        "provider_command_sha256": provider_command_sha256,
         "reason_code": reason_code,
         "provider_effect_possible": state != "NOT_SUBMITTED",
     }
     return seal_training_document(document)
+
+
+def _artifact_anchor_from_event(event: Mapping[str, object]) -> ArtifactMountAnchor:
+    value = event.get("artifact_anchor")
+    if not isinstance(value, Mapping):
+        raise CloudProviderError("HF submission artifact anchor is unavailable")
+    nonce = value.get("nonce")
+    sha256 = value.get("sha256")
+    if (
+        type(nonce) is not str
+        or type(sha256) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", nonce) is None
+        or re.fullmatch(r"[0-9a-f]{64}", sha256) is None
+    ):
+        raise CloudProviderError("HF submission artifact anchor is invalid")
+    return ArtifactMountAnchor(nonce, sha256)
+
+
+def _build_anchor_bound_workload(
+    repository: Path, source_spec: object, preparation: object,
+    bindings: Mapping[str, object], event: Mapping[str, object],
+) -> ProtectedWorkload:
+    from tuner.cloud.hf_training_smoke_workload import build_workload
+
+    anchor = _artifact_anchor_from_event(event)
+    workload = build_workload(
+        repository, source_lock_sha256=str(bindings["source_lock_sha256"]),
+        artifact_slot=str(bindings["artifact_slot_id"]),
+        artifact_anchor_nonce=anchor.nonce, artifact_anchor_sha256=anchor.sha256,
+        source_volume_spec=source_spec,
+        expected_project_root=preparation.physical_project_root,
+        expected_engine_root=preparation.physical_engine_root,
+        expected_project_commit=preparation.source_lock.project_source.commit,
+        expected_engine_commit=preparation.source_lock.engine_source.commit,
+        expected_mode=preparation.source_lock.mode,
+    )
+    if workload.provider_command_sha256 != event.get("provider_command_sha256"):
+        raise CloudProviderError("HF submission provider command does not match its claim")
+    return workload
 
 
 def _utc_now() -> str:
@@ -650,6 +716,7 @@ class HFTrainingSmokeProvider:
             (getattr(api, "cancel_job", None), ("token", "namespace")),
             (getattr(api, "list_jobs", None), ("token", "namespace", "labels", "timeout")),
             (getattr(api, "list_bucket_tree", None), ("token", "bucket_id", "prefix", "recursive")),
+            (getattr(api, "batch_bucket_files", None), ("token", "bucket_id", "add", "copy", "delete")),
         ):
             for parameter in parameters:
                 _explicit_parameter(method, parameter)
@@ -810,6 +877,37 @@ class HFTrainingSmokeProvider:
             raise CloudProviderError("HF Bucket listing exceeds its bound")
         return tuple(bounded)
 
+    def reserve_artifact_slot(
+        self, *, bucket_id: str, prefix: str, artifact_slot: str,
+        anchor: ArtifactMountAnchor,
+    ) -> None:
+        """Materialize one approved slot with a claim-bound ephemeral anchor."""
+
+        if (
+            re.fullmatch(r"[0-9a-f]{64}", artifact_slot) is None
+            or re.fullmatch(r"[0-9a-f]{64}", anchor.nonce) is None
+            or re.fullmatch(r"[0-9a-f]{64}", anchor.sha256) is None
+        ):
+            raise CloudProviderError("HF artifact anchor identity is invalid")
+        anchor_path = f"{prefix}/.synaptic-mount-anchor-{anchor.nonce}.json"
+        payload = canonical_json_bytes({
+            "schema_version": "synaptic-hf-training-mount-anchor/v1",
+            "artifact_slot": artifact_slot,
+            "nonce": anchor.nonce,
+        })
+        if hashlib.sha256(payload).hexdigest() != anchor.sha256:
+            raise CloudProviderError("HF artifact anchor binding is invalid")
+        method = self._api.batch_bucket_files
+        method(
+            bucket_id, add=[(payload, anchor_path)], copy=None, delete=None, token=self._token,
+        )
+        entries = self.list_bucket_tree(bucket_id=bucket_id, prefix=prefix)
+        if len(entries) != 1:
+            raise CloudProviderError("HF artifact slot reservation is not exact")
+        entry = entries[0]
+        if _field(entry, "type") != "file" or _field(entry, "path") != anchor_path:
+            raise CloudProviderError("HF artifact slot reservation is not exact")
+
     @staticmethod
     def _normalize_job(job: object, *, namespace: str) -> ProviderJob:
         job_id = _field(job, "id") or _field(job, "job_id")
@@ -936,6 +1034,7 @@ def probe_provider_contract(huggingface_hub: ModuleType) -> None:
         ("cancel_job", ("token", "namespace")),
         ("list_jobs", ("token", "namespace", "labels", "timeout")),
         ("list_bucket_tree", ("token", "bucket_id", "prefix", "recursive")),
+        ("batch_bucket_files", ("token", "bucket_id", "add", "copy", "delete")),
     ):
         method = getattr(api_type, name, None)
         for parameter in parameters:
@@ -1182,9 +1281,27 @@ def _execute_action(args: object, context: object) -> dict[str, object]:
         HFArtifactVolumeSpec(source=str(bindings["artifact_bucket_id"]), path=str(bindings["artifact_prefix"])),
     ).provider_volume
     secret_file = preflight_hf_secret_file(getattr(args, "env_file", None), context=context)
+    anchor = build_artifact_mount_anchor(str(bindings["artifact_slot_id"]))
+    bound_workload = build_workload(
+        repository, source_lock_sha256=str(bindings["source_lock_sha256"]),
+        artifact_slot=str(bindings["artifact_slot_id"]),
+        artifact_anchor_nonce=anchor.nonce, artifact_anchor_sha256=anchor.sha256,
+        source_volume_spec=source_spec,
+        expected_project_root=preparation.physical_project_root,
+        expected_engine_root=preparation.physical_engine_root,
+        expected_project_commit=preparation.source_lock.project_source.commit,
+        expected_engine_commit=preparation.source_lock.engine_source.commit,
+        expected_mode=preparation.source_lock.mode,
+    )
+    if (
+        bound_workload.workload_sha256 != workload.workload_sha256
+        or bound_workload.image != workload.image
+    ):
+        raise CloudProviderError("Protected HF training anchor binding is invalid")
     claim_document = build_submission_event(
         approval=approval, approval_uri=approval_uri, state="SUBMITTING", sequence=1,
-        occurred_at=now,
+        occurred_at=now, artifact_anchor=anchor.identity(),
+        provider_command_sha256=bound_workload.provider_command_sha256,
     )
     claim = tracking.claim_hf_training_submission(experiment, claim_document)
     if not claim.provider_attempt_authorized:
@@ -1196,6 +1313,8 @@ def _execute_action(args: object, context: object) -> dict[str, object]:
             approval=approval, approval_uri=approval_uri, state=state, sequence=2,
             occurred_at=_utc_now(), previous_event=claim.document,
             previous_event_uri=claim.uri, provider_job=job, reason_code=reason,
+            artifact_anchor=anchor.identity(),
+            provider_command_sha256=bound_workload.provider_command_sha256,
         )
         tracking.record_hf_training_submission_terminal(experiment, document)
 
@@ -1217,8 +1336,13 @@ def _execute_action(args: object, context: object) -> dict[str, object]:
                 "retry_allowed": False, "reason_code": "PREFIX_NOT_EMPTY",
             }
         provider_call_started = True
+        provider.reserve_artifact_slot(
+            bucket_id=str(bindings["artifact_bucket_id"]),
+            prefix=str(bindings["artifact_prefix"]),
+            artifact_slot=str(bindings["artifact_slot_id"]), anchor=anchor,
+        )
         job = provider.submit(
-            image=workload.image, command=workload.provider_command, name=name,
+            image=bound_workload.image, command=bound_workload.provider_command, name=name,
             labels=labels, volumes=(source_volume, artifact_volume), namespace=namespace,
         )
         terminal("SUBMITTED", job=job, reason=None)
@@ -1280,6 +1404,9 @@ def _recover_action(args: object, context: object) -> dict[str, object]:
         or workload.image.split("@", 1)[1] != bindings["image_child_digest"]
     ):
         raise CloudProviderError("Protected HF training workload changed after approval")
+    bound_workload = _build_anchor_bound_workload(
+        repository, source_spec, preparation, bindings, previous,
+    )
     import huggingface_hub
 
     source_volume = preparation.prove_volume(huggingface_hub).provider_volume
@@ -1290,7 +1417,7 @@ def _recover_action(args: object, context: object) -> dict[str, object]:
     name, labels = provider_job_identity(approval)
     namespace = str(approval["launcher_auth"]["expected_namespace"])
     expected = ProviderJobExpectation(
-        workload.image, workload.provider_command, name, tuple(sorted(labels.items())),
+        bound_workload.image, bound_workload.provider_command, name, tuple(sorted(labels.items())),
         (source_volume, artifact_volume), namespace,
     )
     secret_file = preflight_hf_secret_file(getattr(args, "env_file", None), context=context)
@@ -1314,6 +1441,8 @@ def _recover_action(args: object, context: object) -> dict[str, object]:
         approval=approval, approval_uri=approval_uri, state="SUBMITTED", sequence=3,
         occurred_at=_utc_now(), previous_event=previous, previous_event_uri=previous_uri,
         provider_job=job, reason_code="RECOVERY_CONFIRMED_SUBMITTED",
+        artifact_anchor=_artifact_anchor_from_event(previous).identity(),
+        provider_command_sha256=str(previous["provider_command_sha256"]),
     )
     tracking.recover_hf_training_submission(experiment, recovered)
     return {"status": "SUBMITTED", **job.identity(), "recovered": True, "retry_allowed": False}
@@ -1456,6 +1585,9 @@ def _observe_action(args: object, context: object) -> dict[str, object]:
         or workload.image.split("@", 1)[1] != bindings["image_child_digest"]
     ):
         raise CloudProviderError("Protected HF training workload changed after approval")
+    bound_workload = _build_anchor_bound_workload(
+        repository, source_spec, preparation, bindings, submission_claim,
+    )
     import huggingface_hub
 
     source_volume = preparation.prove_volume(huggingface_hub).provider_volume
@@ -1465,7 +1597,7 @@ def _observe_action(args: object, context: object) -> dict[str, object]:
     ).provider_volume
     job_name, labels = provider_job_identity(approval)
     expected = ProviderJobExpectation(
-        workload.image, workload.provider_command, job_name, tuple(sorted(labels.items())),
+        bound_workload.image, bound_workload.provider_command, job_name, tuple(sorted(labels.items())),
         (source_volume, artifact_volume), namespace,
     )
     claim_time = datetime.fromisoformat(str(submission_claim["occurred_at"]).replace("Z", "+00:00"))

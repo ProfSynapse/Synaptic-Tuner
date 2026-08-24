@@ -150,6 +150,7 @@ def test_workload_rejects_provider_reference_drift_without_fallback(tmp_path: Pa
         lambda argv: argv[2:] + argv[:2],
         lambda argv: ["--recipe=x", *argv[1:]],
         lambda argv: [*argv, "--recipe", "x"],
+        lambda argv: argv[:-1],
     ],
 )
 def test_rejects_reordering_equals_and_duplicate_options(mutation) -> None:
@@ -214,3 +215,25 @@ def test_provider_command_and_remote_argv_hashes_are_deterministic(tmp_path: Pat
     assert workload.provider_command_sha256 == hashlib.sha256(
         (json.dumps(list(workload.provider_command), sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
     ).hexdigest()
+
+    anchored = build_workload(
+        REPO, source_lock_sha256="6" * 64, artifact_slot="7" * 64,
+        artifact_anchor_nonce="8" * 64, artifact_anchor_sha256="9" * 64,
+        runtime_lock_path=lock, source_volume_spec=spec,
+        expected_project_root="/workspace/source/project",
+        expected_engine_root="/workspace/source/engine",
+        expected_project_commit="3" * 40, expected_engine_commit="4" * 40,
+        expected_mode="dual_clone",
+    )
+    assert anchored.remote_argv[-4:] == (
+        "--artifact-anchor-nonce", "8" * 64,
+        "--artifact-anchor-sha256", "9" * 64,
+    )
+    assert anchored.provider_command_sha256 != workload.provider_command_sha256
+    assert max(len(value.encode("utf-8")) for value in anchored.provider_command) <= 512
+    assert len(json.dumps(list(anchored.provider_command), separators=(",", ":")).encode("ascii")) <= 4096
+    with pytest.raises(TrainingSmokeWorkloadError, match="incomplete"):
+        build_workload(
+            REPO, source_lock_sha256="6" * 64, artifact_slot="7" * 64,
+            artifact_anchor_nonce="8" * 64, runtime_lock_path=lock,
+        )

@@ -2884,6 +2884,23 @@ def test_hf_training_preflight_reauthenticates_runtime_lock_snapshot(tmp_path: P
         service.record_hf_training_preflight(experiment, preflight)
 
 
+def _training_submission_binding(experiment: Experiment) -> dict[str, object]:
+    nonce = "1" * 64
+    artifact_slot = _training_approval(experiment)["bindings"]["artifact_slot_id"]
+    payload = {
+        "schema_version": "synaptic-hf-training-mount-anchor/v1",
+        "artifact_slot": artifact_slot,
+        "nonce": nonce,
+    }
+    return {
+        "artifact_anchor": {
+            "nonce": nonce,
+            "sha256": hashlib.sha256(canonical_training_bytes(payload)).hexdigest(),
+        },
+        "provider_command_sha256": "3" * 64,
+    }
+
+
 def _training_submission(experiment: Experiment, state: str, previous: tuple[str, str] | None = None) -> dict[str, object]:
     terminal = state != "SUBMITTING"
     return _training_seal(
@@ -2895,6 +2912,7 @@ def _training_submission(experiment: Experiment, state: str, previous: tuple[str
             "state": state, "sequence": 2 if terminal else 1, "occurred_at": "2026-08-20T12:04:00Z" if terminal else "2026-08-20T12:03:00Z",
             "previous_event": ({"uri": previous[0], "sha256": previous[1]} if previous else None),
             "provider_job": ({"namespace": "owner", "job_id": "job-1", "created_at": "2026-08-20T12:03:30Z"} if state == "SUBMITTED" else None),
+            **_training_submission_binding(experiment),
             "reason_code": ("INTERRUPTED_AFTER_CLAIM" if state == "AMBIGUOUS" else "PREFIX_NOT_EMPTY" if state == "NOT_SUBMITTED" else None),
             "provider_effect_possible": state != "NOT_SUBMITTED",
         },
@@ -2992,6 +3010,7 @@ def test_hf_training_ambiguous_submission_has_one_confirmed_submitted_recovery(t
     recovered = _training_seal(
         {
             "schema_version": "synaptic-hf-training-submission-event/v1",
+            **_training_submission_binding(experiment),
             "authorization_id": experiment.hf_training_authorization_id,
             "approval": {"uri": experiment.hf_training_approval_uri, "sha256": experiment.hf_training_approval_sha256},
             "experiment_id": experiment.experiment_id,

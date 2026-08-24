@@ -156,26 +156,33 @@ class ProtectedWorkload:
     image: str
 
 
-_ARGUMENT_ORDER = (
+_BASE_ARGUMENT_ORDER = (
     "--recipe", "--recipe-sha256", "--runtime-lock", "--runtime-lock-sha256",
     "--source-lock", "--source-lock-sha256", "--artifact-root", "--artifact-slot",
     "--project-root", "--engine-root",
 )
+_ANCHOR_ARGUMENT_ORDER = ("--artifact-anchor-nonce", "--artifact-anchor-sha256")
 
 
 def validate_remote_argv(argv: Sequence[str]) -> None:
-    if len(argv) != len(_ARGUMENT_ORDER) * 2:
-        raise TrainingSmokeWorkloadError("Protected remote argv has the wrong length")
-    if tuple(argv[::2]) != _ARGUMENT_ORDER:
+    if len(argv) % 2:
+        raise TrainingSmokeWorkloadError("Protected remote argv has a missing value")
+    option_order = tuple(argv[::2])
+    if option_order not in {
+        _BASE_ARGUMENT_ORDER,
+        _BASE_ARGUMENT_ORDER + _ANCHOR_ARGUMENT_ORDER,
+    }:
         raise TrainingSmokeWorkloadError("Protected remote argv order or option set drifted")
     if any("=" in option or not option.startswith("--") for option in argv[::2]):
         raise TrainingSmokeWorkloadError("Protected remote argv uses a forbidden option form")
-    if len(set(argv[::2])) != len(_ARGUMENT_ORDER):
+    if len(set(argv[::2])) != len(option_order):
         raise TrainingSmokeWorkloadError("Protected remote argv contains duplicate options")
 
 
 def build_workload(
     repository: Path, *, source_lock_sha256: str, artifact_slot: str,
+    artifact_anchor_nonce: str | None = None,
+    artifact_anchor_sha256: str | None = None,
     runtime_lock_path: Path | None = None,
     source_volume_spec: HFVerifiedVolumeSpec | None = None,
     expected_project_root: str | None = None,
@@ -204,6 +211,15 @@ def build_workload(
         "--project-root", PROJECT_ROOT,
         "--engine-root", ENGINE_ROOT,
     )
+    if (artifact_anchor_nonce is None) is not (artifact_anchor_sha256 is None):
+        raise TrainingSmokeWorkloadError("Protected artifact anchor binding is incomplete")
+    if artifact_anchor_nonce is not None:
+        if not _HEX64.fullmatch(artifact_anchor_nonce) or not _HEX64.fullmatch(str(artifact_anchor_sha256)):
+            raise TrainingSmokeWorkloadError("Protected artifact anchor binding is invalid")
+        argv += (
+            "--artifact-anchor-nonce", artifact_anchor_nonce,
+            "--artifact-anchor-sha256", str(artifact_anchor_sha256),
+        )
     validate_remote_argv(argv)
     provider_inputs = (
         source_volume_spec, expected_project_root, expected_engine_root,

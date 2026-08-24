@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import inspect
 import json
@@ -13,6 +14,7 @@ import pytest
 
 from tuner.cloud import hf_training_smoke_remote_entry as remote
 from tuner.cloud.hf_training_smoke_contract import (
+    canonical_json_bytes,
     RUNTIME_PYTHON_IMPLEMENTATION,
     RUNTIME_PYTHON_VERSION,
 )
@@ -126,6 +128,87 @@ def _package_version(monkeypatch):
     monkeypatch.setattr(importlib.metadata, "version", lambda name: "2.9.0")
     monkeypatch.setattr(remote.platform, "python_implementation", lambda: RUNTIME_PYTHON_IMPLEMENTATION)
     monkeypatch.setattr(remote.platform, "python_version", lambda: RUNTIME_PYTHON_VERSION)
+
+
+def _anchor_sha256(slot: str, nonce: str = "12" * 32) -> str:
+    return hashlib.sha256(canonical_json_bytes({
+        "schema_version": "synaptic-hf-training-mount-anchor/v1",
+        "artifact_slot": slot,
+        "nonce": nonce,
+    })).hexdigest()
+
+
+def _mount_anchor(root: Path, slot: str, nonce: str = "12" * 32) -> Path:
+    anchor = root / f".synaptic-mount-anchor-{nonce}.json"
+    anchor.write_bytes(canonical_json_bytes({
+        "schema_version": "synaptic-hf-training-mount-anchor/v1",
+        "artifact_slot": slot,
+        "nonce": nonce,
+    }))
+    return anchor
+
+
+def test_reserved_artifact_slot_atomically_creates_canonical_sentinel(tmp_path: Path) -> None:
+    slot = "a" * 64
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    anchor = _mount_anchor(root, slot)
+
+    remote._require_reserved_artifact_slot(root, slot, "12" * 32, _anchor_sha256(slot))
+
+    sentinel = canonical_json_bytes({
+        "schema_version": "synaptic-hf-training-exclusive-sentinel/v1",
+        "artifact_slot": slot,
+    })
+    assert (root / "exclusive-sentinel.json").read_bytes() == sentinel
+    assert not anchor.exists()
+
+
+@pytest.mark.parametrize("mutation", ["empty", "extra", "wrong_slot", "symlink"])
+def test_reserved_artifact_slot_rejects_nonexact_mount(
+    tmp_path: Path, mutation: str,
+) -> None:
+    slot = "a" * 64
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    anchor = root / (".synaptic-mount-anchor-" + ("12" * 32) + ".json")
+    if mutation != "empty":
+        _mount_anchor(root, ("b" * 64 if mutation == "wrong_slot" else slot))
+    if mutation == "extra":
+        (root / "unexpected").write_bytes(b"x")
+    if mutation == "symlink":
+        anchor.unlink()
+        try:
+            anchor.symlink_to(root / "missing")
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable")
+
+    with pytest.raises(remote.RemoteTrainingSmokeError):
+        remote._require_reserved_artifact_slot(
+            root, slot, "12" * 32, _anchor_sha256(slot),
+        )
+
+
+def test_substituted_valid_anchor_is_rejected(tmp_path: Path) -> None:
+    slot = "a" * 64
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    _mount_anchor(root, slot, nonce="34" * 32)
+
+    with pytest.raises(remote.RemoteTrainingSmokeError, match="not exact"):
+        remote._require_reserved_artifact_slot(
+            root, slot, "12" * 32, _anchor_sha256(slot),
+        )
+
+
+def test_exclusive_sentinel_creation_never_overwrites_collision(tmp_path: Path) -> None:
+    sentinel = tmp_path / "exclusive-sentinel.json"
+    sentinel.write_bytes(b"concurrent-data")
+
+    with pytest.raises(FileExistsError):
+        remote._write_exclusive_json(sentinel, {"artifact_slot": "a" * 64})
+
+    assert sentinel.read_bytes() == b"concurrent-data"
 
 
 def test_runtime_attests_gpu_before_unsloth_import(monkeypatch, tmp_path: Path) -> None:

@@ -225,7 +225,7 @@ def approval(accepted_preflight: dict) -> dict:
 
 
 def event_base(schema: str, accepted_approval: dict) -> dict:
-    return {
+    document = {
         "schema_version": schema,
         "authorization_id": accepted_approval["authorization_id"],
         "approval": {"uri": "tracking://approval.json", "sha256": document_sha256(accepted_approval)},
@@ -234,6 +234,21 @@ def event_base(schema: str, accepted_approval: dict) -> dict:
         "tracking_root_id": SHA,
         "occurred_at": TS,
     }
+    if schema == "synaptic-hf-training-submission-event/v1":
+        nonce = "1" * 64
+        anchor = {
+            "schema_version": "synaptic-hf-training-mount-anchor/v1",
+            "artifact_slot": accepted_approval["bindings"]["artifact_slot_id"],
+            "nonce": nonce,
+        }
+        document["artifact_anchor"] = {
+            "nonce": nonce,
+            "sha256": hashlib.sha256(
+                (json.dumps(anchor, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+            ).hexdigest(),
+        }
+        document["provider_command_sha256"] = "2" * 64
+    return document
 
 
 def test_closed_runtime_preflight_and_approval_contracts_do_not_mutate_inputs():
@@ -530,6 +545,23 @@ def test_submission_and_cancellation_transitions_bind_predecessors_and_effects()
     submitting = _seal({**event_base("synaptic-hf-training-submission-event/v1", auth), "state": "SUBMITTING", "sequence": 1, "previous_event": None, "provider_job": None, "reason_code": None, "provider_effect_possible": True}, "event_id")
     submitted = _seal({**event_base("synaptic-hf-training-submission-event/v1", auth), "state": "SUBMITTED", "sequence": 2, "previous_event": {"uri": "tracking://submitting.json", "sha256": document_sha256(submitting)}, "provider_job": {"namespace": "owner", "job_id": "job-1", "created_at": TS}, "reason_code": None, "provider_effect_possible": True}, "event_id")
     assert validate_submission_event(submitted, approval=auth, previous_event=submitting)["state"] == "SUBMITTED"
+
+    substituted = deepcopy(submitted)
+    substitute_nonce = "3" * 64
+    substitute_payload = {
+        "schema_version": "synaptic-hf-training-mount-anchor/v1",
+        "artifact_slot": auth["bindings"]["artifact_slot_id"],
+        "nonce": substitute_nonce,
+    }
+    substituted["artifact_anchor"] = {
+        "nonce": substitute_nonce,
+        "sha256": hashlib.sha256(
+            (json.dumps(substitute_payload, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+        ).hexdigest(),
+    }
+    substituted = _seal(substituted, "event_id")
+    with pytest.raises(CloudProviderError, match="specification changed"):
+        validate_submission_event(substituted, approval=auth, previous_event=submitting)
 
     claimed = _seal({**event_base("synaptic-hf-training-cancellation-event/v1", auth), "submission": {"uri": "tracking://submitted.json", "sha256": document_sha256(submitted)}, "provider_job": submitted["provider_job"], "state": "CLAIMED", "sequence": 1, "previous_event": None, "reason_code": None, "provider_effect_possible": True}, "event_id")
     ambiguous = _seal({**claimed, "state": "AMBIGUOUS", "sequence": 2, "previous_event": {"uri": "tracking://claimed.json", "sha256": document_sha256(claimed)}, "reason_code": "INTERRUPTED_AFTER_CLAIM"}, "event_id")
