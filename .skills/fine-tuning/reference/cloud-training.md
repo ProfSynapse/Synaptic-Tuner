@@ -376,6 +376,11 @@ preflight, and approval gates all pass, this lane is **not live-eligible**.
   argument are carried together in one deterministic zlib/Base64 envelope using only shell-safe payload characters
   behind a tiny no-shell decoder. Its canonical serialized argv is capped at
   4608 bytes, and every provider command item is capped at 512 UTF-8 bytes.
+- **Closed remote failure stages:** the silenced remote entrypoint may expose only
+  `REMOTE_CREDENTIAL_REJECTED` (120), `REMOTE_RUNTIME_REJECTED` (121),
+  `REMOTE_ARTIFACT_REJECTED` (122), or `REMOTE_TRAINER_REJECTED` (123).
+  Unexpected failures remain `REMOTE_TRAINING_SMOKE_REJECTED` (125). Never emit
+  exception text, tracebacks, provider response data, or credential-derived details.
 - **Isolated provider client:** the host uses the pinned Hub client and fixed
   HTTPS endpoint with ambient proxy, endpoint, CA, and credential overrides
   rejected. Credential contents are read only after the required durable claim.

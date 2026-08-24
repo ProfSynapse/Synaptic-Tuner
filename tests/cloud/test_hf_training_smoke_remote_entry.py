@@ -434,6 +434,43 @@ def test_main_sanitizes_all_failure_details(monkeypatch, capfd) -> None:
     assert "Traceback" not in captured.err
 
 
+@pytest.mark.parametrize(
+    ("stage", "reason_code", "exit_code"),
+    [
+        ("credential", "REMOTE_CREDENTIAL_REJECTED", 120),
+        ("runtime", "REMOTE_RUNTIME_REJECTED", 121),
+        ("artifact", "REMOTE_ARTIFACT_REJECTED", 122),
+        ("trainer", "REMOTE_TRAINER_REJECTED", 123),
+    ],
+)
+def test_main_exposes_only_closed_failure_stage(
+    monkeypatch, capfd, stage: str, reason_code: str, exit_code: int
+) -> None:
+    secret = "hf_private_failure_detail"
+
+    def fail(argv):
+        os.write(1, secret.encode("ascii"))
+        os.write(2, secret.encode("ascii"))
+        raise remote.RemoteTrainingSmokeError(secret, stage=stage)
+
+    monkeypatch.setattr(remote, "run", fail)
+    assert remote.main([]) == exit_code
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "reason_code": reason_code,
+        "schema_version": "synaptic-hf-training-private-error/v1",
+    }
+    assert captured.err.count("\n") == 1
+    assert secret not in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_remote_failure_stage_must_be_from_closed_set() -> None:
+    with pytest.raises(ValueError, match="failure stage is invalid"):
+        remote.RemoteTrainingSmokeError("private", stage="unexpected")
+
+
 def test_main_sanitizes_argparse_boundary(capfd) -> None:
     assert remote.main(["--unknown", "hf_secret"]) == 125
     captured = capfd.readouterr()

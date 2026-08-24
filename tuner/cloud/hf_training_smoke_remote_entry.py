@@ -25,8 +25,20 @@ from tuner.cloud.hf_training_smoke_workload import (
 )
 
 
+_FAILURE_STAGES = {
+    "credential": ("REMOTE_CREDENTIAL_REJECTED", 120),
+    "runtime": ("REMOTE_RUNTIME_REJECTED", 121),
+    "artifact": ("REMOTE_ARTIFACT_REJECTED", 122),
+    "trainer": ("REMOTE_TRAINER_REJECTED", 123),
+}
+
+
 class RemoteTrainingSmokeError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, stage: str | None = None) -> None:
+        if stage is not None and stage not in _FAILURE_STAGES:
+            raise ValueError("Protected failure stage is invalid")
+        super().__init__(message)
+        self.stage = stage
 
 
 _GPU_RUNTIME_SENTINEL = "GPU_RUNTIME_REQUIRED"
@@ -103,11 +115,24 @@ class _SilenceProcessDescriptors:
         return False
 
 
-def _write_private_failure() -> None:
+def _private_failure(stage: str | None) -> tuple[bytes, int]:
+    classified = _FAILURE_STAGES.get(stage or "")
+    if classified is None:
+        return _PRIVATE_FAILURE_BYTES, 125
+    reason_code, exit_code = classified
+    return _canonical_json({
+        "reason_code": reason_code,
+        "schema_version": "synaptic-hf-training-private-error/v1",
+    }), exit_code
+
+
+def _write_private_failure(stage: str | None = None) -> int:
+    payload, exit_code = _private_failure(stage)
     try:
-        os.write(2, _PRIVATE_FAILURE_BYTES)
+        os.write(2, payload)
     except OSError:
         pass
+    return exit_code
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -199,7 +224,7 @@ def _reject_remote_credentials() -> None:
     forbidden = {"HF_TOKEN", "HF_API_KEY", "WANDB_API_KEY", "HUGGING_FACE_HUB_TOKEN"}
     present = sorted(key for key in forbidden if os.environ.get(key))
     if present:
-        raise RemoteTrainingSmokeError("Protected job environment contains forbidden credentials")
+        raise RemoteTrainingSmokeError("Protected job environment contains forbidden credentials", stage="credential")
 
 
 def _runtime_evidence(runtime_lock: Path) -> dict[str, object]:
@@ -208,35 +233,35 @@ def _runtime_evidence(runtime_lock: Path) -> dict[str, object]:
     try:
         lock = json.loads(runtime_lock.read_text(encoding="ascii"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RemoteTrainingSmokeError("Protected runtime lock could not be read") from exc
+        raise RemoteTrainingSmokeError("Protected runtime lock could not be read", stage="runtime") from exc
     runtime = lock.get("runtime") if isinstance(lock, dict) else None
     if not isinstance(runtime, dict):
-        raise RemoteTrainingSmokeError("Protected Python runtime drifted")
+        raise RemoteTrainingSmokeError("Protected Python runtime drifted", stage="runtime")
     python_implementation = platform.python_implementation()
     if (
         type(python_implementation) is not str
         or python_implementation != RUNTIME_PYTHON_IMPLEMENTATION
         or runtime.get("python_implementation") != RUNTIME_PYTHON_IMPLEMENTATION
     ):
-        raise RemoteTrainingSmokeError("Protected Python implementation drifted")
+        raise RemoteTrainingSmokeError("Protected Python implementation drifted", stage="runtime")
     python_version = platform.python_version()
     if (
         type(python_version) is not str
         or python_version != RUNTIME_PYTHON_VERSION
         or runtime.get("python") != RUNTIME_PYTHON_VERSION
     ):
-        raise RemoteTrainingSmokeError("Protected Python runtime drifted")
+        raise RemoteTrainingSmokeError("Protected Python runtime drifted", stage="runtime")
     packages = runtime.get("packages")
     if not isinstance(packages, dict) or not packages:
-        raise RemoteTrainingSmokeError("Protected runtime package lock is empty")
+        raise RemoteTrainingSmokeError("Protected runtime package lock is empty", stage="runtime")
     observed_packages: dict[str, str] = {}
     for name, expected in sorted(packages.items()):
         try:
             observed = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError as exc:
-            raise RemoteTrainingSmokeError("Protected runtime package is missing") from exc
+            raise RemoteTrainingSmokeError("Protected runtime package is missing", stage="runtime") from exc
         if observed != expected:
-            raise RemoteTrainingSmokeError("Protected runtime package version drifted")
+            raise RemoteTrainingSmokeError("Protected runtime package version drifted", stage="runtime")
         observed_packages[name] = observed
 
     try:
@@ -244,7 +269,7 @@ def _runtime_evidence(runtime_lock: Path) -> dict[str, object]:
         from safetensors import safe_open
         from transformers import TrainerCallback
     except Exception as exc:
-        raise RemoteTrainingSmokeError("Protected CPU-safe runtime imports failed") from exc
+        raise RemoteTrainingSmokeError("Protected CPU-safe runtime imports failed", stage="runtime") from exc
 
     resolvers = {
         "TrainerCallback.on_optimizer_step": TrainerCallback.on_optimizer_step,
@@ -253,80 +278,80 @@ def _runtime_evidence(runtime_lock: Path) -> dict[str, object]:
     }
     signatures = runtime.get("signatures")
     if not isinstance(signatures, dict):
-        raise RemoteTrainingSmokeError("Protected runtime signature set drifted")
+        raise RemoteTrainingSmokeError("Protected runtime signature set drifted", stage="runtime")
     expected_signatures = dict(signatures)
     if expected_signatures.pop("unsloth.import", None) != _GPU_RUNTIME_SENTINEL:
-        raise RemoteTrainingSmokeError("Protected runtime lacks the GPU-only Unsloth sentinel")
+        raise RemoteTrainingSmokeError("Protected runtime lacks the GPU-only Unsloth sentinel", stage="runtime")
     if set(expected_signatures) != set(resolvers):
-        raise RemoteTrainingSmokeError("Protected runtime signature set drifted")
+        raise RemoteTrainingSmokeError("Protected runtime signature set drifted", stage="runtime")
     try:
         observed_signatures = {
             name: str(inspect.signature(target)) for name, target in resolvers.items()
         }
     except Exception as exc:
-        raise RemoteTrainingSmokeError("Protected CPU-safe callable inspection failed") from exc
+        raise RemoteTrainingSmokeError("Protected CPU-safe callable inspection failed", stage="runtime") from exc
     if observed_signatures != expected_signatures:
-        raise RemoteTrainingSmokeError("Protected runtime callable signature drifted")
+        raise RemoteTrainingSmokeError("Protected runtime callable signature drifted", stage="runtime")
 
     try:
         cuda_available = torch.cuda.is_available()
     except Exception as exc:
-        raise RemoteTrainingSmokeError("Protected CUDA identity check failed") from exc
+        raise RemoteTrainingSmokeError("Protected CUDA identity check failed", stage="runtime") from exc
     if type(cuda_available) is not bool or cuda_available is not True:
-        raise RemoteTrainingSmokeError("Protected smoke requires an available CUDA GPU")
+        raise RemoteTrainingSmokeError("Protected smoke requires an available CUDA GPU", stage="runtime")
     try:
         device_count = torch.cuda.device_count()
     except Exception as exc:
-        raise RemoteTrainingSmokeError("Protected CUDA identity check failed") from exc
+        raise RemoteTrainingSmokeError("Protected CUDA identity check failed", stage="runtime") from exc
     if type(device_count) is not int or device_count != 1:
-        raise RemoteTrainingSmokeError("Protected smoke requires exactly one visible CUDA GPU")
+        raise RemoteTrainingSmokeError("Protected smoke requires exactly one visible CUDA GPU", stage="runtime")
     try:
         device_name = torch.cuda.get_device_name(0)
     except Exception as exc:
-        raise RemoteTrainingSmokeError("Protected CUDA identity check failed") from exc
+        raise RemoteTrainingSmokeError("Protected CUDA identity check failed", stage="runtime") from exc
     if type(device_name) is not str or device_name != _APPROVED_GPU_NAME:
-        raise RemoteTrainingSmokeError("Protected smoke did not run on the approved A10G hardware")
+        raise RemoteTrainingSmokeError("Protected smoke did not run on the approved A10G hardware", stage="runtime")
     try:
         compute_capability = torch.cuda.get_device_capability(0)
     except Exception as exc:
-        raise RemoteTrainingSmokeError("Protected CUDA identity check failed") from exc
+        raise RemoteTrainingSmokeError("Protected CUDA identity check failed", stage="runtime") from exc
     if (
         type(compute_capability) is not tuple
         or len(compute_capability) != 2
         or any(type(part) is not int for part in compute_capability)
         or compute_capability != _APPROVED_COMPUTE_CAPABILITY
     ):
-        raise RemoteTrainingSmokeError("Protected A10G compute capability is invalid")
+        raise RemoteTrainingSmokeError("Protected A10G compute capability is invalid", stage="runtime")
     try:
         properties = torch.cuda.get_device_properties(0)
         total_memory = properties.total_memory
     except Exception as exc:
-        raise RemoteTrainingSmokeError("Protected CUDA identity check failed") from exc
+        raise RemoteTrainingSmokeError("Protected CUDA identity check failed", stage="runtime") from exc
     if (
         type(total_memory) is not int
         or not _MIN_A10G_MEMORY_BYTES <= total_memory <= _MAX_A10G_MEMORY_BYTES
     ):
-        raise RemoteTrainingSmokeError("Protected A10G memory identity is invalid")
+        raise RemoteTrainingSmokeError("Protected A10G memory identity is invalid", stage="runtime")
 
     try:
         from unsloth import FastLanguageModel
 
         from_pretrained = FastLanguageModel.from_pretrained
     except Exception as exc:
-        raise RemoteTrainingSmokeError("Protected GPU-side Unsloth import failed") from exc
+        raise RemoteTrainingSmokeError("Protected GPU-side Unsloth import failed", stage="runtime") from exc
     if not callable(from_pretrained):
-        raise RemoteTrainingSmokeError("Protected GPU-side model loader is not callable")
+        raise RemoteTrainingSmokeError("Protected GPU-side model loader is not callable", stage="runtime")
     try:
         gpu_signature = str(inspect.signature(from_pretrained))
         signature_bytes = gpu_signature.encode("utf-8")
     except Exception as exc:
-        raise RemoteTrainingSmokeError("Protected GPU-side callable inspection failed") from exc
+        raise RemoteTrainingSmokeError("Protected GPU-side callable inspection failed", stage="runtime") from exc
     if (
         not signature_bytes
         or len(signature_bytes) > _MAX_GPU_SIGNATURE_BYTES
         or any(byte < 0x20 or byte > 0x7E for byte in signature_bytes)
     ):
-        raise RemoteTrainingSmokeError("Protected GPU-side callable signature is unbounded")
+        raise RemoteTrainingSmokeError("Protected GPU-side callable signature is unbounded", stage="runtime")
 
     return {
         "python_implementation": python_implementation,
@@ -381,7 +406,7 @@ def run(argv: list[str]) -> dict[str, object]:
     if args.recipe_sha256 != RECIPE_SHA256 or _sha256_file(recipe, 64 * 1024) != RECIPE_SHA256:
         raise RemoteTrainingSmokeError("Protected recipe identity mismatch")
     if _sha256_file(runtime_lock, 128 * 1024) != args.runtime_lock_sha256:
-        raise RemoteTrainingSmokeError("Protected runtime-lock identity mismatch")
+        raise RemoteTrainingSmokeError("Protected runtime-lock identity mismatch", stage="runtime")
     if _sha256_file(source_lock, 4 * 1024 * 1024) != args.source_lock_sha256:
         raise RemoteTrainingSmokeError("Protected source-lock identity mismatch")
     runtime_evidence = _runtime_evidence(runtime_lock)
@@ -396,9 +421,9 @@ def run(argv: list[str]) -> dict[str, object]:
 
     artifact_root = Path(args.artifact_root)
     if artifact_root.as_posix() != "/workspace/artifacts" or not artifact_root.is_dir():
-        raise RemoteTrainingSmokeError("Protected artifact mount is unavailable")
+        raise RemoteTrainingSmokeError("Protected artifact mount is unavailable", stage="artifact")
     if any(artifact_root.iterdir()):
-        raise RemoteTrainingSmokeError("Protected artifact prefix must be empty")
+        raise RemoteTrainingSmokeError("Protected artifact prefix must be empty", stage="artifact")
     _copy_regular(source_lock, artifact_root / "source-lock.json", maximum=4 * 1024 * 1024)
     _write_json(
         artifact_root / "exclusive-sentinel.json",
@@ -432,7 +457,7 @@ def run(argv: list[str]) -> dict[str, object]:
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     if completed.returncode != 0:
-        raise RemoteTrainingSmokeError("Protected trainer exited unsuccessfully")
+        raise RemoteTrainingSmokeError("Protected trainer exited unsuccessfully", stage="trainer")
 
     checkpoint = run_root / "checkpoints" / "checkpoint-1"
     final_model = run_root / "final_model"
@@ -453,7 +478,7 @@ def run(argv: list[str]) -> dict[str, object]:
     checkpoint_identity = safetensors_identity(artifact_root / "checkpoint-1/adapter_model.safetensors")
     final_identity = safetensors_identity(artifact_root / "final_model/adapter_model.safetensors")
     if checkpoint_identity != final_identity:
-        raise RemoteTrainingSmokeError("Protected checkpoint and final adapter differ")
+        raise RemoteTrainingSmokeError("Protected checkpoint and final adapter differ", stage="artifact")
     evidence = json.loads((artifact_root / "step-evidence.json").read_text(encoding="utf-8"))
     evidence["serialized_adapter_identity"] = final_identity
     _write_json(artifact_root / "step-evidence.json", evidence)
@@ -481,9 +506,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with _SilenceProcessDescriptors():
             run(list(sys.argv[1:] if argv is None else argv))
+    except RemoteTrainingSmokeError as exc:
+        return _write_private_failure(exc.stage)
     except Exception:
-        _write_private_failure()
-        return 125
+        return _write_private_failure()
     return 0
 
 
