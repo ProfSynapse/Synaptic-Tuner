@@ -62,6 +62,8 @@ _FORBIDDEN_ENV = frozenset(
 )
 _PROVIDER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _JOB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+_PROVIDER_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_PROVIDER_LABEL_DIGEST_PREFIX = 48
 _DOWNLOAD_PASS = b'{"schema_version":"synaptic-hf-training-download-child/v1","status":"PASS"}\n'
 _PROVIDER_STAGES = frozenset({"SCHEDULING", "RUNNING", "COMPLETED", "ERROR", "DELETED", "CANCELED"})
 
@@ -314,13 +316,18 @@ def provider_job_identity(approval: Mapping[str, object]) -> tuple[str, dict[str
         raise CloudProviderError("HF training authorization identity is invalid")
     if not isinstance(bindings, Mapping):
         raise CloudProviderError("HF training approval bindings are invalid")
+    for key in ("workload_digest", "artifact_slot_id"):
+        value = bindings.get(key)
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise CloudProviderError("HF training approval binding identity is invalid")
     labels = {
-        "synaptic_kind": "hf_training_smoke",
-        "synaptic_authorization": authorization,
-        "synaptic_workload": bindings.get("workload_digest"),
-        "synaptic_artifact_slot": bindings.get("artifact_slot_id"),
+        "synaptic-kind": "hf-training-smoke",
+        "synaptic-auth": authorization[:_PROVIDER_LABEL_DIGEST_PREFIX],
     }
-    if any(not isinstance(value, str) or not value for value in labels.values()):
+    if any(
+        _PROVIDER_LABEL.fullmatch(key) is None or _PROVIDER_LABEL.fullmatch(value) is None
+        for key, value in labels.items()
+    ):
         raise CloudProviderError("HF training recovery labels are invalid")
     return f"synaptic-hf-training-smoke-{authorization[:12]}", labels
 
@@ -649,22 +656,15 @@ class HFTrainingSmokeProvider:
         self, *, image: str, command: tuple[str, ...], name: str,
         labels: Mapping[str, str], volumes: tuple[object, object], namespace: str,
     ) -> ProviderJob:
-        authorization = labels.get("synaptic_authorization") if isinstance(labels, Mapping) else None
+        authorization = labels.get("synaptic-auth") if isinstance(labels, Mapping) else None
         expected_labels = {
-            "synaptic_kind": "hf_training_smoke",
-            "synaptic_authorization": authorization,
-            "synaptic_workload": labels.get("synaptic_workload") if isinstance(labels, Mapping) else None,
-            "synaptic_artifact_slot": labels.get("synaptic_artifact_slot") if isinstance(labels, Mapping) else None,
+            "synaptic-kind": "hf-training-smoke",
+            "synaptic-auth": authorization,
         }
         if (
             dict(labels) != expected_labels
             or not isinstance(authorization, str)
-            or re.fullmatch(r"[0-9a-f]{64}", authorization) is None
-            or any(
-                not isinstance(expected_labels[key], str)
-                or re.fullmatch(r"[0-9a-f]{64}", expected_labels[key]) is None
-                for key in ("synaptic_workload", "synaptic_artifact_slot")
-            )
+            or re.fullmatch(r"[0-9a-f]{48}", authorization) is None
             or name != f"synaptic-hf-training-smoke-{authorization[:12]}"
         ):
             raise CloudProviderError("HF provider job identity is not exact")
@@ -714,7 +714,10 @@ class HFTrainingSmokeProvider:
             or not isinstance(labels, Mapping)
             or not labels
             or any(
-                not isinstance(key, str) or not key or not isinstance(value, str) or not value
+                not isinstance(key, str)
+                or not isinstance(value, str)
+                or _PROVIDER_LABEL.fullmatch(key) is None
+                or _PROVIDER_LABEL.fullmatch(value) is None
                 for key, value in labels.items()
             )
         ):

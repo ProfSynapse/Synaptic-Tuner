@@ -141,8 +141,7 @@ def test_provider_is_pinned_isolated_and_passes_token_explicitly() -> None:
         command=("python", "-I", "-c", "pass"),
         name="synaptic-hf-training-smoke-" + "a" * 12,
         labels={
-            "synaptic_kind": "hf_training_smoke", "synaptic_authorization": "a" * 64,
-            "synaptic_workload": "b" * 64, "synaptic_artifact_slot": "c" * 64,
+            "synaptic-kind": "hf-training-smoke", "synaptic-auth": "a" * 48,
         }, volumes=(_Volume("source"), _Volume("artifact")), namespace="synaptic",
     )
     assert job.job_id == "job-1"
@@ -152,7 +151,7 @@ def test_provider_is_pinned_isolated_and_passes_token_explicitly() -> None:
     assert provider._api.run_kwargs["token"] == "hf_secret"
     assert provider.inspect("job-1", namespace="synaptic").status == "RUNNING"
     provider.cancel("job-1", namespace="synaptic")
-    assert provider.list_jobs(namespace="synaptic", labels={"synaptic_authorization": "a" * 64}) == ()
+    assert provider.list_jobs(namespace="synaptic", labels={"synaptic-auth": "a" * 48}) == ()
     assert provider.list_bucket_tree(bucket_id="synaptic/artifacts", prefix="training/slot") == ()
     assert provider._api.inspect_args[-1] == "hf_secret"
     assert provider._api.cancelled[-1] == "hf_secret"
@@ -207,8 +206,7 @@ def test_inspection_reauthenticates_full_immutable_job_spec() -> None:
     provider = create_provider("hf_secret", environment={}, huggingface_hub=hub, httpx=httpx)
     volumes = (_Volume("source"), _Volume("artifact"))
     labels = {
-        "synaptic_kind": "hf_training_smoke", "synaptic_authorization": "a" * 64,
-        "synaptic_workload": "b" * 64, "synaptic_artifact_slot": "c" * 64,
+        "synaptic-kind": "hf-training-smoke", "synaptic-auth": "a" * 48,
     }
     provider.submit(
         image="unsloth/unsloth@sha256:" + "d" * 64,
@@ -224,6 +222,34 @@ def test_inspection_reauthenticates_full_immutable_job_spec() -> None:
     provider._api.run_kwargs["env"] = {**FIXED_NONSECRET_ENV, "HOSTILE": "1"}
     with pytest.raises(CloudProviderError, match="not approval-authenticated"):
         provider.inspect("job-1", namespace="synaptic", expected=expected)
+
+
+def test_provider_job_identity_uses_conservative_provider_labels() -> None:
+    approval = accepted_approval(accepted_preflight())
+    name, labels = operator.provider_job_identity(approval)
+
+    assert name == f"synaptic-hf-training-smoke-{approval['authorization_id'][:12]}"
+    assert labels == {
+        "synaptic-kind": "hf-training-smoke",
+        "synaptic-auth": approval["authorization_id"][:48],
+    }
+    assert all(1 <= len(value) <= 63 for item in labels.items() for value in item)
+    assert all("_" not in value for item in labels.items() for value in item)
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        {"synaptic_auth": "a" * 48},
+        {"synaptic-auth": "a" * 64},
+        {"synaptic-auth": "A" * 48},
+    ],
+)
+def test_provider_rejects_nonconservative_recovery_labels(labels) -> None:
+    hub, httpx, _ = _modules()
+    provider = create_provider("hf_secret", environment={}, huggingface_hub=hub, httpx=httpx)
+    with pytest.raises(CloudProviderError, match="recovery query"):
+        provider.list_jobs(namespace="synaptic", labels=labels)
 
 
 def test_inspection_rejects_swapped_job_id() -> None:

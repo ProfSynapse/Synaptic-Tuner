@@ -587,6 +587,11 @@ For `hf_jobs`, a few patterns matter enough to treat as hard rules:
 - Normalize blank auth values to `None`. An empty `HF_TOKEN` or `HF_API_KEY` can produce `Authorization: Bearer ` and fail before the request is sent.
 - Resolve and, if needed, create the bucket once before training starts. During steady-state log sync, use the resolved bucket ID directly.
 - Keep HF job labels conservative. Do not put slash-heavy values like raw `bucket_id` or `artifact_prefix` into labels; HF Jobs can reject submission. Recover those values from command args or other metadata instead.
+- For the protected A10G smoke, keep discovery labels inside the checked-in
+  conservative provider profile: lowercase alphanumeric/hyphen keys and values,
+  no more than 63 characters each. Use the approval authorization prefix for
+  discovery; authenticate the full approval through the inspected image,
+  command, environment, and volumes instead of placing 64-character digests in provider labels.
 - Polling and identity checks should be conservative. Frequent bucket creation attempts or repeated `whoami-v2` calls can hit Hugging Face rate limits.
 - On Windows launch hosts, set `PYTHONIOENCODING=utf-8` for non-JSON cloud
   launches. Rich UI output can contain glyphs such as `★`, and the default
