@@ -545,17 +545,22 @@ def test_main_restores_process_descriptors(monkeypatch, capfd) -> None:
     assert captured.err == "restored-err"
 
 
-def test_main_preserves_keyboard_cancellation(monkeypatch, capfd) -> None:
-    def cancel(argv):
-        os.write(2, b"private-before-cancel")
-        raise KeyboardInterrupt
+@pytest.mark.parametrize("failure_type", [KeyboardInterrupt, SystemExit, BaseException])
+def test_main_sanitizes_base_exception(monkeypatch, capfd, failure_type) -> None:
+    secret = "private-base-exception-detail"
 
-    monkeypatch.setattr(remote, "run", cancel)
-    with pytest.raises(KeyboardInterrupt):
-        remote.main([])
+    def fail(argv):
+        os.write(1, secret.encode("ascii"))
+        os.write(2, secret.encode("ascii"))
+        raise failure_type(secret)
+
+    monkeypatch.setattr(remote, "run", fail)
+    assert remote.main([]) == 125
     captured = capfd.readouterr()
     assert captured.out == ""
-    assert captured.err == ""
+    assert captured.err == remote._PRIVATE_FAILURE_BYTES.decode("ascii")
+    assert secret not in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_main_sanitizes_descriptor_setup_failure(monkeypatch, capfd) -> None:

@@ -508,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
             run(list(sys.argv[1:] if argv is None else argv))
     except RemoteTrainingSmokeError as exc:
         return _write_private_failure(exc.stage)
-    except Exception:
+    except BaseException:
         return _write_private_failure()
     return 0
 
