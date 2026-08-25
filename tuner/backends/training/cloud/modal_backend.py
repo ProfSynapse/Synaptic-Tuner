@@ -23,13 +23,14 @@ Dependencies:
     - tuner.core.interfaces.ITrainingBackend
     - tuner.core.config.TrainingConfig
     - tuner.core.exceptions.ConfigurationError, BackendError
-    - modal (optional, checked at runtime)
+    - modal CLI (checked at runtime; may come from pip, pipx, or conda)
     - Trainers/cloud/train_modal.py (Modal wrapper script)
 """
 
 import json
 import logging
 import os
+import shutil
 import subprocess
 import yaml
 from pathlib import Path
@@ -91,22 +92,21 @@ class ModalBackend(ITrainingBackend):
         """Check that Modal is installed and authenticated.
 
         Validates:
-        1. The `modal` Python package is importable
+        1. The `modal` CLI executable is available
         2. Modal authentication is configured (either ~/.modal.toml from
            `modal setup`, or MODAL_TOKEN_ID + MODAL_TOKEN_SECRET env vars)
 
         Returns:
             Tuple of (is_valid, error_message)
         """
-        # Check if modal package is installed
-        try:
-            import modal  # noqa: F401
-        except ImportError:
+        # Execution is CLI-based. The package need not be importable from the
+        # Python interpreter running Synaptic Tuner (pipx/conda shims are valid).
+        modal_cli = shutil.which("modal")
+        if not modal_cli:
             return False, (
-                "Modal package is not installed. "
+                "Modal CLI is not installed. "
                 "Install with: pip install modal"
             )
-
         # Check authentication: either env vars or ~/.modal.toml
         token_id = os.environ.get("MODAL_TOKEN_ID", "")
         token_secret = os.environ.get("MODAL_TOKEN_SECRET", "")
@@ -120,15 +120,15 @@ class ModalBackend(ITrainingBackend):
         if modal_toml.exists():
             return True, ""
 
-        # Try running `modal token show` as a final check
+        # Modal 1.x exposes active authentication through the current profile.
         try:
             result = subprocess.run(
-                ["modal", "token", "show"],
+                [modal_cli, "profile", "current"],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            if result.returncode == 0:
+            if result.returncode == 0 and result.stdout.strip():
                 return True, ""
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass

@@ -101,9 +101,11 @@ class TestModalBackendProperties:
 class TestModalValidateEnvironment:
     def test_fails_when_modal_not_installed(self, repo_root, clean_env):
         backend = ModalBackend(repo_root)
-        with patch.dict("sys.modules", {"modal": None}):
-            with patch("builtins.__import__", side_effect=ImportError("No module named 'modal'")):
-                is_valid, error = backend.validate_environment()
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.shutil.which",
+            return_value=None,
+        ):
+            is_valid, error = backend.validate_environment()
         assert not is_valid
         assert "not installed" in error.lower()
 
@@ -111,39 +113,69 @@ class TestModalValidateEnvironment:
         clean_env.setenv("MODAL_TOKEN_ID", "test-token-id")
         clean_env.setenv("MODAL_TOKEN_SECRET", "test-token-secret")
         backend = ModalBackend(repo_root)
-        with patch("tuner.backends.training.cloud.modal_backend.importlib", create=True):
-            # Mock the import modal inside validate_environment
-            mock_modal = MagicMock()
-            with patch.dict("sys.modules", {"modal": mock_modal}):
-                is_valid, error = backend.validate_environment()
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.shutil.which",
+            return_value="C:/tools/modal.exe",
+        ):
+            is_valid, error = backend.validate_environment()
         assert is_valid
         assert error == ""
 
     def test_succeeds_with_toml_file(self, repo_root, clean_env, tmp_path):
         backend = ModalBackend(repo_root)
-        mock_modal = MagicMock()
         toml_path = tmp_path / ".modal.toml"
         toml_path.touch()
-        with patch.dict("sys.modules", {"modal": mock_modal}):
-            with patch("tuner.backends.training.cloud.modal_backend.Path.home",
-                        return_value=tmp_path):
-                is_valid, error = backend.validate_environment()
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.shutil.which",
+            return_value="C:/tools/modal.exe",
+        ), patch(
+            "tuner.backends.training.cloud.modal_backend.Path.home",
+            return_value=tmp_path,
+        ):
+            is_valid, error = backend.validate_environment()
         assert is_valid
+
+    def test_succeeds_with_active_cli_profile(
+        self, repo_root, clean_env, tmp_path
+    ):
+        backend = ModalBackend(repo_root)
+        result = MagicMock(returncode=0, stdout="synaptic-labs\n")
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.shutil.which",
+            return_value="C:/tools/modal.exe",
+        ), patch(
+            "tuner.backends.training.cloud.modal_backend.Path.home",
+            return_value=tmp_path,
+        ), patch(
+            "tuner.backends.training.cloud.modal_backend.subprocess.run",
+            return_value=result,
+        ) as run:
+            is_valid, error = backend.validate_environment()
+        assert is_valid
+        assert error == ""
+        assert run.call_args.args[0] == [
+            "C:/tools/modal.exe",
+            "profile",
+            "current",
+        ]
 
     def test_fails_when_no_auth_configured(self, repo_root, clean_env, tmp_path):
         backend = ModalBackend(repo_root)
-        mock_modal = MagicMock()
-        # No env vars, no toml, and modal CLI fails
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        with patch.dict("sys.modules", {"modal": mock_modal}):
-            with patch("tuner.backends.training.cloud.modal_backend.Path.home",
-                        return_value=tmp_path):
-                with patch("tuner.backends.training.cloud.modal_backend.subprocess.run",
-                            return_value=mock_result):
-                    is_valid, error = backend.validate_environment()
+        mock_result = MagicMock(returncode=1, stdout="")
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.shutil.which",
+            return_value="C:/tools/modal.exe",
+        ), patch(
+            "tuner.backends.training.cloud.modal_backend.Path.home",
+            return_value=tmp_path,
+        ), patch(
+            "tuner.backends.training.cloud.modal_backend.subprocess.run",
+            return_value=mock_result,
+        ):
+            is_valid, error = backend.validate_environment()
         assert not is_valid
         assert "not authenticated" in error.lower()
+
 
 
 class TestModalLoadConfig:
