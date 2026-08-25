@@ -94,6 +94,7 @@ training_image = (
         # Core ML stack — pinned to exact versions for reproducibility
         "torch==2.7.0",
         "unsloth[cu128-torch270]==2025.7.8",
+        "unsloth_zoo==2025.8.4",
         "trl==0.19.1",
         "transformers==4.54.0",
         "datasets==3.6.0",
