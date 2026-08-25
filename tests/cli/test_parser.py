@@ -16,6 +16,21 @@ from tuner.cli.router import route_command
 from tuner.project import ProjectContext
 
 
+def test_cloud_run_routes_without_importing_unrelated_transformers(monkeypatch):
+    from argparse import Namespace
+    from unittest.mock import patch
+
+    args = Namespace(command="cloud-run", json=False)
+    context = ProjectContext.standalone(engine_root=Path(__file__).parents[2])
+    monkeypatch.setitem(sys.modules, "transformers", None)
+
+    with patch(
+        "tuner.handlers.cloud_run_handler.CloudRunHandler.handle",
+        return_value=17,
+    ):
+        assert route_command(args, context=context) == 17
+
+
 def test_capabilities_parser_supports_list_describe_and_json_placement():
     parser = create_parser()
 

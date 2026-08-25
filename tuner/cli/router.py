@@ -129,6 +129,18 @@ def route_command(args: Namespace, context: ProjectContext | None = None) -> int
             return 1
         return _bind_context(LocalRunHandler(args=args), context).handle()
 
+    # Provider-neutral cloud training must not import unrelated local trainer,
+    # evaluation, or HF pipeline stacks before the selected provider is known.
+    if command == "cloud-run":
+        from tuner.handlers.cloud_run_handler import CloudRunHandler
+
+        return _bind_context(CloudRunHandler(args=args), context).handle()
+
+    if command == "cloud":
+        from tuner.handlers.cloud_train_handler import CloudTrainHandler
+
+        return _bind_context(CloudTrainHandler(args=args), context).handle()
+
     # Keep project introspection independent from optional runtime handlers.
     # These commands must remain cheap and side-effect free.
     if command == "project":
