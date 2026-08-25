@@ -104,6 +104,7 @@ training_image = (
         # ==0.30.2 pin made the image unresolvable (ResolutionImpossible at build).
         "huggingface_hub>=0.34.0,<1.0",
         # Project utilities — lighter deps, less sensitive to version drift
+        "jsonschema>=4.18,<5",
         "pyyaml",
         "wandb",
         "hf_transfer",
