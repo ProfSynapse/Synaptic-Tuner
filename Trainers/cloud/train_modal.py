@@ -31,6 +31,7 @@ Dependencies:
     - HF_TOKEN environment variable (for model downloads and Hub uploads)
 """
 
+import json
 import os
 import re
 import subprocess
@@ -66,6 +67,40 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 HOURS = 60 * 60  # seconds
+CONFIG_OVERRIDE_KEYS = {
+    "beta",
+    "chat_template_kwargs",
+    "evolutionary_cache_baseline",
+    "evolutionary_candidates",
+    "evolutionary_enabled",
+    "evolutionary_eval_batch_size",
+    "evolutionary_eval_frequency",
+    "evolutionary_log_candidates",
+    "evolutionary_log_selected",
+    "evolutionary_max_grad_norm",
+    "evolutionary_min_improvement",
+    "evolutionary_min_relative_improvement",
+    "evolutionary_noise_floor_epsilon",
+    "evolutionary_noise_scale",
+    "evolutionary_scale_factors",
+    "evolutionary_selection_method",
+    "evolutionary_strategy",
+    "evolutionary_validation_config",
+    "evolutionary_warmup_steps",
+    "gradient_accumulation_steps",
+    "init_lora_weights",
+    "load_in_4bit",
+    "lora_alpha",
+    "lora_dropout",
+    "lora_r",
+    "lora_target_modules",
+    "save_steps",
+    "save_total_limit",
+    "seed",
+    "use_dora",
+    "use_rslora",
+}
+
 
 # Persistent volume for caching HuggingFace model weights between runs.
 # This avoids re-downloading multi-GB models on every training run, saving
@@ -342,6 +377,93 @@ def run_training(
     if config_overrides.get("max_steps"):
         cmd.extend(["--max-steps", str(config_overrides["max_steps"])])
 
+    scalar_flags = {
+        "gradient_accumulation_steps": "--gradient-accumulation",
+        "seed": "--seed",
+        "lora_r": "--lora-r",
+        "lora_alpha": "--lora-alpha",
+        "lora_dropout": "--lora-dropout",
+        "init_lora_weights": "--init-lora-weights",
+    }
+    if trainer_type == "kto":
+        scalar_flags["beta"] = "--beta"
+    if trainer_type == "sft":
+        scalar_flags.update(
+            {
+                "save_steps": "--save-steps",
+                "save_total_limit": "--save-total-limit",
+                "evolutionary_candidates": "--evolutionary-candidates",
+                "evolutionary_eval_batch_size": "--evolutionary-eval-batch-size",
+                "evolutionary_validation_config": "--evolutionary-validation-config",
+                "evolutionary_strategy": "--evolutionary-strategy",
+                "evolutionary_noise_scale": "--evolutionary-noise-scale",
+                "evolutionary_max_grad_norm": "--evolutionary-max-grad-norm",
+                "evolutionary_selection_method": "--evolutionary-selection-method",
+                "evolutionary_min_improvement": "--evolutionary-min-improvement",
+                "evolutionary_min_relative_improvement": "--evolutionary-min-relative-improvement",
+                "evolutionary_noise_floor_epsilon": "--evolutionary-noise-floor-epsilon",
+                "evolutionary_eval_frequency": "--evolutionary-eval-frequency",
+                "evolutionary_warmup_steps": "--evolutionary-warmup-steps",
+            }
+        )
+    for key, flag in scalar_flags.items():
+        value = config_overrides.get(key)
+        if value is not None:
+            cmd.extend([flag, str(value)])
+
+    target_modules = config_overrides.get("lora_target_modules")
+    if target_modules:
+        if isinstance(target_modules, list):
+            target_modules = ",".join(str(item) for item in target_modules)
+        cmd.extend(["--lora-target-modules", str(target_modules)])
+    if config_overrides.get("use_dora"):
+        cmd.append("--use-dora")
+    if config_overrides.get("use_rslora"):
+        cmd.append("--use-rslora")
+
+    if trainer_type == "sft":
+        chat_kwargs = config_overrides.get("chat_template_kwargs")
+        if chat_kwargs is not None:
+            cmd.extend(
+                [
+                    "--chat-template-kwargs",
+                    json.dumps(chat_kwargs, separators=(",", ":"), sort_keys=True),
+                ]
+            )
+        load_in_4bit = config_overrides.get("load_in_4bit")
+        if load_in_4bit is not None:
+            cmd.append("--load-in-4bit" if load_in_4bit else "--no-load-in-4bit")
+        if config_overrides.get("evolutionary_enabled"):
+            cmd.append("--evolutionary-enabled")
+        scale_factors = config_overrides.get("evolutionary_scale_factors")
+        if scale_factors:
+            cmd.extend(
+                [
+                    "--evolutionary-scale-factors",
+                    ",".join(str(value) for value in scale_factors),
+                ]
+            )
+        for key, enabled_flag, disabled_flag in (
+            (
+                "evolutionary_cache_baseline",
+                "--evolutionary-cache-baseline",
+                "--evolutionary-no-cache-baseline",
+            ),
+            (
+                "evolutionary_log_candidates",
+                "--evolutionary-log-candidates",
+                "--evolutionary-no-log-candidates",
+            ),
+            (
+                "evolutionary_log_selected",
+                "--evolutionary-log-selected",
+                "--evolutionary-no-log-selected",
+            ),
+        ):
+            value = config_overrides.get(key)
+            if value is not None:
+                cmd.append(enabled_flag if value else disabled_flag)
+
     print(f"[Modal] Running: {' '.join(cmd)}")
     print(f"[Modal] Working directory: {trainer_dir}")
 
@@ -436,7 +558,9 @@ def main(
     learning_rate: float = 0.0,
     num_epochs: int = 0,
     batch_size: int = 0,
+    max_seq_length: int = 0,
     max_steps: int = 0,
+    config_overrides_json: str = "",
     timeout_hours: int = 6,
 ):
     """Local entrypoint for Modal cloud training.
@@ -495,12 +619,27 @@ def main(
 
     # Build config overrides dict (only include non-default values)
     config_overrides = {}
+    if config_overrides_json:
+        try:
+            parsed_overrides = json.loads(config_overrides_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("config_overrides_json must be valid JSON") from exc
+        if not isinstance(parsed_overrides, dict):
+            raise ValueError("config_overrides_json must contain a JSON object")
+        unknown = sorted(set(parsed_overrides) - CONFIG_OVERRIDE_KEYS)
+        if unknown:
+            raise ValueError(
+                "Unsupported Modal config override(s): " + ", ".join(unknown)
+            )
+        config_overrides.update(parsed_overrides)
     if learning_rate > 0:
         config_overrides["learning_rate"] = learning_rate
     if num_epochs > 0:
         config_overrides["num_epochs"] = num_epochs
     if batch_size > 0:
         config_overrides["batch_size"] = batch_size
+    if max_seq_length > 0:
+        config_overrides["max_seq_length"] = max_seq_length
     if max_steps > 0:
         config_overrides["max_steps"] = max_steps
 

@@ -29,10 +29,14 @@ Recipes consumed by `tuner.handlers.local_run_handler`. Top-level keys:
 
 ### `target: cloud`
 
-Recipes consumed by `tuner.handlers.cloud_run_handler`. Top-level keys:
-`name`, `description`, `target`, `method`, `provider` (e.g. `hf_jobs`),
-`job`, `repo`, `setup`, `run` (with `run.steps` shell commands),
-`artifacts`.
+Recipes consumed by `tuner.handlers.cloud_run_handler` through two submodule-owned APIs:
+
+- Declarative training recipes provide `provider`, `model`, `dataset`, `training`,
+  optional `lora`, `job`, and `artifacts`. They compile to
+  `synaptic_tuner.api.v1.CloudTrainingRequest` and dispatch through
+  `CloudTrainingAPI`; provider details stay behind the engine boundary.
+- Custom HF jobs retain the lower-level `job`, `repo`, `setup`, `run.steps`,
+  and `artifacts` shape. They use the protected HF custom-job compiler.
 
 ### `target: both`
 
@@ -81,6 +85,7 @@ config = load_recipe(path, runner="local")
 # CLI
 python tuner.py local-run --job-config Trainers/recipes/qwen35_2b_sft_smoke.yaml --yes
 python tuner.py cloud-run --job-config Trainers/recipes/battle_of_models_qwen35_2b_sft.yaml --yes
+python tuner.py cloud-run --job-config Trainers/recipes/modal_smollm2_1p7b_sft_smoke.yaml --yes
 
 # Interactive TUI: select 'train' or 'cloud' from the main menu and
 # pick a recipe from the list.

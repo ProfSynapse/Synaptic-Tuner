@@ -1,0 +1,29 @@
+name: modal-smollm2-1p7b-sft-smoke
+description: Five-step Modal SFT smoke using the public provider-neutral training API.
+target: cloud
+method: sft
+provider: modal
+
+model:
+  name: HuggingFaceTB/SmolLM2-1.7B-Instruct
+
+dataset:
+  name: professorsynapse/claudesidian-synthetic-dataset
+  file: nonthinking_tools_sft_04.22.26.jsonl
+
+training:
+  epochs: 1
+  batch_size: 2
+  learning_rate: 0.0002
+  max_steps: 5
+  max_seq_length: 512
+
+job:
+  gpu: L4
+  timeout_hours: 1
+
+artifacts:
+  backend: modal_volume
+  identifier: toolset-training-artifacts
+  mount_path: /vol/artifacts
+  publish_final_model: false

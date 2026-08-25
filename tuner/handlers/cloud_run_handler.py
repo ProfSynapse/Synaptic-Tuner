@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import yaml
 
 from shared.utilities.unique_ids import unique_utc_timestamp
+from synaptic_tuner.api.v1 import CloudTrainingAPI, CloudTrainingRequest
 from tuner.backends.training.cloud.base_cloud import load_cloud_config, load_project_deps
 from tuner.cloud import (
     CloudJobSpec,
@@ -263,6 +264,76 @@ class CloudRunHandler(BaseHandler):
         }
         return spec, metadata
 
+    @staticmethod
+    def _uses_training_api(config: Dict[str, Any]) -> bool:
+        """Select the typed training API for declarative training recipes."""
+
+        run_cfg = config.get("run")
+        has_steps = isinstance(run_cfg, dict) and bool(run_cfg.get("steps"))
+        return (
+            not has_steps
+            and str(config.get("method", "")).strip().lower()
+            in {"sft", "kto", "dpo", "grpo", "embedding", "ace_step"}
+            and isinstance(config.get("model"), dict)
+            and isinstance(config.get("dataset"), dict)
+        )
+
+    def _handle_training_api_recipe(
+        self, config_path: Path, config: Dict[str, Any]
+    ) -> int:
+        api = CloudTrainingAPI(self.context)
+        try:
+            request = CloudTrainingRequest.from_recipe(config)
+            plan = api.prepare(request)
+        except Exception as exc:
+            if self.json_mode:
+                self.output_error(str(exc), code="CLOUD_TRAINING_PREPARE_ERROR")
+            else:
+                print_error(str(exc))
+            return 1
+
+        if self.json_mode:
+            self.output(
+                {
+                    "operation": "training",
+                    "config_path": str(config_path),
+                    **dict(plan.summary),
+                }
+            )
+            return 0
+
+        print_header("CLOUD TRAINING", "Submit a declarative training recipe")
+        print_config(
+            {
+                "Config": str(config_path),
+                "Provider": plan.summary["provider"],
+                "Method": str(plan.summary["method"]).upper(),
+                "Model": plan.summary["model"],
+                "Dataset": plan.summary["dataset_file"],
+                "GPU": plan.summary["gpu"],
+                "Timeout": f"{plan.summary['timeout_hours']}h",
+                "Source Commit": plan.summary["source_commit"],
+                "Artifacts": plan.summary.get("artifact_identifier") or "-",
+            },
+            "Cloud Training Configuration",
+        )
+        if not getattr(self.args, "auto_confirm", False) and not confirm(
+            "Start cloud training with this configuration?"
+        ):
+            print_info("Cloud training cancelled.")
+            return 0
+
+        try:
+            result = api.submit(plan)
+        except Exception as exc:
+            print_error(f"Failed to submit cloud training: {exc}")
+            return 1
+        if result.success:
+            print_info("Cloud training completed successfully.")
+        else:
+            print_error(f"Cloud training failed with exit code: {result.exit_code}")
+        return result.exit_code
+
     def handle(self) -> int:
         try:
             config_path = self._resolve_job_config_path(getattr(self.args, "job_config", None))
@@ -273,6 +344,9 @@ class CloudRunHandler(BaseHandler):
                 return 1
             print_error(str(exc))
             return 1
+
+        if self._uses_training_api(config):
+            return self._handle_training_api_recipe(config_path, config)
 
         if self.json_mode:
             try:

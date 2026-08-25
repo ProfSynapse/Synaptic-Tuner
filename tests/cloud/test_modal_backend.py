@@ -10,6 +10,7 @@ Covers:
 - get_gpu_options
 """
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -271,6 +272,52 @@ class TestModalExecute:
         assert called_env["CLOUD_REPO_BRANCH"] == "main"
         assert called_env["CLOUD_REPO_COMMIT"] == "abc12345def67890"
 
+
+    def test_transports_resolved_request_and_allowlisted_overrides(
+        self, repo_root, clean_env
+    ):
+        backend = ModalBackend(repo_root)
+        config = _cloud_config(
+            model_name="org/model",
+            dataset_name="org/dataset",
+            dataset_file="train.jsonl",
+            gpu_type="L4",
+            timeout_hours=1,
+            epochs=1,
+            batch_size=2,
+            learning_rate=2e-4,
+            max_steps=5,
+            max_seq_length=512,
+            gradient_accumulation_steps=4,
+            seed=0,
+            lora_r=16,
+            lora_alpha=32,
+            lora_target_modules=["q_proj", "v_proj"],
+            use_rslora=True,
+        )
+        process = MagicMock()
+        process.wait.return_value = 0
+
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.subprocess.Popen",
+            return_value=process,
+        ) as popen:
+            assert backend.execute(config, python_path="") == 0
+
+        command = popen.call_args.args[0]
+        assert command[command.index("--gpu") + 1] == "L4"
+        assert command[command.index("--timeout-hours") + 1] == "1"
+        assert command[command.index("--model-name") + 1] == "org/model"
+        assert command[command.index("--dataset-name") + 1] == "org/dataset"
+        assert command[command.index("--dataset-file") + 1] == "train.jsonl"
+        assert command[command.index("--max-seq-length") + 1] == "512"
+        payload = json.loads(command[command.index("--config-overrides-json") + 1])
+        assert payload["gradient_accumulation_steps"] == 4
+        assert payload["seed"] == 0
+        assert payload["lora_r"] == 16
+        assert payload["lora_alpha"] == 32
+        assert payload["lora_target_modules"] == ["q_proj", "v_proj"]
+        assert payload["use_rslora"] is True
 
 class TestModalResolveRepoSource:
     """Test that ModalBackend.load_config() relies on resolve_repo_source.

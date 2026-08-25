@@ -6,9 +6,11 @@ a job needs a GPU class or an on-demand elasticity that the RunPod wrapper lane
 (`reference/runpod-jobs.md`) does not give you, or as a second independent
 provider when HF Jobs and RunPod are both flaky.
 
-Like the RunPod lane, this is for arbitrary wrapper work. Cloud TRAINING through
-the tuner still goes via `tuner.py cloud-run` / `cloud-pipeline`; see
-`reference/cloud-training.md`.
+Modal has two engine-owned routes. Declarative model training goes through
+`synaptic_tuner.api.v1.CloudTrainingAPI`; the `cloud-run` command and recipes
+such as `Trainers/recipes/modal_smollm2_1p7b_sft_smoke.yaml` are thin adapters.
+Arbitrary wrapper work may still invoke a checked-in Modal app directly. See
+`reference/cloud-training.md` for the shared training contract.
 
 ---
 

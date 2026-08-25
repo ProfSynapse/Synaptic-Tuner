@@ -27,6 +27,7 @@ Dependencies:
     - Trainers/cloud/train_modal.py (Modal wrapper script)
 """
 
+import json
 import logging
 import os
 import subprocess
@@ -196,10 +197,25 @@ class ModalBackend(ITrainingBackend):
             config_path=config_path,
             trainer_dir=trainer_dir,
             model_name=model_config.get("model_name", "Unknown"),
-            dataset_file=dataset_config.get("local_file") or f"{dataset_config.get('dataset_name', '')}/{dataset_config.get('dataset_file', 'Unknown')}",
+            dataset_file=dataset_config.get("local_file") or dataset_config.get("dataset_file", "Unknown"),
+            dataset_name=dataset_config.get("dataset_name"),
             epochs=training_config.get("num_train_epochs", 1),
             batch_size=training_config.get("per_device_train_batch_size", 4),
             learning_rate=training_config.get("learning_rate", 0.0),
+            gradient_accumulation_steps=training_config.get("gradient_accumulation_steps"),
+            save_steps=training_config.get("save_steps"),
+            save_total_limit=training_config.get("save_total_limit"),
+            max_steps=training_config.get("max_steps"),
+            max_seq_length=training_config.get("max_seq_length") or model_config.get("max_seq_length"),
+            seed=training_config.get("seed"),
+            load_in_4bit=model_config.get("load_in_4bit"),
+            lora_r=config.get("lora", {}).get("r"),
+            lora_alpha=config.get("lora", {}).get("lora_alpha"),
+            lora_dropout=config.get("lora", {}).get("lora_dropout"),
+            lora_target_modules=model_config.get("target_modules") or config.get("lora", {}).get("target_modules"),
+            use_dora=bool(config.get("lora", {}).get("use_dora", False)),
+            use_rslora=bool(config.get("lora", {}).get("use_rslora", False)),
+            init_lora_weights=config.get("lora", {}).get("init_lora_weights"),
             provider="modal",
             gpu_type=gpu_type,
             timeout_hours=timeout_hours,
@@ -246,8 +262,8 @@ class ModalBackend(ITrainingBackend):
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
         cloud_config = load_cloud_config(cloud_config_path)
         modal_settings = cloud_config.get("modal", {})
-        gpu_type = modal_settings.get("gpu", DEFAULT_GPU)
-        timeout_hours = modal_settings.get("timeout_hours", DEFAULT_TIMEOUT_HOURS)
+        gpu_type = config.gpu_type or modal_settings.get("gpu", DEFAULT_GPU)
+        timeout_hours = config.timeout_hours or modal_settings.get("timeout_hours", DEFAULT_TIMEOUT_HOURS)
 
         if not config.repo_url or not config.repo_branch or not config.repo_commit:
             raise BackendError("Modal cloud runs require exact repo source metadata.")
@@ -263,6 +279,63 @@ class ModalBackend(ITrainingBackend):
             "--repo-branch", config.repo_branch,
             "--repo-commit", config.repo_commit,
         ]
+        if config.model_name and config.model_name != "Unknown":
+            cmd.extend(["--model-name", config.model_name])
+        if config.dataset_name:
+            cmd.extend(["--dataset-name", config.dataset_name])
+            if config.dataset_file and config.dataset_file != "Unknown":
+                cmd.extend(["--dataset-file", config.dataset_file])
+        elif config.dataset_file and config.dataset_file != "Unknown":
+            cmd.extend(["--dataset-path", config.dataset_file])
+        if config.learning_rate and config.learning_rate > 0:
+            cmd.extend(["--learning-rate", str(config.learning_rate)])
+        if config.epochs and config.epochs > 0:
+            cmd.extend(["--num-epochs", str(config.epochs)])
+        if config.batch_size and config.batch_size > 0:
+            cmd.extend(["--batch-size", str(config.batch_size)])
+        if getattr(config, "max_steps", None) is not None and config.max_steps > 0:
+            cmd.extend(["--max-steps", str(config.max_steps)])
+        if getattr(config, "max_seq_length", None) is not None and config.max_seq_length > 0:
+            cmd.extend(["--max-seq-length", str(config.max_seq_length)])
+        overrides = {
+            "gradient_accumulation_steps": getattr(config, "gradient_accumulation_steps", None),
+            "save_steps": getattr(config, "save_steps", None),
+            "save_total_limit": getattr(config, "save_total_limit", None),
+            "seed": getattr(config, "seed", None),
+            "beta": getattr(config, "beta", None),
+            "chat_template_kwargs": getattr(config, "chat_template_kwargs", None),
+            "load_in_4bit": getattr(config, "load_in_4bit", None),
+            "lora_r": getattr(config, "lora_r", None),
+            "lora_alpha": getattr(config, "lora_alpha", None),
+            "lora_dropout": getattr(config, "lora_dropout", None),
+            "lora_target_modules": getattr(config, "lora_target_modules", None),
+            "use_dora": getattr(config, "use_dora", False),
+            "use_rslora": getattr(config, "use_rslora", False),
+            "init_lora_weights": getattr(config, "init_lora_weights", None),
+            "evolutionary_enabled": getattr(config, "evolutionary_enabled", False),
+            "evolutionary_candidates": getattr(config, "evolutionary_candidates", None),
+            "evolutionary_eval_batch_size": getattr(config, "evolutionary_eval_batch_size", None),
+            "evolutionary_validation_config": getattr(config, "evolutionary_validation_config", None),
+            "evolutionary_strategy": getattr(config, "evolutionary_strategy", None),
+            "evolutionary_noise_scale": getattr(config, "evolutionary_noise_scale", None),
+            "evolutionary_max_grad_norm": getattr(config, "evolutionary_max_grad_norm", None),
+            "evolutionary_scale_factors": getattr(config, "evolutionary_scale_factors", None),
+            "evolutionary_selection_method": getattr(config, "evolutionary_selection_method", None),
+            "evolutionary_min_improvement": getattr(config, "evolutionary_min_improvement", None),
+            "evolutionary_min_relative_improvement": getattr(config, "evolutionary_min_relative_improvement", None),
+            "evolutionary_noise_floor_epsilon": getattr(config, "evolutionary_noise_floor_epsilon", None),
+            "evolutionary_eval_frequency": getattr(config, "evolutionary_eval_frequency", None),
+            "evolutionary_warmup_steps": getattr(config, "evolutionary_warmup_steps", None),
+            "evolutionary_cache_baseline": getattr(config, "evolutionary_cache_baseline", None),
+            "evolutionary_log_candidates": getattr(config, "evolutionary_log_candidates", None),
+            "evolutionary_log_selected": getattr(config, "evolutionary_log_selected", None),
+        }
+        overrides = {key: value for key, value in overrides.items() if value is not None}
+        if overrides:
+            cmd.extend([
+                "--config-overrides-json",
+                json.dumps(overrides, separators=(",", ":"), sort_keys=True),
+            ])
         if config.publish_final_model:
             cmd.append("--publish-final-model")
         if config.publish_target_repo:

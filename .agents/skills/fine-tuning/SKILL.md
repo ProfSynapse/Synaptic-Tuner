@@ -22,7 +22,8 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Env-backed GRPO | `cd Trainers/grpo && python train_env_grpo.py --config ./configs/env_config.yaml --dry-run` |
 | Experiment loop | `python tuner.py experiment-loop --experiment-config configs/flywheel/experiment_loop.yaml` |
 | LoRA surgery | `python tuner.py surgery --surgery-config configs/lora_surgery.yaml` |
-| HF custom job | `python tuner.py cloud-run --job-config Trainers/recipes/<recipe>.yaml` |
+| Provider-neutral cloud training recipe | `python tuner.py cloud-run --job-config Trainers/recipes/<recipe>.yaml --yes` |
+| HF custom job (`run.steps`) | `python tuner.py cloud-run --job-config Trainers/recipes/<recipe>.yaml` |
 | Canonical HF train+eval | `python tuner.py cloud-pipeline --method sft --preset full` |
 | Full experiment bundle | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
 | Evolutionary SFT smoke test | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<evolutionary-spec>.yaml --yes` |
@@ -111,6 +112,8 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For repeatable local GPU training, prefer `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes` over ad hoc `docker run` commands. Put the model, dataset, Docker image, package overrides, LoRA settings, training knobs, and artifact paths in YAML.
 - For Windows Docker Desktop with GPU, prefer `job.transfer: auto` or `copy` in local-run configs. The runner chooses copy mode on Windows because GPU bind mounts can fail with access denied.
 - Keep newly released model support in local-run `setup.pip` pins or image fields. Do not leave one-off package installs in shell history.
+- Declarative cloud training is owned by `synaptic_tuner.api.v1.CloudTrainingAPI`; `cloud-run` and YAML recipes are adapters. Put provider, model, dataset, training, LoRA, runtime, and artifact choices in the recipe rather than provider-specific host code.
+- For the checked-in Modal smoke path, use `python tuner.py cloud-run --job-config Trainers/recipes/modal_smollm2_1p7b_sft_smoke.yaml --yes`.
 - For canonical HF experiments, prefer `python tuner.py cloud-pipeline ...` over `cloud-run`.
 - For full train → eval → exact loss → analysis → recommendation runs, prefer `python tuner.py run-experiment ...`.
 - Evolutionary SFT is experimental but now first-class in the cloud experiment path. Prefer a checked-in experiment spec or `cloud-pipeline --train-evolutionary-*` overrides over editing trainer YAMLs by hand.

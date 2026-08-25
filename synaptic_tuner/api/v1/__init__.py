@@ -13,6 +13,12 @@ from .sources import SourceLock
 
 __all__ = [
     "CapabilityDescriptor",
+    "CLOUD_PROVIDERS",
+    "CloudSourceContract",
+    "CloudTrainingAPI",
+    "CloudTrainingPlan",
+    "CloudTrainingRequest",
+    "CloudTrainingResult",
     "EventEnvelope",
     "PathRef",
     "PluginBinding",
@@ -22,3 +28,22 @@ __all__ = [
     "SecretRef",
     "SourceLock",
 ]
+
+_TRAINING_EXPORTS = {
+    "CLOUD_PROVIDERS",
+    "CloudSourceContract",
+    "CloudTrainingAPI",
+    "CloudTrainingPlan",
+    "CloudTrainingRequest",
+    "CloudTrainingResult",
+}
+
+
+def __getattr__(name: str):
+    """Load the cloud-training API only when a caller requests it."""
+
+    if name in _TRAINING_EXPORTS:
+        from . import training
+
+        return getattr(training, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

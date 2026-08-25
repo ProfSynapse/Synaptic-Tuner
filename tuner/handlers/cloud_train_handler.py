@@ -17,24 +17,19 @@ Supports --json flag for AI-parseable output.
 """
 
 import logging
-import os
 from argparse import Namespace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from tuner.backends.training.cloud.base_cloud import resolve_cloud_image
-from tuner.cloud import (
-    build_runtime_layout,
-    build_source_lock,
-    checkout_policy_from_context,
-    ssh_checkout_policy_from_environment,
-    standalone_credential_from_environment,
+from synaptic_tuner.api.v1 import (
+    CloudSourceContract,
+    CloudTrainingAPI,
+    CloudTrainingRequest,
 )
+
 from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
-from tuner.core.exceptions import CloudProviderError
+from tuner.backends.registry import TrainingBackendRegistry  # compatibility patch seam
 from tuner.handlers.base import BaseHandler
-from tuner.backends.registry import TrainingBackendRegistry
 from tuner.ui import (
     print_menu,
     print_header,
@@ -106,43 +101,11 @@ class CloudTrainHandler(BaseHandler):
         return True
 
     def _get_provider_status(self, *, validate_environment: bool = True) -> List[Dict]:
-        """
-        Check availability and status of each cloud provider.
+        """Return provider discovery through the public training API."""
 
-        ``validate_environment=False`` is the inspection-only path used by
-        JSON status output. It reports registry metadata without constructing
-        a backend or resolving provider credentials.
-
-        Returns:
-            List of dicts with provider id, name, status, and details
-        """
-        providers = []
-
-        for provider_id, info in PROVIDER_INFO.items():
-            status = {
-                "id": provider_id,
-                "name": info["name"],
-                "registered": provider_id in TrainingBackendRegistry.list(),
-                "env_ready": False,
-                "detail": "",
-            }
-
-            if status["registered"] and validate_environment:
-                try:
-                    backend = TrainingBackendRegistry.get(provider_id, repo_root=self.repo_root)
-                    is_valid, error = backend.validate_environment()
-                    status["env_ready"] = is_valid
-                    status["detail"] = "" if is_valid else error
-                except Exception as e:
-                    status["detail"] = str(e)
-            elif status["registered"]:
-                status["detail"] = "Registered; credentials not checked in inspection mode"
-            else:
-                status["detail"] = f"Not installed (run: {info['install_hint']})"
-
-            providers.append(status)
-
-        return providers
+        return CloudTrainingAPI(self.context).provider_statuses(
+            validate_environment=validate_environment
+        )
 
     def _get_cloud_status(self) -> dict:
         """
@@ -160,31 +123,19 @@ class CloudTrainHandler(BaseHandler):
         }
 
     def _prepare_source_contract(self):
-        """Build and validate source/layout provenance before provider choice."""
+        """Delegate source/layout provenance to the public training API."""
 
-        run_id = getattr(self.args, "run_id", None) or (
-            "cloud-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        )
-        standalone_credential = standalone_credential_from_environment(os.environ)
-        ssh_policy = ssh_checkout_policy_from_environment(os.environ)
-        source_lock = build_source_lock(
-            self.context,
-            run_id=run_id,
+        contract = CloudTrainingAPI(self.context).prepare_source(
+            run_id=getattr(self.args, "run_id", None),
             mode=getattr(self.args, "source_mode", None),
-            environment=os.environ,
             provider_secret=getattr(self, "_source_provider_secret", None),
             credential_helper=getattr(self, "_source_credential_helper", None),
-            standalone_credential=standalone_credential,
-            ssh_policy=ssh_policy,
         )
-        policy = checkout_policy_from_context(
-            self.context,
-            ssh_policy=ssh_policy,
-            source_lock=source_lock,
+        return (
+            contract.source_lock,
+            contract.runtime_layout,
+            contract.checkout_policy,
         )
-        policy.validate(source_lock.project_source.location)
-        policy.validate(source_lock.engine_source.location)
-        return source_lock, build_runtime_layout(self.context), policy
 
     def _build_provider_menu(self, providers: List[Dict]) -> List[Tuple[str, str]]:
         """
@@ -271,32 +222,18 @@ class CloudTrainHandler(BaseHandler):
             )
             return 1
 
-        # The exact-run authorization barrier belongs only to HF's protected
-        # source-volume route. Other providers retain the same source lock and
-        # checkout policy without inheriting an HF-specific launch gate.
-        if provider_choice == "hf_jobs":
-            try:
-                require_current_hf_source_submission_authorization(
-                    route="cloud-train.handle"
-                )
-            except CloudProviderError as exc:
-                print_error(f"Cloud launch authorization failed: {exc}")
-                return 1
+        api = CloudTrainingAPI(
+            self.context,
+            hf_authorizer=require_current_hf_source_submission_authorization,
+        )
 
-        # Step 4: Get backend and validate environment
+        # Provider discovery and configuration stay behind the API boundary.
         try:
-            backend = TrainingBackendRegistry.get(provider_choice, repo_root=self.repo_root)
-        except ValueError as e:
-            print_error(str(e))
+            methods = api.provider_methods(provider_choice)
+        except Exception as exc:
+            print_error(f"Environment validation failed: {exc}")
             return 1
 
-        is_valid, error = backend.validate_environment()
-        if not is_valid:
-            print_error(f"Environment validation failed: {error}")
-            return 1
-
-        # Step 5: Select training method
-        methods = backend.get_available_methods()
         method_labels = self._load_method_labels()
         method_options = [
             (m, f"{BOX['bullet']} {method_labels.get(m, m.upper())}") for m in methods
@@ -310,17 +247,20 @@ class CloudTrainHandler(BaseHandler):
             method = methods[0]
             print_info(f"Using method: {method.upper()}")
 
-        # Step 6: Load configuration
         try:
-            config = backend.load_config(method)
-            config = self._apply_training_overrides(config)
-            # Provider integrations consume these canonical objects as they
-            # migrate; attaching rather than re-modeling keeps one source SSOT.
-            config.source_lock = source_lock
-            config.runtime_layout = runtime_layout
-            config.checkout_policy = checkout_policy
-        except Exception as e:
-            print_error(f"Failed to load configuration: {e}")
+            request = self._build_training_request(provider_choice, method)
+            plan = api.prepare(
+                request,
+                source=CloudSourceContract(
+                    source_lock=source_lock,
+                    runtime_layout=runtime_layout,
+                    checkout_policy=checkout_policy,
+                ),
+                validate_environment=False,
+            )
+            config = plan._config
+        except Exception as exc:
+            print_error(f"Failed to prepare cloud training: {exc}")
             return 1
 
         # Step 7: Display configuration with cost estimate
@@ -338,7 +278,8 @@ class CloudTrainHandler(BaseHandler):
         print()
 
         try:
-            exit_code = backend.execute(config, python_path="")
+            result = api.submit(plan)
+            exit_code = result.exit_code
         except Exception as e:
             print_error(f"Cloud training failed: {e}")
             return 1
@@ -350,197 +291,109 @@ class CloudTrainHandler(BaseHandler):
 
         return exit_code
 
-    def _apply_training_overrides(self, config):
-        """Apply direct CLI overrides to a loaded cloud training config."""
-        args = self.args
-        if not args:
-            return config
+    def _build_training_request(
+        self, provider: str, method: str
+    ) -> CloudTrainingRequest:
+        """Translate argparse fields into the stable API request contract."""
 
-        train_model_name = getattr(args, "train_model_name", None)
-        if train_model_name:
-            config.model_name = train_model_name
-
-        train_dataset_name = getattr(args, "train_dataset_name", None)
-        if train_dataset_name:
-            config.dataset_name = train_dataset_name
-
-        train_dataset_file = getattr(args, "train_dataset_file", None)
-        if train_dataset_file:
-            config.dataset_file = train_dataset_file
-
-        train_batch_size = getattr(args, "train_batch_size", None)
-        if train_batch_size is not None:
-            config.batch_size = train_batch_size
-
-        train_save_steps = getattr(args, "train_save_steps", None)
-        if train_save_steps is not None:
-            config.save_steps = train_save_steps
-
-        train_save_total_limit = getattr(args, "train_save_total_limit", None)
-        if train_save_total_limit is not None:
-            config.save_total_limit = train_save_total_limit
-
-        train_gradient_accumulation = getattr(args, "train_gradient_accumulation", None)
-        if train_gradient_accumulation is not None:
-            config.gradient_accumulation_steps = train_gradient_accumulation
-
-        train_learning_rate = getattr(args, "train_learning_rate", None)
-        if train_learning_rate is not None:
-            config.learning_rate = train_learning_rate
-
-        train_seed = getattr(args, "train_seed", None)
-        if train_seed is not None:
-            config.seed = train_seed
-
-        train_beta = getattr(args, "train_beta", None)
-        if train_beta is not None and config.method in ("dpo", "kto"):
-            config.beta = train_beta
-
-        train_num_epochs = getattr(args, "train_num_epochs", None)
-        if train_num_epochs is not None:
-            config.epochs = train_num_epochs
-
-        train_max_steps = getattr(args, "train_max_steps", None)
-        if train_max_steps is not None:
-            config.max_steps = train_max_steps
-
-        train_max_seq_length = getattr(args, "train_max_seq_length", None)
-        if train_max_seq_length is not None:
-            config.max_seq_length = train_max_seq_length
-
-        if getattr(args, "train_load_in_4bit", None) is not None:
-            config.load_in_4bit = args.train_load_in_4bit
-
-        train_lora_r = getattr(args, "train_lora_r", None)
-        if train_lora_r is not None:
-            config.lora_r = train_lora_r
-
-        train_lora_alpha = getattr(args, "train_lora_alpha", None)
-        if train_lora_alpha is not None:
-            config.lora_alpha = train_lora_alpha
-
-        train_lora_dropout = getattr(args, "train_lora_dropout", None)
-        if train_lora_dropout is not None:
-            config.lora_dropout = train_lora_dropout
-
-        if getattr(args, "train_use_dora", False):
-            config.use_dora = True
-
-        if getattr(args, "train_use_rslora", False):
-            config.use_rslora = True
-
-        train_init_lora_weights = getattr(args, "train_init_lora_weights", None)
-        if train_init_lora_weights is not None:
-            config.init_lora_weights = train_init_lora_weights
-
-        train_lora_target_modules = getattr(args, "train_lora_target_modules", None)
-        if train_lora_target_modules:
-            normalized = train_lora_target_modules.strip()
-            if normalized == "all-linear":
-                config.lora_target_modules = normalized
-            else:
-                config.lora_target_modules = [
-                    module.strip()
-                    for module in normalized.split(",")
-                    if module.strip()
-                ]
-
+        args = self.args or Namespace()
+        training = {}
+        for argument, field_name in {
+            "train_batch_size": "batch_size",
+            "train_save_steps": "save_steps",
+            "train_save_total_limit": "save_total_limit",
+            "train_gradient_accumulation": "gradient_accumulation_steps",
+            "train_learning_rate": "learning_rate",
+            "train_seed": "seed",
+            "train_num_epochs": "epochs",
+            "train_max_steps": "max_steps",
+            "train_max_seq_length": "max_seq_length",
+            "train_load_in_4bit": "load_in_4bit",
+            "train_evolutionary_candidates": "evolutionary_candidates",
+            "train_evolutionary_eval_batch_size": "evolutionary_eval_batch_size",
+            "train_evolutionary_validation_config": "evolutionary_validation_config",
+            "train_evolutionary_strategy": "evolutionary_strategy",
+            "train_evolutionary_noise_scale": "evolutionary_noise_scale",
+            "train_evolutionary_max_grad_norm": "evolutionary_max_grad_norm",
+            "train_evolutionary_selection_method": "evolutionary_selection_method",
+            "train_evolutionary_min_improvement": "evolutionary_min_improvement",
+            "train_evolutionary_min_relative_improvement": "evolutionary_min_relative_improvement",
+            "train_evolutionary_noise_floor_epsilon": "evolutionary_noise_floor_epsilon",
+            "train_evolutionary_eval_frequency": "evolutionary_eval_frequency",
+            "train_evolutionary_warmup_steps": "evolutionary_warmup_steps",
+            "train_evolutionary_cache_baseline": "evolutionary_cache_baseline",
+            "train_evolutionary_log_candidates": "evolutionary_log_candidates",
+            "train_evolutionary_log_selected": "evolutionary_log_selected",
+        }.items():
+            value = getattr(args, argument, None)
+            if value is not None:
+                training[field_name] = value
+        if method in {"dpo", "kto"} and getattr(args, "train_beta", None) is not None:
+            training["beta"] = args.train_beta
         if getattr(args, "train_evolutionary_enabled", False):
-            config.evolutionary_enabled = True
-
-        train_evolutionary_candidates = getattr(args, "train_evolutionary_candidates", None)
-        if train_evolutionary_candidates is not None:
-            config.evolutionary_candidates = train_evolutionary_candidates
-
-        train_evolutionary_eval_batch_size = getattr(args, "train_evolutionary_eval_batch_size", None)
-        if train_evolutionary_eval_batch_size is not None:
-            config.evolutionary_eval_batch_size = train_evolutionary_eval_batch_size
-
-        train_evolutionary_validation_config = getattr(args, "train_evolutionary_validation_config", None)
-        if train_evolutionary_validation_config is not None:
-            config.evolutionary_validation_config = train_evolutionary_validation_config
-
-        train_evolutionary_strategy = getattr(args, "train_evolutionary_strategy", None)
-        if train_evolutionary_strategy is not None:
-            config.evolutionary_strategy = train_evolutionary_strategy
-
-        train_evolutionary_noise_scale = getattr(args, "train_evolutionary_noise_scale", None)
-        if train_evolutionary_noise_scale is not None:
-            config.evolutionary_noise_scale = train_evolutionary_noise_scale
-
-        train_evolutionary_max_grad_norm = getattr(args, "train_evolutionary_max_grad_norm", None)
-        if train_evolutionary_max_grad_norm is not None:
-            config.evolutionary_max_grad_norm = train_evolutionary_max_grad_norm
-
-        train_evolutionary_scale_factors = getattr(args, "train_evolutionary_scale_factors", None)
-        if train_evolutionary_scale_factors:
-            config.evolutionary_scale_factors = [
+            training["evolutionary_enabled"] = True
+        scale_factors = getattr(args, "train_evolutionary_scale_factors", None)
+        if scale_factors:
+            training["evolutionary_scale_factors"] = [
                 float(value.strip())
-                for value in train_evolutionary_scale_factors.split(",")
+                for value in scale_factors.split(",")
                 if value.strip()
             ]
 
-        train_evolutionary_selection_method = getattr(args, "train_evolutionary_selection_method", None)
-        if train_evolutionary_selection_method is not None:
-            config.evolutionary_selection_method = train_evolutionary_selection_method
-
-        train_evolutionary_min_improvement = getattr(args, "train_evolutionary_min_improvement", None)
-        if train_evolutionary_min_improvement is not None:
-            config.evolutionary_min_improvement = train_evolutionary_min_improvement
-
-        train_evolutionary_min_relative_improvement = getattr(args, "train_evolutionary_min_relative_improvement", None)
-        if train_evolutionary_min_relative_improvement is not None:
-            config.evolutionary_min_relative_improvement = train_evolutionary_min_relative_improvement
-
-        train_evolutionary_noise_floor_epsilon = getattr(args, "train_evolutionary_noise_floor_epsilon", None)
-        if train_evolutionary_noise_floor_epsilon is not None:
-            config.evolutionary_noise_floor_epsilon = train_evolutionary_noise_floor_epsilon
-
-        train_evolutionary_eval_frequency = getattr(args, "train_evolutionary_eval_frequency", None)
-        if train_evolutionary_eval_frequency is not None:
-            config.evolutionary_eval_frequency = train_evolutionary_eval_frequency
-
-        train_evolutionary_warmup_steps = getattr(args, "train_evolutionary_warmup_steps", None)
-        if train_evolutionary_warmup_steps is not None:
-            config.evolutionary_warmup_steps = train_evolutionary_warmup_steps
-
-        if getattr(args, "train_evolutionary_cache_baseline", None) is not None:
-            config.evolutionary_cache_baseline = args.train_evolutionary_cache_baseline
-
-        if getattr(args, "train_evolutionary_log_candidates", None) is not None:
-            config.evolutionary_log_candidates = args.train_evolutionary_log_candidates
-
-        if getattr(args, "train_evolutionary_log_selected", None) is not None:
-            config.evolutionary_log_selected = args.train_evolutionary_log_selected
-
-        train_gpu = getattr(args, "train_gpu", None)
-        if train_gpu:
-            config.gpu_type = train_gpu
-            if hasattr(config, "hf_flavor"):
-                config.hf_flavor = train_gpu
-
-        train_timeout_hours = getattr(args, "train_timeout_hours", None)
-        if train_timeout_hours is not None:
-            config.timeout_hours = train_timeout_hours
-
-        train_cloud_image = getattr(args, "train_cloud_image", None)
-        if train_cloud_image:
-            config.cloud_image = train_cloud_image
-            config.cloud_image_profile = None
-
-        train_image_profile = getattr(args, "train_image_profile", None)
-        if train_image_profile:
-            cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
-            config.cloud_image, config.cloud_image_profile = resolve_cloud_image(
-                cloud_config_path,
-                requested_profile=train_image_profile,
-                fallback_image=config.cloud_image,
+        lora = {}
+        for argument, field_name in {
+            "train_lora_r": "r",
+            "train_lora_alpha": "alpha",
+            "train_lora_dropout": "dropout",
+            "train_init_lora_weights": "init_lora_weights",
+        }.items():
+            value = getattr(args, argument, None)
+            if value is not None:
+                lora[field_name] = value
+        if getattr(args, "train_use_dora", False):
+            lora["use_dora"] = True
+        if getattr(args, "train_use_rslora", False):
+            lora["use_rslora"] = True
+        target_modules = getattr(args, "train_lora_target_modules", None)
+        if target_modules:
+            normalized = target_modules.strip()
+            lora["target_modules"] = (
+                normalized
+                if normalized == "all-linear"
+                else [item.strip() for item in normalized.split(",") if item.strip()]
             )
 
-        if config.dataset_name and config.dataset_file and "/" not in config.dataset_file:
-            config.dataset_file = f"{config.dataset_name}/{config.dataset_file}"
+        runtime = {}
+        for argument, field_name in {
+            "train_gpu": "gpu_type",
+            "train_timeout_hours": "timeout_hours",
+            "train_cloud_image": "cloud_image",
+            "train_image_profile": "image_profile",
+        }.items():
+            value = getattr(args, argument, None)
+            if value is not None:
+                runtime[field_name] = value
 
-        return config
+        return CloudTrainingRequest(
+            provider=provider,
+            method=method,
+            model_name=getattr(args, "train_model_name", None),
+            dataset_name=getattr(args, "train_dataset_name", None),
+            dataset_file=getattr(args, "train_dataset_file", None),
+            training=training,
+            lora=lora,
+            runtime=runtime,
+            run_id=getattr(args, "run_id", None),
+        )
+
+    def _apply_training_overrides(self, config):
+        """Compatibility adapter backed by the public request mapper."""
+
+        request = self._build_training_request(
+            getattr(config, "provider", None) or getattr(config, "platform", ""),
+            config.method,
+        )
+        return CloudTrainingAPI.apply_request(config, request)
 
     def _load_method_labels(self) -> Dict[str, str]:
         """
