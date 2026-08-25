@@ -298,6 +298,7 @@ class CloudTrainingAPI:
             "batch_size": config.batch_size,
             "learning_rate": config.learning_rate,
             "max_steps": getattr(config, "max_steps", None),
+            "max_seq_length": getattr(config, "max_seq_length", None),
             "artifact_backend": getattr(config, "artifact_backend", None),
             "artifact_identifier": getattr(config, "artifact_identifier", None),
             "source_commit": getattr(

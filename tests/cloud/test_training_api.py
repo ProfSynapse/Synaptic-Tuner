@@ -112,6 +112,7 @@ def test_modal_prepare_applies_request_without_hf_gate(tmp_path):
     assert config.batch_size == 2
     assert config.max_steps == 5
     assert config.max_seq_length == 512
+    assert plan.summary["max_seq_length"] == 512
     assert config.gpu_type == "L4"
     assert config.timeout_hours == 1
     assert config.source_lock is plan.source.source_lock
