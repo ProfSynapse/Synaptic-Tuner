@@ -201,7 +201,7 @@ class ModalBackend(ITrainingBackend):
             dataset_name=dataset_config.get("dataset_name"),
             epochs=training_config.get("num_train_epochs", 1),
             batch_size=training_config.get("per_device_train_batch_size", 4),
-            learning_rate=training_config.get("learning_rate", 0.0),
+            learning_rate=float(training_config.get("learning_rate", 0.0)),
             gradient_accumulation_steps=training_config.get("gradient_accumulation_steps"),
             save_steps=training_config.get("save_steps"),
             save_total_limit=training_config.get("save_total_limit"),

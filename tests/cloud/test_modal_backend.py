@@ -194,6 +194,8 @@ class TestModalLoadConfig:
         assert config.model_name == "test-org/test-model-sft"
         assert config.epochs == 2
         assert config.batch_size == 4
+        assert config.learning_rate == pytest.approx(2e-4)
+        assert isinstance(config.learning_rate, float)
         assert config.gpu_type == "L40S"
         assert config.timeout_hours == 6
         assert config.artifact_backend == "modal_volume"
