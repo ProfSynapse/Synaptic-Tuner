@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.synapticlabs.ai/synaptic-training-v1.json",
-  "title": "Synaptic Training Request v1",
+  "title": "Synaptic SFT Training Request v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -10,8 +10,7 @@
     "method",
     "model",
     "dataset",
-    "parameters",
-    "adapter",
+    "sft",
     "execution",
     "artifacts"
   ],
@@ -23,12 +22,7 @@
       "const": "training"
     },
     "method": {
-      "enum": [
-        "sft",
-        "kto",
-        "grpo",
-        "embedding"
-      ]
+      "const": "sft"
     },
     "model": {
       "$ref": "#/$defs/model"
@@ -36,11 +30,8 @@
     "dataset": {
       "$ref": "#/$defs/dataset"
     },
-    "parameters": {
-      "$ref": "#/$defs/parameters"
-    },
-    "adapter": {
-      "$ref": "#/$defs/adapter"
+    "sft": {
+      "$ref": "#/$defs/sft"
     },
     "execution": {
       "$ref": "#/$defs/execution"
@@ -50,13 +41,54 @@
     }
   },
   "$defs": {
-    "nonEmpty": {
+    "repo": {
       "type": "string",
-      "minLength": 1
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
     },
     "digest": {
       "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$"
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "decimal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*(\\.[0-9]*[1-9])?|0\\.[0-9]*[1-9])$"
+        },
+        {
+          "type": "number",
+          "minimum": 0
+        }
+      ]
+    },
+    "positiveDecimal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^([1-9][0-9]*(\\.[0-9]*[1-9])?|0\\.[0-9]*[1-9])$"
+        },
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      ]
+    },
+    "ratio": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^(0|1|0\\.[0-9]*[1-9])$"
+        },
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      ]
     },
     "model": {
       "type": "object",
@@ -66,13 +98,13 @@
       ],
       "properties": {
         "identifier": {
-          "$ref": "#/$defs/nonEmpty"
+          "$ref": "#/$defs/repo"
         },
         "revision": {
-          "$ref": "#/$defs/nonEmpty"
+          "$ref": "#/$defs/revision"
         },
         "tokenizer_revision": {
-          "$ref": "#/$defs/nonEmpty"
+          "$ref": "#/$defs/revision"
         },
         "trust_remote_code": {
           "const": false
@@ -87,139 +119,200 @@
       ],
       "properties": {
         "identifier": {
-          "$ref": "#/$defs/nonEmpty"
+          "$ref": "#/$defs/repo"
         },
         "revision": {
-          "$ref": "#/$defs/nonEmpty"
+          "$ref": "#/$defs/revision"
         },
         "split": {
-          "$ref": "#/$defs/nonEmpty"
+          "type": "string",
+          "pattern": "^(?!.*[?#\\\\])[!-~]{1,128}$"
         },
         "file": {
-          "$ref": "#/$defs/nonEmpty"
+          "type": "string",
+          "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9._/-]+\\.(?:json|jsonl)$",
+          "maxLength": 512
         }
       }
     },
-    "parameters": {
+    "sft": {
       "type": "object",
       "additionalProperties": false,
-      "anyOf": [
-        {
-          "required": [
-            "num_train_epochs"
-          ]
-        },
+      "oneOf": [
         {
           "required": [
             "max_steps"
-          ]
+          ],
+          "not": {
+            "required": [
+              "epochs"
+            ]
+          }
+        },
+        {
+          "required": [
+            "epochs"
+          ],
+          "not": {
+            "required": [
+              "max_steps"
+            ]
+          }
         }
       ],
       "properties": {
-        "num_train_epochs": {
-          "type": "number",
-          "exclusiveMinimum": 0
-        },
         "max_steps": {
           "type": "integer",
           "minimum": 1
         },
+        "epochs": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
         "per_device_train_batch_size": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "default": 1
         },
         "gradient_accumulation_steps": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "default": 1
         },
         "learning_rate": {
-          "type": "number",
-          "exclusiveMinimum": 0
+          "$ref": "#/$defs/positiveDecimal"
         },
         "max_seq_length": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "default": 2048
         },
         "seed": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "default": 3407
         },
         "warmup_ratio": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
+          "$ref": "#/$defs/ratio"
         },
         "weight_decay": {
-          "type": "number",
+          "$ref": "#/$defs/decimal"
+        },
+        "adapter_rank": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 16
+        },
+        "adapter_alpha": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 16
+        },
+        "adapter_dropout": {
+          "$ref": "#/$defs/ratio"
+        },
+        "record_format": {
+          "const": "conversations"
+        },
+        "loss_scope": {
+          "enum": [
+            "assistant_messages",
+            "full_sequence"
+          ]
+        },
+        "prompt_render": {
+          "const": "full_conversation"
+        },
+        "optimizer": {
+          "const": "adamw_8bit"
+        },
+        "scheduler": {
+          "const": "linear"
+        },
+        "max_grad_norm": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "compute_dtype": {
+          "const": "bf16"
+        },
+        "model_quantization": {
+          "const": "none"
+        },
+        "gradient_checkpointing": {
+          "const": "unsloth"
+        },
+        "logging_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "checkpoint_strategy": {
+          "enum": [
+            "none",
+            "steps"
+          ]
+        },
+        "checkpoint_steps": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "checkpoint_limit": {
+          "type": "integer",
           "minimum": 0
         },
         "packing": {
-          "type": "boolean"
+          "const": false
         },
-        "beta": {
-          "type": "number",
-          "minimum": 0
+        "adapter_initialization": {
+          "const": "default"
         },
-        "num_generations": {
-          "type": "integer",
-          "minimum": 1
+        "use_rslora": {
+          "const": false
         },
-        "temperature": {
-          "type": "number",
-          "minimum": 0
-        },
-        "margin": {
-          "type": "number",
-          "minimum": 0
-        }
-      }
-    },
-    "adapter": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "mode"
-      ],
-      "properties": {
-        "mode": {
-          "enum": [
-            "none",
-            "full",
-            "lora",
-            "qlora",
-            "frozen_head"
-          ]
-        },
-        "rank": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "alpha": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "dropout": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
+        "use_dora": {
+          "const": false
         },
         "target_modules": {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/nonEmpty"
-          },
-          "uniqueItems": true
-        },
-        "use_rslora": {
-          "type": "boolean"
-        },
-        "use_dora": {
-          "type": "boolean"
-        },
-        "init": {
-          "$ref": "#/$defs/nonEmpty"
+          "maxItems": 0
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "checkpoint_strategy": {
+                "const": "steps"
+              }
+            },
+            "required": [
+              "checkpoint_strategy"
+            ]
+          },
+          "then": {
+            "required": [
+              "checkpoint_steps"
+            ],
+            "properties": {
+              "checkpoint_limit": {
+                "minimum": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "checkpoint_steps": {
+                "type": "null"
+              },
+              "checkpoint_limit": {
+                "const": 0
+              }
+            }
+          }
+        }
+      ]
     },
     "execution": {
       "type": "object",
@@ -229,23 +322,29 @@
       ],
       "properties": {
         "provider": {
-          "$ref": "#/$defs/nonEmpty"
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
         },
         "accelerator": {
-          "$ref": "#/$defs/nonEmpty"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
         },
         "accelerator_count": {
           "type": "integer",
           "minimum": 1
         },
         "runtime_image": {
-          "$ref": "#/$defs/nonEmpty"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
         },
         "runtime_image_digest": {
-          "$ref": "#/$defs/digest"
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
         },
         "dependency_lock_digest": {
-          "$ref": "#/$defs/contentDigest"
+          "$ref": "#/$defs/digest"
         },
         "timeout_seconds": {
           "type": "integer",
@@ -261,11 +360,11 @@
         },
         "allowed_secret_refs": {
           "type": "array",
+          "uniqueItems": true,
           "items": {
             "type": "string",
-            "pattern": "^(secret|credential)://[A-Za-z0-9._/-]+$"
-          },
-          "uniqueItems": true
+            "pattern": "^(secret|credential)://[A-Za-z0-9_-]+(?:/[A-Za-z0-9._-]+)*$"
+          }
         }
       },
       "dependentRequired": {
@@ -289,56 +388,9 @@
         },
         "publication_ref": {
           "type": "string",
-          "pattern": "^publication://[A-Za-z0-9._/-]+$"
-        },
-        "required_artifacts": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/nonEmpty"
-          },
-          "uniqueItems": true
+          "pattern": "^publication://[A-Za-z0-9_-]+(?:/[A-Za-z0-9._-]+)*$"
         }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "publish_final_model": {
-                "const": true
-              }
-            },
-            "required": [
-              "publish_final_model"
-            ]
-          },
-          "then": {
-            "required": [
-              "publication_ref"
-            ]
-          }
-        },
-        {
-          "if": {
-            "required": [
-              "publication_ref"
-            ]
-          },
-          "then": {
-            "properties": {
-              "publish_final_model": {
-                "const": true
-              }
-            },
-            "required": [
-              "publish_final_model"
-            ]
-          }
-        }
-      ]
-    },
-    "contentDigest": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{64}$"
+      }
     }
   }
 }

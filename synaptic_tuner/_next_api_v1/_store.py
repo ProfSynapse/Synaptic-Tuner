@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterator
 
+from ._workloads import CanonicalWorkload, decode_sft_workload
 from ._log_policy import (
     EventCode, LogLevel, MAX_QUERY_LIMIT, MAX_RETAINED_BYTES,
     MAX_RETAINED_RECORDS, MessageCode, checked_log_fields,
@@ -27,9 +28,9 @@ from .execution import (
 )
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 APPLICATION_ID = 0x53594E4A
-SCHEMA_DESCRIPTOR = "synaptic.jobstore/sqlite/v2:grants,runs,effects,observations,state_events,logs,log_meta,cursors"
+SCHEMA_DESCRIPTOR = "synaptic.jobstore/sqlite/v3:grants,workloads,runs,effects,observations,state_events,logs,log_meta,cursors"
 MAX_CURSOR_ROWS_PER_RUN = 1024
 CURSOR_TTL_SECONDS = 86_400
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
@@ -139,6 +140,7 @@ class SubmissionClaim:
     identity: EffectIdentity
     new_claim: bool
     state: RunState
+    workload: CanonicalWorkload
 
 
 @dataclass(frozen=True, slots=True)
@@ -467,13 +469,20 @@ class JobStore:
               issued_at TEXT NOT NULL, expires_at TEXT NOT NULL,
               consumed_run_id TEXT UNIQUE, consumed_at TEXT
             );
+            CREATE TABLE workloads (
+              workload_digest TEXT PRIMARY KEY, schema_version TEXT NOT NULL,
+              entrypoint TEXT NOT NULL, canonical_bytes BLOB NOT NULL,
+              byte_length INTEGER NOT NULL CHECK(byte_length BETWEEN 1 AND 65536),
+              CHECK(length(canonical_bytes)=byte_length)
+            );
             CREATE TABLE runs (
               run_id TEXT PRIMARY KEY, project_ref TEXT NOT NULL,
               principal_ref TEXT NOT NULL, provider TEXT NOT NULL,
               account_ref TEXT NOT NULL, namespace_ref TEXT NOT NULL,
               operation_key TEXT NOT NULL, plan_fingerprint TEXT NOT NULL,
-              canonical_plan TEXT NOT NULL, source_digest TEXT NOT NULL,
-              workload_digest TEXT NOT NULL, artifact_slot_ref TEXT NOT NULL,
+              source_digest TEXT NOT NULL,
+              workload_digest TEXT NOT NULL REFERENCES workloads(workload_digest),
+              artifact_slot_ref TEXT NOT NULL,
               grant_digest TEXT NOT NULL UNIQUE REFERENCES grants(grant_digest),
               state TEXT NOT NULL, artifact_state TEXT NOT NULL,
               revision INTEGER NOT NULL, message_code TEXT,
@@ -658,8 +667,10 @@ class JobStore:
         grant: ExecutionGrant,
         binding: GrantBinding,
         *,
-        canonical_plan: str,
+        workload: CanonicalWorkload,
     ) -> SubmissionClaim:
+        if not isinstance(workload, CanonicalWorkload) or workload.digest != binding.workload_digest:
+            raise GrantRejected("grant binding does not match canonical workload")
         now = self._now()
         grant_digest = _digest("synaptic.execution-grant/v1", grant.grant_ref)
         with self._transaction() as connection:
@@ -688,9 +699,12 @@ class JobStore:
                 if existing["plan_fingerprint"] != binding.plan_fingerprint or existing["grant_digest"] != grant_digest:
                     raise OperationConflict("operation key is already bound differently")
                 effect = self._effect_row(connection, existing["run_id"], EffectKind.SUBMIT)
+                stored = self._workload_row(connection, existing["workload_digest"])
+                if stored.canonical_bytes != workload.canonical_bytes:
+                    raise CorruptStore("workload digest collision or replay byte mismatch")
                 return SubmissionClaim(
                     RunRef(existing["run_id"], existing["project_ref"]),
-                    self._identity_from_row(effect), False, RunState(existing["state"]),
+                    self._identity_from_row(effect), False, RunState(existing["state"]), stored,
                 )
             if row["consumed_run_id"] is not None:
                 raise GrantRejected("grant has already been consumed")
@@ -702,11 +716,19 @@ class JobStore:
                           binding.scope.namespace_ref, binding.operation_key, EffectKind.SUBMIT.value)),
             )
             connection.execute(
-                """INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                "INSERT OR IGNORE INTO workloads VALUES (?,?,?,?,?)",
+                (workload.digest, workload.document["schema_version"], workload.document["entrypoint"],
+                 sqlite3.Binary(workload.canonical_bytes), len(workload.canonical_bytes)),
+            )
+            stored_workload = self._workload_row(connection, workload.digest)
+            if stored_workload.canonical_bytes != workload.canonical_bytes:
+                raise CorruptStore("workload digest collision or post-write byte mismatch")
+            connection.execute(
+                """INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (run_id, access.project_ref, access.principal_ref, binding.scope.provider,
                  binding.scope.account_ref, binding.scope.namespace_ref, binding.operation_key,
-                 binding.plan_fingerprint, canonical_plan, binding.source_digest,
-                 binding.workload_digest, binding.artifact_slot_ref, grant_digest,
+                 binding.plan_fingerprint, binding.source_digest, binding.workload_digest,
+                 binding.artifact_slot_ref, grant_digest,
                  RunState.SUBMITTING.value, ArtifactVerificationState.PENDING.value,
                  1, MessageCode.AUTHORITY_CONSUMED.value, now, now),
             )
@@ -728,8 +750,30 @@ class JobStore:
             return SubmissionClaim(
                 RunRef(run_id, access.project_ref),
                 EffectIdentity(effect_id, effect_key, EffectKind.SUBMIT, binding.scope),
-                True, RunState.SUBMITTING,
+                True, RunState.SUBMITTING, stored_workload,
             )
+
+    @staticmethod
+    def _workload_row(connection: sqlite3.Connection, digest: str) -> CanonicalWorkload:
+        row = connection.execute(
+            "SELECT schema_version,entrypoint,canonical_bytes,byte_length FROM workloads WHERE workload_digest=?", (digest,)
+        ).fetchone()
+        if row is None:
+            raise CorruptStore("required workload record is missing")
+        payload = bytes(row["canonical_bytes"])
+        if len(payload) != row["byte_length"]:
+            raise CorruptStore("stored workload byte length mismatch")
+        try:
+            workload = decode_sft_workload(payload)
+        except (TypeError, ValueError) as exc:
+            raise CorruptStore("stored workload bytes are invalid") from exc
+        if workload.digest != digest:
+            raise CorruptStore("stored workload digest mismatch")
+        if (row["schema_version"], row["entrypoint"]) != (
+            workload.document["schema_version"], workload.document["entrypoint"]
+        ):
+            raise CorruptStore("stored workload identity columns mismatch")
+        return workload
 
     @staticmethod
     def _effect_row(connection: sqlite3.Connection, run_id: str, kind: EffectKind) -> sqlite3.Row:
@@ -759,6 +803,8 @@ class JobStore:
         with self._transaction() as connection:
             row = self._owned_run(connection, access, run)
             effect = self._effect_row(connection, row["run_id"], kind)
+            if kind is EffectKind.SUBMIT:
+                self._workload_row(connection, row["workload_digest"])
             if effect["status"] != "claimed":
                 raise InvalidTransition("effect is not claimable")
             state = RunState.SUBMITTING if kind is EffectKind.SUBMIT else RunState.CANCELLING

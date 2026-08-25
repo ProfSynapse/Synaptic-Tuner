@@ -5,19 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
+from ._compiled_plan import ProductionCompilationUnavailable, ProductionCompiledTrainingPlan
 from ._log_policy import MessageCode
+from ._workloads import decode_sft_workload, require_live_verified
 from ._provider import (
     AuthenticationUnavailable, CancelRequest, DefinitiveNoEffect,
     EffectKind, EffectObservation, EffectOutcomeUnknown, EffectReceipt,
     ExecutionProvider, LookupResult, ProtocolViolation, ProviderAuth,
-    ProviderRunState, ProviderUnavailable, SubmitRequest,
+    ProviderRunState, ProviderUnavailable, SubmitRequest, VerifiedWorkload,
 )
 from ._store import GrantBinding, InvalidTransition, JobStore, SubmissionClaim
 from .execution import (
     AccessContext, CancelResult, ExecutionGrant, LogCursor, LogPage, RunRef,
     RunState, RunStatus,
 )
-from .training import TrainingPlan
 
 
 class ProviderNotConfigured(RuntimeError):
@@ -82,17 +83,26 @@ class JobService:
             raise AuthenticationUnavailable("provider/auth/effect scope mismatch")
 
     def start(
-        self, access: AccessContext, plan: TrainingPlan, grant: ExecutionGrant,
+        self, access: AccessContext, plan: ProductionCompiledTrainingPlan, grant: ExecutionGrant,
         binding: GrantBinding, auth: ProviderAuth,
     ) -> StartResult:
         self._store
+        if not isinstance(plan, ProductionCompiledTrainingPlan):
+            raise ProductionCompilationUnavailable(
+                "live start requires the future production compiler/resolver"
+            )
+        raise ProductionCompilationUnavailable("production start is unavailable")
+        authoritative = decode_sft_workload(plan.workload.canonical_bytes)
+        if authoritative.digest != plan.workload.digest or authoritative.canonical_bytes != plan.workload.canonical_bytes:
+            raise ValueError("training plan workload bytes are not authoritative")
+        provenance = require_live_verified(plan.provenance)
         provider = self._provider(binding.scope.provider)
         if provider.scope != binding.scope:
             raise ProviderNotConfigured("execution scope is not configured")
         if binding.plan_fingerprint != plan.fingerprint:
             raise ValueError("grant binding does not match training plan")
         claim = self._store.claim_submission(
-            access, grant, binding, canonical_plan=_canonical_plan(plan)
+            access, grant, binding, workload=plan.workload
         )
         if not claim.new_claim:
             return StartResult(claim.run, claim.state, True)
@@ -106,7 +116,7 @@ class JobService:
         started = self._store.mark_effect_started(access, claim.run, EffectKind.SUBMIT)
         request = SubmitRequest(
             started.identity, plan.fingerprint, plan.source_digest,
-            plan.workload_digest, plan.artifact_slot_ref,
+            VerifiedWorkload(claim.workload, provenance), plan.artifact_slot_ref,
         )
         try:
             self._validate_call_boundary(provider, auth, started.identity.scope)
@@ -300,12 +310,6 @@ class JobService:
                           message: MessageCode) -> CancelResult:
         status = self._ambiguous(access, run, EffectKind.CANCEL, message)
         return CancelResult(run, status.state, False, status.message_code)
-
-
-def _canonical_plan(plan: TrainingPlan) -> str:
-    import json
-    return json.dumps(plan.to_dict(), sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False, allow_nan=False)
 
 
 __all__ = ["JobService", "JobStoreUnconfigured", "ProviderNotConfigured", "StartResult"]

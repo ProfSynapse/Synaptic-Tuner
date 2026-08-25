@@ -13,6 +13,9 @@ from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum
 from typing import Any, Mapping, Protocol, runtime_checkable
 
+from ._workloads import CanonicalWorkload, FixtureVerified, LiveVerified
+from .methods.sft import SFTSpec
+
 from .execution import (
     AccessContext, ArtifactRef, AuthorizationRequirement, ExecutionGrant,
     RunRef, RunState, RunStatus,
@@ -296,8 +299,7 @@ class TrainingRequest:
     method: TrainingMethod
     model: ModelSpec
     dataset: DatasetSpec
-    parameters: TrainingParameters
-    adapter: AdapterSpec
+    sft: SFTSpec
     execution: ExecutionSpec
     artifacts: ArtifactPolicy = ArtifactPolicy()
     schema_version: str = TRAINING_SCHEMA_VERSION
@@ -307,8 +309,7 @@ class TrainingRequest:
         _require_type(self.method, TrainingMethod, "method")
         _require_type(self.model, ModelSpec, "model")
         _require_type(self.dataset, DatasetSpec, "dataset")
-        _require_type(self.parameters, TrainingParameters, "parameters")
-        _require_type(self.adapter, AdapterSpec, "adapter")
+        _require_type(self.sft, SFTSpec, "sft")
         _require_type(self.execution, ExecutionSpec, "execution")
         _require_type(self.artifacts, ArtifactPolicy, "artifacts")
         if self.schema_version != TRAINING_SCHEMA_VERSION or self.kind != TRAINING_KIND:
@@ -384,12 +385,12 @@ class TrainingPlan:
     method: TrainingMethod
     model: ModelSpec
     dataset: DatasetSpec
-    parameters: TrainingParameters
-    adapter: AdapterSpec
+    sft: SFTSpec
     execution: ExecutionSpec
     artifacts: ArtifactPolicy
     source_digest: str
-    workload_digest: str
+    workload: CanonicalWorkload
+    provenance: LiveVerified | FixtureVerified
     artifact_slot_ref: str
     quote_ref: str | None
     authorization: tuple[AuthorizationRequirement, ...]
@@ -398,8 +399,7 @@ class TrainingPlan:
         _require_type(self.method, TrainingMethod, "method")
         _require_type(self.model, ModelSpec, "model")
         _require_type(self.dataset, DatasetSpec, "dataset")
-        _require_type(self.parameters, TrainingParameters, "parameters")
-        _require_type(self.adapter, AdapterSpec, "adapter")
+        _require_type(self.sft, SFTSpec, "sft")
         _require_type(self.execution, ExecutionSpec, "execution")
         _require_type(self.artifacts, ArtifactPolicy, "artifacts")
         if self.model.revision is None or self.model.tokenizer_revision is None:
@@ -417,9 +417,10 @@ class TrainingPlan:
             raise ValueError("plan requires resolved execution runtime image and dependency lock")
         _validate_runtime_image_binding(self.execution)
         object.__setattr__(self, "source_digest", _canonical_digest(self.source_digest, "source_digest"))
-        object.__setattr__(
-            self, "workload_digest", _canonical_digest(self.workload_digest, "workload_digest")
-        )
+        if not isinstance(self.workload, CanonicalWorkload):
+            raise TypeError("workload must be CanonicalWorkload")
+        if not isinstance(self.provenance, (LiveVerified, FixtureVerified)):
+            raise TypeError("provenance must be sealed live or fixture provenance")
         object.__setattr__(
             self, "artifact_slot_ref", _required(self.artifact_slot_ref, "artifact_slot_ref")
         )
@@ -430,7 +431,15 @@ class TrainingPlan:
         object.__setattr__(self, "authorization", authorization)
 
     def to_dict(self) -> dict[str, Any]:
-        return _canonical_value(self)
+        result = _canonical_value(self)
+        result["workload"] = self.workload.document
+        result["workload_digest"] = self.workload.digest
+        result["provenance"] = self.workload.document["provenance"]
+        return result
+
+    @property
+    def workload_digest(self) -> str:
+        return self.workload.digest
 
     @property
     def fingerprint(self) -> str:
@@ -499,6 +508,10 @@ class TrainingAPI(Protocol):
 
 
 def _canonical_value(value: Any) -> Any:
+    if isinstance(value, CanonicalWorkload):
+        return dict(value.document)
+    if isinstance(value, (LiveVerified, FixtureVerified)):
+        return {"class": "live_verified" if isinstance(value, LiveVerified) else "fixture_verified"}
     if isinstance(value, Enum):
         return value.value
     if is_dataclass(value) and not isinstance(value, type):

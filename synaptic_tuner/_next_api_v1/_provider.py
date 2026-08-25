@@ -7,6 +7,8 @@ from enum import Enum
 import re
 from typing import Protocol, runtime_checkable
 
+from ._workloads import CanonicalWorkload, LiveVerified, require_live_verified
+
 
 _SAFE_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,255}")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
@@ -92,19 +94,56 @@ class ProviderJobRef:
         object.__setattr__(self, "provider_job_id", _safe_ref(self.provider_job_id, "provider_job_id"))
 
 
+_STAGING_SEAL = object()
+
+
+class _ProviderStagingCapability:
+    __slots__ = ("_seal",)
+
+    def __init__(self, seal: object = None) -> None:
+        if seal is not _STAGING_SEAL:
+            raise TypeError("provider staging capabilities are production-composition values")
+        self._seal = seal
+
+
+class VerifiedWorkload:
+    """Redacted transport; canonical bytes require a staging capability."""
+
+    __slots__ = ("_workload",)
+
+    def __init__(self, workload: CanonicalWorkload, provenance: LiveVerified) -> None:
+        require_live_verified(provenance)
+        if not isinstance(workload, CanonicalWorkload):
+            raise TypeError("workload must be CanonicalWorkload")
+        self._workload = workload
+
+    @property
+    def digest(self) -> str:
+        return self._workload.digest
+
+    def bytes_for_staging(self, capability: object) -> bytes:
+        if not isinstance(capability, _ProviderStagingCapability) or capability._seal is not _STAGING_SEAL:
+            raise TypeError("canonical workload bytes require provider staging authority")
+        return self._workload.canonical_bytes
+
+    def __repr__(self) -> str:
+        return f"VerifiedWorkload(digest={self.digest!r}, payload=<redacted>)"
+
 @dataclass(frozen=True, slots=True)
 class SubmitRequest:
     identity: EffectIdentity
     plan_fingerprint: str
     source_digest: str
-    workload_digest: str
+    workload: VerifiedWorkload
     artifact_slot_ref: str
 
     def __post_init__(self) -> None:
         if not isinstance(self.identity, EffectIdentity):
             raise TypeError("identity must be EffectIdentity")
-        for name in ("plan_fingerprint", "source_digest", "workload_digest"):
+        for name in ("plan_fingerprint", "source_digest"):
             object.__setattr__(self, name, _digest(getattr(self, name), name))
+        if not isinstance(self.workload, VerifiedWorkload):
+            raise TypeError("workload must be VerifiedWorkload")
         object.__setattr__(self, "artifact_slot_ref", _safe_ref(self.artifact_slot_ref, "artifact_slot_ref"))
 
 
@@ -242,5 +281,5 @@ __all__ = [
     "EffectIdentity", "EffectKind", "EffectObservation", "EffectOutcomeUnknown",
     "EffectReceipt", "ExecutionProvider", "ExecutionScope", "LookupResult",
     "ProtocolViolation", "ProviderAuth", "ProviderJobRef", "ProviderRunState",
-    "ProviderUnavailable", "RunObservation", "SubmitRequest",
+    "ProviderUnavailable", "RunObservation", "SubmitRequest", "VerifiedWorkload",
 ]
