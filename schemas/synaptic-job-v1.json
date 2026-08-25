@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-job-v1.json",
+  "title": "Separately Entitled Synaptic Administrative Job v1",
+  "description": "Validation does not confer entitlement or enable submission.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "name",
+    "source",
+    "command",
+    "execution",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "synaptic.job/v1"
+    },
+    "kind": {
+      "const": "job"
+    },
+    "name": {
+      "$ref": "#/$defs/nonEmpty"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "command": {
+      "$ref": "#/$defs/command"
+    },
+    "execution": {
+      "$ref": "#/$defs/execution"
+    },
+    "artifacts": {
+      "$ref": "#/$defs/artifacts"
+    }
+  },
+  "$defs": {
+    "nonEmpty": {
+      "type": "string",
+      "minLength": 1
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "commit"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "commit": {
+          "$ref": "#/$defs/digest"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entrypoint_profile_ref",
+        "arguments"
+      ],
+      "properties": {
+        "entrypoint_profile_ref": {
+          "type": "string",
+          "pattern": "^entrypoint-profile://approved/(?!.*[bB][aA][sS][hH])[A-Za-z0-9._-]+$"
+        },
+        "arguments": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "parameter_ref"
+                ],
+                "properties": {
+                  "parameter_ref": {
+                    "type": "string",
+                    "pattern": "^parameter://[A-Za-z0-9_-]+(?:/[A-Za-z0-9._-]+)*$"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "secret_ref"
+                ],
+                "properties": {
+                  "secret_ref": {
+                    "type": "string",
+                    "pattern": "^secret://[A-Za-z0-9_-]+(?:/[A-Za-z0-9._-]+)*$"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "image",
+        "image_digest",
+        "cpu",
+        "memory_mb",
+        "disk_mb",
+        "process_limit",
+        "timeout_seconds",
+        "network_policy",
+        "secret_refs"
+      ],
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "image": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "image_digest": {
+          "$ref": "#/$defs/imageDigest"
+        },
+        "accelerator": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "accelerator_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "cpu": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "memory_mb": {
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 2097152
+        },
+        "disk_mb": {
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 16777216
+        },
+        "process_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        },
+        "network_policy": {
+          "enum": [
+            "none",
+            "allowlisted"
+          ]
+        },
+        "network_allowlist": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "uniqueItems": true,
+          "maxItems": 64
+        },
+        "secret_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(secret|credential)://[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true,
+          "maxItems": 32
+        },
+        "mount_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(input|artifact)://[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true,
+          "maxItems": 32
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "network_policy": {
+                "const": "none"
+              }
+            },
+            "required": [
+              "network_policy"
+            ]
+          },
+          "then": {
+            "properties": {
+              "network_allowlist": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "network_policy": {
+                "const": "allowlisted"
+              }
+            },
+            "required": [
+              "network_policy"
+            ]
+          },
+          "then": {
+            "required": [
+              "network_allowlist"
+            ]
+          }
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_artifacts"
+      ],
+      "properties": {
+        "required_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "uniqueItems": true,
+          "maxItems": 256
+        },
+        "publication_ref": {
+          "type": "string",
+          "pattern": "^publication://[A-Za-z0-9._/-]+$"
+        }
+      }
+    },
+    "imageDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "x-synaptic-enabled-by-default": false
+}

@@ -1,0 +1,344 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-training-v1.json",
+  "title": "Synaptic Training Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "method",
+    "model",
+    "dataset",
+    "parameters",
+    "adapter",
+    "execution",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "synaptic.training/v1"
+    },
+    "kind": {
+      "const": "training"
+    },
+    "method": {
+      "enum": [
+        "sft",
+        "kto",
+        "grpo",
+        "embedding"
+      ]
+    },
+    "model": {
+      "$ref": "#/$defs/model"
+    },
+    "dataset": {
+      "$ref": "#/$defs/dataset"
+    },
+    "parameters": {
+      "$ref": "#/$defs/parameters"
+    },
+    "adapter": {
+      "$ref": "#/$defs/adapter"
+    },
+    "execution": {
+      "$ref": "#/$defs/execution"
+    },
+    "artifacts": {
+      "$ref": "#/$defs/artifacts"
+    }
+  },
+  "$defs": {
+    "nonEmpty": {
+      "type": "string",
+      "minLength": 1
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identifier"
+      ],
+      "properties": {
+        "identifier": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "revision": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "tokenizer_revision": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "trust_remote_code": {
+          "const": false
+        }
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identifier"
+      ],
+      "properties": {
+        "identifier": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "revision": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "split": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "file": {
+          "$ref": "#/$defs/nonEmpty"
+        }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "num_train_epochs"
+          ]
+        },
+        {
+          "required": [
+            "max_steps"
+          ]
+        }
+      ],
+      "properties": {
+        "num_train_epochs": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_steps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "per_device_train_batch_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "gradient_accumulation_steps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "learning_rate": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_seq_length": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warmup_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "weight_decay": {
+          "type": "number",
+          "minimum": 0
+        },
+        "packing": {
+          "type": "boolean"
+        },
+        "beta": {
+          "type": "number",
+          "minimum": 0
+        },
+        "num_generations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0
+        },
+        "margin": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "none",
+            "full",
+            "lora",
+            "qlora",
+            "frozen_head"
+          ]
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "alpha": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "dropout": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "target_modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "uniqueItems": true
+        },
+        "use_rslora": {
+          "type": "boolean"
+        },
+        "use_dora": {
+          "type": "boolean"
+        },
+        "init": {
+          "$ref": "#/$defs/nonEmpty"
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider"
+      ],
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "accelerator": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "accelerator_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "runtime_image": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "runtime_image_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "dependency_lock_digest": {
+          "$ref": "#/$defs/contentDigest"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maximum_cost_minor_units": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "allowed_secret_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(secret|credential)://[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "dependentRequired": {
+        "maximum_cost_minor_units": [
+          "currency"
+        ],
+        "currency": [
+          "maximum_cost_minor_units"
+        ]
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "retain_checkpoints": {
+          "type": "boolean"
+        },
+        "publish_final_model": {
+          "type": "boolean"
+        },
+        "publication_ref": {
+          "type": "string",
+          "pattern": "^publication://[A-Za-z0-9._/-]+$"
+        },
+        "required_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "publish_final_model": {
+                "const": true
+              }
+            },
+            "required": [
+              "publish_final_model"
+            ]
+          },
+          "then": {
+            "required": [
+              "publication_ref"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "publication_ref"
+            ]
+          },
+          "then": {
+            "properties": {
+              "publish_final_model": {
+                "const": true
+              }
+            },
+            "required": [
+              "publish_final_model"
+            ]
+          }
+        }
+      ]
+    },
+    "contentDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
