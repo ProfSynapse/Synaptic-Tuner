@@ -12,11 +12,7 @@ dataset:
   file: nonthinking_tools_sft_04.22.26.jsonl
 
 training:
-  epochs: 1
-  batch_size: 2
-  learning_rate: 0.0002
   max_steps: 5
-  max_seq_length: 512
 
 job:
   gpu: L4

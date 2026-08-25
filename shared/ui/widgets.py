@@ -4,6 +4,7 @@ Advanced UI Widgets for Synaptic Tuner
 Provides spinners, file pickers, fuzzy search, sparklines, and more.
 """
 
+import math
 import os
 import sys
 import logging
@@ -381,15 +382,22 @@ def sparkline(values: List[float], width: int = 20) -> str:
         step = len(values) / width
         values = [values[int(i * step)] for i in range(width)]
 
-    # Normalize to 0-7 range
-    min_val = min(values)
-    max_val = max(values)
+    # A non-finite metric is diagnostic data, not a reason to crash training.
+    finite_values = [value for value in values if math.isfinite(value)]
+    if not finite_values:
+        return "·" * len(values)
+
+    # Normalize finite values to 0-7 and preserve non-finite positions.
+    min_val = min(finite_values)
+    max_val = max(finite_values)
     range_val = max_val - min_val if max_val != min_val else 1
 
-    normalized = [(v - min_val) / range_val for v in values]
-    indices = [min(7, int(v * 7.99)) for v in normalized]
-
-    return "".join(chars[i] for i in indices)
+    return "".join(
+        "·"
+        if not math.isfinite(value)
+        else chars[min(7, int(((value - min_val) / range_val) * 7.99))]
+        for value in values
+    )
 
 
 def sparkline_with_labels(
