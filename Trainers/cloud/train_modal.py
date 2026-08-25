@@ -311,10 +311,7 @@ def run_training(
     ])
 
     if model_name:
-        # Model name override requires modifying config before training.
-        # For now, this is noted as a future enhancement -- the config.yaml
-        # in the repo should be pre-configured with the desired model.
-        print(f"[Modal] Note: model_name override '{model_name}' requires config.yaml update")
+        cmd.extend(["--model-name", model_name])
 
     if dataset_path:
         # Convert relative dataset path to absolute within the workspace

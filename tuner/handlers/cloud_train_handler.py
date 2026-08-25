@@ -244,17 +244,6 @@ class CloudTrainHandler(BaseHandler):
             print_error(f"Cloud source preflight failed: {exc}")
             return 1
 
-        # Source preflight establishes what would run, but does not authorize
-        # provider interaction. Fail closed before capability probes, menus,
-        # SDK/backend construction, credential resolution, or compilation.
-        try:
-            require_current_hf_source_submission_authorization(
-                route="cloud-train.handle"
-            )
-        except CloudProviderError as exc:
-            print_error(f"Cloud launch authorization failed: {exc}")
-            return 1
-
         # Step 1: Check provider availability
         providers = self._get_provider_status()
 
@@ -281,6 +270,18 @@ class CloudTrainHandler(BaseHandler):
                 f"  Install with: {info['install_hint']}"
             )
             return 1
+
+        # The exact-run authorization barrier belongs only to HF's protected
+        # source-volume route. Other providers retain the same source lock and
+        # checkout policy without inheriting an HF-specific launch gate.
+        if provider_choice == "hf_jobs":
+            try:
+                require_current_hf_source_submission_authorization(
+                    route="cloud-train.handle"
+                )
+            except CloudProviderError as exc:
+                print_error(f"Cloud launch authorization failed: {exc}")
+                return 1
 
         # Step 4: Get backend and validate environment
         try:

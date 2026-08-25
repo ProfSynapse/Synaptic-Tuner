@@ -328,12 +328,15 @@ class TestCloudTrainHandler:
         assert status["providers"][0]["env_ready"] is False
         get_backend.assert_not_called()
 
-    def test_launch_authorization_precedes_provider_probe_and_menu(self, capsys):
-        from tuner.core.exceptions import CloudProviderError
-
-        args = Namespace(json=False)
+    def test_modal_launch_preserves_source_contract_without_hf_barrier(self):
+        args = Namespace(json=False, auto_confirm=True)
         handler = self._make_handler(args)
-        events = []
+        events: list[str] = []
+        backend = MagicMock()
+        backend.validate_environment.return_value = (True, "")
+        backend.get_available_methods.return_value = ["sft"]
+        backend.load_config.return_value = MagicMock()
+        backend.execute.return_value = 0
 
         with patch.object(
             handler,
@@ -341,57 +344,70 @@ class TestCloudTrainHandler:
             side_effect=lambda: events.append("source_preflight") or (object(), object(), object()),
         ), patch(
             "tuner.handlers.cloud_train_handler.require_current_hf_source_submission_authorization",
-            side_effect=lambda **_kwargs: events.append("authorization_barrier")
-            or (_ for _ in ()).throw(CloudProviderError("approval required")),
-        ), patch.object(
+            side_effect=AssertionError("Modal inherited the HF authorization barrier"),
+        ) as barrier, patch.object(
             handler,
             "_get_provider_status",
-            side_effect=AssertionError("provider status ran before authorization"),
-        ) as get_status, patch(
+            side_effect=lambda: events.append("provider_status") or [{
+                "id": "modal", "name": "Modal", "registered": True,
+                "env_ready": True, "detail": "",
+            }],
+        ), patch(
+            "tuner.handlers.cloud_train_handler.print_menu",
+            side_effect=lambda *_args, **_kwargs: events.append("provider_menu") or "modal",
+        ), patch(
             "tuner.handlers.cloud_train_handler.TrainingBackendRegistry.get",
-            side_effect=AssertionError("backend constructed before authorization"),
-        ) as get_backend, patch(
-            "tuner.handlers.cloud_train_handler.print_menu",
-            side_effect=AssertionError("provider menu shown before authorization"),
-        ) as print_provider_menu:
-            code = handler.handle()
-
-        assert code == 1
-        assert events == ["source_preflight", "authorization_barrier"]
-        get_status.assert_not_called()
-        get_backend.assert_not_called()
-        print_provider_menu.assert_not_called()
-        assert "approval required" in capsys.readouterr().out
-
-    def test_launch_orders_barrier_before_provider_probe_and_menu(self):
-        args = Namespace(json=False)
-        handler = self._make_handler(args)
-        events = []
-
-        with patch.object(
-            handler,
-            "_prepare_source_contract",
-            side_effect=lambda: events.append("source_preflight") or (object(), object(), object()),
-        ), patch(
-            "tuner.handlers.cloud_train_handler.require_current_hf_source_submission_authorization",
-            side_effect=lambda **_kwargs: events.append("authorization_barrier"),
+            return_value=backend,
         ), patch.object(
-            handler,
-            "_get_provider_status",
-            side_effect=lambda: events.append("provider_status") or [],
-        ), patch(
-            "tuner.handlers.cloud_train_handler.print_menu",
-            side_effect=lambda *_args, **_kwargs: events.append("provider_menu") or None,
+            handler, "_build_config_display", return_value={},
         ):
             code = handler.handle()
 
         assert code == 0
+        assert events == ["source_preflight", "provider_status", "provider_menu"]
+        barrier.assert_not_called()
+        backend.execute.assert_called_once()
+
+    def test_hf_launch_barrier_runs_after_provider_choice_before_backend(self, capsys):
+        from tuner.core.exceptions import CloudProviderError
+
+        args = Namespace(json=False)
+        handler = self._make_handler(args)
+        events: list[str] = []
+
+        with patch.object(
+            handler,
+            "_prepare_source_contract",
+            side_effect=lambda: events.append("source_preflight") or (object(), object(), object()),
+        ), patch.object(
+            handler,
+            "_get_provider_status",
+            side_effect=lambda: events.append("provider_status") or [{
+                "id": "hf_jobs", "name": "HuggingFace Jobs", "registered": True,
+                "env_ready": True, "detail": "",
+            }],
+        ), patch(
+            "tuner.handlers.cloud_train_handler.print_menu",
+            side_effect=lambda *_args, **_kwargs: events.append("provider_menu") or "hf_jobs",
+        ), patch(
+            "tuner.handlers.cloud_train_handler.require_current_hf_source_submission_authorization",
+            side_effect=lambda **_kwargs: events.append("authorization_barrier")
+            or (_ for _ in ()).throw(CloudProviderError("approval required")),
+        ), patch(
+            "tuner.handlers.cloud_train_handler.TrainingBackendRegistry.get",
+            side_effect=AssertionError("HF backend constructed before authorization"),
+        ) as get_backend:
+            code = handler.handle()
+
+        assert code == 1
         assert events == [
             "source_preflight",
-            "authorization_barrier",
             "provider_status",
             "provider_menu",
+            "authorization_barrier",
         ]
+        get_backend.assert_not_called()
+        assert "approval required" in capsys.readouterr().out
 
     def test_apply_training_overrides_no_args(self):
         args = Namespace(json=True)
