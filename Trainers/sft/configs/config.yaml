@@ -89,7 +89,7 @@ training:
 dataset:
   # Dataset source
   dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
-  dataset_file: "nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3.jsonl"
+  dataset_file: "nonthinking_tools_sft_04.22.26.jsonl"
 
   # Use local file (relative to Trainers/sft/)
   # Leave null by default so cloud jobs use the HuggingFace dataset above.
