@@ -19,6 +19,7 @@ FUNCTION_FAMILY = "run_sft_v1"
 GPU = "A10"
 CONTROL_MOUNT = "/workspace/control"
 ARTIFACT_MOUNT = "/workspace/run"
+BOOTSTRAP_SOURCE_MODULES = ("tuner", "synaptic_tuner")
 _PINNED_IMAGE = re.compile(r"^\S+@sha256:[0-9a-f]{64}$")
 _SECRET_NAME = re.compile(
     r"(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIALS?)(?:_|$)"
@@ -118,8 +119,17 @@ def build_modal_deployment(
         required_keys=list(spec.runtime_secret_keys),
         client=client,
     )
-    image = sdk.Image.from_registry(spec.registry_reference).entrypoint([]).env(dict(spec.environment))
-    app = sdk.App(APP_NAME, image=image, include_source=True)
+    image = (
+        sdk.Image.from_registry(spec.registry_reference)
+        .entrypoint([])
+        .env(dict(spec.environment))
+        .add_local_python_source(
+            *BOOTSTRAP_SOURCE_MODULES,
+            copy=False,
+            ignore=[],
+        )
+    )
+    app = sdk.App(APP_NAME, image=image, include_source=False)
 
     @app.function(
         name=spec.function_name,
@@ -130,7 +140,7 @@ def build_modal_deployment(
         secrets=[secret],
         retries=0,
         timeout=spec.timeout_seconds,
-        include_source=True,
+        include_source=False,
         restrict_modal_access=True,
         single_use_containers=True,
     )
@@ -149,6 +159,7 @@ def build_modal_deployment(
 
 
 __all__ = [
-    "APP_NAME", "ARTIFACT_MOUNT", "CONTROL_MOUNT", "FUNCTION_FAMILY", "GPU",
+    "APP_NAME", "ARTIFACT_MOUNT", "BOOTSTRAP_SOURCE_MODULES", "CONTROL_MOUNT",
+    "FUNCTION_FAMILY", "GPU",
     "ModalDeploymentObjectsV1", "ModalDeploymentSpecV1", "build_modal_deployment",
 ]

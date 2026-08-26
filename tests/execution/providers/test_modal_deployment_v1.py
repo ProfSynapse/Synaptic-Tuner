@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from tuner.execution.providers.modal.deployment_v1 import (
-    APP_NAME, ARTIFACT_MOUNT, CONTROL_MOUNT,
+    APP_NAME, ARTIFACT_MOUNT, BOOTSTRAP_SOURCE_MODULES, CONTROL_MOUNT,
     ModalDeploymentSpecV1, build_modal_deployment,
 )
 from tuner.execution.providers.modal.deployment_identity import modal_function_name
@@ -31,9 +31,10 @@ class Secret:
 
 
 class ImageValue:
-    def __init__(self,reference):self.reference=reference;self.entrypoint_value=None;self.environment=None
+    def __init__(self,reference):self.reference=reference;self.entrypoint_value=None;self.environment=None;self.local_sources=None
     def entrypoint(self,value):self.entrypoint_value=value;return self
     def env(self,value):self.environment=value;return self
+    def add_local_python_source(self,*modules,**kwargs):self.local_sources=(modules,kwargs);return self
 
 
 class Image:
@@ -72,9 +73,12 @@ def test_deployment_factory_is_exact_explicit_and_does_not_submit():
         assert call.kwargs=={"environment_name":"env","create_if_missing":False,"version":1,"client":client}
     assert Secret.calls[-1].kwargs=={"environment_name":"env","required_keys":["HF_TOKEN","SYNAPTIC_EVIDENCE_MAC_KEY"],"client":client}
     assert built.image.entrypoint_value==[] and built.image.environment=={"PYTHONNOUSERSITE":"1"}
+    assert built.image.local_sources==(BOOTSTRAP_SOURCE_MODULES,{"copy":False,"ignore":[]})
+    assert built.app.kwargs["include_source"] is False
     kwargs=built.app.function_kwargs
     assert kwargs["name"]==FUNCTION_NAME and kwargs["gpu"]=="A10"
     assert kwargs["serialized"] is True
+    assert kwargs["include_source"] is False
     assert kwargs["volumes"]=={CONTROL_MOUNT:built.control_volume,ARTIFACT_MOUNT:built.artifact_volume}
     assert kwargs["retries"]==0 and kwargs["timeout"]==900
     assert kwargs["restrict_modal_access"] is True and kwargs["single_use_containers"] is True
