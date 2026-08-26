@@ -387,6 +387,16 @@ def _valid_remote_branch_ref(ref: str) -> bool:
     )
 
 
+def canonical_remote_branch_ref(branch: str) -> str:
+    """Return one exact refs/heads name or fail closed."""
+    if not isinstance(branch, str) or not branch or branch != branch.strip():
+        raise SourceLockError("pushed source requires an exact upstream branch")
+    ref = f"refs/heads/{branch}"
+    if not _valid_remote_branch_ref(ref):
+        raise SourceLockError("pushed source upstream branch is invalid")
+    return ref
+
+
 def _remote_ref_sha(location: RepositoryLocation, ref: str) -> str | None:
     """Return the exact SHA advertised by a validated origin ref, if provable."""
 

@@ -18,7 +18,8 @@ from tuner.execution.evidence import EvidenceAuthenticator, SOURCE_EVIDENCE_POLI
 from .context import ProjectContext
 from .execution_source import AuthenticatedSourceEvidenceV1, LocalSourceInspectionPort, PushedSourceVerificationPort
 from .source_bundle import (
-    RepositoryLocation, SourceLock, SourceLockError, inspect_git_source,
+    RepositoryLocation, SourceLock, SourceLockError,
+    canonical_remote_branch_ref, inspect_git_source,
     resolve_relative_repository_url,
 )
 
@@ -64,10 +65,17 @@ class GitCliLocalSourceInspector(LocalSourceInspectionPort):
         matches = []
         for section in parser.sections():
             if section.startswith('submodule "') and section.endswith('"') and parser.get(section,"path",fallback=None)==submodule_path:
-                matches.append(parser.get(section,"url",fallback=None))
-        if len(matches)!=1 or not matches[0]:
+                matches.append((
+                    parser.get(section,"url",fallback=None),
+                    parser.get(section,"branch",fallback=None),
+                ))
+        if len(matches)!=1 or not matches[0][0] or not matches[0][1]:
             raise SourceLockError("engine submodule path is not uniquely committed")
-        committed_location = resolve_relative_repository_url(matches[0], project_source.location)
+        committed_url, committed_branch = matches[0]
+        canonical_remote_branch_ref(committed_branch)
+        committed_location = resolve_relative_repository_url(
+            committed_url, project_source.location
+        )
         raw_tree = _local_git(project,"ls-tree","-z","HEAD","--",submodule_path)
         records=[record for record in raw_tree.split(b"\0") if record]
         if len(records)!=1:
@@ -79,8 +87,13 @@ class GitCliLocalSourceInspector(LocalSourceInspectionPort):
         if mode!="160000" or kind!="commit" or path.decode("utf-8")!=submodule_path:
             raise SourceLockError("committed engine gitlink is malformed")
         engine_source=inspect_git_source(engine,submodule_path=submodule_path,gitlink_commit=gitlink,remote_proof=lambda *_:False)
-        if engine_source.location.canonical_url!=committed_location.canonical_url or engine_source.commit.lower()!=gitlink.lower():
+        if (
+            engine_source.location.canonical_url != committed_location.canonical_url
+            or engine_source.commit.lower() != gitlink.lower()
+            or engine_source.branch not in {None, committed_branch}
+        ):
             raise SourceLockError("engine checkout differs from committed submodule identity")
+        engine_source = replace(engine_source, branch=committed_branch)
         return SourceLock(run_id="local-inspection",mode="superproject",project_source=project_source,engine_source=engine_source,project={},configuration={})
 
 
@@ -97,8 +110,7 @@ class GitLsRemotePushedCommitVerifier(PushedSourceVerificationPort):
         self.runner=runner;self.authenticator=authenticator;self.clock=clock;self.audience_ref=audience_ref;self.issuer_ref=issuer_ref;self.key_ref=key_ref;self.challenge_factory=challenge_factory;self.evidence_ref_factory=evidence_ref_factory
 
     def _verify_ref(self,source)->None:
-        if not source.branch:raise SourceLockError("pushed source requires an exact upstream branch")
-        ref=f"refs/heads/{source.branch}"
+        ref=canonical_remote_branch_ref(source.branch)
         try:raw=self.runner.read_ref(canonical_url=source.location.canonical_url,exact_ref=ref)
         except Exception as exc:raise SourceLockError("authenticated remote ref verification failed") from exc
         if not isinstance(raw,bytes) or len(raw)>4096:raise SourceLockError("remote ref proof is malformed")
