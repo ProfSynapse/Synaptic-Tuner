@@ -116,13 +116,20 @@ _RUNTIME_STAGE_EXITS = {
     "runtime_trainer_failed": 23,
     "runtime_evidence_rejected": 24,
     "runtime_artifact_rejected": 25,
+    "runtime_workload_document_rejected": 30,
+    "runtime_workload_engine_rejected": 31,
+    "runtime_workload_schema_rejected": 32,
+    "runtime_workload_reconstruction_rejected": 33,
+    "runtime_workload_fingerprint_rejected": 34,
+    "runtime_workload_roots_rejected": 35,
 }
 
 
 def _mark_runtime_stage(error: RuntimeV1Error, diagnostic_code: str) -> RuntimeV1Error:
     if diagnostic_code not in _RUNTIME_STAGE_EXITS:
         raise ValueError("runtime diagnostic stage is invalid")
-    error.diagnostic_code = diagnostic_code
+    if not isinstance(getattr(error, "diagnostic_code", None), str):
+        error.diagnostic_code = diagnostic_code
     return error
 
 
@@ -522,35 +529,44 @@ def decode_and_validate_workload(
     *,
     engine_file: Path,
 ) -> tuple[object, RuntimeRoots]:
-    document = _canonical_document(payload)
-    provisional_engine = environment.get("SYNAPTIC_ENGINE_ROOT", "")
-    if not provisional_engine or not Path(provisional_engine).is_absolute():
-        raise RuntimeV1Error("engine root is unavailable")
-    provisional_path = Path(provisional_engine)
-    _assert_no_redirected_components(provisional_path)
     try:
-        engine_root = provisional_path.resolve(strict=True)
-    except OSError as exc:
-        raise RuntimeV1Error("engine root is unavailable") from exc
-    expected_entrypoint = engine_root / Path(*_ENTRYPOINT.parts)
-    if _require_contained_regular(
-        engine_file, engine_root, label="runtime entrypoint"
-    ) != _require_contained_regular(
-        expected_entrypoint, engine_root, label="runtime entrypoint"
-    ):
-        raise RuntimeV1Error("engine root does not own this runtime entrypoint")
-    _ensure_engine_import(engine_root)
-    _validate_schema(document, engine_root)
+        document = _canonical_document(payload)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_document_rejected")
+    try:
+        provisional_engine = environment.get("SYNAPTIC_ENGINE_ROOT", "")
+        if not provisional_engine or not Path(provisional_engine).is_absolute():
+            raise RuntimeV1Error("engine root is unavailable")
+        provisional_path = Path(provisional_engine)
+        _assert_no_redirected_components(provisional_path)
+        try:
+            engine_root = provisional_path.resolve(strict=True)
+        except OSError as exc:
+            raise RuntimeV1Error("engine root is unavailable") from exc
+        expected_entrypoint = engine_root / Path(*_ENTRYPOINT.parts)
+        if _require_contained_regular(
+            engine_file, engine_root, label="runtime entrypoint"
+        ) != _require_contained_regular(
+            expected_entrypoint, engine_root, label="runtime entrypoint"
+        ):
+            raise RuntimeV1Error("engine root does not own this runtime entrypoint")
+        _ensure_engine_import(engine_root)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_engine_rejected")
+    try:
+        _validate_schema(document, engine_root)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_schema_rejected")
     from synaptic_tuner.api.v1.training import CanonicalDocument
     from tuner.project.execution_source import ExecutionSourceV1
     from tuner.training.methods.sft import compile_sft_workload
 
-    configuration = document.get("configuration")
-    if not isinstance(configuration, Mapping) or not isinstance(
-        configuration.get("document"), Mapping
-    ):
-        raise RuntimeV1Error("workload configuration is invalid")
     try:
+        configuration = document.get("configuration")
+        if not isinstance(configuration, Mapping) or not isinstance(
+            configuration.get("document"), Mapping
+        ):
+            raise RuntimeV1Error("workload configuration is invalid")
         resolved_config = CanonicalDocument.from_mapping(configuration["document"])
         revision = hashlib.sha256(
             resolved_config.canonical_json.encode("utf-8")
@@ -562,14 +578,29 @@ def decode_and_validate_workload(
             resolved_config=resolved_config,
             execution_source=execution_source,
         )
+        if workload.canonical_bytes != payload:
+            raise RuntimeV1Error("workload bytes do not match deterministic compilation")
     except (TypeError, ValueError) as exc:
-        raise RuntimeV1Error("workload could not be reconstructed") from exc
-    if workload.canonical_bytes != payload:
-        raise RuntimeV1Error("workload bytes do not match deterministic compilation")
+        error = RuntimeV1Error("workload could not be reconstructed")
+        raise _mark_runtime_stage(
+            error, "runtime_workload_reconstruction_rejected"
+        ) from exc
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(
+            error, "runtime_workload_reconstruction_rejected"
+        )
     expected_fingerprint = environment.get("SYNAPTIC_WORKLOAD_FINGERPRINT")
     if expected_fingerprint != workload.fingerprint:
-        raise RuntimeV1Error("workload fingerprint does not match the dispatcher binding")
-    roots = bind_runtime_roots(document, environment, engine_file=engine_file)
+        raise _mark_runtime_stage(
+            RuntimeV1Error(
+                "workload fingerprint does not match the dispatcher binding"
+            ),
+            "runtime_workload_fingerprint_rejected",
+        )
+    try:
+        roots = bind_runtime_roots(document, environment, engine_file=engine_file)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_roots_rejected")
     return workload, roots
 
 

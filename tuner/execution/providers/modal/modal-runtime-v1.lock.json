@@ -18,15 +18,15 @@
     },
     "modal_remote": {
       "path": "tuner/execution/providers/modal/remote.py",
-      "sha256": "cde53084889ecbb78721be2d3303ba31c536f7fb56f09655276c5656ef4eda7a"
+      "sha256": "88d20d1abba8d15e2ed4441c02f4b83f8511e9c116473e28c910672500575663"
     },
     "modal_runtime": {
       "path": "tuner/execution/providers/modal/runtime.py",
-      "sha256": "8f493379fd90562d05df4dcb972b03607f2af0d8b2d260d22590c21965ee8c3b"
+      "sha256": "923a0312240ff2afa1252d1cc4a9e52f150ca36b4f22433e4cdbe9bcc36f1289"
     },
     "sft_runtime": {
       "path": "Trainers/sft/runtime_v1.py",
-      "sha256": "6cde864d8f36a0d408d7422f7f74862c8f217779b607527c97a2f24d02ed64a0"
+      "sha256": "4437d28e94f9320ee20475a746d9f5918155cb252c39be0079b287b1e9bc62f4"
     }
   },
   "ml_stack": {

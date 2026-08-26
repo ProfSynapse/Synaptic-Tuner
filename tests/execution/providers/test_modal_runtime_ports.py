@@ -61,6 +61,12 @@ def test_subprocess_runner_uses_no_shell_and_never_returns_captured_secret_outpu
         (23, 123, "runtime_trainer_failed"),
         (24, 123, "runtime_evidence_rejected"),
         (25, 122, "runtime_artifact_rejected"),
+        (30, 124, "runtime_workload_document_rejected"),
+        (31, 124, "runtime_workload_engine_rejected"),
+        (32, 124, "runtime_workload_schema_rejected"),
+        (33, 124, "runtime_workload_reconstruction_rejected"),
+        (34, 124, "runtime_workload_fingerprint_rejected"),
+        (35, 124, "runtime_workload_roots_rejected"),
     ),
 )
 def test_subprocess_runner_maps_closed_runtime_stages(

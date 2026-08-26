@@ -691,7 +691,7 @@ def test_runtime_rejects_stale_dispatcher_fingerprint(tmp_path: Path) -> None:
             runner=FakeRunner(),
             engine_file=engine_file,
         )
-    assert failure.value.diagnostic_code == "runtime_workload_rejected"
+    assert failure.value.diagnostic_code == "runtime_workload_fingerprint_rejected"
 
 
 def test_runtime_rejects_project_dataset_traversal(tmp_path: Path) -> None:
