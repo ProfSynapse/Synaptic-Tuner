@@ -478,7 +478,7 @@ def test_publish_delegates_verified_bytes_to_the_host_owned_destination(tmp_path
     class Publisher:
         def __init__(self):self.calls=[]
         def publish(self,source,destination_ref):
-            values={item.kind:source.read(item.kind,maximum=item.size) for item in source.artifacts}
+            values={item.kind:b"".join(source.iter_bytes(item.kind,maximum=item.size)) for item in source.artifacts}
             self.calls.append((source.run,source.plan_fingerprint,destination_ref,values))
             return ArtifactPublicationReceipt(
                 source.run,source.plan_fingerprint,destination_ref,

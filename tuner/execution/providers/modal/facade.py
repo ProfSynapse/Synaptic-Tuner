@@ -6,7 +6,7 @@ deliberately no profile, token, or ``Client.from_env`` fallback here.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from enum import Enum
 from typing import Protocol
 
@@ -33,6 +33,9 @@ class ModalFacade(Protocol):
     def bound_scope(self) -> tuple[str, str, str, str]: ...
     def capability_proof(self, binding: ModalClientBinding) -> CapabilityProofV1: ...
     def read_complete(self, volume_id: str, path: str, *, max_bytes: int) -> bytes: ...
+    def iter_complete(
+        self, volume_id: str, path: str, *, max_bytes: int
+    ) -> Iterator[bytes]: ...
     def list_prefix(self, volume_id: str, prefix: str, *, max_entries: int) -> tuple[tuple[str, int, str], ...]: ...
     def inspect_deployment(self, *, app_name: str, function_name: str) -> ModalDeploymentSelectionV1: ...
 
@@ -144,10 +147,16 @@ class ExplicitModal154ReadFacade:
             raise ModalFacadeError("modal_volume_unavailable") from None
 
     def read_complete(self, volume_id: str, path: str, *, max_bytes: int) -> bytes:
+        return b"".join(
+            self.iter_complete(volume_id, path, max_bytes=max_bytes)
+        )
+
+    def iter_complete(
+        self, volume_id: str, path: str, *, max_bytes: int
+    ) -> Iterator[bytes]:
         canonical_path(path)
         strict_int(max_bytes, "max_bytes", minimum=1)
         volume = self._volume(volume_id)
-        chunks: list[bytes] = []
         size = 0
         try:
             for chunk in volume.read_file(path):
@@ -156,12 +165,11 @@ class ExplicitModal154ReadFacade:
                 size += len(chunk)
                 if size > max_bytes:
                     raise ValueError
-                chunks.append(chunk)
+                yield chunk
         except ModalFacadeError:
             raise
         except Exception:
             raise ModalFacadeError("modal_volume_read_failed") from None
-        return b"".join(chunks)
 
     def list_prefix(self, volume_id: str, prefix: str, *, max_entries: int) -> tuple[tuple[str, int, str], ...]:
         prefix = _closed_prefix(prefix)

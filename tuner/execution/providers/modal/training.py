@@ -104,7 +104,7 @@ class _ModalVerifiedArtifactSource:
     facade: ExplicitModal154ReadFacade
     volume_id: str
 
-    def read(self, kind: str, *, maximum: int) -> bytes:
+    def iter_bytes(self, kind: str, *, maximum: int):
         if not isinstance(kind, str) or not kind or type(maximum) is not int or maximum < 1:
             raise ValueError("artifact read request is invalid")
         matches = [member for member in self.members if member.role.value == kind]
@@ -113,12 +113,16 @@ class _ModalVerifiedArtifactSource:
         member = matches[0]
         if member.size > maximum:
             raise ValueError("verified artifact exceeds publication bound")
-        content = self.facade.read_complete(
+        digest = hashlib.sha256()
+        size = 0
+        for chunk in self.facade.iter_complete(
             self.volume_id, member.path, max_bytes=maximum
-        )
-        if len(content) != member.size or sha(content) != member.sha256:
+        ):
+            size += len(chunk)
+            digest.update(chunk)
+            yield chunk
+        if size != member.size or digest.hexdigest() != member.sha256:
             raise ValueError("verified artifact changed before publication")
-        return content
 
 
 def _closed(value: object, keys: set[str], label: str) -> dict[str, object]:

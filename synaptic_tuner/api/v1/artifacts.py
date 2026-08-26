@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
 
 from .execution import RunRef
@@ -41,7 +42,7 @@ class VerifiedArtifactSource(Protocol):
     plan_fingerprint: str
     artifacts: tuple[VerifiedArtifactDescriptor, ...]
 
-    def read(self, kind: str, *, maximum: int) -> bytes: ...
+    def iter_bytes(self, kind: str, *, maximum: int) -> Iterator[bytes]: ...
 
 
 @dataclass(frozen=True, slots=True)
