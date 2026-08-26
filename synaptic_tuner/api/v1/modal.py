@@ -19,6 +19,7 @@ from tuner.execution.providers.modal.deployment_v1 import (
     ModalDeploymentSpecV1,
     build_modal_deployment,
 )
+from tuner.execution.providers.modal.deployment_identity import modal_function_name
 from tuner.execution.providers.modal.facade import (
     EXACT_MODAL_SDK_VERSION,
     ExplicitModal154ReadFacade,
@@ -72,6 +73,7 @@ __all__ = [
     "SubprocessSftRunner",
     "VerifiedModalDeploymentIdentityV1",
     "build_modal_deployment",
+    "modal_function_name",
     "compose_modal_source_finalizer",
     "compose_modal_training_operations",
 ]

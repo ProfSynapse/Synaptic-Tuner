@@ -114,7 +114,6 @@ class _ExplicitModal154VolumeWriter:
             with volume.batch_upload(force=False) as batch:
                 for path, data in files:
                     batch.put_file(BytesIO(data), path)
-            self._facade._assert_volume_id(volume, volume_id)
         except ModalFacadeError:
             raise
         except Exception:

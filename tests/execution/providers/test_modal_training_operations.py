@@ -35,6 +35,7 @@ from tuner.execution.providers.modal.config import (
     ModalRuntimeLockV1,
     ModalSecretProfileV1,
 )
+from tuner.execution.providers.modal.deployment_identity import modal_function_name
 from tuner.execution.providers.modal.contracts import canonical_json, sha
 from tuner.execution.providers.modal.producer import MountedCompletionProducerV1
 from tuner.execution.providers.modal.remote import ProcessResultV1,admit_remote_invocation
@@ -137,6 +138,7 @@ class PlanningResolver:
 
 
 def selection() -> ModalDeploymentSelectionV1:
+    deployment_ref = "modal-deployment-" + "1" * 32
     runtime_lock = ModalRuntimeLockV1.packaged()
     selected = ModalDeploymentSelectionV1(
         account_ref="acct",
@@ -144,9 +146,8 @@ def selection() -> ModalDeploymentSelectionV1:
         environment_ref="env",
         client_ref="client",
         app_name="synaptic-training-v1",
-        function_name="run_sft_v1",
-        function_version="1",
-        image_id="im-runtime-1",
+        deployment_ref=deployment_ref,
+        function_name=modal_function_name(deployment_ref),
         image_digest=runtime_lock.image_digest,
         dependency_lock_digest=runtime_lock.locked_digest("dependency_lock"),
         wrapper_digest=runtime_lock.locked_digest("deployment_wrapper"),
@@ -167,12 +168,12 @@ def selection() -> ModalDeploymentSelectionV1:
 
 
 def profile() -> ModalProviderProfileV1:
+    deployment_ref = "modal-deployment-" + "1" * 32
     return ModalProviderProfileV1(
         "modal-a10-v1",
         "synaptic-training-v1",
-        "run_sft_v1",
-        "1",
-        "im-runtime-1",
+        modal_function_name(deployment_ref),
+        deployment_ref,
         "engine://tuner/execution/providers/modal/modal-runtime-v1.lock.json",
         "control-name",
         "artifact-name",

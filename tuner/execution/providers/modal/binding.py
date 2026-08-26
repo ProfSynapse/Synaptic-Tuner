@@ -9,7 +9,7 @@ class ModalClientBinding:
         for n in self.__dataclass_fields__:object.__setattr__(self,n,safe_ref(getattr(self,n),n))
 @dataclass(frozen=True,slots=True)
 class CapabilityProofV1:
-    explicit_client:bool;authenticated_scope:bool;volume_v1_io:bool;volume_listing:bool;deployment_identity:bool;image_identity:bool;function_version:bool
+    explicit_client:bool;authenticated_scope:bool;volume_v1_io:bool;volume_listing:bool;deployment_identity:bool;image_identity:bool;named_function_lookup:bool
     @property
     def complete(self):return all(getattr(self,n) is True for n in self.__dataclass_fields__)
 @dataclass(frozen=True,slots=True)

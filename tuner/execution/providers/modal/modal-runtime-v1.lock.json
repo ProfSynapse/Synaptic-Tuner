@@ -6,7 +6,7 @@
     },
     "deployment_wrapper": {
       "path": "tuner/execution/providers/modal/deployment_v1.py",
-      "sha256": "6cd3372342d5c21d8faecc72b88055767dbeb710481ae823f1ab41fa91976507"
+      "sha256": "d3c7add201fe33edf6c194c9b2aaa696d7408869064079ed8853304928360b19"
     },
     "modal_mounted_io": {
       "path": "tuner/execution/providers/modal/mounted_io.py",
@@ -22,7 +22,7 @@
     },
     "modal_runtime": {
       "path": "tuner/execution/providers/modal/runtime.py",
-      "sha256": "cf8019026552a28c429d1e114844b4821815ddf3645107abdbac939bc773ae45"
+      "sha256": "8f007f2d71681b9f0d1b89f06c2ebc7bce72efd8ada8b435e33d16bb9601e1ba"
     },
     "sft_runtime": {
       "path": "Trainers/sft/runtime_v1.py",

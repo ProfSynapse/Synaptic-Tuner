@@ -72,14 +72,15 @@ class SecretReference:
 class ProviderPlan:
     app_name: str
     function_name: str
-    function_version: str
-    image_id: str
+    deployment_ref: str
+    image_digest: str
     gpu: str="A10"
     timeout_seconds: int=3600
     secrets: tuple[SecretReference,...]=()
     def __post_init__(self):
-        for n in ("app_name","function_name","function_version","image_id"):
+        for n in ("app_name","function_name","deployment_ref"):
             object.__setattr__(self,n,safe_ref(getattr(self,n),n))
+        object.__setattr__(self,"image_digest",digest(self.image_digest,"image_digest"))
         if self.gpu!="A10": raise ValueError("Modal hardware must be A10")
         if not isinstance(self.timeout_seconds,int) or isinstance(self.timeout_seconds,bool) or not 1<=self.timeout_seconds<=MAX_TIMEOUT_SECONDS: raise ValueError("invalid timeout")
         secrets=tuple(self.secrets)
@@ -87,7 +88,7 @@ class ProviderPlan:
         object.__setattr__(self,"secrets",secrets)
     @property
     def fingerprint(self)->str:
-        document={"app":self.app_name,"function":self.function_name,"function_version":self.function_version,"image_id":self.image_id,"gpu":self.gpu,"timeout":self.timeout_seconds,"secrets":[{"name":s.name,"required_keys":s.required_keys} for s in self.secrets]}
+        document={"app":self.app_name,"function":self.function_name,"deployment_ref":self.deployment_ref,"image_digest":self.image_digest,"gpu":self.gpu,"timeout":self.timeout_seconds,"secrets":[{"name":s.name,"required_keys":s.required_keys} for s in self.secrets]}
         return hashlib.sha256(b"synaptic.modal-plan/v1\0"+json.dumps(document,sort_keys=True,separators=(",",":")).encode()).hexdigest()
 
 

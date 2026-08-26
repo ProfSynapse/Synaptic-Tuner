@@ -26,6 +26,7 @@ from tuner.project.execution_source import (
 from tuner.project.source_bundle import SourceLock, SourceLockError
 
 from ...contracts import digest, safe_ref
+from .deployment_identity import validate_modal_function_identity
 from ...evidence import (
     DEPLOYMENT_EVIDENCE_POLICY, SOURCE_EVIDENCE_POLICY, EvidenceAuthenticator,
     EvidenceReplayRepository, admit_evidence, validate_evidence_window,
@@ -60,8 +61,7 @@ class ModalDeploymentSelectionV1:
     client_ref: str
     app_name: str
     function_name: str
-    function_version: str
-    image_id: str
+    deployment_ref: str
     image_digest: str
     dependency_lock_digest: str
     wrapper_digest: str
@@ -87,9 +87,14 @@ class ModalDeploymentSelectionV1:
             raise ValueError("Modal timeout must be a bounded exact integer")
         for name in (
             "account_ref", "workspace_ref", "environment_ref", "client_ref", "app_name",
-            "function_name", "function_version", "image_id",
+            "deployment_ref",
         ):
             object.__setattr__(self, name, safe_ref(getattr(self, name), name))
+        deployment_ref, function_name = validate_modal_function_identity(
+            self.deployment_ref, self.function_name
+        )
+        object.__setattr__(self, "deployment_ref", deployment_ref)
+        object.__setattr__(self, "function_name", function_name)
         for name in (
             "image_digest", "dependency_lock_digest", "wrapper_digest", "runtime_digest",
             "python_executable_digest", "secret_requirements_digest",
@@ -108,7 +113,7 @@ class ModalDeploymentSelectionV1:
             "workspace_ref": self.workspace_ref, "environment_ref": self.environment_ref,
             "client_ref": self.client_ref, "sdk_version": self.sdk_version,
             "app_name": self.app_name, "function_name": self.function_name,
-            "function_version": self.function_version, "image_id": self.image_id,
+            "deployment_ref": self.deployment_ref,
             "image_digest": self.image_digest,
             "dependency_lock_digest": self.dependency_lock_digest,
             "wrapper_digest": self.wrapper_digest, "runtime_digest": self.runtime_digest,
@@ -126,7 +131,7 @@ class ModalDeploymentSelectionV1:
         expected = {
             "schema_version", "account_ref", "workspace_ref", "environment_ref",
             "client_ref", "sdk_version", "app_name", "function_name",
-            "function_version", "image_id", "image_digest", "dependency_lock_digest",
+            "deployment_ref", "image_digest", "dependency_lock_digest",
             "wrapper_digest", "runtime_digest", "python_version", "python_executable",
             "python_executable_digest", "runtime_environment",
             "secret_requirements_digest", "provider_runtime_requirements_digest",
@@ -163,8 +168,7 @@ class ModalDeploymentSelectionV1:
             sdk_version=binding.sdk_version,
             app_name=profile.app_name,
             function_name=profile.function_name,
-            function_version=profile.function_version,
-            image_id=profile.image_id,
+            deployment_ref=profile.deployment_ref,
             image_digest=runtime_lock.image_digest,
             dependency_lock_digest=runtime_lock.locked_digest("dependency_lock"),
             wrapper_digest=runtime_lock.locked_digest("deployment_wrapper"),

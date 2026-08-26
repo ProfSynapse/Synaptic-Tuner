@@ -13,6 +13,7 @@ from tuner.execution.providers.modal.resolution import (
     ModalDualCloneSourceFinalizer,
     VerifiedModalDeploymentIdentityV1,
 )
+from tuner.execution.providers.modal.deployment_identity import modal_function_name
 from tuner.project.context import ProjectContext
 from tuner.project.execution_source import AuthenticatedSourceEvidenceV1, ExecutionSourceV1
 from tuner.project.source_bundle import SourceLock, SourceLockError
@@ -41,10 +42,12 @@ def _source(mode: str = "superproject", path: str = "vendor/engine") -> SourceLo
 
 
 def _deployment() -> ModalDeploymentSelectionV1:
+    deployment_ref = "modal-deployment-" + "1" * 32
     return ModalDeploymentSelectionV1(
         account_ref="acct", workspace_ref="workspace", environment_ref="env",
-        client_ref="client", app_name="training-app", function_name="train-sft",
-        function_version="v1", image_id="im-123", image_digest="1" * 64,
+        client_ref="client", app_name="synaptic-training-v1",
+        function_name=modal_function_name(deployment_ref),
+        deployment_ref=deployment_ref, image_digest="1" * 64,
         dependency_lock_digest="2" * 64, wrapper_digest="3" * 64,
         runtime_digest="4" * 64, python_version="3.12.7",
         python_executable="/usr/local/bin/python3.12", python_executable_digest="5" * 64,
@@ -97,7 +100,11 @@ class DeploymentPort:
     def verify(self, selection: ModalDeploymentSelectionV1) -> VerifiedModalDeploymentIdentityV1:
         self.calls += 1
         if self.drift:
-            selection = replace(selection, function_version="v2")
+            deployment_ref = "modal-deployment-" + "2" * 32
+            selection = replace(
+                selection, deployment_ref=deployment_ref,
+                function_name=modal_function_name(deployment_ref),
+            )
         fields={"selection":selection,"issuer_ref":"modal-verifier","evidence_ref":"deployment-proof","audience_ref":"project/run-1","challenge_nonce":"deployment-nonce","verified_at":"2026-08-25T12:02:00Z","expires_at":"2026-08-25T12:07:00Z","key_ref":self.key_ref}
         unsigned={"schema_version":"synaptic-verified-modal-deployment/v1","selection":selection.to_dict(),**{name:fields[name] for name in ("issuer_ref","evidence_ref","audience_ref","challenge_nonce","verified_at","expires_at","key_ref")}}
         payload=json.dumps(unsigned,sort_keys=True,separators=(",",":"),ensure_ascii=False,allow_nan=False).encode()

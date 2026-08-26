@@ -11,10 +11,11 @@ from types import MappingProxyType
 from typing import Callable, Mapping
 
 from ...contracts import safe_ref
+from .deployment_identity import validate_modal_function_identity
 from .facade import EXACT_MODAL_SDK_VERSION, MODAL_VOLUME_V1, ModalFacadeError
 
 APP_NAME = "synaptic-training-v1"
-FUNCTION_NAME = "run_sft_v1"
+FUNCTION_FAMILY = "run_sft_v1"
 GPU = "A10"
 CONTROL_MOUNT = "/workspace/control"
 ARTIFACT_MOUNT = "/workspace/run"
@@ -26,6 +27,8 @@ _SECRET_NAME = re.compile(
 
 @dataclass(frozen=True, slots=True)
 class ModalDeploymentSpecV1:
+    deployment_ref: str
+    function_name: str
     registry_reference: str
     control_volume_name: str
     artifact_volume_name: str
@@ -35,6 +38,11 @@ class ModalDeploymentSpecV1:
     timeout_seconds: int = 3600
 
     def __post_init__(self) -> None:
+        deployment_ref, function_name = validate_modal_function_identity(
+            self.deployment_ref, self.function_name
+        )
+        object.__setattr__(self, "deployment_ref", deployment_ref)
+        object.__setattr__(self, "function_name", function_name)
         if not isinstance(self.registry_reference, str) or _PINNED_IMAGE.fullmatch(self.registry_reference) is None:
             raise ValueError("Modal runtime image must be digest pinned")
         for name in ("control_volume_name", "artifact_volume_name", "runtime_secret_name"):
@@ -114,7 +122,7 @@ def build_modal_deployment(
     app = sdk.App(APP_NAME, image=image, include_source=True)
 
     @app.function(
-        name=FUNCTION_NAME,
+        name=spec.function_name,
         serialized=True,
         image=image,
         gpu=GPU,
@@ -141,6 +149,6 @@ def build_modal_deployment(
 
 
 __all__ = [
-    "APP_NAME", "ARTIFACT_MOUNT", "CONTROL_MOUNT", "FUNCTION_NAME", "GPU",
+    "APP_NAME", "ARTIFACT_MOUNT", "CONTROL_MOUNT", "FUNCTION_FAMILY", "GPU",
     "ModalDeploymentObjectsV1", "ModalDeploymentSpecV1", "build_modal_deployment",
 ]

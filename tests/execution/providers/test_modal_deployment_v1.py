@@ -3,9 +3,14 @@ from __future__ import annotations
 import pytest
 
 from tuner.execution.providers.modal.deployment_v1 import (
-    APP_NAME, ARTIFACT_MOUNT, CONTROL_MOUNT, FUNCTION_NAME,
+    APP_NAME, ARTIFACT_MOUNT, CONTROL_MOUNT,
     ModalDeploymentSpecV1, build_modal_deployment,
 )
+from tuner.execution.providers.modal.deployment_identity import modal_function_name
+
+
+DEPLOYMENT_REF = "modal-deployment-" + "1" * 32
+FUNCTION_NAME = modal_function_name(DEPLOYMENT_REF)
 
 
 class Handle:
@@ -55,6 +60,7 @@ class SDK:
 def test_deployment_factory_is_exact_explicit_and_does_not_submit():
     client=object();worker=lambda value,job_ref:(value,job_ref)
     spec=ModalDeploymentSpecV1(
+        DEPLOYMENT_REF, FUNCTION_NAME,
         "registry.example/runtime@sha256:"+"a"*64,
         "control-v1","artifact-v1","runtime-v1",("HF_TOKEN","SYNAPTIC_EVIDENCE_MAC_KEY"),
         {"PYTHONNOUSERSITE":"1"},timeout_seconds=900,
@@ -87,6 +93,7 @@ def test_deployment_factory_is_exact_explicit_and_does_not_submit():
 def test_deployment_rejects_raw_secret_environment(environment):
     with pytest.raises(ValueError, match="named Modal Secrets"):
         ModalDeploymentSpecV1(
+            DEPLOYMENT_REF, FUNCTION_NAME,
             "registry.example/runtime@sha256:" + "a" * 64,
             "control-v1", "artifact-v1", "runtime-v1",
             ("HF_TOKEN", "SYNAPTIC_EVIDENCE_MAC_KEY"), environment,
@@ -96,6 +103,7 @@ def test_deployment_rejects_raw_secret_environment(environment):
 def test_deployment_environment_is_detached_and_immutable():
     environment = {"PYTHONNOUSERSITE": "1"}
     spec = ModalDeploymentSpecV1(
+        DEPLOYMENT_REF, FUNCTION_NAME,
         "registry.example/runtime@sha256:" + "a" * 64,
         "control-v1", "artifact-v1", "runtime-v1",
         ("HF_TOKEN", "SYNAPTIC_EVIDENCE_MAC_KEY"), environment,

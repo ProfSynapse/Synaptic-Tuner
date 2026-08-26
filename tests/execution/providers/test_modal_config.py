@@ -18,7 +18,8 @@ ROOT=Path(__file__).resolve().parents[3]
 def test_checked_in_modal_profile_and_packaged_runtime_lock_resolve_strictly():
     profile=ModalProviderProfileV1.from_mapping(yaml.safe_load((ROOT/"examples/host-project/providers/modal-a10-v1.yaml").read_text(encoding="utf-8")))
     runtime=ModalRuntimeLockV1.packaged()
-    assert profile.app_name=="synaptic-training-v1" and profile.function_name=="run_sft_v1"
+    assert profile.app_name=="synaptic-training-v1"
+    assert profile.function_name.endswith("0" * 32)
     assert runtime.registry_reference.endswith("5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39")
     assert len(runtime.locked_digest("deployment_wrapper"))==64
 

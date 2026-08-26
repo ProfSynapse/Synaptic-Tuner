@@ -13,6 +13,7 @@ from tuner.execution.providers.modal.binding import ModalClientBinding, Readines
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade, ModalFacadeError,ModalFunctionCallState
 from tuner.execution.providers.modal.mutation import _ExplicitModal154FunctionMutator
 from tuner.execution.providers.modal.resolution import VerifiedModalDeploymentIdentityV1
+from tuner.execution.providers.modal.deployment_identity import modal_function_name
 from tuner.execution.providers.modal.staging import _ExplicitModal154VolumeWriter, prepare_modal_stage
 
 
@@ -62,10 +63,10 @@ class FakeCall:
 
 class FakeFunction:
     calls=[];spawn_calls=[];fail=False
-    def __init__(self):self.object_id="fu-1"
+    def __init__(self):self.object_id="fu-1";self.is_hydrated=False
     @classmethod
     def from_name(cls,app,name,**kwargs):cls.calls.append((app,name,kwargs));return cls()
-    def hydrate(self,client):return self
+    def hydrate(self,client):self.is_hydrated=True;return self
     def spawn(self,*args):
         type(self).spawn_calls.append(args)
         if type(self).fail:raise RuntimeError("secret provider detail")
@@ -90,7 +91,7 @@ def make_facade(*,sdk=SDK,selection=None):
     FakeVolume.calls=[];FakeFunction.calls=[];FakeFunction.spawn_calls=[];FakeFunction.fail=False;FakeCall.result=TimeoutError()
     FakeVolume.registry={"control-name":FakeVolume("cv"),"artifact-name":FakeVolume("av")}
     client=object();binding=ModalClientBinding("acct","workspace","env","client","1.5.4")
-    selected=selection or replace(_deployment(),function_version="1")
+    selected=selection or _deployment()
     facade=ExplicitModal154ReadFacade(
         binding,sdk=sdk,client=client,
         scope_observer=lambda supplied:("acct","workspace","env","client") if supplied is client else (),
@@ -126,16 +127,14 @@ def test_read_list_and_deployment_use_only_explicit_client_environment_and_v1():
     assert facade.inspect_deployment(app_name=selection.app_name,function_name=selection.function_name)==selection
     name,kwargs=FakeVolume.calls[0]
     assert name=="control-name" and kwargs=={"environment_name":"env","create_if_missing":False,"version":1,"client":facade.client}
-    assert FakeFunction.calls[-1][2]=={"version":1,"environment_name":"env","client":facade.client}
+    assert FakeFunction.calls[-1][2]=={"environment_name":"env","client":facade.client}
 
 
-def test_reads_and_listings_fail_closed_on_bounds_duplicates_and_identity_drift():
+def test_reads_and_listings_fail_closed_on_bounds_and_duplicates():
     facade,_=make_facade();volume=FakeVolume.registry["control-name"];volume.files["control/x"]=b"abcdef"
     with pytest.raises(ModalFacadeError,match="read_failed"):facade.read_complete("cv","control/x",max_bytes=5)
     volume.entries=[Entry("control/x",1),Entry("control/x",1)]
     with pytest.raises(ModalFacadeError,match="list_failed"):facade.list_prefix("cv","control/",max_entries=3)
-    volume.entries=[];volume.object_id="wrong"
-    with pytest.raises(ModalFacadeError,match="identity_mismatch"):facade.list_prefix("cv","control/",max_entries=3)
 
 
 def test_prepare_persist_stage_readback_and_no_overwrite():
@@ -182,7 +181,11 @@ def test_mutator_rejects_deployment_target_substitution_before_spawn():
     facade,deployment=make_facade()
     original=verified(deployment)
     bound=MutationCommandV1(replace(command().operation,deployment_attestation_digest=original.attestation_digest),command().bundle_digest,command().stage_claim_digest)
-    substituted=replace(deployment,function_name="substituted-function")
+    other_ref="modal-deployment-"+"2"*32
+    substituted=replace(
+        deployment, deployment_ref=other_ref,
+        function_name=modal_function_name(other_ref),
+    )
     mutator=_ExplicitModal154FunctionMutator(facade,verified(substituted))
     with pytest.raises(ModalFacadeError,match="binding_mismatch"):
         mutator.execute_once(bound.canonical_bytes)

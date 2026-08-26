@@ -160,7 +160,7 @@ def _artifact_contract(value: dict[str, object]) -> None:
 
 _SELECTION_KEYS = {
     "schema_version", "account_ref", "workspace_ref", "environment_ref", "client_ref",
-    "sdk_version", "app_name", "function_name", "function_version", "image_id",
+    "sdk_version", "app_name", "function_name", "deployment_ref",
     "image_digest", "dependency_lock_digest", "wrapper_digest", "runtime_digest",
     "python_version", "python_executable", "python_executable_digest",
     "runtime_environment", "secret_requirements_digest",

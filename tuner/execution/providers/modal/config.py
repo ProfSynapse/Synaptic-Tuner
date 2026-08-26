@@ -10,9 +10,9 @@ from types import MappingProxyType
 from typing import Mapping
 
 from ...contracts import digest, safe_ref
+from .deployment_identity import validate_modal_function_identity
 
 
-_IMAGE_ID = re.compile(r"^im-[A-Za-z0-9._+-]+$")
 _REGISTRY = re.compile(r"^\S+@sha256:[0-9a-f]{64}$")
 
 
@@ -56,22 +56,22 @@ class ModalProviderProfileV1:
     profile: str
     app_name: str
     function_name: str
-    function_version: str
-    image_id: str
+    deployment_ref: str
     runtime_lock_ref: str
     control_volume_ref: str
     artifact_volume_ref: str
     secrets: tuple[ModalSecretProfileV1, ...]
 
     def __post_init__(self) -> None:
-        for name in ("profile", "app_name", "function_name", "control_volume_ref", "artifact_volume_ref"):
+        for name in ("profile", "app_name", "control_volume_ref", "artifact_volume_ref"):
             object.__setattr__(self, name, safe_ref(getattr(self, name), name))
-        if self.app_name != "synaptic-training-v1" or self.function_name != "run_sft_v1":
-            raise ValueError("Modal v1 deployment names are fixed")
-        if not isinstance(self.function_version, str) or not re.fullmatch(r"[1-9][0-9]*", self.function_version):
-            raise ValueError("Modal function version must be a positive numeric string")
-        if not isinstance(self.image_id, str) or _IMAGE_ID.fullmatch(self.image_id) is None:
-            raise ValueError("Modal image_id is invalid")
+        deployment_ref, function_name = validate_modal_function_identity(
+            self.deployment_ref, self.function_name
+        )
+        object.__setattr__(self, "deployment_ref", deployment_ref)
+        object.__setattr__(self, "function_name", function_name)
+        if self.app_name != "synaptic-training-v1":
+            raise ValueError("Modal v1 application name is fixed")
         if self.runtime_lock_ref != "engine://tuner/execution/providers/modal/modal-runtime-v1.lock.json":
             raise ValueError("Modal runtime lock reference is unsupported")
         if self.control_volume_ref == self.artifact_volume_ref:
@@ -88,7 +88,7 @@ class ModalProviderProfileV1:
         root = _closed(value, {"schema_version", "profile", "deployment", "runtime_lock", "volumes", "secrets"}, "Modal provider profile")
         if root["schema_version"] != "synaptic-modal-provider/v1":
             raise ValueError("unsupported Modal provider profile schema")
-        deployment = _closed(root["deployment"], {"app_name", "function_name", "function_version", "image_id"}, "Modal deployment")
+        deployment = _closed(root["deployment"], {"app_name", "function_name", "deployment_ref"}, "Modal deployment")
         volumes = _closed(root["volumes"], {"control_ref", "artifact_ref"}, "Modal volumes")
         raw_secrets = root["secrets"]
         if not isinstance(raw_secrets, list) or not 1 <= len(raw_secrets) <= 16:
@@ -101,7 +101,7 @@ class ModalProviderProfileV1:
             secrets.append(ModalSecretProfileV1(item["name"], tuple(item["required_keys"])))
         return cls(
             root["profile"], deployment["app_name"], deployment["function_name"],
-            deployment["function_version"], deployment["image_id"], root["runtime_lock"],
+            deployment["deployment_ref"], root["runtime_lock"],
             volumes["control_ref"], volumes["artifact_ref"], tuple(secrets),
         )
 
@@ -147,8 +147,7 @@ class ModalProviderProfileV1:
             "deployment": {
                 "app_name": self.app_name,
                 "function_name": self.function_name,
-                "function_version": self.function_version,
-                "image_id": self.image_id,
+                "deployment_ref": self.deployment_ref,
                 "accelerator": accelerator,
                 "timeout_seconds": timeout_seconds,
                 "max_retries": max_retries,

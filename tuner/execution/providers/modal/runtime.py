@@ -66,16 +66,14 @@ def _file_digest(path: Path) -> str:
 class GitDualCloneMaterializer:
     """Clone and independently reverify the one accepted dual-clone topology."""
 
-    __slots__ = ("_run", "_image_id")
+    __slots__ = ("_run",)
 
     def __init__(
         self,
         *,
         command_runner: Callable[[Sequence[str]], bytes] | None = None,
-        image_id_observer: Callable[[], str | None] | None = None,
     ) -> None:
         self._run = command_runner or self._subprocess
-        self._image_id = image_id_observer or (lambda: os.environ.get("MODAL_IMAGE_ID"))
 
     @staticmethod
     def _subprocess(argv: Sequence[str]) -> bytes:
@@ -146,8 +144,6 @@ class GitDualCloneMaterializer:
             raise ValueError("remote runtime roots differ from the fixed Modal layout")
         if project.exists() or engine.exists() or expected_run_root.exists():
             raise ValueError("remote operation directory collision")
-        if self._image_id() != deployment.image_id:
-            raise ValueError("remote Modal image identity mismatch")
         actual_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         if (
             sys.implementation.name != "cpython"

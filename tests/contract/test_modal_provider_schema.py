@@ -17,4 +17,4 @@ def test_modal_provider_example_is_config_first_and_contains_no_secret_values():
     rendered=json.dumps(document,sort_keys=True).lower()
     assert "token_value" not in rendered and "api_key" not in rendered and "password" not in rendered
     assert document["deployment"]["app_name"]=="synaptic-training-v1"
-    assert document["deployment"]["function_name"]=="run_sft_v1"
+    assert document["deployment"]["function_name"].startswith("run_sft_v1_")

@@ -52,7 +52,6 @@ class _ExplicitModal154FunctionMutator:
         function = self._facade._function(
             app_name=selection.app_name,
             function_name=selection.function_name,
-            function_version=selection.function_version,
         )
         try:
             call = function.spawn(canonical_command)

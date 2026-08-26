@@ -693,8 +693,7 @@ class ModalTrainingOperations:
         if (
             deployment.app_name != self._profile.app_name
             or deployment.function_name != self._profile.function_name
-            or deployment.function_version != self._profile.function_version
-            or deployment.image_id != self._profile.image_id
+            or deployment.deployment_ref != self._profile.deployment_ref
         ):
             raise ValueError("training plan differs from the configured Modal deployment")
         if plan.execution_source.deployment_member_sha256 != sha(

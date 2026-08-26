@@ -45,8 +45,9 @@ def documents() -> dict[str, bytes]:
         "selection": {
             "schema_version": "synaptic-modal-deployment-selection/v1",
             "account_ref": "acct", "workspace_ref": "workspace", "environment_ref": "env",
-            "client_ref": "client", "sdk_version": "1.5.4", "app_name": "training-app",
-            "function_name": "train-sft", "function_version": "v1", "image_id": "im-1",
+            "client_ref": "client", "sdk_version": "1.5.4", "app_name": "synaptic-training-v1",
+            "function_name": "run_sft_v1_11111111111111111111111111111111",
+            "deployment_ref": "modal-deployment-11111111111111111111111111111111",
             "image_digest": "1" * 64, "dependency_lock_digest": "2" * 64,
             "wrapper_digest": "3" * 64, "runtime_digest": "4" * 64,
             "python_version": "3.12.7", "python_executable": "/usr/local/bin/python3.12",

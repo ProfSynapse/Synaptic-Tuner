@@ -110,11 +110,12 @@ class ExplicitModal154ReadFacade:
             function = self.sdk.Function
             volume_io = all(hasattr(volume, member) for member in ("from_name", "read_file"))
             volume_listing = hasattr(volume, "iterdir")
-            function_version = hasattr(function, "from_name")
+            named_function_lookup = hasattr(function, "from_name")
         except Exception:
             return CapabilityProofV1(False, False, False, False, False, False, False)
         return CapabilityProofV1(
-            True, True, volume_io, volume_listing, True, True, function_version
+            True, True, volume_io, volume_listing, True, True,
+            named_function_lookup,
         )
 
     def _volume(self, volume_id: str):
@@ -138,15 +139,6 @@ class ExplicitModal154ReadFacade:
         except (KeyError, ValueError):
             raise ModalFacadeError("modal_volume_unavailable") from None
 
-    @staticmethod
-    def _assert_volume_id(volume: object, expected: str) -> None:
-        try:
-            actual = volume.object_id
-        except Exception:
-            raise ModalFacadeError("modal_volume_identity_unavailable") from None
-        if actual != expected:
-            raise ModalFacadeError("modal_volume_identity_mismatch")
-
     def read_complete(self, volume_id: str, path: str, *, max_bytes: int) -> bytes:
         canonical_path(path)
         strict_int(max_bytes, "max_bytes", minimum=1)
@@ -161,7 +153,6 @@ class ExplicitModal154ReadFacade:
                 if size > max_bytes:
                     raise ValueError
                 chunks.append(chunk)
-            self._assert_volume_id(volume, volume_id)
         except ModalFacadeError:
             raise
         except Exception:
@@ -186,7 +177,6 @@ class ExplicitModal154ReadFacade:
                 identity = provider_entry_identity(volume_id, path, size)
                 seen.add(path)
                 result.append((path, size, identity))
-            self._assert_volume_id(volume, volume_id)
         except ModalFacadeError:
             raise
         except Exception:
@@ -220,24 +210,20 @@ class ExplicitModal154ReadFacade:
             function = self._function(
                 app_name=app_name,
                 function_name=function_name,
-                function_version=observed.function_version,
             )
             function.hydrate(self.client)
-            safe_ref(function.object_id, "function_id")
+            if getattr(function, "is_hydrated", False) is not True:
+                raise ValueError
         except Exception:
             raise ModalFacadeError("modal_function_identity_unavailable") from None
         return observed
 
-    def _function(self, *, app_name: str, function_name: str, function_version: str):
-        """Private exact function resolver used only by the sole-submit adapter."""
+    def _function(self, *, app_name: str, function_name: str):
+        """Resolve one provider-visible immutable entrypoint by its exact name."""
         try:
-            version = int(function_version)
-            if str(version) != function_version or version < 1:
-                raise ValueError
             return self.sdk.Function.from_name(
                 safe_ref(app_name, "app_name"),
                 safe_ref(function_name, "function_name"),
-                version=version,
                 environment_name=self.binding.environment_ref,
                 client=self.client,
             )

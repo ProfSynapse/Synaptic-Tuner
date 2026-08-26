@@ -11,12 +11,11 @@
     "deployment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["app_name", "function_name", "function_version", "image_id"],
+      "required": ["app_name", "function_name", "deployment_ref"],
       "properties": {
         "app_name": {"const": "synaptic-training-v1"},
-        "function_name": {"const": "run_sft_v1"},
-        "function_version": {"type": "string", "pattern": "^[1-9][0-9]*$"},
-        "image_id": {"type": "string", "pattern": "^im-[A-Za-z0-9._+-]+$"}
+        "function_name": {"type": "string", "pattern": "^run_sft_v1_[0-9a-f]{32}$"},
+        "deployment_ref": {"type": "string", "pattern": "^modal-deployment-[0-9a-f]{32}$"}
       }
     },
     "runtime_lock": {"type": "string", "pattern": "^engine://tuner/execution/providers/modal/modal-runtime-v1\\.lock\\.json$"},

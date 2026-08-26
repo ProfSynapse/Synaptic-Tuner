@@ -7,6 +7,7 @@ import pytest
 from tests.execution.providers.test_modal_source_resolution import _deployment
 from tuner.execution.providers.modal.binding import CapabilityProofV1
 from tuner.execution.providers.modal.verification import ModalSdkDeploymentVerifier
+from tuner.execution.providers.modal.deployment_identity import modal_function_name
 
 
 class Auth:
@@ -34,4 +35,9 @@ def test_modal_verifier_rejects_scope_capability_and_deployment_drift():
     with pytest.raises(ValueError,match="unverifiable"):verifier(facade).verify(selection)
     facade=Facade(selection);facade.proof=replace(facade.proof,image_identity=False)
     with pytest.raises(ValueError,match="unverifiable"):verifier(facade).verify(selection)
-    with pytest.raises(ValueError,match="unverifiable"):verifier(Facade(replace(selection,function_version="v2"))).verify(selection)
+    other = "modal-deployment-" + "2" * 32
+    with pytest.raises(ValueError,match="unverifiable"):
+        verifier(Facade(replace(
+            selection, deployment_ref=other,
+            function_name=modal_function_name(other),
+        ))).verify(selection)
