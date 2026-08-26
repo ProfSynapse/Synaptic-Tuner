@@ -159,6 +159,10 @@ def test_finalizer_derives_the_single_dual_clone_execution_source(tmp_path: Path
         "tracking": "/workspace/run/run-1/tracking",
         "cache": "/workspace/run/run-1/cache", "tmp": "/workspace/run/run-1/tmp",
     }
+    assert finalized.writable_capability_root == "/workspace/run"
+    assert finalized.to_dict()["runtime"]["capability_roots"] == {
+        "writable": "/workspace/run"
+    }
     assert finalized.deployment_member_sha256 == __import__("hashlib").sha256(
         json.dumps(resolution.deployment.to_dict(), sort_keys=True, separators=(",", ":"))
         .encode()

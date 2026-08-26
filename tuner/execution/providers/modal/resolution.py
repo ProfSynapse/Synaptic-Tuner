@@ -443,7 +443,8 @@ class ModalDualCloneSourceFinalizer:
             deployment_member_sha256=hashlib.sha256(
                 _canonical(verified_deployment.to_dict())
             ).hexdigest(),
-            roots=roots, python_implementation="cpython",
+            roots=roots, writable_capability_root="/workspace/run",
+            python_implementation="cpython",
             python_version=deployment.python_version,
             python_executable=deployment.python_executable,
             python_executable_digest=deployment.python_executable_digest,

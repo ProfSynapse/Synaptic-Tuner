@@ -428,7 +428,12 @@ def _publish_unrelated_completed_run(value, repository, tmp_path):
     environment["TRANSFORMERS_CACHE"]=roots["cache"]+"/transformers"
     invocation=replace(
         invocation,
-        source=replace(invocation.source,roots=roots,environment=environment),
+        source=replace(
+            invocation.source,
+            roots=roots,
+            writable_capability_root=str(artifact_volume),
+            environment=environment,
+        ),
     )
     records=[]
     for role in ArtifactRole:

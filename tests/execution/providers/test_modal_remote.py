@@ -124,7 +124,7 @@ def test_completion_producer_publishes_exact_five_and_authenticated_terminal(tmp
     environment=dict(invocation.source.environment)
     for name,variable in {"artifacts":"SYNAPTIC_ARTIFACT_ROOT","state":"SYNAPTIC_STATE_ROOT","tracking":"SYNAPTIC_TRACKING_ROOT","cache":"SYNAPTIC_CACHE_ROOT","tmp":"SYNAPTIC_TMP_ROOT"}.items():environment[variable]=roots[name]
     environment["HF_HOME"]=roots["cache"]+"/huggingface";environment["TRANSFORMERS_CACHE"]=roots["cache"]+"/transformers"
-    source=replace(invocation.source,roots=roots,environment=environment);invocation=replace(invocation,source=source)
+    source=replace(invocation.source,roots=roots,writable_capability_root=str(volume),environment=environment);invocation=replace(invocation,source=source)
     records=[]
     for role in ArtifactRole:
         name=role.value+".bin";content=(role.value+"-content").encode()
@@ -155,7 +155,7 @@ def test_completion_producer_rejects_inventory_from_another_workload(tmp_path):
     environment=dict(invocation.source.environment)
     for name,variable in {"artifacts":"SYNAPTIC_ARTIFACT_ROOT","state":"SYNAPTIC_STATE_ROOT","tracking":"SYNAPTIC_TRACKING_ROOT","cache":"SYNAPTIC_CACHE_ROOT","tmp":"SYNAPTIC_TMP_ROOT"}.items():environment[variable]=roots[name]
     environment["HF_HOME"]=roots["cache"]+"/huggingface";environment["TRANSFORMERS_CACHE"]=roots["cache"]+"/transformers"
-    source=replace(invocation.source,roots=roots,environment=environment);invocation=replace(invocation,source=source)
+    source=replace(invocation.source,roots=roots,writable_capability_root=str(volume),environment=environment);invocation=replace(invocation,source=source)
     records=[]
     import hashlib
     for role in ArtifactRole:

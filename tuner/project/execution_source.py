@@ -228,6 +228,7 @@ class ExecutionSourceV1:
     source_evidence: AuthenticatedSourceEvidenceV1
     deployment_member_sha256: str
     roots: Mapping[str, str]
+    writable_capability_root: str
     python_implementation: str
     python_version: str
     python_executable: str
@@ -277,6 +278,33 @@ class ExecutionSourceV1:
             roots[name] = value
         if len(set(roots.values())) != len(roots):
             raise SourceLockError("runtime roots must not alias")
+        capability = _text(
+            self.writable_capability_root, "writable capability root"
+        )
+        if not (
+            capability.startswith("/") or Path(capability).is_absolute()
+        ) or capability.endswith(("/", "\\")):
+            raise SourceLockError(
+                "writable capability root must be a canonical absolute path"
+            )
+        capability_path = Path(capability)
+        if any(
+            capability_path not in Path(roots[name]).parents
+            for name in ("artifacts", "state", "tracking", "cache", "tmp")
+        ):
+            raise SourceLockError(
+                "writable runtime roots must descend from their capability root"
+            )
+        if any(
+            capability_path == Path(roots[name])
+            or capability_path in Path(roots[name]).parents
+            or Path(roots[name]) in capability_path.parents
+            for name in ("engine", "project")
+        ):
+            raise SourceLockError(
+                "writable capability root must be disjoint from sources"
+            )
+        object.__setattr__(self, "writable_capability_root", capability)
         for writable in ("artifacts", "state", "tracking", "cache", "tmp"):
             if any(
                 Path(roots[writable]) == Path(roots[source])
@@ -348,6 +376,9 @@ class ExecutionSourceV1:
             "runtime": {
                 "schema_version": RUNTIME_SCHEMA,
                 "roots": dict(self.roots),
+                "capability_roots": {
+                    "writable": self.writable_capability_root,
+                },
                 "interpreter": {
                     "implementation": self.python_implementation,
                     "version": self.python_version,
@@ -388,15 +419,22 @@ class ExecutionSourceV1:
         }:
             raise SourceLockError("engine execution source is malformed")
         if not isinstance(runtime, Mapping) or set(runtime) != {
-            "schema_version", "roots", "interpreter", "environment"
+            "schema_version", "roots", "capability_roots", "interpreter", "environment"
         } or runtime.get("schema_version") != RUNTIME_SCHEMA:
             raise SourceLockError("execution runtime is malformed")
         roots = runtime.get("roots")
+        capability_roots = runtime.get("capability_roots")
         interpreter = runtime.get("interpreter")
         environment = runtime.get("environment")
-        if not isinstance(roots, Mapping) or not isinstance(interpreter, Mapping) or set(interpreter) != {
+        if (
+            not isinstance(roots, Mapping)
+            or not isinstance(capability_roots, Mapping)
+            or set(capability_roots) != {"writable"}
+            or not isinstance(interpreter, Mapping)
+            or set(interpreter) != {
             "implementation", "version", "executable", "executable_digest"
-        }:
+            }
+        ):
             raise SourceLockError("execution interpreter is malformed")
         if not isinstance(environment, Mapping) or set(environment) != {
             "clear_inherited", "variables", "secret_requirements_digest",
@@ -411,6 +449,7 @@ class ExecutionSourceV1:
             engine_submodule_path=topology["engine_submodule_path"],
             source_evidence=AuthenticatedSourceEvidenceV1.from_dict(value["source_evidence"]),
             deployment_member_sha256=value["deployment_member_sha256"], roots=roots,
+            writable_capability_root=capability_roots["writable"],
             python_implementation=interpreter["implementation"],
             python_version=interpreter["version"], python_executable=interpreter["executable"],
             python_executable_digest=interpreter["executable_digest"],

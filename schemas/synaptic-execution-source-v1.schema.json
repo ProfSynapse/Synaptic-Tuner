@@ -81,10 +81,17 @@
     },
     "runtime": {
       "type": "object", "additionalProperties": false,
-      "required": ["schema_version", "roots", "interpreter", "environment"],
+      "required": ["schema_version", "roots", "capability_roots", "interpreter", "environment"],
       "properties": {
         "schema_version": {"const": "synaptic-modal-runtime/v1"},
         "roots": {"$ref": "#/$defs/roots"},
+        "capability_roots": {
+          "type": "object", "additionalProperties": false,
+          "required": ["writable"],
+          "properties": {
+            "writable": {"type": "string", "minLength": 1}
+          }
+        },
         "interpreter": {
           "type": "object", "additionalProperties": false,
           "required": ["implementation", "version", "executable", "executable_digest"],

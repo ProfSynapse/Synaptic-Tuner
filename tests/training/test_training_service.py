@@ -70,7 +70,8 @@ def _execution_source(submodule_path: str) -> ExecutionSourceV1:
             verified_at="2026-08-25T12:01:00Z", expires_at="2026-08-25T12:10:00Z",
             key_ref="source-key", tag_base64="dGFn", attestation_digest="9" * 64,
         ),
-        deployment_member_sha256="7" * 64, roots=roots, python_implementation="cpython",
+        deployment_member_sha256="7" * 64, roots=roots,
+        writable_capability_root="/workspace/run", python_implementation="cpython",
         python_version="3.12.7", python_executable="/usr/local/bin/python3.12",
         python_executable_digest="6" * 64, environment={
             "PATH": "/usr/local/bin", "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1",

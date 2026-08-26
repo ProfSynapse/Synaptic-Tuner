@@ -376,6 +376,34 @@ def bind_runtime_roots(
     expected = runtime.get("roots")
     if not isinstance(expected, Mapping) or set(expected) != set(_ROOT_ENV):
         raise RuntimeV1Error("runtime-roots contract is incomplete")
+    capability_roots = runtime.get("capability_roots")
+    if (
+        not isinstance(capability_roots, Mapping)
+        or set(capability_roots) != {"writable"}
+        or not isinstance(capability_roots.get("writable"), str)
+    ):
+        raise RuntimeV1Error("runtime capability-roots contract is incomplete")
+    writable_boundary = Path(capability_roots["writable"])
+    if not writable_boundary.is_absolute():
+        raise RuntimeV1Error("runtime capability roots must be absolute")
+    if any(
+        writable_boundary not in Path(expected[name]).parents
+        for name in _WRITABLE_NAMES
+    ):
+        raise RuntimeV1Error(
+            "writable runtime roots escape their locked capability root"
+        )
+    _assert_no_redirected_components(
+        writable_boundary, allowed_redirect=writable_boundary
+    )
+    if not writable_boundary.exists() or not writable_boundary.is_dir():
+        raise RuntimeV1Error("writable capability root is unavailable")
+    try:
+        resolved_boundary = writable_boundary.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeV1Error("writable capability root is unavailable") from exc
+    if not resolved_boundary.is_dir():
+        raise RuntimeV1Error("writable capability root must resolve to a directory")
     roots: dict[str, Path] = {}
     for name, variable in _ROOT_ENV.items():
         raw = environment.get(variable)
@@ -385,12 +413,24 @@ def bind_runtime_roots(
         path = Path(raw)
         if not path.is_absolute():
             raise RuntimeV1Error("runtime roots must be absolute")
-        _assert_no_redirected_components(path)
+        _assert_no_redirected_components(
+            path,
+            allowed_redirect=(
+                writable_boundary if name in _WRITABLE_NAMES else None
+            ),
+        )
         if not path.exists() or not path.is_dir() or _is_redirect(path):
             raise RuntimeV1Error("runtime roots must be existing link-free directories")
         resolved = path.resolve(strict=True)
-        if resolved != path:
+        if name not in _WRITABLE_NAMES and resolved != path:
             raise RuntimeV1Error("runtime root contains an unresolved alias")
+        if (
+            name in _WRITABLE_NAMES
+            and resolved_boundary not in resolved.parents
+        ):
+            raise RuntimeV1Error(
+                "writable runtime root escapes its resolved capability root"
+            )
         roots[name] = resolved
     result = RuntimeRoots(**roots)
     _validate_root_topology(result, execution_source, engine_file=engine_file)
@@ -407,10 +447,13 @@ def _is_redirect(path: Path) -> bool:
     return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
-def _assert_no_redirected_components(path: Path) -> None:
-    """Reject symlink, junction, or reparse redirection in every existing component."""
+def _assert_no_redirected_components(
+    path: Path, *, allowed_redirect: Path | None = None
+) -> None:
+    """Reject redirection except at one authenticated capability boundary."""
 
     absolute = path.absolute()
+    allowed = allowed_redirect.absolute() if allowed_redirect is not None else None
     current = Path(absolute.anchor)
     for part in absolute.parts[1:]:
         current = current / part
@@ -420,7 +463,7 @@ def _assert_no_redirected_components(path: Path) -> None:
             continue
         except OSError as exc:
             raise RuntimeV1Error("runtime path component is unavailable") from exc
-        if _is_redirect(current):
+        if _is_redirect(current) and current != allowed:
             raise RuntimeV1Error("runtime path traverses a redirected component")
 
 

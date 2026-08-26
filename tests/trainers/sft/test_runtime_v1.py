@@ -49,6 +49,7 @@ def _fixture(
     *,
     dataset_ref: str = "project://data/train.jsonl",
     mode: str = "dual_clone",
+    redirected_capability: bool = False,
 ):
     if mode != "dual_clone":
         raise ValueError("runtime v1 test fixture supports only the finalized dual-clone mode")
@@ -69,9 +70,16 @@ def _fixture(
     dataset = project / "data" / "train.jsonl"
     dataset.parent.mkdir(parents=True)
     dataset.write_bytes(b'{"messages":[]}\n')
-    capability_root = (tmp_path / "capabilities").resolve()
+    capability_root = tmp_path / "capabilities"
+    if redirected_capability:
+        provider_volume = tmp_path / "provider-volume"
+        provider_volume.mkdir()
+        try:
+            capability_root.symlink_to(provider_volume, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks are unavailable")
     roots = {
-        name: (capability_root / name).resolve()
+        name: capability_root / name
         for name in ("artifacts", "state", "tracking", "cache", "tmp")
     }
     for path in roots.values():
@@ -186,6 +194,7 @@ def _fixture(
             key_ref="source-key", tag_base64="dGFn", attestation_digest="8" * 64,
         ),
         deployment_member_sha256="7" * 64, roots=locked_roots,
+        writable_capability_root=str(capability_root),
         python_implementation="cpython",
         python_version=".".join(str(part) for part in sys.version_info[:3]),
         python_executable=str(Path(sys.executable).resolve()),
@@ -679,6 +688,47 @@ def test_runtime_rejects_environment_root_not_bound_by_workload(tmp_path: Path) 
             runner=FakeRunner(),
             engine_file=engine_file,
         )
+
+
+def test_runtime_accepts_one_locked_provider_capability_redirect(
+    tmp_path: Path,
+) -> None:
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path, redirected_capability=True
+    )
+    runner = FakeRunner()
+
+    result = execute_runtime(
+        workload.canonical_bytes,
+        environment=environment,
+        runner=runner,
+        engine_file=engine_file,
+    )
+
+    assert result.workload_fingerprint == workload.fingerprint
+    assert runner.calls[0].cwd == (tmp_path / "provider-volume" / "tmp").resolve()
+
+
+def test_runtime_rejects_redirect_below_locked_capability_boundary(
+    tmp_path: Path,
+) -> None:
+    workload, environment, engine_file, roots, _ = _fixture(tmp_path)
+    roots["cache"].rmdir()
+    outside = tmp_path / "outside-cache"
+    outside.mkdir()
+    try:
+        roots["cache"].symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+
+    with pytest.raises(RuntimeV1Error, match="redirected component") as failure:
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=FakeRunner(),
+            engine_file=engine_file,
+        )
+    assert failure.value.diagnostic_code == "runtime_workload_roots_rejected"
 
 
 def test_runtime_rejects_stale_dispatcher_fingerprint(tmp_path: Path) -> None:

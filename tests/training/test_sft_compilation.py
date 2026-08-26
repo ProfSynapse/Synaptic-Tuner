@@ -97,7 +97,8 @@ def _execution_source(*, engine_commit: str = "a" * 40) -> ExecutionSourceV1:
         run_id=provisional.run_id, created_at=provisional.created_at,
         project_source=provisional.project_source, engine_source=provisional.engine_source,
         engine_submodule_path="vendor/training-engine", source_evidence=pushed,
-        deployment_member_sha256="7" * 64, roots=roots, python_implementation="cpython",
+        deployment_member_sha256="7" * 64, roots=roots,
+        writable_capability_root="/workspace/run", python_implementation="cpython",
         python_version="3.12.3", python_executable="/usr/local/bin/python3.12",
         python_executable_digest="6" * 64,
         environment={
