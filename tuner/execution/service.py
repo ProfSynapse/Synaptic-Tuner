@@ -34,6 +34,7 @@ class LifecycleService:
     def record_verification(self,*,project_ref,run_id,expected_revision,verification):
         code,msg={VerificationStatus.VERIFYING:(EventCode.VERIFICATION_STARTED,MessageCode.SEMANTIC_VERIFICATION_STARTED),VerificationStatus.VERIFIED:(EventCode.VERIFICATION_VERIFIED,MessageCode.SEMANTIC_VERIFICATION_PASSED),VerificationStatus.INVALID:(EventCode.VERIFICATION_INVALID,MessageCode.SEMANTIC_VERIFICATION_FAILED),VerificationStatus.INCONCLUSIVE:(EventCode.VERIFICATION_INCONCLUSIVE,MessageCode.SEMANTIC_VERIFICATION_INCONCLUSIVE)}[verification]
         return self._append(project_ref,run_id,expected_revision,code,msg)
+    def reopen_verification(self,*,project_ref,run_id,expected_revision):return self._append(project_ref,run_id,expected_revision,EventCode.VERIFICATION_REOPENED,MessageCode.SEMANTIC_VERIFICATION_REOPENED)
     def list_runs(self,*,project_ref,limit=50,cursor=None):return self._repository.list_runs(project_ref,limit=limit,cursor=cursor)
     def _append(self,p,r,v,c,m):return self._repository.append(p,r,expected_revision=v,event=LifecycleEvent(c,self._now(),m))
 __all__=["LifecycleService"]

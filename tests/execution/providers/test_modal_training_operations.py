@@ -55,6 +55,7 @@ from tuner.training import ResolvedTrainingComponents,TrainingService, default_r
 from tuner.training.methods.sft import compile_sft_workload
 from tuner.execution.broker import MutationCommandV1
 from tuner.execution.providers.modal.contracts import ArtifactRole,StageReceiptV1
+from tuner.runtime.verification import VerificationStatus as RuntimeVerificationStatus
 
 
 NOW = "2026-08-25T12:03:00Z"
@@ -454,6 +455,21 @@ def test_structurally_valid_but_unrelated_artifacts_cannot_succeed(tmp_path):
     outcome=value.outcome(submission)
     assert outcome.status.state is RunState.FAILED
     assert not outcome.artifacts and not outcome.success
+
+
+def test_explicit_reverify_can_correct_a_terminal_false_negative(tmp_path):
+    value,repository,plan=operations(tmp_path)
+    submission=value.start(plan,value.preflight(plan),ExecutionGrant("grant-run-1"))
+    _publish_unrelated_completed_run(value,repository,tmp_path)
+    value._verify_semantics=lambda preparation,manifest: RuntimeVerificationStatus.INVALID
+    assert value.outcome(submission).status.state is RunState.FAILED
+    value._verify_semantics=lambda preparation,manifest: RuntimeVerificationStatus.VERIFIED
+    corrected=value.reverify(submission)
+    assert corrected.status.state is RunState.SUCCEEDED
+    assert corrected.success and len(corrected.artifacts)==5
+    record=repository.load("project-1","run-1")
+    assert record.events[-2].code is EventCode.VERIFICATION_REOPENED
+    assert record.events[-1].code is EventCode.VERIFICATION_VERIFIED
 
 
 def test_transient_completion_read_becomes_inconclusive_not_invalid(tmp_path):

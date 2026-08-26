@@ -370,6 +370,8 @@ class TrainingOperations(Protocol):
 
     def outcome(self, submission: TrainingSubmission) -> TrainingOutcome: ...
 
+    def reverify(self, submission: TrainingSubmission) -> TrainingOutcome: ...
+
 
 class TrainingAPI:
     """Import-light facade over a host-selected training implementation."""
@@ -405,6 +407,9 @@ class TrainingAPI:
 
     def outcome(self, submission: TrainingSubmission) -> TrainingOutcome:
         return self._operations.outcome(submission)
+
+    def reverify(self, submission: TrainingSubmission) -> TrainingOutcome:
+        return self._operations.reverify(submission)
 
 
 __all__ = [

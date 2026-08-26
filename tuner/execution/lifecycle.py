@@ -45,7 +45,12 @@ def initial_record(
 def apply_event(record: LifecycleRecord, event: LifecycleEvent) -> LifecycleRecord:
     """Apply one already-durable event to a lifecycle snapshot."""
 
-    if record.phase in _TERMINAL_PHASES:
+    reopening_invalid_verification = (
+        event.code is EventCode.VERIFICATION_REOPENED
+        and record.phase is LifecyclePhase.FAILED
+        and record.verification is VerificationStatus.INVALID
+    )
+    if record.phase in _TERMINAL_PHASES and not reopening_invalid_verification:
         raise InvalidTransition("terminal runs cannot transition")
 
     phase = record.phase
@@ -53,7 +58,12 @@ def apply_event(record: LifecycleRecord, event: LifecycleEvent) -> LifecycleReco
     grant = record.grant_binding
     effects = record.effects
 
-    if event.code is EventCode.AUTHORITY_ACCEPTED:
+    if event.code is EventCode.VERIFICATION_REOPENED:
+        if not reopening_invalid_verification:
+            raise InvalidTransition("only invalid verification may be reopened")
+        phase = LifecyclePhase.VERIFYING
+        verification = VerificationStatus.VERIFYING
+    elif event.code is EventCode.AUTHORITY_ACCEPTED:
         if event.grant_binding is None:
             raise InvalidTransition("authority event requires a grant binding")
         if event.grant_binding.effect_kind.value == "cancel":

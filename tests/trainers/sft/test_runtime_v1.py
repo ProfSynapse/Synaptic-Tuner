@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import tarfile
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,10 @@ from Trainers.sft.runtime_v1 import (
 from tuner.project.execution_source import AuthenticatedSourceEvidenceV1, ExecutionSourceV1
 from tuner.project.source_bundle import SourceLock
 from tuner.training.methods.sft import compile_sft_workload
+from tuner.runtime.verification import (
+    _validate_embedded_trainer_lineage,
+    _validate_execution_evidence,
+)
 
 
 _REPO = Path(__file__).parents[3]
@@ -704,7 +709,7 @@ def test_runtime_rejects_environment_root_not_bound_by_workload(tmp_path: Path) 
 def test_runtime_accepts_one_locked_provider_capability_redirect(
     tmp_path: Path,
 ) -> None:
-    workload, environment, engine_file, _, _ = _fixture(
+    workload, environment, engine_file, roots, _ = _fixture(
         tmp_path, redirected_capability=True
     )
     runner = FakeRunner()
@@ -718,6 +723,71 @@ def test_runtime_accepts_one_locked_provider_capability_redirect(
 
     assert result.workload_fingerprint == workload.fingerprint
     assert runner.calls[0].cwd == (tmp_path / "provider-volume" / "tmp").resolve()
+    lineage = json.loads(
+        (roots["artifacts"] / "training_lineage.json").read_text(encoding="utf-8")
+    )
+    execution = lineage["execution_evidence"]
+    assert _validate_execution_evidence(execution, workload)
+    assert _validate_embedded_trainer_lineage(
+        lineage["trainer_lineage"], workload, execution
+    )
+
+
+def _relocated_runtime_lineage(tmp_path: Path):
+    workload, environment, engine_file, roots, _ = _fixture(tmp_path)
+    execute_runtime(
+        workload.canonical_bytes,
+        environment=environment,
+        runner=FakeRunner(),
+        engine_file=engine_file,
+    )
+    lineage = json.loads(
+        (roots["artifacts"] / "training_lineage.json").read_text(encoding="utf-8")
+    )
+    locked = workload.document["execution_source"]["runtime"]["roots"]
+    observed_boundary = (tmp_path / "provider-observed" / "runtime-v1-test").resolve()
+    replacements = {
+        locked[name].replace("\\", "/"):
+        str(observed_boundary / name).replace("\\", "/")
+        for name in ("artifacts", "state", "tracking", "cache", "tmp")
+    }
+
+    def relocate(value):
+        if isinstance(value, dict):
+            return {key: relocate(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [relocate(item) for item in value]
+        if isinstance(value, str):
+            normalized = value.replace("\\", "/")
+            for old, new in replacements.items():
+                if normalized == old or normalized.startswith(old + "/"):
+                    return new + normalized[len(old):]
+            return normalized
+        return value
+
+    return workload, relocate(deepcopy(lineage))
+
+
+def test_semantic_verifier_accepts_one_consistent_provider_root_relocation(
+    tmp_path: Path,
+) -> None:
+    workload, lineage = _relocated_runtime_lineage(tmp_path)
+    execution = lineage["execution_evidence"]
+    assert _validate_execution_evidence(execution, workload)
+    assert _validate_embedded_trainer_lineage(
+        lineage["trainer_lineage"], workload, execution
+    )
+
+
+def test_semantic_verifier_rejects_inconsistent_provider_root_relocation(
+    tmp_path: Path,
+) -> None:
+    workload, lineage = _relocated_runtime_lineage(tmp_path)
+    execution = lineage["execution_evidence"]
+    execution["environment"]["SYNAPTIC_CACHE_ROOT"] = str(
+        (tmp_path / "different-provider-root" / "cache").resolve()
+    ).replace("\\", "/")
+    assert not _validate_execution_evidence(execution, workload)
 
 
 def test_runtime_rejects_redirect_below_locked_capability_boundary(

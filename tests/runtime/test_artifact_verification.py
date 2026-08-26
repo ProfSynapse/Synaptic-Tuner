@@ -63,7 +63,7 @@ def _runtime_workload():
     source = _execution_source()
     roots = {
         "engine": "/workspace/engine", "project": "/workspace/project",
-        **{name: f"/workspace/{name}" for name in ("artifacts", "state", "tracking", "cache", "tmp")},
+        **{name: f"/workspace/run/{name}" for name in ("artifacts", "state", "tracking", "cache", "tmp")},
     }
     environment = dict(source.environment)
     replacements = {
@@ -76,7 +76,8 @@ def _runtime_workload():
     }
     environment.update(replacements)
     source = replace(
-        source, roots=roots, environment=environment,
+        source, roots=roots, writable_capability_root="/workspace/run",
+        environment=environment,
         python_executable="/usr/bin/python", python_version="3.12.3",
     )
     config = CanonicalDocument.from_mapping(
@@ -90,7 +91,7 @@ def _runtime_workload():
                 "save_steps": 1, "save_total_limit": 1, "lora_rank": 8,
                 "lora_alpha": 16, "lora_dropout": "0.0",
                 "lora_target_modules": ["q_proj", "v_proj"], "use_dora": False,
-                "use_rslora": False, "init_lora_weights": "true", "split_dataset": False,
+                "use_rslora": False, "init_lora_weights": True, "split_dataset": False,
             },
         }
     )
@@ -99,14 +100,15 @@ def _runtime_workload():
 
 def _lineage(workload) -> bytes:
     config = workload.document["configuration"]["document"]
-    root = "/workspace/engine"
-    project_root = "/workspace/project"
-    run_dir = "/workspace/state/runtime-v1-trainer/output/runtime-v1"
+    roots = workload.document["execution_source"]["runtime"]["roots"]
+    root = roots["engine"]
+    project_root = roots["project"]
+    run_dir = roots["state"] + "/runtime-v1-trainer/output/runtime-v1"
     dataset_path = f"{project_root}/data/train.jsonl"
     argv = [
         "/usr/bin/python", f"{root}/Trainers/sft/train_sft.py", "--model-name", "example/model",
-        "--model-revision", "c" * 40, "--anonymous-model", "--model-cache-dir", "/workspace/cache/model",
-        "--local-file", dataset_path, "--output-root", "/workspace/state/runtime-v1-trainer/output",
+        "--model-revision", "c" * 40, "--anonymous-model", "--model-cache-dir", roots["cache"] + "/model",
+        "--local-file", dataset_path, "--output-root", roots["state"] + "/runtime-v1-trainer/output",
         "--run-timestamp", "runtime-v1", "--no-dashboard", "--quiet",
         "--runtime-v1-workload-fingerprint", workload.fingerprint,
         "--runtime-v1-configuration-revision", workload.document["configuration"]["revision"],
@@ -123,11 +125,12 @@ def _lineage(workload) -> bytes:
     environment = {
         "PATH": "/usr/local/bin",
         "SYNAPTIC_ENGINE_ROOT": root, "SYNAPTIC_PROJECT_ROOT": project_root,
-        "SYNAPTIC_ARTIFACT_ROOT": "/workspace/artifacts", "SYNAPTIC_STATE_ROOT": "/workspace/state",
-        "SYNAPTIC_TRACKING_ROOT": "/workspace/tracking", "SYNAPTIC_CACHE_ROOT": "/workspace/cache",
-        "SYNAPTIC_TMP_ROOT": "/workspace/tmp", "SYNAPTIC_WORKLOAD_FINGERPRINT": workload.fingerprint,
-        "PYTHONPATH": root, "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1",
-        "HF_HOME": "/workspace/cache/huggingface", "TRANSFORMERS_CACHE": "/workspace/cache/transformers",
+        "SYNAPTIC_ARTIFACT_ROOT": roots["artifacts"], "SYNAPTIC_STATE_ROOT": roots["state"],
+        "SYNAPTIC_TRACKING_ROOT": roots["tracking"], "SYNAPTIC_CACHE_ROOT": roots["cache"],
+        "SYNAPTIC_TMP_ROOT": roots["tmp"], "SYNAPTIC_WORKLOAD_FINGERPRINT": workload.fingerprint,
+        "PYTHONPATH": root + ":" + root + "/Trainers/sft",
+        "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1",
+        "HF_HOME": roots["cache"] + "/huggingface", "TRANSFORMERS_CACHE": roots["cache"] + "/transformers",
         "WANDB_DISABLED": "true",
     }
     execution = {
@@ -136,7 +139,7 @@ def _lineage(workload) -> bytes:
         "configuration_revision": workload.document["configuration"]["revision"],
         "model": {key: config["model"][key] for key in ("ref", "revision", "tokenizer_revision", "load_in_4bit")},
         "dataset": {"ref": config["dataset"]["ref"], "resolved_path": dataset_path, "revision": config["dataset"]["revision"], "content_digest": config["dataset"]["content_digest"]},
-        "sft": config["sft"], "argv": argv, "environment": environment, "cwd": "/workspace/tmp",
+        "sft": config["sft"], "argv": argv, "environment": environment, "cwd": roots["tmp"],
         "outputs": {"run_dir": run_dir, "final_model_dir": f"{run_dir}/final_model", "tokenizer_dir": f"{run_dir}/final_model", "lineage_path": f"{run_dir}/training_lineage.json"},
         "result": {"exit_code": 0, "status": "completed"},
     }
@@ -146,8 +149,8 @@ def _lineage(workload) -> bytes:
         "configuration_revision": workload.document["configuration"]["revision"],
         "model": {key: config["model"][key] for key in ("ref", "revision", "tokenizer_revision", "load_in_4bit")},
         "dataset": {"resolved_path": dataset_path, "revision": config["dataset"]["revision"], "content_digest": config["dataset"]["content_digest"]},
-        "training": {"batch_size": 2, "gradient_accumulation_steps": 4, "learning_rate": 0.0002, "max_steps": 1, "num_epochs": 1.0, "max_seq_length": 1024, "seed": 7, "save_steps": 1, "save_total_limit": 1, "split_dataset": False},
-        "lora": {"rank": 8, "alpha": 16, "dropout": 0.0, "target_modules": ["q_proj", "v_proj"], "use_dora": False, "use_rslora": False, "init_lora_weights": "true"},
+        "training": {"batch_size": 2, "gradient_accumulation_steps": 4, "learning_rate": 0.0002, "max_steps": 1, "num_epochs": 1, "max_seq_length": 1024, "seed": 7, "save_steps": 1, "save_total_limit": 1, "split_dataset": False},
+        "lora": {"rank": 8, "alpha": 16, "dropout": 0.0, "target_modules": ["q_proj", "v_proj"], "use_dora": False, "use_rslora": False, "init_lora_weights": True},
         "outputs": {"run_dir": run_dir, "final_model_dir": f"{run_dir}/final_model"},
         "status": "completed",
     }

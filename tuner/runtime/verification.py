@@ -420,17 +420,120 @@ def _normalized_path(value: object) -> str | None:
     return value.replace("\\", "/").rstrip("/")
 
 
+_WRITABLE_RUNTIME_ROOTS = ("artifacts", "state", "tracking", "cache", "tmp")
+_ROOT_ENVIRONMENT_KEYS = {
+    "engine": "SYNAPTIC_ENGINE_ROOT",
+    "project": "SYNAPTIC_PROJECT_ROOT",
+    "artifacts": "SYNAPTIC_ARTIFACT_ROOT",
+    "state": "SYNAPTIC_STATE_ROOT",
+    "tracking": "SYNAPTIC_TRACKING_ROOT",
+    "cache": "SYNAPTIC_CACHE_ROOT",
+    "tmp": "SYNAPTIC_TMP_ROOT",
+}
+
+
+def _absolute_normalized_path(value: object) -> str | None:
+    normalized = _normalized_path(value)
+    if normalized is None or not (
+        normalized.startswith("/") or re.fullmatch(r"[A-Za-z]:/.*", normalized)
+    ):
+        return None
+    return normalized
+
+
+def _join_path(root: str, *parts: str) -> str:
+    return "/".join((root.rstrip("/"), *(part.strip("/") for part in parts)))
+
+
+def _observed_runtime_roots(
+    source_runtime: dict[str, object], environment: dict[str, object]
+) -> dict[str, str] | None:
+    """Bind one provider-observed writable relocation to the locked root layout."""
+
+    locked_value = source_runtime.get("roots")
+    capabilities = source_runtime.get("capability_roots")
+    if (
+        not isinstance(locked_value, dict)
+        or set(locked_value) != set(_ROOT_ENVIRONMENT_KEYS)
+        or not isinstance(capabilities, dict)
+        or set(capabilities) != {"writable"}
+    ):
+        return None
+    locked = {
+        name: _absolute_normalized_path(value)
+        for name, value in locked_value.items()
+    }
+    capability = _absolute_normalized_path(capabilities.get("writable"))
+    if capability is None or any(value is None for value in locked.values()):
+        return None
+    locked_boundaries = {
+        locked[name].rsplit("/", 1)[0]
+        for name in _WRITABLE_RUNTIME_ROOTS
+        if locked[name].endswith("/" + name)
+    }
+    if len(locked_boundaries) != 1:
+        return None
+    locked_boundary = next(iter(locked_boundaries))
+    if not (
+        locked_boundary == capability
+        or locked_boundary.startswith(capability + "/")
+    ) or any(
+        locked[name] != _join_path(locked_boundary, name)
+        for name in _WRITABLE_RUNTIME_ROOTS
+    ):
+        return None
+    observed = {
+        name: _absolute_normalized_path(environment.get(variable))
+        for name, variable in _ROOT_ENVIRONMENT_KEYS.items()
+    }
+    if any(value is None for value in observed.values()):
+        return None
+    if observed["engine"] != locked["engine"] or observed["project"] != locked["project"]:
+        return None
+    observed_boundaries = {
+        observed[name].rsplit("/", 1)[0]
+        for name in _WRITABLE_RUNTIME_ROOTS
+        if observed[name].endswith("/" + name)
+    }
+    if len(observed_boundaries) != 1:
+        return None
+    observed_boundary = next(iter(observed_boundaries))
+    if not observed_boundary or any(
+        observed[name] != _join_path(observed_boundary, name)
+        for name in _WRITABLE_RUNTIME_ROOTS
+    ):
+        return None
+    return {name: value for name, value in observed.items() if value is not None}
+
+
+def _python_executable_matches(actual: str, interpreter: dict[str, object]) -> bool:
+    planned = _absolute_normalized_path(interpreter.get("executable"))
+    observed = _absolute_normalized_path(actual)
+    version = interpreter.get("version")
+    if planned is None or observed is None or not isinstance(version, str):
+        return False
+    if observed == planned:
+        return True
+    match = re.fullmatch(r"(\d+)\.(\d+)\.\d+", version)
+    if match is None:
+        return False
+    parent, separator, filename = planned.rpartition("/")
+    if not separator or filename not in {"python", "python3"}:
+        return False
+    return observed == _join_path(parent, f"python{match.group(1)}.{match.group(2)}")
+
+
 def _validate_evidence_paths_and_argv(
     evidence: dict[str, object], workload: CompiledWorkload
 ) -> bool:
     source_runtime = workload.document["execution_source"].get("runtime")
     if not isinstance(source_runtime, dict) or not isinstance(source_runtime.get("roots"), dict):
         return False
-    roots = source_runtime["roots"]
-    if set(roots) != {"engine", "project", "artifacts", "state", "tracking", "cache", "tmp"}:
+    environment = evidence["environment"]
+    if not isinstance(environment, dict):
         return False
-    normalized = {key: _normalized_path(value) for key, value in roots.items()}
-    if any(value is None for value in normalized.values()):
+    normalized = _observed_runtime_roots(source_runtime, environment)
+    if normalized is None:
         return False
     config = workload.document["configuration"]["document"]
     relative_dataset = config["dataset"]["ref"].removeprefix("project://")
@@ -457,28 +560,28 @@ def _validate_evidence_paths_and_argv(
         "implementation", "version", "executable", "executable_digest"
     }:
         return False
-    planned_python = _normalized_path(interpreter.get("executable"))
     planned_environment = (
         environment_contract.get("variables")
         if isinstance(environment_contract, dict)
         and environment_contract.get("clear_inherited") is True
         else None
     )
-    if planned_python is None or not isinstance(planned_environment, dict):
+    if not isinstance(planned_environment, dict):
+        return False
+    executable = _normalized_path(evidence["argv"][0])
+    if executable is None or not _python_executable_matches(executable, interpreter):
         return False
     expected_argv = _expected_trainer_argv(
-        planned_python, normalized, dataset_path, config, workload
+        executable, normalized, dataset_path, config, workload
     )
-    executable = _normalized_path(evidence["argv"][0])
     if (
-        executable is None
-        or not (executable.startswith("/") or re.fullmatch(r"[A-Za-z]:/.*", executable))
-        or [_normalized_path(item) for item in evidence["argv"]] != [
+        [_normalized_path(item) for item in evidence["argv"]] != [
         _normalized_path(item) for item in expected_argv
         ]
     ):
         return False
-    env = evidence["environment"]
+    env = environment
+    path_separator = ";" if re.fullmatch(r"[A-Za-z]:/.*", normalized["engine"]) else ":"
     required_env = {
         "SYNAPTIC_ENGINE_ROOT": normalized["engine"],
         "SYNAPTIC_PROJECT_ROOT": normalized["project"],
@@ -488,7 +591,9 @@ def _validate_evidence_paths_and_argv(
         "SYNAPTIC_CACHE_ROOT": normalized["cache"],
         "SYNAPTIC_TMP_ROOT": normalized["tmp"],
         "SYNAPTIC_WORKLOAD_FINGERPRINT": workload.fingerprint,
-        "PYTHONPATH": normalized["engine"],
+        "PYTHONPATH": path_separator.join((
+            normalized["engine"], _join_path(normalized["engine"], "Trainers", "sft")
+        )),
         "PYTHONNOUSERSITE": "1",
         "PYTHONSAFEPATH": "1",
         "HF_HOME": f"{normalized['cache']}/huggingface",
@@ -546,7 +651,13 @@ def _expected_trainer_argv(
         argv.append("--use-dora")
     if sft["use_rslora"]:
         argv.append("--use-rslora")
-    argv.extend(("--init-lora-weights", sft["init_lora_weights"]))
+    init_lora_weights = sft["init_lora_weights"]
+    argv.extend((
+        "--init-lora-weights",
+        ("true" if init_lora_weights else "false")
+        if isinstance(init_lora_weights, bool)
+        else init_lora_weights,
+    ))
     if sft["split_dataset"]:
         argv.append("--split-dataset")
     argv.append("--load-in-4bit" if model["load_in_4bit"] else "--no-load-in-4bit")
@@ -577,7 +688,7 @@ def _validate_embedded_trainer_lineage(
         "training": {
             "batch_size": sft["batch_size"], "gradient_accumulation_steps": sft["gradient_accumulation_steps"],
             "learning_rate": float(sft["learning_rate"]), "max_steps": sft.get("max_steps", -1),
-            "num_epochs": float(sft.get("num_epochs", 1)), "max_seq_length": sft["max_seq_length"],
+            "num_epochs": sft.get("num_epochs", 1), "max_seq_length": sft["max_seq_length"],
             "seed": sft["seed"], "save_steps": sft["save_steps"],
             "save_total_limit": sft["save_total_limit"], "split_dataset": sft["split_dataset"],
         },

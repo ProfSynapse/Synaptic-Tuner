@@ -136,6 +136,7 @@ class EventCode(str, Enum):
     VERIFICATION_VERIFIED = "verification_verified"
     VERIFICATION_INVALID = "verification_invalid"
     VERIFICATION_INCONCLUSIVE = "verification_inconclusive"
+    VERIFICATION_REOPENED = "verification_reopened"
 
 
 class MessageCode(str, Enum):
@@ -155,6 +156,7 @@ class MessageCode(str, Enum):
     SEMANTIC_VERIFICATION_PASSED = "semantic_verification_passed"
     SEMANTIC_VERIFICATION_FAILED = "semantic_verification_failed"
     SEMANTIC_VERIFICATION_INCONCLUSIVE = "semantic_verification_inconclusive"
+    SEMANTIC_VERIFICATION_REOPENED = "semantic_verification_reopened"
 
 
 @dataclass(frozen=True, slots=True)

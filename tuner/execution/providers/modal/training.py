@@ -1117,6 +1117,60 @@ class ModalTrainingOperations:
             submission, self._status(record), self._artifacts(submission, manifest)
         )
 
+    def reverify(self, submission: TrainingSubmission) -> TrainingOutcome:
+        """Explicitly re-adjudicate immutable authenticated artifacts."""
+        if not isinstance(submission, TrainingSubmission):
+            raise TypeError("submission must be TrainingSubmission")
+        preparation = self._repository.load_modal_preparation(
+            submission.run.project_ref, submission.run.run_id
+        )
+        if (
+            type(preparation) is not ModalDurablePreparationV1
+            or preparation.public_plan_fingerprint != submission.plan_fingerprint
+        ):
+            raise ValueError("durable Modal preparation does not bind the submission")
+        record = self._lifecycle.load(
+            project_ref=submission.run.project_ref,
+            run_id=submission.run.run_id,
+        )
+        if record.phase is LifecyclePhase.SUCCEEDED:
+            manifest = self._completion.validate(preparation.operation.effect.effect_id)
+            return TrainingOutcome(
+                submission, self._status(record), self._artifacts(submission, manifest)
+            )
+        if not (
+            record.phase is LifecyclePhase.FAILED
+            and record.verification is VerificationStatus.INVALID
+        ):
+            raise ValueError("reverify requires an invalid terminal verification")
+        try:
+            manifest = self._completion.validate(preparation.operation.effect.effect_id)
+        except Exception:
+            return TrainingOutcome(submission, self._status(record))
+        semantic = self._verify_semantics(preparation, manifest)
+        record = self._lifecycle.reopen_verification(
+            project_ref=record.project_ref,
+            run_id=record.run_id,
+            expected_revision=record.revision,
+        )
+        verification = {
+            RuntimeVerificationStatus.VERIFIED: VerificationStatus.VERIFIED,
+            RuntimeVerificationStatus.INVALID: VerificationStatus.INVALID,
+            RuntimeVerificationStatus.INCONCLUSIVE: VerificationStatus.INCONCLUSIVE,
+        }[semantic]
+        record = self._lifecycle.record_verification(
+            project_ref=record.project_ref,
+            run_id=record.run_id,
+            expected_revision=record.revision,
+            verification=verification,
+        )
+        artifacts = (
+            self._artifacts(submission, manifest)
+            if verification is VerificationStatus.VERIFIED
+            else ()
+        )
+        return TrainingOutcome(submission, self._status(record), artifacts)
+
 
 def compose_modal_training_operations(
     *,

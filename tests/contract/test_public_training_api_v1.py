@@ -139,7 +139,9 @@ def test_training_api_has_only_the_accepted_verbs() -> None:
         for name, member in TrainingAPI.__dict__.items()
         if not name.startswith("_") and inspect.isfunction(member)
     }
-    assert verbs == {"load", "resolve", "plan", "preflight", "start", "outcome"}
+    assert verbs == {
+        "load", "resolve", "plan", "preflight", "start", "outcome", "reverify"
+    }
 
 
 def test_host_resolver_contract_is_public_and_structural() -> None:
