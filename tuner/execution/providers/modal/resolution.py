@@ -11,7 +11,11 @@ import binascii
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Callable, Mapping, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from .binding import ModalClientBinding
+    from .config import ModalProviderProfileV1
 
 from tuner.project.context import ProjectContext
 from tuner.project.execution_source import (
@@ -131,6 +135,54 @@ class ModalDeploymentSelectionV1:
         if not isinstance(value, Mapping) or set(value) != expected:
             raise ValueError("Modal deployment selection contains missing or unknown fields")
         return cls(**dict(value))
+
+    @classmethod
+    def from_profile(
+        cls,
+        profile: "ModalProviderProfileV1",
+        *,
+        binding: "ModalClientBinding",
+        runtime_environment: Mapping[str, str],
+        timeout_seconds: int = 3600,
+    ) -> "ModalDeploymentSelectionV1":
+        """Resolve the exact v1 selection without duplicating engine digests."""
+        from .binding import ModalClientBinding
+        from .config import ModalProviderProfileV1, ModalRuntimeLockV1
+
+        if type(profile) is not ModalProviderProfileV1:
+            raise TypeError("canonical Modal provider profile is required")
+        if type(binding) is not ModalClientBinding:
+            raise TypeError("canonical Modal client binding is required")
+        runtime_lock = ModalRuntimeLockV1.packaged()
+        environment = dict(runtime_environment)
+        return cls(
+            account_ref=binding.account_ref,
+            workspace_ref=binding.workspace_ref,
+            environment_ref=binding.environment_ref,
+            client_ref=binding.client_ref,
+            sdk_version=binding.sdk_version,
+            app_name=profile.app_name,
+            function_name=profile.function_name,
+            function_version=profile.function_version,
+            image_id=profile.image_id,
+            image_digest=runtime_lock.image_digest,
+            dependency_lock_digest=runtime_lock.locked_digest("dependency_lock"),
+            wrapper_digest=runtime_lock.locked_digest("deployment_wrapper"),
+            runtime_digest=runtime_lock.locked_digest("sft_runtime"),
+            python_version=runtime_lock.python_version,
+            python_executable=runtime_lock.python_executable,
+            python_executable_digest=runtime_lock.python_executable_digest,
+            secret_requirements_digest=profile.secret_requirements_digest,
+            provider_runtime_requirements_digest=(
+                profile.provider_runtime_requirements_digest(
+                    runtime_lock,
+                    runtime_environment=environment,
+                    timeout_seconds=timeout_seconds,
+                )
+            ),
+            runtime_environment=environment,
+            timeout_seconds=timeout_seconds,
+        )
 
 @dataclass(frozen=True, slots=True)
 class VerifiedModalDeploymentIdentityV1:

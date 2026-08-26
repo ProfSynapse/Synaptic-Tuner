@@ -390,7 +390,6 @@ def test_public_api_composes_from_host_ports_without_a_provider_specific_verb(tm
         context=context,
         host_ports=ports,
         provider_config=profile(),
-        recipe_registry=default_recipe_registry(),
     )
     host = APIHost(operations, ports)
     request = host.training.load(CanonicalDocument.from_mapping({"method": "sft"}))

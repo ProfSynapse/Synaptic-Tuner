@@ -2,60 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 from synaptic_tuner.api.v1.training import (
-    ArtifactPolicy,
-    CanonicalDocument,
-    ResourceSpec,
-    RuntimeSpec,
-    TrainingRequest,
+    ResolvedTrainingComponents,
+    TrainingRequestResolver,
+    TrainingResolutionError,
 )
 from tuner.project.context import ProjectContext
 from tuner.project.execution_source import ExecutionSourceV1
-
-
-class TrainingResolutionError(ValueError):
-    pass
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedTrainingComponents:
-    """Exact resolver output before method-specific workload compilation."""
-
-    execution_source: ExecutionSourceV1
-    execution_context: CanonicalDocument
-    resolved_config: CanonicalDocument
-    runtime: RuntimeSpec
-    resources: ResourceSpec
-    artifact_policy: ArtifactPolicy = ArtifactPolicy()
-
-    def __post_init__(self) -> None:
-        checks = (
-            (self.execution_source, ExecutionSourceV1, "execution_source"),
-            (self.execution_context, CanonicalDocument, "execution_context"),
-            (self.resolved_config, CanonicalDocument, "resolved_config"),
-            (self.runtime, RuntimeSpec, "runtime"),
-            (self.resources, ResourceSpec, "resources"),
-            (self.artifact_policy, ArtifactPolicy, "artifact_policy"),
-        )
-        for value, expected, name in checks:
-            if not isinstance(value, expected):
-                raise TypeError(f"{name} must be {expected.__name__}")
-
-
-@runtime_checkable
-class TrainingRequestResolver(Protocol):
-    """Host seam for config, source, model, and dataset resolution."""
-
-    def resolve(
-        self,
-        request: TrainingRequest,
-        *,
-        context: ProjectContext,
-    ) -> ResolvedTrainingComponents: ...
 
 
 def validate_source_topology(

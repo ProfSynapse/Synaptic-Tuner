@@ -5,6 +5,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from synaptic_tuner.api.v1.modal import (
+    ModalClientBinding,
+    ModalDeploymentSelectionV1,
+)
 from tuner.execution.providers.modal.config import ModalProviderProfileV1, ModalRuntimeLockV1
 
 
@@ -33,3 +37,33 @@ def test_runtime_lock_is_deeply_immutable_and_detached_from_input():
     assert runtime.locked_digest("sft_runtime") != "0" * 64
     with pytest.raises(TypeError):
         runtime.document["python"]["version"] = "9.9.9"
+
+
+def test_public_selection_builder_owns_every_engine_digest():
+    profile = ModalProviderProfileV1.from_mapping(
+        yaml.safe_load(
+            (ROOT / "examples/host-project/providers/modal-a10-v1.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+    )
+    binding = ModalClientBinding("ac-1", "workspace", "main", "host-cli", "1.5.4")
+    selection = ModalDeploymentSelectionV1.from_profile(
+        profile,
+        binding=binding,
+        runtime_environment={"LANG": "C.UTF-8"},
+        timeout_seconds=900,
+    )
+    runtime = ModalRuntimeLockV1.packaged()
+
+    assert selection.account_ref == "ac-1"
+    assert selection.timeout_seconds == 900
+    assert selection.image_digest == runtime.image_digest
+    assert selection.secret_requirements_digest == profile.secret_requirements_digest
+    assert selection.provider_runtime_requirements_digest == (
+        profile.provider_runtime_requirements_digest(
+            runtime,
+            runtime_environment={"LANG": "C.UTF-8"},
+            timeout_seconds=900,
+        )
+    )

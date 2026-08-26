@@ -9,7 +9,7 @@ from .execution import AuthorizationRequirement, ExecutionGrant
 from .persistence import EvidenceReplayRepository, LifecycleRepository
 from .runs import RunsAPI, RunsOperations
 from .secrets import SecretRef
-from .training import TrainingAPI, TrainingOperations
+from .training import TrainingAPI, TrainingOperations, TrainingRequestResolver
 
 
 class GrantProvider(Protocol):
@@ -56,8 +56,7 @@ class ModalDeploymentReader(Protocol):
     def inspect_deployment(self, *, app_name: str, function_name: str): ...
 
 
-class TrainingResolver(Protocol):
-    def resolve(self, request, *, context): ...
+TrainingResolver = TrainingRequestResolver
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +70,7 @@ class HostPorts:
     clock: Clock
     git_remote: GitRemoteReader
     modal_reads: ModalDeploymentReader
-    training_resolver: TrainingResolver
+    training_resolver: TrainingRequestResolver
 
 
 class APIHost:

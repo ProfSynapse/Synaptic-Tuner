@@ -80,7 +80,6 @@ from .control import (
     TerminalExpectationV1,
 )
 from .facade import ExplicitModal154ReadFacade, ModalFunctionCallState
-from .deployment_v1 import ARTIFACT_MOUNT, CONTROL_MOUNT
 from .logs import LogControlPlane, LogExpectationV1
 from .manifest import CompletionControlPlane, CompletionExpectationV1
 from .mutation import _ExplicitModal154FunctionMutator
@@ -110,17 +109,7 @@ def _resource_digest(plan: TrainingPlan) -> str:
 
 
 def _secret_requirements_digest(profile: ModalProviderProfileV1) -> str:
-    return sha(
-        canonical_json(
-            {
-                "schema_version": "synaptic-modal-secret-requirements/v1",
-                "secrets": [
-                    {"name": item.name, "required_keys": list(item.required_keys)}
-                    for item in profile.secrets
-                ],
-            }
-        )
-    )
+    return profile.secret_requirements_digest
 
 
 def _provider_runtime_requirements_digest(
@@ -128,33 +117,12 @@ def _provider_runtime_requirements_digest(
     profile: ModalProviderProfileV1,
     deployment,
 ) -> str:
-    return sha(
-        canonical_json(
-            {
-                "schema_version": "synaptic-modal-provider-runtime-requirements/v1",
-                "runtime_lock": runtime_lock.to_dict(),
-                "deployment": {
-                    "app_name": profile.app_name,
-                    "function_name": profile.function_name,
-                    "function_version": profile.function_version,
-                    "image_id": profile.image_id,
-                    "accelerator": deployment.accelerator,
-                    "timeout_seconds": deployment.timeout_seconds,
-                    "max_retries": deployment.max_retries,
-                },
-                "volumes": {
-                    "control_ref": profile.control_volume_ref,
-                    "control_mount": CONTROL_MOUNT,
-                    "artifact_ref": profile.artifact_volume_ref,
-                    "artifact_mount": ARTIFACT_MOUNT,
-                },
-                "secrets": [
-                    {"name": item.name, "required_keys": list(item.required_keys)}
-                    for item in profile.secrets
-                ],
-                "environment": dict(deployment.runtime_environment),
-            }
-        )
+    return profile.provider_runtime_requirements_digest(
+        runtime_lock,
+        runtime_environment=deployment.runtime_environment,
+        accelerator=deployment.accelerator,
+        timeout_seconds=deployment.timeout_seconds,
+        max_retries=deployment.max_retries,
     )
 
 
@@ -1140,9 +1108,13 @@ def compose_modal_training_operations(
     context: ProjectContext,
     host_ports: HostPorts,
     provider_config: ModalProviderProfileV1,
-    recipe_registry: RecipeRegistry,
+    recipe_registry: RecipeRegistry | None = None,
 ) -> ModalTrainingOperations:
     """Compose the sole Modal training path without choosing host persistence."""
+    if recipe_registry is None:
+        from tuner.training import default_recipe_registry
+
+        recipe_registry = default_recipe_registry()
     planning = TrainingService(
         context=context,
         resolver=host_ports.training_resolver,

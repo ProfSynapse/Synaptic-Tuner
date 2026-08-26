@@ -6,7 +6,10 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Mapping, Protocol
+from typing import TYPE_CHECKING, Mapping, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from .context import ProjectContext
 
 from .execution import (
     ArtifactRef,
@@ -166,6 +169,47 @@ class ResolvedTrainingRequest:
         for value, kind, name in expected:
             if not isinstance(value, kind):
                 raise TypeError(f"{name} must be {kind.__name__}")
+
+
+class TrainingResolutionError(ValueError):
+    """Stable failure raised when a host cannot resolve an exact request."""
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedTrainingComponents:
+    """Exact host resolver output before deterministic workload compilation."""
+
+    execution_source: ExecutionSourceV1
+    execution_context: CanonicalDocument
+    resolved_config: CanonicalDocument
+    runtime: RuntimeSpec
+    resources: ResourceSpec
+    artifact_policy: ArtifactPolicy = ArtifactPolicy()
+
+    def __post_init__(self) -> None:
+        checks = (
+            (self.execution_source, ExecutionSourceV1, "execution_source"),
+            (self.execution_context, CanonicalDocument, "execution_context"),
+            (self.resolved_config, CanonicalDocument, "resolved_config"),
+            (self.runtime, RuntimeSpec, "runtime"),
+            (self.resources, ResourceSpec, "resources"),
+            (self.artifact_policy, ArtifactPolicy, "artifact_policy"),
+        )
+        for value, expected, name in checks:
+            if not isinstance(value, expected):
+                raise TypeError(f"{name} must be {expected.__name__}")
+
+
+@runtime_checkable
+class TrainingRequestResolver(Protocol):
+    """Host seam for config, source, model, and dataset resolution."""
+
+    def resolve(
+        self,
+        request: TrainingRequest,
+        *,
+        context: "ProjectContext",
+    ) -> ResolvedTrainingComponents: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,6 +410,7 @@ class TrainingAPI:
 __all__ = [
     "ArtifactPolicy",
     "CanonicalDocument",
+    "ResolvedTrainingComponents",
     "ResolvedTrainingRequest",
     "ResourceSpec",
     "RuntimeSpec",
@@ -375,5 +420,7 @@ __all__ = [
     "TrainingPlan",
     "TrainingPreflight",
     "TrainingRequest",
+    "TrainingRequestResolver",
+    "TrainingResolutionError",
     "TrainingSubmission",
 ]

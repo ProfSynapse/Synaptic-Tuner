@@ -1,6 +1,7 @@
 """Strict declarative Modal provider profile and packaged runtime lock."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -103,6 +104,72 @@ class ModalProviderProfileV1:
             deployment["function_version"], deployment["image_id"], root["runtime_lock"],
             volumes["control_ref"], volumes["artifact_ref"], tuple(secrets),
         )
+
+    @property
+    def secret_requirements_digest(self) -> str:
+        value = {
+            "schema_version": "synaptic-modal-secret-requirements/v1",
+            "secrets": [
+                {"name": item.name, "required_keys": list(item.required_keys)}
+                for item in self.secrets
+            ],
+        }
+        return hashlib.sha256(
+            json.dumps(
+                value, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
+        ).hexdigest()
+
+    def provider_runtime_requirements_digest(
+        self,
+        runtime_lock: "ModalRuntimeLockV1",
+        *,
+        runtime_environment: Mapping[str, str],
+        accelerator: str = "A10",
+        timeout_seconds: int = 3600,
+        max_retries: int = 0,
+    ) -> str:
+        if type(runtime_lock) is not ModalRuntimeLockV1:
+            raise TypeError("canonical Modal runtime lock is required")
+        if accelerator != "A10" or type(max_retries) is not int or max_retries != 0:
+            raise ValueError("Modal v1 requires A10 with retries disabled")
+        if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 86400:
+            raise ValueError("Modal timeout must be a bounded exact integer")
+        environment = dict(runtime_environment)
+        if any(
+            not isinstance(key, str) or not key or not isinstance(value, str)
+            for key, value in environment.items()
+        ):
+            raise ValueError("runtime environment must be a closed string map")
+        value = {
+            "schema_version": "synaptic-modal-provider-runtime-requirements/v1",
+            "runtime_lock": runtime_lock.to_dict(),
+            "deployment": {
+                "app_name": self.app_name,
+                "function_name": self.function_name,
+                "function_version": self.function_version,
+                "image_id": self.image_id,
+                "accelerator": accelerator,
+                "timeout_seconds": timeout_seconds,
+                "max_retries": max_retries,
+            },
+            "volumes": {
+                "control_ref": self.control_volume_ref,
+                "control_mount": "/workspace/control",
+                "artifact_ref": self.artifact_volume_ref,
+                "artifact_mount": "/workspace/run",
+            },
+            "secrets": [
+                {"name": item.name, "required_keys": list(item.required_keys)}
+                for item in self.secrets
+            ],
+            "environment": environment,
+        }
+        return hashlib.sha256(
+            json.dumps(
+                value, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
+        ).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

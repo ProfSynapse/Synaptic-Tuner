@@ -15,6 +15,7 @@ from synaptic_tuner.api.v1 import (
     AuthenticatedSourceEvidenceV1,
     ExecutionSourceV1,
     ResolvedTrainingRequest,
+    ResolvedTrainingComponents,
     ResourceSpec,
     RuntimeSpec,
     SourceLock,
@@ -22,6 +23,7 @@ from synaptic_tuner.api.v1 import (
     TrainingPlan,
     TrainingPreflight,
     TrainingRequest,
+    TrainingRequestResolver,
 )
 
 
@@ -136,6 +138,15 @@ def test_training_api_has_only_the_accepted_verbs() -> None:
         if not name.startswith("_") and inspect.isfunction(member)
     }
     assert verbs == {"load", "resolve", "plan", "preflight", "start", "outcome"}
+
+
+def test_host_resolver_contract_is_public_and_structural() -> None:
+    class Resolver:
+        def resolve(self, request, *, context):  # pragma: no cover - contract only
+            raise AssertionError
+
+    assert isinstance(Resolver(), TrainingRequestResolver)
+    assert dataclasses.is_dataclass(ResolvedTrainingComponents)
 
 
 def test_public_records_and_config_are_immutable() -> None:

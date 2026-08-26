@@ -76,6 +76,7 @@ from .sources import (
 from .training import (
     ArtifactPolicy,
     CanonicalDocument,
+    ResolvedTrainingComponents,
     ResolvedTrainingRequest,
     ResourceSpec,
     RuntimeSpec,
@@ -85,6 +86,8 @@ from .training import (
     TrainingPlan,
     TrainingPreflight,
     TrainingRequest,
+    TrainingRequestResolver,
+    TrainingResolutionError,
     TrainingSubmission,
 )
 
@@ -138,6 +141,7 @@ __all__ = [
     "ProjectContext",
     "ReconcileRequest",
     "ResolvedTrainingRequest",
+    "ResolvedTrainingComponents",
     "ResultEnvelope",
     "ResourceSpec",
     "RunCancelRequest",
@@ -168,6 +172,8 @@ __all__ = [
     "TrainingPlan",
     "TrainingPreflight",
     "TrainingRequest",
+    "TrainingRequestResolver",
+    "TrainingResolutionError",
     "TrainingSubmission",
     "VerificationStatus",
     "InvalidTransition",
