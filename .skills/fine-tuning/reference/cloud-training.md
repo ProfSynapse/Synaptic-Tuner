@@ -2,6 +2,25 @@
 
 Cloud training uses the existing SFT and KTO trainers plus the env-backed GRPO path, but persistence and code sync behave differently from local runs.
 
+## Canonical product path
+
+The new product path is the submodule-first public training API documented in
+`docs/architecture/submodule-first-training-v1.md`. Modal SFT and host-selected
+local publication are live-proven. Hugging Face publication is implemented and
+fake-tested only. Local Docker, HF Jobs, and RunPod are not yet execution
+providers through that API.
+
+The protected HF source/bootstrap lane and the older `cloud-run`,
+`cloud-pipeline`, and experiment commands documented below are legacy or
+migration surfaces. They are not fallback implementations of the public v1 API
+and must not be wrapped as new provider adapters. Provider-free checks are not
+live provider proof, and authenticated provider reads are not paid execution
+proof.
+
+For the frozen Modal run and exact fixture completeness boundary, see
+`reference/modal-jobs.md` and
+`tests/fixtures/training_product/modal_live_v1/evidence-index.json`.
+
 ---
 
 ## Exact Source Requirements
@@ -570,8 +589,8 @@ python tuner.py bucket analyze \
 ```
 
 Keep the checked-in benchmark ledger updated from finished runs:
-- [model_hardware_benchmark_ledger.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/docs/benchmarks/model_hardware_benchmark_ledger.md)
-- [model_hardware_benchmark_ledger.csv](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/docs/benchmarks/model_hardware_benchmark_ledger.csv)
+- `docs/benchmarks/model_hardware_benchmark_ledger.md`
+- `docs/benchmarks/model_hardware_benchmark_ledger.csv`
 
 For `run-experiment`, the analysis bundle now appends or updates the ledger automatically using:
 - training lineage

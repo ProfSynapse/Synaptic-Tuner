@@ -27,6 +27,27 @@ The engine now provides `ModalTrainingOperations` and
 provide a conforming durable repository and authenticated host ports before a
 live provider proof; do not use a manual launch as a substitute.
 
+## Frozen live evidence
+
+Modal SFT is live-proven for run
+`modal-sft-20260826T144636Z-7aec224e893d` and provider call
+`fc-01M0Z8K9MCPN3P368V3CK94TV2`. The host ledger records one submit attempt,
+provider success, verification invalidation, a read-only reopen, and final
+verification. The invalid result was a verifier location error: the logical
+`/workspace/run` root corresponded to Modal's resolved physical Volume mount.
+The correction is evidence-bound relocation, not an unbounded path search.
+
+The exact five verified artifact roles were published to a host-selected local
+destination, and repeated publication converged to the durable receipt. The
+portable sanitized fixture is
+`tests/fixtures/training_product/modal_live_v1/evidence-index.json`. Its typed
+completeness is authoritative: lifecycle and publication digests/projections
+are captured, but authenticated provider terminal/completion bytes and artifact
+payloads are not. Do not cite the fixture as a raw provider transcript.
+
+The cross-provider contract and proof matrix live in
+`docs/architecture/submodule-first-training-v1.md`.
+
 ## Fixed v1 topology
 
 - Exact Modal SDK `1.5.4` and one explicit authenticated client; no ambient

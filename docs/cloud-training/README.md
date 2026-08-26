@@ -1,6 +1,25 @@
-# Cloud Training Documentation - Nebius AI Cloud
+# Cloud training documentation
 
-This directory contains comprehensive documentation for running your Toolset-Training pipeline on Nebius AI Cloud.
+The canonical product direction is the submodule-first public training API. See:
+
+- [`../architecture/submodule-first-training-v1.md`](../architecture/submodule-first-training-v1.md)
+  for the authoritative boundary, evidence vocabulary, and provider matrix;
+- [`modal-v1.md`](modal-v1.md) for the live-proven Modal reference adapter;
+- [`../plans/submodule-first-training-product-roadmap-plan.md`](../plans/submodule-first-training-product-roadmap-plan.md)
+  for the approved migration sequence.
+
+Current product status: Modal SFT and host-selected local publication are
+live-proven. Hugging Face publication is implemented and fake-tested only.
+Docker, HF Jobs, and RunPod are not yet execution providers through the public
+v1 API. Protected HF bootstrap commands and older cloud commands below are
+bounded legacy or migration lanes, not interchangeable product entrypoints.
+
+## Legacy and provider research
+
+The remaining documents in this directory include historical Nebius research
+and protected Hugging Face work. Pricing, availability, and API claims in those
+historical sections are not current product promises and require fresh official
+verification before use.
 
 > The Nebius material below is retained as legacy provider research. The current
 > protected Hugging Face source/bootstrap-proof lane is documented first and is

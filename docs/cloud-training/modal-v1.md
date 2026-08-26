@@ -1,6 +1,7 @@
 # Modal v1: submodule-first training
 
-Modal v1 is an execution adapter behind `synaptic_tuner.api.v1.TrainingAPI`.
+Modal v1 is the live-proven reference execution adapter behind
+`synaptic_tuner.api.v1.TrainingAPI`.
 The consuming application owns project configuration, its database, execution
 grants, secrets, and persistence. The Toolset-Training submodule owns the
 provider-neutral request/plan/outcome contracts and the reusable Modal
@@ -70,3 +71,35 @@ This implementation distinguishes:
 Do not run a paid smoke until the host repository conformance tests and the
 independent security/release barrier pass for the exact committed and pushed
 tree.
+
+## Frozen live proof
+
+The first successful product run is
+`modal-sft-20260826T144636Z-7aec224e893d`, bound to provider call
+`fc-01M0Z8K9MCPN3P368V3CK94TV2`, engine commit
+`31d2683448919e1e694f36392fa4e40741226ae9`, and host commit
+`a4926a274b847e1a746ad4de53563b5976fc1574`. The durable host lifecycle records
+one submit attempt, provider success, an initial invalid verification, a
+read-only reopen, and final verification. Reverification did not submit a
+second paid job.
+
+The initial false negative was a location interpretation error: the plan's
+logical run root was `/workspace/run`, while Modal exposed the same mounted
+Volume under its resolved physical mount path. The corrected verifier accepts
+only the evidence-bound relocation; it does not widen reads to an arbitrary
+filesystem search.
+
+The verified source was then published to a host-selected local destination as
+exactly five roles. The resulting receipt is durable and a repeated publication
+converged to the same receipt.
+
+The closed sanitized fixture at
+`tests/fixtures/training_product/modal_live_v1/` preserves the lifecycle and
+publication digests, projections, and tiny synthetic substitutes. It does not
+contain authenticated provider terminal-record or completion-manifest bytes,
+artifact payloads, credential/evidence-authentication material, raw errors, or
+private paths. Its typed completeness declaration is the limit of portable
+fixture proof; it is not a reconstructed provider transcript.
+
+The authoritative cross-provider status matrix is
+[`../architecture/submodule-first-training-v1.md`](../architecture/submodule-first-training-v1.md).

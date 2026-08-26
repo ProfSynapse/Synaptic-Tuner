@@ -1,0 +1,35 @@
+{
+  "effects": [
+    {
+      "attempt_count": 1,
+      "kind": "submit",
+      "provider_job_ref": "fc-01M0Z8K9MCPN3P368V3CK94TV2",
+      "state": "found"
+    }
+  ],
+  "events": [
+    {"code": "run_planned", "effect_state": null, "message_code": "planned", "occurred_at": "2026-08-26T14:46:37Z"},
+    {"code": "authority_accepted", "effect_state": null, "message_code": "authority_bound", "occurred_at": "2026-08-26T14:46:37Z"},
+    {"code": "preparation_started", "effect_state": null, "message_code": "preparing", "occurred_at": "2026-08-26T14:46:37Z"},
+    {"code": "preparation_completed", "effect_state": null, "message_code": "ready", "occurred_at": "2026-08-26T14:46:38Z"},
+    {"code": "effect_attempted", "effect_state": "attempted", "message_code": "effect_mutation_attempted", "occurred_at": "2026-08-26T14:46:42Z"},
+    {"code": "effect_found", "effect_state": "found", "message_code": "effect_confirmed", "occurred_at": "2026-08-26T14:46:44Z"},
+    {"code": "provider_running", "effect_state": null, "message_code": "provider_state_observed", "occurred_at": "2026-08-26T14:47:01Z"},
+    {"code": "provider_succeeded", "effect_state": null, "message_code": "semantic_verification_pending", "occurred_at": "2026-08-26T14:51:00Z"},
+    {"code": "verification_started", "effect_state": null, "message_code": "semantic_verification_started", "occurred_at": "2026-08-26T14:51:00Z"},
+    {"code": "verification_invalid", "effect_state": null, "message_code": "semantic_verification_failed", "occurred_at": "2026-08-26T14:51:08Z"},
+    {"code": "verification_reopened", "effect_state": null, "message_code": "semantic_verification_reopened", "occurred_at": "2026-08-26T15:28:36Z"},
+    {"code": "verification_verified", "effect_state": null, "message_code": "semantic_verification_passed", "occurred_at": "2026-08-26T15:28:36Z"}
+  ],
+  "message_code": "semantic_verification_passed",
+  "phase": "succeeded",
+  "project_ref": "epistemic-humility-research",
+  "record_sha256": "a302c3c3c85ae9776361c84b263d7952a2a6f6e7155c1fb2bf77b552db9b06f1",
+  "revision": 12,
+  "run_id": "modal-sft-20260826T144636Z-7aec224e893d",
+  "schema_version": "synaptic-lifecycle-record-projection/v1",
+  "source_schema_version": "synaptic-lifecycle-record/v1",
+  "updated_at": "2026-08-26T15:28:36Z",
+  "verification": "verified"
+}
+

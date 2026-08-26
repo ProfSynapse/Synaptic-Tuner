@@ -1,0 +1,90 @@
+{
+  "claims": {
+    "artifact_inventory": "exact_five_roles_verified_and_published_locally",
+    "lifecycle_terminal_phase": "succeeded",
+    "semantic_verification": "verified",
+    "submission_attempt_count": 1
+  },
+  "closed": true,
+  "completeness": {
+    "artifact_payload_bytes": {
+      "captured": false,
+      "state": "absent_descriptors_only"
+    },
+    "authenticated_provider_completion_manifest_bytes": {
+      "captured": false,
+      "reason_code": "not_present_in_portable_local_host_evidence",
+      "state": "absent"
+    },
+    "authenticated_provider_terminal_record_bytes": {
+      "captured": false,
+      "reason_code": "not_present_in_portable_local_host_evidence",
+      "state": "absent"
+    },
+    "lifecycle_record": {
+      "canonical_bytes_captured": false,
+      "projection_captured": true,
+      "sha256_captured": true,
+      "state": "digest_and_sanitized_projection"
+    },
+    "publication_receipt": {
+      "canonical_bytes_captured": false,
+      "projection_captured": true,
+      "sha256_captured": true,
+      "state": "digest_and_sanitized_projection"
+    },
+    "publication_repeat_trace": {
+      "captured": false,
+      "state": "converged_receipt_only"
+    },
+    "synthetic_substitutes": {
+      "captured": true,
+      "evidence": false,
+      "state": "bounded_contract_test_material"
+    }
+  },
+  "excluded_material": [
+    "artifact_payloads",
+    "credential_values",
+    "evidence_authentication_material",
+    "grant_and_command_bytes",
+    "private_absolute_paths",
+    "provider_response_bodies",
+    "raw_error_text",
+    "trainer_output"
+  ],
+  "fixture_id": "modal-live-v1-20260826",
+  "fixture_members": [
+    "README.md",
+    "evidence-index.json",
+    "lifecycle-projection.json",
+    "publication-projection.json",
+    "substitutes/final_model.json",
+    "substitutes/tokenizer.json",
+    "substitutes/training_lineage.json",
+    "substitutes/training_metrics.json",
+    "substitutes/workload_record.json"
+  ],
+  "identities": {
+    "engine_commit": "31d2683448919e1e694f36392fa4e40741226ae9",
+    "host_commit": "a4926a274b847e1a746ad4de53563b5976fc1574",
+    "project_ref": "epistemic-humility-research",
+    "provider": "modal",
+    "provider_job_ref": "fc-01M0Z8K9MCPN3P368V3CK94TV2",
+    "run_id": "modal-sft-20260826T144636Z-7aec224e893d"
+  },
+  "observed_artifacts": [
+    {"kind": "final_model", "observed_sha256": "6a96a3206017256190d5a674aabcbaec22fea06608f6141aaa78a11f9f9ee05c", "observed_size": 3737600, "substitute_path": "substitutes/final_model.json", "substitute_sha256": "11fc8ac3c14ce5a920d593d4d063c1c4fd51d2a1569d3a76c886bdbce66a4cf1", "substitute_size": 168},
+    {"kind": "tokenizer", "observed_sha256": "0fdc70673782b3c98212c4f4c9f9222035cba9a163c66c3b7c7a52da2b914225", "observed_size": 4802560, "substitute_path": "substitutes/tokenizer.json", "substitute_sha256": "10aead3bc6ba0ccff177b57933ccad1b1d49099405dc9ffb921de109bedf77a8", "substitute_size": 166},
+    {"kind": "training_lineage", "observed_sha256": "ba8df32e0c68b5e05e32394fc4253964ffddaf1600b03a8917694dd312eda716", "observed_size": 13134, "substitute_path": "substitutes/training_lineage.json", "substitute_sha256": "6077f029cb703324742e4e6f81ad2ba288b272bd58ed960463ed63f7114836df", "substitute_size": 173},
+    {"kind": "training_metrics", "observed_sha256": "86e42337f76787c25871bf731e92c65504461132bbd71adc823110e00563952b", "observed_size": 100, "substitute_path": "substitutes/training_metrics.json", "substitute_sha256": "c7133df7437f955260a89741167d8ec19350fea89e6d0cc9060dbbbcc909ce06", "substitute_size": 173},
+    {"kind": "workload_record", "observed_sha256": "baa8f3e96becde24afc72a46fbb2e69fc5b6e1bb2e070ab0d2ba093da30b9a77", "observed_size": 6123, "substitute_path": "substitutes/workload_record.json", "substitute_sha256": "b69f32c7f26bdff9315c50ead927a32baf620e9583bf1cb3f241c276a4758d56", "substitute_size": 172}
+  ],
+  "projections": [
+    {"path": "lifecycle-projection.json", "sha256": "b9e343e6e8616b1382af475cdbe2ac5c4f582d3888b35d14aea0fa0a9ce2d333", "size": 2315},
+    {"path": "publication-projection.json", "sha256": "e57817e1bc4267c549e4b3545108f2ed618395b4f28be9beb872fa7552a6a71a", "size": 1252}
+  ],
+  "schema_version": "synaptic-training-product-evidence-index/v1",
+  "source": "sanitized_projection_of_already_local_host_evidence"
+}
+
