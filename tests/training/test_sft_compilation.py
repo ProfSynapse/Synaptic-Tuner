@@ -196,6 +196,30 @@ def test_resolved_sft_config_requires_explicit_boolean_quantization(value) -> No
         )
 
 
+@pytest.mark.parametrize("value", [True, False, "gaussian", "loftq", "corda"])
+def test_resolved_sft_config_accepts_semantic_lora_initializers(value) -> None:
+    config = _config().to_dict()
+    config["sft"]["init_lora_weights"] = value
+    workload = compile_sft_workload(
+        resolved_config=CanonicalDocument.from_mapping(config),
+        execution_source=_execution_source(),
+    )
+    assert workload.document["configuration"]["document"]["sft"][
+        "init_lora_weights"
+    ] == value
+
+
+@pytest.mark.parametrize("value", ["true", "false", "eva", 1, None])
+def test_resolved_sft_config_rejects_noncanonical_lora_initializers(value) -> None:
+    config = _config().to_dict()
+    config["sft"]["init_lora_weights"] = value
+    with pytest.raises((TypeError, ValueError), match="init_lora_weights"):
+        compile_sft_workload(
+            resolved_config=CanonicalDocument.from_mapping(config),
+            execution_source=_execution_source(),
+        )
+
+
 @pytest.mark.parametrize(
     ("section", "field"),
     (("model", "revision"), ("model", "tokenizer_revision"), ("dataset", "revision")),

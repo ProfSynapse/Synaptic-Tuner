@@ -33,7 +33,17 @@
             "method": {"const": "sft"},
             "model": {"type": "object"},
             "dataset": {"type": "object"},
-            "sft": {"type": "object"}
+            "sft": {
+              "type": "object",
+              "properties": {
+                "init_lora_weights": {
+                  "oneOf": [
+                    {"type": "boolean"},
+                    {"enum": ["gaussian", "loftq", "corda"]}
+                  ]
+                }
+              }
+            }
           }
         }
       }

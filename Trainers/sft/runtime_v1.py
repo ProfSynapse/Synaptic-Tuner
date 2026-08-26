@@ -798,7 +798,9 @@ def build_trainer_invocation(
     child_env.update(
         {
             "SYNAPTIC_WORKLOAD_FINGERPRINT": workload.fingerprint,
-            "PYTHONPATH": str(roots.engine),
+            "PYTHONPATH": os.pathsep.join(
+                (str(roots.engine), str(trainer_path.parent))
+            ),
             "PYTHONNOUSERSITE": "1",
             "PYTHONSAFEPATH": "1",
             "HF_HOME": str(roots.cache / "huggingface"),
@@ -863,9 +865,13 @@ def _append_sft_arguments(
                 argv.append(flag)
     if "init_lora_weights" in sft:
         value = sft["init_lora_weights"]
-        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+        if isinstance(value, bool):
+            serialized = "true" if value else "false"
+        elif isinstance(value, str) and value in {"gaussian", "loftq", "corda"}:
+            serialized = value
+        else:
             raise RuntimeV1Error("init_lora_weights is invalid")
-        argv.extend(("--init-lora-weights", value))
+        argv.extend(("--init-lora-weights", serialized))
     if "split_dataset" in sft:
         if not isinstance(sft["split_dataset"], bool):
             raise RuntimeV1Error("split_dataset must be a boolean")
@@ -1112,7 +1118,7 @@ def _expected_trainer_projection(
             "gradient_accumulation_steps": sft["gradient_accumulation_steps"],
             "learning_rate": float(sft["learning_rate"]),
             "max_steps": sft.get("max_steps", -1),
-            "num_epochs": float(sft.get("num_epochs", 1)),
+            "num_epochs": sft.get("num_epochs", 1),
             "max_seq_length": sft["max_seq_length"],
             "seed": sft["seed"],
             "save_steps": sft["save_steps"],

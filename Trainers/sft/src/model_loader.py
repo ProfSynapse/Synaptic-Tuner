@@ -162,7 +162,7 @@ def apply_lora_adapters(
     random_state: int = 3407,
     use_rslora: bool = False,
     use_dora: bool = False,
-    init_lora_weights: Optional[str] = None,
+    init_lora_weights: bool | str | None = None,
 ):
     """
     Apply LoRA adapters to the model using Unsloth.

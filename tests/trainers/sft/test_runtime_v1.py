@@ -159,7 +159,7 @@ def _fixture(
                 "lora_target_modules": ["q_proj", "v_proj"],
                 "use_dora": False,
                 "use_rslora": False,
-                "init_lora_weights": "true",
+                "init_lora_weights": True,
                 "split_dataset": False,
                 "save_steps": 1,
                 "save_total_limit": 1,
@@ -300,9 +300,15 @@ def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
     assert "--no-load-in-4bit" in invocation.argv
     assert not any(";" in item or "&&" in item for item in invocation.argv)
     assert "HF_TOKEN" not in dict(invocation.environment)
-    assert dict(invocation.environment)["PYTHONPATH"] == environment["SYNAPTIC_ENGINE_ROOT"]
+    assert dict(invocation.environment)["PYTHONPATH"] == os.pathsep.join(
+        (
+            environment["SYNAPTIC_ENGINE_ROOT"],
+            str(Path(environment["SYNAPTIC_ENGINE_ROOT"]) / "Trainers/sft"),
+        )
+    )
     assert dict(invocation.environment)["PYTHONNOUSERSITE"] == "1"
     assert dict(invocation.environment)["PYTHONSAFEPATH"] == "1"
+    assert type(invocation.expected_projection["training"]["num_epochs"]) is int
     assert {item["role"] for item in result.artifacts} == {
         "workload_record",
         "training_lineage",
@@ -365,7 +371,12 @@ def test_runtime_replaces_hostile_python_environment(tmp_path: Path) -> None:
         engine_file=engine_file,
     )
     child = dict(runner.calls[0].environment)
-    assert child["PYTHONPATH"] == environment["SYNAPTIC_ENGINE_ROOT"]
+    assert child["PYTHONPATH"] == os.pathsep.join(
+        (
+            environment["SYNAPTIC_ENGINE_ROOT"],
+            str(Path(environment["SYNAPTIC_ENGINE_ROOT"]) / "Trainers/sft"),
+        )
+    )
     assert child["PYTHONNOUSERSITE"] == "1"
     assert child["PYTHONSAFEPATH"] == "1"
     assert "PYTHONHOME" not in child

@@ -57,7 +57,7 @@ class LoRAConfig:
     random_state: int
     use_rslora: bool = False
     use_dora: bool = False
-    init_lora_weights: Optional[str] = None
+    init_lora_weights: bool | str | None = None
 
 
 @dataclass

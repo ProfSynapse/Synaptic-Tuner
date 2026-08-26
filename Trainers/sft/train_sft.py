@@ -482,6 +482,15 @@ def build_training_lineage(
     return enrich_training_lineage(lineage, args=args)
 
 
+def _parse_init_lora_weights(value: str) -> bool | str:
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    return normalized
+
+
 def parse_args(argv=None):
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="SFT Training for RTX 3090")
@@ -538,7 +547,7 @@ def parse_args(argv=None):
                         help="Enable DoRA (Weight-Decomposed LoRA). Passes through to PEFT via Unsloth kwargs.")
     parser.add_argument("--use-rslora", action="store_true",
                         help="Enable rsLoRA (rank-stabilized scaling). Recommended at r>=128.")
-    parser.add_argument("--init-lora-weights", type=str,
+    parser.add_argument("--init-lora-weights", type=_parse_init_lora_weights,
                         help="Set init_lora_weights (for example: gaussian, loftq, corda, eva, pissa, olora).")
     parser.add_argument("--evolutionary-enabled", action="store_true",
                         help="Enable experimental evolutionary gradient selection.")

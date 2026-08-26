@@ -23,6 +23,7 @@ SFT_ENTRYPOINT = "Trainers/sft/runtime_v1.py"
 SFT_RUNTIME_REQUIREMENTS_SCHEMA = "synaptic-sft-runtime-requirements/v1"
 _REVISION = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_UNSLOTH_INIT_LORA_WEIGHTS = frozenset({"gaussian", "loftq", "corda"})
 
 SFT_ARTIFACT_CONTRACT = ArtifactContract(
     schema_version="synaptic-sft-artifacts/v1",
@@ -99,6 +100,17 @@ def _resource(value: object, name: str, required: tuple[str, ...]) -> dict[str, 
     return result
 
 
+def _validate_init_lora_weights(value: object) -> None:
+    if isinstance(value, bool):
+        return
+    if isinstance(value, str) and value in _UNSLOTH_INIT_LORA_WEIGHTS:
+        return
+    raise ValueError(
+        "sft.init_lora_weights must be a boolean or one of "
+        "gaussian, loftq, or corda"
+    )
+
+
 def compile_sft_workload(
     *,
     resolved_config: CanonicalDocument,
@@ -125,6 +137,8 @@ def compile_sft_workload(
     method_config = config.get("sft")
     if not isinstance(method_config, Mapping):
         raise TypeError("sft must be a mapping")
+    if "init_lora_weights" in method_config:
+        _validate_init_lora_weights(method_config["init_lora_weights"])
     config_bytes = resolved_config.canonical_json.encode("utf-8")
     config_revision = hashlib.sha256(config_bytes).hexdigest()
     requirements = [
