@@ -43,12 +43,41 @@ def test_subprocess_runner_uses_no_shell_and_never_returns_captured_secret_outpu
     monkeypatch.setenv("HF_TOKEN","secret")
     runner=SubprocessSftRunner(secret_keys=("HF_TOKEN",),timeout_seconds=10)
     result=runner.run(("/python","/runtime.py","--canonical-workload-stdin"),cwd="/tmp",environment={"SAFE":"1"},stdin=b"workload")
-    assert result.returncode==7 and result.stdout==result.stderr==b""
+    assert result.returncode==123 and result.stdout==result.stderr==b""
     assert result.diagnostic_code=="trainer_nonzero"
     argv,kwargs=calls[0]
     assert argv==("/python","/runtime.py","--canonical-workload-stdin")
     assert kwargs["shell"] is False and kwargs["env"]["HF_TOKEN"]=="secret"
     assert kwargs["input"]==b"workload" and kwargs["timeout"]==10
+
+
+@pytest.mark.parametrize(
+    ("runtime_exit", "remote_exit", "diagnostic_code"),
+    (
+        (2, 121, "runtime_unclassified_rejection"),
+        (20, 124, "runtime_workload_rejected"),
+        (21, 122, "runtime_artifact_precondition"),
+        (22, 124, "runtime_invocation_rejected"),
+        (23, 123, "runtime_trainer_failed"),
+        (24, 123, "runtime_evidence_rejected"),
+        (25, 122, "runtime_artifact_rejected"),
+    ),
+)
+def test_subprocess_runner_maps_closed_runtime_stages(
+    monkeypatch, runtime_exit, remote_exit, diagnostic_code
+):
+    monkeypatch.setenv("HF_TOKEN", "secret")
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.runtime.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=runtime_exit),
+    )
+    result = SubprocessSftRunner(secret_keys=("HF_TOKEN",), timeout_seconds=10).run(
+        ("/python", "/runtime.py", "--canonical-workload-stdin"),
+        cwd="/tmp", environment={}, stdin=b"workload",
+    )
+    assert (result.returncode, result.diagnostic_code) == (
+        remote_exit, diagnostic_code
+    )
 
 
 def test_subprocess_runner_rejects_missing_secret_and_command_override(monkeypatch):

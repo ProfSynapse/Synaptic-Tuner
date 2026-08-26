@@ -684,37 +684,40 @@ def test_runtime_rejects_environment_root_not_bound_by_workload(tmp_path: Path) 
 def test_runtime_rejects_stale_dispatcher_fingerprint(tmp_path: Path) -> None:
     workload, environment, engine_file, _, _ = _fixture(tmp_path)
     environment["SYNAPTIC_WORKLOAD_FINGERPRINT"] = "0" * 64
-    with pytest.raises(RuntimeV1Error, match="fingerprint"):
+    with pytest.raises(RuntimeV1Error, match="fingerprint") as failure:
         execute_runtime(
             workload.canonical_bytes,
             environment=environment,
             runner=FakeRunner(),
             engine_file=engine_file,
         )
+    assert failure.value.diagnostic_code == "runtime_workload_rejected"
 
 
 def test_runtime_rejects_project_dataset_traversal(tmp_path: Path) -> None:
     workload, environment, engine_file, _, _ = _fixture(
         tmp_path, dataset_ref="project://../outside.jsonl"
     )
-    with pytest.raises(RuntimeV1Error, match="escapes"):
+    with pytest.raises(RuntimeV1Error, match="escapes") as failure:
         execute_runtime(
             workload.canonical_bytes,
             environment=environment,
             runner=FakeRunner(),
             engine_file=engine_file,
         )
+    assert failure.value.diagnostic_code == "runtime_invocation_rejected"
 
 
 def test_runtime_propagates_trainer_failure_without_artifacts(tmp_path: Path) -> None:
     workload, environment, engine_file, roots, _ = _fixture(tmp_path)
-    with pytest.raises(TrainerFailed):
+    with pytest.raises(TrainerFailed) as failure:
         execute_runtime(
             workload.canonical_bytes,
             environment=environment,
             runner=FakeRunner(exit_code=17),
             engine_file=engine_file,
         )
+    assert failure.value.diagnostic_code == "runtime_trainer_failed"
     assert not tuple(roots["artifacts"].iterdir())
 
 

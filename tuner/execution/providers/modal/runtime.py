@@ -243,10 +243,18 @@ class SubprocessSftRunner:
             )
         except Exception:
             raise ModalRemotePhaseError(123, "trainer_invocation_failed") from None
-        return ProcessResultV1(
-            completed.returncode,
-            diagnostic_code=None if completed.returncode == 0 else "trainer_nonzero",
-        )
+        if completed.returncode == 0:
+            return ProcessResultV1(0)
+        returncode, diagnostic_code = {
+            2: (121, "runtime_unclassified_rejection"),
+            20: (124, "runtime_workload_rejected"),
+            21: (122, "runtime_artifact_precondition"),
+            22: (124, "runtime_invocation_rejected"),
+            23: (123, "runtime_trainer_failed"),
+            24: (123, "runtime_evidence_rejected"),
+            25: (122, "runtime_artifact_rejected"),
+        }.get(completed.returncode, (123, "trainer_nonzero"))
+        return ProcessResultV1(returncode, diagnostic_code=diagnostic_code)
 
 
 __all__ = ["EnvironmentHmacAuthenticator", "GitDualCloneMaterializer", "SubprocessSftRunner"]

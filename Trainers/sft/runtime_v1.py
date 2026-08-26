@@ -109,6 +109,23 @@ class TrainerFailed(RuntimeV1Error):
     pass
 
 
+_RUNTIME_STAGE_EXITS = {
+    "runtime_workload_rejected": 20,
+    "runtime_artifact_precondition": 21,
+    "runtime_invocation_rejected": 22,
+    "runtime_trainer_failed": 23,
+    "runtime_evidence_rejected": 24,
+    "runtime_artifact_rejected": 25,
+}
+
+
+def _mark_runtime_stage(error: RuntimeV1Error, diagnostic_code: str) -> RuntimeV1Error:
+    if diagnostic_code not in _RUNTIME_STAGE_EXITS:
+        raise ValueError("runtime diagnostic stage is invalid")
+    error.diagnostic_code = diagnostic_code
+    return error
+
+
 def _json_type_equal(left: object, right: object) -> bool:
     if type(left) is not type(right):
         return False
@@ -865,27 +882,41 @@ def execute_runtime(
     runner: TrainerRunner,
     engine_file: Path = Path(__file__),
 ) -> RuntimeResult:
-    workload, roots = decode_and_validate_workload(
-        payload, environment, engine_file=engine_file
-    )
+    try:
+        workload, roots = decode_and_validate_workload(
+            payload, environment, engine_file=engine_file
+        )
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_rejected")
     if not isinstance(runner, TrainerRunner):
         raise TypeError("runner must implement TrainerRunner")
     if any(roots.artifacts.iterdir()):
-        raise RuntimeV1Error("artifact root must be empty")
-    invocation = build_trainer_invocation(workload, roots, environment)
+        raise _mark_runtime_stage(
+            RuntimeV1Error("artifact root must be empty"),
+            "runtime_artifact_precondition",
+        )
+    try:
+        invocation = build_trainer_invocation(workload, roots, environment)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_invocation_rejected")
     evidence = runner.run(invocation)
     if not isinstance(evidence, TrainerEvidence):
         raise TypeError("trainer runner returned invalid evidence")
     if type(evidence.exit_code) is not int:
         raise TypeError("trainer exit code must be an exact integer")
     if evidence.exit_code != 0:
-        raise TrainerFailed("trainer process failed")
-    _validate_trainer_evidence(evidence, invocation, workload)
-    execution_evidence = _build_execution_evidence(workload, invocation, evidence)
-    execution_evidence_bytes = _canonical_json(execution_evidence)
-    for directory in (evidence.final_model_dir, evidence.tokenizer_dir):
-        _validate_artifact_directory(directory, roots.state)
-    metrics = _normalize_metrics(evidence.metrics)
+        raise _mark_runtime_stage(
+            TrainerFailed("trainer process failed"), "runtime_trainer_failed"
+        )
+    try:
+        _validate_trainer_evidence(evidence, invocation, workload)
+        execution_evidence = _build_execution_evidence(workload, invocation, evidence)
+        execution_evidence_bytes = _canonical_json(execution_evidence)
+        for directory in (evidence.final_model_dir, evidence.tokenizer_dir):
+            _validate_artifact_directory(directory, roots.state)
+        metrics = _normalize_metrics(evidence.metrics)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_evidence_rejected")
     artifacts: list[dict[str, object]] = []
     artifacts.append(_write_artifact(roots.artifacts, "workload_record", "workload.json", payload))
     lineage = {
@@ -942,7 +973,10 @@ def execute_runtime(
         "artifacts": artifacts,
     }
     inventory_path = roots.state / "runtime-v1-inventory.json"
-    _write_exclusive(inventory_path, _canonical_json(inventory))
+    try:
+        _write_exclusive(inventory_path, _canonical_json(inventory))
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_artifact_rejected")
     return RuntimeResult(workload.fingerprint, inventory_path, tuple(artifacts))
 
 
@@ -1508,9 +1542,11 @@ def main(argv: list[str] | None = None) -> int:
             environment=os.environ,
             runner=SubprocessTrainerRunner(),
         )
-    except RuntimeV1Error:
+    except RuntimeV1Error as error:
         print("SFT_RUNTIME_V1_REJECTED", file=sys.stderr)
-        return 2
+        return _RUNTIME_STAGE_EXITS.get(
+            getattr(error, "diagnostic_code", ""), 2
+        )
     print(
         _canonical_json(
             {
