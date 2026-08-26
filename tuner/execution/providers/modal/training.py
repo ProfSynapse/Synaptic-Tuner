@@ -8,6 +8,9 @@ database, grants, credentials, and authenticated Modal client.
 from __future__ import annotations
 
 import hashlib
+import base64
+import binascii
+import json
 from dataclasses import dataclass
 from typing import Mapping, Protocol, runtime_checkable
 
@@ -220,6 +223,40 @@ class ModalPlanContextV1:
         if type(self.generation) is not int or not 1 <= self.generation <= 2**31 - 1:
             raise ValueError("generation must be a bounded exact integer")
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": MODAL_PLAN_CONTEXT_SCHEMA,
+            "project_ref": self.project_ref,
+            "profile": self.profile,
+            "deployment": self.deployment.to_dict(),
+            "binding": {
+                "account_ref": self.binding.account_ref,
+                "workspace_ref": self.binding.workspace_ref,
+                "environment_ref": self.binding.environment_ref,
+                "client_ref": self.binding.client_ref,
+                "sdk_version": self.binding.sdk_version,
+            },
+            "volumes": {
+                "control_volume_id": self.control_volume_id,
+                "artifact_volume_id": self.artifact_volume_id,
+            },
+            "authority": {
+                "key_ref": self.key_ref,
+                "quote_digest": self.quote_digest,
+                "quote_expires_at": self.quote_expires_at,
+                "maximum_cost_minor_units": self.maximum_cost_minor_units,
+                "currency": self.currency,
+            },
+            "operation": {
+                "effect_id": self.effect_id,
+                "effect_key": self.effect_key,
+                "artifact_slot_ref": self.artifact_slot_ref,
+                "invocation_nonce": self.invocation_nonce,
+                "generation": self.generation,
+            },
+            "resource_digest": self.resource_digest,
+        }
+
     @classmethod
     def from_document(cls, document: CanonicalDocument) -> "ModalPlanContextV1":
         if not isinstance(document, CanonicalDocument):
@@ -290,6 +327,79 @@ class ModalDurablePreparationV1:
             raise TypeError("stage must be StageMaterialV1")
         if self.stage.expectation.operation != self.operation:
             raise ValueError("stage material differs from durable operation")
+        if self.stage.expectation.binding != self.context.binding:
+            raise ValueError("stage material differs from durable Modal context")
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return canonical_json(
+            {
+                "schema_version": "synaptic-modal-durable-preparation/v1",
+                "public_plan_fingerprint": self.public_plan_fingerprint,
+                "context": self.context.to_dict(),
+                "operation": self.operation.to_dict(),
+                "stage": {
+                    "bundle_base64": base64.b64encode(self.stage.bundle).decode("ascii"),
+                    "claim_base64": base64.b64encode(self.stage.claim).decode("ascii"),
+                    "claim_tag_base64": base64.b64encode(self.stage.claim_tag).decode("ascii"),
+                },
+            }
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, value: bytes) -> "ModalDurablePreparationV1":
+        if not isinstance(value, bytes) or not value or len(value) > 16 * 1024 * 1024:
+            raise ValueError("Modal preparation must be bounded canonical JSON bytes")
+        try:
+            document = json.loads(value.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Modal preparation must be canonical JSON") from exc
+        expected = {
+            "schema_version", "public_plan_fingerprint", "context", "operation", "stage"
+        }
+        if not isinstance(document, dict) or set(document) != expected:
+            raise ValueError("Modal preparation contains missing or unknown fields")
+        if document["schema_version"] != "synaptic-modal-durable-preparation/v1":
+            raise ValueError("unsupported Modal preparation schema")
+        stage = document["stage"]
+        if not isinstance(stage, dict) or set(stage) != {
+            "bundle_base64", "claim_base64", "claim_tag_base64"
+        }:
+            raise ValueError("Modal stage material is malformed")
+
+        def decode(name: str) -> bytes:
+            encoded = stage[name]
+            if not isinstance(encoded, str) or not encoded.isascii():
+                raise ValueError("Modal stage Base64 is invalid")
+            try:
+                decoded = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise ValueError("Modal stage Base64 is invalid") from exc
+            if not decoded or base64.b64encode(decoded).decode("ascii") != encoded:
+                raise ValueError("Modal stage Base64 is not canonical")
+            return decoded
+
+        context = ModalPlanContextV1.from_document(
+            CanonicalDocument.from_mapping(document["context"])
+        )
+        operation = OperationBindingV1.from_dict(document["operation"])
+        bundle = decode("bundle_base64")
+        claim = decode("claim_base64")
+        claim_tag = decode("claim_tag_base64")
+        material = StageMaterialV1(
+            StageExpectationV1.from_stage(
+                operation, context.binding, claim=claim, bundle=bundle
+            ),
+            bundle,
+            claim,
+            claim_tag,
+        )
+        result = cls(
+            document["public_plan_fingerprint"], context, operation, material
+        )
+        if result.canonical_bytes != value:
+            raise ValueError("Modal preparation is not canonical")
+        return result
 
 
 @runtime_checkable

@@ -54,3 +54,12 @@ def test_importing_public_api_does_not_materialize_modal_sdk():
     __import__("synaptic_tuner.api.v1")
     added = set(sys.modules) - before
     assert "modal" not in added
+
+
+def test_provider_specific_public_contract_still_does_not_import_modal_sdk():
+    before = set(sys.modules)
+    module = __import__("synaptic_tuner.api.v1.modal", fromlist=["*"])
+    added = set(sys.modules) - before
+    assert "modal" not in added
+    assert hasattr(module, "ModalTrainingRepository")
+    assert hasattr(module, "ModalDurablePreparationV1")

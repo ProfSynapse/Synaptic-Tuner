@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import base64
+import binascii
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -234,6 +236,26 @@ class GrantBinding:
         payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(b"synaptic.execution-grant/v2\0" + payload).hexdigest()
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "operation": self.operation.to_dict(),
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "GrantBinding":
+        if not isinstance(value, dict) or set(value) != {
+            "operation", "issued_at", "expires_at"
+        }:
+            raise ValueError("grant binding contains missing or unknown fields")
+        from .operation import OperationBindingV1
+        return cls(
+            OperationBindingV1.from_dict(value["operation"]),
+            value["issued_at"],
+            value["expires_at"],
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class EffectRecord:
@@ -273,6 +295,82 @@ class EffectRecord:
             or self.canonical_command is None or self.attempt_count != 1
         ):
             raise ValueError("attempted effects require one canonical durable attempt")
+
+    def to_dict(self) -> dict[str, object]:
+        scope = self.identity.scope
+        command = (
+            None
+            if self.canonical_command is None
+            else base64.b64encode(self.canonical_command).decode("ascii")
+        )
+        return {
+            "identity": {
+                "effect_id": self.identity.effect_id,
+                "effect_key": self.identity.effect_key,
+                "kind": self.identity.kind.value,
+                "scope": {
+                    "provider": scope.provider,
+                    "account_ref": scope.account_ref,
+                    "namespace_ref": scope.namespace_ref,
+                },
+            },
+            "grant_fingerprint": self.grant_fingerprint,
+            "state": self.state.value,
+            "provider_job_ref": self.provider_job_ref,
+            "receipt_digest": self.receipt_digest,
+            "grant_ref": self.grant_ref,
+            "command_digest": self.command_digest,
+            "canonical_command_base64": command,
+            "attempt_count": self.attempt_count,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "EffectRecord":
+        expected = {
+            "identity", "grant_fingerprint", "state", "provider_job_ref",
+            "receipt_digest", "grant_ref", "command_digest",
+            "canonical_command_base64", "attempt_count",
+        }
+        if not isinstance(value, dict) or set(value) != expected:
+            raise ValueError("effect record contains missing or unknown fields")
+        identity = value["identity"]
+        if not isinstance(identity, dict) or set(identity) != {
+            "effect_id", "effect_key", "kind", "scope"
+        }:
+            raise ValueError("effect identity is malformed")
+        scope = identity["scope"]
+        if not isinstance(scope, dict) or set(scope) != {
+            "provider", "account_ref", "namespace_ref"
+        }:
+            raise ValueError("effect scope is malformed")
+        encoded = value["canonical_command_base64"]
+        if encoded is None:
+            command = None
+        elif isinstance(encoded, str) and encoded.isascii():
+            try:
+                command = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise ValueError("canonical command Base64 is invalid") from exc
+            if base64.b64encode(command).decode("ascii") != encoded:
+                raise ValueError("canonical command Base64 is not canonical")
+        else:
+            raise ValueError("canonical command Base64 is invalid")
+        return cls(
+            identity=EffectIdentity(
+                identity["effect_id"],
+                identity["effect_key"],
+                EffectKind(identity["kind"]),
+                ExecutionScope(**scope),
+            ),
+            grant_fingerprint=value["grant_fingerprint"],
+            state=EffectState(value["state"]),
+            provider_job_ref=value["provider_job_ref"],
+            receipt_digest=value["receipt_digest"],
+            grant_ref=value["grant_ref"],
+            command_digest=value["command_digest"],
+            canonical_command=command,
+            attempt_count=value["attempt_count"],
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,6 +413,35 @@ class LifecycleEvent:
         if self.grant_binding is not None and not isinstance(self.grant_binding, GrantBinding):
             raise TypeError("grant_binding must be GrantBinding")
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "code": self.code.value,
+            "occurred_at": self.occurred_at,
+            "message_code": self.message_code.value,
+            "effect": None if self.effect is None else self.effect.to_dict(),
+            "grant_binding": (
+                None if self.grant_binding is None else self.grant_binding.to_dict()
+            ),
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "LifecycleEvent":
+        if not isinstance(value, dict) or set(value) != {
+            "code", "occurred_at", "message_code", "effect", "grant_binding"
+        }:
+            raise ValueError("lifecycle event contains missing or unknown fields")
+        return cls(
+            EventCode(value["code"]),
+            value["occurred_at"],
+            MessageCode(value["message_code"]),
+            None if value["effect"] is None else EffectRecord.from_dict(value["effect"]),
+            (
+                None
+                if value["grant_binding"] is None
+                else GrantBinding.from_dict(value["grant_binding"])
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class LifecycleRecord:
@@ -354,16 +481,88 @@ class LifecycleRecord:
         if self.grant_binding is not None and self.grant_binding.project_ref != self.project_ref:
             raise ValueError("grant binding project does not match run project")
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": "synaptic-lifecycle-record/v1",
+            "run_id": self.run_id,
+            "project_ref": self.project_ref,
+            "revision": self.revision,
+            "phase": self.phase.value,
+            "verification": self.verification.value,
+            "updated_at": self.updated_at,
+            "message_code": self.message_code.value,
+            "events": [event.to_dict() for event in self.events],
+            "effects": [effect.to_dict() for effect in self.effects],
+            "grant_binding": (
+                None if self.grant_binding is None else self.grant_binding.to_dict()
+            ),
+        }
 
-class _AttemptDisposition(str, Enum):
+    @property
+    def canonical_bytes(self) -> bytes:
+        return json.dumps(
+            self.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+
+    @classmethod
+    def from_dict(cls, value: object) -> "LifecycleRecord":
+        expected = {
+            "schema_version", "run_id", "project_ref", "revision", "phase",
+            "verification", "updated_at", "message_code", "events", "effects",
+            "grant_binding",
+        }
+        if not isinstance(value, dict) or set(value) != expected:
+            raise ValueError("lifecycle record contains missing or unknown fields")
+        if value["schema_version"] != "synaptic-lifecycle-record/v1":
+            raise ValueError("unsupported lifecycle record schema")
+        events = value["events"]
+        effects = value["effects"]
+        if not isinstance(events, list) or not isinstance(effects, list):
+            raise ValueError("lifecycle record collections must be arrays")
+        return cls(
+            run_id=value["run_id"],
+            project_ref=value["project_ref"],
+            revision=value["revision"],
+            phase=LifecyclePhase(value["phase"]),
+            verification=VerificationStatus(value["verification"]),
+            updated_at=value["updated_at"],
+            message_code=MessageCode(value["message_code"]),
+            events=tuple(LifecycleEvent.from_dict(item) for item in events),
+            effects=tuple(EffectRecord.from_dict(item) for item in effects),
+            grant_binding=(
+                None
+                if value["grant_binding"] is None
+                else GrantBinding.from_dict(value["grant_binding"])
+            ),
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, value: bytes) -> "LifecycleRecord":
+        if not isinstance(value, bytes) or not value or len(value) > 16 * 1024 * 1024:
+            raise ValueError("lifecycle record must be bounded canonical JSON bytes")
+        try:
+            document = json.loads(value.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("lifecycle record must be canonical JSON") from exc
+        result = cls.from_dict(document)
+        if result.canonical_bytes != value:
+            raise ValueError("lifecycle record is not canonical")
+        return result
+
+
+class AttemptDisposition(str, Enum):
     EXECUTE_NOW = "execute_now"
     LOOKUP_ONLY = "lookup_only"
 
 @dataclass(frozen=True, slots=True)
-class _AttemptAdmission:
+class AttemptAdmission:
     record: LifecycleRecord
     effect: EffectRecord
-    disposition: _AttemptDisposition
+    disposition: AttemptDisposition
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,7 +626,7 @@ class LifecycleRepository(Protocol):
     def compare_and_consume_attempt(
         self, project_ref: str, run_id: str, *, expected_revision: int,
         grant_ref: str, canonical_command: object,
-    ) -> _AttemptAdmission: ...
+    ) -> AttemptAdmission: ...
 
     def record_attempt_outcome(
         self, project_ref: str, run_id: str, *, expected_revision: int,
@@ -454,6 +653,8 @@ class ReconciliationAdapter(Protocol):
 
 
 __all__ = [
+    "AttemptAdmission",
+    "AttemptDisposition",
     "AuthorizationMismatch",
     "EffectCollision",
     "EffectDisposition",

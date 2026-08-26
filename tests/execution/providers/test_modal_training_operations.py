@@ -304,6 +304,19 @@ def test_start_uses_host_durability_then_one_spawn(tmp_path):
     assert value.outcome(submission).status.state is RunState.RUNNING
 
 
+def test_modal_preparation_has_a_strict_canonical_persistence_round_trip(tmp_path):
+    value, repository, plan = operations(tmp_path)
+    value.start(plan, value.preflight(plan), ExecutionGrant("grant-run-1"))
+    preparation = repository.load_modal_preparation("project-1", "run-1")
+    assert ModalDurablePreparationV1.from_canonical_bytes(
+        preparation.canonical_bytes
+    ) == preparation
+    with pytest.raises(ValueError, match="canonical"):
+        ModalDurablePreparationV1.from_canonical_bytes(
+            preparation.canonical_bytes + b" "
+        )
+
+
 def test_repeated_start_reuses_durable_operation_and_never_spawns_twice(tmp_path):
     value, repository, plan = operations(tmp_path)
     preflight = value.preflight(plan)

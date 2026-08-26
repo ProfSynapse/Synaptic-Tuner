@@ -100,3 +100,11 @@ def test_public_provider_has_no_mutation_surface():
     assert "submit" not in modal.__all__ and "cancel" not in modal.__all__
     import tuner.execution as public
     assert not hasattr(public,"MutationPermit") and not hasattr(public,"_ProviderEffectExecutor")
+
+
+def test_lifecycle_record_has_a_strict_canonical_persistence_round_trip():
+    c=command();repo,r=ready(c);MutationBroker(repo,_ProviderEffectExecutor(Driver())).execute(c,expected_revision=r.revision)
+    record=repo.load("p","r")
+    assert LifecycleRecord.from_canonical_bytes(record.canonical_bytes)==record
+    with pytest.raises(ValueError,match="canonical"):
+        LifecycleRecord.from_canonical_bytes(record.canonical_bytes+b" ")

@@ -3,7 +3,7 @@ from dataclasses import replace
 from datetime import datetime,timezone
 from threading import RLock
 from tuner.execution.contracts import *
-from tuner.execution.contracts import _AttemptAdmission,_AttemptDisposition
+from tuner.execution.contracts import AttemptAdmission,AttemptDisposition
 from tuner.execution.lifecycle import apply_event
 
 class InMemoryLifecycleRepository:
@@ -22,7 +22,7 @@ class InMemoryLifecycleRepository:
             old=self.records[(p,r)];cmd=canonical_command;raw=cmd.canonical_bytes
             for e in old.effects:
                 if e.identity.effect_id==cmd.effect.effect_id or (e.identity.kind is cmd.effect.kind and e.identity.effect_key==cmd.effect.effect_key):
-                    if e.command_digest==cmd.digest and e.canonical_command==raw:return _AttemptAdmission(old,e,_AttemptDisposition.LOOKUP_ONLY)
+                    if e.command_digest==cmd.digest and e.canonical_command==raw:return AttemptAdmission(old,e,AttemptDisposition.LOOKUP_ONLY)
                     raise EffectCollision("canonical command collision")
             if old.revision!=expected_revision:raise RevisionConflict("revision")
             g=old.grant_binding
@@ -31,7 +31,7 @@ class InMemoryLifecycleRepository:
             if cmd.effect.kind is EffectKind.CANCEL and not any(e.identity.kind is EffectKind.SUBMIT and e.state is EffectState.FOUND and e.provider_job_ref==cmd.target_provider_job_ref for e in old.effects):raise AuthorizationMismatch("unconfirmed cancel target")
             effect=EffectRecord(cmd.effect,g.fingerprint,EffectState.ATTEMPTED,grant_ref=grant_ref,command_digest=cmd.digest,canonical_command=raw,attempt_count=1)
             event=LifecycleEvent(EventCode.EFFECT_ATTEMPTED,now_text,MessageCode.EFFECT_MUTATION_ATTEMPTED,effect=effect)
-            new=apply_event(old,event);self.records[(p,r)]=new;self.consumed.add(grant_ref);return _AttemptAdmission(new,effect,_AttemptDisposition.EXECUTE_NOW)
+            new=apply_event(old,event);self.records[(p,r)]=new;self.consumed.add(grant_ref);return AttemptAdmission(new,effect,AttemptDisposition.EXECUTE_NOW)
     def record_attempt_outcome(self,p,r,*,expected_revision,command_digest,observation):
         with self.lock:
             old=self.records[(p,r)]

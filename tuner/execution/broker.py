@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from ._effect_executor import _ProviderEffectExecutor
 from .contracts import (
     EffectCollision, EffectDisposition, EffectObservation, EffectState,
-    LifecycleRepository, _AttemptDisposition, digest,
+    LifecycleRepository, AttemptDisposition, digest,
 )
 from .operation import OperationBindingV1
 
@@ -112,7 +112,7 @@ class MutationBroker:
             command.project_ref, command.run_id, expected_revision=expected_revision,
             grant_ref=command.grant_ref, canonical_command=command,
         )
-        if admission.disposition is _AttemptDisposition.LOOKUP_ONLY:
+        if admission.disposition is AttemptDisposition.LOOKUP_ONLY:
             effect = admission.effect
             if effect.state is EffectState.FOUND:
                 return EffectObservation(

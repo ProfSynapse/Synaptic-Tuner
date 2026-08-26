@@ -6,59 +6,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from .execution import AuthorizationRequirement, ExecutionGrant
+from .persistence import EvidenceReplayRepository, LifecycleRepository
 from .runs import RunsAPI, RunsOperations
 from .secrets import SecretRef
 from .training import TrainingAPI, TrainingOperations
-
-
-class LifecycleRepository(Protocol):
-    """Host persistence port; concrete database choices remain outside the API.
-
-    This port deliberately contains only atomic lifecycle persistence.  Public
-    run verbs are supplied through ``HostPorts.runs`` so a database adapter is
-    never forced to become a provider orchestration service.
-    """
-
-    def create(self, record: object) -> object: ...
-
-    def load(self, project_ref: str, run_id: str) -> object | None: ...
-
-    def append(
-        self,
-        project_ref: str,
-        run_id: str,
-        *,
-        expected_revision: int,
-        event: object,
-    ) -> object: ...
-
-    def compare_and_consume_attempt(
-        self,
-        project_ref: str,
-        run_id: str,
-        *,
-        expected_revision: int,
-        grant_ref: str,
-        canonical_command: object,
-    ) -> object: ...
-
-    def record_attempt_outcome(
-        self,
-        project_ref: str,
-        run_id: str,
-        *,
-        expected_revision: int,
-        command_digest: str,
-        observation: object,
-    ) -> object: ...
-
-    def list_runs(
-        self,
-        project_ref: str,
-        *,
-        limit: int,
-        cursor: str | None = None,
-    ) -> object: ...
 
 
 class GrantProvider(Protocol):
@@ -83,9 +34,7 @@ class SecretProvider(Protocol):
     def resolve(self, reference: SecretRef) -> str: ...
 
 
-class EvidenceReplayStore(Protocol):
-    """Host-durable atomic replay admission; concrete storage stays in the main project."""
-    def admit(self, **evidence): ...
+EvidenceReplayStore = EvidenceReplayRepository
 
 
 class EvidenceAuthenticator(Protocol):
