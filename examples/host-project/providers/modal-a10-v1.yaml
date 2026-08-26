@@ -1,0 +1,17 @@
+schema_version: synaptic-modal-provider/v1
+profile: modal-a10-v1
+deployment:
+  app_name: synaptic-training-v1
+  function_name: run_sft_v1
+  function_version: "1"
+  image_id: im-replace-after-explicit-deployment
+runtime_lock: engine://tuner/execution/providers/modal/modal-runtime-v1.lock.json
+volumes:
+  control_ref: modal-control-v1
+  artifact_ref: modal-artifacts-v1
+secrets:
+  - provider: modal
+    name: synaptic-training-runtime-v1
+    required_keys:
+      - HF_TOKEN
+      - SYNAPTIC_EVIDENCE_MAC_KEY

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapticlabs.ai/schemas/synaptic-modal-runtime-lock-v1.schema.json",
+  "title": "Synaptic Modal Runtime Lock v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sdk_version", "registry_reference", "python", "locked_files", "ml_stack"],
+  "properties": {
+    "schema_version": {"const": "synaptic-modal-runtime-lock/v1"},
+    "sdk_version": {"const": "1.5.4"},
+    "registry_reference": {"type": "string", "pattern": "^unsloth/unsloth:[^@]+@sha256:[0-9a-f]{64}$"},
+    "python": {
+      "type": "object", "additionalProperties": false,
+      "required": ["implementation", "version", "executable", "executable_sha256"],
+      "properties": {
+        "implementation": {"const": "cpython"},
+        "version": {"const": "3.11.14"},
+        "executable": {"const": "/opt/conda/bin/python3"},
+        "executable_sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "locked_files": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dependency_lock", "deployment_wrapper", "modal_mounted_io", "modal_producer", "modal_remote", "modal_runtime", "sft_runtime"],
+      "properties": {
+        "dependency_lock": {"$ref": "#/$defs/file"},
+        "deployment_wrapper": {"$ref": "#/$defs/file"},
+        "modal_mounted_io": {"$ref": "#/$defs/file"},
+        "modal_producer": {"$ref": "#/$defs/file"},
+        "modal_remote": {"$ref": "#/$defs/file"},
+        "modal_runtime": {"$ref": "#/$defs/file"},
+        "sft_runtime": {"$ref": "#/$defs/file"}
+      }
+    },
+    "ml_stack": {
+      "type": "object", "additionalProperties": false,
+      "required": ["torch", "transformers", "trl"],
+      "properties": {
+        "torch": {"const": "2.9.0+cu128"},
+        "transformers": {"const": "4.57.1"},
+        "trl": {"const": "0.24.0"}
+      }
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]+$"},
+        "sha256": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

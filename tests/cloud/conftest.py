@@ -134,15 +134,6 @@ def repo_root(tmp_path):
                 "a10g-large": {"name": "A10G x4 (96GB)", "price": 4.40},
                 "a100-large": {"name": "A100 (80GB)", "price": 2.50},
             },
-            "modal": {
-                "T4": {"name": "T4 (16GB)", "price": 0.59},
-                "L4": {"name": "L4 (24GB)", "price": 0.73},
-                "A10G": {"name": "A10G (24GB)", "price": 1.10},
-                "L40S": {"name": "L40S (48GB)", "price": 1.40},
-                "A100": {"name": "A100 (40GB)", "price": 2.78},
-                "A100-80GB": {"name": "A100 (80GB)", "price": 3.72},
-                "H100": {"name": "H100 (80GB)", "price": 4.89},
-            },
             "runpod": {
                 "NVIDIA RTX A6000": {"name": "RTX A6000 (48GB)", "price": 0.79},
                 "NVIDIA A100 80GB PCIe": {"name": "A100 (80GB)", "price": 1.64},
@@ -167,14 +158,6 @@ def repo_root(tmp_path):
                     "image_profile": "stable_unsloth",
                 },
             },
-            "modal": {
-                "gpu": "L40S",
-                "timeout_hours": 6,
-                "artifact_backend": "modal_volume",
-                "cache_volume_name": "toolset-model-cache",
-                "output_volume_name": "toolset-training-artifacts",
-                "output_mount_path": "/vol/artifacts",
-            },
             "runpod": {
                 "gpu_type_id": "NVIDIA A100 SXM",
                 "gpu_count": 1,
@@ -194,9 +177,6 @@ def repo_root(tmp_path):
     }
     with open(cloud_dir / "cloud_config.yaml", "w") as f:
         yaml.dump(cloud_config, f)
-
-    # Create Modal wrapper script (empty file, just needs to exist)
-    (cloud_dir / "train_modal.py").touch()
 
     origin_repo = tmp_path / "origin.git"
     subprocess.run(["git", "init", "--bare", str(origin_repo)], check=True, capture_output=True)

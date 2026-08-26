@@ -184,3 +184,20 @@ def test_train_sft_revalidates_aux_head_coherence_after_cli_overrides() -> None:
     # The B-M1 ERROR guard is DISTINCT from the prompt_render WARN guard — both
     # must coexist; the remediation must not merge or remove the WARN.
     assert "WARNING: aux_head token_position='end_of_prompt'" in source
+
+
+def test_runtime_v1_projection_is_opt_in_atomic_and_post_save() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    for flag in (
+        "--runtime-v1-workload-fingerprint",
+        "--runtime-v1-configuration-revision",
+        "--runtime-v1-tokenizer-revision",
+        "--runtime-v1-dataset-revision",
+        "--runtime-v1-dataset-digest",
+    ):
+        assert flag in source
+    assert "if any(present) and not all(present):" in source
+    assert "if args.protected_smoke_evidence or runtime_v1_requested:" in source
+    assert "os.replace(temporary, destination)" in source
+    assert source.index("trainer.save_model(") < source.index("write_runtime_v1_projection_atomic(", source.index("def run("))
+    assert 'lineage["synaptic_runtime_projection"] = runtime_projection' in source

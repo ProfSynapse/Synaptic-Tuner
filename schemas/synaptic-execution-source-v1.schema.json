@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-execution-source-v1.schema.json",
+  "title": "Synaptic Execution Source v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "created_at", "topology", "sources", "source_evidence", "deployment_member_sha256", "runtime"],
+  "properties": {
+    "schema_version": {"const": "synaptic-execution-source/v1"},
+    "run_id": {"$ref": "#/$defs/safeRef"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "topology": {
+      "type": "object", "additionalProperties": false,
+      "required": ["provenance_mode", "execution_mode", "engine_submodule_path"],
+      "properties": {
+        "provenance_mode": {"const": "superproject"},
+        "execution_mode": {"const": "dual_clone"},
+        "engine_submodule_path": {"$ref": "#/$defs/submodulePath"}
+      }
+    },
+    "sources": {
+      "type": "object", "additionalProperties": false, "required": ["project", "engine"],
+      "properties": {
+        "project": {"$ref": "#/$defs/projectSource"},
+        "engine": {"$ref": "#/$defs/engineSource"}
+      }
+    },
+    "source_evidence": {"$ref": "#/$defs/sourceEvidence"},
+    "deployment_member_sha256": {"$ref": "#/$defs/digest"},
+    "runtime": {"$ref": "#/$defs/runtime"}
+  },
+  "$defs": {
+    "commit": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "safeRef": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+\\-]{0,255}$"},
+    "submodulePath": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[^\\\\]+$"},
+    "projectSource": {
+      "type": "object", "additionalProperties": false, "required": ["url", "commit"],
+      "properties": {"url": {"type": "string", "pattern": "^(?:https|ssh)://"}, "commit": {"$ref": "#/$defs/commit"}}
+    },
+    "engineSource": {
+      "type": "object", "additionalProperties": false,
+      "required": ["url", "commit", "submodule_path", "gitlink_commit"],
+      "properties": {
+        "url": {"type": "string", "pattern": "^(?:https|ssh)://"},
+        "commit": {"$ref": "#/$defs/commit"},
+        "submodule_path": {"$ref": "#/$defs/submodulePath"},
+        "gitlink_commit": {"$ref": "#/$defs/commit"}
+      }
+    },
+    "sourceEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "project", "engine", "issuer_ref", "evidence_ref", "audience_ref", "challenge_nonce", "verified_at", "expires_at", "key_ref", "tag_base64", "attestation_digest"],
+      "properties": {
+        "schema_version": {"const": "synaptic-authenticated-source-evidence/v1"},
+        "project": {"$ref": "#/$defs/projectSource"},
+        "engine": {"$ref": "#/$defs/engineSource"},
+        "issuer_ref": {"$ref": "#/$defs/safeRef"},
+        "evidence_ref": {"$ref": "#/$defs/safeRef"},
+        "audience_ref": {"$ref": "#/$defs/safeRef"},
+        "challenge_nonce": {"$ref": "#/$defs/safeRef"},
+        "verified_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+        "expires_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+        "key_ref": {"$ref": "#/$defs/safeRef"},
+        "tag_base64": {"type": "string", "minLength": 4, "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"},
+        "attestation_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "roots": {
+      "type": "object", "additionalProperties": false,
+      "required": ["engine", "project", "artifacts", "state", "tracking", "cache", "tmp"],
+      "properties": {
+        "engine": {"type": "string", "minLength": 1},
+        "project": {"type": "string", "minLength": 1},
+        "artifacts": {"type": "string", "minLength": 1},
+        "state": {"type": "string", "minLength": 1},
+        "tracking": {"type": "string", "minLength": 1},
+        "cache": {"type": "string", "minLength": 1},
+        "tmp": {"type": "string", "minLength": 1}
+      }
+    },
+    "runtime": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "roots", "interpreter", "environment"],
+      "properties": {
+        "schema_version": {"const": "synaptic-modal-runtime/v1"},
+        "roots": {"$ref": "#/$defs/roots"},
+        "interpreter": {
+          "type": "object", "additionalProperties": false,
+          "required": ["implementation", "version", "executable", "executable_digest"],
+          "properties": {
+            "implementation": {"const": "cpython"},
+            "version": {"type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"},
+            "executable": {"type": "string", "minLength": 1, "maxLength": 512},
+            "executable_digest": {"$ref": "#/$defs/digest"}
+          }
+        },
+        "environment": {
+          "type": "object", "additionalProperties": false,
+          "required": ["clear_inherited", "variables", "secret_requirements_digest", "provider_runtime_requirements_digest"],
+          "properties": {
+            "clear_inherited": {"const": true},
+            "variables": {"type": "object", "additionalProperties": {"type": "string"}},
+            "secret_requirements_digest": {"$ref": "#/$defs/digest"},
+            "provider_runtime_requirements_digest": {"$ref": "#/$defs/digest"}
+          }
+        }
+      }
+    }
+  }
+}

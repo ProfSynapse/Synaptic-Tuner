@@ -141,8 +141,11 @@ private/
 
 # Runtime/test scratch output
 /.runtime_tmp/
+/.synaptic/
 /.tmp/
 /pytest-cache-files-*/
+/.pytest-*/
+/tests/broker-contract-tests*/
 /tmp/*
 !/tmp/clipcannon-review/
 !/tmp/clipcannon-review/**

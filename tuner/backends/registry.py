@@ -24,7 +24,6 @@ class TrainingBackendRegistry:
         "rtx": "tuner.backends.training.rtx_backend:RTXBackend",
         "mac": "tuner.backends.training.mac_backend:MacBackend",
         "hf_jobs": "tuner.backends.training.cloud.hf_jobs_backend:HFJobsBackend",
-        "modal": "tuner.backends.training.cloud.modal_backend:ModalBackend",
         "runpod": "tuner.backends.training.cloud.runpod_backend:RunPodBackend",
     }
     _resolved: Dict[str, Type[ITrainingBackend]] = {}

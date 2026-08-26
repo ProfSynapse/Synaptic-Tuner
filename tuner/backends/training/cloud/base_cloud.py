@@ -2,8 +2,8 @@
 Shared utilities for cloud training backends.
 
 Location: tuner/backends/training/cloud/base_cloud.py
-Purpose: Helper functions used by all cloud provider backends (HF Jobs, Modal, RunPod)
-Used by: hf_jobs_backend.py, modal_backend.py, runpod_backend.py
+Purpose: Helper functions used by legacy cloud training backends and config
+Used by: hf_jobs_backend.py, runpod_backend.py
 
 This module provides:
 - Cloud config loading from cloud_config.yaml
@@ -87,8 +87,8 @@ def load_gpu_pricing(cloud_config_path: Optional[Path] = None) -> dict:
 
     Example:
         pricing = load_gpu_pricing()
-        modal_h100 = pricing["modal"]["H100"]
-        # {"name": "H100 (80GB)", "price": 4.89}
+        hf_a10g = pricing["hf_jobs"]["a10g-small"]
+        # {"name": "A10G (24GB)", "price": 1.10}
     """
     global _GPU_PRICING_CACHE
     if _GPU_PRICING_CACHE is not None:
@@ -151,7 +151,7 @@ def load_gpu_tiers(cloud_config_path: Path) -> dict:
 
     Example:
         tiers = load_gpu_tiers(repo_root / "Trainers" / "cloud" / "cloud_config.yaml")
-        modal_gpu = tiers["standard"]["modal"]  # "L40S"
+        hf_gpu = tiers["standard"]["hf_jobs"]  # "a10g-small"
     """
     if not cloud_config_path.exists():
         return {}
@@ -208,7 +208,7 @@ def resolve_gpu_for_tier(
 
     Args:
         cloud_config_path: Path to cloud_config.yaml file
-        provider: Provider name ('hf_jobs', 'modal', 'runpod')
+        provider: Provider name ('hf_jobs' or 'runpod')
         tier: Tier name ('budget', 'standard', 'performance')
 
     Returns:
@@ -216,8 +216,8 @@ def resolve_gpu_for_tier(
         not found.
 
     Example:
-        gpu = resolve_gpu_for_tier(config_path, "modal", "standard")
-        # Returns "L40S"
+        gpu = resolve_gpu_for_tier(config_path, "hf_jobs", "standard")
+        # Returns "a10g-small"
     """
     tiers = load_gpu_tiers(cloud_config_path)
     tier_config = tiers.get(tier)
@@ -526,7 +526,7 @@ def estimate_cost(provider: str, gpu_type: str, timeout_hours: float) -> Optiona
     Reads pricing data from cloud_config.yaml (cached after first load).
 
     Args:
-        provider: Cloud provider identifier ('hf_jobs', 'modal', 'runpod')
+        provider: Cloud provider identifier ('hf_jobs' or 'runpod')
         gpu_type: Provider-specific GPU identifier
         timeout_hours: Maximum job duration in hours
 

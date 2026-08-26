@@ -13,21 +13,18 @@ gpu_tiers:
   budget:
     description: "Budget tier -- good for testing and small models"
     hf_jobs: "cpu-basic"
-    modal: "T4"
     runpod: "NVIDIA GeForce RTX 3090"
     approx_cost_per_hour: 0.40
 
   standard:
     description: "Standard tier -- recommended for most training runs"
     hf_jobs: "a10g-small"
-    modal: "L40S"
     runpod: "NVIDIA A100 SXM"
     approx_cost_per_hour: 1.95
 
   performance:
     description: "Performance tier -- fastest for large models"
     hf_jobs: "a100-large"
-    modal: "A100"
     runpod: "NVIDIA H100 SXM"
     approx_cost_per_hour: 3.00
 
@@ -41,14 +38,6 @@ pricing:
     a10g-small:    { name: "A10G (24GB)",      price: 1.10 }
     a10g-large:    { name: "A10G x4 (96GB)",   price: 4.40 }
     a100-large:    { name: "A100 (80GB)",      price: 2.50 }
-  modal:
-    T4:            { name: "T4 (16GB)",        price: 0.59 }
-    L4:            { name: "L4 (24GB)",        price: 0.73 }
-    A10G:          { name: "A10G (24GB)",      price: 1.10 }
-    L40S:          { name: "L40S (48GB)",      price: 1.40 }
-    A100:          { name: "A100 (40GB)",      price: 2.78 }
-    A100-80GB:     { name: "A100 (80GB)",      price: 3.72 }
-    H100:          { name: "H100 (80GB)",      price: 4.89 }
   runpod:
     "NVIDIA RTX A6000":      { name: "RTX A6000 (48GB)", price: 0.79 }
     "NVIDIA A100 80GB PCIe": { name: "A100 (80GB)",      price: 1.64 }
@@ -99,14 +88,6 @@ cloud:
       runtime: unsloth
       image_profile: stable_unsloth
       timeout: 4h
-
-  modal:
-    gpu: L40S
-    timeout_hours: 6
-    cache_volume_name: "toolset-model-cache"
-    artifact_backend: modal_volume
-    output_volume_name: "toolset-training-artifacts"
-    output_mount_path: "/vol/artifacts"
 
   runpod:
     gpu_type_id: "NVIDIA A100 SXM"

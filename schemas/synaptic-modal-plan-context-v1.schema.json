@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapticlabs.ai/schemas/synaptic-modal-plan-context-v1.schema.json",
+  "title": "Synaptic Modal Resolved Plan Context v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "project_ref", "profile", "deployment", "binding",
+    "volumes", "authority", "operation", "resource_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "synaptic-modal-plan-context/v1"},
+    "project_ref": {"$ref": "#/$defs/ref"},
+    "profile": {"$ref": "#/$defs/ref"},
+    "resource_digest": {"$ref": "#/$defs/digest"},
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account_ref", "workspace_ref", "environment_ref", "client_ref", "sdk_version"],
+      "properties": {
+        "account_ref": {"$ref": "#/$defs/ref"},
+        "workspace_ref": {"$ref": "#/$defs/ref"},
+        "environment_ref": {"$ref": "#/$defs/ref"},
+        "client_ref": {"$ref": "#/$defs/ref"},
+        "sdk_version": {"const": "1.5.4"}
+      }
+    },
+    "volumes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control_volume_id", "artifact_volume_id"],
+      "properties": {
+        "control_volume_id": {"$ref": "#/$defs/ref"},
+        "artifact_volume_id": {"$ref": "#/$defs/ref"}
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_ref", "quote_digest", "quote_expires_at", "maximum_cost_minor_units", "currency"],
+      "properties": {
+        "key_ref": {"$ref": "#/$defs/ref"},
+        "quote_digest": {"$ref": "#/$defs/digest"},
+        "quote_expires_at": {"type": "string", "format": "date-time"},
+        "maximum_cost_minor_units": {"type": "integer", "minimum": 0},
+        "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effect_id", "effect_key", "artifact_slot_ref", "invocation_nonce", "generation"],
+      "properties": {
+        "effect_id": {"$ref": "#/$defs/ref"},
+        "effect_key": {"$ref": "#/$defs/ref"},
+        "artifact_slot_ref": {"$ref": "#/$defs/ref"},
+        "invocation_nonce": {"$ref": "#/$defs/ref"},
+        "generation": {"type": "integer", "minimum": 1, "maximum": 2147483647}
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "selection", "issuer_ref", "evidence_ref", "audience_ref",
+        "challenge_nonce", "verified_at", "expires_at", "key_ref", "tag_base64",
+        "attestation_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "synaptic-verified-modal-deployment/v1"},
+        "selection": {"$ref": "#/$defs/selection"},
+        "issuer_ref": {"$ref": "#/$defs/ref"},
+        "evidence_ref": {"$ref": "#/$defs/ref"},
+        "audience_ref": {"$ref": "#/$defs/ref"},
+        "challenge_nonce": {"$ref": "#/$defs/ref"},
+        "verified_at": {"type": "string", "format": "date-time"},
+        "expires_at": {"type": "string", "format": "date-time"},
+        "key_ref": {"$ref": "#/$defs/ref"},
+        "tag_base64": {"type": "string", "minLength": 4, "maxLength": 512},
+        "attestation_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  },
+  "$defs": {
+    "ref": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+\\-]{0,255}$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "account_ref", "workspace_ref", "environment_ref", "client_ref",
+        "sdk_version", "app_name", "function_name", "function_version", "image_id",
+        "image_digest", "dependency_lock_digest", "wrapper_digest", "runtime_digest",
+        "python_version", "python_executable", "python_executable_digest",
+        "runtime_environment", "secret_requirements_digest",
+        "provider_runtime_requirements_digest", "accelerator", "timeout_seconds", "max_retries"
+      ],
+      "properties": {
+        "schema_version": {"const": "synaptic-modal-deployment-selection/v1"},
+        "account_ref": {"$ref": "#/$defs/ref"},
+        "workspace_ref": {"$ref": "#/$defs/ref"},
+        "environment_ref": {"$ref": "#/$defs/ref"},
+        "client_ref": {"$ref": "#/$defs/ref"},
+        "sdk_version": {"const": "1.5.4"},
+        "app_name": {"const": "synaptic-training-v1"},
+        "function_name": {"const": "run_sft_v1"},
+        "function_version": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "image_id": {"type": "string", "pattern": "^im-[A-Za-z0-9._+\\-]+$"},
+        "image_digest": {"$ref": "#/$defs/digest"},
+        "dependency_lock_digest": {"$ref": "#/$defs/digest"},
+        "wrapper_digest": {"$ref": "#/$defs/digest"},
+        "runtime_digest": {"$ref": "#/$defs/digest"},
+        "python_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "python_executable": {"type": "string", "pattern": "^/"},
+        "python_executable_digest": {"$ref": "#/$defs/digest"},
+        "runtime_environment": {
+          "type": "object",
+          "additionalProperties": {"type": "string"}
+        },
+        "secret_requirements_digest": {"$ref": "#/$defs/digest"},
+        "provider_runtime_requirements_digest": {"$ref": "#/$defs/digest"},
+        "accelerator": {"const": "A10"},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+        "max_retries": {"const": 0}
+      }
+    }
+  }
+}

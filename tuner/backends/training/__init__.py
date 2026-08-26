@@ -9,14 +9,13 @@ _EXPORT_MODULES = {
     "RTXBackend": ".rtx_backend",
     "MacBackend": ".mac_backend",
     "HFJobsBackend": ".cloud",
-    "ModalBackend": ".cloud",
     "RunPodBackend": ".cloud",
     "AVAILABLE_BACKENDS": ".cloud",
 }
 
 __all__ = [
     "ITrainingBackend", "RTXBackend", "MacBackend",
-    "HFJobsBackend", "ModalBackend", "RunPodBackend", "AVAILABLE_BACKENDS",
+    "HFJobsBackend", "RunPodBackend", "AVAILABLE_BACKENDS",
 ]
 
 

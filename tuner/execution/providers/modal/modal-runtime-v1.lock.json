@@ -1,0 +1,46 @@
+{
+  "locked_files": {
+    "dependency_lock": {
+      "path": "requirements/modal-launcher-v1.lock",
+      "sha256": "8273b49a3b613bed82905ac349d2028935269c4d369dd5781a5eb0bad23b874e"
+    },
+    "deployment_wrapper": {
+      "path": "tuner/execution/providers/modal/deployment_v1.py",
+      "sha256": "6cd3372342d5c21d8faecc72b88055767dbeb710481ae823f1ab41fa91976507"
+    },
+    "modal_mounted_io": {
+      "path": "tuner/execution/providers/modal/mounted_io.py",
+      "sha256": "c3e1d2fea462fd603501ae15d7d8697a72afcfe31b1df5fe879cf968c61a293d"
+    },
+    "modal_producer": {
+      "path": "tuner/execution/providers/modal/producer.py",
+      "sha256": "d12fae626815ae21f4a7ac5b53d198351cf6354fa77eb3aaf77fbd2dfa95d77e"
+    },
+    "modal_remote": {
+      "path": "tuner/execution/providers/modal/remote.py",
+      "sha256": "6c80dd7cc0c966cb2000cbe1c16cd01bbca380729ca1470d1e7cd9dfa92bdfd5"
+    },
+    "modal_runtime": {
+      "path": "tuner/execution/providers/modal/runtime.py",
+      "sha256": "cf8019026552a28c429d1e114844b4821815ddf3645107abdbac939bc773ae45"
+    },
+    "sft_runtime": {
+      "path": "Trainers/sft/runtime_v1.py",
+      "sha256": "5e2dfc6b582f67f04171c2458cc7895857083e8eab9e55875acb5e6a11f26743"
+    }
+  },
+  "ml_stack": {
+    "torch": "2.9.0+cu128",
+    "transformers": "4.57.1",
+    "trl": "0.24.0"
+  },
+  "python": {
+    "executable": "/opt/conda/bin/python3",
+    "executable_sha256": "06950bbe281eade6c8c0a9c6c70e6a9a338e6fb63b641dc3a71b1854e74fc859",
+    "implementation": "cpython",
+    "version": "3.11.14"
+  },
+  "registry_reference": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
+  "schema_version": "synaptic-modal-runtime-lock/v1",
+  "sdk_version": "1.5.4"
+}

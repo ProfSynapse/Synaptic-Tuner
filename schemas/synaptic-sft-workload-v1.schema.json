@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-sft-workload-v1.schema.json",
+  "title": "Synaptic SFT Workload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "method",
+    "entrypoint",
+    "execution_source",
+    "configuration",
+    "identities",
+    "runtime_requirements",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {"const": "synaptic-sft-workload/v1"},
+    "method": {"const": "sft"},
+    "entrypoint": {"const": "Trainers/sft/runtime_v1.py"},
+    "execution_source": {"$ref": "synaptic-execution-source-v1.schema.json"},
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "document"],
+      "properties": {
+        "revision": {"$ref": "#/$defs/digest"},
+        "document": {
+          "type": "object",
+          "required": ["schema_version", "method", "model", "dataset", "sft"],
+          "properties": {
+            "schema_version": {"const": "synaptic-sft-config/v1"},
+            "method": {"const": "sft"},
+            "model": {"type": "object"},
+            "dataset": {"type": "object"},
+            "sft": {"type": "object"}
+          }
+        }
+      }
+    },
+    "identities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "dataset"],
+      "properties": {
+        "model": {"$ref": "#/$defs/model"},
+        "dataset": {"$ref": "#/$defs/resource"}
+      }
+    },
+    "runtime_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "python", "isolation", "allowed_environment", "trainer_projection_schema", "artifact_formats"],
+      "properties": {
+        "schema_version": {"const": "synaptic-sft-runtime-requirements/v1"},
+        "python": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["implementation", "minimum_version", "maximum_version_exclusive"],
+          "properties": {
+            "implementation": {"const": "cpython"},
+            "minimum_version": {"const": "3.11"},
+            "maximum_version_exclusive": {"const": "3.14"}
+          }
+        },
+        "isolation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["no_user_site", "safe_path"],
+          "properties": {"no_user_site": {"const": true}, "safe_path": {"const": true}}
+        },
+        "allowed_environment": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["COMSPEC", "CUDA_VISIBLE_DEVICES", "HF_HOME", "LANG", "LC_ALL", "LD_LIBRARY_PATH", "NVIDIA_VISIBLE_DEVICES", "PATH", "PATHEXT", "PYTHONIOENCODING", "PYTHONNOUSERSITE", "PYTHONPATH", "PYTHONSAFEPATH", "SYNAPTIC_ARTIFACT_ROOT", "SYNAPTIC_CACHE_ROOT", "SYNAPTIC_ENGINE_ROOT", "SYNAPTIC_PROJECT_ROOT", "SYNAPTIC_STATE_ROOT", "SYNAPTIC_TMP_ROOT", "SYNAPTIC_TRACKING_ROOT", "SystemRoot", "TRANSFORMERS_CACHE", "WANDB_DISABLED", "WINDIR"]}
+        },
+        "trainer_projection_schema": {"const": "synaptic-sft-trainer-projection/v1"},
+        "artifact_formats": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "tokenizer"],
+          "properties": {
+            "model": {"const": ["peft-safetensors", "full-safetensors"]},
+            "tokenizer": {"const": "tokenizer-json"}
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "requirements"],
+      "properties": {
+        "schema_version": {"const": "synaptic-sft-artifacts/v1"},
+        "requirements": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {"$ref": "#/$defs/artifactRequirement"},
+          "allOf": [
+            {"$ref": "#/$defs/exactWorkloadRecord"},
+            {"$ref": "#/$defs/exactTrainingLineage"},
+            {"$ref": "#/$defs/exactTrainingMetrics"},
+            {"$ref": "#/$defs/exactFinalModel"},
+            {"$ref": "#/$defs/exactTokenizer"}
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "resource": {
+      "type": "object",
+      "required": ["ref", "revision"],
+      "properties": {
+        "ref": {"type": "string", "minLength": 1, "maxLength": 512},
+        "revision": {"$ref": "#/$defs/revision"},
+        "content_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "model": {
+      "allOf": [
+        {"$ref": "#/$defs/resource"},
+        {
+          "type": "object",
+          "required": ["tokenizer_revision"],
+          "properties": {
+            "tokenizer_revision": {"$ref": "#/$defs/revision"}
+          }
+        }
+      ]
+    },
+    "artifactRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "minimum", "maximum"],
+      "properties": {
+        "role": {
+          "enum": [
+            "workload_record",
+            "training_lineage",
+            "training_metrics",
+            "final_model",
+            "tokenizer"
+          ]
+        },
+        "minimum": {"const": 1},
+        "maximum": {"const": 1}
+      }
+    },
+    "exactWorkloadRecord": {
+      "contains": {"properties": {"role": {"const": "workload_record"}}},
+      "minContains": 1,
+      "maxContains": 1
+    },
+    "exactTrainingLineage": {
+      "contains": {"properties": {"role": {"const": "training_lineage"}}},
+      "minContains": 1,
+      "maxContains": 1
+    },
+    "exactTrainingMetrics": {
+      "contains": {"properties": {"role": {"const": "training_metrics"}}},
+      "minContains": 1,
+      "maxContains": 1
+    },
+    "exactFinalModel": {
+      "contains": {"properties": {"role": {"const": "final_model"}}},
+      "minContains": 1,
+      "maxContains": 1
+    },
+    "exactTokenizer": {
+      "contains": {"properties": {"role": {"const": "tokenizer"}}},
+      "minContains": 1,
+      "maxContains": 1
+    }
+  }
+}

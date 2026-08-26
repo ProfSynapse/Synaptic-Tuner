@@ -27,6 +27,7 @@ classifiers = [
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9"]
+modal = ["modal==1.5.4"]
 
 [project.scripts]
 synaptic = "tuner.cli.main:main"
@@ -51,7 +52,9 @@ include = [
 ]
 namespaces = true
 
-# This metadata supports source and editable installs. Runtime scripts, schemas,
-# templates, containers, and configuration assets are not yet declared package
-# data. A self-contained wheel and publication remain gated on the Node R asset
-# inventory and clean-environment verification.
+[tool.setuptools.package-data]
+"tuner.execution.providers.modal" = ["modal-runtime-v1.lock.json"]
+
+# The Modal runtime lock is part of the importable engine contract. Broader
+# runtime scripts, schemas, templates, containers, and configuration assets are
+# still source-tree assets pending the full publication inventory.

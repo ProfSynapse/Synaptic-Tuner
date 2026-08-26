@@ -43,7 +43,6 @@ class TestLoadCloudConfig:
     def test_returns_cloud_section(self, cloud_config_path):
         result = load_cloud_config(cloud_config_path)
         assert "hf_jobs" in result
-        assert "modal" in result
         assert "runpod" in result
 
     def test_returns_empty_dict_on_malformed_yaml(self, tmp_path):
@@ -380,14 +379,8 @@ class TestEstimateCost:
         assert result is None
 
     def test_zero_hours_returns_zero_cost(self):
-        result = estimate_cost("modal", "T4", 0.0)
+        result = estimate_cost("hf_jobs", "a10g-small", 0.0)
         assert result == "~$0.00"
-
-    def test_modal_gpu_pricing(self):
-        result = estimate_cost("modal", "H100", 2.0)
-        pricing = load_gpu_pricing()
-        expected = pricing["modal"]["H100"]["price"] * 2.0
-        assert result == f"~${expected:.2f}"
 
     def test_runpod_gpu_pricing(self):
         result = estimate_cost("runpod", "NVIDIA RTX A6000", 1.0)
@@ -412,7 +405,3 @@ class TestGetGpuDisplayName:
     def test_unknown_provider_returns_raw_type(self):
         name = get_gpu_display_name("nonexistent", "a10g-small")
         assert name == "a10g-small"
-
-    def test_modal_h100(self):
-        name = get_gpu_display_name("modal", "H100")
-        assert name == "H100 (80GB)"

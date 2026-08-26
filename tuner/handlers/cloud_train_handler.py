@@ -6,7 +6,7 @@ Purpose: Orchestrate cloud training workflow (provider selection, config, job su
 Used by: Router when 'cloud' command is invoked, MainMenuHandler for cloud training option
 
 Manages the user workflow for submitting training jobs to cloud GPU providers:
-1. Select cloud provider (HF Jobs, Modal, RunPod)
+1. Select a legacy training backend (HF Jobs or RunPod)
 2. Validate provider credentials/environment
 3. Select training method (SFT, KTO)
 4. Load and display configuration with cost estimate
@@ -55,12 +55,6 @@ PROVIDER_INFO = {
         "description": "Managed GPU training via HF infrastructure",
         "install_hint": "pip install --upgrade huggingface_hub>=0.27.0",
         "env_var": "HF_TOKEN",
-    },
-    "modal": {
-        "name": "Modal",
-        "description": "Serverless GPU compute with auto-scaling",
-        "install_hint": "pip install modal && modal setup",
-        "env_var": None,  # Uses OAuth or MODAL_TOKEN_ID
     },
     "runpod": {
         "name": "RunPod",

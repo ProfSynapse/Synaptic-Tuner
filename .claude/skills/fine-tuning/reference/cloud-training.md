@@ -457,6 +457,28 @@ not widened by any later action.
 
 ---
 
+## Modal v1 execution lane
+
+Modal v1 is the clean submodule-first lane described in
+`reference/modal-jobs.md`. It uses exact SDK 1.5.4, an explicit host-created
+client, the fixed deployed `synaptic-training-v1/run_sft_v1` Function, one A10,
+two existing Volume v1 objects, exact dual-clone source verification, and one
+brokered `.spawn()` with retries disabled. The old `ModalBackend`,
+`Trainers/cloud/train_modal.py`, provider menu, pricing table, and manual
+`modal run` training path are removed and must not be restored.
+
+The consuming project owns configuration, database transactions, lifecycle,
+grants, secrets, and evidence authentication. The engine contains no concrete
+database and no SQLite runtime. Modal artifacts are authoritative in the
+artifact Volume; optional Hub publication is a later action.
+
+Proof is staged: provider-free checks first, authenticated provider reads
+second, and one paid smoke only after the exact tree, host durability, and
+authorization barriers pass. Provider-free success is not evidence that an
+account, deployment, Volume, secret, GPU, or paid invocation works live.
+
+---
+
 ## Provider-Native Storage
 
 Cloud artifacts are durable by default in the provider ecosystem:
@@ -501,16 +523,28 @@ When enabled:
 
 ## Smoke-Test Workflow
 
-1. Confirm the branch is clean and pushed.
-2. Point the trainer config at a remote dataset when possible.
-3. Run `python tuner.py cloud`.
-4. Choose provider and method.
-5. Start with a short smoke test (`max_steps`, small dataset slice, or one epoch).
-6. Verify artifacts in provider-native storage before enabling final-model publish.
+Cloud training is config-first through the public training API. There is no
+generic provider menu and the removed legacy Modal launcher is not a fallback.
+
+1. Confirm the host project and engine submodule are clean, exact, and pushed.
+2. Resolve the model, dataset, provider profile, runtime lock, and short SFT
+   smoke configuration through `TrainingAPI.load`, `resolve`, and `plan`. The
+   host resolver must emit a canonical `synaptic-modal-plan-context/v1`; do not
+   keep deployment, Volume, quote, expiry, or operation identity only in memory.
+3. Pass the provider-free barrier, then run the provider's authenticated
+   read-only preflight.
+4. Persist the exact preflight and obtain a host-owned opaque execution grant.
+   The main-project database must implement `ModalTrainingRepository`; its
+   preparation commit and lifecycle revision are one atomic transaction.
+5. Call `TrainingAPI.start` once. An ambiguous provider outcome is
+   reconciliation-only and never authorizes another submission.
+6. Use `TrainingAPI.outcome` and provider-native evidence to verify artifacts
+   before any separately authorized final-model publication.
 
 Recommended first-pass checks:
 - `hf_jobs`: inspect the configured bucket prefix under `runs/hf_jobs/...`
-- `modal`: inspect the configured Modal Volume path
+- `modal`: inspect only the effect-scoped `operations/{effect_id}/` paths in the
+  configured control and artifact Volumes
 - `runpod`: inspect the mounted RunPod Network Volume path
 
 For HF Jobs specifically, bucket-backed artifacts are the primary source of truth once they start appearing:

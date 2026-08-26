@@ -10,13 +10,118 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import sys
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
+
+
+RUNTIME_V1_PROJECTION_SCHEMA = "synaptic-sft-trainer-projection/v1"
+
+
+def _runtime_v1_projection_requested(args: argparse.Namespace) -> bool:
+    names = (
+        "runtime_v1_workload_fingerprint", "runtime_v1_configuration_revision",
+        "runtime_v1_tokenizer_revision", "runtime_v1_dataset_revision",
+        "runtime_v1_dataset_digest",
+    )
+    present = [getattr(args, name, None) is not None for name in names]
+    if any(present) and not all(present):
+        raise ValueError("Runtime v1 projection flags must be supplied together")
+    return all(present)
+
+
+def _sha256_regular_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_runtime_v1_projection(
+    *, args: argparse.Namespace, config: Any, run_dir: Path, final_model_path: Path
+) -> dict[str, object] | None:
+    """Build the closed runtime-v1 projection from values actually executed."""
+
+    if not _runtime_v1_projection_requested(args):
+        return None
+    dataset_path = Path(config.dataset.local_file).resolve(strict=True)
+    dataset_digest = _sha256_regular_file(dataset_path)
+    if dataset_digest != args.runtime_v1_dataset_digest:
+        raise ValueError("Runtime v1 dataset digest does not match the executed input")
+    effective_max_steps = getattr(config.training, "max_steps", None) or -1
+    return {
+        "schema_version": RUNTIME_V1_PROJECTION_SCHEMA,
+        "workload_fingerprint": args.runtime_v1_workload_fingerprint,
+        "configuration_revision": args.runtime_v1_configuration_revision,
+        "model": {
+            "ref": config.model.model_name,
+            "revision": config.model.model_revision,
+            "tokenizer_revision": args.runtime_v1_tokenizer_revision,
+            "load_in_4bit": config.model.load_in_4bit,
+        },
+        "dataset": {
+            "resolved_path": str(dataset_path),
+            "revision": args.runtime_v1_dataset_revision,
+            "content_digest": dataset_digest,
+        },
+        "training": {
+            "batch_size": config.training.per_device_train_batch_size,
+            "gradient_accumulation_steps": config.training.gradient_accumulation_steps,
+            "learning_rate": config.training.learning_rate,
+            "max_steps": effective_max_steps,
+            "num_epochs": config.training.num_train_epochs,
+            "max_seq_length": config.training.max_seq_length,
+            "seed": config.seed,
+            "save_steps": config.training.save_steps,
+            "save_total_limit": config.training.save_total_limit,
+            "split_dataset": bool(args.split_dataset or config.dataset.split_dataset),
+        },
+        "lora": {
+            "rank": config.lora.r,
+            "alpha": config.lora.lora_alpha,
+            "dropout": config.lora.lora_dropout,
+            "target_modules": config.lora.target_modules,
+            "use_dora": config.lora.use_dora,
+            "use_rslora": config.lora.use_rslora,
+            "init_lora_weights": config.lora.init_lora_weights,
+        },
+        "outputs": {
+            "run_dir": str(run_dir.resolve()),
+            "final_model_dir": str(final_model_path.resolve()),
+        },
+        "status": "completed",
+    }
+
+
+def write_runtime_v1_projection_atomic(
+    projection: dict[str, object], run_dir: Path
+) -> Path:
+    destination = run_dir / "runtime_v1_projection.json"
+    if destination.exists():
+        raise FileExistsError(f"Runtime projection already exists: {destination}")
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".runtime-v1-projection-", suffix=".tmp", dir=run_dir
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(projection, stream, sort_keys=True, separators=(",", ":"), allow_nan=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+    return destination
 
 # Add repo root and src to path before imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -587,6 +692,16 @@ def parse_args(argv=None):
                        help=argparse.SUPPRESS)
     parser.add_argument("--protected-smoke-config", type=str,
                        help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-workload-fingerprint", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-configuration-revision", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-tokenizer-revision", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-dataset-revision", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-dataset-digest", type=str,
+                       help=argparse.SUPPRESS)
 
     # UI options
     parser.add_argument("--no-dashboard", action="store_true",
@@ -599,6 +714,7 @@ def parse_args(argv=None):
 
 def run(args: argparse.Namespace):
     """Execute training with the provided CLI arguments."""
+    runtime_v1_requested = _runtime_v1_projection_requested(args)
     run_metadata = {
         "train_size": None,
         "eval_size": None,
@@ -1309,7 +1425,7 @@ def run(args: argparse.Namespace):
     # Save final model
     print(f"\nSaving final model to: {final_model_path}")
     trainer.save_model(str(final_model_path))
-    if args.protected_smoke_evidence:
+    if args.protected_smoke_evidence or runtime_v1_requested:
         tokenizer.save_pretrained(str(final_model_path))
 
     if protected_callback is not None and protected_before is not None:
@@ -1343,6 +1459,15 @@ def run(args: argparse.Namespace):
     print(f"  Model saved to: {final_model_path}")
     print(f"  Logs saved to: {logs_dir}/")
 
+    runtime_projection = build_runtime_v1_projection(
+        args=args,
+        config=config,
+        run_dir=run_dir,
+        final_model_path=final_model_path,
+    )
+    if runtime_projection is not None:
+        write_runtime_v1_projection_atomic(runtime_projection, run_dir)
+
     # Build and save training lineage
     print("\nBuilding training lineage...")
     lineage = build_training_lineage(
@@ -1356,6 +1481,8 @@ def run(args: argparse.Namespace):
         evolutionary_stats=evo_wrapper.get_stats() if evo_wrapper else None,
         preprocessing_metadata=preprocessing_metadata,
     )
+    if runtime_projection is not None:
+        lineage["synaptic_runtime_projection"] = runtime_projection
     actual_lineage_path = save_training_lineage(lineage, run_dir)
     run_metadata["lineage_path"] = str(actual_lineage_path)
 

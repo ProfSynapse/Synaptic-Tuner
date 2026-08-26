@@ -6,16 +6,14 @@ from importlib import import_module
 
 _BACKEND_TARGETS = {
     "hf_jobs": (".hf_jobs_backend", "HFJobsBackend"),
-    "modal": (".modal_backend", "ModalBackend"),
     "runpod": (".runpod_backend", "RunPodBackend"),
 }
 _EXPORT_TARGETS = {
     "HFJobsBackend": _BACKEND_TARGETS["hf_jobs"],
-    "ModalBackend": _BACKEND_TARGETS["modal"],
     "RunPodBackend": _BACKEND_TARGETS["runpod"],
 }
 
-__all__ = ["AVAILABLE_BACKENDS", "HFJobsBackend", "ModalBackend", "RunPodBackend"]
+__all__ = ["AVAILABLE_BACKENDS", "HFJobsBackend", "RunPodBackend"]
 
 
 def _resolve_backend(name: str):

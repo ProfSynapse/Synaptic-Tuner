@@ -1,0 +1,7 @@
+schema_version: synaptic-training-request/v1
+method: sft
+provider:
+  kind: modal
+  profile: modal-a10-v1
+configuration:
+  profile: project://experiments/sft-smoke.yaml

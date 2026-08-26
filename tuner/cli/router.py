@@ -7,7 +7,7 @@ Used by: Main entry point (cli/main.py)
 
 Routes top-level commands to their handlers:
   - train: TrainHandler (SFT, KTO, GRPO workflows)
-  - cloud: CloudTrainHandler (cloud GPU training via HF Jobs, Modal, RunPod)
+  - cloud: CloudTrainHandler (legacy cloud GPU training via HF Jobs or RunPod)
   - eval: EvalHandler (model evaluation)
   - synthchat: SynthChatHandler (data generation and improvement)
   - modelops: ModelOpsHandler (run, merge, convert, upload)

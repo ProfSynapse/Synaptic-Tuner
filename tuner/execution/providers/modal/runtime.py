@@ -1,0 +1,225 @@
+"""Concrete remote-only dual-clone and process ports for Modal v1."""
+from __future__ import annotations
+
+import hashlib
+import base64
+import binascii
+import hmac
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Callable, Mapping, Sequence
+
+from tuner.project.execution_source import ExecutionSourceV1
+
+from .remote import ProcessResultV1
+from .resolution import ModalDeploymentSelectionV1
+from .config import ModalRuntimeLockV1
+
+
+class EnvironmentHmacAuthenticator:
+    """Authenticate remote control records from one explicitly allowed secret."""
+
+    __slots__ = ("_environment_key", "_key_ref")
+
+    def __init__(self, *, environment_key: str, key_ref: str) -> None:
+        if not isinstance(environment_key, str) or not environment_key or not environment_key.isupper():
+            raise ValueError("evidence environment key must be explicit")
+        from ...contracts import safe_ref
+        self._environment_key = environment_key
+        self._key_ref = safe_ref(key_ref, "key_ref")
+
+    def _key(self, key_ref: str) -> bytes:
+        if key_ref != self._key_ref:
+            raise ValueError("evidence key reference mismatch")
+        value = os.environ.get(self._environment_key)
+        if not isinstance(value, str) or not value or not value.isascii():
+            raise ValueError("evidence key is unavailable")
+        try:
+            decoded = base64.b64decode(value, validate=True)
+        except (ValueError, binascii.Error):
+            raise ValueError("evidence key is invalid") from None
+        if len(decoded) != 32 or base64.b64encode(decoded).decode("ascii") != value:
+            raise ValueError("evidence key is invalid")
+        return decoded
+
+    def sign(self, purpose: str, payload: bytes, key_ref: str) -> bytes:
+        if not isinstance(purpose, str) or not purpose or not isinstance(payload, bytes):
+            raise TypeError("evidence purpose and payload are required")
+        return hmac.new(self._key(key_ref), purpose.encode("ascii") + b"\0" + payload, hashlib.sha256).digest()
+
+    def verify(self, purpose: str, payload: bytes, tag: bytes, key_ref: str) -> bool:
+        if not isinstance(tag, bytes):
+            return False
+        return hmac.compare_digest(self.sign(purpose, payload, key_ref), tag)
+
+
+def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+class GitDualCloneMaterializer:
+    """Clone and independently reverify the one accepted dual-clone topology."""
+
+    __slots__ = ("_run", "_image_id")
+
+    def __init__(
+        self,
+        *,
+        command_runner: Callable[[Sequence[str]], bytes] | None = None,
+        image_id_observer: Callable[[], str | None] | None = None,
+    ) -> None:
+        self._run = command_runner or self._subprocess
+        self._image_id = image_id_observer or (lambda: os.environ.get("MODAL_IMAGE_ID"))
+
+    @staticmethod
+    def _subprocess(argv: Sequence[str]) -> bytes:
+        environment = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": "/tmp/synaptic-modal-git-home",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GCM_INTERACTIVE": "Never",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_OPTIONAL_LOCKS": "0",
+        }
+        completed = subprocess.run(
+            tuple(argv),
+            shell=False,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=600,
+            env=environment,
+        )
+        if completed.returncode != 0 or len(completed.stdout) > 1024 * 1024:
+            raise ValueError("remote source command failed")
+        return completed.stdout
+
+    def _git(self, *arguments: str) -> str:
+        try:
+            value = self._run(("git", *arguments))
+        except Exception:
+            raise ValueError("remote source verification failed") from None
+        if not isinstance(value, bytes) or len(value) > 1024 * 1024:
+            raise ValueError("remote source verification failed")
+        try:
+            return value.decode("utf-8").strip()
+        except UnicodeError:
+            raise ValueError("remote source verification failed") from None
+
+    def _clone(self, url: str, commit: str, destination: Path) -> None:
+        self._git("clone", "--no-checkout", "--filter=blob:none", "--", url, str(destination))
+        self._git("-C", str(destination), "checkout", "--detach", commit)
+        if self._git("-C", str(destination), "rev-parse", "HEAD").lower() != commit.lower():
+            raise ValueError("remote source commit mismatch")
+        if self._git("-C", str(destination), "remote", "get-url", "origin") != url:
+            raise ValueError("remote source origin mismatch")
+        if self._git("-C", str(destination), "status", "--porcelain=v1", "--untracked-files=all"):
+            raise ValueError("remote source checkout is not clean")
+
+    def prepare_and_verify(
+        self,
+        source: ExecutionSourceV1,
+        deployment: ModalDeploymentSelectionV1,
+    ) -> None:
+        if type(source) is not ExecutionSourceV1 or type(deployment) is not ModalDeploymentSelectionV1:
+            raise TypeError("canonical source and deployment are required")
+        project = Path(source.roots["project"])
+        engine = Path(source.roots["engine"])
+        expected_run_root = Path("/workspace/run") / source.run_id
+        writable = {name: Path(source.roots[name]) for name in ("artifacts", "state", "tracking", "cache", "tmp")}
+        if (
+            project != Path("/workspace/project")
+            or engine != Path("/workspace/engine")
+            or project == engine
+            or any(path.parent != expected_run_root for path in writable.values())
+            or set(path.name for path in writable.values()) != {"artifacts", "state", "tracking", "cache", "tmp"}
+        ):
+            raise ValueError("remote runtime roots differ from the fixed Modal layout")
+        if project.exists() or engine.exists() or expected_run_root.exists():
+            raise ValueError("remote operation directory collision")
+        if self._image_id() != deployment.image_id:
+            raise ValueError("remote Modal image identity mismatch")
+        actual_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        if (
+            sys.implementation.name != "cpython"
+            or actual_version != source.python_version
+            or Path(sys.executable) != Path(source.python_executable)
+            or _file_digest(Path(source.python_executable)) != source.python_executable_digest
+        ):
+            raise ValueError("remote Python runtime identity mismatch")
+        self._clone(source.project_source.location.canonical_url, source.project_source.commit, project)
+        self._clone(source.engine_source.location.canonical_url, source.engine_source.commit, engine)
+        gitlink = self._git(
+            "-C", str(project), "ls-tree", "HEAD", "--", source.engine_submodule_path
+        ).split()
+        if len(gitlink) < 3 or gitlink[0] != "160000" or gitlink[1] != "commit" or gitlink[2].lower() != source.engine_source.commit.lower():
+            raise ValueError("remote engine gitlink mismatch")
+        runtime_lock = ModalRuntimeLockV1.packaged()
+        runtime_lock.validate_selection(deployment)
+        checks = {
+            engine / member["path"]: member["sha256"]
+            for member in runtime_lock.document["locked_files"].values()
+        }
+        if any(not path.is_file() or _file_digest(path) != expected for path, expected in checks.items()):
+            raise ValueError("remote locked runtime source mismatch")
+        expected_run_root.mkdir(parents=True, exist_ok=False)
+        for path in writable.values():
+            path.mkdir(exist_ok=False)
+
+
+class SubprocessSftRunner:
+    """Invoke the fixed runtime without a shell and without returning secret-bearing output."""
+
+    __slots__ = ("_secret_keys", "_timeout")
+
+    def __init__(self, *, secret_keys: tuple[str, ...], timeout_seconds: int) -> None:
+        if not secret_keys or len(secret_keys) != len(set(secret_keys)):
+            raise ValueError("exact runtime secret keys are required")
+        self._secret_keys = tuple(secret_keys)
+        if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 86400:
+            raise ValueError("runtime timeout must be bounded")
+        self._timeout = timeout_seconds
+
+    def run(
+        self,
+        argv: tuple[str, str, str],
+        *,
+        cwd: str,
+        environment: dict[str, str],
+        stdin: bytes,
+    ) -> ProcessResultV1:
+        if len(argv) != 3 or argv[2] != "--canonical-workload-stdin":
+            raise ValueError("runtime command is not fixed")
+        process_environment = dict(environment)
+        for key in self._secret_keys:
+            value = os.environ.get(key)
+            if not isinstance(value, str) or not value:
+                raise ValueError("required runtime secret is unavailable")
+            process_environment[key] = value
+        try:
+            completed = subprocess.run(
+                argv,
+                cwd=cwd,
+                env=process_environment,
+                input=stdin,
+                shell=False,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=self._timeout,
+            )
+        except Exception:
+            raise ValueError("fixed SFT runtime invocation failed") from None
+        return ProcessResultV1(completed.returncode)
+
+
+__all__ = ["EnvironmentHmacAuthenticator", "GitDualCloneMaterializer", "SubprocessSftRunner"]

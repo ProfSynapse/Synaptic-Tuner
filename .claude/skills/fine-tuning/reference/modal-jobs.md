@@ -1,130 +1,110 @@
-# Modal Jobs Reference
+# Modal Training v1 Reference
 
-Modal is a serverless-container cloud lane for GPU jobs: define an `@app.function`
-that runs your work inside a pinned image on a Modal-provisioned GPU. Use it when
-a job needs a GPU class or an on-demand elasticity that the RunPod wrapper lane
-(`reference/runpod-jobs.md`) does not give you, or as a second independent
-provider when HF Jobs and RunPod are both flaky.
+Modal training is a submodule-first execution provider behind the public
+`TrainingAPI`. It is not a second training CLI and it is not launched with
+`modal run`. A consuming host supplies request configuration, durable storage,
+authorization grants, credential resolution, and evidence authentication. The
+engine supplies strict contracts, planning, verification, staging, the mutation
+broker, and the fixed remote worker.
 
-Like the RunPod lane, this is for arbitrary wrapper work. Cloud TRAINING through
-the tuner still goes via `tuner.py cloud-run` / `cloud-pipeline`; see
-`reference/cloud-training.md`.
+## Product flow
 
----
+1. The host loads a `synaptic-training-request/v1` document.
+2. `TrainingAPI.resolve` locks the host project, engine submodule, model,
+   dataset, provider profile, runtime, and artifact policy.
+3. `TrainingAPI.plan` produces one immutable plan whose canonical, non-secret
+   `synaptic-modal-plan-context/v1` binds the verified deployment, explicit
+   client scope, exact Volume IDs, quote/expiry, cost ceiling, and unique
+   operation identity.
+4. `TrainingAPI.preflight` performs read-only source, deployment, Volume,
+   capability, quote, and authorization checks.
+5. The host obtains an opaque grant and calls `TrainingAPI.start` once.
+6. `TrainingAPI.outcome` reconciles the provider call and verifies the exact
+   terminal records and artifacts.
 
-## Launch: always `--detach` for real jobs
+The engine now provides `ModalTrainingOperations` and
+`compose_modal_training_operations`. A consuming main project must still
+provide a conforming durable repository and authenticated host ports before a
+live provider proof; do not use a manual launch as a substitute.
 
-A plain `modal run <app>` ties the app's lifetime to the launching client. When
-that client goes away -- session end, dropped connection, killed babysitter --
-Modal sends the app a cancellation signal and the run dies; the app is created as
-an "ephemeral" app for exactly this reason.
+## Fixed v1 topology
 
-For any job longer than a quick smoke, launch detached so the run outlives the
-client:
+- Exact Modal SDK `1.5.4` and one explicit authenticated client; no ambient
+  profile or `Client.from_env()` fallback in engine code.
+- Fixed deployed app/function `synaptic-training-v1/run_sft_v1`.
+- One A10 GPU, one canonical command argument, `retries=0`, and one detached
+  `.spawn()` call behind `MutationBroker`.
+- One digest-pinned Unsloth registry image with its inherited entrypoint
+  cleared.
+- One existing Modal Volume v1 for control/log/evidence records and one
+  distinct existing Modal Volume v1 for input/output artifacts.
+- Each effect is isolated below `operations/{effect_id}/`; jobs never share
+  global `input/`, `output/`, `logs/`, or `evidence/` paths.
+- The remote job independently clones the exact pushed host project and exact
+  engine commit, verifies the project gitlink, and invokes only
+  `Trainers/sft/runtime_v1.py --canonical-workload-stdin` without a shell.
+- The verified runtime is CPython 3.11.14 at `/opt/conda/bin/python3`; its
+  executable, image, complete hash-pinned launcher dependency closure,
+  deployment wrapper, remote worker/producer/runtime modules, SFT entrypoint,
+  and ML stack are checked in `modal-runtime-v1.lock.json`. The host enforces
+  this packaged lock before preflight and the remote materializer enforces it
+  again against the reconstructed exact checkout.
 
-```bash
-modal run --detach <app_module>::<function>
-```
+## Storage and evidence
 
-Monitor a detached run by its app id:
+Modal Volume is the authoritative provider-native artifact store for a Modal
+run. Hub publication is optional and separately authorized. The remote producer
+emits exactly five artifacts: workload record, training lineage, training
+metrics, final model, and tokenizer.
 
-```bash
-modal app logs <app-id>
-modal app list          # find the app id
-```
+The control Volume contains operation-scoped, authenticated structured logs,
+terminal evidence, and the completion manifest. The host database stores the
+expected operation identity, lifecycle, one-shot authority consumption,
+provider job reference, and verification result. It implements
+`ModalTrainingRepository`, including an atomic preparation commit. The engine
+derives result expectations from the durable preparation plus canonical
+attempt record; it does not select or ship a concrete database and must not
+create SQLite state.
 
-### `--detach` alone does not survive a graceful client death
+Mounted Volume writes are committed explicitly after the producer finishes.
+The artifact Volume is committed before the control Volume so an intentionally
+visible completion record cannot precede its artifacts. Any uncertainty after
+staging or `.spawn()` is reconciliation-only; it does not recreate submission
+authority.
 
-`--detach` protects the APP from client disconnect, but not the in-flight call.
-If the client process receives a graceful signal (SIGINT/SIGTERM) while blocked
-on `.remote()`, the unwinding call sends an explicit input-cancel RPC -- the log
-shows "Received a cancellation signal while processing input" -- and the running
-function dies even though the app was detached. Only SIGKILL or a network drop
-leaves the input running.
+Treat both mounts as hostile shared storage. On the locked Linux runtime,
+reads and writes traverse through retained directory descriptors and open leaves
+relative to those descriptors, preventing an ancestor substitution between
+validation and I/O. Reads are bounded and compare descriptor identity before
+and after; writes use exclusive leaf creation. Named Modal Secrets are the only credential path;
+secret-like environment keys or symbolic secret values are rejected before
+image construction.
 
-The robust fix is to remove the blocking client entirely: have the local
-entrypoint use `.spawn()` instead of `.remote()`.
+## Three proof levels
 
-```python
-@app.local_entrypoint()
-def main():
-    call = my_fn.spawn(...)   # returns immediately after scheduling
-    print(f"spawned {call.object_id}")
-```
+1. **Provider-free barrier** — schemas, canonical parsing, hostile binding
+   tests, exact SDK surface construction, image inspection, network-disabled
+   image runtime checks, compilation, and packaging. No credentials, provider
+   calls, GPU, or spend.
+2. **Authenticated live preflight** — explicit-client account/workspace/
+   environment binding, existing Volume identities, deployed Function version,
+   Modal image identity, secret names/required keys, and a current quote. This
+   may read provider state but may not submit training.
+3. **Paid smoke** — after the exact tree is independently accepted, committed,
+   pushed, and granted, stage once and call `.spawn()` once. Observe and verify
+   by the durable provider job ID and Volume evidence. Never retry an ambiguous
+   submission.
 
-With `modal run --detach` + `.spawn()`, the client exits on its own within
-seconds and there is never an in-flight input for a dying client to cancel.
-Completion is then observed out-of-band: `modal app logs` plus a DONE marker on
-the checkpoint Volume (see the crash-proof pattern below). Note Modal's caveat
-that detach keeps only the LAST triggered function alive -- one spawn per
-`modal run` invocation.
+## Failure diagnostics
 
----
+Raw trainer stdout/stderr, tokens, provider responses, and exception text do not
+cross the remote contract. Persist closed status codes and redacted structured
+records. For a failed live smoke, collect the provider call status, Modal logs,
+operation-scoped Volume inventory, authenticated terminal/log records, exact
+source/deployment/runtime locks, and host lifecycle history before changing
+trainer hyperparameters.
 
-## Image setup gotchas
-
-- **Clear a hijacking ENTRYPOINT.** Images that ship a process supervisor (the
-  Unsloth images run `supervisord`) will hijack the container and never run your
-  function. Reset the entrypoint when building the image:
-  `image = base_image.entrypoint([])`.
-- **Bake the hf_xet mitigation into the image env.** The `hf_xet` CAS backend
-  hangs without a timeout on multi-GB model pulls (see gotcha #5 in
-  `reference/runpod-jobs.md`); it is a `huggingface_hub` issue, not provider
-  specific, so Modal hits it too. Set both in the image env (or the function's
-  secrets):
-
-  ```python
-  image = image.env({
-      "HF_HUB_DISABLE_XET": "1",
-      "HF_HUB_ENABLE_HF_TRANSFER": "0",
-  })
-  ```
-
----
-
-## Crash-proof long-run pattern
-
-Modal containers can die mid-run (preemption, OOM, node loss). A long job must be
-able to survive a container death and resume rather than restart from zero. The
-pattern that holds up:
-
-1. **Write outputs to container-local disk first.** Fast, simple; the local disk
-   is scratch and disappears with the container.
-2. **Mirror to a `modal.Volume` on a background daemon thread.** A ~120s loop
-   copies new/changed output files into the mounted Volume and calls
-   `vol.commit()`. Catch and log every exception inside the loop -- a failed
-   mirror tick must NEVER kill the run.
-3. **Restore from the Volume before starting work.** At function entry, copy any
-   prior outputs back from the Volume onto local disk so the native script's own
-   resume logic engages (finds its last checkpoint / done markers and continues).
-4. **Let container death respawn and resume.** Decorate the function with retries
-   so a killed container comes back and re-enters step 3:
-
-   ```python
-   @app.function(retries=modal.Retries(max_retries=3, backoff_coefficient=1.0))
-   ```
-
-5. **Write a DONE marker at the very end.** A sentinel file (mirrored to the
-   Volume) lets a respawn distinguish "finished, nothing to do" from "died
-   partway, resume".
-
-The Volume is checkpoint/scratch space, not the system of record: the final
-result still has to land on the durable store (an HF staging repo) per the
-artifact contract in `reference/runpod-jobs.md`. A long run that produces a real
-model must opt into publishing it to the Hub -- the code default is off so a bare
-`modal run` cannot silently publish.
-
----
-
-## When to prefer Modal vs RunPod
-
-- **RunPod wrapper lane** (`reference/runpod-jobs.md`): byte-pinned image + git
-  commit on a specific single-GPU class; the launcher owns pod teardown. Good for
-  reproducing a job that must match a known GPU exactly.
-- **Modal**: serverless elasticity, native retries/Volumes for crash recovery,
-  detached runs that survive the client. Good for long or bursty work, or a
-  different GPU class.
-
-Both lanes obey the same staging prerequisite and artifact contract (see
-`reference/runpod-jobs.md`): referenced repos exist on the Hub at pinned
-revisions before launch, and results land on the Hub as the durable record.
+Provider/runtime failures should be fixed in the provider profile, runtime lock,
+deployment wrapper, or reusable engine contract. Model, dataset, tool schema,
+and training choices stay in host configuration; do not hardcode the current
+smoke into runtime code.

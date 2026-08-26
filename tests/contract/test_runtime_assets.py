@@ -130,7 +130,6 @@ ENGINE_CHECKOUT_FAMILIES = (
         "provider Python entry points",
         "engine-checkout",
         (
-            "Trainers/cloud/train_modal.py",
             "Trainers/cloud/runpod_sync.py",
             "Evaluator/cloud_hf_job.py",
             "Evaluator/cloud_hf_job_vllm.py",

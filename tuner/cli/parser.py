@@ -196,7 +196,7 @@ def create_parser() -> argparse.ArgumentParser:
 Commands:
   (none)      Interactive menu
   train       Training workflow (SFT, KTO, GRPO)
-  cloud       Cloud training (HF Jobs, Modal, RunPod)
+  cloud       Legacy cloud training (HF Jobs, RunPod)
   cloud-run   Config-driven HF cloud job
   cloud-jobs  Inspect or manage live HF Jobs
   plan-hardware Blind hardware planning for experiment specs

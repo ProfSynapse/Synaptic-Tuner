@@ -77,6 +77,84 @@ def test_runtime_layout_rejects_overlapping_targets(tmp_path: Path) -> None:
         )
 
 
+def test_runtime_layout_rejects_duplicate_canonical_targets(tmp_path: Path) -> None:
+    with pytest.raises(SourceLockError, match="distinct canonical"):
+        CloudRuntimeLayout(
+            engine=RuntimeMount(
+                "engine", tmp_path / "engine", PurePosixPath("/workspace/source"), True
+            ),
+            project=RuntimeMount(
+                "project", tmp_path / "project", PurePosixPath("/workspace/source"), True
+            ),
+            writable=tuple(
+                RuntimeMount(
+                    name, tmp_path / name, PurePosixPath("/runtime") / name, False
+                )
+                for name in ("artifacts", "state", "tracking", "cache", "tmp")
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "workspace_root",
+    (
+        "/workspace/./project",
+        "/workspace/staging/../project",
+        "/workspace//project",
+        "/workspace/project/",
+    ),
+)
+def test_runtime_layout_rejects_noncanonical_workspace_root(
+    tmp_path: Path, workspace_root: str
+) -> None:
+    with pytest.raises(SourceLockError, match="canonical POSIX"):
+        build_runtime_layout(_context(tmp_path), workspace_root=workspace_root)
+
+
+def test_runtime_layout_rejects_semantic_target_alias_before_distinctness(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(SourceLockError, match="canonical POSIX"):
+        CloudRuntimeLayout(
+            engine=RuntimeMount(
+                "engine",
+                tmp_path / "engine",
+                PurePosixPath("/workspace/x/../project"),
+                True,
+            ),
+            project=RuntimeMount(
+                "project", tmp_path / "project", PurePosixPath("/workspace/project"), True
+            ),
+            writable=tuple(
+                RuntimeMount(
+                    name, tmp_path / name, PurePosixPath("/runtime") / name, False
+                )
+                for name in ("artifacts", "state", "tracking", "cache", "tmp")
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "target",
+    ("/workspace/./engine", "/workspace//engine", "/workspace/engine/"),
+)
+def test_runtime_mount_rejects_noncanonical_target_spelling(
+    tmp_path: Path, target: str
+) -> None:
+    with pytest.raises(SourceLockError, match="canonical POSIX"):
+        RuntimeMount("engine", tmp_path / "engine", target, True)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("workspace_root", ("/", "/workspace/Training Ω/模型"))
+def test_runtime_layout_preserves_canonical_root_spaces_and_unicode(
+    tmp_path: Path, workspace_root: str
+) -> None:
+    layout = build_runtime_layout(_context(tmp_path), workspace_root=workspace_root)
+    workspace = PurePosixPath(workspace_root)
+    assert layout.engine.target == workspace / "engine"
+    assert layout.project.target == workspace / "project"
+
+
 def test_runtime_layout_requires_absolute_workspace(tmp_path: Path) -> None:
     with pytest.raises(SourceLockError, match="absolute"):
         build_runtime_layout(_context(tmp_path), workspace_root=PurePosixPath("relative"))

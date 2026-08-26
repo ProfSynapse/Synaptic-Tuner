@@ -23,6 +23,9 @@ class RuntimeMount:
     target: PurePosixPath
     read_only: bool
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "target", _canonical_runtime_target(self.target))
+
     def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
@@ -53,8 +56,8 @@ class CloudRuntimeLayout:
             raise SourceLockError("Runtime layout requires the five canonical writable roots")
         self._validate_source_separation()
         targets = [self.engine.target, self.project.target, *(mount.target for mount in self.writable)]
-        if any(not target.is_absolute() for target in targets) or len(set(targets)) != len(targets):
-            raise SourceLockError("Runtime mount targets must be distinct absolute paths")
+        if len(set(targets)) != len(targets):
+            raise SourceLockError("Runtime mount targets must be distinct canonical paths")
         for index, target in enumerate(targets):
             for other in targets[index + 1 :]:
                 if target in other.parents or other in target.parents:
@@ -129,13 +132,11 @@ class CloudRuntimeLayout:
 def build_runtime_layout(
     context: ProjectContext,
     *,
-    workspace_root: PurePosixPath = PurePosixPath("/workspace"),
+    workspace_root: PurePosixPath | str = PurePosixPath("/workspace"),
 ) -> CloudRuntimeLayout:
     """Map a resolved project context onto the canonical cloud paths."""
 
-    workspace = PurePosixPath(workspace_root)
-    if not workspace.is_absolute():
-        raise SourceLockError("Cloud workspace root must be absolute")
+    workspace = _canonical_runtime_target(workspace_root, label="Cloud workspace root")
     sources = (
         RuntimeMount("engine", context.engine_root.resolve(), workspace / "engine", True),
         RuntimeMount("project", context.project_root.resolve(), workspace / "project", True),
@@ -167,6 +168,27 @@ def build_runtime_layout(
         project_carveout_root=(context.project_root / ".synaptic") if context.mode == "host" else None,
         engine_carveout_root=(context.engine_root / ".synaptic") if context.mode == "standalone" else None,
     )
+
+
+def _canonical_runtime_target(
+    target: PurePosixPath | str,
+    *,
+    label: str = "Runtime mount target",
+) -> PurePosixPath:
+    """Require an absolute canonical POSIX spelling before path comparisons."""
+
+    raw = os.fspath(target)
+    canonical = PurePosixPath(raw)
+    if not canonical.is_absolute():
+        raise SourceLockError(f"{label} must be an absolute canonical POSIX path")
+    segments = raw.split("/")
+    if (
+        any(segment in {".", ".."} for segment in segments)
+        or "//" in raw
+        or raw != canonical.as_posix()
+    ):
+        raise SourceLockError(f"{label} must be an absolute canonical POSIX path")
+    return canonical
 
 
 def _is_redirect(path: Path) -> bool:

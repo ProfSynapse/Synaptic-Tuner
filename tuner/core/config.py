@@ -209,14 +209,13 @@ class CloudTrainingConfig(TrainingConfig):
     GPU hardware, timeout, and HuggingFace Hub integration.
 
     Attributes:
-        provider: Cloud provider identifier ('hf_jobs', 'modal', 'runpod')
+        provider: Legacy cloud training provider identifier ('hf_jobs' or 'runpod')
         gpu_type: Provider-specific GPU identifier (e.g., 'a10g-small', 'L40S')
         timeout_hours: Maximum job duration in hours
         cloud_image: Docker image for the cloud job
         push_to_hub: Whether to push results to HF Hub on completion
         hub_repo: Target HF repo ID (prompted if None)
         hf_flavor: HF Jobs hardware flavor (HF Jobs only)
-        modal_volumes: Modal volume mappings (Modal only)
         runpod_volume_gb: RunPod persistent volume size in GB (RunPod only)
 
     Example:
@@ -245,7 +244,6 @@ class CloudTrainingConfig(TrainingConfig):
     push_to_hub: bool = False
     hub_repo: Optional[str] = None
     hf_flavor: Optional[str] = None
-    modal_volumes: Optional[Dict[str, str]] = field(default=None)
     runpod_volume_gb: Optional[int] = None
     artifact_backend: str = ""
     artifact_identifier: Optional[str] = None

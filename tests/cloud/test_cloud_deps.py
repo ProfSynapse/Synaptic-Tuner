@@ -424,54 +424,6 @@ class TestCloudConfigDependencies:
 
 
 # ---------------------------------------------------------------------------
-# Modal backend dependency consistency
-# ---------------------------------------------------------------------------
-
-
-class TestModalDepsConsistency:
-    """Verify the Modal backend (train_modal.py) installs the same project
-    deps as HF Jobs and RunPod.
-
-    Modal uses modal.Image.pip_install() instead of shell commands, so we
-    inspect the source of the training_image definition directly.
-    """
-
-    @pytest.fixture(autouse=True)
-    def _load_modal_source(self):
-        """Read the training_image source from train_modal.py."""
-        modal_path = (
-            Path(__file__).resolve().parents[2]
-            / "Trainers" / "cloud" / "train_modal.py"
-        )
-        if not modal_path.exists():
-            pytest.skip("train_modal.py not found (running outside repo)")
-        with open(modal_path) as f:
-            self.modal_source = f.read()
-
-    def test_modal_includes_project_deps(self):
-        """Modal training image must pip_install all project deps."""
-        for dep in EXPECTED_PROJECT_DEPS:
-            assert f'"{dep}"' in self.modal_source, (
-                f"Modal training image missing project dep: {dep}"
-            )
-
-    def test_modal_does_not_install_unpinned_preinstalled(self):
-        """Modal should pin pre-installed packages (torch, unsloth, etc.)
-        with exact versions, not install them unpinned."""
-        import re
-        # Find all .pip_install(...) argument strings
-        pip_args = re.findall(r'\.pip_install\((.*?)\)', self.modal_source, re.DOTALL)
-        full_pip_block = " ".join(pip_args)
-        # Project deps are allowed unpinned; pre-installed must have ==
-        for dep in IMAGE_PREINSTALLED:
-            # If the dep appears in pip_install, it must have a version pin
-            if f'"{dep}' in full_pip_block:
-                assert f'"{dep}==' in full_pip_block or f'"{dep}[' in full_pip_block, (
-                    f"Modal installs pre-installed package '{dep}' without version pin"
-                )
-
-
-# ---------------------------------------------------------------------------
 # RunPod extra_setup_commands passthrough
 # ---------------------------------------------------------------------------
 

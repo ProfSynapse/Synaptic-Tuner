@@ -46,6 +46,15 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - If a preset resolves but scenario loading fails, inspect `Evaluator/config/eval_run.yaml` for stale filenames before debugging `config_loader.py`.
 - HF cloud eval results are saved under the source run's `evaluations/vllm/{timestamp}/` prefix. Inspect `evaluation_results.json` first, then `evaluation_results.md`, then `evaluation_lineage.json`; use `logs/eval_progress.jsonl` only for live/debug state.
 
+## Modal v1
+
+- Modal training is available only behind the provider-neutral public `TrainingAPI`; do not recreate a `modal run` launcher, provider-specific public verb, or engine-owned database.
+- The consuming host owns configuration, credentials, grants, lifecycle/preparation persistence, data, and product state. The engine defines `ModalTrainingRepository` as a protocol only.
+- Enforce the packaged `modal-runtime-v1.lock.json` at composition and again in the remote source materializer. The CPython 3.11/Linux launcher dependency file must contain the complete transitive closure with exact hashes; install it with `--require-hashes` and never resolve additional packages at runtime.
+- Secrets may enter only through explicitly named Modal Secrets. Reject token/secret/password/API-key environment entries and never embed credential values in `Image.env()`.
+- Treat mounted Volume paths as hostile shared storage: on the locked Linux runtime, traverse and open through retained parent directory descriptors (`dir_fd`/openat semantics) so ancestor substitution cannot redirect I/O; bounded reads must reject symlink/reparse leaves and compare file identity across the read, while writes remain exclusive and collision-failing.
+- A self-consistent provider observation cannot override the packaged image, SDK, Python, dependency, wrapper, worker, SFT runtime, or ML-stack lock. No live preflight or paid smoke may run until the provider-free barrier and independent review are green.
+
 ## Cloud Artifact UX
 
 - HF Jobs local dashboard parity comes from syncing JSONL training logs to the bucket and replaying them locally.

@@ -98,7 +98,7 @@ def test_registry_list_is_ordered_metadata_only_in_a_fresh_process():
     assert result["attempted"] == []
     assert result["loaded"] == []
     assert result["lists"] == [
-        ["rtx", "mac", "hf_jobs", "modal", "runpod"],
+        ["rtx", "mac", "hf_jobs", "runpod"],
         ["ollama", "lmstudio", "llamacpp", "unsloth", "mlc"],
     ]
 
@@ -168,7 +168,6 @@ def test_lazy_facades_preserve_direct_export_identity_and_all_contracts():
     from shared.experiment_tracking.local_tracker import LocalTracker
     from shared.experiment_tracking.per_example_loss import load_losses, save_losses
     from tuner.backends.training.cloud.hf_jobs_backend import HFJobsBackend
-    from tuner.backends.training.cloud.modal_backend import ModalBackend
     from tuner.backends.training.cloud.runpod_backend import RunPodBackend
     from tuner.backends.training.rtx_backend import RTXBackend
     from tuner.handlers.stages.hf_training_stage import HFTrainingStageRunner
@@ -184,7 +183,6 @@ def test_lazy_facades_preserve_direct_export_identity_and_all_contracts():
 
     assert cloud.AVAILABLE_BACKENDS == {
         "hf_jobs": HFJobsBackend,
-        "modal": ModalBackend,
         "runpod": RunPodBackend,
     }
     assert training.AVAILABLE_BACKENDS is cloud.AVAILABLE_BACKENDS
@@ -209,10 +207,10 @@ def test_facade_all_values_remain_exact_and_ordered():
     ]
     assert training.__all__ == [
         "ITrainingBackend", "RTXBackend", "MacBackend", "HFJobsBackend",
-        "ModalBackend", "RunPodBackend", "AVAILABLE_BACKENDS",
+        "RunPodBackend", "AVAILABLE_BACKENDS",
     ]
     assert cloud.__all__ == [
-        "AVAILABLE_BACKENDS", "HFJobsBackend", "ModalBackend", "RunPodBackend",
+        "AVAILABLE_BACKENDS", "HFJobsBackend", "RunPodBackend",
     ]
     assert stages.__all__ == [
         "HFEvalStageRunner", "HFLossStageRunner", "HFTrainingStageRunner",

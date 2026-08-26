@@ -19,11 +19,14 @@ from .source_bundle import (
     inspect_git_source,
     resolve_relative_repository_url,
 )
+from .git_verification import GitCliLocalSourceInspector,GitLsRemotePushedCommitVerifier,ScopedGitRemoteRunner
 
 __all__ = [
     "ConfigDocument",
     "ConfigOverride",
     "GitSource",
+    "GitCliLocalSourceInspector",
+    "GitLsRemotePushedCommitVerifier",
     "PathRef",
     "ProjectContext",
     "ProjectManifest",
@@ -31,6 +34,7 @@ __all__ = [
     "ResolvedConfig",
     "SecretRef",
     "SourceLock",
+    "ScopedGitRemoteRunner",
     "canonicalize_repository_url",
     "discover_project_context",
     "find_nearest_manifest",
