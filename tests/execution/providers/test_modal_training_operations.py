@@ -42,6 +42,7 @@ from tuner.execution.providers.modal.resolution import ModalDeploymentSelectionV
 from tuner.execution.providers.modal.training import (
     MODAL_PLAN_CONTEXT_SCHEMA,
     ModalDurablePreparationV1,
+    ModalPlanContextV1,
     ModalTrainingOperations,
     _provider_runtime_requirements_digest,
     _resource_digest,
@@ -358,6 +359,12 @@ def test_resolved_modal_plan_context_matches_checked_in_schema():
     validator = validator_for(schema)
     validator.check_schema(schema)
     validator(schema).validate(plan.execution_context.to_dict())
+
+
+def test_public_modal_context_owns_the_resource_digest_algorithm():
+    resources = ResourceSpec("A10", 1, 3600)
+    plan, _ = plan_and_facade()
+    assert ModalPlanContextV1.digest_resources(resources) == _resource_digest(plan)
 
 
 def test_expired_quote_or_deployment_cannot_produce_a_ready_preflight(tmp_path):

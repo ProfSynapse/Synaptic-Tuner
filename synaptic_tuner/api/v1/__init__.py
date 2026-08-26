@@ -69,6 +69,7 @@ from .secrets import SecretRef
 from .sources import (
     AuthenticatedSourceEvidenceV1,
     ExecutionSourceV1,
+    GitCliLocalSourceInspector,
     LocalSourceInspectionPort,
     PushedSourceVerificationPort,
     SourceLock,
@@ -122,6 +123,7 @@ __all__ = [
     "EvidenceReplayStore",
     "Clock",
     "GitRemoteReader",
+    "GitCliLocalSourceInspector",
     "GrantProvider",
     "GrantBinding",
     "HostPorts",

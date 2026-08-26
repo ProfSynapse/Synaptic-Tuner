@@ -28,6 +28,7 @@ from synaptic_tuner.api.v1.execution import (
 from synaptic_tuner.api.v1.host import HostPorts
 from synaptic_tuner.api.v1.training import (
     CanonicalDocument,
+    ResourceSpec,
     ResolvedTrainingRequest,
     TrainingOutcome,
     TrainingPlan,
@@ -147,6 +148,21 @@ class ModalPlanContextV1:
     invocation_nonce: str
     generation: int
     resource_digest: str
+
+    @staticmethod
+    def digest_resources(resources: ResourceSpec) -> str:
+        """Return the canonical Modal v1 digest for public resource inputs."""
+        if not isinstance(resources, ResourceSpec):
+            raise TypeError("resources must be a ResourceSpec")
+        return sha(
+            canonical_json(
+                {
+                    "accelerator": resources.accelerator,
+                    "accelerator_count": resources.accelerator_count,
+                    "timeout_seconds": resources.timeout_seconds,
+                }
+            )
+        )
 
     def __post_init__(self) -> None:
         for name in (

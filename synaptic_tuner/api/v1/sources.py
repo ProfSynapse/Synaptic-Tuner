@@ -6,12 +6,14 @@ from tuner.project.execution_source import (
     LocalSourceInspectionPort,
     PushedSourceVerificationPort,
 )
+from tuner.project.git_verification import GitCliLocalSourceInspector
 from tuner.project.source_bundle import GitSource, RepositoryLocation, SourceLock
 
 __all__ = [
     "AuthenticatedSourceEvidenceV1",
     "ExecutionSourceV1",
     "GitSource",
+    "GitCliLocalSourceInspector",
     "LocalSourceInspectionPort",
     "PushedSourceVerificationPort",
     "RepositoryLocation",

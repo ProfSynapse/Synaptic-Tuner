@@ -12,6 +12,7 @@ from synaptic_tuner.api.v1 import (
     ArtifactPolicy,
     CanonicalDocument,
     ExecutionGrant,
+    GitCliLocalSourceInspector,
     AuthenticatedSourceEvidenceV1,
     ExecutionSourceV1,
     ResolvedTrainingRequest,
@@ -147,6 +148,7 @@ def test_host_resolver_contract_is_public_and_structural() -> None:
 
     assert isinstance(Resolver(), TrainingRequestResolver)
     assert dataclasses.is_dataclass(ResolvedTrainingComponents)
+    assert callable(GitCliLocalSourceInspector().inspect)
 
 
 def test_public_records_and_config_are_immutable() -> None:
