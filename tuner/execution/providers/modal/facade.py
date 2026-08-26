@@ -122,13 +122,17 @@ class ExplicitModal154ReadFacade:
         volume_id = safe_ref(volume_id, "volume_id")
         try:
             name = self._volume_names[volume_id]
-            return self.sdk.Volume.from_name(
+            volume = self.sdk.Volume.from_name(
                 name,
                 environment_name=self.binding.environment_ref,
                 create_if_missing=False,
                 version=MODAL_VOLUME_V1,
                 client=self.client,
             )
+            volume.hydrate(self.client)
+            if getattr(volume, "is_hydrated", False) is not True:
+                raise ValueError
+            return volume
         except Exception:
             raise ModalFacadeError("modal_volume_unavailable") from None
 
@@ -177,6 +181,10 @@ class ExplicitModal154ReadFacade:
                 identity = provider_entry_identity(volume_id, path, size)
                 seen.add(path)
                 result.append((path, size, identity))
+        except self.sdk.exception.NotFoundError:
+            if result:
+                raise ModalFacadeError("modal_volume_list_failed") from None
+            return ()
         except ModalFacadeError:
             raise
         except Exception:

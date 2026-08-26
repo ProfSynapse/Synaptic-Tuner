@@ -38,9 +38,10 @@ class Upload:
 
 class FakeVolume:
     registry={};calls=[]
-    def __init__(self,object_id):self.object_id=object_id;self.files={};self.entries=None
+    def __init__(self,object_id):self.object_id=object_id;self.files={};self.entries=None;self.is_hydrated=False;self.missing_prefix_raises=False
     @classmethod
     def from_name(cls,name,**kwargs):cls.calls.append((name,kwargs));return cls.registry[name]
+    def hydrate(self,client):self.is_hydrated=True;return self
     def read_file(self,path):
         data=self.files[path]
         midpoint=max(1,len(data)//2)
@@ -48,6 +49,8 @@ class FakeVolume:
         if midpoint<len(data):yield data[midpoint:]
     def iterdir(self,prefix,recursive=True):
         if self.entries is not None:yield from self.entries;return
+        if self.missing_prefix_raises and not any(path.startswith(prefix) for path in self.files):
+            raise FakeNotFound
         for path,data in sorted(self.files.items()):
             if path.startswith(prefix):yield Entry(path,len(data))
     def batch_upload(self,force=False):return Upload(self,force)
@@ -79,8 +82,11 @@ class FakeFunctionCall:
     def from_id(cls,value,client=None):cls.calls.append((value,client));return FakeCall(value)
 
 
+class FakeNotFound(Exception):pass
+
+
 class SDK:
-    __version__="1.5.4";Volume=FakeVolume;Function=FakeFunction;FunctionCall=FakeFunctionCall
+    __version__="1.5.4";Volume=FakeVolume;Function=FakeFunction;FunctionCall=FakeFunctionCall;exception=type("Exceptions",(),{"NotFoundError":FakeNotFound})
 
 
 class Auth:
@@ -135,6 +141,12 @@ def test_reads_and_listings_fail_closed_on_bounds_and_duplicates():
     with pytest.raises(ModalFacadeError,match="read_failed"):facade.read_complete("cv","control/x",max_bytes=5)
     volume.entries=[Entry("control/x",1),Entry("control/x",1)]
     with pytest.raises(ModalFacadeError,match="list_failed"):facade.list_prefix("cv","control/",max_entries=3)
+
+
+def test_absent_prefix_on_hydrated_volume_is_an_empty_listing():
+    facade,_=make_facade();volume=FakeVolume.registry["control-name"]
+    volume.missing_prefix_raises=True
+    assert facade.list_prefix("cv","operations/new-effect/",max_entries=1)==()
 
 
 def test_prepare_persist_stage_readback_and_no_overwrite():
