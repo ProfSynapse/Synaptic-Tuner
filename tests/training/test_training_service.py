@@ -95,6 +95,7 @@ def _resolved_config() -> CanonicalDocument:
                 "ref": "example/model",
                 "revision": "c" * 40,
                 "tokenizer_revision": "d" * 40,
+                "load_in_4bit": False,
             },
             "dataset": {"ref": "project://data.jsonl", "revision": "e" * 40},
             "sft": {"max_steps": 1},

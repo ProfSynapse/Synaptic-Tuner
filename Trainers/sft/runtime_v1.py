@@ -871,11 +871,10 @@ def _append_sft_arguments(
             raise RuntimeV1Error("split_dataset must be a boolean")
         if sft["split_dataset"]:
             argv.append("--split-dataset")
-    load_in_4bit = model.get("load_in_4bit")
-    if load_in_4bit is not None:
-        if not isinstance(load_in_4bit, bool):
-            raise RuntimeV1Error("model.load_in_4bit must be a boolean")
-        argv.append("--load-in-4bit" if load_in_4bit else "--no-load-in-4bit")
+    load_in_4bit = model["load_in_4bit"]
+    if not isinstance(load_in_4bit, bool):
+        raise RuntimeV1Error("model.load_in_4bit must be a boolean")
+    argv.append("--load-in-4bit" if load_in_4bit else "--no-load-in-4bit")
 
 
 def _positive_int(value: object, name: str) -> str:

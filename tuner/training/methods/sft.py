@@ -116,9 +116,11 @@ def compile_sft_workload(
     model = _resource(
         config.get("model"),
         "model",
-        ("ref", "revision", "tokenizer_revision"),
+        ("ref", "revision", "tokenizer_revision", "load_in_4bit"),
     )
     _revision(model["tokenizer_revision"], "model.tokenizer_revision")
+    if not isinstance(model["load_in_4bit"], bool):
+        raise TypeError("model.load_in_4bit must be a boolean")
     dataset = _resource(config.get("dataset"), "dataset", ("ref", "revision"))
     method_config = config.get("sft")
     if not isinstance(method_config, Mapping):

@@ -124,6 +124,7 @@ def _config(*, model_revision: str = "b" * 40) -> CanonicalDocument:
                 "ref": "HuggingFaceTB/SmolLM2-135M-Instruct",
                 "revision": model_revision,
                 "tokenizer_revision": "c" * 40,
+                "load_in_4bit": False,
             },
             "dataset": {
                 "ref": "project://data/training.jsonl",
@@ -179,6 +180,20 @@ def test_fingerprint_binds_model_and_source_revisions() -> None:
 
     assert baseline.fingerprint != changed_model.fingerprint
     assert baseline.fingerprint != changed_source.fingerprint
+
+
+@pytest.mark.parametrize("value", [None, 0, "false"])
+def test_resolved_sft_config_requires_explicit_boolean_quantization(value) -> None:
+    config = _config().to_dict()
+    if value is None:
+        config["model"].pop("load_in_4bit")
+    else:
+        config["model"]["load_in_4bit"] = value
+    with pytest.raises((TypeError, ValueError), match="load_in_4bit"):
+        compile_sft_workload(
+            resolved_config=CanonicalDocument.from_mapping(config),
+            execution_source=_execution_source(),
+        )
 
 
 @pytest.mark.parametrize(

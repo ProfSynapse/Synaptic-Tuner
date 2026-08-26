@@ -131,9 +131,10 @@
         {"$ref": "#/$defs/resource"},
         {
           "type": "object",
-          "required": ["tokenizer_revision"],
+          "required": ["tokenizer_revision", "load_in_4bit"],
           "properties": {
-            "tokenizer_revision": {"$ref": "#/$defs/revision"}
+            "tokenizer_revision": {"$ref": "#/$defs/revision"},
+            "load_in_4bit": {"type": "boolean"}
           }
         }
       ]
