@@ -760,7 +760,7 @@ def build_trainer_invocation(
     ):
         raise RuntimeV1Error("resolved runtime environment violates portable requirements")
     argv = [
-        str(Path(python_executable)),
+        str(Path(python_executable).resolve()),
         str(trainer_path),
         "--model-name",
         str(model["ref"]),
