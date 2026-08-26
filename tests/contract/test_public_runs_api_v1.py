@@ -9,6 +9,7 @@ import sys
 import pytest
 
 from synaptic_tuner.api.v1 import (
+    APIHost,
     ArtifactPage,
     ArtifactsRequest,
     CancelResult,
@@ -25,6 +26,7 @@ from synaptic_tuner.api.v1 import (
     RunsAPI,
     VerifyRequest,
 )
+from synaptic_tuner.api.v1.host import HostPorts
 from synaptic_tuner.api.v1.execution import RunRef as ExecutionRunRef
 
 
@@ -96,6 +98,34 @@ def test_runs_facade_rejects_repository_identity_drift() -> None:
 
     with pytest.raises(ValueError, match="requested run"):
         RunsAPI(Repository()).show(requested)
+
+
+def test_api_host_keeps_persistence_separate_from_run_operations() -> None:
+    class Training:
+        pass
+
+    class RunOperations:
+        pass
+
+    lifecycle = object()
+    runs = RunOperations()
+    ports = HostPorts(
+        lifecycle=lifecycle,
+        runs=runs,
+        grants=object(),
+        secrets=object(),
+        evidence_replay=object(),
+        authenticator=object(),
+        clock=lambda: "2026-08-25T12:00:00Z",
+        git_remote=object(),
+        modal_reads=object(),
+        training_resolver=object(),
+    )
+
+    host = APIHost(Training(), ports)
+
+    assert host.ports.lifecycle is lifecycle
+    assert host.runs._operations is runs
 
 
 def test_public_v1_import_does_not_load_provider_or_database_modules() -> None:

@@ -259,6 +259,7 @@ def operations(tmp_path, *, now=NOW, plan_facade=None):
     repository.clock = lambda: now
     ports = HostPorts(
         lifecycle=repository,
+        runs=object(),
         grants=Grants(),
         secrets=object(),
         evidence_replay=object(),
@@ -362,6 +363,7 @@ def test_public_api_composes_from_host_ports_without_a_provider_specific_verb(tm
     repository = Repository()
     ports = HostPorts(
         lifecycle=repository,
+        runs=object(),
         grants=Grants(),
         secrets=object(),
         evidence_replay=object(),

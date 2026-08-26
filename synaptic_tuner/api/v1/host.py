@@ -11,8 +11,54 @@ from .secrets import SecretRef
 from .training import TrainingAPI, TrainingOperations
 
 
-class LifecycleRepository(RunsOperations, Protocol):
-    """Host persistence port; concrete database choices remain outside the API."""
+class LifecycleRepository(Protocol):
+    """Host persistence port; concrete database choices remain outside the API.
+
+    This port deliberately contains only atomic lifecycle persistence.  Public
+    run verbs are supplied through ``HostPorts.runs`` so a database adapter is
+    never forced to become a provider orchestration service.
+    """
+
+    def create(self, record: object) -> object: ...
+
+    def load(self, project_ref: str, run_id: str) -> object | None: ...
+
+    def append(
+        self,
+        project_ref: str,
+        run_id: str,
+        *,
+        expected_revision: int,
+        event: object,
+    ) -> object: ...
+
+    def compare_and_consume_attempt(
+        self,
+        project_ref: str,
+        run_id: str,
+        *,
+        expected_revision: int,
+        grant_ref: str,
+        canonical_command: object,
+    ) -> object: ...
+
+    def record_attempt_outcome(
+        self,
+        project_ref: str,
+        run_id: str,
+        *,
+        expected_revision: int,
+        command_digest: str,
+        observation: object,
+    ) -> object: ...
+
+    def list_runs(
+        self,
+        project_ref: str,
+        *,
+        limit: int,
+        cursor: str | None = None,
+    ) -> object: ...
 
 
 class GrantProvider(Protocol):
@@ -68,6 +114,7 @@ class TrainingResolver(Protocol):
 @dataclass(frozen=True, slots=True)
 class HostPorts:
     lifecycle: LifecycleRepository
+    runs: RunsOperations
     grants: GrantProvider
     secrets: SecretProvider
     evidence_replay: EvidenceReplayStore
@@ -81,15 +128,16 @@ class HostPorts:
 class APIHost:
     """Small composition root for host-selected public API implementations."""
 
-    __slots__ = ("ports", "training")
+    __slots__ = ("ports", "training", "_runs")
 
     def __init__(self, training: TrainingOperations, ports: HostPorts) -> None:
         self.training = TrainingAPI(training)
         self.ports = ports
+        self._runs = RunsAPI(ports.runs)
 
     @property
     def runs(self) -> RunsAPI:
-        return RunsAPI(self.ports.lifecycle)
+        return self._runs
 
 
 __all__ = [
