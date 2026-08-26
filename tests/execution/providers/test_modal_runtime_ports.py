@@ -8,8 +8,20 @@ from tuner.execution.providers.modal.runtime import (
     EnvironmentHmacAuthenticator,
     GitDualCloneMaterializer,
     SubprocessSftRunner,
+    _same_executable,
 )
 from tuner.execution.providers.modal.remote import ModalRemotePhaseError
+
+
+def test_runtime_identity_accepts_distinct_paths_to_same_binary(tmp_path):
+    binary = tmp_path / "python3.11"
+    alias = tmp_path / "python3"
+    other = tmp_path / "other-python3"
+    binary.write_bytes(b"locked-interpreter")
+    alias.hardlink_to(binary)
+    other.write_bytes(binary.read_bytes())
+    assert _same_executable(str(binary), str(alias)) is True
+    assert _same_executable(str(binary), str(other)) is False
 
 
 def test_environment_hmac_authenticator_requires_exact_base64_key_and_ref(monkeypatch):

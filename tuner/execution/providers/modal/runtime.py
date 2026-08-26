@@ -63,6 +63,14 @@ def _file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _same_executable(left: str, right: str) -> bool:
+    """Return whether two provider-visible paths name the same binary."""
+    try:
+        return Path(left).samefile(Path(right))
+    except OSError:
+        return False
+
+
 class GitDualCloneMaterializer:
     """Clone and independently reverify the one accepted dual-clone topology."""
 
@@ -148,7 +156,7 @@ class GitDualCloneMaterializer:
         if (
             sys.implementation.name != "cpython"
             or actual_version != source.python_version
-            or Path(sys.executable) != Path(source.python_executable)
+            or not _same_executable(sys.executable, source.python_executable)
             or _file_digest(Path(source.python_executable)) != source.python_executable_digest
         ):
             raise ModalRemotePhaseError(121, "runtime_identity_mismatch")
