@@ -5,6 +5,13 @@ Internal ``tuner`` and ``shared`` modules are not implicitly public APIs.
 """
 
 from .capabilities import CapabilityDescriptor
+from .artifacts import (
+    ArtifactPublicationReceipt,
+    ArtifactPublisher,
+    PublishedArtifact,
+    VerifiedArtifactDescriptor,
+    VerifiedArtifactSource,
+)
 from .context import PathRef, ProjectContext
 from .events import EventEnvelope, ResultEnvelope
 from .execution import (
@@ -97,6 +104,8 @@ __all__ = [
     "AttemptAdmission",
     "AttemptDisposition",
     "ArtifactPage",
+    "ArtifactPublicationReceipt",
+    "ArtifactPublisher",
     "ArtifactPolicy",
     "ArtifactRef",
     "ArtifactState",
@@ -139,6 +148,7 @@ __all__ = [
     "PathRef",
     "PluginBinding",
     "PluginContext",
+    "PublishedArtifact",
     "OperationBindingV1",
     "ProjectContext",
     "ReconcileRequest",
@@ -178,6 +188,8 @@ __all__ = [
     "TrainingResolutionError",
     "TrainingSubmission",
     "VerificationStatus",
+    "VerifiedArtifactDescriptor",
+    "VerifiedArtifactSource",
     "InvalidTransition",
     "apply_lifecycle_event",
     "VerifyRequest",

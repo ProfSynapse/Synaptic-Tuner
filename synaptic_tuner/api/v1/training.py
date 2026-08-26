@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Mapping, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from .context import ProjectContext
 
+from .artifacts import ArtifactPublicationReceipt
 from .execution import (
     ArtifactRef,
     ArtifactState,
@@ -372,6 +373,10 @@ class TrainingOperations(Protocol):
 
     def reverify(self, submission: TrainingSubmission) -> TrainingOutcome: ...
 
+    def publish(
+        self, submission: TrainingSubmission, destination_ref: str
+    ) -> ArtifactPublicationReceipt: ...
+
 
 class TrainingAPI:
     """Import-light facade over a host-selected training implementation."""
@@ -410,6 +415,11 @@ class TrainingAPI:
 
     def reverify(self, submission: TrainingSubmission) -> TrainingOutcome:
         return self._operations.reverify(submission)
+
+    def publish(
+        self, submission: TrainingSubmission, destination_ref: str
+    ) -> ArtifactPublicationReceipt:
+        return self._operations.publish(submission, destination_ref)
 
 
 __all__ = [

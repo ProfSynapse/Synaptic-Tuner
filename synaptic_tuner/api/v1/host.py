@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from .artifacts import ArtifactPublisher
 from .execution import AuthorizationRequirement, ExecutionGrant
 from .persistence import EvidenceReplayRepository, LifecycleRepository
 from .runs import RunsAPI, RunsOperations
@@ -71,6 +72,7 @@ class HostPorts:
     git_remote: GitRemoteReader
     modal_reads: ModalDeploymentReader
     training_resolver: TrainingRequestResolver
+    artifact_publisher: ArtifactPublisher | None = None
 
 
 class APIHost:
@@ -90,6 +92,7 @@ class APIHost:
 
 __all__ = [
     "APIHost",
+    "ArtifactPublisher",
     "GrantProvider",
     "EvidenceAuthenticator",
     "EvidenceReplayStore",
