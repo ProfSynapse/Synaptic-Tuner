@@ -21,6 +21,36 @@ from .mounted_io import read_regular
 from .resolution import ModalDeploymentSelectionV1
 
 
+_DIAGNOSTIC_CODES = frozenset({
+    "artifact_layout_collision",
+    "artifact_layout_failed",
+    "credential_unavailable",
+    "engine_clone_failed",
+    "engine_gitlink_mismatch",
+    "generic_failure",
+    "locked_source_mismatch",
+    "project_clone_failed",
+    "runtime_identity_mismatch",
+    "runtime_lock_mismatch",
+    "source_topology_invalid",
+    "trainer_invocation_failed",
+    "trainer_nonzero",
+})
+
+
+class ModalRemotePhaseError(Exception):
+    """Closed, non-secret failure identity safe for durable remote logs."""
+
+    def __init__(self, returncode: int, diagnostic_code: str) -> None:
+        if returncode not in {120, 121, 122, 123, 124, 125}:
+            raise ValueError("remote phase returncode is invalid")
+        if diagnostic_code not in _DIAGNOSTIC_CODES:
+            raise ValueError("remote diagnostic code is invalid")
+        super().__init__(diagnostic_code)
+        self.returncode = returncode
+        self.diagnostic_code = diagnostic_code
+
+
 class RemoteStageVerifier(Protocol):
     def verify(self, purpose: str, payload: bytes, tag: bytes, key_ref: str) -> bool: ...
 
@@ -38,12 +68,15 @@ class ProcessResultV1:
     returncode: int
     stdout: bytes = b""
     stderr: bytes = b""
+    diagnostic_code: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.returncode) is not int:
             raise TypeError("returncode must be an exact integer")
         if not isinstance(self.stdout, bytes) or not isinstance(self.stderr, bytes):
             raise TypeError("process output must be bytes")
+        if self.diagnostic_code is not None and self.diagnostic_code not in _DIAGNOSTIC_CODES:
+            raise ValueError("process diagnostic code is invalid")
 
 
 class FixedProcessRunner(Protocol):
@@ -232,8 +265,12 @@ class MountedModalWorkerV1:
             result = execute_remote_sft(
                 invocation, sources=self._sources, processes=self._processes
             )
+        except ModalRemotePhaseError as error:
+            result = ProcessResultV1(
+                error.returncode, diagnostic_code=error.diagnostic_code
+            )
         except Exception:
-            result = ProcessResultV1(125)
+            result = ProcessResultV1(125, diagnostic_code="generic_failure")
         completion = self._completion.finalize(invocation, result, job_ref=job_ref)
         status_code = getattr(completion, "status_code", None)
         if status_code not in {"completed", "failed"}:
@@ -247,7 +284,8 @@ class MountedModalWorkerV1:
 
 
 __all__ = [
-    "FixedProcessRunner", "MountedModalWorkerV1", "ProcessResultV1", "RemoteCompletionProducer", "RemoteInvocationV1",
+    "FixedProcessRunner", "ModalRemotePhaseError", "MountedModalWorkerV1",
+    "ProcessResultV1", "RemoteCompletionProducer", "RemoteInvocationV1",
     "RemoteStageVerifier", "SourceMaterializer", "admit_remote_invocation",
     "execute_remote_sft",
 ]

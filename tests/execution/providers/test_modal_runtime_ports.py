@@ -9,6 +9,7 @@ from tuner.execution.providers.modal.runtime import (
     GitDualCloneMaterializer,
     SubprocessSftRunner,
 )
+from tuner.execution.providers.modal.remote import ModalRemotePhaseError
 
 
 def test_environment_hmac_authenticator_requires_exact_base64_key_and_ref(monkeypatch):
@@ -31,6 +32,7 @@ def test_subprocess_runner_uses_no_shell_and_never_returns_captured_secret_outpu
     runner=SubprocessSftRunner(secret_keys=("HF_TOKEN",),timeout_seconds=10)
     result=runner.run(("/python","/runtime.py","--canonical-workload-stdin"),cwd="/tmp",environment={"SAFE":"1"},stdin=b"workload")
     assert result.returncode==7 and result.stdout==result.stderr==b""
+    assert result.diagnostic_code=="trainer_nonzero"
     argv,kwargs=calls[0]
     assert argv==("/python","/runtime.py","--canonical-workload-stdin")
     assert kwargs["shell"] is False and kwargs["env"]["HF_TOKEN"]=="secret"
@@ -42,8 +44,9 @@ def test_subprocess_runner_rejects_missing_secret_and_command_override(monkeypat
     runner=SubprocessSftRunner(secret_keys=("HF_TOKEN",),timeout_seconds=10)
     with pytest.raises(ValueError,match="command"):
         runner.run(("/python","/runtime.py","--other"),cwd="/tmp",environment={},stdin=b"x")
-    with pytest.raises(ValueError,match="secret"):
+    with pytest.raises(ModalRemotePhaseError) as failure:
         runner.run(("/python","/runtime.py","--canonical-workload-stdin"),cwd="/tmp",environment={},stdin=b"x")
+    assert (failure.value.returncode,failure.value.diagnostic_code)==(120,"credential_unavailable")
 
 
 def test_remote_git_subprocess_ignores_home_and_global_system_config(monkeypatch):

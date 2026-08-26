@@ -13,7 +13,7 @@ from typing import Callable, Mapping, Sequence
 
 from tuner.project.execution_source import ExecutionSourceV1
 
-from .remote import ProcessResultV1
+from .remote import ModalRemotePhaseError, ProcessResultV1
 from .resolution import ModalDeploymentSelectionV1
 from .config import ModalRuntimeLockV1
 
@@ -141,9 +141,9 @@ class GitDualCloneMaterializer:
             or any(path.parent != expected_run_root for path in writable.values())
             or set(path.name for path in writable.values()) != {"artifacts", "state", "tracking", "cache", "tmp"}
         ):
-            raise ValueError("remote runtime roots differ from the fixed Modal layout")
+            raise ModalRemotePhaseError(124, "source_topology_invalid")
         if project.exists() or engine.exists() or expected_run_root.exists():
-            raise ValueError("remote operation directory collision")
+            raise ModalRemotePhaseError(122, "artifact_layout_collision")
         actual_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         if (
             sys.implementation.name != "cpython"
@@ -151,25 +151,45 @@ class GitDualCloneMaterializer:
             or Path(sys.executable) != Path(source.python_executable)
             or _file_digest(Path(source.python_executable)) != source.python_executable_digest
         ):
-            raise ValueError("remote Python runtime identity mismatch")
-        self._clone(source.project_source.location.canonical_url, source.project_source.commit, project)
-        self._clone(source.engine_source.location.canonical_url, source.engine_source.commit, engine)
+            raise ModalRemotePhaseError(121, "runtime_identity_mismatch")
+        try:
+            self._clone(
+                source.project_source.location.canonical_url,
+                source.project_source.commit,
+                project,
+            )
+        except Exception:
+            raise ModalRemotePhaseError(124, "project_clone_failed") from None
+        try:
+            self._clone(
+                source.engine_source.location.canonical_url,
+                source.engine_source.commit,
+                engine,
+            )
+        except Exception:
+            raise ModalRemotePhaseError(124, "engine_clone_failed") from None
         gitlink = self._git(
             "-C", str(project), "ls-tree", "HEAD", "--", source.engine_submodule_path
         ).split()
         if len(gitlink) < 3 or gitlink[0] != "160000" or gitlink[1] != "commit" or gitlink[2].lower() != source.engine_source.commit.lower():
-            raise ValueError("remote engine gitlink mismatch")
-        runtime_lock = ModalRuntimeLockV1.packaged()
-        runtime_lock.validate_selection(deployment)
+            raise ModalRemotePhaseError(124, "engine_gitlink_mismatch")
+        try:
+            runtime_lock = ModalRuntimeLockV1.packaged()
+            runtime_lock.validate_selection(deployment)
+        except Exception:
+            raise ModalRemotePhaseError(121, "runtime_lock_mismatch") from None
         checks = {
             engine / member["path"]: member["sha256"]
             for member in runtime_lock.document["locked_files"].values()
         }
         if any(not path.is_file() or _file_digest(path) != expected for path, expected in checks.items()):
-            raise ValueError("remote locked runtime source mismatch")
-        expected_run_root.mkdir(parents=True, exist_ok=False)
-        for path in writable.values():
-            path.mkdir(exist_ok=False)
+            raise ModalRemotePhaseError(124, "locked_source_mismatch")
+        try:
+            expected_run_root.mkdir(parents=True, exist_ok=False)
+            for path in writable.values():
+                path.mkdir(exist_ok=False)
+        except Exception:
+            raise ModalRemotePhaseError(122, "artifact_layout_failed") from None
 
 
 class SubprocessSftRunner:
@@ -199,7 +219,7 @@ class SubprocessSftRunner:
         for key in self._secret_keys:
             value = os.environ.get(key)
             if not isinstance(value, str) or not value:
-                raise ValueError("required runtime secret is unavailable")
+                raise ModalRemotePhaseError(120, "credential_unavailable")
             process_environment[key] = value
         try:
             completed = subprocess.run(
@@ -214,8 +234,11 @@ class SubprocessSftRunner:
                 timeout=self._timeout,
             )
         except Exception:
-            raise ValueError("fixed SFT runtime invocation failed") from None
-        return ProcessResultV1(completed.returncode)
+            raise ModalRemotePhaseError(123, "trainer_invocation_failed") from None
+        return ProcessResultV1(
+            completed.returncode,
+            diagnostic_code=None if completed.returncode == 0 else "trainer_nonzero",
+        )
 
 
 __all__ = ["EnvironmentHmacAuthenticator", "GitDualCloneMaterializer", "SubprocessSftRunner"]

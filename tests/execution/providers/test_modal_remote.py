@@ -9,7 +9,7 @@ import pytest
 from tests.execution.providers.test_modal_bundle import bundle
 from tuner.execution.broker import MutationCommandV1
 from tuner.execution.providers.modal.binding import ModalClientBinding
-from tuner.execution.providers.modal.remote import MountedModalWorkerV1, ProcessResultV1, admit_remote_invocation, execute_remote_sft
+from tuner.execution.providers.modal.remote import ModalRemotePhaseError, MountedModalWorkerV1, ProcessResultV1, admit_remote_invocation, execute_remote_sft
 from tuner.execution.providers.modal.producer import MountedCompletionProducerV1
 from tuner.execution.providers.modal.mounted_io import read_regular, write_exclusive
 from tuner.execution.providers.modal import mounted_io
@@ -80,6 +80,39 @@ def test_mounted_worker_reads_only_fixed_two_volume_paths(tmp_path):
     assert worker(command.canonical_bytes,"fc-1")=={"schema_version":"synaptic-modal-worker-result/v1","effect_id":invocation.command.effect.effect_id,"returncode":0,"status_code":"completed"}
     (input_dir/"bundle.bin").unlink();(input_dir/"bundle.bin").mkdir()
     with pytest.raises(ValueError,match="unavailable"):worker(command.canonical_bytes,"fc-1")
+
+
+def test_mounted_worker_preserves_only_closed_remote_phase_diagnostics(tmp_path):
+    invocation,command,material=admitted();control=tmp_path/"control-volume";artifact=tmp_path/"artifact-volume"
+    control_dir=control/"operations"/"effect-1"/"control";input_dir=artifact/"operations"/"effect-1"/"input"
+    control_dir.mkdir(parents=True);input_dir.mkdir(parents=True)
+    (control_dir/"stage-claim.v1.json").write_bytes(material.claim)
+    (control_dir/"stage-claim.v1.mac").write_bytes(material.claim_tag)
+    (input_dir/"bundle.bin").write_bytes(material.bundle)
+    class Sources:
+        def prepare_and_verify(self,source,deployment):
+            raise ModalRemotePhaseError(124,"engine_clone_failed")
+    class Processes:
+        def run(self,argv,*,cwd,environment,stdin):raise AssertionError
+    observed=[]
+    class Completion:
+        def finalize(self,invocation,result,*,job_ref):
+            observed.append(result)
+            return type("Done",(),{"status_code":"failed"})()
+    worker=MountedModalWorkerV1(verifier=Auth(),sources=Sources(),processes=Processes(),completion=Completion(),control_root=str(control),artifact_root=str(artifact))
+    result=worker(command.canonical_bytes,"fc-1")
+    assert result["returncode"]==124 and result["status_code"]=="failed"
+    assert observed[0].diagnostic_code=="engine_clone_failed"
+
+
+def test_completion_failure_log_contains_only_closed_diagnostic_code(tmp_path):
+    invocation,_,_=admitted();control=tmp_path/"control";artifact=tmp_path/"artifact"
+    completed=MountedCompletionProducerV1(Auth(),control_root=str(control),artifact_root=str(artifact)).finalize(
+        invocation,ProcessResultV1(121,diagnostic_code="runtime_lock_mismatch"),job_ref="fc-1"
+    )
+    assert completed.status_code=="failed"
+    value=__import__("json").loads((control/"operations"/"effect-1"/"logs"/"chunks"/"000.json").read_bytes())
+    assert value["records"]==[{"code":"failed","message":"training failed: runtime_lock_mismatch"}]
 
 
 def test_completion_producer_publishes_exact_five_and_authenticated_terminal(tmp_path):

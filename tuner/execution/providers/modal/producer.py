@@ -159,7 +159,14 @@ class MountedCompletionProducerV1:
         key_ref = invocation.command.operation.stage_target.key_ref
         completed = result.returncode == 0
         members = self._publish_artifacts(invocation) if completed else ()
-        records = [{"code": "completed" if completed else "failed", "message": "training completed" if completed else "training failed"}]
+        message = (
+            "training completed" if completed
+            else "training failed: " + (result.diagnostic_code or "trainer_nonzero")
+        )
+        records = [{
+            "code": "completed" if completed else "failed",
+            "message": message,
+        }]
         log_chunk = canonical_json({
             "schema": "synaptic.modal-log-chunk/v1", "generation": identity["generation"],
             "sequence": 0, "previous_digest": "0" * 64,
