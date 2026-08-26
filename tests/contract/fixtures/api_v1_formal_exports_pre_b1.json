@@ -1,0 +1,23 @@
+[
+  "APIHost", "AttemptAdmission", "AttemptDisposition", "ArtifactPage",
+  "ArtifactPublicationReceipt", "ArtifactPublisher", "ArtifactPolicy", "ArtifactRef",
+  "ArtifactState", "ArtifactsRequest", "AuthorizationRequirement", "AuthorizationMismatch",
+  "CapabilityDescriptor", "CancelResult", "CanonicalDocument", "ErrorCode", "EffectCollision",
+  "EffectDisposition", "EffectIdentity", "EffectKind", "EffectObservation", "EffectRecord",
+  "EffectState", "EvidenceReplayRepository", "EventEnvelope", "ExecutionError",
+  "ExecutionGrant", "ExecutionScope", "EvidenceAuthenticator", "EvidenceReplayStore", "Clock",
+  "GitRemoteReader", "GitCliLocalSourceInspector", "GrantProvider", "GrantBinding", "HostPorts",
+  "LifecycleRepository", "LifecycleEvent", "LifecyclePhase", "LifecycleRecord",
+  "LifecycleRunPage", "ModalDeploymentReader", "MessageCode", "LogEntry", "LogPage", "PathRef",
+  "PluginBinding", "PluginContext", "PublishedArtifact", "OperationBindingV1", "ProjectContext",
+  "ReconcileRequest", "ResolvedTrainingRequest", "ResolvedTrainingComponents", "ResultEnvelope",
+  "ResourceSpec", "RunCancelRequest", "RunListRequest", "RunLogsRequest", "RunPage", "RunRef",
+  "RunAlreadyExists", "RunNotFound", "RunState", "RunStatus", "RunVerification", "RunsAPI",
+  "RunsOperations", "RuntimeSpec", "ReplayDisposition", "RevisionConflict", "SecretRef",
+  "SecretProvider", "SourceLock", "AuthenticatedSourceEvidenceV1", "ExecutionSourceV1",
+  "LocalSourceInspectionPort", "PushedSourceVerificationPort", "TrainingAPI", "TrainingOperations",
+  "TrainingOutcome", "TrainingPlan", "TrainingPreflight", "TrainingRequest",
+  "TrainingRequestResolver", "TrainingResolutionError", "TrainingSubmission", "VerificationStatus",
+  "VerifiedArtifactDescriptor", "VerifiedArtifactSource", "InvalidTransition",
+  "apply_lifecycle_event", "VerifyRequest"
+]

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-publication-result-v1.schema.json",
+  "title": "Synaptic Publication Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "publication_id", "destination_ref", "state", "artifacts"],
+  "properties": {
+    "schema_version": {"const": "synaptic-publication-result/v1"},
+    "publication_id": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "destination_ref": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "state": {"enum": ["claimed", "transferring", "committed", "verified", "ambiguous", "failed_before_effect"]},
+    "artifacts": {
+      "type": "object",
+      "propertyNames": {"pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sha256", "size_bytes"],
+        "properties": {
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "size_bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}

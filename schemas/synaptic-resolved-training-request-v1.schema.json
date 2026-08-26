@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-resolved-training-request-v1.schema.json",
+  "title": "Synaptic Resolved Training Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "project_ref", "source_digest", "resolved_config_digest", "workload_digest", "runtime_digest", "artifact_policy_digest"],
+  "properties": {
+    "schema_version": {"const": "synaptic-resolved-training-request/v1"},
+    "request_id": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "project_ref": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "source_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "resolved_config_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "workload_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "runtime_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact_policy_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

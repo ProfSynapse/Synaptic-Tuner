@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-training-plan-v2.schema.json",
+  "title": "Synaptic Training Plan v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "basis", "provider_plan"],
+  "properties": {
+    "schema_version": {"const": "synaptic-training-plan/v2"},
+    "basis": {"$ref": "#/$defs/basis"},
+    "provider_plan": {"$ref": "#/$defs/provider_plan_ref"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "basis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "project_ref", "source_digest", "resolved_config_digest", "workload_digest", "runtime_digest", "artifact_policy_digest"],
+      "properties": {
+        "schema_version": {"const": "synaptic-training-plan-basis/v1"},
+        "request_id": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+        "project_ref": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+        "source_digest": {"$ref": "#/$defs/digest"},
+        "resolved_config_digest": {"$ref": "#/$defs/digest"},
+        "workload_digest": {"$ref": "#/$defs/digest"},
+        "runtime_digest": {"$ref": "#/$defs/digest"},
+        "artifact_policy_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "provider_plan_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context_digest"],
+      "properties": {"context_digest": {"$ref": "#/$defs/digest"}}
+    }
+  }
+}

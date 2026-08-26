@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-training-preflight-v1.schema.json",
+  "title": "Synaptic Training Preflight v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "plan_fingerprint", "ready", "checked_at", "expires_at", "authorization", "diagnostic_codes"],
+  "properties": {
+    "schema_version": {"const": "synaptic-training-preflight/v1"},
+    "plan_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ready": {"type": "boolean"},
+    "checked_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "authorization": {
+      "type": "object",
+      "propertyNames": {"pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["paid_effect", "maximum_cost_minor_units", "currency"],
+        "properties": {
+          "paid_effect": {"type": "boolean"},
+          "maximum_cost_minor_units": {"type": ["integer", "null"], "minimum": 0},
+          "currency": {"type": ["string", "null"], "pattern": "^[A-Z]{3}$"}
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "maximum_cost_minor_units": {"type": "integer", "minimum": 0},
+              "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}
+            }
+          },
+          {
+            "properties": {
+              "maximum_cost_minor_units": {"const": null},
+              "currency": {"const": null}
+            }
+          }
+        ]
+      }
+    },
+    "diagnostic_codes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"ready": {"const": false}}},
+      "then": {"properties": {"diagnostic_codes": {"minItems": 1}}}
+    }
+  ]
+}
