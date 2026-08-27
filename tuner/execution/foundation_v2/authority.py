@@ -83,3 +83,12 @@ class GrantAuthorityV2:
             x=grant.content
             return grant.authority_ref==self.authority_ref and x.authority_epoch==self.epoch and x.revocation_generation==self.revocation_generation and x.grant_ref not in self._revoked and x.not_before_epoch<=now_epoch<x.expires_at_epoch and hmac.compare_digest(grant.tag,self._tag(b"reconcile-v2\0",x.digest))
         except Exception:return False
+    def authenticate_reconciliation(self,grant,command_bytes):
+        """Authenticate retained reconciliation authority without replaying policy time."""
+        try:
+            if type(grant) is not AuthenticatedReconciliationGrantV1 or type(grant.content) is not ReconciliationGrantContentV1 or type(command_bytes) is not bytes:return False
+            command=parse_exact_command(command_bytes);preparation=command.preparation;effect=command.operation.effect;x=grant.content
+            rebuilt=ReconciliationGrantContentV1(x.grant_ref,command.digest,effect.effect_id,preparation.preparation_digest,x.adapter_digest,preparation.provider.provider_id,preparation.provider.profile_ref,preparation.scope.account_ref,preparation.scope.namespace_ref,x.owner_ref,x.generation,x.ownership_epoch,x.policy_digest,x.requirement_digest,x.not_before_epoch,x.expires_at_epoch,x.authority_epoch,x.revocation_generation)
+            owned=AuthenticatedReconciliationGrantV1(rebuilt,grant.authority_ref,grant.tag)
+            return x==rebuilt and grant==owned and grant.canonical_bytes==owned.canonical_bytes and grant.authority_ref==self.authority_ref and hmac.compare_digest(grant.tag,self._tag(b"reconcile-v2\0",rebuilt.digest))
+        except Exception:return False

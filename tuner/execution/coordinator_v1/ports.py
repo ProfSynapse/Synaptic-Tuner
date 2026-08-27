@@ -32,6 +32,11 @@ from .model import (
     ProviderExecutionBindingV1,
     WorkflowRecordV1,
 )
+from .coordinator import (
+    CoordinatorTransitionV1,
+    ExecutionGrantSlotV1,
+    ReconciliationGrantSlotV1,
+)
 
 
 class RequestLoaderPortV1(Protocol):
@@ -60,16 +65,46 @@ class PlanningStorePortV1(Protocol):
 class WorkflowStorePortV1(Protocol):
     def create(self, record: WorkflowRecordV1) -> bool: ...
     def get(self, run: TrainingRunRef) -> WorkflowRecordV1 | None: ...
-    def get_by_plan(self, plan_fingerprint: str) -> WorkflowRecordV1 | None: ...
+    def get_by_plan(
+        self, project_ref: str, plan_fingerprint: str
+    ) -> WorkflowRecordV1 | None: ...
     def list(self, project_ref: str) -> tuple[WorkflowRecordV1, ...]: ...
     def compare_and_swap(
-        self, current_revision: int, replacement: WorkflowRecordV1
+        self,
+        expected: WorkflowRecordV1,
+        replacement: WorkflowRecordV1,
+        *,
+        transition: CoordinatorTransitionV1,
     ) -> bool: ...
 
 
 class PreparationStorePortV1(Protocol):
     def put_if_absent(self, preparation: CanonicalPreparationV2) -> bool: ...
     def get(self, preparation_digest: str) -> CanonicalPreparationV2 | None: ...
+
+
+class ExecutionGrantStorePortV1(Protocol):
+    def put_if_absent(
+        self, slot: ExecutionGrantSlotV1, grant: AuthenticatedGrantV2,
+        command_bytes: bytes,
+    ) -> bool: ...
+    def get(
+        self, slot: ExecutionGrantSlotV1, command_bytes: bytes
+    ) -> AuthenticatedGrantV2 | None: ...
+
+
+class ReconciliationGrantStorePortV1(Protocol):
+    def put_if_absent(
+        self,
+        slot: ReconciliationGrantSlotV1,
+        grant: AuthenticatedReconciliationGrantV1,
+        command_bytes: bytes,
+        record: EffectRecordV2,
+    ) -> bool: ...
+    def get(
+        self, slot: ReconciliationGrantSlotV1,
+        *, command_bytes: bytes, record: EffectRecordV2,
+    ) -> AuthenticatedReconciliationGrantV1 | None: ...
 
 
 class ProviderBindingResolverPortV1(Protocol):
@@ -174,6 +209,7 @@ __all__ = [
     "AuthorizationPortV1",
     "CoordinatorClockPortV1",
     "EffectFoundationPortV1",
+    "ExecutionGrantStorePortV1",
     "FoundationEvidenceAuthenticatorPortV1",
     "FoundationRecordAssessmentPortV1",
     "PlanningPortV1",
@@ -182,6 +218,7 @@ __all__ = [
     "PreparationStorePortV1",
     "ProviderBindingResolverPortV1",
     "ProviderRunReaderPortV1",
+    "ReconciliationGrantStorePortV1",
     "ProviderObservationAuthenticatorPortV1",
     "RequestLoaderPortV1",
     "RequestResolutionPortV1",
