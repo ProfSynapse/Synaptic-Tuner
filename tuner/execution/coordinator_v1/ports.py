@@ -164,6 +164,7 @@ class AuthorizationPortV1(Protocol):
         record: EffectRecordV2,
         binding: ProviderExecutionBindingV1,
         *,
+        slot: ReconciliationGrantSlotV1,
         now_epoch: int,
     ) -> AuthenticatedReconciliationGrantV1: ...
 
