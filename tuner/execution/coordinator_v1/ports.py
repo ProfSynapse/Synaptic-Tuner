@@ -20,7 +20,8 @@ from tuner.execution.foundation_v2.authority import (
 from tuner.execution.foundation_v2.commands import CanonicalProviderPayloadV1
 from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.preparation import CanonicalPreparationV2
-from tuner.execution.foundation_v2.repository import EffectRecordV2
+from tuner.execution.foundation_v2.repository import EffectRecordV2, ReconciliationOwnershipV2
+from tuner.execution.foundation_v2.receipts import QuiescenceProofV2
 from tuner.execution.foundation_v2.receipts import AuthenticatedInvalidEvidenceV2, AuthenticatedReceiptV2
 
 from .model import (
@@ -37,6 +38,7 @@ from .coordinator import (
     ExecutionGrantSlotV1,
     ReconciliationGrantSlotV1,
 )
+from .foundation import QuiescenceRecoveryRequestV1
 
 
 class RequestLoaderPortV1(Protocol):
@@ -137,7 +139,15 @@ class EffectFoundationPortV1(Protocol):
         grant: AuthenticatedReconciliationGrantV1,
         *,
         now_epoch: int,
+        continuation: ReconciliationOwnershipV2 | None = None,
     ) -> EffectRecordV2: ...
+    def recover_orphan(self, effect_id: str, *, now_epoch: int) -> EffectRecordV2: ...
+
+
+class TrustedQuiescenceEvidencePortV1(Protocol):
+    def obtain(
+        self, request: QuiescenceRecoveryRequestV1, *, now_epoch: int
+    ) -> QuiescenceProofV2: ...
 
 
 class AuthorizationPortV1(Protocol):
@@ -223,5 +233,6 @@ __all__ = [
     "RequestLoaderPortV1",
     "RequestResolutionPortV1",
     "RunIdentityPortV1",
+    "TrustedQuiescenceEvidencePortV1",
     "WorkflowStorePortV1",
 ]
