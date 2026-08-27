@@ -148,8 +148,11 @@ def test_strict_lifecycle_kind_matrix_and_verification_only_success():
 def test_registry_returns_references_without_invocation():
     calls=[]
     def factory():calls.append(1);raise AssertionError
-    provider=ProviderDescriptor("synaptic-provider-descriptor/v1","docker","Docker","1.0.0",ProviderCapabilities(True,True,True,True,True,False));registration=ProviderRegistrationV2(provider,descriptor(),AdapterDescriptorV1("docker","lookup","1.0.0"),factory,factory);registry=LazyProviderRegistryV2();registry.register(registration);ref=ProviderRef("docker","local")
-    assert registry.executor_factory(ref) is factory and registry.adapter_factory(ref) is factory and calls==[]
+    class ReaderFactory:
+        def create(self, request):calls.append(1);raise AssertionError
+    reader_factory=ReaderFactory()
+    provider=ProviderDescriptor("synaptic-provider-descriptor/v1","docker","Docker","1.0.0",ProviderCapabilities(True,True,True,True,True,False));registration=ProviderRegistrationV2(provider,descriptor(),AdapterDescriptorV1("docker","lookup","1.0.0"),factory,factory,reader_factory);registry=LazyProviderRegistryV2();registry.register(registration);ref=ProviderRef("docker","local")
+    assert registry.executor_factory(ref) is factory and registry.adapter_factory(ref) is factory and registry.reader_factory(ref) is reader_factory and calls==[]
 
 def test_receipt_and_admission_are_committed_atomically_once():
     c=stage_command();ex=bound_executor(c,Executor());repo,a,r,invalid,v,_=environment(ex);g=execution_grant(a,c)
