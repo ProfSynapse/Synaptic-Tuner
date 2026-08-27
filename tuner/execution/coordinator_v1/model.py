@@ -32,6 +32,12 @@ class ProviderRunPhaseV1(str, Enum):
     CANCELLED = "cancelled"
 
 
+class ProviderReadPurposeV1(str, Enum):
+    OBSERVE = "observe"
+    LOGS = "logs"
+    ARTIFACTS = "artifacts"
+
+
 class WorkflowPhaseV1(str, Enum):
     PLANNED = "planned"
     PREPARING = "preparing"
@@ -411,6 +417,7 @@ class BoundCancellationRefV1:
 
 @dataclass(frozen=True, slots=True)
 class ProviderRunReadRequestV1:
+    purpose: ProviderReadPurposeV1
     source_workflow_record_digest: str
     source_revision: int
     run: TrainingRunRef
@@ -424,9 +431,11 @@ class ProviderRunReadRequestV1:
     canonical_bytes: bytes
     request_digest: str
     def __post_init__(self):
+        if type(self.purpose) is not ProviderReadPurposeV1:
+            raise TypeError("exact provider read purpose required")
         digest_text(self.source_workflow_record_digest,"source_workflow_record_digest");exact_integer(self.source_revision,"source_revision")
         if type(self.run) is not TrainingRunRef or type(self.provider_run) is not BoundProviderRunRefV1 or type(self.foundation_record) is not EffectRecordV2 or type(self.assessment) is not AuthenticatedFoundationRecordAssessmentV1:raise TypeError("provider read request types invalid")
-        doc={"schema_version":"synaptic-provider-run-read-request/v1","source_workflow_record_digest":self.source_workflow_record_digest,"source_revision":self.source_revision,"run":self.run.to_dict(),"provider_run_binding_digest":self.provider_run.binding_digest,"submit_command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",self.submit_command_bytes),"foundation_record_digest":self.foundation_record.record_digest,"assessment_digest":self.assessment.authenticated_assessment_digest,"foundation_binding_digest":self.foundation_binding.binding_digest,"foundation_outcome_digest":self.foundation_outcome.outcome_digest,"found_receipt_digest":self.found_receipt_digest}
+        doc={"schema_version":"synaptic-provider-run-read-request/v1","purpose":self.purpose.value,"source_workflow_record_digest":self.source_workflow_record_digest,"source_revision":self.source_revision,"run":self.run.to_dict(),"provider_run_binding_digest":self.provider_run.binding_digest,"submit_command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",self.submit_command_bytes),"foundation_record_digest":self.foundation_record.record_digest,"assessment_digest":self.assessment.authenticated_assessment_digest,"foundation_binding_digest":self.foundation_binding.binding_digest,"foundation_outcome_digest":self.foundation_outcome.outcome_digest,"found_receipt_digest":self.found_receipt_digest}
         expected=canonical_bytes(doc)
         if self.canonical_bytes!=expected or self.request_digest!=domain_digest("synaptic-provider-run-read-request/v1",expected):raise ValueError("provider read request identity mismatch")
 
@@ -1049,7 +1058,7 @@ __all__ = [
     "BoundProviderRunRefV1", "BoundProviderStageRefV1", "EffectIntentV1",
     "FoundationDispositionV1", "FoundationEffectBindingV1", "FoundationRecordAssessmentContentV1",
     "FoundationEffectOutcomeV1",
-    "ProviderExecutionBindingV1", "ProviderRunObservationContentV1", "ProviderRunReadRequestV1",
+    "ProviderExecutionBindingV1", "ProviderReadPurposeV1", "ProviderRunObservationContentV1", "ProviderRunReadRequestV1",
     "ProviderRunPhaseV1", "ReceiptAssessmentV1", "ReceiptFreshnessV1", "VerificationVerdictV1", "WorkflowPhaseV1",
     "WorkflowRecordV1",
 ]

@@ -28,6 +28,10 @@ from tuner.execution.foundation_v2.repository import (
 )
 
 from .coordinator import (
+    ApplyArtifactVerificationTransitionV1,
+    ApplyCancelEffectTransitionV1,
+    ApplyProviderObservationTransitionV1,
+    ApplyReverificationTransitionV1,
     ApplyStageEffectTransitionV1,
     ApplySubmitEffectTransitionV1,
     BeginPreparationTransitionV1,
@@ -36,14 +40,20 @@ from .coordinator import (
     ReconciliationGrantSlotV1,
     RecordStageIntentTransitionV1,
     RecordSubmitIntentTransitionV1,
+    RecordCancelIntentTransitionV1,
 )
 from .model import WorkflowPhaseV1, WorkflowRecordV1
 from .state_machine import (
+    apply_artifact_verification,
+    apply_cancel_effect_record,
+    apply_provider_observation,
+    apply_reverification,
     apply_stage_effect_record,
     apply_submit_effect_record,
     begin_preparation,
     record_stage_intent,
     record_submit_intent,
+    record_cancel_intent,
 )
 
 
@@ -90,14 +100,204 @@ def _revalidate_workflow(record: WorkflowRecordV1) -> WorkflowRecordV1:
     return rebuilt
 
 
+_TRANSITION_TYPES = (
+    BeginPreparationTransitionV1,
+    RecordStageIntentTransitionV1,
+    ApplyStageEffectTransitionV1,
+    RecordSubmitIntentTransitionV1,
+    ApplySubmitEffectTransitionV1,
+    RecordCancelIntentTransitionV1,
+    ApplyCancelEffectTransitionV1,
+    ApplyProviderObservationTransitionV1,
+    ApplyArtifactVerificationTransitionV1,
+    ApplyReverificationTransitionV1,
+)
+
+
+def _intent_identity(intent):
+    return {
+        "kind": intent.kind.value,
+        "effect_id": intent.effect_id,
+        "command_digest": intent.command_digest,
+        "command_bytes_digest": domain_digest(
+            "synaptic-foundation-command-bytes/v1",
+            intent.canonical_command_bytes,
+        ),
+        "foundation_binding_digests": [
+            value.binding_digest for value in intent.foundation_bindings
+        ],
+        "foundation_outcome_digests": [
+            value.outcome_digest for value in intent.foundation_outcomes
+        ],
+    }
+
+
+def _transition_document(transition):
+    document = {"kind": transition.kind.value}
+    if type(transition) is BeginPreparationTransitionV1:
+        return document
+    if type(transition) is RecordStageIntentTransitionV1:
+        document.update(
+            preparation_digest=transition.preparation.preparation_digest,
+            preparation_bytes_digest=domain_digest(
+                "synaptic-coordinator-preparation-bytes/v1",
+                transition.preparation.canonical_bytes,
+            ),
+            intent=_intent_identity(transition.intent),
+        )
+        return document
+    if type(transition) in {
+        ApplyStageEffectTransitionV1,
+        ApplySubmitEffectTransitionV1,
+        ApplyCancelEffectTransitionV1,
+    }:
+        document.update(
+            foundation_record_digest=transition.record.record_digest,
+            assessment_digest=transition.assessment.authenticated_assessment_digest,
+            assessment_bytes_digest=domain_digest(
+                "synaptic-coordinator-assessment-bytes/v1",
+                transition.assessment.canonical_bytes,
+            ),
+        )
+        return document
+    if type(transition) in {
+        RecordSubmitIntentTransitionV1,
+        RecordCancelIntentTransitionV1,
+    }:
+        document["intent"] = _intent_identity(transition.intent)
+        return document
+    if type(transition) is ApplyProviderObservationTransitionV1:
+        document.update(
+            request_digest=transition.request.request_digest,
+            request_bytes_digest=domain_digest(
+                "synaptic-coordinator-provider-read-request-bytes/v1",
+                transition.request.canonical_bytes,
+            ),
+            observation_digest=transition.observation.authenticated_observation_digest,
+            observation_bytes_digest=domain_digest(
+                "synaptic-coordinator-provider-observation-bytes/v1",
+                transition.observation.canonical_bytes,
+            ),
+        )
+        return document
+    if type(transition) in {
+        ApplyArtifactVerificationTransitionV1,
+        ApplyReverificationTransitionV1,
+    }:
+        document.update(
+            manifest_digest=transition.manifest.manifest_digest,
+            manifest_evidence_digest=domain_digest(
+                "synaptic-coordinator-manifest-evidence-bytes/v1",
+                transition.manifest.canonical_evidence,
+            ),
+            verification_receipt_digest=(
+                transition.receipt.authenticated_receipt_digest
+            ),
+            verification_receipt_bytes_digest=domain_digest(
+                "synaptic-coordinator-verification-receipt-bytes/v1",
+                transition.receipt.canonical_bytes,
+            ),
+        )
+        return document
+    raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+
+
+def _revalidate_transition(transition):
+    if type(transition) not in _TRANSITION_TYPES:
+        raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+    try:
+        rebuilt = type(transition)(
+            **{
+                field.name: getattr(transition, field.name)
+                for field in fields(type(transition))
+            }
+        )
+        fingerprint = domain_digest(
+            "synaptic-coordinator-transition/v1",
+            canonical_bytes(_transition_document(rebuilt)),
+        )
+    except CoordinatorStoreError:
+        raise
+    except Exception:
+        raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR) from None
+    if rebuilt != transition:
+        raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+    return rebuilt, fingerprint
+
+
 class InMemoryWorkflowStoreV1:
-    def __init__(self, foundation_authenticator, assessment_authenticator):
+    def __init__(
+        self,
+        foundation_authenticator,
+        assessment_authenticator,
+        observation_authenticator,
+        artifact_verifier,
+    ):
         self._foundation_authenticator = foundation_authenticator
         self._assessment_authenticator = assessment_authenticator
+        self._observation_authenticator = observation_authenticator
+        self._artifact_verifier = artifact_verifier
         self._records: dict[tuple[str, str], WorkflowRecordV1] = {}
         self._digests: dict[tuple[str, str], str] = {}
         self._plans: dict[tuple[str, str], tuple[str, str]] = {}
+        self._history: dict[tuple[str, str], tuple[WorkflowRecordV1, ...]] = {}
+        self._history_digests: dict[tuple[str, str], tuple[str, ...]] = {}
+        self._transitions: dict[tuple[str, str], tuple[CoordinatorTransitionV1, ...]] = {}
+        self._transition_digests: dict[tuple[str, str], tuple[str, ...]] = {}
         self._lock = RLock()
+
+    def _validate_history(
+        self, key: tuple[str, str], retained: WorkflowRecordV1
+    ) -> tuple[WorkflowRecordV1, ...]:
+        history = self._history.get(key)
+        history_digests = self._history_digests.get(key)
+        transitions = self._transitions.get(key)
+        transition_digests = self._transition_digests.get(key)
+        if (
+            type(history) is not tuple
+            or type(history_digests) is not tuple
+            or type(transitions) is not tuple
+            or type(transition_digests) is not tuple
+            or not history
+            or len(history_digests) != len(history)
+            or len(transitions) != len(history) - 1
+            or len(transition_digests) != len(transitions)
+        ):
+            raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+        try:
+            genesis = _revalidate_workflow(history[0])
+            if (
+                genesis.phase is not WorkflowPhaseV1.PLANNED
+                or genesis.revision != 0
+                or _workflow_key(genesis.run) != key
+            ):
+                raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+            previous = genesis
+            if history_digests[0] != genesis.record_digest:
+                raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+            for index, transition in enumerate(transitions):
+                transition, fingerprint = _revalidate_transition(transition)
+                if transition_digests[index] != fingerprint:
+                    raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+                following = _revalidate_workflow(history[index + 1])
+                if (
+                    following.revision != previous.revision + 1
+                    or following.run != genesis.run
+                    or following.plan_fingerprint != genesis.plan_fingerprint
+                    or history_digests[index + 1] != following.record_digest
+                ):
+                    raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+                replayed = self._replay(previous, transition)
+                if replayed != following or replayed.record_digest != following.record_digest:
+                    raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+                previous = following
+        except CoordinatorStoreError:
+            raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR) from None
+        except Exception:
+            raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR) from None
+        if previous != retained or previous.record_digest != retained.record_digest:
+            raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+        return history
 
     def _retained(self, key: tuple[str, str]) -> WorkflowRecordV1:
         try:
@@ -111,6 +311,7 @@ class InMemoryWorkflowStoreV1:
             or self._plans.get(index) != key
         ):
             raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+        self._validate_history(key, retained)
         return retained
 
     def create(self, record: WorkflowRecordV1) -> bool:
@@ -146,6 +347,10 @@ class InMemoryWorkflowStoreV1:
             self._records[key] = candidate
             self._digests[key] = candidate.record_digest
             self._plans[plan_index] = key
+            self._history[key] = (candidate,)
+            self._history_digests[key] = (candidate.record_digest,)
+            self._transitions[key] = ()
+            self._transition_digests[key] = ()
             return True
 
     def get(self, run: TrainingRunRef) -> WorkflowRecordV1 | None:
@@ -198,6 +403,33 @@ class InMemoryWorkflowStoreV1:
                     records.append(retained)
             return tuple(records)
 
+    def is_descendant(
+        self, ancestor: WorkflowRecordV1, descendant: WorkflowRecordV1
+    ) -> bool:
+        ancestor = _revalidate_workflow(ancestor)
+        descendant = _revalidate_workflow(descendant)
+        ancestor_key = _workflow_key(ancestor.run)
+        if _workflow_key(descendant.run) != ancestor_key:
+            return False
+        with self._lock:
+            if ancestor_key not in self._records:
+                return False
+            retained = self._retained(ancestor_key)
+            history = self._validate_history(ancestor_key, retained)
+            if (
+                ancestor.revision >= descendant.revision
+                or descendant.revision >= len(history)
+            ):
+                return False
+            stored_ancestor = history[ancestor.revision]
+            stored_descendant = history[descendant.revision]
+            return bool(
+                stored_ancestor == ancestor
+                and stored_ancestor.record_digest == ancestor.record_digest
+                and stored_descendant == descendant
+                and stored_descendant.record_digest == descendant.record_digest
+            )
+
     def _replay(
         self, current: WorkflowRecordV1, transition: CoordinatorTransitionV1
     ) -> WorkflowRecordV1:
@@ -226,6 +458,37 @@ class InMemoryWorkflowStoreV1:
                     transition.assessment,
                     self._foundation_authenticator,
                     self._assessment_authenticator,
+                )
+            if type(transition) is RecordCancelIntentTransitionV1:
+                return record_cancel_intent(current, transition.intent)
+            if type(transition) is ApplyCancelEffectTransitionV1:
+                return apply_cancel_effect_record(
+                    current,
+                    transition.record,
+                    transition.assessment,
+                    self._foundation_authenticator,
+                    self._assessment_authenticator,
+                )
+            if type(transition) is ApplyProviderObservationTransitionV1:
+                return apply_provider_observation(
+                    current,
+                    transition.request,
+                    transition.observation,
+                    self._observation_authenticator,
+                )
+            if type(transition) is ApplyArtifactVerificationTransitionV1:
+                return apply_artifact_verification(
+                    current,
+                    transition.manifest,
+                    transition.receipt,
+                    self._artifact_verifier,
+                )
+            if type(transition) is ApplyReverificationTransitionV1:
+                return apply_reverification(
+                    current,
+                    transition.manifest,
+                    transition.receipt,
+                    self._artifact_verifier,
                 )
         except Exception:
             failed = True
@@ -259,8 +522,17 @@ class InMemoryWorkflowStoreV1:
             replayed = self._replay(retained, transition)
             if replayed.revision != retained.revision + 1 or replayed != replacement:
                 raise _closed(CoordinatorStoreCode.TRANSITION_INVALID)
+            transition, transition_digest = _revalidate_transition(transition)
+            history = self._history[key]
+            history_digests = self._history_digests[key]
+            transitions = self._transitions[key]
+            transition_digests = self._transition_digests[key]
             self._records[key] = replacement
             self._digests[key] = replacement.record_digest
+            self._history[key] = history + (replacement,)
+            self._history_digests[key] = history_digests + (replacement.record_digest,)
+            self._transitions[key] = transitions + (transition,)
+            self._transition_digests[key] = transition_digests + (transition_digest,)
             return True
 
 

@@ -7,7 +7,7 @@ from tuner.execution.coordinator_v1.model import (ArtifactManifestV1, ArtifactVe
  AuthenticatedArtifactVerificationReceiptV1, AuthenticatedFoundationRecordAssessmentV1,
  FoundationRecordAssessmentContentV1, ReceiptAssessmentV1, ReceiptFreshnessV1,
  AuthenticatedProviderRunObservationV1, ProviderRunObservationContentV1,
- EffectIntentV1, ProviderRunPhaseV1, ProviderRunReadRequestV1, VerificationVerdictV1, WorkflowPhaseV1, WorkflowRecordV1)
+ EffectIntentV1, ProviderReadPurposeV1, ProviderRunPhaseV1, ProviderRunReadRequestV1, VerificationVerdictV1, WorkflowPhaseV1, WorkflowRecordV1)
 from tuner.execution.coordinator_v1.state_machine import (WorkflowTransitionError,
  apply_artifact_verification, apply_cancel_effect_record as _apply_cancel, apply_provider_observation,
  apply_reverification, apply_stage_effect_record as _apply_stage, apply_submit_effect_record as _apply_submit,
@@ -107,14 +107,14 @@ class ObservationAuth:
  def __init__(self,allowed=True):self.allowed=allowed
  def authenticate(self,value):return self.allowed
 def observation(current,foundation,phase,evidence,diagnostic=None):
- ass=assessment(foundation);request=provider_run_read_request(current,foundation,ass,Auth(),AssessmentAuth());ref=current.provider_run_ref.reference
+ ass=assessment(foundation);request=provider_run_read_request(current,foundation,ass,Auth(),AssessmentAuth(),purpose=ProviderReadPurposeV1.OBSERVE);ref=current.provider_run_ref.reference
  content=ProviderRunObservationContentV1("synaptic-provider-run-observation-content/v1",request.request_digest,current.record_digest,current.revision,current.run,current.provider_run_ref.binding_digest,ref.provider_id,ref.profile_ref,ref.account_ref,ref.namespace_ref,ref.provider_job_ref,phase,canonical_bytes(evidence),diagnostic,"observer-a","1.0.0","2026-08-26T00:00:00Z")
  envelope=AuthenticatedProviderRunObservationV1.parse(AuthenticatedProviderRunObservationV1(content,"authority-a","key-a","b"*64).canonical_bytes)
  return request,envelope
 
 def read_request_variant(request,**changes):
- values={name:getattr(request,name) for name in ("source_workflow_record_digest","source_revision","run","provider_run","submit_command_bytes","foundation_record","assessment","foundation_binding","foundation_outcome","found_receipt_digest")};values.update(changes)
- doc={"schema_version":"synaptic-provider-run-read-request/v1","source_workflow_record_digest":values["source_workflow_record_digest"],"source_revision":values["source_revision"],"run":values["run"].to_dict(),"provider_run_binding_digest":values["provider_run"].binding_digest,"submit_command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",values["submit_command_bytes"]),"foundation_record_digest":values["foundation_record"].record_digest,"assessment_digest":values["assessment"].authenticated_assessment_digest,"foundation_binding_digest":values["foundation_binding"].binding_digest,"foundation_outcome_digest":values["foundation_outcome"].outcome_digest,"found_receipt_digest":values["found_receipt_digest"]}
+ values={name:getattr(request,name) for name in ("purpose","source_workflow_record_digest","source_revision","run","provider_run","submit_command_bytes","foundation_record","assessment","foundation_binding","foundation_outcome","found_receipt_digest")};values.update(changes)
+ doc={"schema_version":"synaptic-provider-run-read-request/v1","purpose":values["purpose"].value,"source_workflow_record_digest":values["source_workflow_record_digest"],"source_revision":values["source_revision"],"run":values["run"].to_dict(),"provider_run_binding_digest":values["provider_run"].binding_digest,"submit_command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",values["submit_command_bytes"]),"foundation_record_digest":values["foundation_record"].record_digest,"assessment_digest":values["assessment"].authenticated_assessment_digest,"foundation_binding_digest":values["foundation_binding"].binding_digest,"foundation_outcome_digest":values["foundation_outcome"].outcome_digest,"found_receipt_digest":values["found_receipt_digest"]}
  raw=canonical_bytes(doc)
  return ProviderRunReadRequestV1(**values,canonical_bytes=raw,request_digest=domain_digest("synaptic-provider-run-read-request/v1",raw))
 

@@ -282,7 +282,9 @@ class Harness:
             trusted_quiescence_evidence=self.trusted_evidence,
         )
         self.authenticator = FoundationAuthenticator(grants, receipts, invalid)
-        self.workflows = InMemoryWorkflowStoreV1(self.authenticator, assessments)
+        self.workflows = InMemoryWorkflowStoreV1(
+            self.authenticator, assessments, assessments, assessments
+        )
         self.execution_grants = InMemoryExecutionGrantStoreV1(grants)
         self.reconciliation_grants = InMemoryReconciliationGrantStoreV1(grants)
         self.authorization = Authorization(grants, self.executor, self.adapter_descriptor)
@@ -406,6 +408,30 @@ def test_cas_applied_then_raised_converges_from_durable_replacement():
     result = harness.service.start(PLAN, preflight())
     assert result.phase is WorkflowPhaseV1.QUEUED
     assert wrapper.raised
+
+
+@pytest.mark.parametrize("decision", ["truthy", "throwing"])
+def test_coordinator_accepts_only_exact_true_store_ancestry(decision):
+    harness = Harness()
+    source = harness.service.start(PLAN, preflight())
+    retained = harness.workflows
+
+    class AncestryWorkflowStore:
+        def __getattr__(self, name):
+            return getattr(retained, name)
+
+        def is_descendant(self, ancestor, descendant):
+            if decision == "throwing":
+                raise RuntimeError("ancestry-secret")
+            return "truthy"
+
+    harness.service._workflows = AncestryWorkflowStore()
+    with pytest.raises(CoordinatorErrorV1) as caught:
+        harness.service._stored_descendant(source, source)
+    assert caught.value.code is CoordinatorCodeV1.STORE_INTEGRITY
+    assert "ancestry-secret" not in repr(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
     assert harness.executor.calls == ["stage", "submit"]
 
 
@@ -480,6 +506,29 @@ def test_existing_foundation_record_is_applied_before_poisoned_grant_store_acces
     resumed = harness.service.start(PLAN, preflight())
     assert resumed.phase is WorkflowPhaseV1.STAGE_RECONCILE_REQUIRED
     assert harness.executor.calls == ["stage"]
+
+
+def test_exact_false_foundation_authentication_is_interruption_not_progress():
+    harness = Harness()
+
+    class ExactFalseFoundationAuthenticator:
+        def authenticate_grant(self, grant, command_bytes):
+            return False
+
+        def authenticate_receipt(self, receipt):
+            return False
+
+        def authenticate_invalid_evidence(self, evidence):
+            return False
+
+    harness.service._foundation_authenticator = ExactFalseFoundationAuthenticator()
+    for _ in range(2):
+        with pytest.raises(CoordinatorErrorV1) as caught:
+            harness.service.start(PLAN, preflight())
+        assert caught.value.code is CoordinatorCodeV1.FOUNDATION_INTERRUPTED
+        retained = harness.workflows.get(RUN)
+        assert retained.phase is WorkflowPhaseV1.STAGE_INTENT_RECORDED
+        assert harness.executor.calls == ["stage"]
 
 
 def test_submit_indeterminate_reconciles_to_queued_without_reexecuting_submit():

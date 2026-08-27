@@ -13,7 +13,7 @@ from tuner.execution.foundation_v2.references import CancellationRefV1
 from tuner.execution.foundation_v2.repository import DispatchState, EffectRecordV2, EffectState, ReconciliationOwnershipV2
 from .model import (ArtifactManifestV1,AuthenticatedArtifactVerificationReceiptV1,AuthenticatedFoundationRecordAssessmentV1,AuthenticatedProviderRunObservationV1,BoundCancellationRefV1,
  BoundProviderRunRefV1,BoundProviderStageRefV1,EffectIntentV1,FoundationDispositionV1,
- FoundationEffectBindingV1,FoundationEffectOutcomeV1,ProviderRunReadRequestV1,ProviderRunPhaseV1,
+ FoundationEffectBindingV1,FoundationEffectOutcomeV1,ProviderReadPurposeV1,ProviderRunReadRequestV1,ProviderRunPhaseV1,
  ReceiptFreshnessV1,VerificationVerdictV1,WorkflowPhaseV1,WorkflowRecordV1)
 
 class WorkflowTransitionError(ValueError): pass
@@ -256,19 +256,25 @@ def apply_cancel_effect_record(c,r,assessment,a,assessor):
  return WorkflowRecordV1(c.schema_version,c.run,c.plan_fingerprint,c.preflight_digest,c.provider,c.provider_context_digest,c.provider_descriptor_digest,target,c.revision+1,c.preparation_digest,c.stage,c.submit,cancel,c.provider_stage_ref,c.provider_run_ref,ref if o.disposition is FoundationDispositionV1.FOUND else None,c.pre_cancel_phase,c.run_observation_digests,None,None,(),(),(),codes,c.provider_run_observations)
 
 _OBS={WorkflowPhaseV1.QUEUED:{ProviderRunPhaseV1.QUEUED:WorkflowPhaseV1.QUEUED,ProviderRunPhaseV1.RUNNING:WorkflowPhaseV1.RUNNING,ProviderRunPhaseV1.SUCCEEDED:WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,ProviderRunPhaseV1.FAILED:WorkflowPhaseV1.FAILED,ProviderRunPhaseV1.CANCELLED:WorkflowPhaseV1.CANCELLED},WorkflowPhaseV1.RUNNING:{ProviderRunPhaseV1.RUNNING:WorkflowPhaseV1.RUNNING,ProviderRunPhaseV1.SUCCEEDED:WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,ProviderRunPhaseV1.FAILED:WorkflowPhaseV1.FAILED,ProviderRunPhaseV1.CANCELLED:WorkflowPhaseV1.CANCELLED},WorkflowPhaseV1.CANCEL_REQUESTED:{ProviderRunPhaseV1.QUEUED:WorkflowPhaseV1.CANCEL_REQUESTED,ProviderRunPhaseV1.RUNNING:WorkflowPhaseV1.CANCEL_REQUESTED,ProviderRunPhaseV1.SUCCEEDED:WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,ProviderRunPhaseV1.FAILED:WorkflowPhaseV1.FAILED,ProviderRunPhaseV1.CANCELLED:WorkflowPhaseV1.CANCELLED}}
-def provider_run_read_request(c,record,assessment,authenticator,assessor):
- if c.phase not in {WorkflowPhaseV1.QUEUED,WorkflowPhaseV1.RUNNING,WorkflowPhaseV1.CANCEL_REQUESTED}:raise WorkflowTransitionError("workflow is not provider-readable")
+_READ_PHASES={
+ ProviderReadPurposeV1.OBSERVE:{WorkflowPhaseV1.QUEUED,WorkflowPhaseV1.RUNNING,WorkflowPhaseV1.CANCEL_REQUESTED},
+ ProviderReadPurposeV1.LOGS:{WorkflowPhaseV1.QUEUED,WorkflowPhaseV1.RUNNING,WorkflowPhaseV1.CANCEL_INTENT_RECORDED,WorkflowPhaseV1.CANCEL_REQUESTED,WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,WorkflowPhaseV1.VERIFICATION_FAILED,WorkflowPhaseV1.VERIFIED,WorkflowPhaseV1.FAILED,WorkflowPhaseV1.CANCELLED},
+ ProviderReadPurposeV1.ARTIFACTS:{WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,WorkflowPhaseV1.VERIFICATION_FAILED,WorkflowPhaseV1.VERIFIED},
+}
+def provider_run_read_request(c,record,assessment,authenticator,assessor,*,purpose):
+ if type(purpose) is not ProviderReadPurposeV1:raise TypeError("exact provider read purpose required")
+ if c.phase not in _READ_PHASES[purpose]:raise WorkflowTransitionError("workflow is not eligible for provider read purpose")
  try:binding,outcome,bound=_derive_foundation(c.submit,record,assessment,authenticator,assessor,c.provider_run_ref)
  except (TypeError,ValueError,KeyError) as e:raise WorkflowTransitionError(str(e)) from None
  if outcome.disposition is not FoundationDispositionV1.FOUND or bound!=c.provider_run_ref or binding!=c.submit.foundation_bindings[-1] or outcome!=c.submit.foundation_outcomes[-1]:raise WorkflowTransitionError("read request foundation evidence differs from workflow")
  found=bound.authenticated_receipt_digest
- doc={"schema_version":"synaptic-provider-run-read-request/v1","source_workflow_record_digest":c.record_digest,"source_revision":c.revision,"run":c.run.to_dict(),"provider_run_binding_digest":bound.binding_digest,"submit_command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",c.submit.canonical_command_bytes),"foundation_record_digest":record.record_digest,"assessment_digest":assessment.authenticated_assessment_digest,"foundation_binding_digest":binding.binding_digest,"foundation_outcome_digest":outcome.outcome_digest,"found_receipt_digest":found}
+ doc={"schema_version":"synaptic-provider-run-read-request/v1","purpose":purpose.value,"source_workflow_record_digest":c.record_digest,"source_revision":c.revision,"run":c.run.to_dict(),"provider_run_binding_digest":bound.binding_digest,"submit_command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",c.submit.canonical_command_bytes),"foundation_record_digest":record.record_digest,"assessment_digest":assessment.authenticated_assessment_digest,"foundation_binding_digest":binding.binding_digest,"foundation_outcome_digest":outcome.outcome_digest,"found_receipt_digest":found}
  raw=canonical_bytes(doc)
- return ProviderRunReadRequestV1(c.record_digest,c.revision,c.run,bound,c.submit.canonical_command_bytes,record,assessment,binding,outcome,found,raw,domain_digest("synaptic-provider-run-read-request/v1",raw))
+ return ProviderRunReadRequestV1(purpose,c.record_digest,c.revision,c.run,bound,c.submit.canonical_command_bytes,record,assessment,binding,outcome,found,raw,domain_digest("synaptic-provider-run-read-request/v1",raw))
 
 def _validate_read_request(c,request):
  try:
-  ProviderRunReadRequestV1(request.source_workflow_record_digest,request.source_revision,request.run,request.provider_run,request.submit_command_bytes,request.foundation_record,request.assessment,request.foundation_binding,request.foundation_outcome,request.found_receipt_digest,request.canonical_bytes,request.request_digest)
+  ProviderRunReadRequestV1(request.purpose,request.source_workflow_record_digest,request.source_revision,request.run,request.provider_run,request.submit_command_bytes,request.foundation_record,request.assessment,request.foundation_binding,request.foundation_outcome,request.found_receipt_digest,request.canonical_bytes,request.request_digest)
  except (TypeError,ValueError,KeyError) as e:raise WorkflowTransitionError(str(e)) from None
  if c.submit is None or not c.submit.foundation_bindings or not c.submit.foundation_outcomes or c.provider_run_ref is None:raise WorkflowTransitionError("workflow lacks retained submit evidence")
  binding=c.submit.foundation_bindings[-1];outcome=c.submit.foundation_outcomes[-1]
@@ -294,6 +300,7 @@ def apply_provider_observation(c,request,o,authenticator):
  parsed=AuthenticatedProviderRunObservationV1.parse(o.canonical_bytes)
  if parsed.canonical_bytes!=o.canonical_bytes or authenticator.authenticate(parsed) is not True:raise WorkflowTransitionError("observation authentication failed")
  _validate_read_request(c,request)
+ if request.purpose is not ProviderReadPurposeV1.OBSERVE:raise WorkflowTransitionError("provider read request purpose is not observe")
  if parsed.content.request_digest!=request.request_digest:raise WorkflowTransitionError("observation read request digest mismatch")
  digest=parsed.authenticated_observation_digest
  for old in c.provider_run_observations:

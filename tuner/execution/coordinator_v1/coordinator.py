@@ -36,8 +36,12 @@ from tuner.execution.foundation_v2.repository import (
 )
 
 from .model import (
+    ArtifactManifestV1,
+    AuthenticatedArtifactVerificationReceiptV1,
     AuthenticatedFoundationRecordAssessmentV1,
+    AuthenticatedProviderRunObservationV1,
     EffectIntentV1,
+    ProviderRunReadRequestV1,
     ReceiptFreshnessV1,
     WorkflowPhaseV1,
     WorkflowRecordV1,
@@ -48,6 +52,7 @@ from .state_machine import (
     begin_preparation,
     record_stage_intent,
     record_submit_intent,
+    record_cancel_intent,
 )
 
 
@@ -57,6 +62,11 @@ class CoordinatorTransitionKindV1(str, Enum):
     APPLY_STAGE_EFFECT = "apply_stage_effect"
     RECORD_SUBMIT_INTENT = "record_submit_intent"
     APPLY_SUBMIT_EFFECT = "apply_submit_effect"
+    RECORD_CANCEL_INTENT = "record_cancel_intent"
+    APPLY_CANCEL_EFFECT = "apply_cancel_effect"
+    APPLY_PROVIDER_OBSERVATION = "apply_provider_observation"
+    APPLY_ARTIFACT_VERIFICATION = "apply_artifact_verification"
+    APPLY_REVERIFICATION = "apply_reverification"
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,12 +135,89 @@ class ApplySubmitEffectTransitionV1:
             raise TypeError("exact Foundation assessment required")
 
 
+@dataclass(frozen=True, slots=True)
+class RecordCancelIntentTransitionV1:
+    intent: EffectIntentV1
+    kind: CoordinatorTransitionKindV1 = CoordinatorTransitionKindV1.RECORD_CANCEL_INTENT
+
+    def __post_init__(self) -> None:
+        if self.kind is not CoordinatorTransitionKindV1.RECORD_CANCEL_INTENT:
+            raise ValueError("invalid cancel-intent transition")
+        if type(self.intent) is not EffectIntentV1:
+            raise TypeError("exact effect intent required")
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyCancelEffectTransitionV1:
+    record: EffectRecordV2
+    assessment: AuthenticatedFoundationRecordAssessmentV1
+    kind: CoordinatorTransitionKindV1 = CoordinatorTransitionKindV1.APPLY_CANCEL_EFFECT
+
+    def __post_init__(self) -> None:
+        if self.kind is not CoordinatorTransitionKindV1.APPLY_CANCEL_EFFECT:
+            raise ValueError("invalid cancel-effect transition")
+        if type(self.record) is not EffectRecordV2:
+            raise TypeError("exact Foundation record required")
+        if type(self.assessment) is not AuthenticatedFoundationRecordAssessmentV1:
+            raise TypeError("exact Foundation assessment required")
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyProviderObservationTransitionV1:
+    request: ProviderRunReadRequestV1
+    observation: AuthenticatedProviderRunObservationV1
+    kind: CoordinatorTransitionKindV1 = CoordinatorTransitionKindV1.APPLY_PROVIDER_OBSERVATION
+
+    def __post_init__(self) -> None:
+        if self.kind is not CoordinatorTransitionKindV1.APPLY_PROVIDER_OBSERVATION:
+            raise ValueError("invalid provider-observation transition")
+        if type(self.request) is not ProviderRunReadRequestV1:
+            raise TypeError("exact provider read request required")
+        if type(self.observation) is not AuthenticatedProviderRunObservationV1:
+            raise TypeError("exact provider observation required")
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyArtifactVerificationTransitionV1:
+    manifest: ArtifactManifestV1
+    receipt: AuthenticatedArtifactVerificationReceiptV1
+    kind: CoordinatorTransitionKindV1 = CoordinatorTransitionKindV1.APPLY_ARTIFACT_VERIFICATION
+
+    def __post_init__(self) -> None:
+        if self.kind is not CoordinatorTransitionKindV1.APPLY_ARTIFACT_VERIFICATION:
+            raise ValueError("invalid artifact-verification transition")
+        if type(self.manifest) is not ArtifactManifestV1:
+            raise TypeError("exact artifact manifest required")
+        if type(self.receipt) is not AuthenticatedArtifactVerificationReceiptV1:
+            raise TypeError("exact artifact verification receipt required")
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyReverificationTransitionV1:
+    manifest: ArtifactManifestV1
+    receipt: AuthenticatedArtifactVerificationReceiptV1
+    kind: CoordinatorTransitionKindV1 = CoordinatorTransitionKindV1.APPLY_REVERIFICATION
+
+    def __post_init__(self) -> None:
+        if self.kind is not CoordinatorTransitionKindV1.APPLY_REVERIFICATION:
+            raise ValueError("invalid reverification transition")
+        if type(self.manifest) is not ArtifactManifestV1:
+            raise TypeError("exact artifact manifest required")
+        if type(self.receipt) is not AuthenticatedArtifactVerificationReceiptV1:
+            raise TypeError("exact artifact verification receipt required")
+
+
 CoordinatorTransitionV1: TypeAlias = (
     BeginPreparationTransitionV1
     | RecordStageIntentTransitionV1
     | ApplyStageEffectTransitionV1
     | RecordSubmitIntentTransitionV1
     | ApplySubmitEffectTransitionV1
+    | RecordCancelIntentTransitionV1
+    | ApplyCancelEffectTransitionV1
+    | ApplyProviderObservationTransitionV1
+    | ApplyArtifactVerificationTransitionV1
+    | ApplyReverificationTransitionV1
 )
 
 
@@ -223,69 +310,6 @@ def _command_bytes_digest(command_bytes: bytes) -> str:
     if type(command_bytes) is not bytes:
         raise _error(CoordinatorCodeV1.BINDING_MISMATCH)
     return domain_digest("synaptic-foundation-command-bytes/v1", command_bytes)
-
-
-def _intent_prefix(before: EffectIntentV1 | None, after: EffectIntentV1 | None) -> bool:
-    if before is None:
-        return True
-    if after is None:
-        return False
-    return (
-        before.kind,
-        before.effect_id,
-        before.command_digest,
-        before.canonical_command_bytes,
-    ) == (
-        after.kind,
-        after.effect_id,
-        after.command_digest,
-        after.canonical_command_bytes,
-    ) and after.foundation_bindings[: len(before.foundation_bindings)] == before.foundation_bindings and after.foundation_outcomes[: len(before.foundation_outcomes)] == before.foundation_outcomes
-
-
-def _workflow_descends(before: WorkflowRecordV1, after: WorkflowRecordV1) -> bool:
-    if type(before) is not WorkflowRecordV1 or type(after) is not WorkflowRecordV1:
-        return False
-    if after.revision < before.revision:
-        return False
-    if after.revision == before.revision:
-        return after == before
-    immutable = (
-        "schema_version", "run", "plan_fingerprint", "preflight_digest",
-        "provider", "provider_context_digest", "provider_descriptor_digest",
-    )
-    if any(getattr(before, name) != getattr(after, name) for name in immutable):
-        return False
-    if before.preparation_digest is not None and after.preparation_digest != before.preparation_digest:
-        return False
-    if not _intent_prefix(before.stage, after.stage) or not _intent_prefix(before.submit, after.submit):
-        return False
-    if before.provider_stage_ref is not None and after.provider_stage_ref != before.provider_stage_ref:
-        return False
-    if before.provider_run_ref is not None and after.provider_run_ref != before.provider_run_ref:
-        return False
-    prefix_fields = (
-        "run_observation_digests", "provider_run_observations",
-        "verification_receipts", "verification_receipt_digests", "diagnostic_codes",
-    )
-    if any(
-        getattr(after, name)[: len(getattr(before, name))] != getattr(before, name)
-        for name in prefix_fields
-    ):
-        return False
-    ranks = {
-        WorkflowPhaseV1.PLANNED: 0,
-        WorkflowPhaseV1.PREPARING: 1,
-        WorkflowPhaseV1.STAGE_INTENT_RECORDED: 2,
-        WorkflowPhaseV1.STAGE_RECONCILE_REQUIRED: 2,
-        WorkflowPhaseV1.STAGED: 3,
-        WorkflowPhaseV1.SUBMIT_INTENT_RECORDED: 4,
-        WorkflowPhaseV1.SUBMIT_RECONCILE_REQUIRED: 4,
-        WorkflowPhaseV1.QUEUED: 5,
-        WorkflowPhaseV1.FAILED: 5,
-        WorkflowPhaseV1.CONTRADICTED: 5,
-    }
-    return before.phase in ranks and after.phase in ranks and ranks[after.phase] >= ranks[before.phase]
 
 
 class TrainingCoordinatorV1:
@@ -393,11 +417,23 @@ class TrainingCoordinatorV1:
                 return retained
             if retained == current:
                 continue
-            if type(retained) is WorkflowRecordV1 and retained.revision > replacement.revision and _workflow_descends(replacement, retained):
+            if (
+                type(retained) is WorkflowRecordV1
+                and self._stored_descendant(replacement, retained)
+            ):
                 return retained
             if failure is not None:
                 raise failure
         raise _error(CoordinatorCodeV1.RETRY_EXHAUSTED)
+
+    def _stored_descendant(self, ancestor, descendant):
+        decision = _call(
+            lambda: self._workflows.is_descendant(ancestor, descendant),
+            CoordinatorCodeV1.STORE_INTEGRITY,
+        )
+        if type(decision) is not bool:
+            raise _error(CoordinatorCodeV1.STORE_INTEGRITY)
+        return decision
 
     @staticmethod
     def _validate_preparation(candidate, plan, workflow, binding):
@@ -642,8 +678,7 @@ class TrainingCoordinatorV1:
             )
             if (
                 type(retained) is WorkflowRecordV1
-                and retained.revision > workflow.revision
-                and _workflow_descends(workflow, retained)
+                and self._stored_descendant(workflow, retained)
             ):
                 return retained
             if retained == workflow:
@@ -692,7 +727,7 @@ class TrainingCoordinatorV1:
             raise _error(CoordinatorCodeV1.WORKFLOW_CONFLICT)
         if type(workflow) is not WorkflowRecordV1 or workflow.run != run or workflow.preflight_digest != preflight_digest:
             raise _error(CoordinatorCodeV1.WORKFLOW_CONFLICT)
-        if not _workflow_descends(planned, workflow):
+        if workflow != planned and not self._stored_descendant(planned, workflow):
             raise _error(CoordinatorCodeV1.WORKFLOW_CONFLICT)
         return workflow, plan, binding
 
@@ -912,6 +947,10 @@ class TrainingCoordinatorV1:
 __all__ = [
     "ApplyStageEffectTransitionV1",
     "ApplySubmitEffectTransitionV1",
+    "ApplyCancelEffectTransitionV1",
+    "ApplyProviderObservationTransitionV1",
+    "ApplyArtifactVerificationTransitionV1",
+    "ApplyReverificationTransitionV1",
     "BeginPreparationTransitionV1",
     "CoordinatorTransitionKindV1",
     "CoordinatorTransitionV1",
@@ -921,5 +960,6 @@ __all__ = [
     "ReconciliationGrantSlotV1",
     "RecordStageIntentTransitionV1",
     "RecordSubmitIntentTransitionV1",
+    "RecordCancelIntentTransitionV1",
     "TrainingCoordinatorV1",
 ]

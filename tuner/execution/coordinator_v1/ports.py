@@ -71,6 +71,9 @@ class WorkflowStorePortV1(Protocol):
         self, project_ref: str, plan_fingerprint: str
     ) -> WorkflowRecordV1 | None: ...
     def list(self, project_ref: str) -> tuple[WorkflowRecordV1, ...]: ...
+    def is_descendant(
+        self, ancestor: WorkflowRecordV1, descendant: WorkflowRecordV1
+    ) -> bool: ...
     def compare_and_swap(
         self,
         expected: WorkflowRecordV1,

@@ -59,7 +59,7 @@ from .test_state_machine import (
 
 
 def workflow_store():
-    return InMemoryWorkflowStoreV1(Auth(), AssessmentAuth())
+    return InMemoryWorkflowStoreV1(Auth(), AssessmentAuth(), AssessmentAuth(), AssessmentAuth())
 
 
 def execution_grant(raw_intent=None, *, grant_ref="execution-grant"):
@@ -145,6 +145,58 @@ def test_workflow_cas_accepts_reconstructed_expected_and_exact_named_successor()
     assert store.get(source.run) == successor
     assert store.get_by_plan(source.run.project_ref, source.plan_fingerprint) == successor
     assert store.list(source.run.project_ref) == (successor,)
+    assert store.is_descendant(source, successor) is True
+    assert store.is_descendant(source, source) is False
+    assert store.is_descendant(successor, successor) is False
+    assert store.is_descendant(successor, source) is False
+
+
+def test_workflow_ancestry_requires_exact_retained_revision_member():
+    store = workflow_store()
+    source = planned()
+    first = begin_preparation(source)
+    second = record_stage_intent(first, prep(), intent("stage"))
+    assert store.create(source)
+    assert store.compare_and_swap(
+        source, first, transition=BeginPreparationTransitionV1()
+    )
+    assert store.compare_and_swap(
+        first,
+        second,
+        transition=RecordStageIntentTransitionV1(prep(), intent("stage")),
+    )
+    assert store.is_descendant(source, second) is True
+    assert store.is_descendant(first, second) is True
+    fabricated = replace(second, revision=second.revision + 1)
+    assert store.is_descendant(first, fabricated) is False
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    ["history", "history_digest", "transition", "transition_digest"],
+)
+def test_workflow_history_corruption_is_closed(corrupt):
+    store = workflow_store()
+    source = planned()
+    first = begin_preparation(source)
+    assert store.create(source)
+    assert store.compare_and_swap(
+        source, first, transition=BeginPreparationTransitionV1()
+    )
+    key = (source.run.project_ref, source.run.run_id)
+    if corrupt == "history":
+        store._history[key] = (source, replace(first, preflight_digest=D[14]))
+    elif corrupt == "history_digest":
+        store._history_digests[key] = (source.record_digest, D[14])
+    elif corrupt == "transition":
+        store._transitions[key] = (
+            RecordSubmitIntentTransitionV1(intent("submit")),
+        )
+    else:
+        store._transition_digests[key] = (D[14],)
+    with pytest.raises(CoordinatorStoreError) as caught:
+        store.get(source.run)
+    assert caught.value.code is CoordinatorStoreCode.INTEGRITY_ERROR
 
 
 def test_workflow_cas_stale_is_false_and_same_revision_fork_is_closed():
@@ -279,7 +331,7 @@ def test_workflow_cas_replays_effect_with_store_owned_exact_true_authentication(
     )
     assert store.compare_and_swap(awaiting, successor, transition=transition)
 
-    denied = InMemoryWorkflowStoreV1(Auth(), AssessmentAuth(allowed="yes"))
+    denied = InMemoryWorkflowStoreV1(Auth(), AssessmentAuth(allowed="yes"), AssessmentAuth(), AssessmentAuth())
     denied.create(source)
     denied.compare_and_swap(
         source, preparing, transition=BeginPreparationTransitionV1()
@@ -308,7 +360,7 @@ def test_workflow_throwing_reducer_authenticator_is_closed_without_raw_leakage()
     successor = apply_stage_effect_record(
         awaiting, evidence, authenticated_assessment, Auth(), AssessmentAuth()
     )
-    store = InMemoryWorkflowStoreV1(ThrowingFoundation(), AssessmentAuth())
+    store = InMemoryWorkflowStoreV1(ThrowingFoundation(), AssessmentAuth(), AssessmentAuth(), AssessmentAuth())
     store.create(source)
     store.compare_and_swap(
         source, preparing, transition=BeginPreparationTransitionV1()
