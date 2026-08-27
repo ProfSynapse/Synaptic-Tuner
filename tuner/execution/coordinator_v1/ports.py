@@ -42,6 +42,7 @@ from .coordinator import (
     ReconciliationGrantSlotV1,
 )
 from .foundation import QuiescenceRecoveryRequestV1
+from .cursors import AuthenticatedCursorV1, CursorContentV1
 
 
 class RequestLoaderPortV1(Protocol):
@@ -86,6 +87,11 @@ class WorkflowStorePortV1(Protocol):
         *,
         transition: CoordinatorTransitionV1,
     ) -> bool: ...
+
+
+class CursorAuthorityPortV1(Protocol):
+    def issue(self, content: CursorContentV1) -> AuthenticatedCursorV1: ...
+    def verify(self, cursor: AuthenticatedCursorV1) -> bool: ...
 
 
 class PreparationStorePortV1(Protocol):
@@ -233,6 +239,7 @@ __all__ = [
     "ArtifactVerifierPortV1",
     "AuthorizationPortV1",
     "CoordinatorClockPortV1",
+    "CursorAuthorityPortV1",
     "EffectFoundationPortV1",
     "ExecutionGrantStorePortV1",
     "FoundationEvidenceAuthenticatorPortV1",

@@ -31,7 +31,10 @@ from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.observations import ObservationDisposition, ProviderObservationV1
 from tuner.execution.foundation_v2.preparation import CanonicalPreparationV2
 from tuner.execution.foundation_v2.reconciliation import ReconciliationServiceV1
-from tuner.execution.foundation_v2.references import ProviderStageRefV1, ScopedProviderRunRefV1
+from tuner.execution.foundation_v2.references import (
+    CancellationRefV1, ProviderRunRefV1, ProviderStageRefV1,
+    ScopedProviderRunRefV1,
+)
 from tuner.execution.foundation_v2.repository import DispatchState
 
 from tests.execution.coordinator_v1.test_state_machine import (
@@ -124,6 +127,7 @@ class DynamicExecutor:
         self.payload_schemas = ("stage-payload/v2", "submit-payload/v2", "cancel-payload/v2")
         self.outcomes = outcomes
         self.effects = {}
+        self.commands = {}
         self.calls = []
 
     def execute_once(self, payload, request):
@@ -141,6 +145,12 @@ class DynamicExecutor:
                 values["provider_run"] = ScopedProviderRunRefV1(
                     self.provider_id, self.profile_ref, self.account_ref,
                     self.namespace_ref, "job-1",
+                )
+            elif request.effect_kind == "cancel":
+                command = self.commands[request.command_digest]
+                values["cancellation"] = CancellationRefV1(
+                    ProviderRunRefV1(command.to_dict()["cancellation"]["provider_job_ref"]),
+                    command.to_dict()["cancellation"]["reason_digest"],
                 )
         return ProviderObservationV1(
             effect_id, request.command_digest, request.descriptor_digest,
@@ -180,6 +190,7 @@ class Authorization:
     def issue_effect_grant(self, command_bytes, *, preflight_digest, now_epoch):
         command = parse_exact_command(command_bytes)
         self.executor.effects[command.digest] = command.operation.effect.effect_id
+        self.executor.commands[command.digest] = command
         self.effect_issues += 1
         return self.grants.issue(
             command_bytes,
@@ -239,14 +250,22 @@ class TrustedEvidence:
 
 
 class Harness:
-    def __init__(self, *, stage=ObservationDisposition.FOUND, submit=ObservationDisposition.FOUND):
+    def __init__(
+        self,
+        *,
+        stage=ObservationDisposition.FOUND,
+        submit=ObservationDisposition.FOUND,
+        cancel=ObservationDisposition.FOUND,
+    ):
         self.adapter_descriptor = AdapterDescriptorV1(PROVIDER.provider_id, "adapter-a", "1.0.0")
         descriptor = ExecutorDescriptorV1(PROVIDER.provider_id, "executor-a", "1.0.0")
         self.binding = ProviderExecutionBindingV1(
             PROVIDER, DESC.descriptor_digest, CONTEXT.profile_digest, SCOPE,
             descriptor, self.adapter_descriptor.digest, D[7], D[8], D[9],
         )
-        self.executor = DynamicExecutor(descriptor, {"stage": stage, "submit": submit})
+        self.executor = DynamicExecutor(
+            descriptor, {"stage": stage, "submit": submit, "cancel": cancel}
+        )
         repository, grants, receipts, invalid, verifier, executor_resolver = environment(self.executor)
         self.repository = repository
         self.grants = grants
@@ -319,6 +338,16 @@ def test_start_runs_durable_stage_then_submit_and_is_restart_idempotent():
     assert harness.materializer.prepare_calls == 1
 
 
+def test_cancel_persists_intent_before_one_foundation_effect_and_is_idempotent():
+    harness = Harness()
+    queued = harness.service.start(PLAN, preflight())
+    cancelled = harness.service.cancel(queued.run, "user-requested")
+    assert cancelled.phase is WorkflowPhaseV1.CANCEL_REQUESTED
+    assert harness.executor.calls == ["stage", "submit", "cancel"]
+    assert harness.service.cancel(queued.run, "user-requested") == cancelled
+    assert harness.executor.calls == ["stage", "submit", "cancel"]
+
+
 def test_stage_indeterminate_stops_before_submit_and_reconcile_resumes_submit():
     harness = Harness(stage=ObservationDisposition.INDETERMINATE)
     waiting = harness.service.start(PLAN, preflight())
@@ -341,6 +370,34 @@ def test_stage_indeterminate_stops_before_submit_and_reconcile_resumes_submit():
     resumed = harness.service.reconcile(RUN)
     assert resumed.phase is WorkflowPhaseV1.QUEUED
     assert harness.executor.calls == ["stage", "submit"]
+    assert harness.authorization.reconciliation_issues == 1
+
+
+def test_cancel_indeterminate_reconcile_uses_exact_stored_cancel_intent():
+    harness = Harness(cancel=ObservationDisposition.INDETERMINATE)
+    queued = harness.service.start(PLAN, preflight())
+    waiting = harness.service.cancel(queued.run, "user-requested")
+    assert waiting.phase is WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED
+    assert harness.executor.calls == ["stage", "submit", "cancel"]
+
+    command = parse_exact_command(waiting.cancel.canonical_command_bytes)
+    cancellation = command.to_dict()["cancellation"]
+    harness.adapter.observation = ProviderObservationV1(
+        command.operation.effect.effect_id,
+        command.digest,
+        command.executor.digest,
+        ObservationDisposition.FOUND,
+        D[1],
+        1,
+        cancellation=CancellationRefV1(
+            ProviderRunRefV1(cancellation["provider_job_ref"]),
+            cancellation["reason_digest"],
+        ),
+    )
+    requested = harness.service.reconcile(queued.run)
+    assert requested.phase is WorkflowPhaseV1.CANCEL_REQUESTED
+    assert requested.cancel.canonical_command_bytes == waiting.cancel.canonical_command_bytes
+    assert harness.executor.calls == ["stage", "submit", "cancel"]
     assert harness.authorization.reconciliation_issues == 1
 
 

@@ -20,6 +20,7 @@ from tuner.execution.foundation_v2.canonical import (
     safe_ref,
 )
 from tuner.execution.foundation_v2.commands import (
+    build_cancel_command,
     build_stage_command,
     build_submit_command,
     parse_exact_command,
@@ -28,7 +29,11 @@ from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.observations import ObservationDisposition
 from tuner.execution.foundation_v2.preparation import CanonicalPreparationV2
 from tuner.execution.foundation_v2.receipts import AuthenticatedReceiptV2
-from tuner.execution.foundation_v2.references import StagePredecessorV2
+from tuner.execution.foundation_v2.references import (
+    CancellationRefV1,
+    ProviderRunRefV1,
+    StagePredecessorV2,
+)
 from tuner.execution.foundation_v2.repository import (
     DispatchState,
     EffectRecordV2,
@@ -47,6 +52,7 @@ from .model import (
     WorkflowRecordV1,
 )
 from .state_machine import (
+    apply_cancel_effect_record,
     apply_stage_effect_record,
     apply_submit_effect_record,
     begin_preparation,
@@ -594,6 +600,39 @@ class TrainingCoordinatorV1:
         )
         return EffectIntentV1.from_command_bytes(command.canonical_bytes)
 
+    def _cancel_intent(self, workflow, preparation, binding, reason):
+        if (
+            type(reason) is not str
+            or not reason
+            or reason != reason.strip()
+            or len(reason.encode("utf-8")) > 4096
+            or any(ord(character) < 32 or ord(character) == 127 for character in reason)
+            or workflow.provider_run_ref is None
+        ):
+            raise _error(CoordinatorCodeV1.INVALID_INPUT)
+        payload = _call(
+            lambda: self._materializer.payload(preparation, EffectKind.CANCEL),
+            CoordinatorCodeV1.BINDING_MISMATCH,
+        )
+        reason_digest = domain_digest(
+            "synaptic-cancel-reason/v1", canonical_bytes({"reason": reason})
+        )
+        cancellation = CancellationRefV1(
+            ProviderRunRefV1(workflow.provider_run_ref.reference.provider_job_ref),
+            reason_digest,
+        )
+        command = _call(
+            lambda: build_cancel_command(
+                preparation,
+                self._nonce(EffectKind.CANCEL, workflow, preparation),
+                payload,
+                binding.executor_descriptor,
+                cancellation,
+            ),
+            CoordinatorCodeV1.BINDING_MISMATCH,
+        )
+        return EffectIntentV1.from_command_bytes(command.canonical_bytes)
+
     def _execution_grant(self, intent, preflight_digest):
         slot = ExecutionGrantSlotV1(
             intent.effect_id,
@@ -686,6 +725,46 @@ class TrainingCoordinatorV1:
             raise _error(CoordinatorCodeV1.STORE_INTEGRITY)
         return self._cas(workflow, replacement, transition)
 
+    def _apply_cancel_effect(self, workflow):
+        intent = workflow.cancel
+        if intent is None:
+            raise _error(CoordinatorCodeV1.STORE_INTEGRITY)
+        record = _call(lambda: self._foundation.get(intent.effect_id))
+        if record is not None and record.dispatch in {
+            DispatchState.OWNED_NOT_STARTED,
+            DispatchState.OWNED_IN_FLIGHT,
+        }:
+            raise _error(CoordinatorCodeV1.FOUNDATION_INTERRUPTED)
+        if record is None:
+            grant = self._execution_grant(intent, workflow.preflight_digest)
+            _call(
+                lambda: self._foundation.execute(
+                    intent.canonical_command_bytes,
+                    grant,
+                    now_epoch=self._clock.now_epoch(),
+                ),
+                CoordinatorCodeV1.FOUNDATION_INTERRUPTED,
+            )
+            record = _call(lambda: self._foundation.get(intent.effect_id))
+        if record is None:
+            raise _error(CoordinatorCodeV1.STORE_INTEGRITY)
+        assessment = _call(lambda: self._foundation.assess(record))
+        replacement = _call(
+            lambda: apply_cancel_effect_record(
+                workflow,
+                record,
+                assessment,
+                self._foundation_authenticator,
+                self._foundation,
+            ),
+            CoordinatorCodeV1.FOUNDATION_INTERRUPTED,
+        )
+        return self._cas(
+            workflow,
+            replacement,
+            ApplyCancelEffectTransitionV1(record, assessment),
+        )
+
     def _bootstrap(self, plan, preflight):
         if type(plan) is not TrainingPlan or type(preflight) is not TrainingPreflight:
             raise _error(CoordinatorCodeV1.INVALID_INPUT)
@@ -769,6 +848,33 @@ class TrainingCoordinatorV1:
         workflow, retained_plan, binding = self._bootstrap(plan, preflight)
         return self._progress_start(workflow, retained_plan, binding)
 
+    def cancel(self, run: TrainingRunRef, reason: str) -> WorkflowRecordV1:
+        if type(run) is not TrainingRunRef:
+            raise _error(CoordinatorCodeV1.INVALID_INPUT)
+        workflow = _call(
+            lambda: self._workflows.get(run), CoordinatorCodeV1.STORE_INTEGRITY
+        )
+        if type(workflow) is not WorkflowRecordV1:
+            raise _error(CoordinatorCodeV1.INVALID_INPUT)
+        plan, _, _, binding = self._load_basis(workflow.plan_fingerprint)
+        if workflow.phase in {WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.RUNNING}:
+            preparation = self._preparation(plan, workflow, binding)
+            intent = self._cancel_intent(workflow, preparation, binding, reason)
+            workflow = self._cas(
+                workflow,
+                record_cancel_intent(workflow, intent),
+                RecordCancelIntentTransitionV1(intent),
+            )
+        if workflow.phase is WorkflowPhaseV1.CANCEL_INTENT_RECORDED:
+            return self._apply_cancel_effect(workflow)
+        if workflow.phase in {
+            WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,
+            WorkflowPhaseV1.CANCEL_REQUESTED,
+            WorkflowPhaseV1.CANCELLED,
+        }:
+            return workflow
+        raise _error(CoordinatorCodeV1.INVALID_INPUT)
+
     @staticmethod
     def _reconciliation_slot(record, intent):
         command_digest = _command_bytes_digest(intent.canonical_command_bytes)
@@ -840,8 +946,9 @@ class TrainingCoordinatorV1:
         for _ in range(self._MAX_STEPS):
             if workflow.phase in {
                 WorkflowPhaseV1.STAGED, WorkflowPhaseV1.SUBMIT_INTENT_RECORDED,
-                WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.FAILED,
-                WorkflowPhaseV1.CONTRADICTED,
+                WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.RUNNING,
+                WorkflowPhaseV1.CANCEL_REQUESTED, WorkflowPhaseV1.CANCELLED,
+                WorkflowPhaseV1.FAILED, WorkflowPhaseV1.CONTRADICTED,
             }:
                 # Reconciliation never re-executes the existing effect. A newly
                 # discovered stage may, however, advance into the distinct submit
@@ -857,9 +964,13 @@ class TrainingCoordinatorV1:
                 WorkflowPhaseV1.STAGE_RECONCILE_REQUIRED,
             }
             submit = workflow.phase is WorkflowPhaseV1.SUBMIT_RECONCILE_REQUIRED
-            if not stage and not submit:
+            cancel = workflow.phase in {
+                WorkflowPhaseV1.CANCEL_INTENT_RECORDED,
+                WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,
+            }
+            if not stage and not submit and not cancel:
                 raise _error(CoordinatorCodeV1.INVALID_INPUT)
-            intent = workflow.stage if stage else workflow.submit
+            intent = workflow.stage if stage else workflow.submit if submit else workflow.cancel
             record = _call(lambda: self._foundation.get(intent.effect_id))
             if record is None:
                 raise _error(CoordinatorCodeV1.STORE_INTEGRITY)
@@ -874,8 +985,20 @@ class TrainingCoordinatorV1:
                 if record is None:
                     raise _error(CoordinatorCodeV1.STORE_INTEGRITY)
             assessment = _call(lambda: self._foundation.assess(record))
-            reducer = apply_stage_effect_record if stage else apply_submit_effect_record
-            transition_type = ApplyStageEffectTransitionV1 if stage else ApplySubmitEffectTransitionV1
+            reducer = (
+                apply_stage_effect_record
+                if stage
+                else apply_submit_effect_record
+                if submit
+                else apply_cancel_effect_record
+            )
+            transition_type = (
+                ApplyStageEffectTransitionV1
+                if stage
+                else ApplySubmitEffectTransitionV1
+                if submit
+                else ApplyCancelEffectTransitionV1
+            )
             replacement = _call(
                 lambda: reducer(
                     workflow, record, assessment,
@@ -904,6 +1027,7 @@ class TrainingCoordinatorV1:
             if workflow.phase not in {
                 WorkflowPhaseV1.STAGE_RECONCILE_REQUIRED,
                 WorkflowPhaseV1.SUBMIT_RECONCILE_REQUIRED,
+                WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,
             }:
                 return workflow
             if intent.effect_id in looked_up:
