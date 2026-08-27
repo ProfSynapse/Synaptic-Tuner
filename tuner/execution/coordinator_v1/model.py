@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import json
 
 from synaptic_tuner.api.v1.planning import ProviderPlanContextV1, TrainingPlan
 from synaptic_tuner.api.v1.providers import ProviderDescriptor, ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
+from synaptic_tuner.api.v1.runs_facade import RunLogEntry
+from synaptic_tuner.api.v1._timestamps import require_rfc3339
 from tuner.execution.foundation_v2.authority import AuthenticatedGrantV2
 from tuner.execution.foundation_v2.canonical import (
     canonical_bytes, digest_text, domain_digest, exact_integer,
@@ -494,6 +497,265 @@ class AuthenticatedProviderRunObservationV1:
         if evidence!=content.evidence_digest or claimed!=content.content_digest:raise ValueError("observation digest mismatch")
         owned=cls(content,doc["authority_ref"],doc["key_ref"],doc["tag"])
         if owned.canonical_bytes!=raw:raise ValueError("observation bytes not canonical")
+        return owned
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderLogQueryV1:
+    after_sequence: int | None
+    limit: int
+    maximum_bytes: int
+
+    def __post_init__(self) -> None:
+        if self.after_sequence is not None:
+            exact_integer(self.after_sequence, "after_sequence")
+            if self.after_sequence > 2**63 - 1:
+                raise ValueError("after_sequence exceeds the signed 64-bit bound")
+        exact_integer(self.limit, "limit", minimum=1)
+        exact_integer(self.maximum_bytes, "maximum_bytes", minimum=4096)
+        if self.limit > 200:
+            raise ValueError("log query limit exceeds 200")
+        if self.maximum_bytes > 262144:
+            raise ValueError("log query maximum_bytes exceeds 262144")
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return canonical_bytes(
+            {
+                "schema_version": "synaptic-provider-log-query/v1",
+                "after_sequence": self.after_sequence,
+                "limit": self.limit,
+                "maximum_bytes": self.maximum_bytes,
+            }
+        )
+
+    @property
+    def log_query_digest(self) -> str:
+        return domain_digest("synaptic-provider-log-query/v1", self.canonical_bytes)
+
+
+def _provider_log_canonical_bytes(value: dict[str, object]) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("provider log value is not canonical JSON") from exc
+
+
+def _parse_provider_log_object(raw: bytes, *, name: str, maximum_bytes: int) -> dict[str, object]:
+    if type(raw) is not bytes or not raw or len(raw) > maximum_bytes:
+        raise ValueError(f"{name} must be bounded nonempty bytes")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"{name} contains duplicate keys")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=lambda _: (_ for _ in ()).throw(
+                ValueError(f"{name} contains a non-finite number")
+            ),
+            parse_float=lambda _: (_ for _ in ()).throw(
+                ValueError(f"{name} contains a non-integer number")
+            ),
+        )
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{name} must be canonical UTF-8 JSON") from exc
+    if type(value) is not dict or _provider_log_canonical_bytes(value) != raw:
+        raise ValueError(f"{name} must be a canonical JSON object")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderLogPageContentV1:
+    schema_version: str
+    read_request_digest: str
+    log_query_digest: str
+    source_workflow_record_digest: str
+    source_revision: int
+    run: TrainingRunRef
+    provider_run_binding_digest: str
+    provider_id: str
+    profile_ref: str
+    account_ref: str
+    namespace_ref: str
+    provider_job_ref: str
+    after_sequence: int | None
+    entries: tuple[RunLogEntry, ...]
+    total_bytes: int
+    truncated: bool
+    canonical_evidence: bytes
+    reader_ref: str
+    reader_version: str
+    read_at: str
+
+    def __post_init__(self) -> None:
+        if self.schema_version != "synaptic-provider-log-page-content/v1":
+            raise ValueError("provider log page content schema invalid")
+        for name in (
+            "read_request_digest",
+            "log_query_digest",
+            "source_workflow_record_digest",
+            "provider_run_binding_digest",
+        ):
+            digest_text(getattr(self, name), name)
+        exact_integer(self.source_revision, "source_revision")
+        if type(self.run) is not TrainingRunRef:
+            raise TypeError("run must be exact TrainingRunRef")
+        for name in (
+            "provider_id", "profile_ref", "account_ref", "namespace_ref",
+            "provider_job_ref", "reader_ref", "reader_version",
+        ):
+            safe_ref(getattr(self, name), name)
+        require_rfc3339(self.read_at, "read_at")
+        if self.after_sequence is not None:
+            exact_integer(self.after_sequence, "after_sequence")
+            if self.after_sequence > 2**63 - 1:
+                raise ValueError("after_sequence exceeds the signed 64-bit bound")
+        if type(self.entries) is not tuple or any(type(item) is not RunLogEntry for item in self.entries):
+            raise TypeError("entries must be an exact tuple of RunLogEntry")
+        if len(self.entries) > 200:
+            raise ValueError("provider log page exceeds 200 entries")
+        sequences = tuple(item.sequence for item in self.entries)
+        if any(left >= right for left, right in zip(sequences, sequences[1:])):
+            raise ValueError("provider log sequences must be unique and strictly increasing")
+        if self.after_sequence is not None and any(
+            sequence <= self.after_sequence for sequence in sequences
+        ):
+            raise ValueError("provider log sequence does not advance cursor")
+        exact_integer(self.total_bytes, "total_bytes")
+        if self.total_bytes != sum(item.size_bytes for item in self.entries) or self.total_bytes > 262144:
+            raise ValueError("provider log total_bytes mismatch")
+        if type(self.truncated) is not bool:
+            raise TypeError("truncated must be an exact boolean")
+        if type(self.canonical_evidence) is not bytes or len(self.canonical_evidence) > 65536:
+            raise ValueError("provider log canonical evidence exceeds 65536 bytes")
+        _parse_provider_log_object(
+            self.canonical_evidence,
+            name="provider log evidence",
+            maximum_bytes=65536,
+        )
+
+    @property
+    def evidence_digest(self) -> str:
+        return domain_digest("synaptic-provider-log-evidence/v1", self.canonical_evidence)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "read_request_digest": self.read_request_digest,
+            "log_query_digest": self.log_query_digest,
+            "source_workflow_record_digest": self.source_workflow_record_digest,
+            "source_revision": self.source_revision,
+            "run": self.run.to_dict(),
+            "provider_run_binding_digest": self.provider_run_binding_digest,
+            "provider_id": self.provider_id,
+            "profile_ref": self.profile_ref,
+            "account_ref": self.account_ref,
+            "namespace_ref": self.namespace_ref,
+            "provider_job_ref": self.provider_job_ref,
+            "after_sequence": self.after_sequence,
+            "entries": [entry.to_dict() for entry in self.entries],
+            "total_bytes": self.total_bytes,
+            "truncated": self.truncated,
+            "canonical_evidence": _parse_provider_log_object(
+                self.canonical_evidence,
+                name="provider log evidence",
+                maximum_bytes=65536,
+            ),
+            "evidence_digest": self.evidence_digest,
+            "reader_ref": self.reader_ref,
+            "reader_version": self.reader_version,
+            "read_at": self.read_at,
+        }
+
+    @property
+    def content_digest(self) -> str:
+        return domain_digest(
+            "synaptic-provider-log-page-content/v1",
+            _provider_log_canonical_bytes(self.to_dict()),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticatedProviderLogPageV1:
+    content: ProviderLogPageContentV1
+    authority_ref: str
+    key_ref: str
+    tag: str
+
+    def __post_init__(self) -> None:
+        if type(self.content) is not ProviderLogPageContentV1:
+            raise TypeError("content must be exact ProviderLogPageContentV1")
+        safe_ref(self.authority_ref, "authority_ref")
+        safe_ref(self.key_ref, "key_ref")
+        digest_text(self.tag, "tag")
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return _provider_log_canonical_bytes(
+            {
+                "schema_version": "synaptic-authenticated-provider-log-page/v1",
+                "content": {
+                    **self.content.to_dict(),
+                    "content_digest": self.content.content_digest,
+                },
+                "authority_ref": self.authority_ref,
+                "key_ref": self.key_ref,
+                "tag": self.tag,
+            }
+        )
+
+    @property
+    def authenticated_log_page_digest(self) -> str:
+        return domain_digest(
+            "synaptic-authenticated-provider-log-page/v1", self.canonical_bytes
+        )
+
+    @classmethod
+    def parse(cls, raw: bytes) -> "AuthenticatedProviderLogPageV1":
+        document = _parse_provider_log_object(
+            raw, name="authenticated provider log page", maximum_bytes=1048576
+        )
+        if (
+            set(document) != {"schema_version", "content", "authority_ref", "key_ref", "tag"}
+            or document["schema_version"] != "synaptic-authenticated-provider-log-page/v1"
+            or type(document["content"]) is not dict
+        ):
+            raise ValueError("provider log page envelope invalid")
+        values = dict(document["content"])
+        claimed_content_digest = values.pop("content_digest")
+        claimed_evidence_digest = values.pop("evidence_digest")
+        values["run"] = TrainingRunRef.from_dict(values["run"])
+        values["entries"] = tuple(RunLogEntry.from_dict(item) for item in values["entries"])
+        values["canonical_evidence"] = _provider_log_canonical_bytes(
+            values["canonical_evidence"]
+        )
+        content = ProviderLogPageContentV1(**values)
+        if (
+            claimed_evidence_digest != content.evidence_digest
+            or claimed_content_digest != content.content_digest
+        ):
+            raise ValueError("provider log page digest mismatch")
+        owned = cls(
+            content,
+            document["authority_ref"],
+            document["key_ref"],
+            document["tag"],
+        )
+        if owned.canonical_bytes != raw:
+            raise ValueError("provider log page bytes are not canonical")
         return owned
 
 
@@ -1051,14 +1313,28 @@ class WorkflowRecordV1:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class WorkflowStorePageV1:
+    records: tuple[WorkflowRecordV1, ...]
+    has_more: bool
+
+    def __post_init__(self) -> None:
+        if type(self.records) is not tuple or any(
+            type(record) is not WorkflowRecordV1 for record in self.records
+        ):
+            raise TypeError("records must be an exact tuple of WorkflowRecordV1")
+        if type(self.has_more) is not bool:
+            raise TypeError("has_more must be an exact boolean")
+
+
 __all__ = [
     "ArtifactManifestV1", "ArtifactVerificationContentV1",
     "AuthenticatedArtifactVerificationReceiptV1", "AuthenticatedFoundationRecordAssessmentV1",
-    "AuthenticatedProviderRunObservationV1", "BoundCancellationRefV1",
+    "AuthenticatedProviderLogPageV1", "AuthenticatedProviderRunObservationV1", "BoundCancellationRefV1",
     "BoundProviderRunRefV1", "BoundProviderStageRefV1", "EffectIntentV1",
     "FoundationDispositionV1", "FoundationEffectBindingV1", "FoundationRecordAssessmentContentV1",
     "FoundationEffectOutcomeV1",
-    "ProviderExecutionBindingV1", "ProviderReadPurposeV1", "ProviderRunObservationContentV1", "ProviderRunReadRequestV1",
+    "ProviderExecutionBindingV1", "ProviderLogPageContentV1", "ProviderLogQueryV1", "ProviderReadPurposeV1", "ProviderRunObservationContentV1", "ProviderRunReadRequestV1",
     "ProviderRunPhaseV1", "ReceiptAssessmentV1", "ReceiptFreshnessV1", "VerificationVerdictV1", "WorkflowPhaseV1",
-    "WorkflowRecordV1",
+    "WorkflowRecordV1", "WorkflowStorePageV1",
 ]

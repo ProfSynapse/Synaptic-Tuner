@@ -42,7 +42,7 @@ from .coordinator import (
     RecordSubmitIntentTransitionV1,
     RecordCancelIntentTransitionV1,
 )
-from .model import WorkflowPhaseV1, WorkflowRecordV1
+from .model import WorkflowPhaseV1, WorkflowRecordV1, WorkflowStorePageV1
 from .state_machine import (
     apply_artifact_verification,
     apply_cancel_effect_record,
@@ -390,18 +390,44 @@ class InMemoryWorkflowStoreV1:
                 raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
             return retained
 
-    def list(self, project_ref: str) -> tuple[WorkflowRecordV1, ...]:
+    def list_page(
+        self, project_ref: str, *, after_run_key: str | None, limit: int
+    ) -> WorkflowStorePageV1:
         try:
             safe_ref(project_ref, "project_ref")
+            if after_run_key is not None:
+                digest_text(after_run_key, "after_run_key")
+            if type(limit) is not int or not 1 <= limit <= 100:
+                raise ValueError("limit invalid")
         except Exception:
             raise _closed(CoordinatorStoreCode.BINDING_MISMATCH) from None
         with self._lock:
-            records = []
-            for key in sorted(self._records):
+            keyed: list[tuple[str, WorkflowRecordV1]] = []
+            seen: dict[str, TrainingRunRef] = {}
+            for key in tuple(self._records):
                 retained = self._retained(key)
+                run_key = domain_digest(
+                    "synaptic-coordinator-run-key/v1",
+                    canonical_bytes(retained.run.to_dict()),
+                )
+                prior = seen.get(run_key)
+                if prior is not None and prior != retained.run:
+                    raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+                seen[run_key] = retained.run
                 if retained.run.project_ref == project_ref:
-                    records.append(retained)
-            return tuple(records)
+                    keyed.append((run_key, retained))
+            keyed.sort(key=lambda item: item[0])
+            start = 0
+            if after_run_key is not None:
+                keys = tuple(item[0] for item in keyed)
+                if after_run_key not in keys:
+                    raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
+                start = keys.index(after_run_key) + 1
+            selected = keyed[start : start + limit]
+            return WorkflowStorePageV1(
+                records=tuple(record for _, record in selected),
+                has_more=start + len(selected) < len(keyed),
+            )
 
     def is_descendant(
         self, ancestor: WorkflowRecordV1, descendant: WorkflowRecordV1

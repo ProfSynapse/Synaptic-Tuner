@@ -29,9 +29,12 @@ from .model import (
     AuthenticatedFoundationRecordAssessmentV1,
     AuthenticatedArtifactVerificationReceiptV1,
     AuthenticatedProviderRunObservationV1,
+    AuthenticatedProviderLogPageV1,
+    ProviderLogQueryV1,
     ProviderRunReadRequestV1,
     ProviderExecutionBindingV1,
     WorkflowRecordV1,
+    WorkflowStorePageV1,
 )
 from .coordinator import (
     CoordinatorTransitionV1,
@@ -70,7 +73,9 @@ class WorkflowStorePortV1(Protocol):
     def get_by_plan(
         self, project_ref: str, plan_fingerprint: str
     ) -> WorkflowRecordV1 | None: ...
-    def list(self, project_ref: str) -> tuple[WorkflowRecordV1, ...]: ...
+    def list_page(
+        self, project_ref: str, *, after_run_key: str | None, limit: int
+    ) -> WorkflowStorePageV1: ...
     def is_descendant(
         self, ancestor: WorkflowRecordV1, descendant: WorkflowRecordV1
     ) -> bool: ...
@@ -180,7 +185,9 @@ class ProviderRunReaderPortV1(Protocol):
     references and compact bound-run values are never authorization.
     """
     def observe(self, request: ProviderRunReadRequestV1) -> AuthenticatedProviderRunObservationV1: ...
-    def logs(self, request: ProviderRunReadRequestV1, *, cursor: str | None) -> tuple[str, ...]: ...
+    def logs(
+        self, request: ProviderRunReadRequestV1, query: ProviderLogQueryV1
+    ) -> AuthenticatedProviderLogPageV1: ...
     def artifacts(self, request: ProviderRunReadRequestV1) -> ArtifactManifestV1: ...
     def iter_artifact_bytes(
         self, request: ProviderRunReadRequestV1, manifest: ArtifactManifestV1,
@@ -201,6 +208,10 @@ class FoundationRecordAssessmentPortV1(Protocol):
 
 class ProviderObservationAuthenticatorPortV1(Protocol):
     def authenticate(self, observation: AuthenticatedProviderRunObservationV1) -> bool: ...
+
+
+class ProviderLogAuthenticatorPortV1(Protocol):
+    def authenticate(self, page: AuthenticatedProviderLogPageV1) -> bool: ...
 
 
 class ArtifactVerifierPortV1(Protocol):
@@ -231,6 +242,7 @@ __all__ = [
     "PreparationMaterializerPortV1",
     "PreparationStorePortV1",
     "ProviderBindingResolverPortV1",
+    "ProviderLogAuthenticatorPortV1",
     "ProviderRunReaderPortV1",
     "ReconciliationGrantStorePortV1",
     "ProviderObservationAuthenticatorPortV1",

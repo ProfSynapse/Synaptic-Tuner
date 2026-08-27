@@ -23,7 +23,10 @@ from synaptic_tuner.api.v1.planning import (
 )
 from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderDescriptor, ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef, TrainingRunState, VerifiedArtifact
-from synaptic_tuner.api.v1.runs_facade import RunOutcome, RunsAPI
+from synaptic_tuner.api.v1.runs_facade import (
+    RunArtifactRequest, RunListRequest, RunLogEntry, RunLogLevel, RunLogPage,
+    RunLogsRequest, RunOperationCode, RunOutcome, RunPage, RunsAPI,
+)
 from synaptic_tuner.api.v1.training_facade import (
     AuthorizationRequirement, TrainingAPI, TrainingPreflight, TrainingStart,
 )
@@ -84,6 +87,35 @@ def test_semantic_api_ownership_is_exact() -> None:
     assert not hasattr(TrainingAPI, "outcome")
     assert not hasattr(TrainingAPI, "publish")
     assert not hasattr(ArtifactsAPI, "reverify")
+
+
+def test_run_pages_echo_exact_requests_and_preserve_gapped_log_sequences() -> None:
+    run = TrainingRunRef("run-1", "project-1")
+    outcome = RunOutcome(
+        "synaptic-run-outcome/v1", run, TrainingRunState.RUNNING
+    )
+    listing = RunListRequest("project-1", limit=1)
+    assert RunPage(listing, (outcome,)).request is listing
+
+    logs = RunLogsRequest(run, limit=2, maximum_bytes=4096)
+    entries = (
+        RunLogEntry(2, "2026-08-27T12:00:00Z", RunLogLevel.INFO, "start", "ok", 2),
+        RunLogEntry(9, "2026-08-27T12:00:01Z", RunLogLevel.WARNING, "retry", "again", 5),
+    )
+    assert RunLogPage(logs, entries, 7).request is logs
+
+
+def test_run_facade_exact_bounds_and_closed_operation_codes() -> None:
+    run = TrainingRunRef("run-1", "project-1")
+    assert RunArtifactRequest(run, "model", 2**63 - 1).maximum_bytes == 2**63 - 1
+    with pytest.raises(ValueError):
+        RunLogsRequest(run, maximum_bytes=262145)
+    assert tuple(item.value for item in RunOperationCode) == (
+        "run_missing", "cursor_invalid", "capability_unavailable", "read_ineligible",
+        "provider_read_invalid", "log_bounds_invalid", "cancel_ineligible",
+        "artifacts_unverified", "artifact_role_missing", "artifact_limit_exceeded",
+        "artifact_content_invalid", "state_conflict", "integrity_error",
+    )
 
 
 @pytest.mark.parametrize(

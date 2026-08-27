@@ -144,7 +144,9 @@ def test_workflow_cas_accepts_reconstructed_expected_and_exact_named_successor()
     )
     assert store.get(source.run) == successor
     assert store.get_by_plan(source.run.project_ref, source.plan_fingerprint) == successor
-    assert store.list(source.run.project_ref) == (successor,)
+    assert store.list_page(
+        source.run.project_ref, after_run_key=None, limit=100
+    ).records == (successor,)
     assert store.is_descendant(source, successor) is True
     assert store.is_descendant(source, source) is False
     assert store.is_descendant(successor, successor) is False
@@ -276,7 +278,7 @@ def test_workflow_project_plan_index_is_scoped_and_corruption_is_closed():
         store.get(source.run)
 
 
-@pytest.mark.parametrize("operation", ["get", "create", "cas", "list", "get_by_plan"])
+@pytest.mark.parametrize("operation", ["get", "create", "cas", "list_page", "get_by_plan"])
 def test_workflow_foreign_run_under_primary_key_is_integrity_error(operation):
     source = planned()
     successor = begin_preparation(source)
@@ -297,7 +299,9 @@ def test_workflow_foreign_run_under_primary_key_is_integrity_error(operation):
         "cas": lambda: store.compare_and_swap(
             source, successor, transition=BeginPreparationTransitionV1()
         ),
-        "list": lambda: store.list(source.run.project_ref),
+        "list_page": lambda: store.list_page(
+            source.run.project_ref, after_run_key=None, limit=100
+        ),
         "get_by_plan": lambda: store.get_by_plan(
             foreign.run.project_ref, foreign.plan_fingerprint
         ),
