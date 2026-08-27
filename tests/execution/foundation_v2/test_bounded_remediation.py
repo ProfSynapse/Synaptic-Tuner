@@ -8,9 +8,9 @@ from tuner.execution.foundation_v2.canonical import DiagnosticCode, FoundationEr
 from tuner.execution.foundation_v2.commands import build_submit_command
 from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.observations import ObservationDisposition, ProviderObservationV1
-from tuner.execution.foundation_v2.receipts import ReceiptContentV1
+from tuner.execution.foundation_v2.receipts import ReceiptAuthorityV2, ReceiptContentV2
 from tuner.execution.foundation_v2.reconciliation import ReconciliationServiceV1
-from tuner.execution.foundation_v2.repository import DispatchState, EffectState, InMemoryEffectRepositoryV2
+from tuner.execution.foundation_v2.repository import DispatchState, EffectState, InMemoryEffectRepositoryV2, ReceiptFreshnessV2
 from tuner.execution.foundation_v2.references import ProviderStageRefV1, StagePredecessorV2
 
 from .helpers import *
@@ -19,8 +19,8 @@ from .helpers import *
 def _completed_stage():
     command = stage_command()
     executor = bound_executor_local(command, Executor())
-    repo, authority, receipts, verifier, _ = environment(executor)
-    record = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, verifier, _ = environment(executor)
+    record = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     prep_value = command.preparation
@@ -32,7 +32,7 @@ def _completed_stage():
         command.operation.effect.effect_id,
         record.results[0].authenticated_receipt_digest, record.record_digest,
     )
-    return command, record, predecessor, repo, authority, receipts, verifier
+    return command, record, predecessor, repo, authority, receipts, invalid, verifier
 
 
 def bound_executor_local(command, executor):
@@ -58,7 +58,7 @@ def reconciliation_grant_local(authority, command, adapter, *, grant_ref="reconc
 
 
 def test_submit_predecessor_cas_rejects_cross_scope_and_cross_run_reuse():
-    _, _, predecessor, repo, authority, receipts, _ = _completed_stage()
+    _, _, predecessor, repo, authority, receipts, invalid, _ = _completed_stage()
     for changed in (
         replace(predecessor, namespace_ref="other"),
         replace(predecessor, run_id="other-run"),
@@ -66,7 +66,7 @@ def test_submit_predecessor_cas_rejects_cross_scope_and_cross_run_reuse():
         p = prep()
         command = build_submit_command(p, "nonce", payload(EffectKind.SUBMIT, p), descriptor(), changed)
         executor = bound_executor_local(command, Executor())
-        broker = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts)
+        broker = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid)
         with pytest.raises(FoundationError) as error:
             broker.execute(command.canonical_bytes, execution_grant(authority, command, "submit-" + changed.namespace_ref + changed.run_id), now_epoch=150)
         assert error.value.code is DiagnosticCode.BINDING_MISMATCH
@@ -89,8 +89,8 @@ def test_effect_specific_observation_rejected_before_relinquished_result(wrong_r
             )
 
     executor = WrongExecutor()
-    repo, authority, receipts, _, _ = environment(executor)
-    broker = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts)
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    broker = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid)
     with pytest.raises(FoundationError) as error:
         broker.execute(command.canonical_bytes, execution_grant(authority, command), now_epoch=150)
     record = repo.get(command.operation.effect.effect_id)
@@ -104,8 +104,8 @@ def test_effect_specific_observation_rejected_before_relinquished_result(wrong_r
 def test_distinct_authenticated_found_content_contradicts_exact_duplicate_noops():
     command = stage_command()
     executor = bound_executor_local(command, Executor())
-    repo, authority, receipts, _, _ = environment(executor)
-    record = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    record = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     conflicting = ProviderObservationV1(
@@ -123,8 +123,8 @@ def test_distinct_authenticated_found_content_contradicts_exact_duplicate_noops(
 def test_cross_provider_runtime_executor_rejected_before_admission():
     command = stage_command()
     executor = Executor(provider_id="other")
-    repo, authority, receipts, _, _ = environment(executor)
-    broker = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts)
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    broker = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid)
     with pytest.raises(FoundationError) as error:
         broker.execute(command.canonical_bytes, execution_grant(authority, command), now_epoch=150)
     assert error.value.code is DiagnosticCode.BINDING_MISMATCH
@@ -146,9 +146,9 @@ def test_finality_requires_exact_true_and_verifier_error_preserves_receipt():
     for verifier_result in (1, RuntimeError("secret-verifier-body")):
         command = stage_command()
         executor = bound_executor_local(command, Executor(ObservationDisposition.INDETERMINATE))
-        base_repo, authority, receipts, recovery, _ = environment(executor)
-        repo = InMemoryEffectRepositoryV2(receipts, recovery, _BadFinalityVerifier(verifier_result), authority)
-        broker = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts)
+        base_repo, authority, receipts, invalid, recovery, _ = environment(executor)
+        repo = InMemoryEffectRepositoryV2(receipts, invalid, recovery, _BadFinalityVerifier(verifier_result), authority)
+        broker = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid)
         broker.execute(command.canonical_bytes, execution_grant(authority, command), now_epoch=150)
         current = repo.get(command.operation.effect.effect_id)
         proof = recovery.proof(current, "final_absent")
@@ -166,7 +166,7 @@ def test_finality_requires_exact_true_and_verifier_error_preserves_receipt():
 
 def test_grant_content_is_structurally_validated_and_reconciliation_revokes():
     command = stage_command()
-    _, authority, _, _, _ = environment(Executor())
+    _, authority, _, invalid, _, _ = environment(Executor())
     grant = execution_grant(authority, command)
     with pytest.raises(ValueError):
         replace(grant.content, effect_kind="submit")
@@ -186,8 +186,8 @@ def test_grant_content_is_structurally_validated_and_reconciliation_revokes():
 def test_active_reconciliation_transfer_rejected_even_with_valid_proof():
     command = stage_command()
     executor = bound_executor_local(command, Executor(ObservationDisposition.INDETERMINATE))
-    repo, authority, receipts, verifier, _ = environment(executor)
-    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, verifier, _ = environment(executor)
+    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     adapter = AdapterDescriptorV1("docker", "lookup", "1.0.0")
@@ -212,8 +212,8 @@ def test_active_reconciliation_transfer_rejected_even_with_valid_proof():
 def test_cancel_found_requires_exact_target_and_reason():
     command = cancel_command()
     executor = bound_executor_local(command, Executor())
-    repo, authority, receipts, _, _ = environment(executor)
-    record = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    record = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     assert record.state is EffectState.FOUND
@@ -230,9 +230,9 @@ def test_cancel_found_requires_exact_target_and_reason():
             )
 
     wrong = WrongCancellation()
-    wrong_repo, wrong_authority, wrong_receipts, _, _ = environment(wrong)
+    wrong_repo, wrong_authority, wrong_receipts, invalid, _, _ = environment(wrong)
     with pytest.raises(FoundationError) as error:
-        EffectBrokerV2(wrong_repo, ExecutorResolver(wrong), wrong_authority, wrong_receipts).execute(
+        EffectBrokerV2(wrong_repo, ExecutorResolver(wrong), wrong_authority, wrong_receipts, invalid).execute(
             other.canonical_bytes, execution_grant(wrong_authority, other), now_epoch=150,
         )
     assert error.value.code is DiagnosticCode.EVIDENCE_INVALID
@@ -241,14 +241,14 @@ def test_cancel_found_requires_exact_target_and_reason():
 def test_cross_provider_runtime_adapter_rejected_before_claim():
     command = stage_command()
     executor = bound_executor_local(command, Executor(ObservationDisposition.INDETERMINATE))
-    repo, authority, receipts, _, _ = environment(executor)
-    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     adapter = Adapter(observation_for(command), provider_id="other")
     descriptor_value = adapter.descriptor
     grant = reconciliation_grant_local(authority, command, descriptor_value)
-    service = ReconciliationServiceV1(repo, authority, AdapterResolver(adapter), receipts)
+    service = ReconciliationServiceV1(repo, authority, AdapterResolver(adapter), receipts, invalid)
     with pytest.raises(FoundationError) as error:
         service.reconcile(command.canonical_bytes, grant, now_epoch=150)
     assert error.value.code is DiagnosticCode.BINDING_MISMATCH
@@ -264,9 +264,9 @@ class _TruthyRecovery:
 def test_recovery_proof_requires_exact_boolean_true():
     command = stage_command()
     executor = Executor(fail=True)
-    _, authority, receipts, finality, _ = environment(executor)
-    repo = InMemoryEffectRepositoryV2(receipts, _TruthyRecovery(), finality, authority)
-    broker = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts)
+    _, authority, receipts, invalid, finality, _ = environment(executor)
+    repo = InMemoryEffectRepositoryV2(receipts, invalid, _TruthyRecovery(), finality, authority)
+    broker = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid)
     with pytest.raises(FoundationError):
         broker.execute(command.canonical_bytes, execution_grant(authority, command), now_epoch=150)
     with pytest.raises(FoundationError) as error:
@@ -277,8 +277,8 @@ def test_recovery_proof_requires_exact_boolean_true():
 def test_reconciliation_wrong_result_epoch_is_invalid_and_cannot_complete_claim():
     command = stage_command()
     executor = bound_executor_local(command, Executor(ObservationDisposition.INDETERMINATE))
-    repo, authority, receipts, _, _ = environment(executor)
-    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
 
@@ -289,7 +289,7 @@ def test_reconciliation_wrong_result_epoch_is_invalid_and_cannot_complete_claim(
 
     adapter = WrongEpochAdapter(observation_for(command, result_epoch=9))
     grant = reconciliation_grant_local(authority, command, adapter.descriptor)
-    service = ReconciliationServiceV1(repo, authority, AdapterResolver(adapter), receipts)
+    service = ReconciliationServiceV1(repo, authority, AdapterResolver(adapter), receipts, invalid)
     with pytest.raises(FoundationError) as error:
         service.reconcile(command.canonical_bytes, grant, now_epoch=150)
     record = repo.get(command.operation.effect.effect_id)
@@ -301,12 +301,12 @@ def test_reconciliation_wrong_result_epoch_is_invalid_and_cannot_complete_claim(
 def test_reconciliation_first_generation_is_repository_derived_and_next_indeterminate_generation_runs_once():
     command = stage_command()
     executor = bound_executor_local(command, Executor(ObservationDisposition.INDETERMINATE))
-    repo, authority, receipts, _, _ = environment(executor)
-    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     adapter = Adapter(observation_for(command, ObservationDisposition.INDETERMINATE))
-    service = ReconciliationServiceV1(repo, authority, AdapterResolver(adapter), receipts)
+    service = ReconciliationServiceV1(repo, authority, AdapterResolver(adapter), receipts, invalid)
     invalid_first = reconciliation_grant_local(
         authority, command, adapter.descriptor, grant_ref="bad-first",
         generation=2, epoch=2,
@@ -334,12 +334,12 @@ def test_reconciliation_first_generation_is_repository_derived_and_next_indeterm
 def test_terminal_reconciliation_rejects_even_new_generation_before_lookup():
     command = stage_command()
     executor = bound_executor_local(command, Executor(ObservationDisposition.INDETERMINATE))
-    repo, authority, receipts, _, _ = environment(executor)
-    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     adapter = Adapter(observation_for(command))
-    service = ReconciliationServiceV1(repo, authority, AdapterResolver(adapter), receipts)
+    service = ReconciliationServiceV1(repo, authority, AdapterResolver(adapter), receipts, invalid)
     service.reconcile(
         command.canonical_bytes,
         reconciliation_grant_local(authority, command, adapter.descriptor, grant_ref="terminal-one"),
@@ -358,8 +358,8 @@ def test_terminal_reconciliation_rejects_even_new_generation_before_lookup():
 def test_late_old_owner_receipt_is_retained_stale_and_conflicts_with_new_owner_outcome():
     command = stage_command()
     executor = bound_executor_local(command, Executor(ObservationDisposition.INDETERMINATE))
-    repo, authority, receipts, verifier, _ = environment(executor)
-    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, verifier, _ = environment(executor)
+    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     adapter_descriptor = AdapterDescriptorV1("docker", "lookup", "1.0.0")
@@ -380,6 +380,7 @@ def test_late_old_owner_receipt_is_retained_stale_and_conflicts_with_new_owner_o
     record = repo.append_result(command.operation.effect.effect_id, late_receipt, None, now_epoch=151)
     assert late_receipt.authenticated_receipt_digest == record.results[-1].authenticated_receipt_digest
     assert DiagnosticCode.STALE_RESULT in record.invalid_codes
+    assert record.receipt_admissions[-1].freshness is ReceiptFreshnessV2.STALE
     assert record.state is EffectState.INDETERMINATE
 
     current = ProviderObservationV1(
@@ -393,13 +394,15 @@ def test_late_old_owner_receipt_is_retained_stale_and_conflicts_with_new_owner_o
     )
     assert record.state is EffectState.CONTRADICTED
     assert len(record.results) == 3
+    assert record.receipt_admissions[-2].freshness is ReceiptFreshnessV2.STALE
+    assert record.receipt_admissions[-1].freshness is ReceiptFreshnessV2.FRESH
 
 
 def test_same_terminal_semantics_with_different_provenance_is_compatible():
     command = stage_command()
     executor = bound_executor_local(command, Executor())
-    repo, authority, receipts, _, _ = environment(executor)
-    record = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    record = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     same_outcome = observation_for(command, resolution_digest=D[12])
@@ -413,8 +416,8 @@ def test_same_terminal_semantics_with_different_provenance_is_compatible():
 def test_receipt_envelopes_are_owned_canonical_values_and_malformed_signed_found_is_rejected():
     command = stage_command()
     executor = bound_executor_local(command, Executor())
-    repo, authority, receipts, _, _ = environment(executor)
-    record = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    record = EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     observation = observation_for(command)
@@ -439,27 +442,27 @@ def test_receipt_envelopes_are_owned_canonical_values_and_malformed_signed_found
 def test_receipt_authority_key_and_reconciliation_service_outer_types_are_closed():
     for key in ("x" * 32, b"short"):
         with pytest.raises(ValueError):
-            ReceiptAuthorityV1("receipts", key)
+            ReceiptAuthorityV2("receipts", key)
     command = stage_command()
     executor = bound_executor_local(command, Executor(ObservationDisposition.INDETERMINATE))
-    repo, authority, receipts, _, _ = environment(executor)
-    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
-    service = ReconciliationServiceV1(repo, authority, AdapterResolver(Adapter(observation_for(command))), receipts)
+    service = ReconciliationServiceV1(repo, authority, AdapterResolver(Adapter(observation_for(command))), receipts, invalid)
     with pytest.raises(FoundationError) as error:
         service.reconcile(command.canonical_bytes, object(), now_epoch=150)
     assert error.value.code is DiagnosticCode.AUTHORITY_INVALID
     valid = reconciliation_grant_local(authority, command, AdapterDescriptorV1("docker", "lookup", "1.0.0"))
     with pytest.raises(FoundationError) as error:
-        service.reconcile(command.canonical_bytes, valid, now_epoch=150, resume=object())
+        service.reconcile(command.canonical_bytes, valid, now_epoch=150, continuation=object())
     assert error.value.code is DiagnosticCode.AUTHORITY_INVALID
 
     class BadResolver:
         def resolve(self, request):
             return object()
 
-    service = ReconciliationServiceV1(repo, authority, BadResolver(), receipts)
+    service = ReconciliationServiceV1(repo, authority, BadResolver(), receipts, invalid)
     with pytest.raises(FoundationError) as error:
         service.reconcile(command.canonical_bytes, valid, now_epoch=150)
     assert error.value.code is DiagnosticCode.BINDING_MISMATCH
@@ -473,9 +476,9 @@ def test_same_absence_semantics_with_different_valid_proofs_are_compatible():
         def verify_finality(self, proof, record, receipt, *, now_epoch):
             return True
 
-    repo, authority, receipts, recovery, _ = environment(executor)
-    repo = InMemoryEffectRepositoryV2(receipts, recovery, AcceptFinality(), authority)
-    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, recovery, _ = environment(executor)
+    repo = InMemoryEffectRepositoryV2(receipts, invalid, recovery, AcceptFinality(), authority)
+    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
 
@@ -501,7 +504,7 @@ def test_same_absence_semantics_with_different_valid_proofs_are_compatible():
 def test_broker_resolver_boundary_is_closed_before_admission(resolver_value):
     command = stage_command()
     executor = Executor()
-    repo, authority, receipts, _, _ = environment(executor)
+    repo, authority, receipts, invalid, _, _ = environment(executor)
 
     class BadResolver:
         def resolve(self, request):
@@ -509,7 +512,7 @@ def test_broker_resolver_boundary_is_closed_before_admission(resolver_value):
                 raise resolver_value
             return resolver_value
 
-    broker = EffectBrokerV2(repo, BadResolver(), authority, receipts)
+    broker = EffectBrokerV2(repo, BadResolver(), authority, receipts, invalid)
     with pytest.raises(FoundationError) as error:
         broker.execute(command.canonical_bytes, execution_grant(authority, command), now_epoch=150)
     assert error.value.code is DiagnosticCode.BINDING_MISMATCH
@@ -520,8 +523,8 @@ def test_broker_resolver_boundary_is_closed_before_admission(resolver_value):
 def test_reconciliation_completion_malformed_result_never_returns_success_shape():
     command = stage_command()
     executor = bound_executor_local(command, Executor(ObservationDisposition.INDETERMINATE))
-    repo, authority, receipts, _, _ = environment(executor)
-    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
 
@@ -535,19 +538,19 @@ def test_reconciliation_completion_malformed_result_never_returns_success_shape(
 
     adapter = Adapter(observation_for(command))
     service = ReconciliationServiceV1(
-        MalformedCompletionRepository(), authority, AdapterResolver(adapter), receipts,
+        MalformedCompletionRepository(), authority, AdapterResolver(adapter), receipts, invalid,
     )
     grant = reconciliation_grant_local(authority, command, adapter.descriptor)
     with pytest.raises(FoundationError) as error:
         service.reconcile(command.canonical_bytes, grant, now_epoch=150)
-    assert error.value.code is DiagnosticCode.BINDING_MISMATCH
+    assert error.value.code is DiagnosticCode.AUTHORITY_INVALID
 
 
 def test_repository_acquire_reconciliation_outer_values_are_closed():
     command = stage_command()
     executor = bound_executor_local(command, Executor(ObservationDisposition.INDETERMINATE))
-    repo, authority, receipts, _, _ = environment(executor)
-    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts).execute(
+    repo, authority, receipts, invalid, _, _ = environment(executor)
+    EffectBrokerV2(repo, ExecutorResolver(executor), authority, receipts, invalid).execute(
         command.canonical_bytes, execution_grant(authority, command), now_epoch=150,
     )
     adapter = AdapterDescriptorV1("docker", "lookup", "1.0.0")
@@ -572,7 +575,7 @@ def test_repository_acquire_reconciliation_outer_values_are_closed():
 
     service = ReconciliationServiceV1(
         BadClaimRepository(), authority,
-        AdapterResolver(Adapter(observation_for(command))), receipts,
+        AdapterResolver(Adapter(observation_for(command))), receipts, invalid,
     )
     fresh_valid = reconciliation_grant_local(
         authority, command, adapter, grant_ref="fresh-valid",
@@ -584,7 +587,7 @@ def test_repository_acquire_reconciliation_outer_values_are_closed():
 
 def test_repository_acquire_missing_effect_is_closed_and_non_mutating():
     command = stage_command()
-    repo, authority, _, _, _ = environment(Executor())
+    repo, authority, _, invalid, _, _ = environment(Executor())
     adapter = AdapterDescriptorV1("docker", "lookup", "1.0.0")
     grant = reconciliation_grant_local(authority, command, adapter)
     with pytest.raises(FoundationError) as error:

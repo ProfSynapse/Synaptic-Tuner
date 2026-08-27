@@ -7,7 +7,7 @@ from tuner.execution.foundation_v2.executors import ExecutorDescriptorV1,Adapter
 from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.observations import ProviderObservationV1,ObservationDisposition
 from tuner.execution.foundation_v2.preparation import CanonicalPreparationV2
-from tuner.execution.foundation_v2.receipts import ReceiptAuthorityV1
+from tuner.execution.foundation_v2.receipts import InvalidEvidenceAuthorityV2, ReceiptAuthorityV2, ReceiptContentV2
 from tuner.execution.foundation_v2.references import ExecutionScopeV1,ProviderRunRefV1,CancellationRefV1,ProviderStageRefV1,ScopedProviderRunRefV1
 from tuner.execution.foundation_v2.repository import InMemoryEffectRepositoryV2
 D=tuple(c*64 for c in "123456789abcdef")
@@ -27,11 +27,9 @@ def observation_for(command,disposition=ObservationDisposition.FOUND,*,resolutio
         else:kw["cancellation"]=CancellationRefV1(command.operation.effect.cancel_target,command.to_dict()["cancellation"]["reason_digest"])
     return ProviderObservationV1(command.operation.effect.effect_id,command.digest,command.executor.digest,disposition,resolution_digest,result_epoch,finality_proof=finality_proof,**kw)
 def dispatch_receipt_content(command,observation,record):
-    from tuner.execution.foundation_v2.receipts import ReceiptContentV1
-    return ReceiptContentV1.from_observation(observation,source_kind="dispatch",source_owner_ref=record.grant.content.grant_ref,source_generation=1,source_ownership_epoch=record.dispatch_epoch,source_claim_digest=record.dispatch_source_digest)
+    return ReceiptContentV2.from_observation(observation,source_kind="dispatch",source_owner_ref=record.grant.content.grant_ref,source_generation=1,source_ownership_epoch=record.dispatch_epoch,source_claim_digest=record.dispatch_source_digest,source_grant_ref=record.grant.content.grant_ref,source_grant_digest=record.grant.authenticated_grant_digest)
 def reconciliation_receipt_content(observation,claim):
-    from tuner.execution.foundation_v2.receipts import ReceiptContentV1
-    return ReceiptContentV1.from_observation(observation,source_kind="reconciliation",source_owner_ref=claim.owner_ref,source_generation=claim.generation,source_ownership_epoch=claim.ownership_epoch,source_claim_digest=claim.claim_digest)
+    return ReceiptContentV2.from_observation(observation,source_kind="reconciliation",source_owner_ref=claim.owner_ref,source_generation=claim.generation,source_ownership_epoch=claim.ownership_epoch,source_claim_digest=claim.claim_digest,source_grant_ref=claim.grant_ref,source_grant_digest=claim.grant_digest)
 @dataclass(frozen=True,slots=True)
 class Proof:
     effect_id:str;command_digest:str;epoch:int;assertion:str;tag:str
@@ -74,5 +72,5 @@ class AdapterResolver:
     def __init__(self,adapter):self.adapter=adapter;self.calls=0
     def resolve(self,request):self.calls+=1;return mint_resolved_adapter(request,self.adapter)
 def environment(executor):
-    grant=GrantAuthorityV2("grants",b"g"*32);receipt=ReceiptAuthorityV1("receipts",b"r"*32);verifier=StrongVerifier();repo=InMemoryEffectRepositoryV2(receipt,verifier,verifier,grant);return repo,grant,receipt,verifier,ExecutorResolver(executor)
+    grant=GrantAuthorityV2("grants",b"g"*32);receipt=ReceiptAuthorityV2("receipts",b"r"*32);invalid=InvalidEvidenceAuthorityV2("invalid-evidence",b"i"*32);verifier=StrongVerifier();repo=InMemoryEffectRepositoryV2(receipt,invalid,verifier,verifier,grant);return repo,grant,receipt,invalid,verifier,ExecutorResolver(executor)
 def execution_grant(authority,command,ref="grant"):return authority.issue(command.canonical_bytes,grant_ref=ref,policy_digest=D[9],requirement_digest=D[10],not_before_epoch=100,expires_at_epoch=200)

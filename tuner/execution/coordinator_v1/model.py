@@ -17,7 +17,7 @@ from tuner.execution.foundation_v2.commands import parse_exact_command
 from tuner.execution.foundation_v2.executors import ExecutorDescriptorV1
 from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.observations import ObservationDisposition
-from tuner.execution.foundation_v2.receipts import AuthenticatedReceiptV1
+from tuner.execution.foundation_v2.receipts import AuthenticatedReceiptV2
 from tuner.execution.foundation_v2.repository import DispatchState, EffectRecordV2, EffectState
 from tuner.execution.foundation_v2.references import (
     CancellationRefV1, ExecutionScopeV1, ProviderStageRefV1, ScopedProviderRunRefV1,
@@ -114,6 +114,7 @@ class ReceiptFreshnessV1(str, Enum):
 @dataclass(frozen=True, slots=True)
 class ReceiptAssessmentV1:
     authenticated_receipt_digest: str
+    receipt_admission_digest: str
     source_kind: str
     source_owner_ref: str
     source_generation: int
@@ -122,13 +123,13 @@ class ReceiptAssessmentV1:
     finality_verified: bool
     generated_invalid_codes: tuple[str, ...]
     def __post_init__(self):
-        digest_text(self.authenticated_receipt_digest,"authenticated_receipt_digest");safe_ref(self.source_owner_ref,"source_owner_ref")
+        digest_text(self.authenticated_receipt_digest,"authenticated_receipt_digest");digest_text(self.receipt_admission_digest,"receipt_admission_digest");safe_ref(self.source_owner_ref,"source_owner_ref")
         exact_integer(self.source_generation,"source_generation",minimum=1);exact_integer(self.source_ownership_epoch,"source_ownership_epoch",minimum=1)
         if self.source_kind not in {"dispatch","reconciliation"} or type(self.freshness) is not ReceiptFreshnessV1 or type(self.finality_verified) is not bool or type(self.generated_invalid_codes) is not tuple:raise ValueError("receipt assessment fields invalid")
         expected=(() if self.freshness is ReceiptFreshnessV1.FRESH else ("stale_result",))
         if self.finality_verified and "finality_unproven" in self.generated_invalid_codes:raise ValueError("verified finality cannot be unproven")
         if tuple(x for x in self.generated_invalid_codes if x=="stale_result")!=expected:raise ValueError("freshness invalid-code mismatch")
-    def to_dict(self):return {"authenticated_receipt_digest":self.authenticated_receipt_digest,"source_kind":self.source_kind,"source_owner_ref":self.source_owner_ref,"source_generation":self.source_generation,"source_ownership_epoch":self.source_ownership_epoch,"freshness":self.freshness.value,"finality_verified":self.finality_verified,"generated_invalid_codes":list(self.generated_invalid_codes)}
+    def to_dict(self):return {"authenticated_receipt_digest":self.authenticated_receipt_digest,"receipt_admission_digest":self.receipt_admission_digest,"source_kind":self.source_kind,"source_owner_ref":self.source_owner_ref,"source_generation":self.source_generation,"source_ownership_epoch":self.source_ownership_epoch,"freshness":self.freshness.value,"finality_verified":self.finality_verified,"generated_invalid_codes":list(self.generated_invalid_codes)}
 
 @dataclass(frozen=True, slots=True)
 class FoundationRecordAssessmentContentV1:
@@ -141,6 +142,7 @@ class FoundationRecordAssessmentContentV1:
     authenticated_receipt_digests: tuple[str, ...]
     terminal_content_digests: tuple[str, ...]
     receipt_assessments: tuple[ReceiptAssessmentV1, ...]
+    invalid_evidence_admission_digests: tuple[str, ...]
     invalid_codes: tuple[str, ...]
     assessor_ref: str
     assessor_version: str
@@ -151,7 +153,9 @@ class FoundationRecordAssessmentContentV1:
         for n in ("command_digest","command_bytes_digest","foundation_record_digest","record_evidence_digest"):digest_text(getattr(self,n),n)
         if any(type(x) is not ReceiptAssessmentV1 for x in self.receipt_assessments):raise TypeError("receipt assessments must be exact")
         if tuple(x.authenticated_receipt_digest for x in self.receipt_assessments)!=self.authenticated_receipt_digests:raise ValueError("assessment order differs from record receipts")
-    def to_dict(self):return {"schema_version":self.schema_version,"effect_id":self.effect_id,"command_digest":self.command_digest,"command_bytes_digest":self.command_bytes_digest,"foundation_record_digest":self.foundation_record_digest,"record_evidence_digest":self.record_evidence_digest,"authenticated_receipt_digests":list(self.authenticated_receipt_digests),"terminal_content_digests":list(self.terminal_content_digests),"receipt_assessments":[x.to_dict() for x in self.receipt_assessments],"invalid_codes":list(self.invalid_codes),"assessor_ref":self.assessor_ref,"assessor_version":self.assessor_version,"assessed_at":self.assessed_at}
+        if type(self.invalid_evidence_admission_digests) is not tuple:raise TypeError("invalid evidence admission history must be tuple")
+        for value in self.invalid_evidence_admission_digests:digest_text(value,"invalid_evidence_admission_digest")
+    def to_dict(self):return {"schema_version":self.schema_version,"effect_id":self.effect_id,"command_digest":self.command_digest,"command_bytes_digest":self.command_bytes_digest,"foundation_record_digest":self.foundation_record_digest,"record_evidence_digest":self.record_evidence_digest,"authenticated_receipt_digests":list(self.authenticated_receipt_digests),"terminal_content_digests":list(self.terminal_content_digests),"receipt_assessments":[x.to_dict() for x in self.receipt_assessments],"invalid_evidence_admission_digests":list(self.invalid_evidence_admission_digests),"invalid_codes":list(self.invalid_codes),"assessor_ref":self.assessor_ref,"assessor_version":self.assessor_version,"assessed_at":self.assessed_at}
     @property
     def content_digest(self):return domain_digest("synaptic-foundation-record-assessment-content/v1",canonical_bytes(self.to_dict()))
 
@@ -174,9 +178,9 @@ class AuthenticatedFoundationRecordAssessmentV1:
         if set(doc)!=expected or doc["schema_version"]!="synaptic-authenticated-foundation-record-assessment/v1" or not isinstance(doc["content"],dict):raise ValueError("assessment envelope invalid")
         content=dict(doc["content"]);claimed=content.pop("content_digest");assessments=[]
         for value in content["receipt_assessments"]:
-            if not isinstance(value,dict) or set(value)!={"authenticated_receipt_digest","source_kind","source_owner_ref","source_generation","source_ownership_epoch","freshness","finality_verified","generated_invalid_codes"}:raise ValueError("receipt assessment invalid")
-            assessments.append(ReceiptAssessmentV1(value["authenticated_receipt_digest"],value["source_kind"],value["source_owner_ref"],value["source_generation"],value["source_ownership_epoch"],ReceiptFreshnessV1(value["freshness"]),value["finality_verified"],tuple(value["generated_invalid_codes"])))
-        content["receipt_assessments"]=tuple(assessments);content["authenticated_receipt_digests"]=tuple(content["authenticated_receipt_digests"]);content["terminal_content_digests"]=tuple(content["terminal_content_digests"]);content["invalid_codes"]=tuple(content["invalid_codes"])
+            if not isinstance(value,dict) or set(value)!={"authenticated_receipt_digest","receipt_admission_digest","source_kind","source_owner_ref","source_generation","source_ownership_epoch","freshness","finality_verified","generated_invalid_codes"}:raise ValueError("receipt assessment invalid")
+            assessments.append(ReceiptAssessmentV1(value["authenticated_receipt_digest"],value["receipt_admission_digest"],value["source_kind"],value["source_owner_ref"],value["source_generation"],value["source_ownership_epoch"],ReceiptFreshnessV1(value["freshness"]),value["finality_verified"],tuple(value["generated_invalid_codes"])))
+        content["receipt_assessments"]=tuple(assessments);content["authenticated_receipt_digests"]=tuple(content["authenticated_receipt_digests"]);content["terminal_content_digests"]=tuple(content["terminal_content_digests"]);content["invalid_evidence_admission_digests"]=tuple(content["invalid_evidence_admission_digests"]);content["invalid_codes"]=tuple(content["invalid_codes"])
         owned_content=FoundationRecordAssessmentContentV1(**content)
         if claimed!=owned_content.content_digest:raise ValueError("assessment content digest mismatch")
         owned=cls(owned_content,doc["authority_ref"],doc["key_ref"],doc["tag"])
@@ -232,7 +236,7 @@ def _fresh_found_reference(binding,digest,kind):
     snapshot=parse_canonical_object(binding.canonical_snapshot_bytes,name="foundation snapshot")
     receipts=snapshot.get("receipts")
     if type(receipts) is not list or index>=len(receipts):return None
-    receipt=AuthenticatedReceiptV1.parse(canonical_bytes(receipts[index]))
+    receipt=AuthenticatedReceiptV2.parse(canonical_bytes(receipts[index]))
     if receipt.authenticated_receipt_digest!=digest or receipt.content.disposition is not ObservationDisposition.FOUND:return None
     return {EffectKind.STAGE:receipt.content.stage_ref,EffectKind.SUBMIT:receipt.content.provider_run,EffectKind.CANCEL:receipt.content.cancellation}[kind]
 

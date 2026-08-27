@@ -22,6 +22,11 @@ class AuthenticatedGrantV2:
     def __post_init__(self):
         if type(self.content) is not GrantContentV2:raise TypeError("exact grant content required")
         safe_ref(self.authority_ref,"authority_ref");digest_text(self.tag,"tag")
+    @property
+    def canonical_bytes(self):
+        return canonical_bytes({"schema_version":"synaptic-authenticated-grant/v3","content":self.content.to_dict(),"authority_ref":self.authority_ref,"tag":self.tag})
+    @property
+    def authenticated_grant_digest(self):return domain_digest("synaptic-authenticated-grant/v3",self.canonical_bytes)
 @dataclass(frozen=True,slots=True)
 class ReconciliationGrantContentV1:
     grant_ref:str;command_digest:str;effect_id:str;preparation_digest:str;adapter_digest:str;provider_id:str;profile_ref:str;account_ref:str;namespace_ref:str;owner_ref:str;generation:int;ownership_epoch:int;policy_digest:str;requirement_digest:str;not_before_epoch:int;expires_at_epoch:int;authority_epoch:int;revocation_generation:int
@@ -39,6 +44,11 @@ class AuthenticatedReconciliationGrantV1:
     def __post_init__(self):
         if type(self.content) is not ReconciliationGrantContentV1:raise TypeError("exact reconciliation content required")
         safe_ref(self.authority_ref,"authority_ref");digest_text(self.tag,"tag")
+    @property
+    def canonical_bytes(self):
+        return canonical_bytes({"schema_version":"synaptic-authenticated-reconciliation-grant/v2","content":self.content.to_dict(),"authority_ref":self.authority_ref,"tag":self.tag})
+    @property
+    def authenticated_grant_digest(self):return domain_digest("synaptic-authenticated-reconciliation-grant/v2",self.canonical_bytes)
 class GrantAuthorityV2:
     __slots__=("authority_ref","_key","epoch","revocation_generation","_revoked")
     def __init__(self,authority_ref,key,*,epoch=1,revocation_generation=0):
@@ -56,6 +66,14 @@ class GrantAuthorityV2:
             c=parse_exact_command(bytes(command_bytes));p=c.preparation;e=c.operation.effect;x=grant.content
             rebuilt=GrantContentV2(x.grant_ref,c.digest,c.operation.digest,e.effect_id,p.preparation_digest,c.executor.digest,p.provider.provider_id,p.provider.profile_ref,p.scope.account_ref,p.scope.namespace_ref,e.kind.value,c.payload.payload_kind,x.policy_digest,x.requirement_digest,x.not_before_epoch,x.expires_at_epoch,x.authority_epoch,x.revocation_generation)
             return x==rebuilt and grant.authority_ref==self.authority_ref and x.authority_epoch==self.epoch and x.revocation_generation==self.revocation_generation and x.grant_ref not in self._revoked and x.not_before_epoch<=now_epoch<x.expires_at_epoch and hmac.compare_digest(grant.tag,self._tag(b"grant-v3\0",x.digest))
+        except Exception:return False
+    def authenticate(self,grant,command_bytes):
+        try:
+            if type(grant) is not AuthenticatedGrantV2 or type(grant.content) is not GrantContentV2 or type(command_bytes) is not bytes:return False
+            c=parse_exact_command(command_bytes);p=c.preparation;e=c.operation.effect;x=grant.content
+            rebuilt=GrantContentV2(x.grant_ref,c.digest,c.operation.digest,e.effect_id,p.preparation_digest,c.executor.digest,p.provider.provider_id,p.provider.profile_ref,p.scope.account_ref,p.scope.namespace_ref,e.kind.value,c.payload.payload_kind,x.policy_digest,x.requirement_digest,x.not_before_epoch,x.expires_at_epoch,x.authority_epoch,x.revocation_generation)
+            owned=AuthenticatedGrantV2(rebuilt,grant.authority_ref,grant.tag)
+            return x==rebuilt and grant==owned and grant.canonical_bytes==owned.canonical_bytes and grant.authority_ref==self.authority_ref and hmac.compare_digest(grant.tag,self._tag(b"grant-v3\0",rebuilt.digest))
         except Exception:return False
     def issue_reconciliation(self,content):
         if type(content) is not ReconciliationGrantContentV1:raise TypeError("exact reconciliation content required")

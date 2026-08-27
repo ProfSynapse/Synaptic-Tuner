@@ -8,7 +8,7 @@ from tuner.execution.foundation_v2.commands import parse_exact_command
 from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.observations import ObservationDisposition
 from tuner.execution.foundation_v2.preparation import CanonicalPreparationV2
-from tuner.execution.foundation_v2.receipts import AuthenticatedReceiptV1
+from tuner.execution.foundation_v2.receipts import AuthenticatedInvalidEvidenceV2, AuthenticatedReceiptV2
 from tuner.execution.foundation_v2.references import CancellationRefV1
 from tuner.execution.foundation_v2.repository import DispatchState, EffectRecordV2, EffectState, ReconciliationOwnershipV2
 from .model import (ArtifactManifestV1,AuthenticatedArtifactVerificationReceiptV1,AuthenticatedFoundationRecordAssessmentV1,AuthenticatedProviderRunObservationV1,BoundCancellationRefV1,
@@ -19,7 +19,7 @@ from .model import (ArtifactManifestV1,AuthenticatedArtifactVerificationReceiptV
 class WorkflowTransitionError(ValueError): pass
 
 def _claim_doc(c):
- return {"owner_ref":c.owner_ref,"generation":c.generation,"ownership_epoch":c.ownership_epoch,"claimed_at_epoch":c.claimed_at_epoch,"target_digest":c.target_digest,"grant_ref":c.grant_ref,"active":c.active,"completed":c.completed,"claim_digest":c.claim_digest}
+ return {"owner_ref":c.owner_ref,"generation":c.generation,"ownership_epoch":c.ownership_epoch,"claimed_at_epoch":c.claimed_at_epoch,"target_digest":c.target_digest,"grant_ref":c.grant_ref,"grant_digest":c.grant_digest,"grant_lineage":[x.to_dict()|{"binding_digest":x.binding_digest} for x in c.grant_lineage],"active":c.active,"completed":c.completed,"claim_digest":c.claim_digest}
 
 def _validate_claims(record):
  claims=record.reconciliation_claims
@@ -49,7 +49,8 @@ def _derive_foundation(intent,record,assessment,authenticator,assessor,provider_
  if record.attempt_count!=1 or record.dispatch_epoch!=1: raise ValueError("foundation attempt and dispatch epoch must equal one")
  if record.dispatch in {DispatchState.OWNED_NOT_STARTED,DispatchState.OWNED_IN_FLIGHT}: raise ValueError("foundation dispatch is not stable")
  if type(record.dispatch) is not DispatchState or type(record.state) is not EffectState: raise TypeError("foundation enums must be exact")
- if type(record.results) is not tuple or type(record.terminal_content_digests) is not tuple or type(record.invalid_codes) is not tuple: raise TypeError("foundation histories must be exact tuples")
+ if type(record.results) is not tuple or type(record.receipt_admissions) is not tuple or type(record.invalid_evidence) is not tuple or type(record.invalid_evidence_admissions) is not tuple or type(record.terminal_content_digests) is not tuple or type(record.invalid_codes) is not tuple: raise TypeError("foundation histories must be exact tuples")
+ if len(record.results)!=len(record.receipt_admissions) or len(record.invalid_evidence)!=len(record.invalid_evidence_admissions):raise ValueError("foundation evidence ledgers lack exact cardinality")
  if any(type(c) is not DiagnosticCode for c in record.invalid_codes): raise TypeError("foundation invalid codes must be exact")
  claims=_validate_claims(record)
  if claims and record.dispatch not in {DispatchState.RELINQUISHED,DispatchState.QUIESCENCE_PROVEN}: raise ValueError("claims require stable reconciliation dispatch")
@@ -69,18 +70,19 @@ def _derive_foundation(intent,record,assessment,authenticator,assessor,provider_
  receipts=[];seen=set();terminals=[];derived_invalid=[];derived_state=EffectState.UNRESOLVED;authenticated_absences=set();fresh_found_receipts=[]
  scope=(prep.provider.provider_id,prep.provider.profile_ref,prep.scope.account_ref,prep.scope.namespace_ref)
  for index,supplied in enumerate(record.results):
-  if type(supplied) is not AuthenticatedReceiptV1: raise TypeError("receipt must be exact")
-  receipt=AuthenticatedReceiptV1.parse(supplied.canonical_bytes)
+  if type(supplied) is not AuthenticatedReceiptV2: raise TypeError("receipt must be exact")
+  receipt=AuthenticatedReceiptV2.parse(supplied.canonical_bytes)
   if receipt!=supplied or receipt.canonical_bytes!=supplied.canonical_bytes or authenticator.authenticate_receipt(receipt) is not True: raise ValueError("receipt authentication failed")
   if receipt.authenticated_receipt_digest in seen: raise ValueError("duplicate authenticated receipt")
   seen.add(receipt.authenticated_receipt_digest);c=receipt.content
   if (c.command_digest,c.effect_id)!=(intent.command_digest,intent.effect_id) or c.result_epoch!=c.source_ownership_epoch: raise ValueError("receipt command/epoch mismatch")
   if c.source_kind=="dispatch":
-   if (c.source_owner_ref,c.source_generation,c.source_ownership_epoch,c.source_claim_digest)!=(gc.grant_ref,1,record.dispatch_epoch,record.dispatch_source_digest): raise ValueError("dispatch receipt ownership mismatch")
-  elif not any((x.owner_ref,x.generation,x.ownership_epoch,x.claim_digest)==(c.source_owner_ref,c.source_generation,c.source_ownership_epoch,c.source_claim_digest) for x in claims): raise ValueError("reconciliation receipt ownership mismatch")
+   if (c.source_owner_ref,c.source_generation,c.source_ownership_epoch,c.source_claim_digest,c.source_grant_ref,c.source_grant_digest)!=(gc.grant_ref,1,record.dispatch_epoch,record.dispatch_source_digest,gc.grant_ref,grant.authenticated_grant_digest): raise ValueError("dispatch receipt ownership mismatch")
+  elif not any((x.owner_ref,x.generation,x.ownership_epoch,x.claim_digest)==(c.source_owner_ref,c.source_generation,c.source_ownership_epoch,c.source_claim_digest) and any(g.grant_ref==c.source_grant_ref and g.grant_digest==c.source_grant_digest for g in x.grant_lineage) for x in claims): raise ValueError("reconciliation receipt ownership mismatch")
   if index>=len(ac.receipt_assessments):raise ValueError("assessment receipt order incomplete")
   ra=ac.receipt_assessments[index]
-  if (ra.authenticated_receipt_digest,ra.source_kind,ra.source_owner_ref,ra.source_generation,ra.source_ownership_epoch)!=(receipt.authenticated_receipt_digest,c.source_kind,c.source_owner_ref,c.source_generation,c.source_ownership_epoch):raise ValueError("assessment receipt source/order mismatch")
+  admission=record.receipt_admissions[index]
+  if (ra.authenticated_receipt_digest,ra.receipt_admission_digest,ra.source_kind,ra.source_owner_ref,ra.source_generation,ra.source_ownership_epoch)!=(receipt.authenticated_receipt_digest,admission.admission_digest,c.source_kind,c.source_owner_ref,c.source_generation,c.source_ownership_epoch):raise ValueError("assessment receipt source/order mismatch")
   if c.source_ownership_epoch>current_epoch:raise ValueError("receipt source epoch exceeds current authority")
   stale=ra.freshness is ReceiptFreshnessV1.STALE
   generated=tuple(DiagnosticCode(x) for x in ra.generated_invalid_codes);derived_invalid.extend(generated)
@@ -103,7 +105,6 @@ def _derive_foundation(intent,record,assessment,authenticator,assessor,provider_
   expected_codes=[]
   if stale:expected_codes.append(DiagnosticCode.STALE_RESULT)
   if c.disposition is ObservationDisposition.DEFINITELY_ABSENT and not ra.finality_verified:expected_codes.append(DiagnosticCode.FINALITY_UNPROVEN)
-  if DiagnosticCode.EVIDENCE_INVALID in generated:expected_codes.append(DiagnosticCode.EVIDENCE_INVALID)
   if tuple(generated)!=tuple(expected_codes):raise ValueError("assessment generated invalid codes disagree with receipt")
   if terminal is not None:
    if terminal not in terminals:
@@ -115,19 +116,37 @@ def _derive_foundation(intent,record,assessment,authenticator,assessor,provider_
   receipts.append(receipt)
  if len(ac.receipt_assessments)!=len(receipts):raise ValueError("assessment receipt count mismatch")
  assessed_invalid=tuple(DiagnosticCode(x) for x in ac.invalid_codes)
- if tuple(x for x in derived_invalid if x is not DiagnosticCode.EVIDENCE_INVALID)!=tuple(x for x in assessed_invalid if x is not DiagnosticCode.EVIDENCE_INVALID):raise ValueError("assessment invalid provenance mismatch")
+ invalid_digests=[]
+ invalid_evidence_digests=set()
+ prior=None
+ for index,(supplied,admission) in enumerate(zip(record.invalid_evidence,record.invalid_evidence_admissions,strict=True),1):
+  if type(supplied) is not AuthenticatedInvalidEvidenceV2:raise TypeError("invalid evidence must be exact")
+  evidence=AuthenticatedInvalidEvidenceV2.parse(supplied.canonical_bytes)
+  if evidence!=supplied or authenticator.authenticate_invalid_evidence(evidence) is not True:raise ValueError("invalid evidence authentication failed")
+  if evidence.authenticated_evidence_digest in invalid_evidence_digests:raise ValueError("duplicate invalid evidence")
+  invalid_evidence_digests.add(evidence.authenticated_evidence_digest)
+  if (admission.authenticated_evidence_digest,admission.sequence,admission.prior_admission_digest)!=(evidence.authenticated_evidence_digest,index,prior):raise ValueError("invalid evidence admission chain mismatch")
+  if (evidence.content.effect_id,evidence.content.command_digest)!=(intent.effect_id,intent.command_digest):raise ValueError("invalid evidence command mismatch")
+  ec=evidence.content
+  site_kind="dispatch" if ec.site.value.startswith("dispatch_") else "reconciliation"
+  if ec.source_kind!=site_kind:raise ValueError("invalid evidence site/source mismatch")
+  if ec.source_kind=="dispatch":
+   if (ec.source_owner_ref,ec.source_generation,ec.source_ownership_epoch,ec.source_claim_digest,ec.source_grant_ref,ec.source_grant_digest)!=(gc.grant_ref,1,record.dispatch_epoch,record.dispatch_source_digest,gc.grant_ref,grant.authenticated_grant_digest):raise ValueError("invalid dispatch evidence authority mismatch")
+  elif not any((x.owner_ref,x.generation,x.ownership_epoch,x.claim_digest)==(ec.source_owner_ref,ec.source_generation,ec.source_ownership_epoch,ec.source_claim_digest) and any(g.grant_ref==ec.source_grant_ref and g.grant_digest==ec.source_grant_digest for g in x.grant_lineage) for x in claims):raise ValueError("invalid reconciliation evidence authority mismatch")
+  prior=admission.admission_digest;invalid_digests.append(admission.admission_digest)
+ if tuple(invalid_digests)!=ac.invalid_evidence_admission_digests:raise ValueError("assessment invalid evidence projection mismatch")
+ if tuple(derived_invalid)!=tuple(x for x in assessed_invalid if x is not DiagnosticCode.EVIDENCE_INVALID) or sum(x is DiagnosticCode.EVIDENCE_INVALID for x in assessed_invalid)!=len(invalid_digests):raise ValueError("assessment invalid provenance mismatch")
  if any(x not in {DiagnosticCode.STALE_RESULT,DiagnosticCode.FINALITY_UNPROVEN,DiagnosticCode.EVIDENCE_INVALID} for x in assessed_invalid):raise ValueError("assessment generated unsupported invalid code")
- derived_invalid=list(assessed_invalid)
- if derived_state is EffectState.UNRESOLVED and DiagnosticCode.EVIDENCE_INVALID in derived_invalid:
+ if derived_state is EffectState.UNRESOLVED and DiagnosticCode.EVIDENCE_INVALID in assessed_invalid:
   derived_state=EffectState.INDETERMINATE
  if tuple(terminals)!=record.terminal_content_digests or derived_state is not record.state: raise ValueError("supplied foundation terminal/state disagrees with authenticated reduction")
  if record.state in {EffectState.FOUND,EffectState.DEFINITELY_ABSENT,EffectState.CONTRADICTED} and record.reconciliation is not None and record.reconciliation.active:raise ValueError("terminal foundation state retains active reconciliation")
- if tuple(derived_invalid)!=record.invalid_codes or tuple(x.value for x in record.invalid_codes)!=ac.invalid_codes: raise ValueError("foundation invalid-code history disagrees with assessment")
- grant_doc={"schema_version":"synaptic-authenticated-grant/v3","content":gc.to_dict(),"authority_ref":grant.authority_ref,"tag":grant.tag}
- snapshot={"schema_version":"synaptic-foundation-effect-snapshot/v1","command":command.to_dict(),"command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",record.command_bytes),"grant":grant_doc,"dispatch":record.dispatch.value,"state":record.state.value,"attempt_count":record.attempt_count,"dispatch_epoch":record.dispatch_epoch,"receipts":[parse_canonical_object(x.canonical_bytes,name="receipt") for x in receipts],"terminal_content_digests":list(record.terminal_content_digests),"invalid_codes":[x.value for x in record.invalid_codes],"reconciliation":None if record.reconciliation is None else _claim_doc(record.reconciliation),"reconciliation_claims":[_claim_doc(x) for x in claims],"b2_record_digest":record.record_digest}
+ if record.invalid_codes!=assessed_invalid or tuple(x.value for x in record.invalid_codes)!=ac.invalid_codes: raise ValueError("foundation invalid-code history disagrees with assessment")
+ grant_doc=parse_canonical_object(grant.canonical_bytes,name="authenticated grant")
+ snapshot={"schema_version":"synaptic-foundation-effect-snapshot/v1","command":command.to_dict(),"command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",record.command_bytes),"grant":grant_doc,"dispatch":record.dispatch.value,"state":record.state.value,"attempt_count":record.attempt_count,"dispatch_epoch":record.dispatch_epoch,"receipts":[parse_canonical_object(x.canonical_bytes,name="receipt") for x in receipts],"receipt_admissions":[x.to_dict()|{"admission_digest":x.admission_digest} for x in record.receipt_admissions],"invalid_evidence":[parse_canonical_object(x.canonical_bytes,name="invalid evidence") for x in record.invalid_evidence],"invalid_evidence_admissions":[x.to_dict()|{"admission_digest":x.admission_digest} for x in record.invalid_evidence_admissions],"terminal_content_digests":list(record.terminal_content_digests),"invalid_codes":[x.value for x in record.invalid_codes],"reconciliation":None if record.reconciliation is None else _claim_doc(record.reconciliation),"reconciliation_claims":[_claim_doc(x) for x in claims],"b2_record_digest":record.record_digest}
  record_evidence_digest=domain_digest("synaptic-foundation-record-evidence/v1",canonical_bytes(snapshot))
- projection=(ac.effect_id,ac.command_digest,ac.command_bytes_digest,ac.foundation_record_digest,ac.record_evidence_digest,ac.authenticated_receipt_digests,ac.terminal_content_digests)
- expected_projection=(intent.effect_id,intent.command_digest,snapshot["command_bytes_digest"],record.record_digest,record_evidence_digest,tuple(x.authenticated_receipt_digest for x in receipts),record.terminal_content_digests)
+ projection=(ac.effect_id,ac.command_digest,ac.command_bytes_digest,ac.foundation_record_digest,ac.record_evidence_digest,ac.authenticated_receipt_digests,ac.terminal_content_digests,ac.invalid_evidence_admission_digests)
+ expected_projection=(intent.effect_id,intent.command_digest,snapshot["command_bytes_digest"],record.record_digest,record_evidence_digest,tuple(x.authenticated_receipt_digest for x in receipts),record.terminal_content_digests,tuple(x.admission_digest for x in record.invalid_evidence_admissions))
  if projection!=expected_projection:raise ValueError("foundation assessment record projection mismatch")
  snapshot_bytes=canonical_bytes(snapshot);snapshot_digest=domain_digest("synaptic-foundation-effect-snapshot/v1",snapshot_bytes);grant_digest=domain_digest("synaptic-authenticated-effect-grant/v1",canonical_bytes(grant_doc));command_digest=domain_digest("synaptic-foundation-command-bytes/v1",record.command_bytes)
  binding_doc={"kind":intent.kind.value,"effect_id":intent.effect_id,"command_digest":intent.command_digest,"command_bytes_digest":command_digest,"preparation_digest":prep.preparation_digest,"grant_digest":grant_digest,"foundation_record_digest":record.record_digest,"snapshot_digest":snapshot_digest,"assessment_digest":parsed_assessment.authenticated_assessment_digest}
@@ -163,7 +182,7 @@ def _replay_or_validate_new(intent,binding,outcome):
   old=intent.foundation_bindings[-1];a=parse_canonical_object(old.canonical_snapshot_bytes,name="old snapshot");b=parse_canonical_object(binding.canonical_snapshot_bytes,name="new snapshot")
   for name in ("command","command_bytes_digest","grant","attempt_count","dispatch_epoch"):
    if a[name]!=b[name]: raise WorkflowTransitionError(f"foundation {name} changed")
-  for name in ("receipts","terminal_content_digests","invalid_codes"):
+  for name in ("receipts","receipt_admissions","invalid_evidence","invalid_evidence_admissions","terminal_content_digests","invalid_codes"):
    if b[name][:len(a[name])]!=a[name]: raise WorkflowTransitionError(f"foundation {name} is nonmonotonic")
   old_claims=a["reconciliation_claims"];new_claims=b["reconciliation_claims"]
   if old_claims!=new_claims:
@@ -172,8 +191,13 @@ def _replay_or_validate_new(intent,binding,outcome):
     if any(before[x]!=after[x] for x in identity):raise WorkflowTransitionError("reconciliation identity changed")
     transition=(before["active"],before["completed"],after["active"],after["completed"])
     if transition not in {(True,False,False,False),(False,False,True,False),(True,False,False,True)}:raise WorkflowTransitionError("reconciliation replacement invalid")
-    if transition==(False,False,True,False) and before["grant_ref"]==after["grant_ref"]:raise WorkflowTransitionError("resume must change grant")
-    if transition!=(False,False,True,False) and before["grant_ref"]!=after["grant_ref"]:raise WorkflowTransitionError("interrupt/completion changed grant")
+    before_lineage=before["grant_lineage"];after_lineage=after["grant_lineage"]
+    if transition==(False,False,True,False):
+     if before["grant_ref"]==after["grant_ref"] or before["grant_digest"]==after["grant_digest"]:raise WorkflowTransitionError("resume must change grant")
+     if len(after_lineage)!=len(before_lineage)+1 or after_lineage[:-1]!=before_lineage:raise WorkflowTransitionError("resume must append exactly one grant binding")
+     leaf=after_lineage[-1]
+     if leaf["prior_binding_digest"]!=before_lineage[-1]["binding_digest"] or (after["grant_ref"],after["grant_digest"])!=(leaf["grant_ref"],leaf["grant_digest"]):raise WorkflowTransitionError("resume grant binding is not chained to retained lineage")
+    elif before["grant_ref"]!=after["grant_ref"] or before["grant_digest"]!=after["grant_digest"] or before_lineage!=after_lineage:raise WorkflowTransitionError("interrupt/completion changed grant lineage")
    elif len(new_claims)==len(old_claims)+1 and new_claims[:-1]==old_claims: pass
    else:raise WorkflowTransitionError("reconciliation history regressed")
   dispatch={"orphaned_unproven":{"orphaned_unproven","quiescence_proven"},"quiescence_proven":{"quiescence_proven"},"relinquished":{"relinquished"}}
@@ -256,7 +280,7 @@ def _validate_read_request(c,request):
  record=request.foundation_record;grant=record.grant
  if type(grant) is not AuthenticatedGrantV2 or type(grant.content) is not GrantContentV2:raise WorkflowTransitionError("read request foundation grant is not exact")
  claims=record.reconciliation_claims
- snapshot={"schema_version":"synaptic-foundation-effect-snapshot/v1","command":parse_exact_command(record.command_bytes).to_dict(),"command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",record.command_bytes),"grant":{"schema_version":"synaptic-authenticated-grant/v3","content":grant.content.to_dict(),"authority_ref":grant.authority_ref,"tag":grant.tag},"dispatch":record.dispatch.value,"state":record.state.value,"attempt_count":record.attempt_count,"dispatch_epoch":record.dispatch_epoch,"receipts":[parse_canonical_object(x.canonical_bytes,name="receipt") for x in record.results],"terminal_content_digests":list(record.terminal_content_digests),"invalid_codes":[x.value for x in record.invalid_codes],"reconciliation":None if record.reconciliation is None else _claim_doc(record.reconciliation),"reconciliation_claims":[_claim_doc(x) for x in claims],"b2_record_digest":record.record_digest}
+ snapshot={"schema_version":"synaptic-foundation-effect-snapshot/v1","command":parse_exact_command(record.command_bytes).to_dict(),"command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",record.command_bytes),"grant":parse_canonical_object(grant.canonical_bytes,name="authenticated grant"),"dispatch":record.dispatch.value,"state":record.state.value,"attempt_count":record.attempt_count,"dispatch_epoch":record.dispatch_epoch,"receipts":[parse_canonical_object(x.canonical_bytes,name="receipt") for x in record.results],"receipt_admissions":[x.to_dict()|{"admission_digest":x.admission_digest} for x in record.receipt_admissions],"invalid_evidence":[parse_canonical_object(x.canonical_bytes,name="invalid evidence") for x in record.invalid_evidence],"invalid_evidence_admissions":[x.to_dict()|{"admission_digest":x.admission_digest} for x in record.invalid_evidence_admissions],"terminal_content_digests":list(record.terminal_content_digests),"invalid_codes":[x.value for x in record.invalid_codes],"reconciliation":None if record.reconciliation is None else _claim_doc(record.reconciliation),"reconciliation_claims":[_claim_doc(x) for x in claims],"b2_record_digest":record.record_digest}
  if canonical_bytes(snapshot)!=binding.canonical_snapshot_bytes or record.record_digest!=binding.foundation_record_digest:raise WorkflowTransitionError("read request Foundation record differs from retained evidence")
  if request.assessment.canonical_bytes!=binding.canonical_assessment_bytes or request.assessment.authenticated_assessment_digest!=binding.assessment_digest:raise WorkflowTransitionError("read request assessment differs from retained evidence")
  if request.foundation_binding!=binding or request.foundation_outcome!=outcome:raise WorkflowTransitionError("read request binding/outcome differs from retained evidence")

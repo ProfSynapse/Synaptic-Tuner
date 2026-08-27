@@ -21,7 +21,7 @@ from tuner.execution.foundation_v2.commands import CanonicalProviderPayloadV1
 from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.preparation import CanonicalPreparationV2
 from tuner.execution.foundation_v2.repository import EffectRecordV2
-from tuner.execution.foundation_v2.receipts import AuthenticatedReceiptV1
+from tuner.execution.foundation_v2.receipts import AuthenticatedInvalidEvidenceV2, AuthenticatedReceiptV2
 
 from .model import (
     ArtifactManifestV1,
@@ -143,7 +143,8 @@ class FoundationEvidenceAuthenticatorPortV1(Protocol):
     def authenticate_grant(
         self, grant: AuthenticatedGrantV2, command_bytes: bytes
     ) -> bool: ...
-    def authenticate_receipt(self, receipt: AuthenticatedReceiptV1) -> bool: ...
+    def authenticate_receipt(self, receipt: AuthenticatedReceiptV2) -> bool: ...
+    def authenticate_invalid_evidence(self, evidence: AuthenticatedInvalidEvidenceV2) -> bool: ...
 
 class FoundationRecordAssessmentPortV1(Protocol):
     def assess(self, record: EffectRecordV2) -> AuthenticatedFoundationRecordAssessmentV1: ...

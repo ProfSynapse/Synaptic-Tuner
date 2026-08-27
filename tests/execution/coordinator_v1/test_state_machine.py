@@ -19,9 +19,9 @@ from tuner.execution.foundation_v2.commands import CanonicalProviderPayloadV1, b
 from tuner.execution.foundation_v2.executors import ExecutorDescriptorV1
 from tuner.execution.foundation_v2.observations import ObservationDisposition
 from tuner.execution.foundation_v2.preparation import CanonicalPreparationV2
-from tuner.execution.foundation_v2.receipts import ReceiptAuthorityV1, ReceiptContentV1
+from tuner.execution.foundation_v2.receipts import ReceiptAuthorityV2, ReceiptContentV2
 from tuner.execution.foundation_v2.references import CancellationRefV1, ExecutionScopeV1, ProviderRunRefV1, ProviderStageRefV1, ScopedProviderRunRefV1, StagePredecessorV2
-from tuner.execution.foundation_v2.repository import DispatchState, EffectRecordV2, EffectState
+from tuner.execution.foundation_v2.repository import DispatchState, EffectRecordV2, EffectState, ReceiptAdmissionV2, ReceiptFreshnessV2
 
 D = tuple(c * 64 for c in "123456789abcdef")
 PROVIDER = ProviderRef("provider-a", "profile-a"); SCOPE = ExecutionScopeV1("account-a", "namespace-a")
@@ -46,6 +46,7 @@ class Auth:
  def __init__(self, allowed=True): self.allowed=allowed
  def authenticate_grant(self, value, command_bytes): return self.allowed and type(command_bytes) is bytes
  def authenticate_receipt(self, value): return self.allowed
+ def authenticate_invalid_evidence(self,value):return self.allowed
 class AssessmentAuth:
  def __init__(self,allowed=True):self.allowed=allowed
  def authenticate(self,value):return self.allowed
@@ -55,33 +56,38 @@ class Verifier:
 
 def record(effect, state, reference=None):
  grant=GrantAuthorityV2("grant-authority",b"g"*32).issue(effect.canonical_command_bytes,grant_ref=f"grant-{effect.kind.value}",policy_digest=D[10],requirement_digest=D[11],not_before_epoch=1,expires_at_epoch=100)
- base=EffectRecordV2(effect.canonical_command_bytes,grant,DispatchState.RELINQUISHED,state,1)
- results=(); terminal=()
+ base=EffectRecordV2(effect.canonical_command_bytes,grant,DispatchState.RELINQUISHED,EffectState.UNRESOLVED,1)
+ results=[]; admissions=[]; terminal=[]
+ def append(content,*,final=False):
+  receipt=ReceiptAuthorityV2("receipt-authority",b"r"*32).issue(content);expected=("dispatch",grant.content.grant_ref,1,1,base.dispatch_source_digest,grant.content.grant_ref,grant.authenticated_grant_digest);codes=()
+  admission=ReceiptAdmissionV2(receipt.authenticated_receipt_digest,content.source_kind,content.source_owner_ref,content.source_generation,content.source_ownership_epoch,content.source_claim_digest,content.source_grant_ref,content.source_grant_digest,*expected,ReceiptFreshnessV2.FRESH,final,codes)
+  results.append(receipt);admissions.append(admission)
  if state is EffectState.CONTRADICTED:
-  found=ReceiptContentV1(effect.effect_id,effect.command_digest,ObservationDisposition.FOUND,D[0],1,reference if effect.kind.value=="stage" else None,reference if effect.kind.value=="submit" else None,reference if effect.kind.value=="cancel" else None,None,"dispatch",grant.content.grant_ref,1,1,base.dispatch_source_digest)
-  absent=ReceiptContentV1(effect.effect_id,effect.command_digest,ObservationDisposition.DEFINITELY_ABSENT,D[3],1,None,None,None,D[1],"dispatch",grant.content.grant_ref,1,1,base.dispatch_source_digest)
-  authority=ReceiptAuthorityV1("receipt-authority",b"r"*32); results=(authority.issue(found),authority.issue(absent)); terminal=(found.semantic_digest,absent.semantic_digest)
+  found=ReceiptContentV2(effect.effect_id,effect.command_digest,ObservationDisposition.FOUND,D[0],1,reference if effect.kind.value=="stage" else None,reference if effect.kind.value=="submit" else None,reference if effect.kind.value=="cancel" else None,None,"dispatch",grant.content.grant_ref,1,1,base.dispatch_source_digest,grant.content.grant_ref,grant.authenticated_grant_digest)
+  absent=ReceiptContentV2(effect.effect_id,effect.command_digest,ObservationDisposition.DEFINITELY_ABSENT,D[3],1,None,None,None,D[1],"dispatch",grant.content.grant_ref,1,1,base.dispatch_source_digest,grant.content.grant_ref,grant.authenticated_grant_digest)
+  append(found);append(absent,final=True);terminal=[found.semantic_digest,absent.semantic_digest]
  if state in {EffectState.FOUND,EffectState.DEFINITELY_ABSENT}:
   disp=ObservationDisposition.FOUND if state is EffectState.FOUND else ObservationDisposition.DEFINITELY_ABSENT
   kw={"stage_ref":None,"provider_run":None,"cancellation":None}
   if state is EffectState.FOUND: kw[{"stage":"stage_ref","submit":"provider_run","cancel":"cancellation"}[effect.kind.value]]=reference
-  content=ReceiptContentV1(effect.effect_id,effect.command_digest,disp,D[0],1,kw["stage_ref"],kw["provider_run"],kw["cancellation"],D[1] if state is EffectState.DEFINITELY_ABSENT else None,"dispatch",grant.content.grant_ref,1,1,base.dispatch_source_digest)
-  receipt=ReceiptAuthorityV1("receipt-authority",b"r"*32).issue(content); results=(receipt,); terminal=(content.semantic_digest,)
- invalid=(DiagnosticCode.EVIDENCE_INVALID,) if state is EffectState.INDETERMINATE else ()
- return EffectRecordV2(effect.canonical_command_bytes,grant,DispatchState.RELINQUISHED,state,1,results=results,terminal_content_digests=terminal,invalid_codes=invalid)
+  content=ReceiptContentV2(effect.effect_id,effect.command_digest,disp,D[0],1,kw["stage_ref"],kw["provider_run"],kw["cancellation"],D[1] if state is EffectState.DEFINITELY_ABSENT else None,"dispatch",grant.content.grant_ref,1,1,base.dispatch_source_digest,grant.content.grant_ref,grant.authenticated_grant_digest)
+  append(content,final=state is EffectState.DEFINITELY_ABSENT);terminal=[content.semantic_digest]
+ if state is EffectState.INDETERMINATE:
+  content=ReceiptContentV2(effect.effect_id,effect.command_digest,ObservationDisposition.INDETERMINATE,D[0],1,None,None,None,None,"dispatch",grant.content.grant_ref,1,1,base.dispatch_source_digest,grant.content.grant_ref,grant.authenticated_grant_digest);append(content)
+ return EffectRecordV2(effect.canonical_command_bytes,grant,DispatchState.RELINQUISHED,state,1,results=tuple(results),receipt_admissions=tuple(admissions),terminal_content_digests=tuple(terminal))
 
 def assessment(record):
  command=parse_exact_command(record.command_bytes);grant=record.grant
- claim=lambda c:{"owner_ref":c.owner_ref,"generation":c.generation,"ownership_epoch":c.ownership_epoch,"claimed_at_epoch":c.claimed_at_epoch,"target_digest":c.target_digest,"grant_ref":c.grant_ref,"active":c.active,"completed":c.completed,"claim_digest":c.claim_digest}
- snapshot={"schema_version":"synaptic-foundation-effect-snapshot/v1","command":command.to_dict(),"command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",record.command_bytes),"grant":{"schema_version":"synaptic-authenticated-grant/v3","content":grant.content.to_dict(),"authority_ref":grant.authority_ref,"tag":grant.tag},"dispatch":record.dispatch.value,"state":record.state.value,"attempt_count":record.attempt_count,"dispatch_epoch":record.dispatch_epoch,"receipts":[parse_canonical_object(x.canonical_bytes,name="receipt") for x in record.results],"terminal_content_digests":list(record.terminal_content_digests),"invalid_codes":[x.value for x in record.invalid_codes],"reconciliation":None if record.reconciliation is None else claim(record.reconciliation),"reconciliation_claims":[claim(x) for x in record.reconciliation_claims],"b2_record_digest":record.record_digest}
+ claim=lambda c:{"owner_ref":c.owner_ref,"generation":c.generation,"ownership_epoch":c.ownership_epoch,"claimed_at_epoch":c.claimed_at_epoch,"target_digest":c.target_digest,"grant_ref":c.grant_ref,"grant_digest":c.grant_digest,"grant_lineage":[x.to_dict()|{"binding_digest":x.binding_digest} for x in c.grant_lineage],"active":c.active,"completed":c.completed,"claim_digest":c.claim_digest}
+ snapshot={"schema_version":"synaptic-foundation-effect-snapshot/v1","command":command.to_dict(),"command_bytes_digest":domain_digest("synaptic-foundation-command-bytes/v1",record.command_bytes),"grant":parse_canonical_object(grant.canonical_bytes,name="grant"),"dispatch":record.dispatch.value,"state":record.state.value,"attempt_count":record.attempt_count,"dispatch_epoch":record.dispatch_epoch,"receipts":[parse_canonical_object(x.canonical_bytes,name="receipt") for x in record.results],"receipt_admissions":[x.to_dict()|{"admission_digest":x.admission_digest} for x in record.receipt_admissions],"invalid_evidence":[parse_canonical_object(x.canonical_bytes,name="invalid evidence") for x in record.invalid_evidence],"invalid_evidence_admissions":[x.to_dict()|{"admission_digest":x.admission_digest} for x in record.invalid_evidence_admissions],"terminal_content_digests":list(record.terminal_content_digests),"invalid_codes":[x.value for x in record.invalid_codes],"reconciliation":None if record.reconciliation is None else claim(record.reconciliation),"reconciliation_claims":[claim(x) for x in record.reconciliation_claims],"b2_record_digest":record.record_digest}
  values=[]
- for receipt in record.results:
+ for index,receipt in enumerate(record.results):
   c=receipt.content;stale=DiagnosticCode.STALE_RESULT in record.invalid_codes;final=c.disposition is ObservationDisposition.DEFINITELY_ABSENT and DiagnosticCode.FINALITY_UNPROVEN not in record.invalid_codes
   codes=[]
   if stale:codes.append("stale_result")
   if c.disposition is ObservationDisposition.DEFINITELY_ABSENT and not final:codes.append("finality_unproven")
-  values.append(ReceiptAssessmentV1(receipt.authenticated_receipt_digest,c.source_kind,c.source_owner_ref,c.source_generation,c.source_ownership_epoch,ReceiptFreshnessV1.STALE if stale else ReceiptFreshnessV1.FRESH,final,tuple(codes)))
- content=FoundationRecordAssessmentContentV1("synaptic-foundation-record-assessment-content/v1",command.operation.effect.effect_id,command.digest,snapshot["command_bytes_digest"],record.record_digest,domain_digest("synaptic-foundation-record-evidence/v1",canonical_bytes(snapshot)),tuple(x.authenticated_receipt_digest for x in record.results),record.terminal_content_digests,tuple(values),tuple(x.value for x in record.invalid_codes),"assessor-a","1.0.0","2026-08-26T00:00:00Z")
+  values.append(ReceiptAssessmentV1(receipt.authenticated_receipt_digest,record.receipt_admissions[index].admission_digest,c.source_kind,c.source_owner_ref,c.source_generation,c.source_ownership_epoch,ReceiptFreshnessV1.STALE if stale else ReceiptFreshnessV1.FRESH,final,tuple(codes)))
+ content=FoundationRecordAssessmentContentV1("synaptic-foundation-record-assessment-content/v1",command.operation.effect.effect_id,command.digest,snapshot["command_bytes_digest"],record.record_digest,domain_digest("synaptic-foundation-record-evidence/v1",canonical_bytes(snapshot)),tuple(x.authenticated_receipt_digest for x in record.results),record.terminal_content_digests,tuple(values),tuple(x.admission_digest for x in record.invalid_evidence_admissions),tuple(x.value for x in record.invalid_codes),"assessor-a","1.0.0","2026-08-26T00:00:00Z")
  return AuthenticatedFoundationRecordAssessmentV1.parse(AuthenticatedFoundationRecordAssessmentV1(content,"authority-a","key-a","a"*64).canonical_bytes)
 
 def apply_stage_effect_record(c,r,a):return _apply_stage(c,r,assessment(r),a,AssessmentAuth())
@@ -137,7 +143,7 @@ def test_provider_observation_forbids_regression_and_is_idempotent():
  q,foundation=queued_evidence();request,running=observation(q,foundation,ProviderRunPhaseV1.RUNNING,{"phase":"running"})
  r=apply_provider_observation(q,request,running,ObservationAuth()); assert r.phase is WorkflowPhaseV1.RUNNING
  assert apply_provider_observation(r,request,running,ObservationAuth()) is r
- mismatched=read_request_variant(request,foundation_record=replace(request.foundation_record,invalid_codes=(DiagnosticCode.EVIDENCE_INVALID,)))
+ mismatched=read_request_variant(request,foundation_record=record(intent("stage"),EffectState.INDETERMINATE))
  with pytest.raises(WorkflowTransitionError,match="read request Foundation record"):
   apply_provider_observation(r,mismatched,running,ObservationAuth())
  request,back=observation(r,foundation,ProviderRunPhaseV1.QUEUED,{"phase":"queued"})
@@ -149,7 +155,7 @@ def test_provider_observation_forbids_regression_and_is_idempotent():
 def test_provider_observation_rejects_request_not_equal_to_retained_submit_evidence(component):
  q,foundation=queued_evidence();request,envelope=observation(q,foundation,ProviderRunPhaseV1.RUNNING,{"phase":"running-mismatched-request"})
  alternatives={
-  "foundation_record":replace(request.foundation_record,invalid_codes=(DiagnosticCode.EVIDENCE_INVALID,)),
+  "foundation_record":record(intent("stage"),EffectState.INDETERMINATE),
   "assessment":replace(request.assessment,authority_ref="authority-b"),
   "foundation_binding":q.stage.foundation_bindings[-1],
   "foundation_outcome":q.stage.foundation_outcomes[-1],
