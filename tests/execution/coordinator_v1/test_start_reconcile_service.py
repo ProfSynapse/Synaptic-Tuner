@@ -26,6 +26,7 @@ from tuner.execution.coordinator_v1.stores import (
 from tuner.execution.foundation_v2.authority import ReconciliationGrantContentV1
 from tuner.execution.foundation_v2.broker import EffectBrokerV2
 from tuner.execution.foundation_v2.commands import CanonicalProviderPayloadV1, parse_exact_command
+from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.foundation_v2.executors import AdapterDescriptorV1, ExecutorDescriptorV1
 from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.observations import ObservationDisposition, ProviderObservationV1
@@ -89,11 +90,14 @@ class Materializer:
     def __init__(self, binding):
         self.binding = binding
         self.prepare_calls = 0
+        self.payload_calls = 0
+        self.execution_binding_digest = binding.binding_digest
+        self.candidate_transform = lambda value: value
 
     def prepare(self, plan, run, binding):
         self.prepare_calls += 1
         assert binding == self.binding
-        return CanonicalPreparationV2.build(
+        candidate = CanonicalPreparationV2.build(
             provider=binding.provider,
             scope=binding.scope,
             project_ref=run.project_ref,
@@ -106,14 +110,51 @@ class Materializer:
             artifact_contract_digest=plan.basis.artifact_policy_digest,
             quote_digest=binding.quote_digest,
             secret_requirements_digest=binding.secret_requirements_digest,
+            execution_binding_digest=self.execution_binding_digest,
         )
+        return self.candidate_transform(candidate)
 
     def payload(self, preparation, kind):
+        self.payload_calls += 1
         return CanonicalProviderPayloadV1.build(
             preparation.provider.provider_id,
             f"{kind.value}-payload/v2",
             preparation.workload_digest,
         )
+
+
+class CountingPreparationStore(InMemoryPreparationStoreV1):
+    def __init__(self):
+        super().__init__()
+        self.get_calls = 0
+        self.put_calls = 0
+        self.reload_mode = None
+        self.hostile_candidate = None
+
+    def get(self, digest):
+        self.get_calls += 1
+        if self.reload_mode is not None:
+            candidate = self.hostile_candidate
+            if self.reload_mode in {"same_object", "malformed"}:
+                if self.reload_mode == "malformed":
+                    raw = b"{}"
+                else:
+                    document = candidate.to_dict()
+                    document["source_digest"] = D[14]
+                    raw = canonical_bytes(document)
+                object.__setattr__(candidate, "_raw", raw)
+                return candidate
+            document = candidate.to_dict()
+            document["source_digest"] = D[14]
+            return CanonicalPreparationV2.parse(canonical_bytes(document))
+        return super().get(digest)
+
+    def put_if_absent(self, preparation):
+        self.put_calls += 1
+        if self.reload_mode is not None:
+            self.hostile_candidate = preparation
+            return True
+        return super().put_if_absent(preparation)
 
 
 class DynamicExecutor:
@@ -308,9 +349,10 @@ class Harness:
         self.reconciliation_grants = InMemoryReconciliationGrantStoreV1(grants)
         self.authorization = Authorization(grants, self.executor, self.adapter_descriptor)
         self.materializer = Materializer(self.binding)
+        self.preparations = CountingPreparationStore()
         self.service = TrainingCoordinatorV1(
             Planning(), PlanningStore(), self.workflows,
-            InMemoryPreparationStoreV1(),
+            self.preparations,
             self.execution_grants,
             self.reconciliation_grants,
             Resolver(self.binding), self.materializer, self.authorization,
@@ -336,6 +378,173 @@ def test_start_runs_durable_stage_then_submit_and_is_restart_idempotent():
     assert harness.executor.calls == ["stage", "submit"]
     assert harness.authorization.effect_issues == 2
     assert harness.materializer.prepare_calls == 1
+
+
+def test_new_preparation_binding_mismatch_stops_before_payload_grant_or_effect():
+    harness = Harness()
+    harness.materializer.execution_binding_digest = D[14]
+    with pytest.raises(CoordinatorErrorV1) as caught:
+        harness.service.start(PLAN, preflight())
+    assert caught.value.code is CoordinatorCodeV1.BINDING_MISMATCH
+    assert harness.materializer.payload_calls == 0
+    assert harness.authorization.effect_issues == 0
+    assert harness.executor.calls == []
+
+
+def _foundation_call_counts(harness):
+    counts = {name: 0 for name in ("get", "assess", "execute", "reconcile")}
+    for name in tuple(counts):
+        original = getattr(harness.foundation, name)
+
+        def counted(*args, _name=name, _original=original, **kwargs):
+            counts[_name] += 1
+            return _original(*args, **kwargs)
+
+        setattr(harness.foundation, name, counted)
+    return counts
+
+
+@pytest.mark.parametrize("mutation", ("malformed", "extra", "schema", "wrong_type"))
+def test_hostile_new_preparation_closes_before_every_downstream_boundary(mutation):
+    harness = Harness()
+    foundation_calls = _foundation_call_counts(harness)
+
+    def transform(candidate):
+        if mutation == "wrong_type":
+            return object()
+        if mutation == "malformed":
+            raw = b"{}"
+        else:
+            document = candidate.to_dict()
+            if mutation == "extra":
+                document["unexpected"] = D[14]
+            else:
+                document["schema_version"] = "synaptic-preparation/hostile"
+            raw = canonical_bytes(document)
+        object.__setattr__(candidate, "_raw", raw)
+        return candidate
+
+    harness.materializer.candidate_transform = transform
+    with pytest.raises(CoordinatorErrorV1) as caught:
+        harness.service.start(PLAN, preflight())
+    assert caught.value.code is CoordinatorCodeV1.BINDING_MISMATCH
+    assert harness.preparations.get_calls == harness.preparations.put_calls == 0
+    assert harness.materializer.payload_calls == 0
+    assert harness.authorization.effect_issues == 0
+    assert foundation_calls == {"get": 0, "assess": 0, "execute": 0, "reconcile": 0}
+    assert harness.executor.calls == []
+
+
+@pytest.mark.parametrize("mode", ("same_object", "malformed", "valid_conflict"))
+def test_hostile_preparation_reload_closes_before_every_downstream_boundary(mode):
+    harness = Harness()
+    harness.preparations.reload_mode = mode
+    foundation_calls = _foundation_call_counts(harness)
+    with pytest.raises(CoordinatorErrorV1) as caught:
+        harness.service.start(PLAN, preflight())
+    assert caught.value.code is CoordinatorCodeV1.BINDING_MISMATCH
+    assert harness.preparations.put_calls == harness.preparations.get_calls == 1
+    assert harness.materializer.payload_calls == 0
+    assert harness.authorization.effect_issues == 0
+    assert foundation_calls == {"get": 0, "assess": 0, "execute": 0, "reconcile": 0}
+    assert harness.executor.calls == []
+
+
+def test_retained_preparation_binding_mismatch_stops_before_cancel_payload_or_effect():
+    harness = Harness()
+    queued = harness.service.start(PLAN, preflight())
+    assert queued.phase is WorkflowPhaseV1.QUEUED
+    changed_binding = replace(
+        harness.binding,
+        executor_descriptor=ExecutorDescriptorV1(PROVIDER.provider_id, "other-executor", "1.0.0"),
+    )
+    harness.service._bindings = Resolver(changed_binding)
+    before = (
+        harness.materializer.payload_calls,
+        harness.authorization.effect_issues,
+        tuple(harness.executor.calls),
+    )
+    with pytest.raises(CoordinatorErrorV1) as caught:
+        harness.service.cancel(queued.run, "user-requested")
+    assert caught.value.code is CoordinatorCodeV1.BINDING_MISMATCH
+    assert (
+        harness.materializer.payload_calls,
+        harness.authorization.effect_issues,
+        tuple(harness.executor.calls),
+    ) == before
+
+
+def test_cancel_intent_crash_retry_revalidates_binding_before_every_effect_boundary():
+    harness = Harness()
+    queued = harness.service.start(PLAN, preflight())
+    original_apply = harness.service._apply_cancel_effect
+
+    def crash_after_intent(workflow):
+        raise RuntimeError("causal crash after durable cancel intent")
+
+    harness.service._apply_cancel_effect = crash_after_intent
+    with pytest.raises(RuntimeError):
+        harness.service.cancel(queued.run, "user-requested")
+    retained = harness.workflows.get(queued.run)
+    assert retained.phase is WorkflowPhaseV1.CANCEL_INTENT_RECORDED
+    harness.service._apply_cancel_effect = original_apply
+    harness.service._bindings = Resolver(replace(
+        harness.binding,
+        executor_descriptor=ExecutorDescriptorV1(PROVIDER.provider_id, "other-executor", "1.0.0"),
+        reconciliation_adapter_digest=D[14],
+    ))
+    foundation_calls = _foundation_call_counts(harness)
+    before = (
+        harness.materializer.prepare_calls, harness.materializer.payload_calls,
+        harness.authorization.effect_issues, harness.authorization.reconciliation_issues,
+        harness.adapter.calls, tuple(harness.executor.calls),
+    )
+    with pytest.raises(CoordinatorErrorV1) as caught:
+        harness.service.cancel(queued.run, "user-requested")
+    assert caught.value.code is CoordinatorCodeV1.BINDING_MISMATCH
+    assert (
+        harness.materializer.prepare_calls, harness.materializer.payload_calls,
+        harness.authorization.effect_issues, harness.authorization.reconciliation_issues,
+        harness.adapter.calls, tuple(harness.executor.calls),
+    ) == before
+    assert foundation_calls == {"get": 0, "assess": 0, "execute": 0, "reconcile": 0}
+
+
+@pytest.mark.parametrize("kind", ("stage", "submit", "cancel"))
+def test_reconciliation_revalidates_retained_preparation_before_foundation(kind):
+    harness = Harness(**{
+        kind: ObservationDisposition.INDETERMINATE,
+    })
+    if kind == "cancel":
+        queued = harness.service.start(PLAN, preflight())
+        waiting = harness.service.cancel(queued.run, "user-requested")
+    else:
+        waiting = harness.service.start(PLAN, preflight())
+    expected_phase = {
+        "stage": WorkflowPhaseV1.STAGE_RECONCILE_REQUIRED,
+        "submit": WorkflowPhaseV1.SUBMIT_RECONCILE_REQUIRED,
+        "cancel": WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,
+    }[kind]
+    assert waiting.phase is expected_phase
+
+    changed_binding = replace(
+        harness.binding,
+        executor_descriptor=ExecutorDescriptorV1(PROVIDER.provider_id, "other-executor", "1.0.0"),
+        reconciliation_adapter_digest=D[14],
+    )
+    harness.service._bindings = Resolver(changed_binding)
+    foundation_calls = _foundation_call_counts(harness)
+    prior_grants = harness.authorization.reconciliation_issues
+    prior_adapter = harness.adapter.calls
+    prior_effects = tuple(harness.executor.calls)
+
+    with pytest.raises(CoordinatorErrorV1) as caught:
+        harness.service.reconcile(waiting.run)
+    assert caught.value.code is CoordinatorCodeV1.BINDING_MISMATCH
+    assert foundation_calls == {"get": 0, "assess": 0, "execute": 0, "reconcile": 0}
+    assert harness.authorization.reconciliation_issues == prior_grants
+    assert harness.adapter.calls == prior_adapter
+    assert tuple(harness.executor.calls) == prior_effects
 
 
 def test_cancel_persists_intent_before_one_foundation_effect_and_is_idempotent():

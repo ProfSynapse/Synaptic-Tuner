@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 import re
 
-from synaptic_tuner.api.v1.providers import ProviderDescriptor, ProviderRef
+from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderDescriptor, ProviderRef
 from synaptic_tuner.api.v1.results import VerifiedArtifact
 
 from ...foundation_v2.canonical import canonical_bytes, digest_text, domain_digest, safe_ref
@@ -186,7 +186,6 @@ class DockerArtifactContractV1:
 class DockerProfileV1:
     provider: ProviderRef
     descriptor: ProviderDescriptor
-    profile_digest: str
     scope: ExecutionScopeV1
     executor_descriptor: ExecutorDescriptorV1
     adapter_descriptor: AdapterDescriptorV1
@@ -201,6 +200,7 @@ class DockerProfileV1:
 
     def __post_init__(self) -> None:
         exact = (type(self.provider) is ProviderRef, type(self.descriptor) is ProviderDescriptor,
+                 type(self.descriptor.capabilities) is ProviderCapabilities,
                  type(self.scope) is ExecutionScopeV1, type(self.executor_descriptor) is ExecutorDescriptorV1,
                  type(self.adapter_descriptor) is AdapterDescriptorV1, type(self.image) is DockerImageV1,
                  type(self.runtime) is DockerRuntimeV1, type(self.workload) is DockerWorkloadV1,
@@ -210,8 +210,167 @@ class DockerProfileV1:
         if (self.provider.provider_id, self.descriptor.provider_id,
             self.executor_descriptor.provider_id, self.adapter_descriptor.provider_id) != (self.provider.provider_id,) * 4:
             raise ValueError("profile provider identities differ")
-        for name in ("profile_digest", "resource_digest", "quote_digest", "secret_requirements_digest"):
+        for name in ("resource_digest", "quote_digest", "secret_requirements_digest"):
             digest_text(getattr(self, name), name)
+
+    @classmethod
+    def build(cls, *, provider: ProviderRef, descriptor: ProviderDescriptor,
+              scope: ExecutionScopeV1, executor_descriptor: ExecutorDescriptorV1,
+              adapter_descriptor: AdapterDescriptorV1, image: DockerImageV1,
+              runtime: DockerRuntimeV1, workload: DockerWorkloadV1,
+              roots: DockerRootsV1, artifacts: DockerArtifactContractV1,
+              resource_digest: str, quote_digest: str,
+              secret_requirements_digest: str) -> "DockerProfileV1":
+        return cls(
+            provider, descriptor, scope, executor_descriptor, adapter_descriptor,
+            image, runtime, workload, roots, artifacts, resource_digest,
+            quote_digest, secret_requirements_digest,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return _profile_document(validated_profile_snapshot(self))
+
+    @property
+    def profile_digest(self) -> str:
+        snapshot = validated_profile_snapshot(self)
+        return domain_digest(
+            "synaptic-docker-profile/v1", canonical_bytes(_profile_document(snapshot))
+        )
+
+
+def _profile_document(profile: DockerProfileV1) -> dict[str, object]:
+    capabilities = profile.descriptor.capabilities
+    return {
+            "schema_version": "synaptic-docker-profile/v1",
+            "provider": {
+                "provider_id": profile.provider.provider_id,
+                "profile_ref": profile.provider.profile_ref,
+            },
+            "descriptor": {
+                "schema_version": profile.descriptor.schema_version,
+                "provider_id": profile.descriptor.provider_id,
+                "display_name": profile.descriptor.display_name,
+                "implementation_version": profile.descriptor.implementation_version,
+                "capabilities": {
+                    "observe": capabilities.observe, "logs": capabilities.logs,
+                    "cancel": capabilities.cancel, "reconcile": capabilities.reconcile,
+                    "artifact_streaming": capabilities.artifact_streaming,
+                    "cost_quote": capabilities.cost_quote,
+                },
+            },
+            "scope": {
+                "account_ref": profile.scope.account_ref,
+                "namespace_ref": profile.scope.namespace_ref,
+            },
+            "executor_descriptor": {
+                "provider_id": profile.executor_descriptor.provider_id,
+                "executor_id": profile.executor_descriptor.executor_id,
+                "implementation_version": profile.executor_descriptor.implementation_version,
+            },
+            "adapter_descriptor": {
+                "provider_id": profile.adapter_descriptor.provider_id,
+                "adapter_id": profile.adapter_descriptor.adapter_id,
+                "implementation_version": profile.adapter_descriptor.implementation_version,
+            },
+            "image": {
+                "image_ref": profile.image.image_ref,
+                "image_digest": profile.image.image_digest,
+                "presence_policy": profile.image.presence_policy,
+            },
+            "runtime": {
+                "cpu_count": profile.runtime.cpu_count,
+                "memory_bytes": profile.runtime.memory_bytes,
+                "timeout_seconds": profile.runtime.timeout_seconds,
+                "network_mode": profile.runtime.network_mode,
+                "gpu_enabled": profile.runtime.gpu_enabled,
+            },
+            "workload": {
+                "arguments": list(profile.workload.arguments),
+                "environment_keys": list(profile.workload.environment_keys),
+                "workload_digest": profile.workload.workload_digest,
+            },
+            "roots": {
+                "source_ref": profile.roots.source_ref,
+                "artifact_ref": profile.roots.artifact_ref,
+                "source_read_only": profile.roots.source_read_only,
+            },
+            "artifacts": {
+                "roles": list(profile.artifacts.roles),
+                "maximum_artifact_bytes": profile.artifacts.maximum_artifact_bytes,
+                "maximum_total_bytes": profile.artifacts.maximum_total_bytes,
+            },
+            "resource_digest": profile.resource_digest,
+            "quote_digest": profile.quote_digest,
+            "secret_requirements_digest": profile.secret_requirements_digest,
+        }
+
+
+def validated_profile_snapshot(profile: DockerProfileV1) -> DockerProfileV1:
+    if type(profile) is not DockerProfileV1:
+        raise TypeError("exact Docker profile required")
+    if (type(profile.provider) is not ProviderRef
+            or type(profile.descriptor) is not ProviderDescriptor
+            or type(profile.descriptor.capabilities) is not ProviderCapabilities
+            or type(profile.scope) is not ExecutionScopeV1
+            or type(profile.executor_descriptor) is not ExecutorDescriptorV1
+            or type(profile.adapter_descriptor) is not AdapterDescriptorV1
+            or type(profile.image) is not DockerImageV1
+            or type(profile.runtime) is not DockerRuntimeV1
+            or type(profile.workload) is not DockerWorkloadV1
+            or type(profile.roots) is not DockerRootsV1
+            or type(profile.artifacts) is not DockerArtifactContractV1):
+        raise TypeError("profile contains a noncanonical value")
+    capabilities = ProviderCapabilities(
+        profile.descriptor.capabilities.observe,
+        profile.descriptor.capabilities.logs,
+        profile.descriptor.capabilities.cancel,
+        profile.descriptor.capabilities.reconcile,
+        profile.descriptor.capabilities.artifact_streaming,
+        profile.descriptor.capabilities.cost_quote,
+    )
+    return DockerProfileV1.build(
+        provider=ProviderRef(profile.provider.provider_id, profile.provider.profile_ref),
+        descriptor=ProviderDescriptor(
+            profile.descriptor.schema_version, profile.descriptor.provider_id,
+            profile.descriptor.display_name, profile.descriptor.implementation_version,
+            capabilities,
+        ),
+        scope=ExecutionScopeV1(profile.scope.account_ref, profile.scope.namespace_ref),
+        executor_descriptor=ExecutorDescriptorV1(
+            profile.executor_descriptor.provider_id,
+            profile.executor_descriptor.executor_id,
+            profile.executor_descriptor.implementation_version,
+        ),
+        adapter_descriptor=AdapterDescriptorV1(
+            profile.adapter_descriptor.provider_id,
+            profile.adapter_descriptor.adapter_id,
+            profile.adapter_descriptor.implementation_version,
+        ),
+        image=DockerImageV1(
+            profile.image.image_ref, profile.image.image_digest,
+            profile.image.presence_policy,
+        ),
+        runtime=DockerRuntimeV1(
+            profile.runtime.cpu_count, profile.runtime.memory_bytes,
+            profile.runtime.timeout_seconds, profile.runtime.network_mode,
+            profile.runtime.gpu_enabled,
+        ),
+        workload=DockerWorkloadV1(
+            profile.workload.arguments, profile.workload.environment_keys,
+            profile.workload.workload_digest,
+        ),
+        roots=DockerRootsV1(
+            profile.roots.source_ref, profile.roots.artifact_ref,
+            profile.roots.source_read_only,
+        ),
+        artifacts=DockerArtifactContractV1(
+            profile.artifacts.roles, profile.artifacts.maximum_artifact_bytes,
+            profile.artifacts.maximum_total_bytes,
+        ),
+        resource_digest=profile.resource_digest,
+        quote_digest=profile.quote_digest,
+        secret_requirements_digest=profile.secret_requirements_digest,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,8 +383,7 @@ class PreparedDockerPlanV1:
     preparation_digest: str
 
     def __post_init__(self) -> None:
-        if type(self.profile) is not DockerProfileV1:
-            raise TypeError("exact profile required")
+        object.__setattr__(self, "profile", validated_profile_snapshot(self.profile))
         safe_ref(self.project_ref, "project_ref")
         safe_ref(self.run_id, "run_id")
         digest_text(self.plan_fingerprint, "plan_fingerprint")

@@ -367,6 +367,7 @@ class ProfileStack:
                     artifact_contract_digest=plan.basis.artifact_policy_digest,
                     quote_digest=binding.quote_digest,
                     secret_requirements_digest=binding.secret_requirements_digest,
+                    execution_binding_digest=binding.binding_digest,
                 )
 
             def payload(self, preparation, kind):
@@ -789,10 +790,57 @@ def test_each_profile_authenticated_reconciliation_absence_is_terminal(provider_
     assert failed.state.value == "failed"
 
 
+def _assert_converged_provider_observation_history(stack, queued, retained) -> None:
+    history = retained.provider_run_observations
+    assert len(history) in {1, 2}
+    assert retained.run_observation_digests == tuple(
+        item.authenticated_observation_digest for item in history
+    )
+    assert len(set(retained.run_observation_digests)) == len(history)
+    current = queued
+    for observation in history:
+        assert stack.family.evidence_authority.authenticate(observation) is True
+        request = stack.operations._request(current, ProviderReadPurposeV1.OBSERVE)
+        content = observation.content
+        assert (
+            content.source_workflow_record_digest,
+            content.source_revision,
+            content.run,
+            content.provider_run_binding_digest,
+            content.provider_id,
+            content.profile_ref,
+            content.account_ref,
+            content.namespace_ref,
+            content.provider_job_ref,
+        ) == (
+            current.record_digest,
+            current.revision,
+            current.run,
+            current.provider_run_ref.binding_digest,
+            current.provider_run_ref.reference.provider_id,
+            current.provider_run_ref.reference.profile_ref,
+            current.provider_run_ref.reference.account_ref,
+            current.provider_run_ref.reference.namespace_ref,
+            current.provider_run_ref.reference.provider_job_ref,
+        )
+        current = apply_provider_observation(
+            current, request, observation, stack.family.evidence_authority,
+        )
+    assert current == retained
+    phases = tuple(item.content.phase for item in history)
+    if len(history) == 1:
+        assert phases == (ProviderRunPhaseV1.SUCCEEDED,)
+    else:
+        assert phases == (
+            ProviderRunPhaseV1.RUNNING,
+            ProviderRunPhaseV1.SUCCEEDED,
+        )
+
+
 @pytest.mark.parametrize("provider_id", PROFILES)
 def test_each_profile_concurrent_outcomes_converge_without_history_fork(provider_id) -> None:
     stack = ProfileStack(provider_id)
-    stack.coordinator.start(stack.plan, stack.preflight())
+    queued = stack.coordinator.start(stack.plan, stack.preflight())
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = tuple(pool.submit(stack.operations.outcome, stack.run) for _ in range(2))
     results = []
@@ -806,7 +854,40 @@ def test_each_profile_concurrent_outcomes_converge_without_history_fork(provider
         stack.operations.outcome(stack.run)
         retained = stack.workflows.get(stack.run)
     assert retained.phase.value == "succeeded_unverified"
+    assert all(result.state.value in {"running", "succeeded"} for result in results)
+    assert all(
+        stack.operations.outcome(stack.run).state.value == "succeeded"
+        for _ in results
+    )
+    assert stack.workflows.get(stack.run) == retained
+    _assert_converged_provider_observation_history(stack, queued, retained)
+
+
+@pytest.mark.parametrize("provider_id", PROFILES)
+def test_each_profile_terminal_first_observation_has_one_authenticated_entry(provider_id) -> None:
+    stack = ProfileStack(provider_id)
+    queued = stack.coordinator.start(stack.plan, stack.preflight())
+    provider_job_ref = queued.provider_run_ref.reference.provider_job_ref
+    cursor = stack.family.reader._cursor
+    with cursor._lock:
+        cursor._positions[(provider_job_ref, "observe")] = 1
+    assert stack.operations.outcome(stack.run).state.value == "succeeded"
+    retained = stack.workflows.get(stack.run)
+    assert retained.phase.value == "succeeded_unverified"
+    assert len(retained.provider_run_observations) == 1
+    _assert_converged_provider_observation_history(stack, queued, retained)
+
+
+@pytest.mark.parametrize("provider_id", PROFILES)
+def test_each_profile_nonterminal_then_terminal_has_two_authenticated_entries(provider_id) -> None:
+    stack = ProfileStack(provider_id)
+    queued = stack.coordinator.start(stack.plan, stack.preflight())
+    assert stack.operations.outcome(stack.run).state.value == "running"
+    assert stack.operations.outcome(stack.run).state.value == "succeeded"
+    retained = stack.workflows.get(stack.run)
+    assert retained.phase.value == "succeeded_unverified"
     assert len(retained.provider_run_observations) == 2
+    _assert_converged_provider_observation_history(stack, queued, retained)
 
 
 @pytest.mark.parametrize("provider_id", PROFILES)

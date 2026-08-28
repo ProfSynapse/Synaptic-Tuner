@@ -2,10 +2,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from tuner.execution.coordinator_v1.model import ProviderExecutionBindingV1
 from tuner.execution.foundation_v2.commands import (
     CanonicalProviderPayloadV1, build_cancel_command, build_stage_command,
     build_submit_command,
 )
+from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.foundation_v2.executors import ExecutionResolutionRequestV2
 from tuner.execution.foundation_v2.observations import ObservationDisposition
 from tuner.execution.foundation_v2.preparation import CanonicalPreparationV2
@@ -41,6 +43,15 @@ def recovery_payload(profile, kind):
     )
 
 
+def execution_binding(profile):
+    return ProviderExecutionBindingV1(
+        profile.provider, profile.descriptor.descriptor_digest,
+        profile.profile_digest, profile.scope, profile.executor_descriptor,
+        profile.adapter_descriptor.digest, profile.resource_digest,
+        profile.quote_digest, profile.secret_requirements_digest,
+    )
+
+
 def setup_effect_recovery(profile, plan, run, catalog, kind):
     prep = CanonicalPreparationV2.build(
         provider=profile.provider, scope=profile.scope, project_ref=run.project_ref,
@@ -51,6 +62,7 @@ def setup_effect_recovery(profile, plan, run, catalog, kind):
         artifact_contract_digest=profile.artifacts.digest,
         quote_digest=profile.quote_digest,
         secret_requirements_digest=profile.secret_requirements_digest,
+        execution_binding_digest=execution_binding(profile).binding_digest,
     )
     provider_payload = recovery_payload(profile, kind)
     if kind == "stage":
@@ -108,6 +120,7 @@ def setup_recovery(profile, plan, run, catalog, control):
         runtime_digest=profile.runtime.digest, resource_digest=profile.resource_digest,
         artifact_contract_digest=profile.artifacts.digest, quote_digest=profile.quote_digest,
         secret_requirements_digest=profile.secret_requirements_digest,
+        execution_binding_digest=execution_binding(profile).binding_digest,
     )
     payload = CanonicalProviderPayloadV1.build("docker", "submit-payload/v2", profile.workload.workload_digest)
     predecessor = StagePredecessorV2(
@@ -172,6 +185,22 @@ def test_recovery_rejects_found_container_with_wrong_exact_labels(profile, plan,
     ).lookup(target, prep)
     assert result.disposition is ObservationDisposition.INDETERMINATE
     assert tuple(event[0] for event in control.trace) == ("lookup",)
+
+
+def test_reconciliation_rejects_separate_foreign_execution_binding_before_lookup_ports(
+        profile, plan, run, seams):
+    catalog, images, source, control, cancellations = seams
+    prep, _, target = setup_recovery(profile, plan, run, catalog, control)
+    document = prep.to_dict()
+    document["execution_binding_digest"] = D[14]
+    hostile = CanonicalPreparationV2.parse(canonical_bytes(document))
+    result = DockerReconciliationAdapterV1(
+        profile, catalog, catalog.binding_authority,
+        control, source, cancellations, Authority(),
+    ).lookup(target, hostile)
+    assert result.disposition is ObservationDisposition.INDETERMINATE
+    assert images.calls == source.lookup_calls == 0
+    assert control.trace == cancellations.trace == []
 
 
 @pytest.mark.parametrize("failure", ("purpose", "generation", "signer"))

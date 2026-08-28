@@ -35,12 +35,15 @@ def profile(request):
     runtime = DockerRuntimeV1(2, 1_073_741_824, 3600)
     workload = DockerWorkloadV1(("python", "/source/run_fixture.py", "/source", "/artifacts"), (), D[0])
     artifacts = DockerArtifactContractV1(("result",), 1_048_576, 1_048_576)
-    return DockerProfileV1(
-        provider, descriptor, D[1], ExecutionScopeV1("account", "namespace"),
-        ExecutorDescriptorV1("docker", "docker-executor-v1", "1.0.0"),
-        AdapterDescriptorV1("docker", "docker-reconcile-v1", "1.0.0"),
-        DockerImageV1("fixture-image", "sha256:" + "a" * 64), runtime, workload,
-        DockerRootsV1("source-root", "artifact-root"), artifacts, D[2], D[3], D[4],
+    return DockerProfileV1.build(
+        provider=provider, descriptor=descriptor,
+        scope=ExecutionScopeV1("account", "namespace"),
+        executor_descriptor=ExecutorDescriptorV1("docker", "docker-executor-v1", "1.0.0"),
+        adapter_descriptor=AdapterDescriptorV1("docker", "docker-reconcile-v1", "1.0.0"),
+        image=DockerImageV1("fixture-image", "sha256:" + "a" * 64),
+        runtime=runtime, workload=workload,
+        roots=DockerRootsV1("source-root", "artifact-root"), artifacts=artifacts,
+        resource_digest=D[2], quote_digest=D[3], secret_requirements_digest=D[4],
     )
 
 

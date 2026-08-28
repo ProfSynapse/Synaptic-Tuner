@@ -3,7 +3,7 @@ from __future__ import annotations
 from synaptic_tuner.api.v1.providers import ProviderRef
 from .canonical import canonical_bytes,digest_text,domain_digest,exact_fields,parse_canonical_object,safe_ref
 from .references import ExecutionScopeV1
-_FIELDS=frozenset({"schema_version","provider","scope","project_ref","run_id","plan_fingerprint","source_digest","workload_digest","runtime_digest","resource_digest","artifact_contract_digest","quote_digest","secret_requirements_digest"});_ISSUER=object()
+_FIELDS=frozenset({"schema_version","provider","scope","project_ref","run_id","plan_fingerprint","source_digest","workload_digest","runtime_digest","resource_digest","artifact_contract_digest","quote_digest","secret_requirements_digest","execution_binding_digest"});_ISSUER=object()
 class CanonicalPreparationV2:
     __slots__=("_raw","_sealed")
     def __init_subclass__(cls,**kw): raise TypeError("CanonicalPreparationV2 is final")
@@ -24,9 +24,9 @@ class CanonicalPreparationV2:
         for n in _FIELDS-{"schema_version","provider","scope","project_ref","run_id"}:digest_text(doc[n],n)
         return cls(raw,_issuer=_ISSUER)
     @classmethod
-    def build(cls,*,provider,scope,project_ref,run_id,plan_fingerprint,source_digest,workload_digest,runtime_digest,resource_digest,artifact_contract_digest,quote_digest,secret_requirements_digest):
+    def build(cls,*,provider,scope,project_ref,run_id,plan_fingerprint,source_digest,workload_digest,runtime_digest,resource_digest,artifact_contract_digest,quote_digest,secret_requirements_digest,execution_binding_digest):
         if type(provider) is not ProviderRef or type(scope) is not ExecutionScopeV1: raise TypeError("exact references required")
-        return cls.parse(canonical_bytes({"schema_version":"synaptic-preparation/v2","provider":provider.to_dict(),"scope":scope.to_dict(),"project_ref":project_ref,"run_id":run_id,"plan_fingerprint":plan_fingerprint,"source_digest":source_digest,"workload_digest":workload_digest,"runtime_digest":runtime_digest,"resource_digest":resource_digest,"artifact_contract_digest":artifact_contract_digest,"quote_digest":quote_digest,"secret_requirements_digest":secret_requirements_digest}))
+        return cls.parse(canonical_bytes({"schema_version":"synaptic-preparation/v2","provider":provider.to_dict(),"scope":scope.to_dict(),"project_ref":project_ref,"run_id":run_id,"plan_fingerprint":plan_fingerprint,"source_digest":source_digest,"workload_digest":workload_digest,"runtime_digest":runtime_digest,"resource_digest":resource_digest,"artifact_contract_digest":artifact_contract_digest,"quote_digest":quote_digest,"secret_requirements_digest":secret_requirements_digest,"execution_binding_digest":execution_binding_digest}))
     def _doc(self):return parse_canonical_object(self._raw,name="preparation")
     @property
     def canonical_bytes(self):return bytes(self._raw)

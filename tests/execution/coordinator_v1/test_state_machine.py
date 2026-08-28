@@ -33,7 +33,7 @@ PLAN = TrainingPlan("synaptic-training-plan/v2", BASIS, ProviderPlanRef(CONTEXT.
 STAGE_REF = ProviderStageRefV1("provider-a", "profile-a", "account-a", "namespace-a", "stage-a")
 PROVIDER_RUN = ScopedProviderRunRefV1("provider-a", "profile-a", "account-a", "namespace-a", "job-a")
 
-def prep(): return CanonicalPreparationV2.build(provider=PROVIDER, scope=SCOPE, project_ref=RUN.project_ref, run_id=RUN.run_id, plan_fingerprint=PLAN.plan_fingerprint, source_digest=BASIS.source_digest, workload_digest=BASIS.workload_digest, runtime_digest=BASIS.runtime_digest, resource_digest=D[7], artifact_contract_digest=BASIS.artifact_policy_digest, quote_digest=D[8], secret_requirements_digest=D[9])
+def prep(): return CanonicalPreparationV2.build(provider=PROVIDER, scope=SCOPE, project_ref=RUN.project_ref, run_id=RUN.run_id, plan_fingerprint=PLAN.plan_fingerprint, source_digest=BASIS.source_digest, workload_digest=BASIS.workload_digest, runtime_digest=BASIS.runtime_digest, resource_digest=D[7], artifact_contract_digest=BASIS.artifact_policy_digest, quote_digest=D[8], secret_requirements_digest=D[9], execution_binding_digest=D[10])
 def planned(): return WorkflowRecordV1.planned(run=RUN, plan=PLAN, preflight_digest=D[6], context=CONTEXT, provider=PROVIDER, descriptor=DESC)
 def intent(kind):
  p=prep(); payload=CanonicalProviderPayloadV1.build(PROVIDER.provider_id, f"{kind}-payload/v2", p.workload_digest); ex=ExecutorDescriptorV1(PROVIDER.provider_id,"executor-a","1.0.0")

@@ -12,7 +12,7 @@ from tuner.execution.foundation_v2.references import ExecutionScopeV1,ProviderRu
 from tuner.execution.foundation_v2.repository import InMemoryEffectRepositoryV2
 D=tuple(c*64 for c in "123456789abcdef")
 def prep(**kw):
-    x=dict(provider=ProviderRef("docker","local"),scope=ExecutionScopeV1("acct","ns"),project_ref="project",run_id="run",plan_fingerprint=D[0],source_digest=D[1],workload_digest=D[2],runtime_digest=D[3],resource_digest=D[4],artifact_contract_digest=D[5],quote_digest=D[6],secret_requirements_digest=D[7]);x.update(kw);return CanonicalPreparationV2.build(**x)
+    x=dict(provider=ProviderRef("docker","local"),scope=ExecutionScopeV1("acct","ns"),project_ref="project",run_id="run",plan_fingerprint=D[0],source_digest=D[1],workload_digest=D[2],runtime_digest=D[3],resource_digest=D[4],artifact_contract_digest=D[5],quote_digest=D[6],secret_requirements_digest=D[7],execution_binding_digest=D[8]);x.update(kw);return CanonicalPreparationV2.build(**x)
 def descriptor():return ExecutorDescriptorV1("docker","executor","1.0.0")
 def payload(kind,p=None):
     p=p or prep();return CanonicalProviderPayloadV1.build("docker",f"{kind.value}-payload/v2",p.workload_digest)

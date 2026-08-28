@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import fields
 
 import pytest
 
@@ -6,6 +7,7 @@ from synaptic_tuner.api.v1.planning import ProviderPlanContextV1, ProviderPlanRe
 from synaptic_tuner.api.v1.training_facade import TrainingPreflight
 from synaptic_tuner.api.v1.runs_facade import RunArtifactRequest, RunLogsRequest
 from tuner.execution.coordinator_v1.coordinator import TrainingCoordinatorV1
+from tuner.execution.coordinator_v1.model import ProviderExecutionBindingV1
 from tuner.execution.coordinator_v1.cursors import HMACCursorAuthorityV1
 from tuner.execution.coordinator_v1.foundation import (
     ComposedEffectFoundationV1, FoundationRecordAssessmentAuthorityV1,
@@ -70,6 +72,7 @@ def prepared(profile, plan, run):
         artifact_contract_digest=profile.artifacts.digest,
         quote_digest=profile.quote_digest,
         secret_requirements_digest=profile.secret_requirements_digest,
+        execution_binding_digest=execution_binding(profile).binding_digest,
     )
     return PreparedDockerPlanV1(
         profile, run.project_ref, run.run_id, plan.plan_fingerprint,
@@ -79,6 +82,10 @@ def prepared(profile, plan, run):
 
 def make_binding(kind, digest, effect_id, prepared_plan, **values):
     profile = prepared_plan.profile
+    hostile_execution_binding = "execution_binding_digest" in values
+    execution_binding_digest = values.pop(
+        "execution_binding_digest", execution_binding(profile).binding_digest,
+    )
     preparation = CanonicalPreparationV2.build(
         provider=profile.provider, scope=profile.scope,
         project_ref=prepared_plan.project_ref, run_id=prepared_plan.run_id,
@@ -90,7 +97,14 @@ def make_binding(kind, digest, effect_id, prepared_plan, **values):
         artifact_contract_digest=profile.artifacts.digest,
         quote_digest=profile.quote_digest,
         secret_requirements_digest=profile.secret_requirements_digest,
+        execution_binding_digest=execution_binding_digest,
     )
+    if hostile_execution_binding:
+        prepared_plan = PreparedDockerPlanV1(
+            profile, prepared_plan.project_ref, prepared_plan.run_id,
+            prepared_plan.plan_fingerprint, prepared_plan.source_digest,
+            preparation.preparation_digest,
+        )
     provider_payload = payload(profile, kind)
     if kind == "stage":
         command = build_stage_command(
@@ -135,6 +149,15 @@ def request(profile, binding):
 
 def payload(profile, kind):
     return CanonicalProviderPayloadV1.build("docker", f"{kind}-payload/v2", profile.workload.workload_digest)
+
+
+def execution_binding(profile):
+    return ProviderExecutionBindingV1(
+        profile.provider, profile.descriptor.descriptor_digest,
+        profile.profile_digest, profile.scope, profile.executor_descriptor,
+        profile.adapter_descriptor.digest, profile.resource_digest,
+        profile.quote_digest, profile.secret_requirements_digest,
+    )
 
 
 def executor(profile, catalog, images, source, control, cancellations):
@@ -377,6 +400,67 @@ def test_binding_validation_fails_before_every_effect_port(profile, plan, run, s
     assert control.trace == cancellations.trace == []
 
 
+@pytest.mark.parametrize("field", (
+    "provider", "descriptor", "scope", "executor_descriptor",
+    "adapter_descriptor", "image", "runtime", "workload", "roots",
+    "artifacts",
+))
+def test_effect_admission_rejects_live_hostile_plan_profile_before_ports(
+        profile, plan, run, seams, field):
+    catalog, images, source, control, cancellations = seams
+    binding = make_binding("stage", D[9], "stage-effect", prepared(profile, plan, run))
+    owned = catalog.binding_authority.issue(binding)
+    catalog.values[binding.command_digest] = owned
+    value = getattr(owned.content.plan.profile, field)
+
+    class SameProjectionHostile(type(value)):
+        def to_dict(self):
+            return value.to_dict()
+
+    hostile = SameProjectionHostile(**{
+        item.name: getattr(value, item.name) for item in fields(value)
+    })
+    object.__setattr__(owned.content.plan.profile, field, hostile)
+    with pytest.raises(DockerProviderError) as caught:
+        executor(profile, catalog, images, source, control, cancellations).execute_once(
+            payload(profile, "stage"), request(profile, binding)
+        )
+    assert str(caught.value) == "docker_binding_mismatch"
+    assert images.calls == source.calls == 0
+    assert control.trace == cancellations.trace == []
+
+
+@pytest.mark.parametrize("kind", ("stage", "submit", "cancel"))
+def test_authenticated_command_with_only_foreign_execution_binding_stops_before_ports(
+        profile, plan, run, seams, kind):
+    catalog, images, source, control, cancellations = seams
+    prepared_plan = prepared(profile, plan, run)
+    values = {"execution_binding_digest": D[14]}
+    if kind == "cancel":
+        hostile_submit = make_binding(
+            "submit", D[8], "submit-effect", prepared_plan,
+            execution_binding_digest=D[14],
+        )
+        values.update({
+            "cancel_container_ref": "container-1",
+            "cancel_reason_digest": D[4],
+            "cancel_authorization_digest": D[5],
+            "cancel_submit_labels": labels_for(hostile_submit.identity),
+            "original_submit_command_bytes": hostile_submit.command_bytes,
+        })
+    binding = make_binding(
+        kind, D[9], f"{kind}-effect", prepared_plan, **values,
+    )
+    catalog.values[binding.command_digest] = catalog.binding_authority.issue(binding)
+    with pytest.raises(DockerProviderError) as caught:
+        executor(profile, catalog, images, source, control, cancellations).execute_once(
+            payload(profile, kind), request(profile, binding)
+        )
+    assert str(caught.value) == "docker_binding_mismatch"
+    assert images.calls == source.calls == 0
+    assert control.trace == cancellations.trace == []
+
+
 @pytest.mark.parametrize("scenario", ("lifecycle", "cancel", "stage_recovery", "cancel_recovery"))
 def test_both_opaque_profiles_run_unchanged_coordinator_foundation_and_operations(profile, plan, run, seams, scenario):
     catalog, images, source, control, cancellations = seams
@@ -446,7 +530,7 @@ def test_both_opaque_profiles_run_unchanged_coordinator_foundation_and_operation
             return D[6]
         def issue_effect_grant(self, command_bytes, *, preflight_digest, now_epoch):
             command = parse_exact_command(command_bytes)
-            prepared_plan = materializer.prepared(command.preparation.preparation_digest)
+            prepared_plan = materializer.prepared(command.preparation)
             identity = DockerEffectIdentityV1(
                 command.digest, command.operation.effect.effect_id,
                 command.operation.effect.kind.value, prepared_plan,

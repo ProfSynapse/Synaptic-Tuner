@@ -443,26 +443,35 @@ class TrainingCoordinatorV1:
 
     @staticmethod
     def _validate_preparation(candidate, plan, workflow, binding):
-        if type(candidate) is not CanonicalPreparationV2:
-            raise _error(CoordinatorCodeV1.BINDING_MISMATCH)
-        basis = plan.basis
-        actual = (
-            candidate.provider, candidate.scope, candidate.project_ref,
-            candidate.run_id, candidate.plan_fingerprint, candidate.source_digest,
-            candidate.workload_digest, candidate.runtime_digest,
-            candidate.resource_digest, candidate.artifact_contract_digest,
-            candidate.quote_digest, candidate.secret_requirements_digest,
-        )
-        expected = (
-            binding.provider, binding.scope, workflow.run.project_ref,
-            workflow.run.run_id, plan.plan_fingerprint, basis.source_digest,
-            basis.workload_digest, basis.runtime_digest,
-            binding.resource_digest, basis.artifact_policy_digest,
-            binding.quote_digest, binding.secret_requirements_digest,
-        )
-        if actual != expected:
-            raise _error(CoordinatorCodeV1.BINDING_MISMATCH)
-        return candidate
+        try:
+            if type(candidate) is not CanonicalPreparationV2:
+                raise ValueError("exact preparation required")
+            raw = candidate.canonical_bytes
+            sealed = CanonicalPreparationV2.parse(raw)
+            if sealed.canonical_bytes != raw:
+                raise ValueError("preparation bytes changed during admission")
+            basis = plan.basis
+            actual = (
+                sealed.provider, sealed.scope, sealed.project_ref,
+                sealed.run_id, sealed.plan_fingerprint, sealed.source_digest,
+                sealed.workload_digest, sealed.runtime_digest,
+                sealed.resource_digest, sealed.artifact_contract_digest,
+                sealed.quote_digest, sealed.secret_requirements_digest,
+                sealed.execution_binding_digest,
+            )
+            expected = (
+                binding.provider, binding.scope, workflow.run.project_ref,
+                workflow.run.run_id, plan.plan_fingerprint, basis.source_digest,
+                basis.workload_digest, basis.runtime_digest,
+                binding.resource_digest, basis.artifact_policy_digest,
+                binding.quote_digest, binding.secret_requirements_digest,
+                binding.binding_digest,
+            )
+            if actual != expected:
+                raise ValueError("preparation binding mismatch")
+            return sealed
+        except Exception:
+            raise _error(CoordinatorCodeV1.BINDING_MISMATCH) from None
 
     def _preparation(self, plan, workflow, binding):
         if workflow.preparation_digest is not None:
@@ -470,22 +479,44 @@ class TrainingCoordinatorV1:
                 lambda: self._preparations.get(workflow.preparation_digest),
                 CoordinatorCodeV1.STORE_INTEGRITY,
             )
-            if retained is None or retained.preparation_digest != workflow.preparation_digest:
+            if retained is None:
                 raise _error(CoordinatorCodeV1.STORE_INTEGRITY)
-            return self._validate_preparation(retained, plan, workflow, binding)
+            validated = self._validate_preparation(retained, plan, workflow, binding)
+            if validated.preparation_digest != workflow.preparation_digest:
+                raise _error(CoordinatorCodeV1.STORE_INTEGRITY)
+            return validated
         candidate = _call(
             lambda: self._materializer.prepare(plan, workflow.run, binding),
             CoordinatorCodeV1.BINDING_MISMATCH,
         )
-        self._validate_preparation(candidate, plan, workflow, binding)
+        candidate = self._validate_preparation(candidate, plan, workflow, binding)
+        candidate_bytes = candidate.canonical_bytes
+        candidate_digest = candidate.preparation_digest
         _call(lambda: self._preparations.put_if_absent(candidate), CoordinatorCodeV1.STORE_INTEGRITY)
         retained = _call(
-            lambda: self._preparations.get(candidate.preparation_digest),
+            lambda: self._preparations.get(candidate_digest),
             CoordinatorCodeV1.STORE_INTEGRITY,
         )
-        if retained != candidate:
-            raise _error(CoordinatorCodeV1.WORKFLOW_CONFLICT)
+        retained = self._validate_preparation(retained, plan, workflow, binding)
+        if (retained.canonical_bytes != candidate_bytes
+                or retained.preparation_digest != candidate_digest):
+            raise _error(CoordinatorCodeV1.BINDING_MISMATCH)
         return retained
+
+    def _reconciliation_preparation(self, plan, workflow, binding):
+        digest = workflow.preparation_digest
+        if digest is None:
+            raise _error(CoordinatorCodeV1.BINDING_MISMATCH)
+        retained = _call(
+            lambda: self._preparations.get(digest),
+            CoordinatorCodeV1.STORE_INTEGRITY,
+        )
+        if retained is None:
+            raise _error(CoordinatorCodeV1.BINDING_MISMATCH)
+        validated = self._validate_preparation(retained, plan, workflow, binding)
+        if validated.preparation_digest != digest:
+            raise _error(CoordinatorCodeV1.BINDING_MISMATCH)
+        return validated
 
     @staticmethod
     def _nonce(kind, workflow, preparation):
@@ -866,6 +897,7 @@ class TrainingCoordinatorV1:
                 RecordCancelIntentTransitionV1(intent),
             )
         if workflow.phase is WorkflowPhaseV1.CANCEL_INTENT_RECORDED:
+            self._reconciliation_preparation(plan, workflow, binding)
             return self._apply_cancel_effect(workflow)
         if workflow.phase in {
             WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,
@@ -970,6 +1002,7 @@ class TrainingCoordinatorV1:
             }
             if not stage and not submit and not cancel:
                 raise _error(CoordinatorCodeV1.INVALID_INPUT)
+            self._reconciliation_preparation(plan, workflow, binding)
             intent = workflow.stage if stage else workflow.submit if submit else workflow.cancel
             record = _call(lambda: self._foundation.get(intent.effect_id))
             if record is None:

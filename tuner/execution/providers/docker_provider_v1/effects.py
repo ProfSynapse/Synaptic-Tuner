@@ -21,6 +21,7 @@ from ...foundation_v2.references import (
     ProviderStageRefV1,
     ScopedProviderRunRefV1,
 )
+from ...coordinator_v1.model import ProviderExecutionBindingV1
 from .model import (
     AuthenticatedDockerAbsenceV1,
     AuthenticatedDockerCancellationAbsenceV1,
@@ -43,12 +44,14 @@ from .model import (
     DockerLookupRequestV1,
     DockerLookupResultV1,
     DockerProviderError,
+    PreparedDockerPlanV1,
     DockerRunPhaseV1,
     DockerSourceSealRequestV1,
     DockerSourceSealContentV1,
     DockerSourceSealLookupRequestV1,
     DockerSourceSealLookupResultV1,
     labels_for,
+    validated_profile_snapshot,
 )
 
 
@@ -61,8 +64,19 @@ def _rebuilt(value, expected_type):
     return rebuilt
 
 
+def _execution_binding(profile) -> ProviderExecutionBindingV1:
+    profile = validated_profile_snapshot(profile)
+    return ProviderExecutionBindingV1(
+        profile.provider, profile.descriptor.descriptor_digest,
+        profile.profile_digest, profile.scope, profile.executor_descriptor,
+        profile.adapter_descriptor.digest, profile.resource_digest,
+        profile.quote_digest, profile.secret_requirements_digest,
+    )
+
+
 def _resolve_authenticated_binding(catalog, binding_authority, profile, command_digest,
                                    *, expected_command_bytes=None):
+    profile = validated_profile_snapshot(profile)
     owned = catalog.resolve(command_digest)
     if type(owned) is not AuthenticatedDockerCommandBindingV1:
         raise ValueError
@@ -75,9 +89,28 @@ def _resolve_authenticated_binding(catalog, binding_authority, profile, command_
             or binding_authority.authenticate(owned) is not True):
         raise ValueError
     binding = _rebuilt(owned.content, DockerCommandBindingV1)
+    fresh_plan = PreparedDockerPlanV1(
+        binding.plan.profile, binding.plan.project_ref, binding.plan.run_id,
+        binding.plan.plan_fingerprint, binding.plan.source_digest,
+        binding.plan.preparation_digest,
+    )
+    fresh_identity = DockerEffectIdentityV1(
+        binding.identity.command_digest, binding.identity.effect_id,
+        binding.identity.effect_kind, fresh_plan,
+    )
+    fresh_binding = DockerCommandBindingV1(
+        fresh_identity, binding.command_bytes, binding.original_submit_command_bytes,
+        binding.cancel_container_ref, binding.cancel_reason_digest,
+        binding.cancel_submit_labels, binding.cancel_authorization_digest,
+    )
+    if fresh_binding.binding_digest != binding.binding_digest:
+        raise ValueError
+    binding = fresh_binding
     command = parse_exact_command(binding.command_bytes)
     p = binding.plan.profile
     prep = command.preparation
+    if prep.execution_binding_digest != _execution_binding(profile).binding_digest:
+        raise ValueError
     if (expected_command_bytes is not None and binding.command_bytes != expected_command_bytes):
         raise ValueError
     if (binding.command_digest, binding.effect_id, binding.effect_kind,
@@ -128,6 +161,7 @@ class DockerEffectExecutorV1:
 
     def __init__(self, profile, command_catalog, binding_authority, image_inventory, source, control,
                  cancellations, evidence_authority):
+        profile = validated_profile_snapshot(profile)
         self.descriptor = profile.executor_descriptor
         self.provider_id = profile.provider.provider_id
         self.profile_ref = profile.provider.profile_ref
@@ -295,6 +329,7 @@ class DockerReconciliationAdapterV1:
 
     def __init__(self, profile, command_catalog, binding_authority, control, source_seals,
                  cancellations, evidence_authority):
+        profile = validated_profile_snapshot(profile)
         self.descriptor = profile.adapter_descriptor
         self.provider_id = profile.provider.provider_id
         self.profile_ref = profile.provider.profile_ref
@@ -307,6 +342,12 @@ class DockerReconciliationAdapterV1:
 
     def lookup(self, target, preparation: CanonicalPreparationV2) -> ProviderObservationV1:
         try:
+            if type(preparation) is not CanonicalPreparationV2:
+                raise ValueError
+            preparation = CanonicalPreparationV2.parse(preparation.canonical_bytes)
+            expected_binding_digest = _execution_binding(self._profile).binding_digest
+            if preparation.execution_binding_digest != expected_binding_digest:
+                raise ValueError
             binding, command = _resolve_authenticated_binding(
                 self._catalog, self._binding_authority, self._profile,
                 target.command_digest, expected_command_bytes=target.command_bytes,
@@ -318,13 +359,15 @@ class DockerReconciliationAdapterV1:
                 preparation.plan_fingerprint, preparation.source_digest,
                 preparation.workload_digest, preparation.runtime_digest,
                 preparation.resource_digest, preparation.artifact_contract_digest,
-                preparation.quote_digest, preparation.secret_requirements_digest) != (
+                preparation.quote_digest, preparation.secret_requirements_digest,
+                preparation.execution_binding_digest) != (
                     binding.command_digest, binding.effect_id,
                     binding.plan.preparation_digest, p.provider,
                     binding.plan.project_ref, binding.plan.run_id,
                     binding.plan.plan_fingerprint, binding.plan.source_digest,
                     p.workload.workload_digest, p.runtime.digest, p.resource_digest,
-                    p.artifacts.digest, p.quote_digest, p.secret_requirements_digest):
+                    p.artifacts.digest, p.quote_digest, p.secret_requirements_digest,
+                    expected_binding_digest):
                 raise ValueError
             labels = (binding.cancel_submit_labels if binding.effect_kind == "cancel"
                       else labels_for(binding.identity))
