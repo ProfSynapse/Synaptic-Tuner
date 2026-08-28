@@ -39,6 +39,7 @@ from .model import (
     DockerCreateResultV1,
     DockerDiagnosticCodeV1,
     DockerEffectIdentityV1,
+    DockerLabelsV1,
     DockerLookupDispositionV1,
     DockerLookupPurposeV1,
     DockerLookupRequestV1,
@@ -46,6 +47,8 @@ from .model import (
     DockerProviderError,
     PreparedDockerPlanV1,
     DockerRunPhaseV1,
+    DockerStartDispositionV1,
+    DockerStartResultV1,
     DockerSourceSealRequestV1,
     DockerSourceSealContentV1,
     DockerSourceSealLookupRequestV1,
@@ -59,6 +62,16 @@ def _rebuilt(value, expected_type):
     if type(value) is not expected_type:
         raise ValueError
     rebuilt = expected_type(**{field.name: getattr(value, field.name) for field in fields(expected_type)})
+    if rebuilt != value:
+        raise ValueError
+    return rebuilt
+
+
+def _rebuilt_start_result(value):
+    if type(value) is not DockerStartResultV1:
+        raise ValueError
+    labels = None if value.labels is None else _rebuilt(value.labels, DockerLabelsV1)
+    rebuilt = DockerStartResultV1(value.disposition, labels, value.container_ref)
     if rebuilt != value:
         raise ValueError
     return rebuilt
@@ -251,7 +264,8 @@ class DockerEffectExecutorV1:
         labels = labels_for(binding.identity)
         try:
             result = self._control.create_once(
-                labels=labels, image=plan.profile.image, runtime=plan.profile.runtime,
+                labels=_rebuilt(labels, DockerLabelsV1),
+                image=plan.profile.image, runtime=plan.profile.runtime,
                 workload=plan.profile.workload, source_ref=plan.profile.roots.source_ref,
                 artifact_ref=plan.profile.roots.artifact_ref,
             )
@@ -263,18 +277,29 @@ class DockerEffectExecutorV1:
             raise DockerProviderError(DockerDiagnosticCodeV1.CREATE_COLLISION)
         if result.disposition is not DockerCreateDispositionV1.CREATED or result.labels != labels:
             return _indeterminate(binding, request)
+        container_ref = result.container_ref
         try:
-            started = self._control.start_once(result.container_ref, labels)
+            started = self._control.start_once(
+                container_ref, _rebuilt(labels, DockerLabelsV1)
+            )
         except Exception:
-            started = False
-        if started is not True:
-            return _indeterminate(binding, request)
+            raise DockerProviderError(DockerDiagnosticCodeV1.START_INDETERMINATE) from None
+        try:
+            started = _rebuilt_start_result(started)
+        except Exception:
+            raise DockerProviderError(DockerDiagnosticCodeV1.START_INDETERMINATE) from None
+        if started.disposition is DockerStartDispositionV1.COLLISION:
+            raise DockerProviderError(DockerDiagnosticCodeV1.START_COLLISION)
+        if (started.disposition is not DockerStartDispositionV1.STARTED
+                or started.labels != labels
+                or started.container_ref != container_ref):
+            raise DockerProviderError(DockerDiagnosticCodeV1.START_INDETERMINATE)
         return ProviderObservationV1(
             binding.effect_id, binding.command_digest, self.descriptor.digest,
             ObservationDisposition.FOUND, request.digest, 1,
             provider_run=ScopedProviderRunRefV1(
                 self.provider_id, self.profile_ref, self.account_ref,
-                self.namespace_ref, result.container_ref,
+                self.namespace_ref, container_ref,
             ),
         )
 

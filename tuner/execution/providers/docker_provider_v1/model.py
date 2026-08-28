@@ -34,6 +34,7 @@ class DockerDiagnosticCodeV1(str, Enum):
     SOURCE_WRITABLE = "docker_source_writable"
     CREATE_COLLISION = "docker_create_collision"
     CREATE_INDETERMINATE = "docker_create_indeterminate"
+    START_COLLISION = "docker_start_collision"
     START_INDETERMINATE = "docker_start_indeterminate"
     STOP_INDETERMINATE = "docker_stop_indeterminate"
     LOOKUP_INDETERMINATE = "docker_lookup_indeterminate"
@@ -579,6 +580,12 @@ class DockerCreateDispositionV1(str, Enum):
     INDETERMINATE = "indeterminate"
 
 
+class DockerStartDispositionV1(str, Enum):
+    STARTED = "started"
+    COLLISION = "collision"
+    INDETERMINATE = "indeterminate"
+
+
 class DockerLookupDispositionV1(str, Enum):
     FOUND = "found"
     DEFINITELY_ABSENT = "definitely_absent"
@@ -683,6 +690,22 @@ class DockerCreateResultV1:
         found = self.disposition is DockerCreateDispositionV1.CREATED
         if found != (type(self.labels) is DockerLabelsV1 and type(self.container_ref) is str):
             raise ValueError("create result matrix invalid")
+        if self.container_ref is not None:
+            safe_ref(self.container_ref, "container_ref")
+
+
+@dataclass(frozen=True, slots=True)
+class DockerStartResultV1:
+    disposition: DockerStartDispositionV1
+    labels: DockerLabelsV1 | None = None
+    container_ref: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.disposition) is not DockerStartDispositionV1:
+            raise TypeError("exact start disposition required")
+        started = self.disposition is DockerStartDispositionV1.STARTED
+        if started != (type(self.labels) is DockerLabelsV1 and type(self.container_ref) is str):
+            raise ValueError("start result matrix invalid")
         if self.container_ref is not None:
             safe_ref(self.container_ref, "container_ref")
 

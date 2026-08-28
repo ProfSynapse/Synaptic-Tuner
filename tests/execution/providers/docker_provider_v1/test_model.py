@@ -8,7 +8,30 @@ from tuner.execution.foundation_v2.references import ExecutionScopeV1
 from tuner.execution.providers.docker_provider_v1.model import (
     DockerArtifactContractV1, DockerImageV1, DockerProfileV1, DockerRootsV1,
     DockerRuntimeV1, DockerWorkloadV1, validated_profile_snapshot,
+    DockerLabelsV1, DockerStartDispositionV1, DockerStartResultV1,
 )
+
+
+def test_start_result_requires_success_evidence_only_for_started(profile):
+    labels = DockerLabelsV1(
+        "a" * 64, "docker", profile.provider.profile_ref, "account", "namespace",
+        "project", "run", "b" * 64, "c" * 64, "effect", "submit",
+        "d" * 64, "e" * 64,
+    )
+    result = DockerStartResultV1(DockerStartDispositionV1.STARTED, labels, "container-1")
+    assert result.labels == labels
+    assert result.container_ref == "container-1"
+    for disposition in (
+        DockerStartDispositionV1.COLLISION,
+        DockerStartDispositionV1.INDETERMINATE,
+    ):
+        assert DockerStartResultV1(disposition).labels is None
+        with pytest.raises(ValueError):
+            DockerStartResultV1(disposition, labels, "container-1")
+    with pytest.raises(ValueError):
+        DockerStartResultV1(DockerStartDispositionV1.STARTED)
+    with pytest.raises(TypeError):
+        DockerStartResultV1("started", labels, "container-1")
 
 
 def test_profile_is_canonical_immutable_and_opaque_profiles_share_one_type(profile):

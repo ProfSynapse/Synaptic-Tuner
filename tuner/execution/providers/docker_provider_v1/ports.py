@@ -33,6 +33,7 @@ from .model import (
     DockerLookupRequestV1,
     DockerLookupResultV1,
     DockerRuntimeV1,
+    DockerStartResultV1,
     DockerSourceSealRequestV1,
     DockerSourceSealLookupRequestV1,
     DockerSourceSealLookupResultV1,
@@ -70,7 +71,9 @@ class DockerControlPortV1(Protocol):
         runtime: DockerRuntimeV1, workload: DockerWorkloadV1,
         source_ref: str, artifact_ref: str,
     ) -> DockerCreateResultV1: ...
-    def start_once(self, container_ref: str, labels: object) -> bool: ...
+    def start_once(
+        self, container_ref: str, labels: DockerLabelsV1
+    ) -> DockerStartResultV1: ...
     def lookup(self, request: DockerLookupRequestV1) -> DockerLookupResultV1: ...
 
 

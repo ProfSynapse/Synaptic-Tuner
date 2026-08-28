@@ -17,6 +17,7 @@ from tuner.execution.providers.docker_provider_v1.model import (
     DockerCancellationLookupResultV1,
     DockerImageV1, DockerLookupDispositionV1, DockerLookupResultV1, DockerProfileV1,
     DockerRootsV1, DockerRunPhaseV1, DockerRuntimeV1, DockerSourceSealContentV1,
+    DockerStartDispositionV1, DockerStartResultV1,
     DockerSourceSealLookupResultV1, DockerLookupPurposeV1,
     DockerWorkloadV1,
 )
@@ -145,7 +146,8 @@ class Control:
     def __init__(self):
         self.trace = []
         self.create_disposition = DockerCreateDispositionV1.CREATED
-        self.start_result = True
+        self.start_disposition = DockerStartDispositionV1.STARTED
+        self.start_result = None
         self.lookup_result = None
         self.lookup_disposition = DockerLookupDispositionV1.FOUND
         self.created = {}
@@ -165,11 +167,15 @@ class Control:
         return DockerCreateResultV1(self.create_disposition)
     def start_once(self, container_ref, labels):
         self.trace.append(("start", container_ref))
+        if self.start_result is not None:
+            return self.start_result
         key = (container_ref, labels.digest)
-        if key not in self.started and self.start_result:
+        if key not in self.started and self.start_disposition is DockerStartDispositionV1.STARTED:
             self.start_mutations += 1
             self.started.add(key)
-        return self.start_result
+        if self.start_disposition is DockerStartDispositionV1.STARTED:
+            return DockerStartResultV1(self.start_disposition, labels, container_ref)
+        return DockerStartResultV1(self.start_disposition)
     def lookup(self, request):
         self.trace.append(("lookup", request.labels.digest))
         if self.lookup_result is not None:

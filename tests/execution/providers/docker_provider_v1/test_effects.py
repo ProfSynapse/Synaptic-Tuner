@@ -39,8 +39,9 @@ from tuner.execution.providers.docker_provider_v1.effects import (
 )
 from tuner.execution.providers.docker_provider_v1.model import (
     AuthenticatedDockerCommandBindingV1, DockerCommandBindingV1,
-    DockerCreateDispositionV1, DockerProviderError,
+    DockerCreateDispositionV1, DockerDiagnosticCodeV1, DockerProviderError,
     DockerEffectIdentityV1, PreparedDockerPlanV1, labels_for,
+    DockerStartDispositionV1, DockerStartResultV1,
 )
 from tests.execution.providers.docker_provider_v1.conftest import Authority, D
 from tests.execution.coordinator_v1.test_start_reconcile_service import (
@@ -221,13 +222,168 @@ def test_collision_never_starts_and_partial_created_is_never_restarted(profile, 
     with pytest.raises(DockerProviderError):
         executor(profile, catalog, images, source, control, cancellations).execute_once(payload(profile, "submit"), request(profile, collision))
     assert tuple(event[0] for event in control.trace) == ("create",)
-    control.trace.clear(); control.create_disposition = DockerCreateDispositionV1.CREATED; control.start_result = False
+    control.trace.clear(); control.create_disposition = DockerCreateDispositionV1.CREATED
+    control.start_disposition = DockerStartDispositionV1.INDETERMINATE
     partial = make_binding("submit", D[13], "submit-partial", prepared(profile, plan, run))
     catalog.values[partial.command_digest] = partial
     effect = executor(profile, catalog, images, source, control, cancellations)
-    assert effect.execute_once(payload(profile, "submit"), request(profile, partial)).disposition is ObservationDisposition.INDETERMINATE
+    with pytest.raises(DockerProviderError) as caught:
+        effect.execute_once(payload(profile, "submit"), request(profile, partial))
+    assert caught.value.code is DockerDiagnosticCodeV1.START_INDETERMINATE
     assert effect.execute_once(payload(profile, "submit"), request(profile, partial)).disposition is ObservationDisposition.INDETERMINATE
     assert tuple(event[0] for event in control.trace) == ("create", "start")
+
+
+@pytest.mark.parametrize(
+    ("start_result", "expected_code"),
+    (
+        (False, DockerDiagnosticCodeV1.START_INDETERMINATE),
+        (True, DockerDiagnosticCodeV1.START_INDETERMINATE),
+        (DockerStartResultV1(DockerStartDispositionV1.COLLISION), DockerDiagnosticCodeV1.START_COLLISION),
+        (DockerStartResultV1(DockerStartDispositionV1.INDETERMINATE), DockerDiagnosticCodeV1.START_INDETERMINATE),
+    ),
+)
+def test_start_rejects_legacy_collision_and_indeterminate_results(
+    profile, plan, run, seams, start_result, expected_code,
+):
+    catalog, images, source, control, cancellations = seams
+    binding = make_binding("submit", D[12], "typed-start", prepared(profile, plan, run))
+    catalog.values[binding.command_digest] = binding
+    control.start_result = start_result
+    with pytest.raises(DockerProviderError) as caught:
+        executor(profile, catalog, images, source, control, cancellations).execute_once(
+            payload(profile, "submit"), request(profile, binding)
+        )
+    assert caught.value.code is expected_code
+    assert tuple(event[0] for event in control.trace) == ("create", "start")
+
+
+def test_start_rejects_mutated_typed_result(profile, plan, run, seams):
+    catalog, images, source, control, cancellations = seams
+    binding = make_binding("submit", D[12], "malformed-start", prepared(profile, plan, run))
+    catalog.values[binding.command_digest] = binding
+    malformed = DockerStartResultV1(DockerStartDispositionV1.INDETERMINATE)
+    object.__setattr__(malformed, "disposition", DockerStartDispositionV1.STARTED)
+    control.start_result = malformed
+    with pytest.raises(DockerProviderError) as caught:
+        executor(profile, catalog, images, source, control, cancellations).execute_once(
+            payload(profile, "submit"), request(profile, binding)
+        )
+    assert caught.value.code is DockerDiagnosticCodeV1.START_INDETERMINATE
+
+
+def test_start_cannot_mutate_its_labels_alias_into_success(profile, plan, run, seams):
+    catalog, images, source, control, cancellations = seams
+    binding = make_binding("submit", D[12], "aliased-start", prepared(profile, plan, run))
+    catalog.values[binding.command_digest] = binding
+    canonical = labels_for(binding.identity)
+    received = []
+
+    def mutate_start(container_ref, labels):
+        received.append(labels)
+        object.__setattr__(labels, "effect_id", "hostile-effect")
+        return DockerStartResultV1(DockerStartDispositionV1.STARTED, labels, container_ref)
+
+    control.start_once = mutate_start
+    with pytest.raises(DockerProviderError) as caught:
+        executor(profile, catalog, images, source, control, cancellations).execute_once(
+            payload(profile, "submit"), request(profile, binding)
+        )
+    assert caught.value.code is DockerDiagnosticCodeV1.START_INDETERMINATE
+    assert canonical == labels_for(binding.identity)
+    assert received[0] is not canonical
+    assert received[0].effect_id == "hostile-effect"
+
+
+def test_create_and_start_receive_distinct_canonical_label_copies(profile, plan, run, seams):
+    catalog, images, source, control, cancellations = seams
+    binding = make_binding("submit", D[13], "copied-labels", prepared(profile, plan, run))
+    catalog.values[binding.command_digest] = binding
+    canonical = labels_for(binding.identity)
+    received = []
+    original_create = control.create_once
+    original_start = control.start_once
+
+    def capture_create(**values):
+        received.append(values["labels"])
+        return original_create(**values)
+
+    def capture_start(container_ref, labels):
+        received.append(labels)
+        return original_start(container_ref, labels)
+
+    control.create_once = capture_create
+    control.start_once = capture_start
+    result = executor(profile, catalog, images, source, control, cancellations).execute_once(
+        payload(profile, "submit"), request(profile, binding)
+    )
+    assert result.disposition is ObservationDisposition.FOUND
+    assert received[0] == received[1] == canonical
+    assert received[0] is not received[1]
+    assert all(value is not canonical for value in received)
+
+
+def test_create_cannot_redefine_start_labels_baseline(profile, plan, run, seams):
+    catalog, images, source, control, cancellations = seams
+    binding = make_binding("submit", D[13], "hostile-create", prepared(profile, plan, run))
+    catalog.values[binding.command_digest] = binding
+    canonical = labels_for(binding.identity)
+    original_create = control.create_once
+
+    def mutate_create(**values):
+        result = original_create(**values)
+        object.__setattr__(values["labels"], "effect_id", "hostile-effect")
+        return type(result)(result.disposition, values["labels"], result.container_ref)
+
+    control.create_once = mutate_create
+    result = executor(profile, catalog, images, source, control, cancellations).execute_once(
+        payload(profile, "submit"), request(profile, binding)
+    )
+    assert result.disposition is ObservationDisposition.INDETERMINATE
+    assert tuple(event[0] for event in control.trace) == ("create",)
+    assert labels_for(binding.identity) == canonical
+    assert canonical.effect_id != "hostile-effect"
+
+
+@pytest.mark.parametrize("substitution", ("labels", "container_ref"))
+def test_start_requires_exact_created_container_and_labels(
+    profile, plan, run, seams, substitution,
+):
+    catalog, images, source, control, cancellations = seams
+    binding = make_binding("submit", D[13], "bound-start", prepared(profile, plan, run))
+    catalog.values[binding.command_digest] = binding
+    expected_labels = labels_for(binding.identity)
+    if substitution == "labels":
+        other = make_binding("submit", D[12], "other-start", prepared(profile, plan, run))
+        control.start_result = DockerStartResultV1(
+            DockerStartDispositionV1.STARTED, labels_for(other.identity), "container-1"
+        )
+    else:
+        control.start_result = DockerStartResultV1(
+            DockerStartDispositionV1.STARTED, expected_labels, "container-other"
+        )
+    with pytest.raises(DockerProviderError) as caught:
+        executor(profile, catalog, images, source, control, cancellations).execute_once(
+            payload(profile, "submit"), request(profile, binding)
+        )
+    assert caught.value.code is DockerDiagnosticCodeV1.START_INDETERMINATE
+
+
+def test_start_exception_is_closed_indeterminate(profile, plan, run, seams):
+    catalog, images, source, control, cancellations = seams
+    binding = make_binding("submit", D[13], "start-exception", prepared(profile, plan, run))
+    catalog.values[binding.command_digest] = binding
+
+    def fail_start(container_ref, labels):
+        raise RuntimeError("provider detail must not escape")
+
+    control.start_once = fail_start
+    with pytest.raises(DockerProviderError) as caught:
+        executor(profile, catalog, images, source, control, cancellations).execute_once(
+            payload(profile, "submit"), request(profile, binding)
+        )
+    assert caught.value.code is DockerDiagnosticCodeV1.START_INDETERMINATE
+    assert "provider detail" not in str(caught.value)
 
 
 def test_cancel_calls_stop_once(profile, plan, run, seams):
