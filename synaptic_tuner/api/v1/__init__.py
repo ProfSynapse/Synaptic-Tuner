@@ -63,6 +63,11 @@ _LAZY_MODULE_ATTRIBUTES = {
         "TrainingDatasetInputV1", "TrainingDurationV1", "TrainingInputV1",
         "TrainingMethodV1", "TrainingModelInputV1",
     },
+    "training_input_loader": {
+        "LoadedTrainingInputContractV1", "TrainingInputContractCodeV1",
+        "TrainingInputContractErrorV1", "TrainingInputContractIdentityV1",
+        "load_training_input_contract_v1",
+    },
 }
 
 _LAZY_ATTRIBUTES = {
@@ -98,6 +103,9 @@ _FORMAL_EXPORTS = (
     "SFTTrainingHyperparametersV1", "TrainingArtifactRequirementsV1",
     "TrainingDatasetInputV1", "TrainingDurationV1", "TrainingInputV1",
     "TrainingMethodV1", "TrainingModelInputV1",
+    "LoadedTrainingInputContractV1", "TrainingInputContractCodeV1",
+    "TrainingInputContractErrorV1", "TrainingInputContractIdentityV1",
+    "load_training_input_contract_v1",
 )
 
 if not set(_FORMAL_EXPORTS).issubset(_LAZY_ATTRIBUTES):  # pragma: no cover - module invariant

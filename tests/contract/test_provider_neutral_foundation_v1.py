@@ -173,6 +173,11 @@ def test_formal_v1_exports_are_frozen_exactly() -> None:
             "TrainingInputV1",
             "TrainingMethodV1",
             "TrainingModelInputV1",
+            "LoadedTrainingInputContractV1",
+            "TrainingInputContractCodeV1",
+            "TrainingInputContractErrorV1",
+            "TrainingInputContractIdentityV1",
+            "load_training_input_contract_v1",
         ]
     )
     assert api.__all__ == baseline
