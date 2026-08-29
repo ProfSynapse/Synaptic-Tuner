@@ -156,13 +156,24 @@ def test_closed_schemas_accept_their_canonical_python_documents(schema_name, doc
     jsonschema.validate(document(), schema)
 
 
-def test_pre_b1_formal_exports_are_frozen_exactly() -> None:
+def test_formal_v1_exports_are_frozen_exactly() -> None:
     import synaptic_tuner.api.v1 as api
 
     baseline = json.loads(
         (ROOT / "tests/contract/fixtures/api_v1_formal_exports_pre_b1.json").read_text(
             encoding="utf-8"
         )
+    )
+    baseline.extend(
+        [
+            "SFTTrainingHyperparametersV1",
+            "TrainingArtifactRequirementsV1",
+            "TrainingDatasetInputV1",
+            "TrainingDurationV1",
+            "TrainingInputV1",
+            "TrainingMethodV1",
+            "TrainingModelInputV1",
+        ]
     )
     assert api.__all__ == baseline
     assert "EventCode" not in api.__all__
