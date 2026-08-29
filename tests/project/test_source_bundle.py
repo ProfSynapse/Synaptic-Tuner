@@ -1,6 +1,10 @@
 import json
+import hashlib
 import os
 import subprocess
+from dataclasses import replace
+from types import MappingProxyType
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -12,6 +16,7 @@ from tuner.project.source_bundle import (
     GitSource,
     RepositoryLocation,
     SourceLock,
+    SourceLockBindingV1,
     inspect_git_source,
     resolve_relative_repository_url,
 )
@@ -106,6 +111,191 @@ def test_source_lock_round_trip_validates_schema_without_credentials(tmp_path: P
     )
     Draft202012Validator(schema).validate(payload)
     assert SourceLock.from_dict(payload).to_dict() == payload
+
+
+def _complete_lock() -> SourceLock:
+    return SourceLock.from_dict({
+        "schema_version": "synaptic-source-lock/v1",
+        "run_id": "run-binding",
+        "created_at": "2026-08-25T12:00:00Z",
+        "mode": "superproject",
+        "sources": {
+            "project": {
+                "url": "https://github.com/org/host.git", "commit": PROJECT_COMMIT,
+                "dirty": False, "pushed": True,
+            },
+            "engine": {
+                "url": "https://github.com/org/engine.git", "commit": COMMIT,
+                "dirty": False, "pushed": True, "submodule_path": "vendor/engine",
+                "gitlink_commit": COMMIT,
+            },
+        },
+        "project": {"manifest_sha256": "1" * 64},
+        "configuration": {"training_input_digest": "2" * 64},
+        "plugins": [{"name": "plugin-a"}],
+        "inputs": [{"name": "dataset-a"}],
+        "runtime": {"python": "3.12.7"},
+        "outputs": {"artifact": "final-model"},
+    })
+
+
+def test_source_lock_binding_is_exact_canonical_and_round_trips() -> None:
+    lock = _complete_lock()
+    expected = hashlib.sha256(
+        b"synaptic-source-lock-binding/v1\0" + lock.canonical_bytes
+    ).hexdigest()
+    assert lock.canonical_bytes == lock.to_json().encode("utf-8")
+    assert lock.binding == SourceLockBindingV1(
+        "synaptic-source-lock-binding/v1", "synaptic-source-lock/v1", expected
+    )
+    assert SourceLockBindingV1.from_dict(lock.binding.to_dict()) == lock.binding
+    with pytest.raises(SourceLockError):
+        SourceLockBindingV1.from_dict({**lock.binding.to_dict(), "extra": True})
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("run_id", "run-other"),
+        ("created_at", "2026-08-25T12:00:01Z"),
+        ("project", {"manifest_sha256": "3" * 64}),
+        ("configuration", {"training_input_digest": "3" * 64}),
+        ("plugins", ({"name": "plugin-b"},)),
+        ("inputs", ({"name": "dataset-b"},)),
+        ("runtime", {"python": "3.13.0"}),
+        ("outputs", {"artifact": "checkpoint"}),
+    ],
+)
+def test_every_source_lock_section_changes_binding(field: str, replacement: object) -> None:
+    lock = _complete_lock()
+    assert replace(lock, **{field: replacement}).binding != lock.binding
+
+
+def test_source_lock_source_identities_change_binding() -> None:
+    lock = _complete_lock()
+    changed_project = replace(
+        lock,
+        project_source=replace(lock.project_source, commit="c" * 40),
+    )
+    changed_engine = replace(
+        lock,
+        engine_source=replace(
+            lock.engine_source, commit="d" * 40, gitlink_commit="d" * 40
+        ),
+    )
+    assert changed_project.binding != lock.binding
+    assert changed_engine.binding != lock.binding
+
+
+def test_source_lock_canonical_json_is_exact_finite_utf8() -> None:
+    lock = replace(_complete_lock(), configuration={"label": "café"})
+    assert b"caf\xc3\xa9" in lock.canonical_bytes
+    assert b"\\u00e9" not in lock.canonical_bytes
+    assert lock.canonical_bytes == lock.to_json().encode("utf-8")
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), "\ud800", object()])
+def test_source_lock_canonicalization_totalizes_invalid_json_without_context(bad: object) -> None:
+    lock = replace(_complete_lock(), configuration={"member": bad})
+    with pytest.raises(SourceLockError, match="^Source lock cannot be canonicalized$") as caught:
+        _ = lock.canonical_bytes
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+class _ExplodingMapping(Mapping):
+    def __getitem__(self, key):
+        raise RuntimeError("private-value")
+
+    def __iter__(self):
+        raise RuntimeError("private-value")
+
+    def __len__(self):
+        raise RuntimeError("private-value")
+
+
+def test_source_lock_canonicalization_totalizes_pre_serialization_callbacks() -> None:
+    lock = replace(_complete_lock(), configuration=_ExplodingMapping())
+    with pytest.raises(SourceLockError, match="^Source lock cannot be canonicalized$") as caught:
+        _ = lock.binding
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert "private-value" not in str(caught.value)
+
+
+def test_new_binding_and_source_lock_parsers_require_exact_builtins() -> None:
+    lock = _complete_lock()
+    with pytest.raises(SourceLockError):
+        SourceLockBindingV1.from_dict(MappingProxyType(lock.binding.to_dict()))
+    with pytest.raises(SourceLockError):
+        SourceLock.from_dict(MappingProxyType(lock.to_dict()))
+    class Text(str):
+        pass
+    class Array(list):
+        pass
+    text_value=lock.to_dict();text_value["configuration"]={"name":Text("value")}
+    with pytest.raises(SourceLockError):
+        SourceLock.from_dict(text_value)
+    array_value=lock.to_dict();array_value["plugins"]=Array()
+    with pytest.raises(SourceLockError):
+        SourceLock.from_dict(array_value)
+
+
+class _HostileFieldName(str):
+    armed = False
+    calls = 0
+
+    def __hash__(self):
+        if type(self).armed:
+            type(self).calls += 1
+            raise RuntimeError("private-field-name")
+        return str.__hash__(self)
+
+    def __eq__(self, other):
+        if type(self).armed:
+            type(self).calls += 1
+            raise RuntimeError("private-field-name")
+        return str.__eq__(self, other)
+
+
+def _replace_key_with_hostile_field(value: dict[str, object], name: str) -> None:
+    original = value.pop(name)
+    value[_HostileFieldName(name)] = original
+
+
+@pytest.mark.parametrize("family", ["binding", "git-source", "lock", "sources", "section"])
+def test_source_parser_field_inventory_rejects_hostile_string_subclass_without_callbacks(
+    family: str,
+) -> None:
+    lock = _complete_lock()
+    if family == "binding":
+        value = lock.binding.to_dict()
+        _replace_key_with_hostile_field(value, "schema_version")
+        parse = lambda: SourceLockBindingV1.from_dict(value)
+    elif family == "git-source":
+        value = lock.project_source.to_dict()
+        _replace_key_with_hostile_field(value, "url")
+        parse = lambda: GitSource.from_dict(value)
+    else:
+        value = lock.to_dict()
+        if family == "lock":
+            _replace_key_with_hostile_field(value, "schema_version")
+        elif family == "sources":
+            _replace_key_with_hostile_field(value["sources"], "project")
+        else:
+            _replace_key_with_hostile_field(value["configuration"], "training_input_digest")
+        parse = lambda: SourceLock.from_dict(value)
+    _HostileFieldName.calls = 0
+    _HostileFieldName.armed = True
+    try:
+        with pytest.raises(SourceLockError) as caught:
+            parse()
+    finally:
+        _HostileFieldName.armed = False
+    assert _HostileFieldName.calls == 0
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert "private-field-name" not in str(caught.value)
 
 
 def _git(repository: Path, *args: str) -> None:

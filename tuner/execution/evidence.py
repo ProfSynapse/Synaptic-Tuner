@@ -49,6 +49,7 @@ class EvidenceFreshnessPolicyV1:
 
 
 SOURCE_EVIDENCE_POLICY = EvidenceFreshnessPolicyV1(600, 600, 30)
+SOURCE_EVIDENCE_PURPOSE = "source-lock-evidence/v1"
 DEPLOYMENT_EVIDENCE_POLICY = EvidenceFreshnessPolicyV1(300, 300, 30)
 
 
@@ -115,5 +116,6 @@ def admit_evidence(
 __all__ = [
     "DEPLOYMENT_EVIDENCE_POLICY", "EvidenceAuthenticator", "EvidenceFreshnessPolicyV1",
     "EvidenceReplayRepository", "ReplayDisposition", "SOURCE_EVIDENCE_POLICY",
+    "SOURCE_EVIDENCE_PURPOSE",
     "admit_evidence", "canonical_utc", "parse_utc", "validate_evidence_window",
 ]

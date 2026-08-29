@@ -13,12 +13,24 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Callable, Protocol, runtime_checkable
 
-from tuner.execution.evidence import EvidenceAuthenticator, SOURCE_EVIDENCE_POLICY, parse_utc
+from tuner.execution.evidence import (
+    EvidenceAuthenticator,
+    SOURCE_EVIDENCE_POLICY,
+    SOURCE_EVIDENCE_PURPOSE,
+    parse_utc,
+)
 
 from .context import ProjectContext
-from .execution_source import AuthenticatedSourceEvidenceV1, LocalSourceInspectionPort, PushedSourceVerificationPort
+from .execution_source import (
+    AuthenticatedSourceEvidenceV1,
+    LocalSourceInspectionPort,
+    PushedSourceVerificationPort,
+    _capture_source_evidence_snapshot,
+    _require_source_evidence_snapshot,
+)
 from .source_bundle import (
     RepositoryLocation, SourceLock, SourceLockError,
+    _capture_source_lock_snapshot, _require_source_lock_snapshot,
     canonical_remote_branch_ref, inspect_git_source,
     resolve_relative_repository_url,
 )
@@ -109,21 +121,47 @@ class GitLsRemotePushedCommitVerifier(PushedSourceVerificationPort):
         if not isinstance(runner,ScopedGitRemoteRunner) or not isinstance(authenticator,EvidenceAuthenticator):raise TypeError("remote runner and authenticator are required")
         self.runner=runner;self.authenticator=authenticator;self.clock=clock;self.audience_ref=audience_ref;self.issuer_ref=issuer_ref;self.key_ref=key_ref;self.challenge_factory=challenge_factory;self.evidence_ref_factory=evidence_ref_factory
 
-    def _verify_ref(self,source)->None:
+    def _verify_ref(self,source,source_lock,baseline)->None:
         ref=canonical_remote_branch_ref(source.branch)
         try:raw=self.runner.read_ref(canonical_url=source.location.canonical_url,exact_ref=ref)
-        except Exception as exc:raise SourceLockError("authenticated remote ref verification failed") from exc
-        if not isinstance(raw,bytes) or len(raw)>4096:raise SourceLockError("remote ref proof is malformed")
-        lines=[line for line in raw.decode("ascii").splitlines() if line]
+        except BaseException:raise SourceLockError("authenticated remote ref verification failed") from None
+        _require_source_lock_snapshot(source_lock,baseline)
+        if type(raw) is not bytes or len(raw)>4096:raise SourceLockError("remote ref proof is malformed")
+        try:lines=[line for line in raw.decode("ascii").splitlines() if line]
+        except BaseException:raise SourceLockError("remote ref proof is malformed") from None
         if len(lines)!=1 or lines[0]!=f"{source.commit.lower()}\t{ref}":raise SourceLockError("remote ref does not equal the locked commit")
 
     def verify(self,source_lock:SourceLock)->AuthenticatedSourceEvidenceV1:
-        if not isinstance(source_lock,SourceLock) or source_lock.mode!="superproject":raise TypeError("superproject source lock is required")
-        self._verify_ref(source_lock.project_source);self._verify_ref(source_lock.engine_source)
-        verified=self.clock();expires=(parse_utc(verified)+timedelta(seconds=SOURCE_EVIDENCE_POLICY.maximum_lifetime_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        value=AuthenticatedSourceEvidenceV1(project_url=source_lock.project_source.location.canonical_url,project_commit=source_lock.project_source.commit,engine_url=source_lock.engine_source.location.canonical_url,engine_commit=source_lock.engine_source.commit,engine_submodule_path=source_lock.engine_source.submodule_path,gitlink_commit=source_lock.engine_source.gitlink_commit,issuer_ref=self.issuer_ref,evidence_ref=self.evidence_ref_factory(),audience_ref=self.audience_ref,challenge_nonce=self.challenge_factory(),verified_at=verified,expires_at=expires,key_ref=self.key_ref,tag_base64="dGFn",attestation_digest="0"*64)
-        attestation=hashlib.sha256(value.authenticated_payload).hexdigest();tag=self.authenticator.sign("modal-source-evidence/v1",value.authenticated_payload,self.key_ref)
-        return replace(value,attestation_digest=attestation,tag_base64=base64.b64encode(tag).decode("ascii"))
+        if type(source_lock) is not SourceLock or source_lock.mode!="superproject":raise TypeError("superproject source lock is required")
+        baseline = _capture_source_lock_snapshot(source_lock)
+        locked = baseline.canonical_lock
+        self._verify_ref(locked.project_source,source_lock,baseline)
+        self._verify_ref(locked.engine_source,source_lock,baseline)
+        try:verified=self.clock()
+        except BaseException:raise SourceLockError("source evidence clock is unavailable") from None
+        _require_source_lock_snapshot(source_lock,baseline)
+        try:expires=(parse_utc(verified)+timedelta(seconds=SOURCE_EVIDENCE_POLICY.maximum_lifetime_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except BaseException:raise SourceLockError("source evidence clock is unavailable") from None
+        try:evidence_ref=self.evidence_ref_factory()
+        except BaseException:raise SourceLockError("source evidence reference is unavailable") from None
+        _require_source_lock_snapshot(source_lock,baseline)
+        try:challenge=self.challenge_factory()
+        except BaseException:raise SourceLockError("source evidence challenge is unavailable") from None
+        _require_source_lock_snapshot(source_lock,baseline)
+        value=AuthenticatedSourceEvidenceV1(project_url=locked.project_source.location.canonical_url,project_commit=locked.project_source.commit,engine_url=locked.engine_source.location.canonical_url,engine_commit=locked.engine_source.commit,engine_submodule_path=locked.engine_source.submodule_path,gitlink_commit=locked.engine_source.gitlink_commit,source_lock_binding=baseline.binding,issuer_ref=self.issuer_ref,evidence_ref=evidence_ref,audience_ref=self.audience_ref,challenge_nonce=challenge,verified_at=verified,expires_at=expires,key_ref=self.key_ref,tag_base64="dGFn",attestation_digest="0"*64)
+        evidence_baseline=_capture_source_evidence_snapshot(value)
+        attestation=hashlib.sha256(evidence_baseline.authenticated_payload).hexdigest()
+        try:tag=self.authenticator.sign(SOURCE_EVIDENCE_PURPOSE,evidence_baseline.authenticated_payload,self.key_ref)
+        except BaseException:raise SourceLockError("source evidence authentication is unavailable") from None
+        _require_source_lock_snapshot(source_lock,baseline)
+        _require_source_evidence_snapshot(value,evidence_baseline)
+        if type(tag) is not bytes or not tag:
+            raise SourceLockError("source evidence authentication is malformed")
+        result=replace(evidence_baseline.evidence,attestation_digest=attestation,tag_base64=base64.b64encode(tag).decode("ascii"))
+        result_baseline=_capture_source_evidence_snapshot(result)
+        _require_source_lock_snapshot(source_lock,baseline)
+        _require_source_evidence_snapshot(result,result_baseline)
+        return result_baseline.evidence
 
 
 __all__=["GitCliLocalSourceInspector","GitLsRemotePushedCommitVerifier","ScopedGitRemoteRunner"]

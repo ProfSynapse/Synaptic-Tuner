@@ -65,6 +65,7 @@ def _execution_source(submodule_path: str) -> ExecutionSourceV1:
             project_url=project["url"], project_commit=project["commit"],
             engine_url=engine["url"], engine_commit=engine["commit"],
             engine_submodule_path=submodule_path, gitlink_commit=engine["commit"],
+            source_lock_binding=provisional.binding,
             issuer_ref="fake-verifier", evidence_ref="push-proof",
             audience_ref="project/run-1", challenge_nonce="source-nonce",
             verified_at="2026-08-25T12:01:00Z", expires_at="2026-08-25T12:10:00Z",

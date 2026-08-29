@@ -39,7 +39,9 @@ def _workload_validator():
     return validator_type(schema, registry=registry)
 
 
-def _execution_source(*, engine_commit: str = "a" * 40) -> ExecutionSourceV1:
+def _execution_source(
+    *, engine_commit: str = "a" * 40, source_configuration_digest: str = "2" * 64
+) -> ExecutionSourceV1:
     project = {
         "url": "https://github.com/example/product.git",
         "commit": "9" * 40,
@@ -68,7 +70,7 @@ def _execution_source(*, engine_commit: str = "a" * 40) -> ExecutionSourceV1:
             },
             "configuration": {
                 "resolved_uri": "project://resolved-config.json",
-                "resolved_sha256": "2" * 64,
+                "resolved_sha256": source_configuration_digest,
                 "documents": [],
             },
             "plugins": [],
@@ -81,6 +83,7 @@ def _execution_source(*, engine_commit: str = "a" * 40) -> ExecutionSourceV1:
         project_url=project["url"], project_commit=project["commit"],
         engine_url=engine["url"], engine_commit=engine_commit,
         engine_submodule_path="vendor/training-engine", gitlink_commit=engine_commit,
+        source_lock_binding=provisional.binding,
         issuer_ref="fake-verifier", evidence_ref="push-proof",
         audience_ref="project/run-1", challenge_nonce="source-nonce",
         verified_at="2026-08-25T12:01:00Z", expires_at="2026-08-25T12:10:00Z",
@@ -177,9 +180,14 @@ def test_fingerprint_binds_model_and_source_revisions() -> None:
         resolved_config=_config(),
         execution_source=_execution_source(engine_commit="9" * 40),
     )
+    changed_source_configuration = compile_sft_workload(
+        resolved_config=_config(),
+        execution_source=_execution_source(source_configuration_digest="3" * 64),
+    )
 
     assert baseline.fingerprint != changed_model.fingerprint
     assert baseline.fingerprint != changed_source.fingerprint
+    assert baseline.fingerprint != changed_source_configuration.fingerprint
 
 
 @pytest.mark.parametrize("value", [None, 0, "false"])

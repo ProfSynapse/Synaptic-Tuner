@@ -20,6 +20,7 @@ from synaptic_tuner.api.v1 import (
     ResourceSpec,
     RuntimeSpec,
     SourceLock,
+    SourceLockBindingV1,
     TrainingAPI,
     TrainingPlan,
     TrainingPreflight,
@@ -28,7 +29,9 @@ from synaptic_tuner.api.v1 import (
 )
 
 
-def _execution_source(*, commit: str = "a" * 40) -> ExecutionSourceV1:
+def _execution_source(
+    *, commit: str = "a" * 40, configuration: dict[str, object] | None = None
+) -> ExecutionSourceV1:
     project = {
         "url": "https://github.com/example/product.git",
         "commit": "9" * 40,
@@ -51,7 +54,7 @@ def _execution_source(*, commit: str = "a" * 40) -> ExecutionSourceV1:
             "mode": "superproject",
             "sources": {"project": project, "engine": engine},
             "project": {},
-            "configuration": {},
+            "configuration": configuration or {},
             "plugins": [],
             "inputs": [],
             "runtime": {},
@@ -72,6 +75,7 @@ def _execution_source(*, commit: str = "a" * 40) -> ExecutionSourceV1:
             project_url=project["url"], project_commit=project["commit"],
             engine_url=engine["url"], engine_commit=commit,
             engine_submodule_path="vendor/engine", gitlink_commit=commit,
+            source_lock_binding=provisional.binding,
             issuer_ref="fake-verifier", evidence_ref="push-proof",
             audience_ref="project/run-1", challenge_nonce="source-nonce",
             verified_at="2026-08-25T12:01:00Z", expires_at="2026-08-25T12:10:00Z",
@@ -187,6 +191,44 @@ def test_public_planning_contract_rejects_a_provisional_source_lock() -> None:
     )
     with pytest.raises(TypeError, match="ExecutionSourceV1"):
         _resolved(execution_source=provisional)
+
+
+def test_source_lock_binding_is_public_and_exactly_embedded_in_execution_source() -> None:
+    source = _execution_source()
+    binding = source.source_evidence.source_lock_binding
+    assert type(binding) is SourceLockBindingV1
+    assert SourceLockBindingV1.from_dict(binding.to_dict()) == binding
+    assert source.to_dict()["source_evidence"]["source_lock_binding"] == binding.to_dict()
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "training_input_digest",
+        "training_contract_identity_digest",
+        "training_source_sha256",
+        "training_ingress_digest",
+        "provider_policy_digest",
+    ],
+)
+def test_each_host_provenance_key_changes_the_exact_training_plan_fingerprint(key: str) -> None:
+    configuration={
+        "training_input_digest":"1"*64,
+        "training_contract_identity_digest":"2"*64,
+        "training_source_sha256":"3"*64,
+        "training_ingress_digest":"4"*64,
+        "provider_policy_digest":"5"*64,
+    }
+    baseline_source=_execution_source(configuration=configuration)
+    changed_configuration=dict(configuration)
+    changed_configuration[key]="f"*64
+    changed_source=_execution_source(configuration=changed_configuration)
+    baseline_plan=_plan(execution_source=baseline_source)
+    changed_plan=_plan(execution_source=changed_source)
+    assert baseline_source.source_evidence.source_lock_binding != changed_source.source_evidence.source_lock_binding
+    assert baseline_source.source_evidence.authenticated_payload != changed_source.source_evidence.authenticated_payload
+    assert baseline_source.fingerprint != changed_source.fingerprint
+    assert baseline_plan.fingerprint != changed_plan.fingerprint
 
 
 @pytest.mark.parametrize(

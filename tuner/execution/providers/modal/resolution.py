@@ -19,16 +19,27 @@ if TYPE_CHECKING:
 
 from tuner.project.context import ProjectContext
 from tuner.project.execution_source import (
+    AuthenticatedSourceEvidenceV1,
     ExecutionSourceV1,
     LocalSourceInspectionPort,
     PushedSourceVerificationPort,
+    _SealedSourceEvidenceSnapshotV1,
+    _capture_source_evidence_snapshot,
+    _require_source_evidence_snapshot,
 )
-from tuner.project.source_bundle import SourceLock, SourceLockError
+from tuner.project.source_bundle import (
+    SourceLock,
+    SourceLockError,
+    _SealedSourceLockSnapshotV1,
+    _capture_source_lock_snapshot,
+    _require_source_lock_snapshot,
+)
 
 from ...contracts import digest, safe_ref
 from .deployment_identity import validate_modal_function_identity
 from ...evidence import (
-    DEPLOYMENT_EVIDENCE_POLICY, SOURCE_EVIDENCE_POLICY, EvidenceAuthenticator,
+    DEPLOYMENT_EVIDENCE_POLICY, SOURCE_EVIDENCE_POLICY, SOURCE_EVIDENCE_PURPOSE,
+    EvidenceAuthenticator,
     EvidenceReplayRepository, admit_evidence, validate_evidence_window,
 )
 
@@ -137,8 +148,15 @@ class ModalDeploymentSelectionV1:
             "secret_requirements_digest", "provider_runtime_requirements_digest",
             "accelerator", "timeout_seconds", "max_retries",
         }
-        if not isinstance(value, Mapping) or set(value) != expected:
+        if type(value) is not dict or set(value) != expected:
             raise ValueError("Modal deployment selection contains missing or unknown fields")
+        if type(value["runtime_environment"]) is not dict:
+            raise ValueError("Modal deployment runtime environment must be an exact object")
+        string_fields=expected-{"runtime_environment","timeout_seconds","max_retries"}
+        if any(type(value[name]) is not str for name in string_fields):
+            raise ValueError("Modal deployment selection text fields must be exact strings")
+        if type(value["timeout_seconds"]) is not int or type(value["max_retries"]) is not int:
+            raise ValueError("Modal deployment selection limits must be exact integers")
         return cls(**dict(value))
 
     @classmethod
@@ -187,6 +205,33 @@ class ModalDeploymentSelectionV1:
             runtime_environment=environment,
             timeout_seconds=timeout_seconds,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _SealedDeploymentSelectionSnapshotV1:
+    selection: ModalDeploymentSelectionV1
+    canonical_bytes: bytes
+
+
+def _capture_deployment_selection_snapshot(
+    selection: ModalDeploymentSelectionV1,
+) -> _SealedDeploymentSelectionSnapshotV1:
+    if type(selection) is not ModalDeploymentSelectionV1:
+        raise TypeError("exact ModalDeploymentSelectionV1 is required")
+    try:
+        reconstructed = ModalDeploymentSelectionV1.from_dict(selection.to_dict())
+        canonical_bytes = _canonical(reconstructed.to_dict())
+    except BaseException:
+        raise SourceLockError("Modal deployment selection is malformed") from None
+    return _SealedDeploymentSelectionSnapshotV1(reconstructed, canonical_bytes)
+
+
+def _require_deployment_selection_snapshot(
+    selection: ModalDeploymentSelectionV1,
+    baseline: _SealedDeploymentSelectionSnapshotV1,
+) -> None:
+    if _capture_deployment_selection_snapshot(selection) != baseline:
+        raise SourceLockError("Modal deployment selection changed during processing")
 
 @dataclass(frozen=True, slots=True)
 class VerifiedModalDeploymentIdentityV1:
@@ -247,9 +292,13 @@ class VerifiedModalDeploymentIdentityV1:
             "audience_ref", "challenge_nonce", "verified_at", "expires_at",
             "key_ref", "tag_base64", "attestation_digest",
         }
-        if not isinstance(value, Mapping) or set(value) != expected:
+        if type(value) is not dict or set(value) != expected:
             raise ValueError("verified Modal deployment contains missing or unknown fields")
         raw = dict(value)
+        if type(raw["selection"]) is not dict:
+            raise ValueError("verified Modal deployment selection is malformed")
+        if any(type(raw[name]) is not str for name in expected-{"selection"}):
+            raise ValueError("verified Modal deployment fields must be exact strings")
         raw["selection"] = ModalDeploymentSelectionV1.from_dict(raw["selection"])
         return cls(**raw)
 
@@ -300,6 +349,9 @@ def _has_reparse_component(path: Path) -> bool:
 
 def _same_source_identity(actual: SourceLock, supplied: SourceLock) -> bool:
     return (
+        type(actual) is SourceLock
+        and type(supplied) is SourceLock
+        and
         actual.mode == supplied.mode == "superproject"
         and actual.project_source.location.canonical_url
         == supplied.project_source.location.canonical_url
@@ -312,6 +364,49 @@ def _same_source_identity(actual: SourceLock, supplied: SourceLock) -> bool:
         and actual.engine_source.submodule_path == supplied.engine_source.submodule_path
         and actual.engine_source.gitlink_commit == supplied.engine_source.gitlink_commit
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _SealedDeploymentEvidenceSnapshotV1:
+    evidence: VerifiedModalDeploymentIdentityV1
+    document_bytes: bytes
+    authenticated_payload: bytes
+    tag: bytes
+    attestation_digest: str
+    replay_identity: tuple[str, str, str, str, str, str]
+
+
+def _capture_deployment_evidence_snapshot(
+    evidence: VerifiedModalDeploymentIdentityV1,
+) -> _SealedDeploymentEvidenceSnapshotV1:
+    if type(evidence) is not VerifiedModalDeploymentIdentityV1:
+        raise TypeError("exact VerifiedModalDeploymentIdentityV1 is required")
+    try:
+        document = evidence.to_dict()
+        if type(document) is not dict:
+            raise TypeError
+        reconstructed = VerifiedModalDeploymentIdentityV1.from_dict(document)
+        document_bytes = _canonical(reconstructed.to_dict())
+        payload = reconstructed.authenticated_payload
+        tag = reconstructed.tag
+    except BaseException:
+        raise SourceLockError("authenticated deployment evidence is malformed") from None
+    return _SealedDeploymentEvidenceSnapshotV1(
+        reconstructed, document_bytes, payload, tag, reconstructed.attestation_digest,
+        (
+            reconstructed.issuer_ref, reconstructed.evidence_ref,
+            reconstructed.challenge_nonce, reconstructed.audience_ref,
+            reconstructed.attestation_digest, reconstructed.expires_at,
+        ),
+    )
+
+
+def _require_deployment_evidence_snapshot(
+    evidence: VerifiedModalDeploymentIdentityV1,
+    baseline: _SealedDeploymentEvidenceSnapshotV1,
+) -> None:
+    if _capture_deployment_evidence_snapshot(evidence) != baseline:
+        raise SourceLockError("authenticated deployment evidence changed during processing")
 
 
 class ModalDualCloneSourceFinalizer:
@@ -346,18 +441,28 @@ class ModalDualCloneSourceFinalizer:
         self._source_key_ref=safe_ref(source_key_ref,"source_key_ref")
         self._deployment_key_ref=safe_ref(deployment_key_ref,"deployment_key_ref")
 
-    def _admit_evidence(self,evidence,*,purpose,policy,issuer,key_ref,audience):
+    def _admit_evidence(self,evidence_baseline,*,purpose,policy,issuer,key_ref,audience,checkpoint):
+        evidence=evidence_baseline.evidence
         if evidence.issuer_ref!=issuer or evidence.key_ref!=key_ref or evidence.audience_ref!=audience:
             raise SourceLockError("authenticated evidence issuer, key, or audience mismatch")
+        failed=False
         try:
-            now=self._clock();validate_evidence_window(verified_at=evidence.verified_at,expires_at=evidence.expires_at,now=now,policy=policy)
-            if hashlib.sha256(evidence.authenticated_payload).hexdigest()!=evidence.attestation_digest:
+            checkpoint()
+            now=self._clock()
+            checkpoint()
+            validate_evidence_window(verified_at=evidence.verified_at,expires_at=evidence.expires_at,now=now,policy=policy)
+            if hashlib.sha256(evidence_baseline.authenticated_payload).hexdigest()!=evidence_baseline.attestation_digest:
                 raise ValueError("evidence payload digest mismatch")
-            if not self._authenticator.verify(purpose,evidence.authenticated_payload,evidence.tag,evidence.key_ref):
+            checkpoint()
+            if not self._authenticator.verify(purpose,evidence_baseline.authenticated_payload,evidence_baseline.tag,evidence.key_ref):
                 raise ValueError("evidence authentication failed")
+            checkpoint()
             admit_evidence(self._replay,purpose=purpose,issuer_ref=evidence.issuer_ref,evidence_ref=evidence.evidence_ref,challenge_nonce=evidence.challenge_nonce,audience_ref=evidence.audience_ref,payload_digest=evidence.attestation_digest,expires_at=evidence.expires_at)
-        except Exception as exc:
-            raise SourceLockError("authenticated evidence admission failed") from exc
+            checkpoint()
+        except BaseException:
+            failed=True
+        if failed:
+            raise SourceLockError("authenticated evidence admission failed") from None
 
     def finalize(
         self,
@@ -367,12 +472,30 @@ class ModalDualCloneSourceFinalizer:
         deployment: ModalDeploymentSelectionV1,
         audience_ref: str,
     ) -> ModalExecutionSourceResolutionV1:
-        if not isinstance(source_lock, SourceLock) or not isinstance(context, ProjectContext):
+        if type(source_lock) is not SourceLock or not isinstance(context, ProjectContext):
             raise TypeError("source_lock and context must be canonical project values")
-        if not isinstance(deployment, ModalDeploymentSelectionV1):
-            raise TypeError("deployment must be ModalDeploymentSelectionV1")
+        if type(deployment) is not ModalDeploymentSelectionV1:
+            raise TypeError("deployment must be exact ModalDeploymentSelectionV1")
+        lock_baseline = _capture_source_lock_snapshot(source_lock)
+        locked = lock_baseline.canonical_lock
+        deployment_baseline = _capture_deployment_selection_snapshot(deployment)
+        locked_deployment = deployment_baseline.selection
+
+        def checkpoint(
+            source_pair: tuple[AuthenticatedSourceEvidenceV1, _SealedSourceEvidenceSnapshotV1] | None = None,
+            deployment_pair: tuple[VerifiedModalDeploymentIdentityV1, _SealedDeploymentEvidenceSnapshotV1] | None = None,
+        ) -> None:
+            _require_source_lock_snapshot(source_lock, lock_baseline)
+            _require_source_lock_snapshot(locked, lock_baseline)
+            _require_deployment_selection_snapshot(deployment, deployment_baseline)
+            _require_deployment_selection_snapshot(locked_deployment, deployment_baseline)
+            if source_pair is not None:
+                _require_source_evidence_snapshot(*source_pair)
+            if deployment_pair is not None:
+                _require_deployment_evidence_snapshot(*deployment_pair)
+
         audience_ref=safe_ref(audience_ref,"audience_ref")
-        if source_lock.mode != "superproject" or context.mode != "host":
+        if locked.mode != "superproject" or context.mode != "host":
             raise SourceLockError("Modal v1 accepts only host superproject provenance")
         project_root = context.project_root.absolute()
         engine_root = context.engine_root.absolute()
@@ -384,36 +507,53 @@ class ModalDualCloneSourceFinalizer:
             actual_submodule = resolved_engine.relative_to(resolved_project).as_posix()
         except ValueError as exc:
             raise SourceLockError("superproject engine root must be inside the project root") from exc
+        checkpoint()
         try:
             inspected = self._local_sources.inspect(context=context)
-        except Exception as exc:
-            raise SourceLockError("authenticated local source inspection is unavailable") from exc
-        if not _same_source_identity(inspected, source_lock):
+        except BaseException:
+            raise SourceLockError("authenticated local source inspection is unavailable") from None
+        checkpoint()
+        if not _same_source_identity(inspected, locked):
             raise SourceLockError("supplied source lock does not match the current local checkout")
-        if actual_submodule != source_lock.engine_source.submodule_path:
+        if actual_submodule != locked.engine_source.submodule_path:
             raise SourceLockError("engine root does not match the inspected submodule path")
-        if source_lock.project_source.dirty or source_lock.engine_source.dirty:
+        if locked.project_source.dirty or locked.engine_source.dirty:
             raise SourceLockError("Modal source finalization requires clean sources")
-        if source_lock.engine_source.commit.lower() != str(source_lock.engine_source.gitlink_commit).lower():
+        if locked.engine_source.commit.lower() != str(locked.engine_source.gitlink_commit).lower():
             raise SourceLockError("engine commit does not match the inspected project gitlink")
+        checkpoint()
         try:
-            pushed = self._pushed_sources.verify(source_lock)
-        except Exception as exc:
-            raise SourceLockError("authenticated pushed-source evidence is unavailable") from exc
-        if not pushed.binds(source_lock):
+            pushed = self._pushed_sources.verify(locked)
+        except BaseException:
+            raise SourceLockError("authenticated pushed-source evidence is unavailable") from None
+        checkpoint()
+        pushed_baseline = _capture_source_evidence_snapshot(pushed)
+        checkpoint((pushed, pushed_baseline))
+        canonical_pushed = pushed_baseline.evidence
+        if not canonical_pushed.binds(locked):
             raise SourceLockError("pushed-source evidence does not bind both repositories")
-        self._admit_evidence(pushed,purpose="modal-source-evidence/v1",policy=SOURCE_EVIDENCE_POLICY,issuer=self._source_issuer_ref,key_ref=self._source_key_ref,audience=audience_ref)
+        if canonical_pushed.source_lock_binding != lock_baseline.binding:
+            raise SourceLockError("pushed-source evidence does not bind the complete source lock")
+        source_checkpoint=lambda:checkpoint((pushed,pushed_baseline))
+        self._admit_evidence(pushed_baseline,purpose=SOURCE_EVIDENCE_PURPOSE,policy=SOURCE_EVIDENCE_POLICY,issuer=self._source_issuer_ref,key_ref=self._source_key_ref,audience=audience_ref,checkpoint=source_checkpoint)
+        source_checkpoint()
         try:
-            verified_deployment = self._deployments.verify(deployment)
-        except Exception as exc:
-            raise SourceLockError("authenticated Modal deployment evidence is unavailable") from exc
-        if verified_deployment.selection != deployment:
+            verified_deployment = self._deployments.verify(locked_deployment)
+        except BaseException:
+            raise SourceLockError("authenticated Modal deployment evidence is unavailable") from None
+        source_checkpoint()
+        verified_baseline = _capture_deployment_evidence_snapshot(verified_deployment)
+        checkpoint((pushed,pushed_baseline),(verified_deployment,verified_baseline))
+        canonical_verified = verified_baseline.evidence
+        if canonical_verified.selection != locked_deployment:
             raise SourceLockError("verified deployment evidence does not bind the selection")
-        if verified_deployment.challenge_nonce==pushed.challenge_nonce:
+        if canonical_verified.challenge_nonce==canonical_pushed.challenge_nonce:
             raise SourceLockError("source and deployment evidence require distinct challenges")
-        self._admit_evidence(verified_deployment,purpose="modal-deployment-evidence/v1",policy=DEPLOYMENT_EVIDENCE_POLICY,issuer=self._deployment_issuer_ref,key_ref=self._deployment_key_ref,audience=audience_ref)
+        all_checkpoint=lambda:checkpoint((pushed,pushed_baseline),(verified_deployment,verified_baseline))
+        self._admit_evidence(verified_baseline,purpose="modal-deployment-evidence/v1",policy=DEPLOYMENT_EVIDENCE_POLICY,issuer=self._deployment_issuer_ref,key_ref=self._deployment_key_ref,audience=audience_ref,checkpoint=all_checkpoint)
+        all_checkpoint()
 
-        run_root = f"/workspace/run/{source_lock.run_id}"
+        run_root = f"/workspace/run/{locked.run_id}"
         roots = {
             "engine": "/workspace/engine", "project": "/workspace/project",
             "artifacts": f"{run_root}/artifacts", "state": f"{run_root}/state",
@@ -432,27 +572,31 @@ class ModalDualCloneSourceFinalizer:
             "TRANSFORMERS_CACHE": roots["cache"] + "/transformers",
             "WANDB_DISABLED": "true",
         }
-        overlap = set(fixed_environment).intersection(deployment.runtime_environment)
-        if any(deployment.runtime_environment[key] != fixed_environment[key] for key in overlap):
+        overlap = set(fixed_environment).intersection(locked_deployment.runtime_environment)
+        if any(locked_deployment.runtime_environment[key] != fixed_environment[key] for key in overlap):
             raise SourceLockError("deployment runtime environment conflicts with fixed isolation")
-        environment = {**deployment.runtime_environment, **fixed_environment}
+        environment = {**locked_deployment.runtime_environment, **fixed_environment}
+        all_checkpoint()
         execution_source = ExecutionSourceV1(
-            run_id=source_lock.run_id, created_at=source_lock.created_at,
-            project_source=source_lock.project_source, engine_source=source_lock.engine_source,
-            engine_submodule_path=actual_submodule, source_evidence=pushed,
+            run_id=locked.run_id, created_at=locked.created_at,
+            project_source=locked.project_source, engine_source=locked.engine_source,
+            engine_submodule_path=actual_submodule, source_evidence=canonical_pushed,
             deployment_member_sha256=hashlib.sha256(
-                _canonical(verified_deployment.to_dict())
+                verified_baseline.document_bytes
             ).hexdigest(),
             roots=roots, writable_capability_root="/workspace/run",
             python_implementation="cpython",
-            python_version=deployment.python_version,
-            python_executable=deployment.python_executable,
-            python_executable_digest=deployment.python_executable_digest,
+            python_version=locked_deployment.python_version,
+            python_executable=locked_deployment.python_executable,
+            python_executable_digest=locked_deployment.python_executable_digest,
             environment=environment,
-            secret_requirements_digest=deployment.secret_requirements_digest,
-            provider_runtime_requirements_digest=deployment.provider_runtime_requirements_digest,
+            secret_requirements_digest=locked_deployment.secret_requirements_digest,
+            provider_runtime_requirements_digest=locked_deployment.provider_runtime_requirements_digest,
         )
-        return ModalExecutionSourceResolutionV1(execution_source, verified_deployment)
+        all_checkpoint()
+        result=ModalExecutionSourceResolutionV1(execution_source, canonical_verified)
+        all_checkpoint()
+        return result
 
 
 __all__ = [

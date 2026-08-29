@@ -193,6 +193,7 @@ def _fixture(
             project_url=project_source["url"], project_commit=project_source["commit"],
             engine_url=engine_source["url"], engine_commit=engine_source["commit"],
             engine_submodule_path="vendor/training-engine", gitlink_commit="b" * 40,
+            source_lock_binding=source_lock.binding,
             issuer_ref="test-verifier", evidence_ref="test-proof",
             audience_ref="project/run-1", challenge_nonce="source-nonce",
             verified_at="2026-08-25T12:01:00Z", expires_at="2026-08-25T12:10:00Z",

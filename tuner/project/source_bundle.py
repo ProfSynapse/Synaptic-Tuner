@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import posixpath
 import re
@@ -29,6 +31,88 @@ _REMOTE_PROOF_TIMEOUT_SECONDS = 3
 
 RemoteProof = Callable[["RepositoryLocation", str, str], str | bool | None]
 
+SOURCE_LOCK_SCHEMA = "synaptic-source-lock/v1"
+SOURCE_LOCK_BINDING_SCHEMA = "synaptic-source-lock-binding/v1"
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_DICT_COPY = dict.copy
+_DICT_KEYS = dict.keys
+
+
+def _exact_object_fields(
+    value: object,
+    *,
+    required: tuple[str, ...],
+    optional: tuple[str, ...] = (),
+    failure: str,
+) -> dict[str, object]:
+    """Snapshot and validate one closed exact-built-in JSON object."""
+
+    snapshot: dict[str, object] | None = None
+    valid = False
+    try:
+        if type(value) is dict:
+            candidate = _DICT_COPY(value)
+            keys = tuple(_DICT_KEYS(candidate))
+            if all(type(key) is str for key in keys):
+                allowed = required + optional
+                valid = (
+                    len(keys) >= len(required)
+                    and all(key in keys for key in required)
+                    and len(keys) <= len(allowed)
+                    and all(key in allowed for key in keys)
+                )
+                if valid:
+                    snapshot = candidate
+    except BaseException:
+        snapshot = None
+        valid = False
+    if not valid or snapshot is None:
+        raise SourceLockError(failure) from None
+    return snapshot
+
+
+@dataclass(frozen=True, slots=True)
+class SourceLockBindingV1:
+    """Provider-neutral digest binding over one complete canonical source lock."""
+
+    schema_version: str
+    source_lock_schema_version: str
+    source_lock_digest: str
+
+    def __post_init__(self) -> None:
+        if type(self.schema_version) is not str or self.schema_version != SOURCE_LOCK_BINDING_SCHEMA:
+            raise SourceLockError("Unsupported source-lock binding schema version")
+        if (
+            type(self.source_lock_schema_version) is not str
+            or self.source_lock_schema_version != SOURCE_LOCK_SCHEMA
+        ):
+            raise SourceLockError("Unsupported bound source-lock schema version")
+        if (
+            type(self.source_lock_digest) is not str
+            or _SHA256_RE.fullmatch(self.source_lock_digest) is None
+        ):
+            raise SourceLockError("Source-lock binding requires a lowercase SHA-256 digest")
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> "SourceLockBindingV1":
+        value = _exact_object_fields(
+            value,
+            required=("schema_version", "source_lock_schema_version", "source_lock_digest"),
+            failure="Source-lock binding has missing or unknown fields",
+        )
+        return cls(
+            schema_version=value["schema_version"],
+            source_lock_schema_version=value["source_lock_schema_version"],
+            source_lock_digest=value["source_lock_digest"],
+        )
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "schema_version": self.schema_version,
+            "source_lock_schema_version": self.source_lock_schema_version,
+            "source_lock_digest": self.source_lock_digest,
+        }
+
 
 def _normalize_repo_path(value: str) -> str:
     path = "/" + value.replace("\\", "/").lstrip("/")
@@ -38,6 +122,30 @@ def _normalize_repo_path(value: str) -> str:
     if normalized in {"/", "/."} or normalized.startswith("/../"):
         raise RepositoryUrlError("Repository URL must contain a valid repository path")
     return normalized
+
+
+def _snapshot_json_value(value: object, label: str) -> object:
+    """Detach exact JSON built-ins without invoking user-defined containers."""
+
+    if value is None or type(value) in (bool, int, str):
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise SourceLockError(f"{label} must contain finite JSON values")
+        return value
+    if type(value) is list:
+        return [_snapshot_json_value(item, label) for item in value]
+    if type(value) is dict:
+        snapshot = _DICT_COPY(value)
+        keys = tuple(_DICT_KEYS(snapshot))
+        if any(type(key) is not str for key in keys):
+            raise SourceLockError(f"{label} must use exact string field names")
+        return {key: _snapshot_json_value(snapshot[key], label) for key in keys}
+    raise SourceLockError(f"{label} must contain exact JSON values")
+
+
+def _raise_canonicalization_failure() -> None:
+    raise SourceLockError("Source lock cannot be canonicalized") from None
 
 
 @dataclass(frozen=True)
@@ -162,6 +270,15 @@ class GitSource:
     gitlink_commit: str | None = None
 
     def __post_init__(self) -> None:
+        if type(self.location) is not RepositoryLocation:
+            raise TypeError("Git source location must be exact RepositoryLocation")
+        if type(self.commit) is not str:
+            raise SourceLockError("Source commit must be exact text")
+        for name in ("branch", "submodule_path", "gitlink_commit"):
+            if getattr(self, name) is not None and type(getattr(self, name)) is not str:
+                raise SourceLockError(f"Git source {name} must be exact text")
+        if type(self.dirty) is not bool or type(self.pushed) is not bool:
+            raise SourceLockError("Git source state flags must be exact booleans")
         if not _COMMIT_RE.fullmatch(self.commit):
             raise SourceLockError("Source commit must be a full 40- or 64-character hash")
         if self.gitlink_commit and not _COMMIT_RE.fullmatch(self.gitlink_commit):
@@ -173,29 +290,38 @@ class GitSource:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "GitSource":
+        value = _exact_object_fields(
+            value,
+            required=("url", "commit", "dirty", "pushed"),
+            optional=("branch", "submodule_path", "gitlink_commit", "credential"),
+            failure="Git source has missing or unknown fields",
+        )
         raw_url = value.get("url")
-        if not isinstance(raw_url, str):
+        if type(raw_url) is not str or type(value.get("commit")) is not str:
             raise SourceLockError("Git source requires a repository URL")
         credential = value.get("credential")
+        if credential is not None:
+            credential = _exact_object_fields(
+                credential,
+                required=("provider", "name"),
+                failure="Git source credential reference must be an exact object",
+            )
+        for name in ("branch", "submodule_path", "gitlink_commit"):
+            if value.get(name) is not None and type(value[name]) is not str:
+                raise SourceLockError(f"Git source {name} must be exact text")
+        if type(value.get("dirty")) is not bool or type(value.get("pushed")) is not bool:
+            raise SourceLockError("Git source state flags must be exact booleans")
         return cls(
             location=RepositoryLocation.parse(
                 raw_url,
-                credential=credential if isinstance(credential, Mapping) else None,
+                credential=credential,
             ),
-            commit=str(value.get("commit", "")),
-            branch=str(value["branch"]) if value.get("branch") is not None else None,
-            dirty=bool(value.get("dirty", False)),
-            pushed=bool(value.get("pushed", False)),
-            submodule_path=(
-                str(value["submodule_path"])
-                if value.get("submodule_path") is not None
-                else None
-            ),
-            gitlink_commit=(
-                str(value["gitlink_commit"])
-                if value.get("gitlink_commit") is not None
-                else None
-            ),
+            commit=value["commit"],
+            branch=value.get("branch"),
+            dirty=value["dirty"],
+            pushed=value["pushed"],
+            submodule_path=value.get("submodule_path"),
+            gitlink_commit=value.get("gitlink_commit"),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -231,9 +357,15 @@ class SourceLock:
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     )
-    schema_version: str = "synaptic-source-lock/v1"
+    schema_version: str = SOURCE_LOCK_SCHEMA
 
     def __post_init__(self) -> None:
+        if type(self.schema_version) is not str or self.schema_version != SOURCE_LOCK_SCHEMA:
+            raise SourceLockError("Unsupported source-lock schema version")
+        if type(self.run_id) is not str or type(self.created_at) is not str or type(self.mode) is not str:
+            raise SourceLockError("Source lock identity fields must be exact text")
+        if type(self.project_source) is not GitSource or type(self.engine_source) is not GitSource:
+            raise TypeError("Source lock requires exact GitSource values")
         if self.mode not in {"standalone", "superproject", "dual_clone"}:
             raise SourceLockError(f"Unsupported source-lock mode: {self.mode}")
         if not self.run_id:
@@ -254,31 +386,48 @@ class SourceLock:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "SourceLock":
-        if value.get("schema_version") != "synaptic-source-lock/v1":
+        value = _exact_object_fields(
+            value,
+            required=(
+                "schema_version", "run_id", "created_at", "mode", "sources",
+                "project", "configuration", "plugins", "inputs", "runtime", "outputs",
+            ),
+            failure="Source lock has missing or unknown fields",
+        )
+        if any(
+            type(value[name]) is not str
+            for name in ("schema_version", "run_id", "created_at", "mode")
+        ):
+            raise SourceLockError("Source lock identity fields must be exact text")
+        if value["schema_version"] != SOURCE_LOCK_SCHEMA:
             raise SourceLockError("Unsupported source-lock schema version")
-        sources = value.get("sources")
-        if not isinstance(sources, Mapping):
-            raise SourceLockError("Source lock requires sources.project and sources.engine")
+        sources = _exact_object_fields(
+            value.get("sources"),
+            required=("project", "engine"),
+            failure="Source lock requires sources.project and sources.engine",
+        )
         project_source = sources.get("project")
         engine_source = sources.get("engine")
-        if not isinstance(project_source, Mapping) or not isinstance(engine_source, Mapping):
+        if type(project_source) is not dict or type(engine_source) is not dict:
             raise SourceLockError("Source lock requires project and engine source mappings")
+        for name in ("project", "configuration", "runtime", "outputs"):
+            if type(value[name]) is not dict:
+                raise SourceLockError(f"Source lock {name} must be an exact object")
+        for name in ("plugins", "inputs"):
+            if type(value[name]) is not list or any(type(item) is not dict for item in value[name]):
+                raise SourceLockError(f"Source lock {name} must be an exact object array")
         return cls(
-            run_id=str(value.get("run_id", "")),
-            created_at=str(value.get("created_at", "")),
-            mode=str(value.get("mode", "")),  # type: ignore[arg-type]
+            run_id=value["run_id"],
+            created_at=value["created_at"],
+            mode=value["mode"],  # type: ignore[arg-type]
             project_source=GitSource.from_dict(project_source),
             engine_source=GitSource.from_dict(engine_source),
-            project=dict(value.get("project", {})) if isinstance(value.get("project"), Mapping) else {},
-            configuration=(
-                dict(value.get("configuration", {}))
-                if isinstance(value.get("configuration"), Mapping)
-                else {}
-            ),
-            plugins=tuple(value.get("plugins", ())) if isinstance(value.get("plugins"), list) else (),
-            inputs=tuple(value.get("inputs", ())) if isinstance(value.get("inputs"), list) else (),
-            runtime=dict(value.get("runtime", {})) if isinstance(value.get("runtime"), Mapping) else {},
-            outputs=dict(value.get("outputs", {})) if isinstance(value.get("outputs"), Mapping) else {},
+            project=_snapshot_json_value(value["project"], "Source lock project"),
+            configuration=_snapshot_json_value(value["configuration"], "Source lock configuration"),
+            plugins=tuple(_snapshot_json_value(value["plugins"], "Source lock plugins")),
+            inputs=tuple(_snapshot_json_value(value["inputs"], "Source lock inputs")),
+            runtime=_snapshot_json_value(value["runtime"], "Source lock runtime"),
+            outputs=_snapshot_json_value(value["outputs"], "Source lock outputs"),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -309,7 +458,66 @@ class SourceLock:
         }
 
     def to_json(self) -> str:
-        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+        return self.canonical_bytes.decode("utf-8")
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        encoded: bytes | None = None
+        try:
+            document = _snapshot_json_value(self.to_dict(), "Source lock")
+            encoded = json.dumps(
+                document, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False, allow_nan=False,
+            ).encode("utf-8")
+        except BaseException:
+            pass
+        if encoded is None:
+            _raise_canonicalization_failure()
+        return encoded
+
+    @property
+    def binding(self) -> SourceLockBindingV1:
+        return SourceLockBindingV1(
+            schema_version=SOURCE_LOCK_BINDING_SCHEMA,
+            source_lock_schema_version=self.schema_version,
+            source_lock_digest=hashlib.sha256(
+                b"synaptic-source-lock-binding/v1\0" + self.canonical_bytes
+            ).hexdigest(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _SealedSourceLockSnapshotV1:
+    canonical_bytes: bytes
+    binding: SourceLockBindingV1
+    canonical_lock: SourceLock
+
+
+def _capture_source_lock_snapshot(source_lock: SourceLock) -> _SealedSourceLockSnapshotV1:
+    if type(source_lock) is not SourceLock:
+        raise TypeError("exact SourceLock is required")
+    canonical_bytes = source_lock.canonical_bytes
+    try:
+        document = json.loads(canonical_bytes.decode("utf-8"))
+        canonical_lock = SourceLock.from_dict(document)
+    except BaseException:
+        _raise_canonicalization_failure()
+    binding = SourceLockBindingV1(
+        SOURCE_LOCK_BINDING_SCHEMA,
+        SOURCE_LOCK_SCHEMA,
+        hashlib.sha256(
+            b"synaptic-source-lock-binding/v1\0" + canonical_bytes
+        ).hexdigest(),
+    )
+    return _SealedSourceLockSnapshotV1(canonical_bytes, binding, canonical_lock)
+
+
+def _require_source_lock_snapshot(
+    source_lock: SourceLock, baseline: _SealedSourceLockSnapshotV1,
+) -> None:
+    current = _capture_source_lock_snapshot(source_lock)
+    if current.canonical_bytes != baseline.canonical_bytes or current.binding != baseline.binding:
+        raise SourceLockError("source lock changed during authenticated processing")
 
 
 def _minimal_git_environment() -> dict[str, str]:

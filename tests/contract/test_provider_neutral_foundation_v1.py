@@ -180,6 +180,7 @@ def test_formal_v1_exports_are_frozen_exactly() -> None:
             "load_training_input_contract_v1",
         ]
     )
+    baseline.insert(baseline.index("SourceLock") + 1, "SourceLockBindingV1")
     assert api.__all__ == baseline
     assert "EventCode" not in api.__all__
     assert "EventCode" in dir(api)

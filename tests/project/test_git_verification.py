@@ -13,7 +13,11 @@ from tuner.project.source_bundle import SourceLockError
 
 
 class Auth:
-    def sign(self,purpose,payload,key_ref):return b"authenticated-tag"
+    def __init__(self, callback=None):self.callback=callback;self.purposes=[]
+    def sign(self,purpose,payload,key_ref):
+        self.purposes.append(purpose)
+        if self.callback:self.callback()
+        return b"authenticated-tag"
     def verify(self,purpose,payload,tag,key_ref):return tag==b"authenticated-tag"
 
 
@@ -26,13 +30,52 @@ def source_with_branches():
     value=_source();return replace(value,project_source=replace(value.project_source,branch="main"),engine_source=replace(value.engine_source,branch="release"))
 
 
-def verifier(source,runner):
-    return GitLsRemotePushedCommitVerifier(runner,Auth(),clock=lambda:"2026-08-25T12:00:00Z",audience_ref="project/run-1",issuer_ref="git-verifier",key_ref="git-key",challenge_factory=lambda:"source-challenge",evidence_ref_factory=lambda:"source-evidence")
+def verifier(source,runner,auth=None):
+    return GitLsRemotePushedCommitVerifier(runner,auth or Auth(),clock=lambda:"2026-08-25T12:00:00Z",audience_ref="project/run-1",issuer_ref="git-verifier",key_ref="git-key",challenge_factory=lambda:"source-challenge",evidence_ref_factory=lambda:"source-evidence")
 
 
 def test_pushed_verifier_requires_both_exact_named_refs_and_seals_evidence():
-    source=source_with_branches();values={(source.project_source.location.canonical_url,"refs/heads/main"):f"{source.project_source.commit}\trefs/heads/main\n".encode(),(source.engine_source.location.canonical_url,"refs/heads/release"):f"{source.engine_source.commit}\trefs/heads/release\n".encode()};evidence=verifier(source,Runner(values)).verify(source)
+    source=source_with_branches();values={(source.project_source.location.canonical_url,"refs/heads/main"):f"{source.project_source.commit}\trefs/heads/main\n".encode(),(source.engine_source.location.canonical_url,"refs/heads/release"):f"{source.engine_source.commit}\trefs/heads/release\n".encode()};auth=Auth();evidence=verifier(source,Runner(values),auth).verify(source)
     assert evidence.binds(source) and evidence.audience_ref=="project/run-1" and evidence.tag==b"authenticated-tag"
+    assert evidence.source_lock_binding == source.binding
+    assert auth.purposes == ["source-lock-evidence/v1"]
+
+
+def test_pushed_verifier_rejects_source_lock_mutation_during_reads_or_signing():
+    source=source_with_branches();values={(source.project_source.location.canonical_url,"refs/heads/main"):f"{source.project_source.commit}\trefs/heads/main\n".encode(),(source.engine_source.location.canonical_url,"refs/heads/release"):f"{source.engine_source.commit}\trefs/heads/release\n".encode()}
+
+    class MutatingRunner(Runner):
+        def read_ref(self, **kwargs):
+            result=super().read_ref(**kwargs)
+            object.__setattr__(source,"configuration",{"changed":True})
+            return result
+
+    with pytest.raises(SourceLockError,match="changed during"):
+        verifier(source,MutatingRunner(values)).verify(source)
+
+    source=source_with_branches()
+    auth=Auth(lambda:object.__setattr__(source,"configuration",{"changed":True}))
+    with pytest.raises(SourceLockError,match="changed during"):
+        verifier(source,Runner(values),auth).verify(source)
+
+
+def test_pushed_verifier_fails_at_first_remote_swap_before_a_later_restore() -> None:
+    source=source_with_branches();original=source.configuration
+    values={(source.project_source.location.canonical_url,"refs/heads/main"):f"{source.project_source.commit}\trefs/heads/main\n".encode(),(source.engine_source.location.canonical_url,"refs/heads/release"):f"{source.engine_source.commit}\trefs/heads/release\n".encode()}
+
+    class SwapRestoreRunner(Runner):
+        def read_ref(self, **kwargs):
+            result=super().read_ref(**kwargs)
+            object.__setattr__(
+                source,"configuration",
+                {"swapped":True} if len(self.calls)==1 else original,
+            )
+            return result
+
+    runner=SwapRestoreRunner(values)
+    with pytest.raises(SourceLockError,match="changed during"):
+        verifier(source,runner).verify(source)
+    assert len(runner.calls)==1
 
 
 @pytest.mark.parametrize("bad",[b"",b"a"*40+b"\trefs/heads/other\n",b"a"*40+b"\trefs/heads/main\n"+b"a"*40+b"\trefs/heads/main\n"])

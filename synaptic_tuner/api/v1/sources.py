@@ -7,7 +7,12 @@ from tuner.project.execution_source import (
     PushedSourceVerificationPort,
 )
 from tuner.project.git_verification import GitCliLocalSourceInspector
-from tuner.project.source_bundle import GitSource, RepositoryLocation, SourceLock
+from tuner.project.source_bundle import (
+    GitSource,
+    RepositoryLocation,
+    SourceLock,
+    SourceLockBindingV1,
+)
 
 __all__ = [
     "AuthenticatedSourceEvidenceV1",
@@ -18,4 +23,5 @@ __all__ = [
     "PushedSourceVerificationPort",
     "RepositoryLocation",
     "SourceLock",
+    "SourceLockBindingV1",
 ]
