@@ -7,8 +7,7 @@ from typing import Protocol, runtime_checkable
 
 from synaptic_tuner.api.v1.planning import TrainingPlan
 from synaptic_tuner.api.v1.providers import ProviderDescriptor, ProviderRef
-from synaptic_tuner.api.v1.artifacts_facade import PublicationResult
-from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
+from synaptic_tuner.api.v1.results import TrainingRunRef
 from synaptic_tuner.api.v1.runs_facade import RunOutcome
 
 
@@ -33,17 +32,6 @@ class EvidenceStore(Protocol):
 
 class SourceReader(Protocol):
     def iter_bytes(self, *, source_digest: str, maximum_bytes: int) -> Iterator[bytes]: ...
-
-
-class ArtifactSource(Protocol):
-    run: TrainingRunRef
-    artifacts: tuple[VerifiedArtifact, ...]
-
-    def iter_bytes(self, role: str, *, maximum_bytes: int) -> Iterator[bytes]: ...
-
-
-class ArtifactPublisher(Protocol):
-    def publish(self, source: ArtifactSource, destination_ref: str) -> PublicationResult: ...
 
 
 @runtime_checkable
@@ -93,8 +81,6 @@ class TrainingPlanRepository(Protocol):
 
 
 __all__ = [
-    "ArtifactPublisher",
-    "ArtifactSource",
     "AuthorizationGrant",
     "Clock",
     "EvidenceStore",

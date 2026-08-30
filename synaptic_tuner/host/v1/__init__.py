@@ -1,8 +1,6 @@
 """Import-light host SPI v1; protocols only, with no default implementations."""
 
 from .ports import (
-    ArtifactPublisher,
-    ArtifactSource,
     AuthorizationGrant,
     Clock,
     EvidenceStore,
@@ -17,8 +15,6 @@ from .ports import (
 )
 
 __all__ = [
-    "ArtifactPublisher",
-    "ArtifactSource",
     "AuthorizationGrant",
     "Clock",
     "EvidenceStore",

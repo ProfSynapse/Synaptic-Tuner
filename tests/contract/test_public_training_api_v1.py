@@ -145,7 +145,6 @@ def test_training_api_has_only_the_accepted_verbs() -> None:
     }
     assert verbs == {
         "load", "resolve", "plan", "preflight", "start", "outcome", "reverify",
-        "publish",
     }
 
 

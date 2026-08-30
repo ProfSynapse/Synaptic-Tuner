@@ -137,6 +137,7 @@ def test_run_facade_exact_bounds_and_closed_operation_codes() -> None:
             lambda: PublicationResult(
                 "synaptic-publication-result/v1",
                 PublicationRef("publication-1", "local/default"),
+                TrainingRunRef("run-1", "project-1"),
                 PublicationState.VERIFIED,
             ).to_dict(),
         ),
@@ -163,31 +164,6 @@ def test_formal_v1_exports_are_frozen_exactly() -> None:
         (ROOT / "tests/contract/fixtures/api_v1_formal_exports_pre_b1.json").read_text(
             encoding="utf-8"
         )
-    )
-    baseline.extend(
-        [
-            "SFTTrainingHyperparametersV1",
-            "TrainingArtifactRequirementsV1",
-            "TrainingDatasetInputV1",
-            "TrainingDurationV1",
-            "TrainingInputV1",
-            "TrainingMethodV1",
-            "TrainingModelInputV1",
-            "LoadedTrainingInputContractV1",
-            "TrainingInputContractCodeV1",
-            "TrainingInputContractErrorV1",
-            "TrainingInputContractIdentityV1",
-            "load_training_input_contract_v1",
-        ]
-    )
-    baseline.insert(baseline.index("SourceLock") + 1, "SourceLockBindingV1")
-    baseline.insert(
-        baseline.index("SourceLockBindingV1") + 1,
-        "SourceLockProvenanceViewV1",
-    )
-    baseline.insert(
-        baseline.index("SourceLockProvenanceViewV1") + 1,
-        "validate_source_lock_provenance_v1",
     )
     assert api.__all__ == baseline
     assert "EventCode" not in api.__all__
@@ -389,26 +365,10 @@ def test_python_and_schema_reject_noncanonical_text(value: str) -> None:
         jsonschema.validate(document, schema)
 
 
-@pytest.mark.parametrize("value", [False, True, 1.5, math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize("value", [False, True, 1.5, 7.0, math.nan, math.inf, -math.inf])
 def test_artifact_size_rejects_noncanonical_integers(value) -> None:
     with pytest.raises((TypeError, ValueError)):
         VerifiedArtifact("model", DIGESTS[6], value)
-
-
-def test_integral_float_normalizes_to_json_integer_and_matches_schema() -> None:
-    artifact = VerifiedArtifact("model", DIGESTS[6], 7.0)  # type: ignore[arg-type]
-    outcome = RunOutcome(
-        "synaptic-run-outcome/v1", TrainingRunRef("run-1", "project-1"),
-        TrainingRunState.SUCCEEDED, (artifact,),
-    )
-    document = outcome.to_dict()
-    assert document["artifacts"] == {"model": {"sha256": DIGESTS[6], "size_bytes": 7}}
-    assert isinstance(document["artifacts"]["model"]["size_bytes"], int)  # type: ignore[index]
-    schema = json.loads(
-        (ROOT / "schemas/synaptic-run-outcome-v1.schema.json").read_text(encoding="utf-8")
-    )
-    jsonschema.validate(document, schema)
-    assert RunOutcome.from_dict(document) == outcome
 
 
 def test_role_keyed_artifacts_are_closed_unique_and_deterministic() -> None:
@@ -429,8 +389,9 @@ def test_publication_artifacts_use_the_same_role_keyed_canonical_shape() -> None
     result = PublicationResult(
         "synaptic-publication-result/v1",
         PublicationRef("publication-1", "local/default"),
+        TrainingRunRef("run-1", "project-1"),
         PublicationState.VERIFIED,
-        (VerifiedArtifact("model", DIGESTS[6], 7.0),),  # type: ignore[arg-type]
+        (VerifiedArtifact("model", DIGESTS[6], 7),),
     )
     document = result.to_dict()
     schema = json.loads(

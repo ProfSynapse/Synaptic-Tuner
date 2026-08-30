@@ -4,11 +4,19 @@
   "title": "Synaptic Publication Result v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "publication_id", "destination_ref", "state", "artifacts"],
+  "required": ["schema_version", "publication_id", "destination_ref", "run", "state", "artifacts"],
   "properties": {
     "schema_version": {"const": "synaptic-publication-result/v1"},
     "publication_id": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
     "destination_ref": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_id", "project_ref"],
+      "properties": {
+        "run_id": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+        "project_ref": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"}
+      }
+    },
     "state": {"enum": ["claimed", "transferring", "committed", "verified", "ambiguous", "failed_before_effect"]},
     "artifacts": {
       "type": "object",

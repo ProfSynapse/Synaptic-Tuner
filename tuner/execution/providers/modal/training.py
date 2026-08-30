@@ -25,10 +25,6 @@ from synaptic_tuner.api.v1.execution import (
     RunState,
     RunStatus,
 )
-from synaptic_tuner.api.v1.artifacts import (
-    ArtifactPublicationReceipt,
-    VerifiedArtifactDescriptor,
-)
 from synaptic_tuner.api.v1.host import HostPorts
 from synaptic_tuner.api.v1.training import (
     ArtifactPolicy,
@@ -103,36 +99,6 @@ from .staging import StageMaterialV1, _ExplicitModal154VolumeWriter, prepare_mod
 
 
 MODAL_PLAN_CONTEXT_SCHEMA = "synaptic-modal-plan-context/v1"
-
-
-@dataclass(frozen=True, slots=True)
-class _ModalVerifiedArtifactSource:
-    run: RunRef
-    plan_fingerprint: str
-    artifacts: tuple[VerifiedArtifactDescriptor, ...]
-    members: tuple[object, ...]
-    facade: ExplicitModal154ReadFacade
-    volume_id: str
-
-    def iter_bytes(self, kind: str, *, maximum: int):
-        if not isinstance(kind, str) or not kind or type(maximum) is not int or maximum < 1:
-            raise ValueError("artifact read request is invalid")
-        matches = [member for member in self.members if member.role.value == kind]
-        if len(matches) != 1:
-            raise ValueError("verified artifact kind is unavailable")
-        member = matches[0]
-        if member.size > maximum:
-            raise ValueError("verified artifact exceeds publication bound")
-        digest = hashlib.sha256()
-        size = 0
-        for chunk in self.facade.iter_complete(
-            self.volume_id, member.path, max_bytes=maximum
-        ):
-            size += len(chunk)
-            digest.update(chunk)
-            yield chunk
-        if size != member.size or digest.hexdigest() != member.sha256:
-            raise ValueError("verified artifact changed before publication")
 
 
 def _closed(value: object, keys: set[str], label: str) -> dict[str, object]:
@@ -1812,60 +1778,6 @@ class ModalTrainingOperations:
             else ()
         )
         return TrainingOutcome(submission, self._status(record), artifacts)
-
-    def publish(
-        self, submission: TrainingSubmission, destination_ref: str
-    ) -> ArtifactPublicationReceipt:
-        """Publish verified staging artifacts through the host-owned destination port."""
-        if not isinstance(submission, TrainingSubmission):
-            raise TypeError("submission must be TrainingSubmission")
-        if not isinstance(destination_ref, str) or not destination_ref.strip():
-            raise ValueError("destination_ref is required")
-        publisher = self._ports.artifact_publisher
-        if publisher is None:
-            raise RuntimeError("host artifact publisher is unavailable")
-        preparation = self._repository.load_modal_preparation(
-            submission.run.project_ref, submission.run.run_id
-        )
-        if (
-            type(preparation) is not ModalDurablePreparationV1
-            or preparation.public_plan_fingerprint != submission.plan_fingerprint
-        ):
-            raise ValueError("durable Modal preparation does not bind the submission")
-        record = self._lifecycle.load(
-            project_ref=submission.run.project_ref,
-            run_id=submission.run.run_id,
-        )
-        if (
-            record.phase is not LifecyclePhase.SUCCEEDED
-            or record.verification is not VerificationStatus.VERIFIED
-        ):
-            raise ValueError("publish requires a verified succeeded run")
-        manifest = self._completion.validate(preparation.operation.effect.effect_id)
-        descriptors = tuple(
-            VerifiedArtifactDescriptor(member.role.value, member.sha256, member.size)
-            for member in sorted(manifest.members, key=lambda item: item.role.value)
-        )
-        source = _ModalVerifiedArtifactSource(
-            submission.run,
-            submission.plan_fingerprint,
-            descriptors,
-            tuple(manifest.members),
-            self._facade,
-            preparation.context.artifact_volume_id,
-        )
-        receipt = publisher.publish(source, destination_ref.strip())
-        if (
-            not isinstance(receipt, ArtifactPublicationReceipt)
-            or receipt.run != submission.run
-            or receipt.plan_fingerprint != submission.plan_fingerprint
-            or receipt.destination_ref != destination_ref.strip()
-            or {(item.kind, item.sha256, item.size) for item in receipt.artifacts}
-            != {(item.kind, item.sha256, item.size) for item in descriptors}
-        ):
-            raise ValueError("host artifact publication receipt is invalid")
-        return receipt
-
 
 def compose_modal_training_operations(
     *,

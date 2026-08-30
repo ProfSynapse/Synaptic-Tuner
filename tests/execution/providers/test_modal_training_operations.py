@@ -9,7 +9,6 @@ import pytest
 from jsonschema.validators import validator_for
 
 from synaptic_tuner.api.v1.execution import ExecutionGrant, RunState
-from synaptic_tuner.api.v1.artifacts import ArtifactPublicationReceipt,PublishedArtifact
 from synaptic_tuner.api.v1.host import APIHost,HostPorts
 from synaptic_tuner.api.v1.sources import ExecutionSourceV1
 from synaptic_tuner.api.v1.training import (
@@ -244,7 +243,7 @@ def plan_and_facade(selected=None):
     return plan, facade
 
 
-def operations(tmp_path, *, now=NOW, plan_facade=None, publisher=None):
+def operations(tmp_path, *, now=NOW, plan_facade=None):
     plan, facade = plan_facade or plan_and_facade()
     project = tmp_path / "host"
     engine = project / "vendor" / "engine"
@@ -263,7 +262,6 @@ def operations(tmp_path, *, now=NOW, plan_facade=None, publisher=None):
         git_remote=object(),
         modal_reads=facade,
         training_resolver=Resolver(),
-        artifact_publisher=publisher,
     )
     planning = TrainingService(
         context=project_context,
@@ -478,26 +476,6 @@ def test_explicit_reverify_can_correct_a_terminal_false_negative(tmp_path):
     record=repository.load("project-1","run-1")
     assert record.events[-2].code is EventCode.VERIFICATION_REOPENED
     assert record.events[-1].code is EventCode.VERIFICATION_VERIFIED
-
-
-def test_publish_delegates_verified_bytes_to_the_host_owned_destination(tmp_path):
-    class Publisher:
-        def __init__(self):self.calls=[]
-        def publish(self,source,destination_ref):
-            values={item.kind:b"".join(source.iter_bytes(item.kind,maximum=item.size)) for item in source.artifacts}
-            self.calls.append((source.run,source.plan_fingerprint,destination_ref,values))
-            return ArtifactPublicationReceipt(
-                source.run,source.plan_fingerprint,destination_ref,
-                tuple(PublishedArtifact(item.kind,f"memory://{destination_ref}/{item.kind}",item.sha256,item.size) for item in source.artifacts),
-            )
-    publisher=Publisher();value,repository,plan=operations(tmp_path,publisher=publisher)
-    submission=value.start(plan,value.preflight(plan),ExecutionGrant("grant-run-1"))
-    _publish_unrelated_completed_run(value,repository,tmp_path)
-    value._verify_semantics=lambda preparation,manifest: RuntimeVerificationStatus.VERIFIED
-    assert value.outcome(submission).success
-    receipt=value.publish(submission,"local-test")
-    assert receipt.destination_ref=="local-test" and len(receipt.artifacts)==5
-    assert len(publisher.calls)==1 and set(publisher.calls[0][3])=={role.value for role in ArtifactRole}
 
 
 def test_transient_completion_read_becomes_inconclusive_not_invalid(tmp_path):

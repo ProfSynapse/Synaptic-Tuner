@@ -1,4 +1,4 @@
-"""Provider-neutral, one-shot artifact publication; intentionally not exported.
+"""Provider-neutral, one-shot artifact publication implementation.
 
 This module is deliberately self-contained.  Hosts own destination resolution,
 authentication, spooling, persistence, and concrete publication adapters.  The
@@ -1681,6 +1681,7 @@ class PublicationOperationsV1:
             "synaptic-publication-result/v1",
             PublicationRef(record.command.publication_id,
                            record.command.destination_ref),
+            TrainingRunRef.from_dict(record.command.run.to_dict()),
             mapping[record.phase], artifacts,
         )
 

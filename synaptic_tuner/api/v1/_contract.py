@@ -6,14 +6,13 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Mapping
 
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
 def required_text(value: str, name: str) -> str:
-    if not isinstance(value, str):
+    if type(value) is not str:
         raise TypeError(f"{name} must be a string")
     if not value:
         raise ValueError(f"{name} is required")
@@ -35,6 +34,14 @@ def canonical_integer(value: int | float, name: str, *, minimum: int = 0) -> int
     return normalized
 
 
+def exact_integer(value: int, name: str, *, minimum: int = 0) -> int:
+    if type(value) is not int:
+        raise TypeError(f"{name} must be an exact integer")
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
+
+
 def digest_text(value: str, name: str) -> str:
     value = required_text(value, name)
     if _DIGEST.fullmatch(value) is None:
@@ -43,11 +50,14 @@ def digest_text(value: str, name: str) -> str:
 
 
 def exact_fields(
-    value: Mapping[str, object], expected: frozenset[str], name: str
-) -> None:
-    if not isinstance(value, Mapping):
-        raise TypeError(f"{name} must be an object")
-    actual = frozenset(value)
+    value: dict[str, object], expected: frozenset[str], name: str
+) -> dict[str, object]:
+    if type(value) is not dict:
+        raise TypeError(f"{name} must be an exact object")
+    keys = tuple(dict.keys(value))
+    if any(type(key) is not str for key in keys):
+        raise TypeError(f"{name} field names must be exact strings")
+    actual = frozenset(keys)
     if actual != expected:
         unknown = sorted(actual - expected)
         missing = sorted(expected - actual)
@@ -57,9 +67,12 @@ def exact_fields(
         if missing:
             details.append(f"missing fields: {', '.join(missing)}")
         raise ValueError(f"{name} has invalid fields ({'; '.join(details)})")
+    return {key: dict.__getitem__(value, key) for key in keys}
 
 
-def canonical_bytes(value: Mapping[str, object]) -> bytes:
+def canonical_bytes(value: dict[str, object]) -> bytes:
+    if type(value) is not dict:
+        raise TypeError("contract must be an exact object")
     try:
         return json.dumps(
             value,
@@ -68,11 +81,11 @@ def canonical_bytes(value: Mapping[str, object]) -> bytes:
             ensure_ascii=False,
             allow_nan=False,
         ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
-        raise ValueError("contract must contain only canonical JSON values") from exc
+    except (TypeError, ValueError, UnicodeError):
+        raise ValueError("contract must contain only canonical JSON values") from None
 
 
-def contract_digest(domain: str, value: Mapping[str, object]) -> str:
+def contract_digest(domain: str, value: dict[str, object]) -> str:
     domain = required_text(domain, "domain")
     return hashlib.sha256(domain.encode("ascii") + b"\0" + canonical_bytes(value)).hexdigest()
 
