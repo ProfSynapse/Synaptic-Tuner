@@ -31,6 +31,7 @@ from synaptic_tuner.api.v1.artifacts import (
 )
 from synaptic_tuner.api.v1.host import HostPorts
 from synaptic_tuner.api.v1.training import (
+    ArtifactPolicy,
     CanonicalDocument,
     ResourceSpec,
     ResolvedTrainingRequest,
@@ -39,27 +40,36 @@ from synaptic_tuner.api.v1.training import (
     TrainingPreflight,
     TrainingRequest,
     TrainingSubmission,
+    RuntimeSpec,
 )
+from synaptic_tuner.api.v1.sources import ExecutionSourceV1
 from tuner.execution._effect_executor import _ProviderEffectExecutor
 from tuner.execution.broker import MutationBroker, MutationCommandV1
 from tuner.execution.contracts import (
+    AttemptDisposition,
+    AttemptAdmission,
     EffectDisposition,
     EffectIdentity,
     EffectKind,
+    EffectObservation,
     EffectState,
     ExecutionScope,
     EventCode,
     GrantBinding,
+    LifecycleEvent,
     LifecyclePhase,
     LifecycleRecord,
     LifecycleRepository,
+    MessageCode,
     ProviderRunPhase,
     VerificationStatus,
+    RunAlreadyExists,
     digest,
     safe_ref,
 )
 from tuner.execution.operation import ModalStageTargetV1, OperationBindingV1
 from tuner.execution.service import LifecycleService
+from tuner.execution.lifecycle import apply_event, initial_record
 from tuner.project.context import ProjectContext
 from tuner.runtime.artifacts import ArtifactEntry, ArtifactInventory
 from tuner.runtime.dispatch import ProcessResult
@@ -420,19 +430,345 @@ class ModalDurablePreparationV1:
         return result
 
 
+@dataclass(frozen=True, slots=True)
+class ModalPreparedRunV1:
+    """One atomically admitted READY lifecycle and its exact Modal preparation."""
+
+    record: LifecycleRecord
+    preparation: ModalDurablePreparationV1
+
+    def __post_init__(self) -> None:
+        if type(self.record) is not LifecycleRecord:
+            raise TypeError("record must be exact LifecycleRecord")
+        if type(self.preparation) is not ModalDurablePreparationV1:
+            raise TypeError("preparation must be exact ModalDurablePreparationV1")
+        try:
+            record = LifecycleRecord.from_canonical_bytes(self.record.canonical_bytes)
+            preparation = ModalDurablePreparationV1.from_canonical_bytes(
+                self.preparation.canonical_bytes
+            )
+        except BaseException:
+            raise ValueError("Modal prepared run is not canonical") from None
+        events = record.events
+        expected_codes = (
+            EventCode.RUN_PLANNED,
+            EventCode.AUTHORITY_ACCEPTED,
+            EventCode.PREPARATION_STARTED,
+            EventCode.PREPARATION_COMPLETED,
+        )
+        operation = preparation.operation
+        context = preparation.context
+        binding = record.grant_binding
+        if (
+            record.revision != 4
+            or record.phase is not LifecyclePhase.READY
+            or record.verification is not VerificationStatus.NOT_READY
+            or record.effects
+            or len(events) != 4
+            or tuple(event.code for event in events) != expected_codes
+            or len({event.occurred_at for event in events}) != 1
+            or record.updated_at != events[0].occurred_at
+            or events[0].message_code is not MessageCode.PLANNED
+            or events[1].message_code is not MessageCode.AUTHORITY_BOUND
+            or events[2].message_code is not MessageCode.PREPARING
+            or events[3].message_code is not MessageCode.READY
+            or record.message_code is not MessageCode.READY
+            or events[0].effect is not None
+            or events[1].effect is not None
+            or events[2].effect is not None
+            or events[3].effect is not None
+            or events[0].grant_binding is not None
+            or events[2].grant_binding is not None
+            or events[3].grant_binding is not None
+            or type(binding) is not GrantBinding
+            or events[1].grant_binding != binding
+            or binding.operation != operation
+            or binding.grant_ref != operation.grant_ref
+            or record.project_ref != operation.project_ref
+            or record.run_id != operation.run_id
+            or context.project_ref != operation.project_ref
+            or context.effect_id != operation.effect.effect_id
+            or context.effect_key != operation.effect.effect_key
+            or context.artifact_slot_ref != operation.stage_target.artifact_slot_ref
+            or context.invocation_nonce != operation.invocation_nonce
+            or context.generation != operation.stage_target.generation
+            or context.control_volume_id != operation.stage_target.control_volume_id
+            or context.artifact_volume_id != operation.stage_target.artifact_volume_id
+            or context.key_ref != operation.stage_target.key_ref
+            or operation.effect.kind is not EffectKind.SUBMIT
+            or operation.effect.scope.provider != "modal"
+            or operation.effect.scope.account_ref != context.binding.account_ref
+            or operation.effect.scope.namespace_ref
+            != context.binding.environment_ref
+            or operation.deployment_attestation_digest
+            != context.deployment.attestation_digest
+            or operation.resource_digest != context.resource_digest
+            or operation.quote_digest != context.quote_digest
+        ):
+            raise ValueError("Modal prepared run identities disagree")
+        object.__setattr__(self, "record", record)
+        object.__setattr__(self, "preparation", preparation)
+
+
+def _prepared_record_prefix(record: LifecycleRecord) -> LifecycleRecord:
+    if type(record) is not LifecycleRecord or record.revision < 4:
+        raise ValueError("Modal prepared lifecycle is unavailable")
+    events = record.events[:4]
+    return LifecycleRecord(
+        run_id=record.run_id,
+        project_ref=record.project_ref,
+        revision=4,
+        phase=LifecyclePhase.READY,
+        verification=VerificationStatus.NOT_READY,
+        updated_at=events[-1].occurred_at,
+        message_code=events[-1].message_code,
+        events=events,
+        effects=(),
+        grant_binding=events[1].grant_binding,
+    )
+
+
+def _snapshot_plan(value: TrainingPlan) -> TrainingPlan:
+    """Detach all public plan inputs before the first host callback."""
+    if type(value) is not TrainingPlan:
+        raise TypeError("plan must be exact TrainingPlan")
+    return TrainingPlan(
+        ExecutionSourceV1.from_dict(value.execution_source.to_dict()),
+        CanonicalDocument(value.execution_context.canonical_json),
+        CanonicalDocument(value.resolved_config.canonical_json),
+        CanonicalDocument(value.workload.canonical_json),
+        RuntimeSpec(
+            value.runtime.image,
+            value.runtime.dependency_lock_digest,
+            value.runtime.python_version,
+        ),
+        ResourceSpec(
+            value.resources.accelerator,
+            value.resources.accelerator_count,
+            value.resources.timeout_seconds,
+        ),
+        ArtifactPolicy(
+            tuple(value.artifact_policy.required_kinds),
+            value.artifact_policy.retain_checkpoints,
+        ),
+    )
+
+
+def _snapshot_preflight(value: TrainingPreflight) -> TrainingPreflight:
+    if type(value) is not TrainingPreflight:
+        raise TypeError("preflight must be exact TrainingPreflight")
+    authorization = tuple(
+        AuthorizationRequirement(
+            item.operation,
+            item.paid_effect,
+            item.maximum_cost_minor_units,
+            item.currency,
+        )
+        for item in value.authorization
+    )
+    errors = tuple(
+        ExecutionError(item.code, item.message, item.retryable)
+        for item in value.errors
+    )
+    return TrainingPreflight(
+        value.plan_fingerprint,
+        value.ready,
+        value.checked_at,
+        value.expires_at,
+        authorization,
+        errors,
+    )
+
+
+def _snapshot_grant(value: ExecutionGrant) -> ExecutionGrant:
+    if type(value) is not ExecutionGrant:
+        raise TypeError("grant must be exact ExecutionGrant")
+    return ExecutionGrant(value.grant_ref)
+
+
+def _callable_identity(owner: object, name: str) -> tuple[object | None, object]:
+    value = getattr(owner, name)
+    return (getattr(value, "__self__", None), getattr(value, "__func__", value))
+
+
+def _closed_start_failure() -> None:
+    raise RuntimeError("host Modal start failed") from None
+
+
+def _closed_readback_failure() -> None:
+    raise RuntimeError("host Modal prepared-run readback failed") from None
+
+
+def _validated_current_record(
+    value: object,
+    *,
+    prepared: ModalPreparedRunV1,
+    expected_effect: EffectIdentity,
+    require_ready_grant_ref: str | None,
+) -> LifecycleRecord:
+    if type(value) is not LifecycleRecord:
+        _closed_readback_failure()
+    failed = False
+    try:
+        current = LifecycleRecord.from_canonical_bytes(value.canonical_bytes)
+        prefix = _prepared_record_prefix(current)
+    except Exception:
+        failed = True
+    if failed:
+        _closed_readback_failure()
+    if (
+        prefix != prepared.record
+        or current.project_ref != prepared.record.project_ref
+        or current.run_id != prepared.record.run_id
+    ):
+        _closed_readback_failure()
+    replay_failed = False
+    try:
+        replayed = LifecycleRecord.from_canonical_bytes(
+            prepared.record.canonical_bytes
+        )
+        for source_event in current.events[4:]:
+            if type(source_event) is not LifecycleEvent:
+                raise TypeError("lifecycle event must be exact")
+            detached_event = LifecycleEvent.from_dict(source_event.to_dict())
+            replayed = apply_event(replayed, detached_event)
+        replayed = LifecycleRecord.from_canonical_bytes(replayed.canonical_bytes)
+    except Exception:
+        replay_failed = True
+    if replay_failed or replayed.canonical_bytes != current.canonical_bytes:
+        _closed_readback_failure()
+    if current.phase is LifecyclePhase.READY:
+        if require_ready_grant_ref is None or (
+            current.grant_binding is None
+            or current.grant_binding.operation != prepared.preparation.operation
+            or current.grant_binding.grant_ref != require_ready_grant_ref
+        ):
+            _closed_readback_failure()
+    else:
+        expected = prepared.preparation.stage.expectation
+        receipt = StageReceiptV1(
+            expected.effect.effect_id,
+            expected.operation_binding_digest,
+            expected.control_volume_id,
+            expected.artifact_volume_id,
+            expected.claim_digest,
+            expected.bundle_digest,
+        )
+        command_failed = False
+        try:
+            command = MutationCommandV1.from_stage(
+                prepared.preparation.operation, receipt
+            )
+        except Exception:
+            command_failed = True
+        if command_failed:
+            _closed_readback_failure()
+        retained = tuple(
+            effect for effect in current.effects if effect.identity == expected_effect
+        )
+        if (
+            len(retained) != 1
+            or retained[0].identity.kind is not EffectKind.SUBMIT
+            or retained[0].command_digest != command.digest
+            or retained[0].canonical_command != command.canonical_bytes
+        ):
+            _closed_readback_failure()
+        compatible = {
+            LifecyclePhase.SUBMITTING: {EffectState.ATTEMPTED},
+            LifecyclePhase.QUEUED: {EffectState.FOUND},
+            LifecyclePhase.RUNNING: {EffectState.FOUND},
+            LifecyclePhase.VERIFYING: {EffectState.FOUND},
+            LifecyclePhase.SUCCEEDED: {EffectState.FOUND},
+            LifecyclePhase.FAILED: {EffectState.FOUND},
+            LifecyclePhase.CANCELLING: {EffectState.FOUND},
+            LifecyclePhase.CANCELLED: {EffectState.FOUND},
+            LifecyclePhase.RECONCILE_REQUIRED: {
+                EffectState.FOUND,
+                EffectState.INDETERMINATE,
+                EffectState.DEFINITELY_ABSENT,
+            },
+        }
+        if retained[0].state not in compatible.get(current.phase, set()):
+            _closed_readback_failure()
+    return current
+
+
+def _guarded_broker_execute(
+    broker: MutationBroker,
+    repository: ModalTrainingRepository,
+    command: MutationCommandV1,
+    *,
+    expected_revision: int,
+    guard,
+) -> EffectObservation:
+    """Execute one broker path with a guard around every external seam."""
+    admission_failed = False
+    guard()
+    try:
+        admission = repository.compare_and_consume_attempt(
+            command.project_ref,
+            command.run_id,
+            expected_revision=expected_revision,
+            grant_ref=command.grant_ref,
+            canonical_command=command,
+        )
+    except Exception:
+        admission_failed = True
+    guard()
+    if admission_failed:
+        _closed_start_failure()
+    if type(admission) is not AttemptAdmission:
+        _closed_start_failure()
+    if admission.disposition is AttemptDisposition.LOOKUP_ONLY:
+        effect = admission.effect
+        if effect.state is EffectState.FOUND:
+            return EffectObservation(
+                effect.identity,
+                EffectDisposition.FOUND,
+                effect.provider_job_ref,
+                effect.receipt_digest,
+            )
+        if effect.state is EffectState.DEFINITELY_ABSENT:
+            return EffectObservation(
+                effect.identity, EffectDisposition.DEFINITELY_ABSENT
+            )
+        return EffectObservation(effect.identity, EffectDisposition.INDETERMINATE)
+
+    execution_failed = False
+    guard()
+    try:
+        observation = broker._executor.execute_once(command.canonical_bytes)
+    except Exception:
+        execution_failed = True
+    guard()
+    if execution_failed:
+        _closed_start_failure()
+    if type(observation) is not EffectObservation or observation.identity != command.effect:
+        _closed_start_failure()
+
+    outcome_failed = False
+    guard()
+    try:
+        repository.record_attempt_outcome(
+            command.project_ref,
+            command.run_id,
+            expected_revision=admission.record.revision,
+            command_digest=command.digest,
+            observation=observation,
+        )
+    except Exception:
+        outcome_failed = True
+    guard()
+    if outcome_failed:
+        _closed_start_failure()
+    return observation
+
+
 @runtime_checkable
 class ModalTrainingRepository(LifecycleRepository, Protocol):
     """Consuming-project database contract; no implementation lives here."""
 
-    def commit_modal_preparation(
-        self,
-        project_ref: str,
-        run_id: str,
-        *,
-        expected_revision: int,
-        occurred_at: str,
-        preparation: ModalDurablePreparationV1,
-    ) -> LifecycleRecord: ...
+    def create_modal_prepared_run(self, value: ModalPreparedRunV1) -> None: ...
 
     def load_modal_preparation(
         self, project_ref: str, run_id: str
@@ -829,64 +1165,294 @@ class ModalTrainingOperations:
         preflight: TrainingPreflight,
         grant: ExecutionGrant,
     ) -> TrainingSubmission:
-        if not preflight.ready or not preflight.binds(plan):
+        snapshot_failed = False
+        try:
+            sealed_plan = _snapshot_plan(plan)
+            sealed_preflight = _snapshot_preflight(preflight)
+            sealed_grant = _snapshot_grant(grant)
+        except Exception:
+            snapshot_failed = True
+        if snapshot_failed:
+            _closed_start_failure()
+        if not sealed_preflight.ready or not sealed_preflight.binds(sealed_plan):
             raise ValueError("start requires the exact ready preflight")
+
+        pinned_port_fields = (
+            ("lifecycle", self._repository),
+            ("grants", self._ports.grants),
+            ("authenticator", self._ports.authenticator),
+            ("modal_reads", self._facade),
+            ("clock", self._ports.clock),
+        )
+        pinned_attributes = (
+            (self, "_ports", self._ports),
+            (self, "_repository", self._repository),
+            (self, "_facade", self._facade),
+            (self, "_stage_control", self._stage_control),
+            (self, "_broker", self._broker),
+            (self, "_context", self._context),
+            (self, "_profile", self._profile),
+            (self, "_runtime_lock", self._runtime_lock),
+            (self._expectations, "_repository", self._repository),
+            (self._stage_control, "store", self._expectations),
+            (self._stage_control, "auth", self._ports.authenticator),
+            (self._stage_control, "facade", self._facade),
+            (self._broker, "_repository", self._repository),
+        )
+        pinned_executor = self._broker._executor
+        pinned_driver = pinned_executor._driver
+        pinned_attributes += (
+            (self._broker, "_executor", pinned_executor),
+            (pinned_executor, "_driver", pinned_driver),
+            (pinned_driver, "_repository", self._repository),
+            (pinned_driver, "_control", self._stage_control),
+            (pinned_driver, "_facade", self._facade),
+        )
+        pinned_callables = (
+            (self._ports, "clock", _callable_identity(self._ports, "clock")),
+            (
+                self._repository,
+                "create_modal_prepared_run",
+                _callable_identity(self._repository, "create_modal_prepared_run"),
+            ),
+            (self._repository, "load", _callable_identity(self._repository, "load")),
+            (
+                self._repository,
+                "load_modal_preparation",
+                _callable_identity(self._repository, "load_modal_preparation"),
+            ),
+            (
+                self._repository,
+                "load_modal_preparation_by_effect",
+                _callable_identity(
+                    self._repository, "load_modal_preparation_by_effect"
+                ),
+            ),
+            (
+                self._repository,
+                "compare_and_consume_attempt",
+                _callable_identity(self._repository, "compare_and_consume_attempt"),
+            ),
+            (
+                self._repository,
+                "record_attempt_outcome",
+                _callable_identity(self._repository, "record_attempt_outcome"),
+            ),
+            (self._ports.grants, "bind", _callable_identity(self._ports.grants, "bind")),
+            (
+                self._ports.authenticator,
+                "sign",
+                _callable_identity(self._ports.authenticator, "sign"),
+            ),
+            (
+                self._ports.authenticator,
+                "verify",
+                _callable_identity(self._ports.authenticator, "verify"),
+            ),
+            (
+                self._stage_control,
+                "validate",
+                _callable_identity(self._stage_control, "validate"),
+            ),
+            (
+                pinned_executor,
+                "execute_once",
+                _callable_identity(pinned_executor, "execute_once"),
+            ),
+            (
+                pinned_driver,
+                "execute_once",
+                _callable_identity(pinned_driver, "execute_once"),
+            ),
+        )
+
+        def guard() -> None:
+            guard_failed = False
+            try:
+                inputs_match = (
+                    _snapshot_plan(plan) == sealed_plan
+                    and _snapshot_preflight(preflight) == sealed_preflight
+                    and _snapshot_grant(grant) == sealed_grant
+                )
+                ports_match = all(
+                    getattr(self._ports, name) is identity
+                    for name, identity in pinned_port_fields
+                )
+                attributes_match = all(
+                    getattr(owner, name) is identity
+                    for owner, name, identity in pinned_attributes
+                )
+                callables_match = True
+                for owner, name, identity in pinned_callables:
+                    current = _callable_identity(owner, name)
+                    if current[0] is not identity[0] or current[1] is not identity[1]:
+                        callables_match = False
+                        break
+            except Exception:
+                guard_failed = True
+            if guard_failed:
+                _closed_start_failure()
+            if (
+                not inputs_match
+                or not ports_match
+                or not attributes_match
+                or not callables_match
+            ):
+                _closed_start_failure()
+
         from tuner.execution.contracts import timestamp
-        if timestamp(self._ports.clock(), "clock") >= timestamp(
-            preflight.expires_at, "preflight expiry"
+        guard()
+        clock_failed = False
+        try:
+            occurred_at = self._ports.clock()
+        except Exception:
+            clock_failed = True
+        if clock_failed:
+            _closed_start_failure()
+        guard()
+        if timestamp(occurred_at, "clock") >= timestamp(
+            sealed_preflight.expires_at, "preflight expiry"
         ):
             raise ValueError("training preflight has expired")
-        context = self._context_for(plan)
+        context = self._context_for(sealed_plan)
+        guard()
         preparation = _build_preparation(
-            plan, context, grant, self._ports.authenticator
+            sealed_plan, context, sealed_grant, self._ports.authenticator
         )
-        record = self._repository.load(context.project_ref, plan.execution_source.run_id)
-        if record is None:
+        guard()
+        preparation_failed = False
+        try:
+            sealed_preparation = ModalDurablePreparationV1.from_canonical_bytes(
+                preparation.canonical_bytes
+            )
+        except Exception:
+            preparation_failed = True
+        if preparation_failed:
+            _closed_start_failure()
+        guard()
+        binding_failed = False
+        try:
             binding = self._ports.grants.bind(
-                grant, operation=preparation.operation,
-                requirements=preflight.authorization,
+                sealed_grant,
+                operation=sealed_preparation.operation,
+                requirements=sealed_preflight.authorization,
             )
-            if not isinstance(binding, GrantBinding):
-                raise ValueError("host grant binding is unavailable")
-            if binding.operation != preparation.operation or binding.grant_ref != grant.grant_ref:
-                raise ValueError("host grant does not bind the exact Modal operation")
-            record = self._lifecycle.plan(
-                project_ref=context.project_ref, run_id=plan.execution_source.run_id
-            )
-            record = self._lifecycle.authorize(
-                project_ref=record.project_ref,
-                run_id=record.run_id,
-                expected_revision=record.revision,
-                binding=binding,
-            )
-            record = self._lifecycle.begin_preparation(
-                project_ref=record.project_ref,
-                run_id=record.run_id,
-                expected_revision=record.revision,
-            )
-            record = self._repository.commit_modal_preparation(
-                record.project_ref,
-                record.run_id,
-                expected_revision=record.revision,
-                occurred_at=self._ports.clock(),
-                preparation=preparation,
-            )
-            if record.phase is not LifecyclePhase.READY:
-                raise RuntimeError("host did not durably commit Modal preparation")
-        loaded = self._repository.load_modal_preparation(
-            record.project_ref, record.run_id
-        )
-        if loaded != preparation or record.grant_binding is None:
-            raise RuntimeError("host Modal preparation readback failed")
+        except Exception:
+            binding_failed = True
+        if binding_failed:
+            _closed_start_failure()
+        guard()
+        if type(binding) is not GrantBinding:
+            raise ValueError("host grant binding is unavailable")
+        binding_snapshot_failed = False
+        try:
+            binding = GrantBinding.from_dict(binding.to_dict())
+        except Exception:
+            binding_snapshot_failed = True
+        if binding_snapshot_failed:
+            _closed_start_failure()
         if (
-            record.grant_binding.operation != preparation.operation
-            or record.grant_binding.grant_ref != grant.grant_ref
+            binding.operation != sealed_preparation.operation
+            or binding.grant_ref != sealed_grant.grant_ref
         ):
-            raise ValueError("durable Modal authority differs from this start request")
+            raise ValueError("host grant does not bind the exact Modal operation")
+        record = initial_record(
+            project_ref=context.project_ref,
+            run_id=sealed_plan.execution_source.run_id,
+            occurred_at=occurred_at,
+        )
+        record = apply_event(
+            record,
+            LifecycleEvent(
+                EventCode.AUTHORITY_ACCEPTED,
+                occurred_at,
+                MessageCode.AUTHORITY_BOUND,
+                grant_binding=binding,
+            ),
+        )
+        record = apply_event(
+            record,
+            LifecycleEvent(
+                EventCode.PREPARATION_STARTED,
+                occurred_at,
+                MessageCode.PREPARING,
+            ),
+        )
+        record = apply_event(
+            record,
+            LifecycleEvent(
+                EventCode.PREPARATION_COMPLETED,
+                occurred_at,
+                MessageCode.READY,
+            ),
+        )
+        baseline = ModalPreparedRunV1(record, sealed_preparation)
+        presented = ModalPreparedRunV1(baseline.record, baseline.preparation)
+        created = True
+        create_failed = False
+        guard()
+        try:
+            self._repository.create_modal_prepared_run(presented)
+        except RunAlreadyExists as error:
+            if type(error) is RunAlreadyExists:
+                created = False
+            else:
+                create_failed = True
+        except Exception:
+            create_failed = True
+        guard()
+        if create_failed:
+            _closed_start_failure()
+        readback_failed = False
+        try:
+            guard()
+            loaded_record = self._repository.load(
+                baseline.record.project_ref, baseline.record.run_id
+            )
+            guard()
+            loaded_preparation = self._repository.load_modal_preparation(
+                baseline.record.project_ref, baseline.record.run_id
+            )
+            guard()
+        except Exception:
+            readback_failed = True
+        if readback_failed:
+            _closed_readback_failure()
+        pair_failed = False
+        try:
+            loaded_pair = ModalPreparedRunV1(
+                _prepared_record_prefix(loaded_record), loaded_preparation
+            )
+        except Exception:
+            pair_failed = True
+        if pair_failed:
+            _closed_readback_failure()
+        if created:
+            if loaded_pair != baseline:
+                _closed_readback_failure()
+        elif (
+            loaded_pair.preparation != baseline.preparation
+            or loaded_pair.record.project_ref != baseline.record.project_ref
+            or loaded_pair.record.run_id != baseline.record.run_id
+            or loaded_pair.record.grant_binding.operation
+            != baseline.record.grant_binding.operation
+            or loaded_pair.record.grant_binding.grant_ref
+            != sealed_grant.grant_ref
+        ):
+            _closed_readback_failure()
+        preparation = loaded_pair.preparation
+        guard()
+        record = _validated_current_record(
+            loaded_record,
+            prepared=loaded_pair,
+            expected_effect=preparation.operation.effect,
+            require_ready_grant_ref=sealed_grant.grant_ref,
+        )
+        guard()
         if record.phase is not LifecyclePhase.READY:
             return TrainingSubmission(
                 RunRef(record.run_id, record.project_ref),
-                plan.fingerprint,
+                preparation.public_plan_fingerprint,
                 self._submission_time(record, preparation.operation.effect.effect_id),
             )
         expected = preparation.stage.expectation
@@ -898,24 +1464,46 @@ class ModalTrainingOperations:
             expected.claim_digest,
             expected.bundle_digest,
         )
+        guard()
         try:
             self._stage_control.validate(receipt)
         except Exception:
+            guard()
             receipt = _ExplicitModal154VolumeWriter(self._facade).stage_once(
                 preparation.stage
             )
+        guard()
         command = MutationCommandV1.from_stage(preparation.operation, receipt)
-        observation = self._broker.execute(
-            command, expected_revision=record.revision
+        guard()
+        observation = _guarded_broker_execute(
+            self._broker,
+            self._repository,
+            command,
+            expected_revision=record.revision,
+            guard=guard,
         )
+        guard()
         if observation.disposition is EffectDisposition.DEFINITELY_ABSENT:
             raise RuntimeError("Modal submission was definitely absent")
-        record = self._lifecycle.load(
-            project_ref=record.project_ref, run_id=record.run_id
+        final_load_failed = False
+        guard()
+        try:
+            final_value = self._repository.load(record.project_ref, record.run_id)
+        except Exception:
+            final_load_failed = True
+        guard()
+        if final_load_failed:
+            _closed_start_failure()
+        record = _validated_current_record(
+            final_value,
+            prepared=loaded_pair,
+            expected_effect=preparation.operation.effect,
+            require_ready_grant_ref=sealed_grant.grant_ref,
         )
+        guard()
         return TrainingSubmission(
             RunRef(record.run_id, record.project_ref),
-            plan.fingerprint,
+            preparation.public_plan_fingerprint,
             self._submission_time(record, preparation.operation.effect.effect_id),
         )
 
@@ -1287,6 +1875,7 @@ def compose_modal_training_operations(
 __all__ = [
     "MODAL_PLAN_CONTEXT_SCHEMA",
     "ModalDurablePreparationV1",
+    "ModalPreparedRunV1",
     "ModalPlanContextV1",
     "ModalTrainingOperations",
     "ModalTrainingRepository",

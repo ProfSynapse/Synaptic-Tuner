@@ -41,6 +41,7 @@ from tuner.execution.providers.modal.runtime import (
 )
 from tuner.execution.providers.modal.training import (
     ModalDurablePreparationV1,
+    ModalPreparedRunV1,
     ModalPlanContextV1,
     ModalTrainingOperations,
     ModalTrainingRepository,
@@ -49,6 +50,7 @@ from tuner.execution.providers.modal.training import (
 
 __all__ = [
     "ModalDurablePreparationV1",
+    "ModalPreparedRunV1",
     "ModalClientBinding",
     "ModalDeploymentObjectsV1",
     "ModalDeploymentSelectionV1",

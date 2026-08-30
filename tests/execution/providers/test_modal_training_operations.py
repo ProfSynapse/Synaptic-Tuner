@@ -26,11 +26,9 @@ from tests.training.test_training_service import _resolved_config
 from tuner.execution.contracts import (
     EventCode,
     GrantBinding,
-    LifecycleEvent,
     LifecyclePhase,
-    MessageCode,
+    RunAlreadyExists,
 )
-from tuner.execution.lifecycle import apply_event
 from tuner.execution.providers.modal.config import (
     ModalProviderProfileV1,
     ModalRuntimeLockV1,
@@ -44,6 +42,7 @@ from tuner.execution.providers.modal.resolution import ModalDeploymentSelectionV
 from tuner.execution.providers.modal.training import (
     MODAL_PLAN_CONTEXT_SCHEMA,
     ModalDurablePreparationV1,
+    ModalPreparedRunV1,
     ModalPlanContextV1,
     ModalTrainingOperations,
     _provider_runtime_requirements_digest,
@@ -77,22 +76,13 @@ class Repository(InMemoryLifecycleRepository):
         super().__init__(clock=lambda: NOW)
         self.preparations = {}
 
-    def commit_modal_preparation(
-        self, project_ref, run_id, *, expected_revision, occurred_at, preparation
-    ):
-        assert type(preparation) is ModalDurablePreparationV1
-        key = (project_ref, run_id)
-        old = self.records[key]
-        assert old.revision == expected_revision
-        event = LifecycleEvent(
-            EventCode.PREPARATION_COMPLETED,
-            occurred_at,
-            MessageCode.READY,
-        )
-        new = apply_event(old, event)
-        self.preparations[key] = preparation
-        self.records[key] = new
-        return new
+    def create_modal_prepared_run(self, value):
+        assert type(value) is ModalPreparedRunV1
+        key = (value.record.project_ref, value.record.run_id)
+        if key in self.records or key in self.preparations:
+            raise RunAlreadyExists("run already exists")
+        self.records[key] = value.record
+        self.preparations[key] = value.preparation
 
     def load_modal_preparation(self, project_ref, run_id):
         return self.preparations.get((project_ref, run_id))

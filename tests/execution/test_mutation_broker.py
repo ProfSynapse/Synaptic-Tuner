@@ -86,8 +86,9 @@ def test_outcome_requires_exact_revision_effect_and_command():
 def test_cancel_requires_exact_confirmed_target():
     submit=command();repo,r=ready(submit);d=Driver();MutationBroker(repo,_ProviderEffectExecutor(d)).execute(submit,expected_revision=r.revision)
     svc=LifecycleService(repo,clock=lambda:NOW);current=repo.load("p","r");current=svc.record_provider_phase(project_ref="p",run_id="r",expected_revision=current.revision,provider_phase=ProviderRunPhase.RUNNING)
-    c=command(EffectKind.CANCEL,"fc-other",key="cancel",eid="ce");current=svc.authorize(project_ref="p",run_id="r",expected_revision=current.revision,binding=grant(c))
-    with pytest.raises(AuthorizationMismatch):MutationBroker(repo,_ProviderEffectExecutor(d)).execute(c,expected_revision=current.revision)
+    c=command(EffectKind.CANCEL,"fc-other",key="cancel",eid="ce")
+    with pytest.raises(InvalidTransition):
+        svc.authorize(project_ref="p",run_id="r",expected_revision=current.revision,binding=grant(c))
     assert d.calls==1
 def test_exact_target_cancel_executes_once():
     submit=command();repo,r=ready(submit);MutationBroker(repo,_ProviderEffectExecutor(Driver())).execute(submit,expected_revision=r.revision)

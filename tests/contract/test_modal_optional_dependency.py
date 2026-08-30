@@ -63,6 +63,9 @@ def test_provider_specific_public_contract_still_does_not_import_modal_sdk():
     assert "modal" not in added
     assert hasattr(module, "ModalTrainingRepository")
     assert hasattr(module, "ModalDurablePreparationV1")
+    assert hasattr(module, "ModalPreparedRunV1")
+    from tuner.execution.providers.modal.training import ModalPreparedRunV1
+    assert module.ModalPreparedRunV1 is ModalPreparedRunV1
     assert hasattr(module, "ExplicitModal154ReadFacade")
     assert hasattr(module, "ModalDeploymentSelectionV1")
     assert hasattr(module, "ModalDeploymentSpecV1")

@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from ._effect_executor import _ProviderEffectExecutor
 from .contracts import (
     EffectCollision, EffectDisposition, EffectObservation, EffectState,
-    LifecycleRepository, AttemptDisposition, digest,
+    LifecycleRepository, AttemptDisposition, digest, _PARSE_FAILED,
+    _has_exact_fields, _try_json_bytes,
 )
 from .operation import OperationBindingV1
 
@@ -21,7 +22,7 @@ class MutationCommandV1:
     stage_claim_digest: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.operation, OperationBindingV1):
+        if type(self.operation) is not OperationBindingV1:
             raise TypeError("operation must be OperationBindingV1")
         object.__setattr__(self, "bundle_digest", digest(self.bundle_digest, "bundle_digest"))
         object.__setattr__(
@@ -73,30 +74,38 @@ class MutationCommandV1:
     @classmethod
     def from_bytes(cls, value: bytes) -> "MutationCommandV1":
         """Parse the one canonical payload accepted by provider mutators/workers."""
-        if not isinstance(value, bytes) or not value:
-            raise ValueError("mutation command must be nonempty canonical JSON bytes")
-        try:
-            document = json.loads(value.decode("utf-8"))
-        except (UnicodeError, json.JSONDecodeError) as exc:
-            raise ValueError("mutation command must be canonical JSON") from exc
-        expected = {
+        if type(value) is not bytes:
+            raise TypeError("mutation command must be exact bytes") from None
+        document = _try_json_bytes(value, maximum=16 * 1024 * 1024)
+        expected = frozenset({
             "schema_version", "operation_binding", "operation_binding_digest",
             "bundle_digest", "stage_claim_digest",
-        }
-        if not isinstance(document, dict) or set(document) != expected:
+        })
+        if document is _PARSE_FAILED or not _has_exact_fields(document, expected):
             raise ValueError("mutation command contains missing or unknown fields")
-        if document.get("schema_version") != "synaptic-mutation-command/v1":
+        if document["schema_version"] != "synaptic-mutation-command/v1":
             raise ValueError("unsupported mutation-command schema")
-        operation = OperationBindingV1.from_dict(document["operation_binding"])
-        if document["operation_binding_digest"] != operation.digest:
-            raise ValueError("mutation command operation digest mismatch")
-        result = cls(
-            operation=operation,
-            bundle_digest=document["bundle_digest"],
-            stage_claim_digest=document["stage_claim_digest"],
-        )
-        if result.canonical_bytes != value:
-            raise ValueError("mutation command is not canonical")
+        result: MutationCommandV1 | object = _PARSE_FAILED
+        failure = "invalid"
+        try:
+            operation = OperationBindingV1.from_dict(document["operation_binding"])
+            candidate = cls(
+                operation=operation,
+                bundle_digest=document["bundle_digest"],
+                stage_claim_digest=document["stage_claim_digest"],
+            )
+            if document["operation_binding_digest"] != operation.digest:
+                failure = "digest"
+            elif candidate.canonical_bytes == value:
+                result = candidate
+            else:
+                failure = "canonical"
+        except Exception:
+            pass
+        if result is _PARSE_FAILED:
+            if failure == "digest":
+                raise ValueError("mutation command operation digest mismatch") from None
+            raise ValueError("mutation command is not canonical") from None
         return result
 
 
