@@ -50,6 +50,7 @@ _LAZY_MODULE_ATTRIBUTES = {
         "AuthenticatedSourceEvidenceV1", "ExecutionSourceV1",
         "GitCliLocalSourceInspector", "LocalSourceInspectionPort",
         "PushedSourceVerificationPort", "SourceLock", "SourceLockBindingV1",
+        "SourceLockProvenanceViewV1", "validate_source_lock_provenance_v1",
     },
     "training": {
         "ArtifactPolicy", "CanonicalDocument", "ResolvedTrainingComponents",
@@ -95,6 +96,7 @@ _FORMAL_EXPORTS = (
     "RunNotFound", "RunState", "RunStatus", "RunVerification", "RunsAPI",
     "RunsOperations", "RuntimeSpec", "ReplayDisposition", "RevisionConflict", "SecretRef",
     "SecretProvider", "SourceLock", "SourceLockBindingV1",
+    "SourceLockProvenanceViewV1", "validate_source_lock_provenance_v1",
     "AuthenticatedSourceEvidenceV1", "ExecutionSourceV1",
     "LocalSourceInspectionPort", "PushedSourceVerificationPort", "TrainingAPI",
     "TrainingOperations", "TrainingOutcome", "TrainingPlan", "TrainingPreflight",

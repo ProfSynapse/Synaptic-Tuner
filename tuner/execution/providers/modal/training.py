@@ -11,7 +11,7 @@ import hashlib
 import base64
 import binascii
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping, Protocol, runtime_checkable
 
 from synaptic_tuner.api.v1.execution import (
@@ -357,6 +357,25 @@ class ModalDurablePreparationV1:
             raise ValueError("stage material differs from durable operation")
         if self.stage.expectation.binding != self.context.binding:
             raise ValueError("stage material differs from durable Modal context")
+        if self.public_plan_fingerprint != self.operation.plan_fingerprint:
+            raise ValueError("durable plan fingerprint differs from its operation")
+
+    def detached_execution_source(self) -> ExecutionSourceV1:
+        """Return the exact staged execution source without exposing bundle internals."""
+        try:
+            bundle = ModalExecutionBundleV1.parse_transport(self.stage.bundle)
+            members = tuple(
+                member for member in bundle.members
+                if member.name == "execution-source.json"
+            )
+            if len(members) != 1:
+                raise ValueError
+            document = json.loads(members[0].content.decode("utf-8"))
+            if type(document) is not dict:
+                raise ValueError
+            return ExecutionSourceV1.from_dict(document)
+        except BaseException:
+            raise ValueError("durable execution source is unavailable") from None
 
     @property
     def canonical_bytes(self) -> bytes:
@@ -984,6 +1003,7 @@ def _build_preparation(
         stage_target=target,
         member_documents=members,
     )
+    operation = replace(operation, plan_fingerprint=plan.fingerprint)
     bundle = ModalExecutionBundleV1.build(
         operation=operation, member_documents=members
     ).transport_base64

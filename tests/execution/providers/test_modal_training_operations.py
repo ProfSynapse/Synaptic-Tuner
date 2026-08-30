@@ -11,6 +11,7 @@ from jsonschema.validators import validator_for
 from synaptic_tuner.api.v1.execution import ExecutionGrant, RunState
 from synaptic_tuner.api.v1.artifacts import ArtifactPublicationReceipt,PublishedArtifact
 from synaptic_tuner.api.v1.host import APIHost,HostPorts
+from synaptic_tuner.api.v1.sources import ExecutionSourceV1
 from synaptic_tuner.api.v1.training import (
     ArtifactPolicy,
     CanonicalDocument,
@@ -306,10 +307,25 @@ def test_modal_preparation_has_a_strict_canonical_persistence_round_trip(tmp_pat
     assert ModalDurablePreparationV1.from_canonical_bytes(
         preparation.canonical_bytes
     ) == preparation
+    detached = preparation.detached_execution_source()
+    assert type(detached) is ExecutionSourceV1
+    assert ExecutionSourceV1.from_dict(detached.to_dict()) == detached
     with pytest.raises(ValueError, match="canonical"):
         ModalDurablePreparationV1.from_canonical_bytes(
             preparation.canonical_bytes + b" "
         )
+
+
+def test_modal_preparation_rejects_public_operation_fingerprint_mismatch(tmp_path):
+    value, repository, plan = operations(tmp_path)
+    value.start(plan, value.preflight(plan), ExecutionGrant("grant-run-1"))
+    preparation = repository.load_modal_preparation("project-1", "run-1")
+    with pytest.raises(ValueError, match="fingerprint"):
+        replace(preparation, public_plan_fingerprint="f" * 64)
+    document = json.loads(preparation.canonical_bytes)
+    document["public_plan_fingerprint"] = "f" * 64
+    with pytest.raises(ValueError, match="fingerprint"):
+        ModalDurablePreparationV1.from_canonical_bytes(canonical_json(document))
 
 
 def test_repeated_start_reuses_durable_operation_and_never_spawns_twice(tmp_path):

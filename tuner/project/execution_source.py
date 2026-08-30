@@ -30,6 +30,10 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _SAFE_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,255}$")
 _ROOT_NAMES = ("engine", "project", "artifacts", "state", "tracking", "cache", "tmp")
+_TRAINING_PROVENANCE_KEYS = (
+    "training_input_digest", "training_contract_identity_digest",
+    "training_source_sha256", "training_ingress_digest", "provider_policy_digest",
+)
 _DICT_COPY = dict.copy
 _DICT_KEYS = dict.keys
 
@@ -639,6 +643,39 @@ class ExecutionSourceV1:
     @property
     def fingerprint(self) -> str:
         return hashlib.sha256(b"synaptic-execution-source/v1\0" + self.canonical_bytes).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class SourceLockProvenanceViewV1:
+    """Validated provider-neutral training provenance bound to one complete lock."""
+
+    binding: SourceLockBindingV1
+    projection: tuple[tuple[str, str], ...]
+
+
+def validate_source_lock_provenance_v1(
+    source: ExecutionSourceV1,
+    source_lock: SourceLock,
+    expected: dict[str, str],
+) -> SourceLockProvenanceViewV1:
+    if type(source) is not ExecutionSourceV1 or type(source_lock) is not SourceLock:
+        raise SourceLockError("exact execution source and source lock are required")
+    expected = _exact_object_fields(
+        expected, required=_TRAINING_PROVENANCE_KEYS,
+        failure="training provenance projection is malformed",
+    )
+    projection = tuple((key, expected[key]) for key in _TRAINING_PROVENANCE_KEYS)
+    if any(type(value) is not str or _DIGEST_RE.fullmatch(value) is None for _, value in projection):
+        raise SourceLockError("training provenance projection is malformed")
+    configuration = dict(source_lock.configuration)
+    if tuple(configuration) != _TRAINING_PROVENANCE_KEYS or configuration != dict(projection):
+        raise SourceLockError("source lock training provenance differs")
+    if (
+        source.source_evidence.source_lock_binding != source_lock.binding
+        or not source.source_evidence.binds(source_lock)
+    ):
+        raise SourceLockError("execution source does not bind the complete source lock")
+    return SourceLockProvenanceViewV1(source_lock.binding, projection)
 
 
 @runtime_checkable

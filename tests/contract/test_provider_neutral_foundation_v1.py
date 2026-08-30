@@ -181,6 +181,14 @@ def test_formal_v1_exports_are_frozen_exactly() -> None:
         ]
     )
     baseline.insert(baseline.index("SourceLock") + 1, "SourceLockBindingV1")
+    baseline.insert(
+        baseline.index("SourceLockBindingV1") + 1,
+        "SourceLockProvenanceViewV1",
+    )
+    baseline.insert(
+        baseline.index("SourceLockProvenanceViewV1") + 1,
+        "validate_source_lock_provenance_v1",
+    )
     assert api.__all__ == baseline
     assert "EventCode" not in api.__all__
     assert "EventCode" in dir(api)

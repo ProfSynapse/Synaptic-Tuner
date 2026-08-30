@@ -7,7 +7,7 @@ import binascii
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping
 from urllib.parse import parse_qsl, urlsplit
 
@@ -336,6 +336,12 @@ def _validate_semantics(bundle: "ModalExecutionBundleV1") -> None:
         },
         target_provider_job_ref=operation.target_provider_job_ref,
     )
+    # The public training-plan fingerprint is authenticated by the operation
+    # and durable preparation.  The private bundle members remain the existing
+    # schema; rebuilding here uses that already authenticated operation value.
+    expected_operation = replace(
+        expected_operation, plan_fingerprint=operation.plan_fingerprint
+    )
     if operation != expected_operation:
         raise ValueError("operation binding was not derived from the exact predecessor members")
     scope = operation.effect.scope
@@ -344,7 +350,6 @@ def _validate_semantics(bundle: "ModalExecutionBundleV1") -> None:
         or operation.effect != bundle.effect
         or operation.invocation_nonce != bundle.invocation_nonce
         or operation.stage_target.artifact_slot_ref != plan.get("artifact_slot_ref")
-        or operation.plan_fingerprint != members["plan.json"].sha256
         or operation.execution_source_digest != members["execution-source.json"].sha256
         or operation.workload_digest != members["workload.json"].sha256
         or operation.artifact_contract_digest != members["artifact-contract.json"].sha256

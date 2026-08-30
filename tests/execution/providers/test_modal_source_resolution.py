@@ -18,6 +18,7 @@ from tuner.execution.providers.modal.deployment_identity import modal_function_n
 from tuner.project.context import ProjectContext
 from tuner.project.execution_source import AuthenticatedSourceEvidenceV1, ExecutionSourceV1
 from tuner.project.source_bundle import SourceLock, SourceLockError
+from tuner.project.execution_source import validate_source_lock_provenance_v1
 from tuner.execution.evidence import ReplayDisposition
 
 
@@ -204,6 +205,28 @@ def test_complete_source_lock_binding_changes_execution_and_plan_source_identity
     ).execution_source
     assert first_source.source_evidence.source_lock_binding != second_source.source_evidence.source_lock_binding
     assert first_source.fingerprint != second_source.fingerprint
+
+
+def test_provider_neutral_training_provenance_view_binds_all_five_keys(tmp_path: Path) -> None:
+    projection = {
+        "training_input_digest": "1" * 64,
+        "training_contract_identity_digest": "2" * 64,
+        "training_source_sha256": "3" * 64,
+        "training_ingress_digest": "4" * 64,
+        "provider_policy_digest": "5" * 64,
+    }
+    lock = _source(configuration=projection)
+    execution = _finalizer(lock).finalize(
+        lock, context=_context(tmp_path), deployment=_deployment(),
+        audience_ref="project/run-1",
+    ).execution_source
+    view = validate_source_lock_provenance_v1(execution, lock, projection)
+    assert view.binding == lock.binding
+    for key in projection:
+        changed = dict(projection)
+        changed[key] = "f" * 64
+        with pytest.raises(SourceLockError):
+            validate_source_lock_provenance_v1(execution, lock, changed)
 
 
 def test_execution_source_rejects_missing_or_substituted_source_lock_binding(tmp_path: Path) -> None:

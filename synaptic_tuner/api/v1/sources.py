@@ -5,6 +5,8 @@ from tuner.project.execution_source import (
     ExecutionSourceV1,
     LocalSourceInspectionPort,
     PushedSourceVerificationPort,
+    SourceLockProvenanceViewV1,
+    validate_source_lock_provenance_v1,
 )
 from tuner.project.git_verification import GitCliLocalSourceInspector
 from tuner.project.source_bundle import (
@@ -24,4 +26,6 @@ __all__ = [
     "RepositoryLocation",
     "SourceLock",
     "SourceLockBindingV1",
+    "SourceLockProvenanceViewV1",
+    "validate_source_lock_provenance_v1",
 ]

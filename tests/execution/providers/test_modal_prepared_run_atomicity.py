@@ -183,7 +183,7 @@ def test_exact_run_already_exists_with_conflicting_pair_fails_closed(
         raise RunAlreadyExists("conflicting prepared run")
 
     monkeypatch.setattr(repository, "create_modal_prepared_run", conflict)
-    with pytest.raises(RuntimeError, match="readback failed"):
+    with pytest.raises(RuntimeError, match="host Modal start failed"):
         value.start(plan, value.preflight(plan), ExecutionGrant("grant-run-1"))
     assert FakeFunction.spawn_calls == []
 
