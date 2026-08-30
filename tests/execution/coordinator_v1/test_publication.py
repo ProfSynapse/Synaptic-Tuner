@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 import inspect
+import json
 from threading import Barrier, Lock, Thread
 from threading import Event
 
@@ -400,6 +401,136 @@ def test_strong_store_exact_claim_replay_and_descendant_cas() -> None:
     with pytest.raises(PublicationErrorV1) as error:
         admitted.transition(PublicationPhaseV1.VERIFIED, "2026-08-27T12:00:02Z")
     assert error.value.code is PublicationCodeV1.STATE_CONFLICT
+
+
+def test_publication_record_canonical_persistence_round_trips_every_state_shape() -> None:
+    artifact, _ = _artifact()
+    source = _source([(artifact, b"adapter")])
+    destination = _destination()
+    command = PublicationCommandV1.build(
+        run=RUN, source_identity_digest=source.source_identity_digest,
+        source_inventory=source.artifacts,
+        destination_ref=destination.destination_ref,
+        destination_identity_digest=destination.identity_digest,
+        destination_configuration_digest=destination.configuration_digest,
+        destination_policy_digest=destination.policy_digest,
+        maximum_artifact_bytes=destination.maximum_artifact_bytes,
+        maximum_total_bytes=destination.maximum_total_bytes,
+        destination_authority_ref=destination.authority_ref,
+        destination_key_ref=destination.key_ref,
+    )
+    claimed = PublicationRecordV1.claim(command, "2026-08-27T12:00:00Z")
+    store = StrongInMemoryPublicationStoreV1()
+    store.claim(claimed)
+    transfer = store.begin_transfer(
+        command.publication_id, claimed.record_digest,
+        "2026-08-27T12:00:01Z",
+    )
+    ownership = transfer.ownership
+    assert ownership is not None
+    inventory = DestinationInventoryV1((
+        DestinationArtifactV1(
+            artifact.role, "bundle/adapter", artifact.sha256,
+            artifact.size_bytes,
+        ),
+    ))
+    receipt = _receipt(command, ownership, inventory)
+    committed = store.complete_transfer(
+        ownership, receipt, False, "2026-08-27T12:00:02Z",
+    )
+    verified = store.complete_transfer(
+        ownership, receipt, True, "2026-08-27T12:00:03Z",
+    )
+
+    recovery_store = StrongInMemoryPublicationStoreV1()
+    recovery_store.claim(claimed)
+    recovery_transfer = recovery_store.begin_transfer(
+        command.publication_id, claimed.record_digest,
+        "2026-08-27T12:00:01Z",
+    )
+    recovery_owner = recovery_transfer.ownership
+    assert recovery_owner is not None
+    recovery_receipt = _receipt(command, recovery_owner, inventory)
+    decision = recovery_store.relinquish_uncertain(
+        recovery_owner, "2026-08-27T12:00:02Z",
+    )
+    permit = decision.permit
+    assert permit is not None
+    lookup = _lookup(
+        LookupOutcomeV1.FOUND, command, permit, recovery_receipt,
+    )
+    recovered = recovery_store.finalize_recovery(
+        permit, PublicationPhaseV1.VERIFIED,
+        "2026-08-27T12:00:03Z", lookup, receipt=recovery_receipt,
+    )
+
+    absence_store = StrongInMemoryPublicationStoreV1()
+    absence_store.claim(claimed)
+    absence_transfer = absence_store.begin_transfer(
+        command.publication_id, claimed.record_digest,
+        "2026-08-27T12:00:01Z",
+    )
+    absence_owner = absence_transfer.ownership
+    assert absence_owner is not None
+    absence_decision = absence_store.relinquish_uncertain(
+        absence_owner, "2026-08-27T12:00:02Z",
+    )
+    absence_permit = absence_decision.permit
+    assert absence_permit is not None
+    absence_lookup = _lookup(
+        LookupOutcomeV1.DEFINITELY_ABSENT, command, absence_permit,
+        absent=True,
+    )
+    absent = absence_store.finalize_recovery(
+        absence_permit, PublicationPhaseV1.ABSENT,
+        "2026-08-27T12:00:03Z", absence_lookup,
+        tombstone=absence_lookup.tombstone,
+    )
+
+    for record in (
+        claimed, transfer.record, committed, verified,
+        decision.record, recovered, absent,
+    ):
+        raw = record.canonical_bytes
+        assert PublicationRecordV1.from_canonical_bytes(raw) == record
+        assert PublicationRecordV1.from_canonical_bytes(raw).canonical_bytes == raw
+
+
+def test_publication_record_persistence_rejects_noncanonical_and_tampered_bytes() -> None:
+    artifact, _ = _artifact()
+    destination = _destination()
+    source = _source([(artifact, b"adapter")])
+    record = PublicationRecordV1.claim(
+        PublicationCommandV1.build(
+            run=RUN, source_identity_digest=source.source_identity_digest,
+            source_inventory=source.artifacts,
+            destination_ref=destination.destination_ref,
+            destination_identity_digest=destination.identity_digest,
+            destination_configuration_digest=destination.configuration_digest,
+            destination_policy_digest=destination.policy_digest,
+            maximum_artifact_bytes=destination.maximum_artifact_bytes,
+            maximum_total_bytes=destination.maximum_total_bytes,
+            destination_authority_ref=destination.authority_ref,
+            destination_key_ref=destination.key_ref,
+        ),
+        "2026-08-27T12:00:00Z",
+    )
+    raw = record.canonical_bytes
+    document = json.loads(raw)
+    document["record_digest"] = "f" * 64
+    tampered = json.dumps(
+        document, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode()
+    duplicate = raw.replace(
+        b'"claim_digest":',
+        b'"claim_digest":"' + b'0' * 64 + b'","claim_digest":',
+        1,
+    )
+    for candidate in (raw + b" ", tampered, duplicate, b"{}", b"[]"):
+        with pytest.raises((TypeError, ValueError)):
+            PublicationRecordV1.from_canonical_bytes(candidate)
+    with pytest.raises((TypeError, ValueError)):
+        PublicationRecordV1.from_canonical_bytes(bytearray(raw))
 
 
 @pytest.mark.parametrize("ref", ["opaque/local-like", "opaque/hf-repo-like"])

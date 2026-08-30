@@ -18,7 +18,10 @@ from synaptic_tuner.api.v1.artifacts_facade import (
     PublicationState,
     PublicationVerification,
 )
-from synaptic_tuner.api.v1.publication import PublicationOperationsV1
+from synaptic_tuner.api.v1.publication import (
+    PublicationOperationsV1,
+    PublicationTransitionKernelV1,
+)
 from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
 
 
@@ -35,6 +38,7 @@ def _result() -> PublicationResult:
 def test_root_exports_exact_canonical_publication_identities() -> None:
     assert v1.ArtifactsAPI is ArtifactsAPI
     assert v1.PublicationOperationsV1 is PublicationOperationsV1
+    assert v1.PublicationTransitionKernelV1 is PublicationTransitionKernelV1
     assert PublicationOperationsV1.__module__ == "tuner.execution.coordinator_v1.publication"
     for removed in (
         "ArtifactPublicationReceipt", "ArtifactPublisher", "PublishedArtifact",

@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 import hashlib
+import json
 from threading import RLock
 from typing import Protocol
 
@@ -954,6 +955,16 @@ class PublicationRecordV1:
             raise _closed(PublicationCodeV1.STATE_CONFLICT)
         return self._advance(phase, timestamp)
 
+    @property
+    def canonical_bytes(self) -> bytes:
+        """Return the complete, bounded canonical persistence envelope."""
+        return _publication_record_bytes(self)
+
+    @classmethod
+    def from_canonical_bytes(cls, raw: bytes) -> "PublicationRecordV1":
+        """Reconstruct and fully revalidate a persisted publication record."""
+        return _parse_publication_record(raw)
+
     def _advance(self, phase, timestamp, *, ownership=None, permit=None,
                  outcome=None, receipt=None, tombstone=None):
         if phase not in _TRANSITIONS.get(self.phase, frozenset()):
@@ -991,6 +1002,414 @@ class PublicationRecordV1:
         return self._create(self.command, self.claim_digest, phase, history,
                             ownership_history, recovery_permits, lookup_history, receipt,
                             tombstone)
+
+
+_MAX_PUBLICATION_RECORD_BYTES = 1_048_576
+
+
+def _record_fields(value: object, expected: frozenset[str], name: str) -> dict[str, object]:
+    if type(value) is not dict or frozenset(value) != expected:
+        raise ValueError(f"{name} contains missing or unknown fields")
+    if any(type(key) is not str for key in value):
+        raise ValueError(f"{name} field names must be exact strings")
+    return value
+
+
+def _record_array(value: object, name: str) -> list[object]:
+    if type(value) is not list:
+        raise ValueError(f"{name} must be an exact array")
+    return value
+
+
+def _record_json_bytes(value: dict[str, object]) -> bytes:
+    try:
+        raw = json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("publication record is not canonical JSON") from exc
+    if not raw or len(raw) > _MAX_PUBLICATION_RECORD_BYTES:
+        raise ValueError("publication record exceeds the persistence limit")
+    return raw
+
+
+def _parse_record_json(raw: bytes) -> dict[str, object]:
+    if type(raw) is not bytes or not raw or len(raw) > _MAX_PUBLICATION_RECORD_BYTES:
+        raise ValueError("publication record must be bounded exact bytes")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("publication record contains duplicate keys")
+            result[key] = value
+        return result
+
+    def reject_number(_: str) -> object:
+        raise ValueError("publication record contains a non-integer number")
+
+    try:
+        value = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=unique_object,
+            parse_constant=reject_number, parse_float=reject_number,
+        )
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("publication record must be canonical UTF-8 JSON") from exc
+    if type(value) is not dict or _record_json_bytes(value) != raw:
+        raise ValueError("publication record must be a canonical JSON object")
+    return value
+
+
+def _command_document(value: PublicationCommandV1) -> dict[str, object]:
+    return {
+        "schema_version": value.schema_version,
+        "publication_id": value.publication_id,
+        "mutation_id": value.mutation_id,
+        "run": value.run.to_dict(),
+        "source_identity_digest": value.source_identity_digest,
+        "source_inventory": [item.to_dict() for item in value.source_inventory],
+        "destination_ref": value.destination_ref,
+        "destination_identity_digest": value.destination_identity_digest,
+        "destination_configuration_digest": value.destination_configuration_digest,
+        "destination_policy_digest": value.destination_policy_digest,
+        "maximum_artifact_bytes": value.maximum_artifact_bytes,
+        "maximum_total_bytes": value.maximum_total_bytes,
+        "destination_authority_ref": value.destination_authority_ref,
+        "destination_key_ref": value.destination_key_ref,
+        "command_digest": value.command_digest,
+    }
+
+
+_COMMAND_FIELDS = frozenset({
+    "schema_version", "publication_id", "mutation_id", "run",
+    "source_identity_digest", "source_inventory", "destination_ref",
+    "destination_identity_digest", "destination_configuration_digest",
+    "destination_policy_digest", "maximum_artifact_bytes",
+    "maximum_total_bytes", "destination_authority_ref",
+    "destination_key_ref", "command_digest",
+})
+
+
+def _parse_command(value: object) -> PublicationCommandV1:
+    doc = _record_fields(value, _COMMAND_FIELDS, "publication command")
+    run = _record_fields(doc["run"], frozenset({"run_id", "project_ref"}), "run")
+    inventory = tuple(
+        VerifiedArtifact.from_dict(_record_fields(
+            item, frozenset({"role", "sha256", "size_bytes"}),
+            "source artifact",
+        ))
+        for item in _record_array(doc["source_inventory"], "source inventory")
+    )
+    return PublicationCommandV1(
+        doc["schema_version"], doc["publication_id"], doc["mutation_id"],
+        TrainingRunRef.from_dict(run), doc["source_identity_digest"], inventory,
+        doc["destination_ref"], doc["destination_identity_digest"],
+        doc["destination_configuration_digest"], doc["destination_policy_digest"],
+        doc["maximum_artifact_bytes"], doc["maximum_total_bytes"],
+        doc["destination_authority_ref"], doc["destination_key_ref"],
+        doc["command_digest"],
+    )
+
+
+def _event_document(value: PublicationEventV1) -> dict[str, object]:
+    return {
+        "sequence": value.sequence, "kind": value.kind.value,
+        "timestamp": value.timestamp,
+        "prior_record_digest": value.prior_record_digest,
+        "evidence_digest": value.evidence_digest,
+        "event_digest": value.event_digest,
+    }
+
+
+def _parse_event(value: object) -> PublicationEventV1:
+    doc = _record_fields(value, frozenset({
+        "sequence", "kind", "timestamp", "prior_record_digest",
+        "evidence_digest", "event_digest",
+    }), "publication event")
+    return PublicationEventV1(
+        doc["sequence"], PublicationEventKindV1(doc["kind"]), doc["timestamp"],
+        doc["prior_record_digest"], doc["evidence_digest"], doc["event_digest"],
+    )
+
+
+def _ownership_document(value: TransferOwnershipV1) -> dict[str, object]:
+    return {
+        "publication_id": value.publication_id,
+        "command_digest": value.command_digest,
+        "mutation_id": value.mutation_id,
+        "claim_digest": value.claim_digest,
+        "ownership_id": value.ownership_id,
+        "issued_revision": value.issued_revision,
+        "issued_at": value.issued_at,
+    }
+
+
+_OWNERSHIP_FIELDS = frozenset({
+    "publication_id", "command_digest", "mutation_id", "claim_digest",
+    "ownership_id", "issued_revision", "issued_at",
+})
+
+
+def _parse_ownership(value: object) -> TransferOwnershipV1:
+    doc = _record_fields(value, _OWNERSHIP_FIELDS, "transfer ownership")
+    return TransferOwnershipV1(
+        doc["publication_id"], doc["command_digest"], doc["mutation_id"],
+        doc["claim_digest"], doc["ownership_id"], doc["issued_revision"],
+        doc["issued_at"],
+    )
+
+
+def _permit_document(value: LookupRecoveryPermitV1) -> dict[str, object]:
+    return {
+        "publication_id": value.publication_id,
+        "command_digest": value.command_digest,
+        "mutation_id": value.mutation_id,
+        "claim_digest": value.claim_digest,
+        "fenced_ownership_id": value.fenced_ownership_id,
+        "permit_id": value.permit_id,
+        "issued_revision": value.issued_revision,
+        "issued_at": value.issued_at,
+    }
+
+
+_PERMIT_FIELDS = frozenset({
+    "publication_id", "command_digest", "mutation_id", "claim_digest",
+    "fenced_ownership_id", "permit_id", "issued_revision", "issued_at",
+})
+
+
+def _parse_permit(value: object) -> LookupRecoveryPermitV1:
+    doc = _record_fields(value, _PERMIT_FIELDS, "recovery permit")
+    return LookupRecoveryPermitV1(
+        doc["publication_id"], doc["command_digest"], doc["mutation_id"],
+        doc["claim_digest"], doc["fenced_ownership_id"], doc["permit_id"],
+        doc["issued_revision"], doc["issued_at"],
+    )
+
+
+def _destination_artifact_document(value: DestinationArtifactV1) -> dict[str, object]:
+    return value.to_dict()
+
+
+def _parse_destination_artifact(value: object) -> DestinationArtifactV1:
+    doc = _record_fields(value, frozenset({
+        "role", "path", "sha256", "size_bytes",
+    }), "destination artifact")
+    return DestinationArtifactV1(
+        doc["role"], doc["path"], doc["sha256"], doc["size_bytes"],
+    )
+
+
+def _destination_inventory_document(value: DestinationInventoryV1) -> dict[str, object]:
+    return {"artifacts": [_destination_artifact_document(item) for item in value.artifacts]}
+
+
+def _parse_destination_inventory(value: object) -> DestinationInventoryV1:
+    doc = _record_fields(value, frozenset({"artifacts"}), "destination inventory")
+    return DestinationInventoryV1(tuple(
+        _parse_destination_artifact(item)
+        for item in _record_array(doc["artifacts"], "destination artifacts")
+    ))
+
+
+def _authenticated_inventory_document(
+    value: AuthenticatedDestinationInventoryV1,
+) -> dict[str, object]:
+    return {
+        "inventory": _destination_inventory_document(value.inventory),
+        "publication_id": value.publication_id,
+        "command_digest": value.command_digest,
+        "mutation_id": value.mutation_id,
+        "ownership_id": value.ownership_id,
+        "recorded_at": value.recorded_at,
+        "authority_ref": value.authority_ref,
+        "key_ref": value.key_ref,
+        "tag": value.tag,
+    }
+
+
+_AUTHENTICATED_INVENTORY_FIELDS = frozenset({
+    "inventory", "publication_id", "command_digest", "mutation_id",
+    "ownership_id", "recorded_at", "authority_ref", "key_ref", "tag",
+})
+
+
+def _parse_authenticated_inventory(value: object) -> AuthenticatedDestinationInventoryV1:
+    doc = _record_fields(
+        value, _AUTHENTICATED_INVENTORY_FIELDS,
+        "authenticated destination inventory",
+    )
+    return AuthenticatedDestinationInventoryV1(
+        _parse_destination_inventory(doc["inventory"]), doc["publication_id"],
+        doc["command_digest"], doc["mutation_id"], doc["ownership_id"],
+        doc["recorded_at"], doc["authority_ref"], doc["key_ref"], doc["tag"],
+    )
+
+
+def _receipt_document(value: AuthenticatedPublicationReceiptV1) -> dict[str, object]:
+    return {
+        "schema_version": value.schema_version,
+        "publication_id": value.publication_id,
+        "command_digest": value.command_digest,
+        "run": value.run.to_dict(),
+        "source_identity_digest": value.source_identity_digest,
+        "destination_ref": value.destination_ref,
+        "destination_identity_digest": value.destination_identity_digest,
+        "mutation_id": value.mutation_id,
+        "claim_digest": value.claim_digest,
+        "ownership_id": value.ownership_id,
+        "inventory": _authenticated_inventory_document(value.inventory),
+        "recorded_at": value.recorded_at,
+        "authority_ref": value.authority_ref,
+        "key_ref": value.key_ref,
+        "tag": value.tag,
+    }
+
+
+_RECEIPT_FIELDS = frozenset({
+    "schema_version", "publication_id", "command_digest", "run",
+    "source_identity_digest", "destination_ref", "destination_identity_digest",
+    "mutation_id", "claim_digest", "ownership_id", "inventory",
+    "recorded_at", "authority_ref", "key_ref", "tag",
+})
+
+
+def _parse_receipt(value: object) -> AuthenticatedPublicationReceiptV1:
+    doc = _record_fields(value, _RECEIPT_FIELDS, "publication receipt")
+    run = _record_fields(doc["run"], frozenset({"run_id", "project_ref"}), "receipt run")
+    return AuthenticatedPublicationReceiptV1(
+        doc["schema_version"], doc["publication_id"], doc["command_digest"],
+        TrainingRunRef.from_dict(run), doc["source_identity_digest"],
+        doc["destination_ref"], doc["destination_identity_digest"],
+        doc["mutation_id"], doc["claim_digest"], doc["ownership_id"],
+        _parse_authenticated_inventory(doc["inventory"]), doc["recorded_at"],
+        doc["authority_ref"], doc["key_ref"], doc["tag"],
+    )
+
+
+_TOMBSTONE_FIELDS = frozenset({
+    "schema_version", "publication_id", "mutation_id", "command_digest",
+    "claim_digest", "destination_ref", "destination_identity_digest",
+    "destination_configuration_digest", "destination_policy_digest",
+    "destination_authority_ref", "destination_key_ref", "fenced_ownership_id",
+    "recovery_permit_id", "mutation_registry_digest", "checked_at",
+    "evidence_digest", "authority_ref", "key_ref", "tag",
+})
+
+
+def _tombstone_document(value: AuthenticatedPublicationTombstoneV1) -> dict[str, object]:
+    return {name: getattr(value, name) for name in _TOMBSTONE_FIELDS}
+
+
+def _parse_tombstone(value: object) -> AuthenticatedPublicationTombstoneV1:
+    doc = _record_fields(value, _TOMBSTONE_FIELDS, "publication tombstone")
+    return AuthenticatedPublicationTombstoneV1(*(
+        doc[name] for name in (
+            "schema_version", "publication_id", "mutation_id", "command_digest",
+            "claim_digest", "destination_ref", "destination_identity_digest",
+            "destination_configuration_digest", "destination_policy_digest",
+            "destination_authority_ref", "destination_key_ref",
+            "fenced_ownership_id", "recovery_permit_id",
+            "mutation_registry_digest", "checked_at", "evidence_digest",
+            "authority_ref", "key_ref", "tag",
+        )
+    ))
+
+
+_LOOKUP_FIELDS = frozenset({
+    "schema_version", "outcome", "publication_id", "command_digest",
+    "destination_identity_digest", "mutation_id", "ownership_id",
+    "recovery_permit_id", "mutation_registry_digest", "checked_at",
+    "tombstone", "receipt", "authority_ref", "key_ref", "tag",
+})
+
+
+def _lookup_document(value: AuthenticatedLookupV1) -> dict[str, object]:
+    return {
+        "schema_version": value.schema_version,
+        "outcome": value.outcome.value,
+        "publication_id": value.publication_id,
+        "command_digest": value.command_digest,
+        "destination_identity_digest": value.destination_identity_digest,
+        "mutation_id": value.mutation_id,
+        "ownership_id": value.ownership_id,
+        "recovery_permit_id": value.recovery_permit_id,
+        "mutation_registry_digest": value.mutation_registry_digest,
+        "checked_at": value.checked_at,
+        "tombstone": None if value.tombstone is None else _tombstone_document(value.tombstone),
+        "receipt": None if value.receipt is None else _receipt_document(value.receipt),
+        "authority_ref": value.authority_ref,
+        "key_ref": value.key_ref,
+        "tag": value.tag,
+    }
+
+
+def _parse_lookup(value: object) -> AuthenticatedLookupV1:
+    doc = _record_fields(value, _LOOKUP_FIELDS, "authenticated lookup")
+    return AuthenticatedLookupV1(
+        doc["schema_version"], LookupOutcomeV1(doc["outcome"]),
+        doc["publication_id"], doc["command_digest"],
+        doc["destination_identity_digest"], doc["mutation_id"],
+        doc["ownership_id"], doc["recovery_permit_id"],
+        doc["mutation_registry_digest"], doc["checked_at"],
+        None if doc["tombstone"] is None else _parse_tombstone(doc["tombstone"]),
+        None if doc["receipt"] is None else _parse_receipt(doc["receipt"]),
+        doc["authority_ref"], doc["key_ref"], doc["tag"],
+    )
+
+
+_RECORD_FIELDS = frozenset({
+    "schema_version", "command", "claim_digest", "phase", "revision",
+    "history", "ownership_history", "recovery_permits", "lookup_history",
+    "receipt", "tombstone", "record_digest",
+})
+
+
+def _publication_record_document(value: PublicationRecordV1) -> dict[str, object]:
+    if type(value) is not PublicationRecordV1:
+        raise TypeError("record must be exact PublicationRecordV1")
+    return {
+        "schema_version": "synaptic-publication-record-envelope/v1",
+        "command": _command_document(value.command),
+        "claim_digest": value.claim_digest,
+        "phase": value.phase.value,
+        "revision": value.revision,
+        "history": [_event_document(item) for item in value.history],
+        "ownership_history": [_ownership_document(item) for item in value.ownership_history],
+        "recovery_permits": [_permit_document(item) for item in value.recovery_permits],
+        "lookup_history": [_lookup_document(item) for item in value.lookup_history],
+        "receipt": None if value.receipt is None else _receipt_document(value.receipt),
+        "tombstone": None if value.tombstone is None else _tombstone_document(value.tombstone),
+        "record_digest": value.record_digest,
+    }
+
+
+def _publication_record_bytes(value: PublicationRecordV1) -> bytes:
+    return _record_json_bytes(_publication_record_document(value))
+
+
+def _parse_publication_record(raw: bytes) -> PublicationRecordV1:
+    doc = _record_fields(_parse_record_json(raw), _RECORD_FIELDS, "publication record")
+    if doc["schema_version"] != "synaptic-publication-record-envelope/v1":
+        raise ValueError("unsupported publication record envelope")
+    record = PublicationRecordV1(
+        _parse_command(doc["command"]), doc["claim_digest"],
+        PublicationPhaseV1(doc["phase"]), doc["revision"],
+        tuple(_parse_event(item) for item in _record_array(doc["history"], "history")),
+        tuple(_parse_ownership(item) for item in _record_array(
+            doc["ownership_history"], "ownership history")),
+        tuple(_parse_permit(item) for item in _record_array(
+            doc["recovery_permits"], "recovery permits")),
+        tuple(_parse_lookup(item) for item in _record_array(
+            doc["lookup_history"], "lookup history")),
+        None if doc["receipt"] is None else _parse_receipt(doc["receipt"]),
+        None if doc["tombstone"] is None else _parse_tombstone(doc["tombstone"]),
+        doc["record_digest"],
+    )
+    if record.canonical_bytes != raw:
+        raise ValueError("publication record reconstruction mismatch")
+    return record
 
 
 class TransferDispositionV1(str, Enum):
@@ -1042,6 +1461,347 @@ class PublicationStorePortV1(Protocol):
     def list(self, destination_ref: str, limit: int) -> tuple[tuple[PublicationRecordV1, ...], bool]: ...
 
 
+class PublicationTransitionKernelV1:
+    """Pure publication transitions shared by volatile and durable stores."""
+
+    @staticmethod
+    def claim(
+        current: PublicationRecordV1 | None,
+        record: PublicationRecordV1,
+    ) -> tuple[PublicationRecordV1, bool]:
+        if (type(record) is not PublicationRecordV1
+                or record.phase is not PublicationPhaseV1.CLAIMED):
+            raise TypeError("claim requires exact claimed record")
+        if current is None:
+            return record, True
+        if type(current) is not PublicationRecordV1:
+            raise TypeError("current must be exact PublicationRecordV1 or None")
+        if current.command.command_digest != record.command.command_digest:
+            raise _closed(PublicationCodeV1.PUBLICATION_CONFLICT)
+        return current, False
+
+    @staticmethod
+    def compare_and_swap(
+        current: PublicationRecordV1 | None,
+        expected_record_digest: str,
+        descendant: PublicationRecordV1,
+    ) -> tuple[PublicationRecordV1 | None, bool]:
+        digest_text(expected_record_digest, "expected_record_digest")
+        if type(descendant) is not PublicationRecordV1:
+            raise TypeError("descendant must be exact PublicationRecordV1")
+        if current is not None and type(current) is not PublicationRecordV1:
+            raise TypeError("current must be exact PublicationRecordV1 or None")
+        if current is None or current.record_digest != expected_record_digest:
+            return current, False
+        if (
+            descendant.revision != current.revision + 1
+            or descendant.history[:-1] != current.history
+            or descendant.history[-1].prior_record_digest != current.record_digest
+            or descendant.command != current.command
+            or descendant.claim_digest != current.claim_digest
+            or current.phase is not PublicationPhaseV1.CLAIMED
+            or descendant.phase is not PublicationPhaseV1.FAILED_BEFORE_EFFECT
+            or descendant.ownership_history != current.ownership_history
+            or descendant.recovery_permits != current.recovery_permits
+            or descendant.lookup_history != current.lookup_history
+            or descendant.receipt is not current.receipt
+            or descendant.tombstone is not current.tombstone
+        ):
+            raise _closed(PublicationCodeV1.STATE_CONFLICT)
+        return descendant, True
+
+    @staticmethod
+    def _ownership(
+        current: PublicationRecordV1, timestamp: str, nonce: int,
+    ) -> TransferOwnershipV1:
+        exact_integer(nonce, "ownership nonce", minimum=1)
+        ownership_id = domain_digest(
+            "synaptic-transfer-owner-id/v1",
+            canonical_bytes({
+                "record_digest": current.record_digest,
+                "nonce": nonce,
+                "timestamp": timestamp,
+            }),
+        )
+        return TransferOwnershipV1(
+            current.command.publication_id, current.command.command_digest,
+            current.command.mutation_id, current.claim_digest, ownership_id,
+            current.revision + 1, timestamp,
+        )
+
+    @staticmethod
+    def _permit(
+        current: PublicationRecordV1,
+        ownership: TransferOwnershipV1,
+        timestamp: str,
+    ) -> LookupRecoveryPermitV1:
+        permit_id = domain_digest(
+            "synaptic-lookup-permit-id/v1",
+            canonical_bytes({
+                "record_digest": current.record_digest,
+                "fenced_ownership_id": ownership.ownership_id,
+                "revision": current.revision + 1,
+                "timestamp": timestamp,
+            }),
+        )
+        return LookupRecoveryPermitV1(
+            current.command.publication_id, current.command.command_digest,
+            current.command.mutation_id, current.claim_digest,
+            ownership.ownership_id, permit_id, current.revision + 1, timestamp,
+        )
+
+    @classmethod
+    def begin_transfer(
+        cls,
+        current: PublicationRecordV1 | None,
+        publication_id: str,
+        expected_record_digest: str,
+        timestamp: str,
+        nonce: int,
+    ) -> TransferAdmissionV1:
+        digest_text(publication_id, "publication_id")
+        digest_text(expected_record_digest, "expected_record_digest")
+        safe_ref(timestamp, "timestamp")
+        exact_integer(nonce, "ownership nonce", minimum=1)
+        if current is None:
+            raise _closed(PublicationCodeV1.PUBLICATION_MISSING)
+        if type(current) is not PublicationRecordV1:
+            raise TypeError("current must be exact PublicationRecordV1 or None")
+        if current.command.publication_id != publication_id:
+            raise _closed(PublicationCodeV1.PUBLICATION_MISSING)
+        if current.phase is PublicationPhaseV1.CLAIMED:
+            if current.record_digest != expected_record_digest:
+                return TransferAdmissionV1(
+                    TransferDispositionV1.ACTIVE, current, None,
+                )
+            ownership = cls._ownership(current, timestamp, nonce)
+            descendant = current._advance(
+                PublicationPhaseV1.TRANSFERRING, timestamp,
+                ownership=ownership,
+            )
+            return TransferAdmissionV1(
+                TransferDispositionV1.ACQUIRED, descendant, ownership,
+            )
+        if current.phase in (
+            PublicationPhaseV1.TRANSFERRING, PublicationPhaseV1.COMMITTED,
+        ):
+            return TransferAdmissionV1(
+                TransferDispositionV1.ACTIVE, current,
+                current.ownership_history[-1],
+            )
+        return TransferAdmissionV1(
+            TransferDispositionV1.TERMINAL, current, None,
+        )
+
+    @staticmethod
+    def _ownership_matches(
+        current: PublicationRecordV1, ownership: TransferOwnershipV1,
+    ) -> bool:
+        return (
+            bool(current.ownership_history)
+            and current.ownership_history[-1] == ownership
+            and ownership.publication_id == current.command.publication_id
+            and ownership.command_digest == current.command.command_digest
+            and ownership.mutation_id == current.command.mutation_id
+            and ownership.claim_digest == current.claim_digest
+        )
+
+    @staticmethod
+    def _receipt_structurally_matches(
+        current: PublicationRecordV1,
+        ownership: TransferOwnershipV1,
+        receipt: AuthenticatedPublicationReceiptV1,
+    ) -> bool:
+        inventory = receipt.inventory
+        return (
+            _receipt_matches(receipt, current.command, current.claim_digest,
+                             ownership)
+            and inventory.publication_id == current.command.publication_id
+            and inventory.command_digest == current.command.command_digest
+            and inventory.mutation_id == current.command.mutation_id
+            and inventory.ownership_id == ownership.ownership_id
+            and inventory.authority_ref
+            == current.command.destination_authority_ref
+            and inventory.key_ref == current.command.destination_key_ref
+            and receipt.authority_ref
+            == current.command.destination_authority_ref
+            and receipt.key_ref == current.command.destination_key_ref
+        )
+
+    @classmethod
+    def complete_transfer(
+        cls,
+        current: PublicationRecordV1 | None,
+        ownership: TransferOwnershipV1,
+        receipt: AuthenticatedPublicationReceiptV1,
+        verified: bool,
+        timestamp: str,
+        *,
+        ownership_active: bool,
+    ) -> PublicationRecordV1:
+        if (type(ownership) is not TransferOwnershipV1
+                or type(receipt) is not AuthenticatedPublicationReceiptV1):
+            raise TypeError("exact ownership and receipt required")
+        if type(verified) is not bool or type(ownership_active) is not bool:
+            raise TypeError("verified/ownership_active must be exact bool")
+        if current is not None and type(current) is not PublicationRecordV1:
+            raise TypeError("current must be exact PublicationRecordV1 or None")
+        if (current is None or not ownership_active
+                or not cls._ownership_matches(current, ownership)
+                or not cls._receipt_structurally_matches(
+                    current, ownership, receipt)):
+            raise _closed(PublicationCodeV1.STATE_CONFLICT)
+        if not verified and current.phase is PublicationPhaseV1.TRANSFERRING:
+            return current._advance(
+                PublicationPhaseV1.COMMITTED, timestamp, receipt=receipt,
+            )
+        if (verified and current.phase is PublicationPhaseV1.COMMITTED
+                and current.receipt == receipt):
+            return current._advance(
+                PublicationPhaseV1.VERIFIED, timestamp, receipt=receipt,
+            )
+        raise _closed(PublicationCodeV1.STATE_CONFLICT)
+
+    @classmethod
+    def _fence(
+        cls,
+        current: PublicationRecordV1,
+        ownership: TransferOwnershipV1,
+        timestamp: str,
+    ) -> RecoveryDecisionV1:
+        permit = cls._permit(current, ownership, timestamp)
+        descendant = current._advance(
+            PublicationPhaseV1.AMBIGUOUS, timestamp, permit=permit,
+        )
+        return RecoveryDecisionV1(
+            RecoveryDispositionV1.PERMITTED, descendant, permit,
+        )
+
+    @classmethod
+    def relinquish_uncertain(
+        cls,
+        current: PublicationRecordV1 | None,
+        ownership: TransferOwnershipV1,
+        timestamp: str,
+        *,
+        ownership_active: bool,
+    ) -> RecoveryDecisionV1:
+        if type(ownership) is not TransferOwnershipV1:
+            raise TypeError("exact ownership required")
+        if type(ownership_active) is not bool:
+            raise TypeError("ownership_active must be exact bool")
+        if current is not None and type(current) is not PublicationRecordV1:
+            raise TypeError("current must be exact PublicationRecordV1 or None")
+        if (current is None or not ownership_active
+                or not cls._ownership_matches(current, ownership)
+                or current.phase not in (
+                    PublicationPhaseV1.TRANSFERRING,
+                    PublicationPhaseV1.COMMITTED,
+                )):
+            raise _closed(PublicationCodeV1.STATE_CONFLICT)
+        return cls._fence(current, ownership, timestamp)
+
+    @classmethod
+    def recover_transfer(
+        cls,
+        current: PublicationRecordV1 | None,
+        publication_id: str,
+        command_digest: str,
+        timestamp: str,
+        *,
+        ownership_active: bool,
+    ) -> RecoveryDecisionV1:
+        digest_text(publication_id, "publication_id")
+        digest_text(command_digest, "command_digest")
+        if type(ownership_active) is not bool:
+            raise TypeError("ownership_active must be exact bool")
+        if current is not None and type(current) is not PublicationRecordV1:
+            raise TypeError("current must be exact PublicationRecordV1 or None")
+        if (current is None
+                or current.command.publication_id != publication_id
+                or current.command.command_digest != command_digest):
+            raise _closed(PublicationCodeV1.PUBLICATION_MISSING)
+        if current.phase in (
+            PublicationPhaseV1.TRANSFERRING, PublicationPhaseV1.COMMITTED,
+        ):
+            ownership = current.ownership_history[-1]
+            if ownership_active:
+                return RecoveryDecisionV1(
+                    RecoveryDispositionV1.ACTIVE, current, None,
+                )
+            return cls._fence(current, ownership, timestamp)
+        if current.phase is PublicationPhaseV1.AMBIGUOUS:
+            return RecoveryDecisionV1(
+                RecoveryDispositionV1.PERMITTED, current,
+                current.recovery_permits[-1],
+            )
+        return RecoveryDecisionV1(
+            RecoveryDispositionV1.TERMINAL, current, None,
+        )
+
+    @classmethod
+    def finalize_recovery(
+        cls,
+        current: PublicationRecordV1 | None,
+        permit: LookupRecoveryPermitV1,
+        phase: PublicationPhaseV1,
+        timestamp: str,
+        outcome: AuthenticatedLookupV1,
+        *,
+        receipt: AuthenticatedPublicationReceiptV1 | None = None,
+        tombstone: AuthenticatedPublicationTombstoneV1 | None = None,
+    ) -> PublicationRecordV1:
+        if type(permit) is not LookupRecoveryPermitV1:
+            raise TypeError("exact recovery permit required")
+        if type(outcome) is not AuthenticatedLookupV1:
+            raise TypeError("exact lookup outcome required")
+        if phase not in (
+            PublicationPhaseV1.VERIFIED, PublicationPhaseV1.ABSENT,
+            PublicationPhaseV1.CONFLICT,
+        ):
+            raise _closed(PublicationCodeV1.STATE_CONFLICT)
+        if current is not None and type(current) is not PublicationRecordV1:
+            raise TypeError("current must be exact PublicationRecordV1 or None")
+        if (current is None or current.phase is not PublicationPhaseV1.AMBIGUOUS
+                or not current.recovery_permits
+                or current.recovery_permits[-1] != permit
+                or outcome.authority_ref
+                != current.command.destination_authority_ref
+                or outcome.key_ref != current.command.destination_key_ref
+                or outcome.publication_id != current.command.publication_id
+                or outcome.command_digest != current.command.command_digest
+                or outcome.destination_identity_digest
+                != current.command.destination_identity_digest
+                or outcome.mutation_id != current.command.mutation_id
+                or outcome.ownership_id != permit.fenced_ownership_id
+                or outcome.recovery_permit_id != permit.permit_id):
+            raise _closed(PublicationCodeV1.STATE_CONFLICT)
+        ownership = current.ownership_history[-1]
+        if phase is PublicationPhaseV1.VERIFIED:
+            if (type(receipt) is not AuthenticatedPublicationReceiptV1
+                    or outcome.outcome is not LookupOutcomeV1.FOUND
+                    or outcome.receipt != receipt
+                    or not cls._receipt_structurally_matches(
+                        current, ownership, receipt)
+                    or (current.receipt is not None
+                        and current.receipt != receipt)):
+                raise _closed(PublicationCodeV1.STATE_CONFLICT)
+        elif phase is PublicationPhaseV1.ABSENT:
+            if (type(tombstone) is not AuthenticatedPublicationTombstoneV1
+                    or outcome.outcome is not LookupOutcomeV1.DEFINITELY_ABSENT
+                    or outcome.tombstone != tombstone
+                    or outcome.mutation_registry_digest
+                    != tombstone.mutation_registry_digest
+                    or not _tombstone_matches(
+                        tombstone, current.command, current.claim_digest,
+                        ownership, permit)):
+                raise _closed(PublicationCodeV1.STATE_CONFLICT)
+        return current._advance(
+            phase, timestamp, outcome=outcome, receipt=receipt,
+            tombstone=tombstone,
+        )
+
+
 class StrongInMemoryPublicationStoreV1:
     """Thread-safe reference store enforcing exact claims and direct descendants."""
 
@@ -1052,17 +1812,16 @@ class StrongInMemoryPublicationStoreV1:
         self._lock = RLock()
 
     def claim(self, record: PublicationRecordV1):
-        if type(record) is not PublicationRecordV1 or record.phase is not PublicationPhaseV1.CLAIMED:
+        if (type(record) is not PublicationRecordV1
+                or record.phase is not PublicationPhaseV1.CLAIMED):
             raise TypeError("claim requires exact claimed record")
-        key = record.command.publication_id
         with self._lock:
-            current = self._records.get(key)
-            if current is None:
-                self._records[key] = record
-                return record, True
-            if current.command.command_digest != record.command.command_digest:
-                raise _closed(PublicationCodeV1.PUBLICATION_CONFLICT)
-            return current, False
+            current, created = PublicationTransitionKernelV1.claim(
+                self._records.get(record.command.publication_id), record,
+            )
+            if created:
+                self._records[record.command.publication_id] = current
+            return current, created
 
     def get(self, publication_id: str):
         digest_text(publication_id, "publication_id")
@@ -1070,175 +1829,81 @@ class StrongInMemoryPublicationStoreV1:
             return self._records.get(publication_id)
 
     def compare_and_swap(self, expected_record_digest: str, descendant: PublicationRecordV1):
-        digest_text(expected_record_digest, "expected_record_digest")
         if type(descendant) is not PublicationRecordV1:
             raise TypeError("descendant must be exact PublicationRecordV1")
         with self._lock:
-            current = self._records.get(descendant.command.publication_id)
-            if current is None or current.record_digest != expected_record_digest:
-                return False
-            if (
-                descendant.revision != current.revision + 1
-                or descendant.history[:-1] != current.history
-                or descendant.history[-1].prior_record_digest != current.record_digest
-                or descendant.command != current.command
-                or descendant.claim_digest != current.claim_digest
-                or current.phase is not PublicationPhaseV1.CLAIMED
-                or descendant.phase is not PublicationPhaseV1.FAILED_BEFORE_EFFECT
-                or descendant.ownership_history != current.ownership_history
-                or descendant.recovery_permits != current.recovery_permits
-                or descendant.lookup_history != current.lookup_history
-                or descendant.receipt is not current.receipt
-                or descendant.tombstone is not current.tombstone
-            ):
-                raise _closed(PublicationCodeV1.STATE_CONFLICT)
-            self._records[descendant.command.publication_id] = descendant
-            return True
-
-    def _ownership(self, current, timestamp):
-        self._nonce += 1
-        ownership_id = domain_digest("synaptic-transfer-owner-id/v1", canonical_bytes({
-            "record_digest": current.record_digest,
-            "nonce": self._nonce,
-            "timestamp": timestamp,
-        }))
-        return TransferOwnershipV1(
-            current.command.publication_id, current.command.command_digest,
-            current.command.mutation_id, current.claim_digest, ownership_id,
-            current.revision + 1, timestamp,
-        )
-
-    def _permit(self, current, ownership, timestamp):
-        permit_id = domain_digest("synaptic-lookup-permit-id/v1", canonical_bytes({
-            "record_digest": current.record_digest,
-            "fenced_ownership_id": ownership.ownership_id,
-            "revision": current.revision + 1,
-            "timestamp": timestamp,
-        }))
-        return LookupRecoveryPermitV1(
-            current.command.publication_id, current.command.command_digest,
-            current.command.mutation_id, current.claim_digest,
-            ownership.ownership_id, permit_id, current.revision + 1, timestamp,
-        )
+            current, changed = PublicationTransitionKernelV1.compare_and_swap(
+                self._records.get(descendant.command.publication_id),
+                expected_record_digest, descendant,
+            )
+            if changed:
+                self._records[descendant.command.publication_id] = current
+            return changed
 
     def begin_transfer(self, publication_id, expected_record_digest, timestamp):
-        digest_text(publication_id, "publication_id")
-        digest_text(expected_record_digest, "expected_record_digest")
-        safe_ref(timestamp, "timestamp")
         with self._lock:
             current = self._records.get(publication_id)
-            if current is None:
-                raise _closed(PublicationCodeV1.PUBLICATION_MISSING)
-            if current.phase is PublicationPhaseV1.CLAIMED:
-                if current.record_digest != expected_record_digest:
-                    return TransferAdmissionV1(TransferDispositionV1.ACTIVE,
-                                               current, None)
-                ownership = self._ownership(current, timestamp)
-                descendant = current._advance(
-                    PublicationPhaseV1.TRANSFERRING, timestamp,
-                    ownership=ownership,
-                )
-                self._records[publication_id] = descendant
-                self._live_owners.add(ownership.ownership_id)
-                return TransferAdmissionV1(TransferDispositionV1.ACQUIRED,
-                                           descendant, ownership)
-            if current.phase in (PublicationPhaseV1.TRANSFERRING,
-                                 PublicationPhaseV1.COMMITTED):
-                return TransferAdmissionV1(
-                    TransferDispositionV1.ACTIVE, current,
-                    current.ownership_history[-1],
-                )
-            return TransferAdmissionV1(TransferDispositionV1.TERMINAL,
-                                       current, None)
-
-    @staticmethod
-    def _ownership_matches(current, ownership):
-        return (current.ownership_history and current.ownership_history[-1] == ownership
-                and ownership.publication_id == current.command.publication_id
-                and ownership.command_digest == current.command.command_digest
-                and ownership.mutation_id == current.command.mutation_id
-                and ownership.claim_digest == current.claim_digest)
-
-    @staticmethod
-    def _receipt_structurally_matches(current, ownership, receipt):
-        inventory = receipt.inventory
-        return (
-            _receipt_matches(receipt, current.command, current.claim_digest,
-                             ownership)
-            and inventory.publication_id == current.command.publication_id
-            and inventory.command_digest == current.command.command_digest
-            and inventory.mutation_id == current.command.mutation_id
-            and inventory.ownership_id == ownership.ownership_id
-            and inventory.authority_ref == current.command.destination_authority_ref
-            and inventory.key_ref == current.command.destination_key_ref
-            and receipt.authority_ref == current.command.destination_authority_ref
-            and receipt.key_ref == current.command.destination_key_ref
-        )
+            if (current is not None
+                    and current.phase is PublicationPhaseV1.CLAIMED
+                    and current.record_digest == expected_record_digest):
+                self._nonce += 1
+            admission = PublicationTransitionKernelV1.begin_transfer(
+                current, publication_id, expected_record_digest, timestamp,
+                max(1, self._nonce),
+            )
+            if admission.disposition is TransferDispositionV1.ACQUIRED:
+                self._records[publication_id] = admission.record
+                self._live_owners.add(admission.ownership.ownership_id)
+            return admission
 
     def complete_transfer(self, ownership, receipt, verified, timestamp):
-        if type(ownership) is not TransferOwnershipV1 or type(receipt) is not AuthenticatedPublicationReceiptV1:
+        if (type(ownership) is not TransferOwnershipV1
+                or type(receipt) is not AuthenticatedPublicationReceiptV1):
             raise TypeError("exact ownership and receipt required")
-        if type(verified) is not bool:
-            raise TypeError("verified must be exact bool")
         with self._lock:
             current = self._records.get(ownership.publication_id)
-            if (current is None or ownership.ownership_id not in self._live_owners
-                    or not self._ownership_matches(current, ownership)
-                    or not self._receipt_structurally_matches(current, ownership, receipt)):
-                raise _closed(PublicationCodeV1.STATE_CONFLICT)
-            if not verified and current.phase is PublicationPhaseV1.TRANSFERRING:
-                descendant = current._advance(PublicationPhaseV1.COMMITTED,
-                                              timestamp, receipt=receipt)
-            elif verified and current.phase is PublicationPhaseV1.COMMITTED and current.receipt == receipt:
-                descendant = current._advance(PublicationPhaseV1.VERIFIED,
-                                              timestamp, receipt=receipt)
-                self._live_owners.discard(ownership.ownership_id)
-            else:
-                raise _closed(PublicationCodeV1.STATE_CONFLICT)
+            descendant = PublicationTransitionKernelV1.complete_transfer(
+                current, ownership, receipt, verified, timestamp,
+                ownership_active=ownership.ownership_id in self._live_owners,
+            )
             self._records[ownership.publication_id] = descendant
+            if verified:
+                self._live_owners.discard(ownership.ownership_id)
             return descendant
-
-    def _fence(self, current, ownership, timestamp):
-        permit = self._permit(current, ownership, timestamp)
-        descendant = current._advance(PublicationPhaseV1.AMBIGUOUS, timestamp,
-                                      permit=permit)
-        self._live_owners.discard(ownership.ownership_id)
-        self._records[current.command.publication_id] = descendant
-        return RecoveryDecisionV1(RecoveryDispositionV1.PERMITTED,
-                                  descendant, permit)
 
     def relinquish_uncertain(self, ownership, timestamp):
         if type(ownership) is not TransferOwnershipV1:
             raise TypeError("exact ownership required")
         with self._lock:
             current = self._records.get(ownership.publication_id)
-            if (current is None or ownership.ownership_id not in self._live_owners
-                    or not self._ownership_matches(current, ownership)
-                    or current.phase not in (PublicationPhaseV1.TRANSFERRING,
-                                             PublicationPhaseV1.COMMITTED)):
-                raise _closed(PublicationCodeV1.STATE_CONFLICT)
-            return self._fence(current, ownership, timestamp)
+            decision = PublicationTransitionKernelV1.relinquish_uncertain(
+                current, ownership, timestamp,
+                ownership_active=ownership.ownership_id in self._live_owners,
+            )
+            self._records[ownership.publication_id] = decision.record
+            self._live_owners.discard(ownership.ownership_id)
+            return decision
 
     def recover_transfer(self, publication_id, command_digest, timestamp):
-        digest_text(publication_id, "publication_id")
-        digest_text(command_digest, "command_digest")
         with self._lock:
             current = self._records.get(publication_id)
-            if current is None or current.command.command_digest != command_digest:
-                raise _closed(PublicationCodeV1.PUBLICATION_MISSING)
-            if current.phase in (PublicationPhaseV1.TRANSFERRING,
-                                 PublicationPhaseV1.COMMITTED):
-                ownership = current.ownership_history[-1]
-                if ownership.ownership_id in self._live_owners:
-                    return RecoveryDecisionV1(RecoveryDispositionV1.ACTIVE,
-                                              current, None)
-                return self._fence(current, ownership, timestamp)
-            if current.phase is PublicationPhaseV1.AMBIGUOUS:
-                return RecoveryDecisionV1(RecoveryDispositionV1.PERMITTED,
-                                          current,
-                                          current.recovery_permits[-1])
-            return RecoveryDecisionV1(RecoveryDispositionV1.TERMINAL,
-                                      current, None)
+            active = (
+                current is not None
+                and bool(current.ownership_history)
+                and current.ownership_history[-1].ownership_id
+                in self._live_owners
+            )
+            decision = PublicationTransitionKernelV1.recover_transfer(
+                current, publication_id, command_digest, timestamp,
+                ownership_active=active,
+            )
+            if decision.record is not current:
+                self._records[publication_id] = decision.record
+                if current is not None and current.ownership_history:
+                    self._live_owners.discard(
+                        current.ownership_history[-1].ownership_id,
+                    )
+            return decision
 
     def mark_orphaned(self, ownership):
         """Reference-store crash hook; durable hosts derive this from fencing."""
@@ -1251,51 +1916,12 @@ class StrongInMemoryPublicationStoreV1:
                           receipt=None, tombstone=None):
         if type(permit) is not LookupRecoveryPermitV1:
             raise TypeError("exact recovery permit required")
-        if type(outcome) is not AuthenticatedLookupV1:
-            raise TypeError("exact lookup outcome required")
-        if phase not in (PublicationPhaseV1.VERIFIED,
-                         PublicationPhaseV1.ABSENT,
-                         PublicationPhaseV1.CONFLICT):
-            raise _closed(PublicationCodeV1.STATE_CONFLICT)
         with self._lock:
             current = self._records.get(permit.publication_id)
-            if (current is None or current.phase is not PublicationPhaseV1.AMBIGUOUS
-                    or not current.recovery_permits
-                    or current.recovery_permits[-1] != permit
-                    or outcome.authority_ref
-                    != current.command.destination_authority_ref
-                    or outcome.key_ref != current.command.destination_key_ref
-                    or outcome.publication_id != current.command.publication_id
-                    or outcome.command_digest != current.command.command_digest
-                    or outcome.destination_identity_digest
-                    != current.command.destination_identity_digest
-                    or outcome.mutation_id != current.command.mutation_id
-                    or outcome.ownership_id != permit.fenced_ownership_id
-                    or outcome.recovery_permit_id != permit.permit_id):
-                raise _closed(PublicationCodeV1.STATE_CONFLICT)
-            ownership = current.ownership_history[-1]
-            if phase is PublicationPhaseV1.VERIFIED:
-                if (type(receipt) is not AuthenticatedPublicationReceiptV1
-                        or outcome.outcome is not LookupOutcomeV1.FOUND
-                        or outcome.receipt != receipt
-                        or not self._receipt_structurally_matches(
-                            current, ownership, receipt)
-                        or (current.receipt is not None
-                            and current.receipt != receipt)):
-                    raise _closed(PublicationCodeV1.STATE_CONFLICT)
-            elif phase is PublicationPhaseV1.ABSENT:
-                if (type(tombstone) is not AuthenticatedPublicationTombstoneV1
-                        or outcome.outcome is not LookupOutcomeV1.DEFINITELY_ABSENT
-                        or outcome.tombstone != tombstone
-                        or outcome.mutation_registry_digest
-                        != tombstone.mutation_registry_digest
-                        or not _tombstone_matches(tombstone, current.command,
-                                                  current.claim_digest,
-                                                  ownership, permit)):
-                    raise _closed(PublicationCodeV1.STATE_CONFLICT)
-            descendant = current._advance(phase, timestamp, outcome=outcome,
-                                          receipt=receipt,
-                                          tombstone=tombstone)
+            descendant = PublicationTransitionKernelV1.finalize_recovery(
+                current, permit, phase, timestamp, outcome,
+                receipt=receipt, tombstone=tombstone,
+            )
             self._records[permit.publication_id] = descendant
             return descendant
 
@@ -1848,7 +2474,8 @@ __all__ = [
     "LookupRecoveryPermitV1", "MaterializedSourceV1", "PublicationCodeV1",
     "PublicationErrorV1", "PublicationEventKindV1", "PublicationEventV1",
     "PublicationOperationsV1", "PublicationPhaseV1", "PublicationRecordV1",
-    "PublicationStorePortV1", "RecoveryDecisionV1", "RecoveryDispositionV1",
+    "PublicationStorePortV1", "PublicationTransitionKernelV1",
+    "RecoveryDecisionV1", "RecoveryDispositionV1",
     "SpooledArtifactV1", "SpoolSinkPortV1",
     "StrongInMemoryPublicationStoreV1", "TransferAdmissionV1",
     "TransferDispositionV1", "TransferOwnershipV1",
