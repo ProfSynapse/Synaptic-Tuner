@@ -19,6 +19,11 @@ from synaptic_tuner.api.v1.artifacts_facade import (
     PublicationVerification,
 )
 from synaptic_tuner.api.v1.publication import (
+    AuthenticatedDestinationInventoryV1,
+    AuthenticatedPublicationReceiptV1,
+    AuthenticatedPublicationTombstoneV1,
+    DestinationArtifactV1,
+    DestinationInventoryV1,
     PublicationOperationsV1,
     PublicationTransitionKernelV1,
 )
@@ -35,6 +40,68 @@ def _result() -> PublicationResult:
     )
 
 
+def _publication_codec_documents():
+    artifact = {
+        "role": "adapter", "path": "bundle/adapter",
+        "sha256": "1" * 64, "size_bytes": 7,
+    }
+    inventory = {"artifacts": [artifact]}
+    authenticated_inventory = {
+        "inventory": inventory, "publication_id": "2" * 64,
+        "command_digest": "3" * 64, "mutation_id": "4" * 64,
+        "ownership_id": "5" * 64, "recorded_at": "2026-08-27T12:00:01Z",
+        "authority_ref": "host-authority", "key_ref": "host-key",
+        "tag": "6" * 64,
+    }
+    receipt = {
+        "schema_version": "synaptic-publication-receipt/v1",
+        "publication_id": "2" * 64, "command_digest": "3" * 64,
+        "run": {"run_id": "run-1", "project_ref": "project-1"},
+        "source_identity_digest": "7" * 64,
+        "destination_ref": "opaque/local-like",
+        "destination_identity_digest": "8" * 64,
+        "mutation_id": "4" * 64, "claim_digest": "9" * 64,
+        "ownership_id": "5" * 64, "inventory": authenticated_inventory,
+        "recorded_at": "2026-08-27T12:00:01Z",
+        "authority_ref": "host-authority", "key_ref": "host-key",
+        "tag": "a" * 64,
+    }
+    tombstone = {
+        "schema_version": "synaptic-publication-tombstone/v1",
+        "publication_id": "2" * 64, "mutation_id": "4" * 64,
+        "command_digest": "3" * 64, "claim_digest": "9" * 64,
+        "destination_ref": "opaque/local-like",
+        "destination_identity_digest": "8" * 64,
+        "destination_configuration_digest": "b" * 64,
+        "destination_policy_digest": "c" * 64,
+        "destination_authority_ref": "host-authority",
+        "destination_key_ref": "host-key", "fenced_ownership_id": "5" * 64,
+        "recovery_permit_id": "d" * 64, "mutation_registry_digest": "e" * 64,
+        "checked_at": "2026-08-27T12:00:02Z", "evidence_digest": "f" * 64,
+        "authority_ref": "host-authority", "key_ref": "host-key",
+        "tag": "0" * 64,
+    }
+    return (
+        (DestinationArtifactV1, artifact),
+        (DestinationInventoryV1, inventory),
+        (AuthenticatedDestinationInventoryV1, authenticated_inventory),
+        (AuthenticatedPublicationReceiptV1, receipt),
+        (AuthenticatedPublicationTombstoneV1, tombstone),
+    )
+
+
+def _assert_exact_json_scalars(value) -> None:
+    if type(value) is dict:
+        assert all(type(key) is str for key in value)
+        for item in value.values():
+            _assert_exact_json_scalars(item)
+    elif type(value) is list:
+        for item in value:
+            _assert_exact_json_scalars(item)
+    else:
+        assert type(value) in (str, int, type(None))
+
+
 def test_root_exports_exact_canonical_publication_identities() -> None:
     assert v1.ArtifactsAPI is ArtifactsAPI
     assert v1.PublicationOperationsV1 is PublicationOperationsV1
@@ -48,6 +115,149 @@ def test_root_exports_exact_canonical_publication_identities() -> None:
         assert not hasattr(v1, removed)
     with pytest.raises(ModuleNotFoundError):
         __import__("synaptic_tuner.api.v1.artifacts")
+
+
+@pytest.mark.parametrize(
+    ("codec_type", "document"),
+    _publication_codec_documents(),
+    ids=lambda item: item.__name__ if isinstance(item, type) else None,
+)
+def test_publication_evidence_object_codecs_require_exact_objects_and_scalars(
+    codec_type, document,
+) -> None:
+    parsed = codec_type.from_dict(document)
+    _assert_exact_json_scalars(parsed.to_dict())
+
+    class DictSubclass(dict):
+        pass
+
+    for hostile in (MappingProxyType(document), DictSubclass(document)):
+        with pytest.raises(TypeError, match="exact object"):
+            codec_type.from_dict(hostile)
+
+
+def test_publication_evidence_object_codecs_reject_hostile_keys_without_callbacks() -> None:
+    class Field(str):
+        calls = 0
+
+        def __hash__(self):
+            type(self).calls += 1
+            return str.__hash__(self)
+
+        def __eq__(self, other):
+            type(self).calls += 1
+            raise RuntimeError("secret key callback")
+
+    _, artifact = _publication_codec_documents()[0]
+    role = artifact.pop("role")
+    dict.__setitem__(artifact, Field("role"), role)
+    Field.calls = 0
+    with pytest.raises(TypeError, match="field names") as captured:
+        DestinationArtifactV1.from_dict(artifact)
+    assert captured.value.__cause__ is None
+    assert Field.calls == 0
+
+    _, inventory = _publication_codec_documents()[1]
+    nested_artifact = inventory["artifacts"][0]
+    path = nested_artifact.pop("path")
+    dict.__setitem__(nested_artifact, Field("path"), path)
+    Field.calls = 0
+    with pytest.raises(TypeError, match="field names") as captured:
+        DestinationInventoryV1.from_dict(inventory)
+    assert captured.value.__cause__ is None
+    assert Field.calls == 0
+
+    _, receipt = _publication_codec_documents()[3]
+    run = receipt["run"]
+    run_id = run.pop("run_id")
+    dict.__setitem__(run, Field("run_id"), run_id)
+    Field.calls = 0
+    with pytest.raises(TypeError, match="field names") as captured:
+        AuthenticatedPublicationReceiptV1.from_dict(receipt)
+    assert captured.value.__cause__ is None
+    assert Field.calls == 0
+
+
+def test_publication_evidence_object_codecs_reject_hostile_scalars_without_callbacks() -> None:
+    class Text(str):
+        calls = 0
+
+        def __hash__(self):
+            type(self).calls += 1
+            raise RuntimeError("secret scalar callback")
+
+        def __eq__(self, other):
+            type(self).calls += 1
+            raise RuntimeError("secret scalar callback")
+
+        def __str__(self):
+            type(self).calls += 1
+            raise RuntimeError("secret scalar callback")
+
+    cases = []
+    _, artifact = _publication_codec_documents()[0]
+    artifact["role"] = Text(artifact["role"])
+    cases.append((DestinationArtifactV1, artifact))
+
+    _, inventory = _publication_codec_documents()[1]
+    inventory["artifacts"][0]["path"] = Text("bundle/adapter")
+    cases.append((DestinationInventoryV1, inventory))
+
+    _, authenticated_inventory = _publication_codec_documents()[2]
+    authenticated_inventory["authority_ref"] = Text("host-authority")
+    cases.append((AuthenticatedDestinationInventoryV1, authenticated_inventory))
+
+    _, receipt = _publication_codec_documents()[3]
+    receipt["run"]["run_id"] = Text("run-1")
+    cases.append((AuthenticatedPublicationReceiptV1, receipt))
+
+    _, tombstone = _publication_codec_documents()[4]
+    tombstone["checked_at"] = Text("2026-08-27T12:00:02Z")
+    cases.append((AuthenticatedPublicationTombstoneV1, tombstone))
+
+    for codec_type, document in cases:
+        Text.calls = 0
+        with pytest.raises(TypeError, match="exact string") as captured:
+            codec_type.from_dict(document)
+        assert captured.value.__cause__ is None
+        assert Text.calls == 0
+
+    class Number(int):
+        calls = 0
+
+        def __lt__(self, other):
+            type(self).calls += 1
+            raise RuntimeError("secret numeric callback")
+
+    _, artifact = _publication_codec_documents()[0]
+    artifact["size_bytes"] = Number(7)
+    with pytest.raises(TypeError, match="exact integer") as captured:
+        DestinationArtifactV1.from_dict(artifact)
+    assert captured.value.__cause__ is None
+    assert Number.calls == 0
+
+
+def test_publication_evidence_object_codecs_reject_nested_container_subclasses() -> None:
+    class DictSubclass(dict):
+        pass
+
+    class ListSubclass(list):
+        pass
+
+    _, inventory = _publication_codec_documents()[1]
+    inventory["artifacts"] = ListSubclass(inventory["artifacts"])
+    with pytest.raises(ValueError, match="exact array"):
+        DestinationInventoryV1.from_dict(inventory)
+
+    _, receipt = _publication_codec_documents()[3]
+    receipt["run"] = MappingProxyType(receipt["run"])
+    with pytest.raises(TypeError, match="exact object"):
+        AuthenticatedPublicationReceiptV1.from_dict(receipt)
+
+    _, receipt = _publication_codec_documents()[3]
+    receipt["inventory"] = DictSubclass(receipt["inventory"])
+    with pytest.raises(TypeError, match="exact object"):
+        AuthenticatedPublicationReceiptV1.from_dict(receipt)
 
 
 def test_publication_result_parser_requires_exact_builtin_objects() -> None:

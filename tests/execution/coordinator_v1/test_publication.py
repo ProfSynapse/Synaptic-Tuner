@@ -194,6 +194,42 @@ def _lookup(outcome, command, permit, receipt=None, *, absent=False, bind=True):
     return replace(value, tag=AUTH.sign("publication-lookup/v1", value.payload))
 
 
+def _publication_codec_values():
+    artifact = DestinationArtifactV1("adapter", "bundle/adapter", "1" * 64, 7)
+    inventory = DestinationInventoryV1((artifact,))
+    authenticated_inventory = AuthenticatedDestinationInventoryV1(
+        inventory, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
+        "2026-08-27T12:00:01Z", "host-authority", KEY, "6" * 64,
+    )
+    receipt = AuthenticatedPublicationReceiptV1(
+        "synaptic-publication-receipt/v1", "2" * 64, "3" * 64, RUN,
+        "7" * 64, "opaque/local-like", "8" * 64, "4" * 64,
+        "9" * 64, "5" * 64, authenticated_inventory,
+        "2026-08-27T12:00:01Z", "host-authority", KEY, "a" * 64,
+    )
+    tombstone = AuthenticatedPublicationTombstoneV1(
+        "synaptic-publication-tombstone/v1", "2" * 64, "4" * 64,
+        "3" * 64, "9" * 64, "opaque/local-like", "8" * 64,
+        "b" * 64, "c" * 64, "host-authority", KEY, "5" * 64,
+        "d" * 64, "e" * 64, "2026-08-27T12:00:02Z", "f" * 64,
+        "host-authority", KEY, "0" * 64,
+    )
+    return (
+        (DestinationArtifactV1, artifact),
+        (DestinationInventoryV1, inventory),
+        (AuthenticatedDestinationInventoryV1, authenticated_inventory),
+        (AuthenticatedPublicationReceiptV1, receipt),
+        (AuthenticatedPublicationTombstoneV1, tombstone),
+    )
+
+
+def _canonical_test_bytes(value):
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
 class Adapter:
     """One fake implementation; the opaque descriptor is only configuration data."""
 
@@ -369,6 +405,59 @@ def test_command_is_canonical_and_every_binding_changes_identity() -> None:
                 for change in changes} | {command.publication_id}) == 6
     with pytest.raises(ValueError):
         replace(command, mutation_id="4" * 64)
+
+
+@pytest.mark.parametrize(
+    ("codec_type", "value"),
+    _publication_codec_values(),
+    ids=lambda item: item.__name__ if isinstance(item, type) else None,
+)
+def test_public_publication_evidence_codecs_round_trip_exactly(codec_type, value) -> None:
+    document = value.to_dict()
+    assert codec_type.from_dict(document) == value
+    raw = value.canonical_bytes
+    assert raw == _canonical_test_bytes(document)
+    assert codec_type.from_canonical_bytes(raw) == value
+    assert codec_type.from_canonical_bytes(raw).canonical_bytes == raw
+
+
+@pytest.mark.parametrize(
+    ("codec_type", "value"),
+    _publication_codec_values(),
+    ids=lambda item: item.__name__ if isinstance(item, type) else None,
+)
+def test_public_publication_evidence_codecs_reject_hostile_bytes(codec_type, value) -> None:
+    raw = value.canonical_bytes
+    document = value.to_dict()
+    fields = tuple(document)
+    first = fields[0]
+    reordered = {field: document[field] for field in reversed(fields)}
+    reordered_raw = json.dumps(
+        reordered, sort_keys=False, separators=(",", ":"), ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    assert reordered_raw != raw
+
+    duplicate_prefix = _canonical_test_bytes({first: document[first]})[1:-1]
+    duplicate = b"{" + duplicate_prefix + b"," + raw[1:]
+    unknown = dict(document)
+    unknown["unknown"] = "field"
+    missing = dict(document)
+    del missing[first]
+    floating = dict(document)
+    floating[first] = 1.5
+
+    for candidate in (
+        raw + b" ", reordered_raw, duplicate,
+        _canonical_test_bytes(unknown), _canonical_test_bytes(missing),
+        _canonical_test_bytes(floating),
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            codec_type.from_canonical_bytes(candidate)
+    with pytest.raises((TypeError, ValueError)):
+        codec_type.from_canonical_bytes(bytearray(raw))
+    with pytest.raises((TypeError, ValueError)):
+        codec_type.from_dict([])
 
 
 def test_strong_store_exact_claim_replay_and_descendant_cas() -> None:

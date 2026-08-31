@@ -396,6 +396,21 @@ class DestinationArtifactV1:
         return {"role": self.role, "path": self.path, "sha256": self.sha256,
                 "size_bytes": self.size_bytes}
 
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "DestinationArtifactV1":
+        return _parse_destination_artifact(value)
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return _record_json_bytes(_destination_artifact_document(self))
+
+    @classmethod
+    def from_canonical_bytes(cls, raw: bytes) -> "DestinationArtifactV1":
+        result = _parse_destination_artifact(_parse_record_json(raw))
+        if result.canonical_bytes != raw:
+            raise ValueError("destination artifact failed canonical reconstruction")
+        return result
+
 
 @dataclass(frozen=True, slots=True)
 class DestinationInventoryV1:
@@ -409,8 +424,23 @@ class DestinationInventoryV1:
         if keys != tuple(sorted(keys)) or len(keys) != len(set(keys)):
             raise ValueError("destination inventory must be unique and canonical")
 
-    def to_dict(self) -> list[dict[str, object]]:
-        return [item.to_dict() for item in self.artifacts]
+    def to_dict(self) -> dict[str, object]:
+        return _destination_inventory_document(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "DestinationInventoryV1":
+        return _parse_destination_inventory(value)
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return _record_json_bytes(_destination_inventory_document(self))
+
+    @classmethod
+    def from_canonical_bytes(cls, raw: bytes) -> "DestinationInventoryV1":
+        result = _parse_destination_inventory(_parse_record_json(raw))
+        if result.canonical_bytes != raw:
+            raise ValueError("destination inventory failed canonical reconstruction")
+        return result
 
     @property
     def inventory_digest(self) -> str:
@@ -458,6 +488,28 @@ class AuthenticatedDestinationInventoryV1:
             "authority_ref": self.authority_ref,
             "key_ref": self.key_ref,
         })
+
+    def to_dict(self) -> dict[str, object]:
+        return _authenticated_inventory_document(self)
+
+    @classmethod
+    def from_dict(
+        cls, value: dict[str, object]
+    ) -> "AuthenticatedDestinationInventoryV1":
+        return _parse_authenticated_inventory(value)
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return _record_json_bytes(_authenticated_inventory_document(self))
+
+    @classmethod
+    def from_canonical_bytes(
+        cls, raw: bytes
+    ) -> "AuthenticatedDestinationInventoryV1":
+        result = _parse_authenticated_inventory(_parse_record_json(raw))
+        if result.canonical_bytes != raw:
+            raise ValueError("authenticated inventory failed canonical reconstruction")
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -576,6 +628,28 @@ class AuthenticatedPublicationReceiptV1:
             "key_ref": self.key_ref,
         })
 
+    def to_dict(self) -> dict[str, object]:
+        return _receipt_document(self)
+
+    @classmethod
+    def from_dict(
+        cls, value: dict[str, object]
+    ) -> "AuthenticatedPublicationReceiptV1":
+        return _parse_receipt(value)
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return _record_json_bytes(_receipt_document(self))
+
+    @classmethod
+    def from_canonical_bytes(
+        cls, raw: bytes
+    ) -> "AuthenticatedPublicationReceiptV1":
+        result = _parse_receipt(_parse_record_json(raw))
+        if result.canonical_bytes != raw:
+            raise ValueError("publication receipt failed canonical reconstruction")
+        return result
+
 
 class LookupOutcomeV1(str, Enum):
     FOUND = "found"
@@ -645,6 +719,28 @@ class AuthenticatedPublicationTombstoneV1:
             "authority_ref": self.authority_ref,
             "key_ref": self.key_ref,
         })
+
+    def to_dict(self) -> dict[str, object]:
+        return _tombstone_document(self)
+
+    @classmethod
+    def from_dict(
+        cls, value: dict[str, object]
+    ) -> "AuthenticatedPublicationTombstoneV1":
+        return _parse_tombstone(value)
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return _record_json_bytes(_tombstone_document(self))
+
+    @classmethod
+    def from_canonical_bytes(
+        cls, raw: bytes
+    ) -> "AuthenticatedPublicationTombstoneV1":
+        result = _parse_tombstone(_parse_record_json(raw))
+        if result.canonical_bytes != raw:
+            raise ValueError("publication tombstone failed canonical reconstruction")
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -1008,16 +1104,33 @@ _MAX_PUBLICATION_RECORD_BYTES = 1_048_576
 
 
 def _record_fields(value: object, expected: frozenset[str], name: str) -> dict[str, object]:
-    if type(value) is not dict or frozenset(value) != expected:
+    if type(value) is not dict:
+        raise TypeError(f"{name} must be an exact object")
+    keys = tuple(dict.keys(value))
+    if any(type(key) is not str for key in keys):
+        raise TypeError(f"{name} field names must be exact strings")
+    if frozenset(keys) != expected:
         raise ValueError(f"{name} contains missing or unknown fields")
-    if any(type(key) is not str for key in value):
-        raise ValueError(f"{name} field names must be exact strings")
-    return value
+    return {key: dict.__getitem__(value, key) for key in keys}
 
 
 def _record_array(value: object, name: str) -> list[object]:
     if type(value) is not list:
         raise ValueError(f"{name} must be an exact array")
+    return value
+
+
+def _record_text(document: dict[str, object], field: str, name: str) -> str:
+    value = dict.__getitem__(document, field)
+    if type(value) is not str:
+        raise TypeError(f"{name} must be an exact string")
+    return value
+
+
+def _record_integer(document: dict[str, object], field: str, name: str) -> int:
+    value = dict.__getitem__(document, field)
+    if type(value) is not int:
+        raise TypeError(f"{name} must be an exact integer")
     return value
 
 
@@ -1197,7 +1310,10 @@ def _parse_destination_artifact(value: object) -> DestinationArtifactV1:
         "role", "path", "sha256", "size_bytes",
     }), "destination artifact")
     return DestinationArtifactV1(
-        doc["role"], doc["path"], doc["sha256"], doc["size_bytes"],
+        _record_text(doc, "role", "destination artifact role"),
+        _record_text(doc, "path", "destination artifact path"),
+        _record_text(doc, "sha256", "destination artifact sha256"),
+        _record_integer(doc, "size_bytes", "destination artifact size_bytes"),
     )
 
 
@@ -1241,9 +1357,15 @@ def _parse_authenticated_inventory(value: object) -> AuthenticatedDestinationInv
         "authenticated destination inventory",
     )
     return AuthenticatedDestinationInventoryV1(
-        _parse_destination_inventory(doc["inventory"]), doc["publication_id"],
-        doc["command_digest"], doc["mutation_id"], doc["ownership_id"],
-        doc["recorded_at"], doc["authority_ref"], doc["key_ref"], doc["tag"],
+        _parse_destination_inventory(dict.__getitem__(doc, "inventory")),
+        _record_text(doc, "publication_id", "inventory publication_id"),
+        _record_text(doc, "command_digest", "inventory command_digest"),
+        _record_text(doc, "mutation_id", "inventory mutation_id"),
+        _record_text(doc, "ownership_id", "inventory ownership_id"),
+        _record_text(doc, "recorded_at", "inventory recorded_at"),
+        _record_text(doc, "authority_ref", "inventory authority_ref"),
+        _record_text(doc, "key_ref", "inventory key_ref"),
+        _record_text(doc, "tag", "inventory tag"),
     )
 
 
@@ -1277,14 +1399,32 @@ _RECEIPT_FIELDS = frozenset({
 
 def _parse_receipt(value: object) -> AuthenticatedPublicationReceiptV1:
     doc = _record_fields(value, _RECEIPT_FIELDS, "publication receipt")
-    run = _record_fields(doc["run"], frozenset({"run_id", "project_ref"}), "receipt run")
+    run = _record_fields(
+        dict.__getitem__(doc, "run"),
+        frozenset({"run_id", "project_ref"}),
+        "receipt run",
+    )
     return AuthenticatedPublicationReceiptV1(
-        doc["schema_version"], doc["publication_id"], doc["command_digest"],
-        TrainingRunRef.from_dict(run), doc["source_identity_digest"],
-        doc["destination_ref"], doc["destination_identity_digest"],
-        doc["mutation_id"], doc["claim_digest"], doc["ownership_id"],
-        _parse_authenticated_inventory(doc["inventory"]), doc["recorded_at"],
-        doc["authority_ref"], doc["key_ref"], doc["tag"],
+        _record_text(doc, "schema_version", "receipt schema_version"),
+        _record_text(doc, "publication_id", "receipt publication_id"),
+        _record_text(doc, "command_digest", "receipt command_digest"),
+        TrainingRunRef(
+            _record_text(run, "run_id", "receipt run_id"),
+            _record_text(run, "project_ref", "receipt project_ref"),
+        ),
+        _record_text(doc, "source_identity_digest", "receipt source_identity_digest"),
+        _record_text(doc, "destination_ref", "receipt destination_ref"),
+        _record_text(
+            doc, "destination_identity_digest", "receipt destination_identity_digest",
+        ),
+        _record_text(doc, "mutation_id", "receipt mutation_id"),
+        _record_text(doc, "claim_digest", "receipt claim_digest"),
+        _record_text(doc, "ownership_id", "receipt ownership_id"),
+        _parse_authenticated_inventory(dict.__getitem__(doc, "inventory")),
+        _record_text(doc, "recorded_at", "receipt recorded_at"),
+        _record_text(doc, "authority_ref", "receipt authority_ref"),
+        _record_text(doc, "key_ref", "receipt key_ref"),
+        _record_text(doc, "tag", "receipt tag"),
     )
 
 
@@ -1305,7 +1445,7 @@ def _tombstone_document(value: AuthenticatedPublicationTombstoneV1) -> dict[str,
 def _parse_tombstone(value: object) -> AuthenticatedPublicationTombstoneV1:
     doc = _record_fields(value, _TOMBSTONE_FIELDS, "publication tombstone")
     return AuthenticatedPublicationTombstoneV1(*(
-        doc[name] for name in (
+        _record_text(doc, name, f"tombstone {name}") for name in (
             "schema_version", "publication_id", "mutation_id", "command_digest",
             "claim_digest", "destination_ref", "destination_identity_digest",
             "destination_configuration_digest", "destination_policy_digest",
