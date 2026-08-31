@@ -24,6 +24,7 @@ from synaptic_tuner.api.v1.publication import (
     AuthenticatedPublicationTombstoneV1,
     DestinationArtifactV1,
     DestinationInventoryV1,
+    PublicationCommandV1,
     PublicationOperationsV1,
     PublicationTransitionKernelV1,
 )
@@ -115,6 +116,10 @@ def test_root_exports_exact_canonical_publication_identities() -> None:
         assert not hasattr(v1, removed)
     with pytest.raises(ModuleNotFoundError):
         __import__("synaptic_tuner.api.v1.artifacts")
+
+
+def test_public_destination_port_exposes_its_exact_command_type() -> None:
+    assert PublicationCommandV1.__module__ == "tuner.execution.coordinator_v1.publication"
 
 
 @pytest.mark.parametrize(
