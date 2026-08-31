@@ -25,7 +25,7 @@ from .source_bundle import (
 
 EXECUTION_SOURCE_SCHEMA = "synaptic-execution-source/v1"
 SOURCE_EVIDENCE_SCHEMA = "synaptic-authenticated-source-evidence/v1"
-RUNTIME_SCHEMA = "synaptic-modal-runtime/v1"
+RUNTIME_SCHEMA = "synaptic-training-runtime/v1"
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _SAFE_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,255}$")

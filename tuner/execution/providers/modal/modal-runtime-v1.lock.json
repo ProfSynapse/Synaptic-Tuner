@@ -26,7 +26,7 @@
     },
     "sft_runtime": {
       "path": "Trainers/sft/runtime_v1.py",
-      "sha256": "0ec69f3d6dda2407b81b8a5f9aa37ba7c0f9b5267f1d036133332dd5d9d8059a"
+      "sha256": "5eae42311c28047fa8203e1ef8b85aa753d200d946ec50c369c57510202c1dc8"
     }
   },
   "ml_stack": {

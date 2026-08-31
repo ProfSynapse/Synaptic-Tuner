@@ -93,7 +93,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["schema_version", "roots", "capability_roots", "interpreter", "environment"],
       "properties": {
-        "schema_version": {"const": "synaptic-modal-runtime/v1"},
+        "schema_version": {"const": "synaptic-training-runtime/v1"},
         "roots": {"$ref": "#/$defs/roots"},
         "capability_roots": {
           "type": "object", "additionalProperties": false,

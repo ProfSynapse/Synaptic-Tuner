@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import multiprocessing
 import os
 import shutil
 import sys
@@ -20,10 +21,14 @@ from Trainers.sft.runtime_v1 import (
     TrainerEvidence,
     TrainerFailed,
     execute_runtime,
+    read_authenticated_workload_file,
     read_bounded_workload,
     _canonical_document,
 )
-from tuner.project.execution_source import AuthenticatedSourceEvidenceV1, ExecutionSourceV1
+from tuner.project.execution_source import (
+    AuthenticatedSourceEvidenceV1,
+    ExecutionSourceV1,
+)
 from tuner.project.source_bundle import SourceLock
 from tuner.training.methods.sft import compile_sft_workload
 from tuner.runtime.verification import (
@@ -33,6 +38,21 @@ from tuner.runtime.verification import (
 
 
 _REPO = Path(__file__).parents[3]
+
+
+def _read_fifo_transport_child(path_text: str, control_root_text: str, result) -> None:
+    try:
+        read_authenticated_workload_file(
+            Path(path_text),
+            control_root=Path(control_root_text),
+            expected_byte_count=1,
+            expected_sha256="f" * 64,
+            expected_fingerprint="e" * 64,
+        )
+    except RuntimeV1Error:
+        result.put("rejected")
+    else:
+        result.put("accepted")
 
 
 def _safetensors(
@@ -57,7 +77,9 @@ def _fixture(
     redirected_capability: bool = False,
 ):
     if mode != "dual_clone":
-        raise ValueError("runtime v1 test fixture supports only the finalized dual-clone mode")
+        raise ValueError(
+            "runtime v1 test fixture supports only the finalized dual-clone mode"
+        )
     project = (tmp_path / "host-project").resolve()
     engine = (tmp_path / "training-engine").resolve()
     schemas = engine / "schemas"
@@ -172,7 +194,9 @@ def _fixture(
         }
     )
     planned_environment = {
-        "PATH": "fixture-path", "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1",
+        "PATH": "fixture-path",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONSAFEPATH": "1",
         "PYTHONPATH": locked_roots["engine"],
         "SYNAPTIC_ENGINE_ROOT": locked_roots["engine"],
         "SYNAPTIC_PROJECT_ROOT": locked_roots["project"],
@@ -186,25 +210,37 @@ def _fixture(
         "WANDB_DISABLED": "true",
     }
     execution_source = ExecutionSourceV1(
-        run_id=source_lock.run_id, created_at=source_lock.created_at,
-        project_source=source_lock.project_source, engine_source=source_lock.engine_source,
+        run_id=source_lock.run_id,
+        created_at=source_lock.created_at,
+        project_source=source_lock.project_source,
+        engine_source=source_lock.engine_source,
         engine_submodule_path="vendor/training-engine",
         source_evidence=AuthenticatedSourceEvidenceV1(
-            project_url=project_source["url"], project_commit=project_source["commit"],
-            engine_url=engine_source["url"], engine_commit=engine_source["commit"],
-            engine_submodule_path="vendor/training-engine", gitlink_commit="b" * 40,
+            project_url=project_source["url"],
+            project_commit=project_source["commit"],
+            engine_url=engine_source["url"],
+            engine_commit=engine_source["commit"],
+            engine_submodule_path="vendor/training-engine",
+            gitlink_commit="b" * 40,
             source_lock_binding=source_lock.binding,
-            issuer_ref="test-verifier", evidence_ref="test-proof",
-            audience_ref="project/run-1", challenge_nonce="source-nonce",
-            verified_at="2026-08-25T12:01:00Z", expires_at="2026-08-25T12:10:00Z",
-            key_ref="source-key", tag_base64="dGFn", attestation_digest="8" * 64,
+            issuer_ref="test-verifier",
+            evidence_ref="test-proof",
+            audience_ref="project/run-1",
+            challenge_nonce="source-nonce",
+            verified_at="2026-08-25T12:01:00Z",
+            expires_at="2026-08-25T12:10:00Z",
+            key_ref="source-key",
+            tag_base64="dGFn",
+            attestation_digest="8" * 64,
         ),
-        deployment_member_sha256="7" * 64, roots=locked_roots,
+        deployment_member_sha256="7" * 64,
+        roots=locked_roots,
         writable_capability_root=str(capability_root),
         python_implementation="cpython",
         python_version=".".join(str(part) for part in sys.version_info[:3]),
         python_executable=str(Path(sys.executable).resolve()),
-        python_executable_digest="6" * 64, environment=planned_environment,
+        python_executable_digest="6" * 64,
+        environment=planned_environment,
         secret_requirements_digest="5" * 64,
         provider_runtime_requirements_digest="4" * 64,
     )
@@ -336,13 +372,17 @@ def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
     assert execution["environment"] == dict(invocation.environment)
     assert execution["model"]["revision"] == "c" * 40
     assert execution["model"]["tokenizer_revision"] == "c" * 40
-    assert execution["dataset"]["content_digest"] == hashlib.sha256(
-        dataset.read_bytes()
-    ).hexdigest()
+    assert (
+        execution["dataset"]["content_digest"]
+        == hashlib.sha256(dataset.read_bytes()).hexdigest()
+    )
     assert execution["sft"] == workload.document["configuration"]["document"]["sft"]
-    assert lineage["execution_evidence_sha256"] == hashlib.sha256(
-        json.dumps(execution, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    assert (
+        lineage["execution_evidence_sha256"]
+        == hashlib.sha256(
+            json.dumps(execution, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
     assert result.inventory_path.parent == roots["state"]
     assert (roots["artifacts"] / "final_model.tar").read_bytes() != (
         roots["artifacts"] / "tokenizer.tar"
@@ -389,34 +429,62 @@ def test_runtime_replaces_hostile_python_environment(tmp_path: Path) -> None:
     assert "HF_TOKEN" not in child
 
 
-def test_runtime_routes_qwen2_fast_tokenizer_sidecars_to_tokenizer_only(tmp_path: Path) -> None:
+def test_runtime_routes_qwen2_fast_tokenizer_sidecars_to_tokenizer_only(
+    tmp_path: Path,
+) -> None:
     workload, environment, engine_file, roots, _ = _fixture(tmp_path)
 
     class Qwen2FastOutput(FakeRunner):
         def run(self, invocation):
             evidence = super().run(invocation)
             root = invocation.final_model_dir
-            (root / "vocab.json").write_text(json.dumps({"hello": 0}, indent=2), encoding="utf-8")
+            (root / "vocab.json").write_text(
+                json.dumps({"hello": 0}, indent=2), encoding="utf-8"
+            )
             (root / "merges.txt").write_text("#version: 0.2\nh e\n", encoding="utf-8")
-            (root / "added_tokens.json").write_text(json.dumps({"<|im_start|>": 1}, indent=2), encoding="utf-8")
-            (root / "special_tokens_map.json").write_text(json.dumps({"eos_token": "<|im_end|>"}, indent=2), encoding="utf-8")
-            (root / "chat_template.jinja").write_text("{% for message in messages %}{{ message.content }}{% endfor %}", encoding="utf-8")
+            (root / "added_tokens.json").write_text(
+                json.dumps({"<|im_start|>": 1}, indent=2), encoding="utf-8"
+            )
+            (root / "special_tokens_map.json").write_text(
+                json.dumps({"eos_token": "<|im_end|>"}, indent=2), encoding="utf-8"
+            )
+            (root / "chat_template.jinja").write_text(
+                "{% for message in messages %}{{ message.content }}{% endfor %}",
+                encoding="utf-8",
+            )
             return evidence
 
-    execute_runtime(workload.canonical_bytes, environment=environment, runner=Qwen2FastOutput(), engine_file=engine_file)
+    execute_runtime(
+        workload.canonical_bytes,
+        environment=environment,
+        runner=Qwen2FastOutput(),
+        engine_file=engine_file,
+    )
     with tarfile.open(roots["artifacts"] / "final_model.tar") as archive:
         model_names = set(archive.getnames())
     with tarfile.open(roots["artifacts"] / "tokenizer.tar") as archive:
         tokenizer_names = set(archive.getnames())
-    assert {"vocab.json", "merges.txt", "added_tokens.json", "special_tokens_map.json", "chat_template.jinja"} <= tokenizer_names
+    assert {
+        "vocab.json",
+        "merges.txt",
+        "added_tokens.json",
+        "special_tokens_map.json",
+        "chat_template.jinja",
+    } <= tokenizer_names
     assert model_names.isdisjoint(tokenizer_names)
 
 
 @pytest.mark.parametrize(
     ("name", "content"),
-    (("vocab.json", '{"token":true}'), ("merges.txt", "not-a-pair"), ("special_tokens_map.json", '{"x":NaN}')),
+    (
+        ("vocab.json", '{"token":true}'),
+        ("merges.txt", "not-a-pair"),
+        ("special_tokens_map.json", '{"x":NaN}'),
+    ),
 )
-def test_runtime_rejects_malformed_optional_tokenizer_sidecars(tmp_path: Path, name: str, content: str) -> None:
+def test_runtime_rejects_malformed_optional_tokenizer_sidecars(
+    tmp_path: Path, name: str, content: str
+) -> None:
     workload, environment, engine_file, _, _ = _fixture(tmp_path)
 
     class BadSidecar(FakeRunner):
@@ -426,17 +494,31 @@ def test_runtime_rejects_malformed_optional_tokenizer_sidecars(tmp_path: Path, n
             return evidence
 
     with pytest.raises(RuntimeV1Error):
-        execute_runtime(workload.canonical_bytes, environment=environment, runner=BadSidecar(), engine_file=engine_file)
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=BadSidecar(),
+            engine_file=engine_file,
+        )
 
 
-def test_portable_runtime_requirements_enforce_implementation_and_version(monkeypatch) -> None:
+def test_portable_runtime_requirements_enforce_implementation_and_version(
+    monkeypatch,
+) -> None:
     requirements = {
         "schema_version": "synaptic-sft-runtime-requirements/v1",
-        "python": {"implementation": "cpython", "minimum_version": "3.12", "maximum_version_exclusive": "3.14"},
+        "python": {
+            "implementation": "cpython",
+            "minimum_version": "3.12",
+            "maximum_version_exclusive": "3.14",
+        },
         "isolation": {"no_user_site": True, "safe_path": True},
         "allowed_environment": ["PATH"],
         "trainer_projection_schema": "synaptic-sft-trainer-projection/v1",
-        "artifact_formats": {"model": ["peft-safetensors", "full-safetensors"], "tokenizer": "tokenizer-json"},
+        "artifact_formats": {
+            "model": ["peft-safetensors", "full-safetensors"],
+            "tokenizer": "tokenizer-json",
+        },
     }
     runtime_v1._validate_portable_runtime_requirements(requirements)
     monkeypatch.setattr(runtime_v1.sys, "version_info", (3, 12, 0))
@@ -470,11 +552,22 @@ def test_runtime_rejects_unrecognized_or_empty_model_output(tmp_path: Path) -> N
         )
 
 
-@pytest.mark.parametrize("attack", (
-    "mixed-family", "base-drift", "unknown-weight", "incomplete-shards",
-    "mixed-shard-unsharded", "orphan-index", "opposite-index", "metadata-bool",
-))
-def test_runtime_rejects_ambiguous_or_incomplete_model_family(tmp_path: Path, attack: str) -> None:
+@pytest.mark.parametrize(
+    "attack",
+    (
+        "mixed-family",
+        "base-drift",
+        "unknown-weight",
+        "incomplete-shards",
+        "mixed-shard-unsharded",
+        "orphan-index",
+        "opposite-index",
+        "metadata-bool",
+    ),
+)
+def test_runtime_rejects_ambiguous_or_incomplete_model_family(
+    tmp_path: Path, attack: str
+) -> None:
     workload, environment, engine_file, _, _ = _fixture(tmp_path)
 
     class HostileModel(FakeRunner):
@@ -482,44 +575,66 @@ def test_runtime_rejects_ambiguous_or_incomplete_model_family(tmp_path: Path, at
             evidence = super().run(invocation)
             root = invocation.final_model_dir
             if attack == "mixed-family":
-                (root / "config.json").write_text('{"model_type":"fixture"}', encoding="utf-8")
+                (root / "config.json").write_text(
+                    '{"model_type":"fixture"}', encoding="utf-8"
+                )
                 (root / "model.safetensors").write_bytes(_safetensors())
             elif attack == "base-drift":
                 (root / "adapter_config.json").write_text(
-                    '{"base_model_name_or_path":"attacker/model","peft_type":"LORA"}', encoding="utf-8"
+                    '{"base_model_name_or_path":"attacker/model","peft_type":"LORA"}',
+                    encoding="utf-8",
                 )
             elif attack == "unknown-weight":
                 (root / "evil.bin").write_bytes(b"not a supported model artifact")
             elif attack == "incomplete-shards":
                 (root / "adapter_model.safetensors").unlink()
-                (root / "adapter_model-00001-of-00002.safetensors").write_bytes(_safetensors())
+                (root / "adapter_model-00001-of-00002.safetensors").write_bytes(
+                    _safetensors()
+                )
                 (root / "adapter_model.safetensors.index.json").write_text(
                     '{"metadata":{},"weight_map":{"weight":"adapter_model-00001-of-00002.safetensors"}}',
                     encoding="utf-8",
                 )
             elif attack == "mixed-shard-unsharded":
-                (root / "adapter_model-00001-of-00001.safetensors").write_bytes(_safetensors())
+                (root / "adapter_model-00001-of-00001.safetensors").write_bytes(
+                    _safetensors()
+                )
                 (root / "adapter_model.safetensors.index.json").write_text(
-                    '{"metadata":{},"weight_map":{"weight":"adapter_model-00001-of-00001.safetensors"}}', encoding="utf-8"
+                    '{"metadata":{},"weight_map":{"weight":"adapter_model-00001-of-00001.safetensors"}}',
+                    encoding="utf-8",
                 )
             elif attack == "orphan-index":
-                (root / "adapter_model.safetensors.index.json").write_text('{"metadata":{},"weight_map":{}}', encoding="utf-8")
+                (root / "adapter_model.safetensors.index.json").write_text(
+                    '{"metadata":{},"weight_map":{}}', encoding="utf-8"
+                )
             elif attack == "opposite-index":
-                (root / "model.safetensors.index.json").write_text('{"metadata":{},"weight_map":{}}', encoding="utf-8")
+                (root / "model.safetensors.index.json").write_text(
+                    '{"metadata":{},"weight_map":{}}', encoding="utf-8"
+                )
             else:
                 (root / "adapter_model.safetensors").unlink()
-                (root / "adapter_model-00001-of-00001.safetensors").write_bytes(_safetensors())
+                (root / "adapter_model-00001-of-00001.safetensors").write_bytes(
+                    _safetensors()
+                )
                 (root / "adapter_model.safetensors.index.json").write_text(
-                    '{"metadata":{"total_size":true},"weight_map":{"weight":"adapter_model-00001-of-00001.safetensors"}}', encoding="utf-8"
+                    '{"metadata":{"total_size":true},"weight_map":{"weight":"adapter_model-00001-of-00001.safetensors"}}',
+                    encoding="utf-8",
                 )
             return evidence
 
     with pytest.raises(RuntimeV1Error):
-        execute_runtime(workload.canonical_bytes, environment=environment, runner=HostileModel(), engine_file=engine_file)
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=HostileModel(),
+            engine_file=engine_file,
+        )
 
 
 @pytest.mark.parametrize("family", ("full", "sharded-peft"))
-def test_runtime_accepts_each_supported_exact_model_family(tmp_path: Path, family: str) -> None:
+def test_runtime_accepts_each_supported_exact_model_family(
+    tmp_path: Path, family: str
+) -> None:
     workload, environment, engine_file, _, _ = _fixture(tmp_path)
 
     class SupportedModel(FakeRunner):
@@ -529,19 +644,30 @@ def test_runtime_accepts_each_supported_exact_model_family(tmp_path: Path, famil
             if family == "full":
                 (root / "adapter_config.json").unlink()
                 (root / "adapter_model.safetensors").unlink()
-                (root / "config.json").write_text('{"model_type":"fixture"}', encoding="utf-8")
+                (root / "config.json").write_text(
+                    '{"model_type":"fixture"}', encoding="utf-8"
+                )
                 (root / "model.safetensors").write_bytes(_safetensors())
             else:
                 (root / "adapter_model.safetensors").unlink()
-                (root / "adapter_model-00001-of-00002.safetensors").write_bytes(_safetensors(name="weight_a"))
-                (root / "adapter_model-00002-of-00002.safetensors").write_bytes(_safetensors(payload=b"\x02\x00\x00\x00", name="weight_b"))
+                (root / "adapter_model-00001-of-00002.safetensors").write_bytes(
+                    _safetensors(name="weight_a")
+                )
+                (root / "adapter_model-00002-of-00002.safetensors").write_bytes(
+                    _safetensors(payload=b"\x02\x00\x00\x00", name="weight_b")
+                )
                 (root / "adapter_model.safetensors.index.json").write_text(
                     '{"metadata":{},"weight_map":{"weight_a":"adapter_model-00001-of-00002.safetensors","weight_b":"adapter_model-00002-of-00002.safetensors"}}',
                     encoding="utf-8",
                 )
             return evidence
 
-    execute_runtime(workload.canonical_bytes, environment=environment, runner=SupportedModel(), engine_file=engine_file)
+    execute_runtime(
+        workload.canonical_bytes,
+        environment=environment,
+        runner=SupportedModel(),
+        engine_file=engine_file,
+    )
 
 
 @pytest.mark.parametrize(
@@ -562,7 +688,16 @@ def test_runtime_accepts_each_supported_exact_model_family(tmp_path: Path, famil
         ("adapter_model.safetensors", _safetensors(offsets=(1, 5))),
         ("adapter_model.safetensors", _safetensors() + b"trailing"),
     ),
-    ids=("fake-config", "duplicate-config", "nonfinite-config", "one-byte", "zeros", "zero-tensor", "offsets", "length"),
+    ids=(
+        "fake-config",
+        "duplicate-config",
+        "nonfinite-config",
+        "one-byte",
+        "zeros",
+        "zero-tensor",
+        "offsets",
+        "length",
+    ),
 )
 def test_runtime_rejects_fake_model_contents(
     tmp_path: Path, filename: str, content: bytes
@@ -597,7 +732,14 @@ def test_runtime_rejects_fake_model_contents(
         ("tokenizer.json", b"\x00" * 32),
         ("tokenizer.json", b'{"model":{"type":"BPE","vocab":{}},"version":"1.0"}'),
     ),
-    ids=("fake-config", "duplicate-config", "nonfinite-config", "one-byte", "zeros", "empty-vocab"),
+    ids=(
+        "fake-config",
+        "duplicate-config",
+        "nonfinite-config",
+        "one-byte",
+        "zeros",
+        "empty-vocab",
+    ),
 )
 def test_runtime_rejects_fake_tokenizer_contents(
     tmp_path: Path, filename: str, content: bytes
@@ -653,10 +795,22 @@ def test_runtime_projection_comparison_is_json_type_strict(tmp_path: Path) -> No
             projection = json.loads(json.dumps(evidence.projection))
             projection["model"]["load_in_4bit"] = 0
             lineage = {**evidence.lineage, "synaptic_runtime_projection": projection}
-            return TrainerEvidence(evidence.exit_code, evidence.final_model_dir, evidence.tokenizer_dir, lineage, projection, evidence.metrics)
+            return TrainerEvidence(
+                evidence.exit_code,
+                evidence.final_model_dir,
+                evidence.tokenizer_dir,
+                lineage,
+                projection,
+                evidence.metrics,
+            )
 
     with pytest.raises(RuntimeV1Error, match="bind"):
-        execute_runtime(workload.canonical_bytes, environment=environment, runner=BooleanNumericAlias(), engine_file=engine_file)
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=BooleanNumericAlias(),
+            engine_file=engine_file,
+        )
 
 
 def test_runtime_rejects_unexpected_child_directory(tmp_path: Path) -> None:
@@ -671,7 +825,12 @@ def test_runtime_rejects_unexpected_child_directory(tmp_path: Path) -> None:
             return evidence
 
     with pytest.raises(RuntimeV1Error, match="nested"):
-        execute_runtime(workload.canonical_bytes, environment=environment, runner=NestedOutput(), engine_file=engine_file)
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=NestedOutput(),
+            engine_file=engine_file,
+        )
 
 
 def test_runtime_detects_artifact_mutation_during_snapshot(
@@ -748,8 +907,9 @@ def _relocated_runtime_lineage(tmp_path: Path):
     locked = workload.document["execution_source"]["runtime"]["roots"]
     observed_boundary = (tmp_path / "provider-observed" / "runtime-v1-test").resolve()
     replacements = {
-        locked[name].replace("\\", "/"):
-        str(observed_boundary / name).replace("\\", "/")
+        locked[name]
+        .replace("\\", "/"): str(observed_boundary / name)
+        .replace("\\", "/")
         for name in ("artifacts", "state", "tracking", "cache", "tmp")
     }
 
@@ -762,7 +922,7 @@ def _relocated_runtime_lineage(tmp_path: Path):
             normalized = value.replace("\\", "/")
             for old, new in replacements.items():
                 if normalized == old or normalized.startswith(old + "/"):
-                    return new + normalized[len(old):]
+                    return new + normalized[len(old) :]
             return normalized
         return value
 
@@ -877,6 +1037,236 @@ def test_bounded_stdin_accepts_exact_limit_and_rejects_trailing_byte() -> None:
         read_bounded_workload(io.BytesIO(exact + b"!"))
 
 
+@pytest.mark.skipif(os.name != "posix", reason="sealed file transport is POSIX-only")
+def test_authenticated_file_transport_accepts_the_exact_sealed_workload(
+    tmp_path: Path,
+) -> None:
+    workload, _, _, _, _ = _fixture(tmp_path)
+    control_root = (tmp_path / "control").resolve()
+    control_root.mkdir()
+    path = control_root / "workload.json"
+    path.write_bytes(workload.canonical_bytes)
+
+    assert (
+        read_authenticated_workload_file(
+            path,
+            control_root=control_root,
+            expected_byte_count=len(workload.canonical_bytes),
+            expected_sha256=hashlib.sha256(workload.canonical_bytes).hexdigest(),
+            expected_fingerprint=workload.fingerprint,
+        )
+        == workload.canonical_bytes
+    )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="sealed file transport is POSIX-only")
+def test_runtime_parser_consumes_only_the_complete_file_transport_binding(
+    tmp_path: Path,
+) -> None:
+    workload, _, _, _, _ = _fixture(tmp_path)
+    control_root = (tmp_path / "control").resolve()
+    control_root.mkdir()
+    path = control_root / "workload.json"
+    path.write_bytes(workload.canonical_bytes)
+    args = runtime_v1.build_parser().parse_args(
+        [
+            "--canonical-workload-file",
+            str(path),
+            "--canonical-workload-control-root",
+            str(control_root),
+            "--canonical-workload-byte-count",
+            str(len(workload.canonical_bytes)),
+            "--canonical-workload-sha256",
+            hashlib.sha256(workload.canonical_bytes).hexdigest(),
+            "--canonical-workload-fingerprint",
+            workload.fingerprint,
+        ]
+    )
+
+    assert runtime_v1._read_workload_input(args) == workload.canonical_bytes
+
+
+def test_runtime_rejects_incomplete_or_mixed_file_transport_flags() -> None:
+    incomplete = runtime_v1.build_parser().parse_args(
+        ["--canonical-workload-file", "/control/workload.json"]
+    )
+    with pytest.raises(RuntimeV1Error, match="complete binding"):
+        runtime_v1._read_workload_input(incomplete)
+
+    mixed = runtime_v1.build_parser().parse_args(
+        [
+            "--canonical-workload-stdin",
+            "--canonical-workload-sha256",
+            "f" * 64,
+        ]
+    )
+    with pytest.raises(RuntimeV1Error, match="cannot include file bindings"):
+        runtime_v1._read_workload_input(mixed)
+
+
+@pytest.mark.parametrize("binding", ("size", "digest", "fingerprint"))
+@pytest.mark.skipif(os.name != "posix", reason="sealed file transport is POSIX-only")
+def test_authenticated_file_transport_rejects_a_foreign_binding(
+    tmp_path: Path, binding: str
+) -> None:
+    workload, _, _, _, _ = _fixture(tmp_path)
+    control_root = (tmp_path / "control").resolve()
+    control_root.mkdir()
+    path = control_root / "workload.json"
+    path.write_bytes(workload.canonical_bytes)
+    values = {
+        "expected_byte_count": len(workload.canonical_bytes),
+        "expected_sha256": hashlib.sha256(workload.canonical_bytes).hexdigest(),
+        "expected_fingerprint": workload.fingerprint,
+    }
+    values[
+        {
+            "size": "expected_byte_count",
+            "digest": "expected_sha256",
+            "fingerprint": "expected_fingerprint",
+        }[binding]
+    ] = (
+        len(workload.canonical_bytes) - 1 if binding == "size" else "f" * 64
+    )
+
+    with pytest.raises(RuntimeV1Error, match="binding"):
+        read_authenticated_workload_file(path, control_root=control_root, **values)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="sealed file transport is POSIX-only")
+def test_authenticated_file_transport_rejects_a_redirected_member(
+    tmp_path: Path,
+) -> None:
+    workload, _, _, _, _ = _fixture(tmp_path)
+    control_root = (tmp_path / "control").resolve()
+    control_root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(workload.canonical_bytes)
+    path = control_root / "workload.json"
+    try:
+        path.symlink_to(outside)
+    except OSError:
+        pytest.skip("file symlinks are unavailable")
+
+    with pytest.raises(RuntimeV1Error, match="descriptor traversal"):
+        read_authenticated_workload_file(
+            path,
+            control_root=control_root,
+            expected_byte_count=len(workload.canonical_bytes),
+            expected_sha256=hashlib.sha256(workload.canonical_bytes).hexdigest(),
+            expected_fingerprint=workload.fingerprint,
+        )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="sealed file transport is POSIX-only")
+def test_authenticated_file_transport_rejects_fifo_member_promptly(
+    tmp_path: Path,
+) -> None:
+    control_root = (tmp_path / "control").resolve()
+    control_root.mkdir()
+    path = control_root / "workload.json"
+    os.mkfifo(path)
+    context = multiprocessing.get_context("spawn")
+    result = context.Queue()
+    process = context.Process(
+        target=_read_fifo_transport_child,
+        args=(str(path), str(control_root), result),
+    )
+    process.start()
+    process.join(timeout=2)
+    if process.is_alive():
+        process.terminate()
+        process.join(timeout=2)
+        pytest.fail("FIFO workload member blocked instead of failing promptly")
+    assert process.exitcode == 0
+    assert result.get(timeout=1) == "rejected"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="sealed file transport is POSIX-only")
+def test_authenticated_file_transport_rejects_identity_change_during_read(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workload, _, _, _, _ = _fixture(tmp_path)
+    control_root = (tmp_path / "control").resolve()
+    control_root.mkdir()
+    path = control_root / "workload.json"
+    path.write_bytes(workload.canonical_bytes)
+    original = runtime_v1._file_identity
+    calls = 0
+
+    def changed_identity(value):
+        nonlocal calls
+        calls += 1
+        identity = original(value)
+        return identity if calls == 1 else (*identity[:-1], identity[-1] + 1)
+
+    monkeypatch.setattr(runtime_v1, "_file_identity", changed_identity)
+    with pytest.raises(RuntimeV1Error, match="changed while"):
+        read_authenticated_workload_file(
+            path,
+            control_root=control_root,
+            expected_byte_count=len(workload.canonical_bytes),
+            expected_sha256=hashlib.sha256(workload.canonical_bytes).hexdigest(),
+            expected_fingerprint=workload.fingerprint,
+        )
+
+
+def test_authenticated_file_transport_fails_closed_without_posix_primitives(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(runtime_v1.os, "name", "nt")
+    with pytest.raises(RuntimeV1Error, match="POSIX descriptor traversal"):
+        read_authenticated_workload_file(
+            tmp_path / "control" / "workload.json",
+            control_root=tmp_path / "control",
+            expected_byte_count=1,
+            expected_sha256="f" * 64,
+            expected_fingerprint="e" * 64,
+        )
+
+
+def test_authenticated_file_transport_rejects_noncanonical_paths_before_open() -> None:
+    with pytest.raises(RuntimeV1Error, match="canonical and absolute"):
+        read_authenticated_workload_file(
+            Path("/control/../control/workload.json"),
+            control_root=Path("/control/../control"),
+            expected_byte_count=1,
+            expected_sha256="f" * 64,
+            expected_fingerprint="e" * 64,
+        )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="sealed file transport is POSIX-only")
+def test_authenticated_file_transport_rejects_ancestry_identity_swap(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workload, _, _, _, _ = _fixture(tmp_path)
+    control_root = (tmp_path / "control").resolve()
+    control_root.mkdir()
+    path = control_root / "workload.json"
+    path.write_bytes(workload.canonical_bytes)
+    original = runtime_v1._open_directory_chain
+    calls = 0
+
+    def changed_chain(root):
+        nonlocal calls
+        calls += 1
+        descriptors, identities = original(root)
+        if calls == 2:
+            identities = (*identities[:-1], (identities[-1][0], identities[-1][1] + 1))
+        return descriptors, identities
+
+    monkeypatch.setattr(runtime_v1, "_open_directory_chain", changed_chain)
+    with pytest.raises(RuntimeV1Error, match="ancestry changed"):
+        read_authenticated_workload_file(
+            path,
+            control_root=control_root,
+            expected_byte_count=len(workload.canonical_bytes),
+            expected_sha256=hashlib.sha256(workload.canonical_bytes).hexdigest(),
+            expected_fingerprint=workload.fingerprint,
+        )
+
+
 @pytest.mark.parametrize(
     "payload",
     (
@@ -889,7 +1279,9 @@ def test_bounded_stdin_accepts_exact_limit_and_rejects_trailing_byte() -> None:
         b'{"x":1}trailing',
     ),
 )
-def test_strict_canonical_parser_closes_hostile_numbers_and_bytes(payload: bytes) -> None:
+def test_strict_canonical_parser_closes_hostile_numbers_and_bytes(
+    payload: bytes,
+) -> None:
     with pytest.raises(RuntimeV1Error):
         _canonical_document(payload)
 

@@ -162,10 +162,25 @@ def test_sft_workload_is_canonical_and_deterministic() -> None:
     assert first.document["configuration"]["document"]["dataset"]["format"] == (
         "configured_chat_rows/v2"
     )
+    assert first.document["execution_source"]["runtime"]["schema_version"] == (
+        "synaptic-training-runtime/v1"
+    )
     requirements = first.document["runtime_requirements"]
     assert requirements["schema_version"] == "synaptic-sft-runtime-requirements/v1"
     assert requirements["trainer_projection_schema"] == "synaptic-sft-trainer-projection/v1"
     assert "python_executable" not in json.dumps(requirements)
+
+
+def test_execution_source_schema_rejects_the_removed_modal_runtime_alias() -> None:
+    workload = compile_sft_workload(
+        resolved_config=_config(), execution_source=_execution_source()
+    )
+    document = workload.document
+    document["execution_source"]["runtime"]["schema_version"] = (
+        "synaptic-modal-runtime/v1"
+    )
+
+    assert tuple(_workload_validator().iter_errors(document))
 
 
 def test_fingerprint_binds_model_and_source_revisions() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import math
 import os
@@ -21,7 +22,9 @@ from typing import BinaryIO, Mapping, Protocol, runtime_checkable
 MAX_WORKLOAD_BYTES = 256 * 1024
 MAX_LINEAGE_BYTES = 4 * 1024 * 1024
 EXECUTION_SOURCE_SCHEMA = "synaptic-execution-source/v1"
-RUNTIME_SCHEMA = "synaptic-modal-runtime/v1"
+RUNTIME_SCHEMA = "synaptic-training-runtime/v1"
+_WORKLOAD_FINGERPRINT_DOMAIN = b"synaptic-training-workload/v1\0"
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _ENTRYPOINT = PurePosixPath("Trainers/sft/runtime_v1.py")
 _ROOT_ENV = {
     "engine": "SYNAPTIC_ENGINE_ROOT",
@@ -47,13 +50,20 @@ _INHERITED_ENV = (
     "LC_ALL",
 )
 _MODEL_CONFIGS = frozenset({"adapter_config.json", "config.json"})
-_MODEL_PAYLOADS = re.compile(r"^(adapter_model|model)(?:-(\d{5})-of-(\d{5}))?\.safetensors$")
+_MODEL_PAYLOADS = re.compile(
+    r"^(adapter_model|model)(?:-(\d{5})-of-(\d{5}))?\.safetensors$"
+)
 _TOKENIZER_CONFIGS = frozenset({"tokenizer_config.json"})
 _TOKENIZER_PAYLOADS = frozenset({"tokenizer.json"})
-_TOKENIZER_OPTIONAL = frozenset({
-    "added_tokens.json", "special_tokens_map.json", "chat_template.jinja",
-    "merges.txt", "vocab.json",
-})
+_TOKENIZER_OPTIONAL = frozenset(
+    {
+        "added_tokens.json",
+        "special_tokens_map.json",
+        "chat_template.jinja",
+        "merges.txt",
+        "vocab.json",
+    }
+)
 _MODEL_OPTIONAL = frozenset({"generation_config.json", "README.md"})
 _KNOWN_IGNORED = frozenset({"training_args.bin"})
 _MAX_INDEX_BYTES = 16 * 1024 * 1024
@@ -148,31 +158,44 @@ def _json_type_equal(left: object, right: object) -> bool:
 
 
 def _version_tuple(value: object, label: str) -> tuple[int, ...]:
-    if not isinstance(value, str) or re.fullmatch(r"0|[1-9]\d*(?:\.(?:0|[1-9]\d*)){1,3}", value) is None:
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"0|[1-9]\d*(?:\.(?:0|[1-9]\d*)){1,3}", value) is None
+    ):
         raise RuntimeV1Error(f"{label} is not a strict runtime version")
     return tuple(int(part) for part in value.split("."))
 
 
 def _validate_portable_runtime_requirements(requirements: object) -> None:
     if not isinstance(requirements, Mapping) or set(requirements) != {
-        "schema_version", "python", "isolation", "allowed_environment",
-        "trainer_projection_schema", "artifact_formats",
+        "schema_version",
+        "python",
+        "isolation",
+        "allowed_environment",
+        "trainer_projection_schema",
+        "artifact_formats",
     }:
         raise RuntimeV1Error("portable runtime requirements are malformed")
     python = requirements["python"]
     if not isinstance(python, Mapping) or set(python) != {
-        "implementation", "minimum_version", "maximum_version_exclusive"
+        "implementation",
+        "minimum_version",
+        "maximum_version_exclusive",
     }:
         raise RuntimeV1Error("portable Python requirements are malformed")
     if python["implementation"] != sys.implementation.name:
         raise RuntimeV1Error("runtime Python implementation is unsupported")
     minimum = _version_tuple(python["minimum_version"], "minimum Python version")
-    maximum = _version_tuple(python["maximum_version_exclusive"], "maximum Python version")
+    maximum = _version_tuple(
+        python["maximum_version_exclusive"], "maximum Python version"
+    )
     current = tuple(sys.version_info[: max(len(minimum), len(maximum))])
     minimum_cmp = minimum + (0,) * (len(current) - len(minimum))
     maximum_cmp = maximum + (0,) * (len(current) - len(maximum))
     if not minimum_cmp <= current < maximum_cmp:
-        raise RuntimeV1Error("runtime Python version is outside the portable requirement")
+        raise RuntimeV1Error(
+            "runtime Python version is outside the portable requirement"
+        )
     if not _json_type_equal(
         requirements["isolation"], {"no_user_site": True, "safe_path": True}
     ):
@@ -183,7 +206,8 @@ def _validate_portable_runtime_requirements(requirements: object) -> None:
         not isinstance(allowed, list)
         or len(allowed) != len(set(allowed))
         or any(not isinstance(item, str) or not item for item in allowed)
-        or requirements["trainer_projection_schema"] != "synaptic-sft-trainer-projection/v1"
+        or requirements["trainer_projection_schema"]
+        != "synaptic-sft-trainer-projection/v1"
         or not isinstance(formats, Mapping)
         or set(formats) != {"model", "tokenizer"}
         or formats["model"] != ["peft-safetensors", "full-safetensors"]
@@ -221,6 +245,171 @@ def read_bounded_workload(stream: BinaryIO) -> bytes:
     if stream.read(1):
         raise RuntimeV1Error("workload stdin exceeds its byte bound")
     return payload
+
+
+def read_authenticated_workload_file(
+    path: Path,
+    *,
+    control_root: Path,
+    expected_byte_count: int,
+    expected_sha256: str,
+    expected_fingerprint: str,
+) -> bytes:
+    """Read one sealed workload through retained POSIX directory descriptors."""
+
+    if not isinstance(path, Path) or not isinstance(control_root, Path):
+        raise TypeError("workload file and control root must be Path values")
+    if (
+        not path.is_absolute()
+        or not control_root.is_absolute()
+        or "//" in path.as_posix()
+        or "//" in control_root.as_posix()
+        or "\\" in path.as_posix()
+        or "\\" in control_root.as_posix()
+        or any(part in {"", ".", ".."} for part in path.parts[1:])
+        or any(part in {"", ".", ".."} for part in control_root.parts[1:])
+    ):
+        raise RuntimeV1Error("workload file paths must be canonical and absolute")
+    if path != control_root / "workload.json":
+        raise RuntimeV1Error("workload file must be the fixed control-root member")
+    if (
+        type(expected_byte_count) is not int
+        or isinstance(expected_byte_count, bool)
+        or not 1 <= expected_byte_count <= MAX_WORKLOAD_BYTES
+    ):
+        raise RuntimeV1Error("workload file byte count is invalid")
+    if (
+        type(expected_sha256) is not str
+        or _DIGEST_RE.fullmatch(expected_sha256) is None
+    ):
+        raise RuntimeV1Error("workload file digest is invalid")
+    if (
+        type(expected_fingerprint) is not str
+        or _DIGEST_RE.fullmatch(expected_fingerprint) is None
+    ):
+        raise RuntimeV1Error("workload file fingerprint is invalid")
+    _require_posix_descriptor_file_transport()
+    directory_descriptors: list[int] = []
+    confirmation_descriptors: list[int] = []
+    file_descriptor: int | None = None
+    confirmation_file_descriptor: int | None = None
+    try:
+        directory_descriptors, directory_identities = _open_directory_chain(
+            control_root
+        )
+        root_descriptor = directory_descriptors[-1]
+        file_descriptor = os.open(
+            "workload.json",
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=root_descriptor,
+        )
+        before = os.fstat(file_descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_WORKLOAD_BYTES:
+            raise RuntimeV1Error("workload file must be bounded and regular")
+        chunks: list[bytes] = []
+        remaining = MAX_WORKLOAD_BYTES + 1
+        while remaining:
+            chunk = os.read(file_descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        after = os.fstat(file_descriptor)
+        if len(payload) > MAX_WORKLOAD_BYTES:
+            raise RuntimeV1Error("workload file exceeds its byte bound")
+        if _file_identity(before) != _file_identity(after):
+            raise RuntimeV1Error("workload file changed while it was read")
+        if (
+            tuple(
+                _directory_descriptor_identity(os.fstat(descriptor))
+                for descriptor in directory_descriptors
+            )
+            != directory_identities
+        ):
+            raise RuntimeV1Error("workload ancestry changed while it was read")
+        confirmation_descriptors, confirmation_identities = _open_directory_chain(
+            control_root
+        )
+        if confirmation_identities != directory_identities:
+            raise RuntimeV1Error("workload ancestry changed while it was read")
+        confirmation_file_descriptor = os.open(
+            "workload.json",
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=confirmation_descriptors[-1],
+        )
+        confirmed = os.fstat(confirmation_file_descriptor)
+        if _file_identity(after) != _file_identity(confirmed):
+            raise RuntimeV1Error("workload file changed while it was read")
+    except OSError as exc:
+        raise RuntimeV1Error("workload descriptor traversal failed closed") from exc
+    finally:
+        for descriptor in (
+            confirmation_file_descriptor,
+            file_descriptor,
+        ):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        for descriptor in reversed(confirmation_descriptors + directory_descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+    if len(payload) != expected_byte_count:
+        raise RuntimeV1Error("workload file byte count does not match its binding")
+    observed_sha256 = hashlib.sha256(payload).hexdigest()
+    if not hmac.compare_digest(observed_sha256, expected_sha256):
+        raise RuntimeV1Error("workload file digest does not match its binding")
+    observed_fingerprint = hashlib.sha256(
+        _WORKLOAD_FINGERPRINT_DOMAIN + payload
+    ).hexdigest()
+    if not hmac.compare_digest(observed_fingerprint, expected_fingerprint):
+        raise RuntimeV1Error("workload file fingerprint does not match its binding")
+    return payload
+
+
+def _require_posix_descriptor_file_transport() -> None:
+    required_flags = ("O_NOFOLLOW", "O_DIRECTORY", "O_CLOEXEC", "O_NONBLOCK")
+    if (
+        os.name != "posix"
+        or os.open not in getattr(os, "supports_dir_fd", set())
+        or any(
+            not hasattr(os, name) or type(getattr(os, name)) is not int
+            for name in required_flags
+        )
+    ):
+        raise RuntimeV1Error("sealed workload files require POSIX descriptor traversal")
+
+
+def _directory_descriptor_identity(value: os.stat_result) -> tuple[int, int]:
+    if not stat.S_ISDIR(value.st_mode):
+        raise RuntimeV1Error("workload ancestry must contain only directories")
+    return value.st_dev, value.st_ino
+
+
+def _open_directory_chain(
+    root: Path,
+) -> tuple[list[int], tuple[tuple[int, int], ...]]:
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptors = [os.open(root.anchor, flags)]
+    try:
+        for component in root.parts[1:]:
+            descriptors.append(os.open(component, flags, dir_fd=descriptors[-1]))
+        identities = tuple(
+            _directory_descriptor_identity(os.fstat(descriptor))
+            for descriptor in descriptors
+        )
+        return descriptors, identities
+    except BaseException:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise
 
 
 def _canonical_document(payload: bytes) -> dict[str, object]:
@@ -273,7 +462,9 @@ def _validate_schema(document: Mapping[str, object], engine_root: Path) -> None:
         raise RuntimeV1Error("execution-source schema identity is invalid")
     validator_type = validator_for(schema)
     validator_type.check_schema(schema)
-    registry = Registry().with_resource(schema_id, Resource.from_contents(source_schema))
+    registry = Registry().with_resource(
+        schema_id, Resource.from_contents(source_schema)
+    )
     errors = tuple(validator_type(schema, registry=registry).iter_errors(document))
     if errors:
         raise RuntimeV1Error("workload failed the SFT v1 schema")
@@ -338,10 +529,9 @@ def _read_regular(path: Path, *, maximum: int) -> bytes:
         raise RuntimeV1Error("runtime file could not be read") from exc
     if len(content) > maximum:
         raise RuntimeV1Error("runtime file exceeds its byte bound")
-    if (
-        _file_identity(before) != _file_identity(after)
-        or _stable_path_identity(after) != _stable_path_identity(current)
-    ):
+    if _file_identity(before) != _file_identity(after) or _stable_path_identity(
+        after
+    ) != _stable_path_identity(current):
         raise RuntimeV1Error("runtime file changed while it was read")
     return content
 
@@ -371,7 +561,10 @@ def bind_runtime_roots(
     if not isinstance(execution_source, Mapping):
         raise RuntimeV1Error("workload execution source is missing")
     runtime = execution_source.get("runtime")
-    if not isinstance(runtime, Mapping) or runtime.get("schema_version") != RUNTIME_SCHEMA:
+    if (
+        not isinstance(runtime, Mapping)
+        or runtime.get("schema_version") != RUNTIME_SCHEMA
+    ):
         raise RuntimeV1Error("execution source lacks the runtime contract")
     expected = runtime.get("roots")
     if not isinstance(expected, Mapping) or set(expected) != set(_ROOT_ENV):
@@ -409,25 +602,22 @@ def bind_runtime_roots(
         raw = environment.get(variable)
         locked = expected.get(name)
         if not isinstance(raw, str) or not raw or raw != locked:
-            raise RuntimeV1Error("environment root does not match the locked runtime root")
+            raise RuntimeV1Error(
+                "environment root does not match the locked runtime root"
+            )
         path = Path(raw)
         if not path.is_absolute():
             raise RuntimeV1Error("runtime roots must be absolute")
         _assert_no_redirected_components(
             path,
-            allowed_redirect=(
-                writable_boundary if name in _WRITABLE_NAMES else None
-            ),
+            allowed_redirect=(writable_boundary if name in _WRITABLE_NAMES else None),
         )
         if not path.exists() or not path.is_dir() or _is_redirect(path):
             raise RuntimeV1Error("runtime roots must be existing link-free directories")
         resolved = path.resolve(strict=True)
         if name not in _WRITABLE_NAMES and resolved != path:
             raise RuntimeV1Error("runtime root contains an unresolved alias")
-        if (
-            name in _WRITABLE_NAMES
-            and resolved_boundary not in resolved.parents
-        ):
+        if name in _WRITABLE_NAMES and resolved_boundary not in resolved.parents:
             raise RuntimeV1Error(
                 "writable runtime root escapes its resolved capability root"
             )
@@ -438,7 +628,9 @@ def bind_runtime_roots(
 
 
 def _is_redirect(path: Path) -> bool:
-    if path.is_symlink() or (hasattr(os.path, "isjunction") and os.path.isjunction(path)):
+    if path.is_symlink() or (
+        hasattr(os.path, "isjunction") and os.path.isjunction(path)
+    ):
         return True
     try:
         attributes = path.lstat().st_file_attributes
@@ -514,9 +706,14 @@ def _validate_root_topology(
         raise RuntimeV1Error("runtime entrypoint is outside the locked engine root")
     topology = execution_source.get("topology")
     sources = execution_source.get("sources")
-    if not isinstance(sources, Mapping) or not isinstance(sources.get("engine"), Mapping):
+    if not isinstance(sources, Mapping) or not isinstance(
+        sources.get("engine"), Mapping
+    ):
         raise RuntimeV1Error("source topology is incomplete")
-    if not isinstance(topology, Mapping) or topology.get("execution_mode") != "dual_clone":
+    if (
+        not isinstance(topology, Mapping)
+        or topology.get("execution_mode") != "dual_clone"
+    ):
         raise RuntimeV1Error("runtime v1 requires the finalized dual-clone topology")
     if roots.engine == roots.project:
         raise RuntimeV1Error("dual-clone roots must be distinct")
@@ -546,7 +743,9 @@ def _resolve_relative(root: Path, value: str, *, require_file: bool) -> Path:
     if not isinstance(value, str) or not value or "\\" in value or "://" in value:
         raise RuntimeV1Error("project path reference is invalid")
     relative = PurePosixPath(value)
-    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+    if relative.is_absolute() or any(
+        part in {"", ".", ".."} for part in relative.parts
+    ):
         raise RuntimeV1Error("project path reference escapes its root")
     candidate = root.joinpath(*relative.parts)
     _assert_no_redirected_components(root)
@@ -622,16 +821,16 @@ def decode_and_validate_workload(
             execution_source=execution_source,
         )
         if workload.canonical_bytes != payload:
-            raise RuntimeV1Error("workload bytes do not match deterministic compilation")
+            raise RuntimeV1Error(
+                "workload bytes do not match deterministic compilation"
+            )
     except (TypeError, ValueError) as exc:
         error = RuntimeV1Error("workload could not be reconstructed")
         raise _mark_runtime_stage(
             error, "runtime_workload_reconstruction_rejected"
         ) from exc
     except RuntimeV1Error as error:
-        raise _mark_runtime_stage(
-            error, "runtime_workload_reconstruction_rejected"
-        )
+        raise _mark_runtime_stage(error, "runtime_workload_reconstruction_rejected")
     expected_fingerprint = environment.get("SYNAPTIC_WORKLOAD_FINGERPRINT")
     if expected_fingerprint != workload.fingerprint:
         raise _mark_runtime_stage(
@@ -711,11 +910,17 @@ def build_trainer_invocation(
     sources = document["execution_source"]["sources"]
     project_revision = sources["project"]["commit"]
     if dataset.get("revision") != project_revision:
-        raise RuntimeV1Error("project dataset revision must match the locked project commit")
+        raise RuntimeV1Error(
+            "project dataset revision must match the locked project commit"
+        )
     content_digest = dataset.get("content_digest")
-    if not isinstance(content_digest, str) or hashlib.sha256(
-        _read_regular(dataset_path, maximum=8 * 1024 * 1024 * 1024)
-    ).hexdigest() != content_digest:
+    if (
+        not isinstance(content_digest, str)
+        or hashlib.sha256(
+            _read_regular(dataset_path, maximum=8 * 1024 * 1024 * 1024)
+        ).hexdigest()
+        != content_digest
+    ):
         raise RuntimeV1Error("project dataset content digest does not match")
 
     trainer_root = roots.state / "runtime-v1-trainer"
@@ -732,18 +937,29 @@ def build_trainer_invocation(
     requirements = document.get("runtime_requirements")
     _validate_portable_runtime_requirements(requirements)
     runtime_lock = document["execution_source"].get("runtime")
-    interpreter = runtime_lock.get("interpreter") if isinstance(runtime_lock, Mapping) else None
-    execution_environment = runtime_lock.get("environment") if isinstance(runtime_lock, Mapping) else None
+    interpreter = (
+        runtime_lock.get("interpreter") if isinstance(runtime_lock, Mapping) else None
+    )
+    execution_environment = (
+        runtime_lock.get("environment") if isinstance(runtime_lock, Mapping) else None
+    )
     if not isinstance(interpreter, Mapping) or set(interpreter) != {
-        "implementation", "version", "executable", "executable_digest"
+        "implementation",
+        "version",
+        "executable",
+        "executable_digest",
     }:
         raise RuntimeV1Error("execution interpreter is missing or malformed")
-    if interpreter["implementation"] != sys.implementation.name or interpreter["version"] != ".".join(
-        str(part) for part in sys.version_info[:3]
-    ):
-        raise RuntimeV1Error("execution interpreter identity does not match this runtime")
+    if interpreter["implementation"] != sys.implementation.name or interpreter[
+        "version"
+    ] != ".".join(str(part) for part in sys.version_info[:3]):
+        raise RuntimeV1Error(
+            "execution interpreter identity does not match this runtime"
+        )
     python_executable = interpreter["executable"]
-    if not isinstance(python_executable, str) or Path(python_executable).resolve(strict=True) != Path(sys.executable).resolve(strict=True):
+    if not isinstance(python_executable, str) or Path(python_executable).resolve(
+        strict=True
+    ) != Path(sys.executable).resolve(strict=True):
         raise RuntimeV1Error("resolved runtime interpreter does not match this runtime")
     planned_environment = (
         execution_environment.get("variables")
@@ -755,10 +971,15 @@ def build_trainer_invocation(
     if (
         not isinstance(planned_environment, Mapping)
         or not isinstance(allowed_environment, list)
-        or any(not isinstance(k, str) or not isinstance(v, str) for k, v in planned_environment.items())
+        or any(
+            not isinstance(k, str) or not isinstance(v, str)
+            for k, v in planned_environment.items()
+        )
         or not set(planned_environment).issubset(set(allowed_environment))
     ):
-        raise RuntimeV1Error("resolved runtime environment violates portable requirements")
+        raise RuntimeV1Error(
+            "resolved runtime environment violates portable requirements"
+        )
     argv = [
         str(Path(python_executable).resolve()),
         str(trainer_path),
@@ -790,11 +1011,7 @@ def build_trainer_invocation(
     ]
     _append_sft_arguments(argv, sft, model)
     child_env = dict(planned_environment)
-    child_env.update(
-        {
-            _ROOT_ENV[name]: str(getattr(roots, name)) for name in _ROOT_ENV
-        }
-    )
+    child_env.update({_ROOT_ENV[name]: str(getattr(roots, name)) for name in _ROOT_ENV})
     child_env.update(
         {
             "SYNAPTIC_WORKLOAD_FINGERPRINT": workload.fingerprint,
@@ -809,7 +1026,9 @@ def build_trainer_invocation(
         }
     )
     expected_projection = _expected_trainer_projection(
-        workload, dataset_path=dataset_path, run_dir=run_dir,
+        workload,
+        dataset_path=dataset_path,
+        run_dir=run_dir,
         final_model_dir=final_model_dir,
     )
     return TrainerInvocation(
@@ -851,9 +1070,14 @@ def _append_sft_arguments(
             argv.extend((flag, normalize(sft[key], key)))
     targets = sft.get("lora_target_modules")
     if targets is not None:
-        if not isinstance(targets, list) or not targets or any(
-            not isinstance(item, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", item)
-            for item in targets
+        if (
+            not isinstance(targets, list)
+            or not targets
+            or any(
+                not isinstance(item, str)
+                or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", item)
+                for item in targets
+            )
         ):
             raise RuntimeV1Error("lora_target_modules is invalid")
         argv.extend(("--lora-target-modules", ",".join(targets)))
@@ -918,7 +1142,10 @@ def _nonnegative_decimal(value: object, name: str) -> str:
 class SubprocessTrainerRunner:
     def run(self, invocation: TrainerInvocation) -> TrainerEvidence:
         invocation.stdout_path.parent.mkdir(parents=True, exist_ok=True)
-        with invocation.stdout_path.open("xb") as stdout, invocation.stderr_path.open("xb") as stderr:
+        with (
+            invocation.stdout_path.open("xb") as stdout,
+            invocation.stderr_path.open("xb") as stderr,
+        ):
             completed = subprocess.run(
                 invocation.argv,
                 cwd=invocation.cwd,
@@ -929,7 +1156,14 @@ class SubprocessTrainerRunner:
                 check=False,
             )
         if completed.returncode != 0:
-            return TrainerEvidence(completed.returncode, invocation.final_model_dir, invocation.tokenizer_dir, {}, {}, {})
+            return TrainerEvidence(
+                completed.returncode,
+                invocation.final_model_dir,
+                invocation.tokenizer_dir,
+                {},
+                {},
+                {},
+            )
         lineage = _read_json_file(invocation.lineage_path, maximum=MAX_LINEAGE_BYTES)
         projection = _read_json_file(
             invocation.projection_path,
@@ -997,7 +1231,9 @@ def execute_runtime(
     except RuntimeV1Error as error:
         raise _mark_runtime_stage(error, "runtime_evidence_rejected")
     artifacts: list[dict[str, object]] = []
-    artifacts.append(_write_artifact(roots.artifacts, "workload_record", "workload.json", payload))
+    artifacts.append(
+        _write_artifact(roots.artifacts, "workload_record", "workload.json", payload)
+    )
     lineage = {
         "schema_version": "synaptic-sft-training-lineage/v1",
         "workload_fingerprint": workload.fingerprint,
@@ -1034,7 +1270,9 @@ def execute_runtime(
             filename="final_model.tar",
             source=evidence.final_model_dir,
             artifact_kind="model",
-            locked_model_ref=workload.document["configuration"]["document"]["model"]["ref"],
+            locked_model_ref=workload.document["configuration"]["document"]["model"][
+                "ref"
+            ],
         )
     )
     artifacts.append(
@@ -1207,7 +1445,11 @@ def _validate_artifact_directory(path: Path, state_root: Path) -> None:
         resolved = path.resolve(strict=True)
     except OSError as exc:
         raise RuntimeV1Error("trainer artifact directory is missing") from exc
-    if not resolved.is_dir() or state_root not in resolved.parents or _is_redirect(path):
+    if (
+        not resolved.is_dir()
+        or state_root not in resolved.parents
+        or _is_redirect(path)
+    ):
         raise RuntimeV1Error("trainer artifact directory escapes writable state")
     for item in resolved.iterdir():
         _assert_no_redirected_components(item)
@@ -1231,7 +1473,9 @@ def _write_exclusive(path: Path, content: bytes) -> None:
         raise RuntimeV1Error("runtime artifact write failed") from exc
 
 
-def _write_artifact(root: Path, role: str, filename: str, content: bytes) -> dict[str, object]:
+def _write_artifact(
+    root: Path, role: str, filename: str, content: bytes
+) -> dict[str, object]:
     path = root / filename
     _write_exclusive(path, content)
     return {
@@ -1251,7 +1495,9 @@ def _archive_artifact(
     artifact_kind: str,
     locked_model_ref: str | None = None,
 ) -> dict[str, object]:
-    members = _select_artifact_members(source, artifact_kind, locked_model_ref=locked_model_ref)
+    members = _select_artifact_members(
+        source, artifact_kind, locked_model_ref=locked_model_ref
+    )
     destination = root / filename
     try:
         with destination.open("xb") as raw:
@@ -1269,7 +1515,12 @@ def _archive_artifact(
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             content_digest.update(chunk)
             size += len(chunk)
-    return {"role": role, "path": filename, "sha256": content_digest.hexdigest(), "size": size}
+    return {
+        "role": role,
+        "path": filename,
+        "sha256": content_digest.hexdigest(),
+        "size": size,
+    }
 
 
 def _select_artifact_members(
@@ -1288,11 +1539,21 @@ def _select_artifact_members(
         adapter = "adapter_config.json" in files
         full = "config.json" in files
         if adapter == full:
-            raise RuntimeV1Error("trainer model output must contain exactly one model family")
+            raise RuntimeV1Error(
+                "trainer model output must contain exactly one model family"
+            )
         family = "adapter_model" if adapter else "model"
         config_name = "adapter_config.json" if adapter else "config.json"
-        payloads = sorted(name for name in files if (match := _MODEL_PAYLOADS.fullmatch(name)) and match.group(1) == family)
-        opposite = [name for name in files if (match := _MODEL_PAYLOADS.fullmatch(name)) and match.group(1) != family]
+        payloads = sorted(
+            name
+            for name in files
+            if (match := _MODEL_PAYLOADS.fullmatch(name)) and match.group(1) == family
+        )
+        opposite = [
+            name
+            for name in files
+            if (match := _MODEL_PAYLOADS.fullmatch(name)) and match.group(1) != family
+        ]
         if opposite:
             raise RuntimeV1Error("trainer model output mixes model families")
         index_name = f"{family}.safetensors.index.json"
@@ -1321,18 +1582,30 @@ def _select_artifact_members(
     if artifact_kind == "model":
         for name in configs:
             _validate_model_config(files[name], name, locked_model_ref=locked_model_ref)
-        tensor_info = {name: _validate_safetensors_file(files[name]) for name in payloads}
+        tensor_info = {
+            name: _validate_safetensors_file(files[name]) for name in payloads
+        }
         _validate_model_shards(payloads, files, tensor_info, family)
         if "generation_config.json" in files:
-            generation = _read_json_file(files["generation_config.json"], maximum=4 * 1024 * 1024)
-            if not isinstance(generation, Mapping) or not _bounded_json_tree(generation):
+            generation = _read_json_file(
+                files["generation_config.json"], maximum=4 * 1024 * 1024
+            )
+            if not isinstance(generation, Mapping) or not _bounded_json_tree(
+                generation
+            ):
                 raise RuntimeV1Error("generation_config.json is malformed")
-        if "README.md" in files and not _read_utf8_text(files["README.md"], maximum=4 * 1024 * 1024).strip():
+        if (
+            "README.md" in files
+            and not _read_utf8_text(files["README.md"], maximum=4 * 1024 * 1024).strip()
+        ):
             raise RuntimeV1Error("README.md is empty")
         unknown = set(files) - set(selected) - _KNOWN_IGNORED - validated_tokenizer
         if unknown:
             raise RuntimeV1Error("trainer model output contains an unsupported file")
-        if "training_args.bin" in files and not 0 < files["training_args.bin"].stat().st_size <= 16 * 1024 * 1024:
+        if (
+            "training_args.bin" in files
+            and not 0 < files["training_args.bin"].stat().st_size <= 16 * 1024 * 1024
+        ):
             raise RuntimeV1Error("training_args.bin is empty or oversized")
     else:
         if set(selected) != validated_tokenizer:
@@ -1340,7 +1613,9 @@ def _select_artifact_members(
     return tuple(files[name] for name in selected)
 
 
-def _validate_model_config(path: Path, name: str, *, locked_model_ref: str | None) -> None:
+def _validate_model_config(
+    path: Path, name: str, *, locked_model_ref: str | None
+) -> None:
     document = _read_json_file(path, maximum=4 * 1024 * 1024)
     if name == "adapter_config.json":
         if (
@@ -1349,10 +1624,7 @@ def _validate_model_config(path: Path, name: str, *, locked_model_ref: str | Non
             or document["base_model_name_or_path"] != locked_model_ref
         ):
             raise RuntimeV1Error("trainer adapter config is not recognizable LoRA")
-    elif (
-        not isinstance(document.get("model_type"), str)
-        or not document["model_type"]
-    ):
+    elif not isinstance(document.get("model_type"), str) or not document["model_type"]:
         raise RuntimeV1Error("trainer model config is not recognizable")
 
 
@@ -1381,7 +1653,9 @@ def _validate_tokenizer_json(path: Path) -> None:
 
 
 def _validate_tokenizer_files(files: Mapping[str, Path]) -> set[str]:
-    present = (_TOKENIZER_CONFIGS | _TOKENIZER_PAYLOADS | _TOKENIZER_OPTIONAL) & set(files)
+    present = (_TOKENIZER_CONFIGS | _TOKENIZER_PAYLOADS | _TOKENIZER_OPTIONAL) & set(
+        files
+    )
     for name in present:
         path = files[name]
         if not 0 < path.lstat().st_size <= _MAX_ARCHIVE_MEMBER_BYTES:
@@ -1392,19 +1666,33 @@ def _validate_tokenizer_files(files: Mapping[str, Path]) -> set[str]:
             _validate_tokenizer_json(path)
         elif name in {"vocab.json", "added_tokens.json"}:
             document = _read_json_file(path, maximum=512 * 1024 * 1024)
-            if not isinstance(document, Mapping) or not document or len(document) > 2_000_000 or any(
-                not isinstance(token, str) or not token or not isinstance(index, int)
-                or isinstance(index, bool) or index < 0
-                for token, index in document.items()
+            if (
+                not isinstance(document, Mapping)
+                or not document
+                or len(document) > 2_000_000
+                or any(
+                    not isinstance(token, str)
+                    or not token
+                    or not isinstance(index, int)
+                    or isinstance(index, bool)
+                    or index < 0
+                    for token, index in document.items()
+                )
             ):
                 raise RuntimeV1Error(f"{name} is not a recognizable token mapping")
         elif name == "special_tokens_map.json":
             document = _read_json_file(path, maximum=4 * 1024 * 1024)
-            if not isinstance(document, Mapping) or len(document) > 4096 or not _bounded_json_tree(document):
+            if (
+                not isinstance(document, Mapping)
+                or len(document) > 4096
+                or not _bounded_json_tree(document)
+            ):
                 raise RuntimeV1Error("special_tokens_map.json is malformed")
         elif name == "merges.txt":
             text = _read_utf8_text(path, maximum=512 * 1024 * 1024)
-            lines = [line for line in text.splitlines() if line and not line.startswith("#")]
+            lines = [
+                line for line in text.splitlines() if line and not line.startswith("#")
+            ]
             if not lines or any(len(line.split()) != 2 for line in lines):
                 raise RuntimeV1Error("merges.txt is malformed")
         elif name == "chat_template.jinja":
@@ -1430,10 +1718,14 @@ def _bounded_json_tree(value: object, *, depth: int = 0) -> bool:
     if isinstance(value, float):
         return math.isfinite(value)
     if isinstance(value, list):
-        return len(value) <= 100_000 and all(_bounded_json_tree(item, depth=depth + 1) for item in value)
+        return len(value) <= 100_000 and all(
+            _bounded_json_tree(item, depth=depth + 1) for item in value
+        )
     if isinstance(value, Mapping):
         return len(value) <= 100_000 and all(
-            isinstance(key, str) and len(key) <= 4096 and _bounded_json_tree(item, depth=depth + 1)
+            isinstance(key, str)
+            and len(key) <= 4096
+            and _bounded_json_tree(item, depth=depth + 1)
             for key, item in value.items()
         )
     return False
@@ -1446,7 +1738,9 @@ def _validate_model_shards(
     family: str,
 ) -> None:
     matches = [_MODEL_PAYLOADS.fullmatch(name) for name in payloads]
-    sharded = [match for match in matches if match is not None and match.group(2) is not None]
+    sharded = [
+        match for match in matches if match is not None and match.group(2) is not None
+    ]
     index_name = f"{family}.safetensors.index.json"
     if sharded:
         totals = {int(match.group(3)) for match in sharded}
@@ -1454,19 +1748,29 @@ def _validate_model_shards(
             raise RuntimeV1Error("model shards declare inconsistent totals")
         total = totals.pop()
         numbers = {int(match.group(2)) for match in sharded}
-        if not 1 <= total <= _MAX_SHARDS or numbers != set(range(1, total + 1)) or len(payloads) != total:
+        if (
+            not 1 <= total <= _MAX_SHARDS
+            or numbers != set(range(1, total + 1))
+            or len(payloads) != total
+        ):
             raise RuntimeV1Error("model shard set is incomplete")
         if index_name not in files:
             raise RuntimeV1Error("sharded model output lacks its index")
         index = _read_json_file(files[index_name], maximum=_MAX_INDEX_BYTES)
-        if set(index) != {"metadata", "weight_map"} or not isinstance(index["metadata"], Mapping) or not isinstance(index["weight_map"], Mapping):
+        if (
+            set(index) != {"metadata", "weight_map"}
+            or not isinstance(index["metadata"], Mapping)
+            or not isinstance(index["weight_map"], Mapping)
+        ):
             raise RuntimeV1Error("model shard index is malformed")
         metadata = index["metadata"]
         if set(metadata) - {"total_size"} or (
-            "total_size" in metadata and (
+            "total_size" in metadata
+            and (
                 not isinstance(metadata["total_size"], int)
                 or isinstance(metadata["total_size"], bool)
-                or metadata["total_size"] != sum(info[1] for info in tensor_info.values())
+                or metadata["total_size"]
+                != sum(info[1] for info in tensor_info.values())
             )
         ):
             raise RuntimeV1Error("model shard index metadata is invalid")
@@ -1480,9 +1784,15 @@ def _validate_model_shards(
         for name, shard in weight_map.items():
             indexed[shard].add(name)
         if any(indexed[name] != set(tensor_info[name][0]) for name in payloads):
-            raise RuntimeV1Error("model shard index does not exactly describe payload tensors")
+            raise RuntimeV1Error(
+                "model shard index does not exactly describe payload tensors"
+            )
     else:
-        if len(payloads) != 1 or payloads[0] != f"{family}.safetensors" or index_name in files:
+        if (
+            len(payloads) != 1
+            or payloads[0] != f"{family}.safetensors"
+            or index_name in files
+        ):
             raise RuntimeV1Error("unsharded model output is inconsistent")
 
 
@@ -1518,13 +1828,14 @@ def _validate_safetensors_file(path: Path) -> tuple[frozenset[str], int]:
     return frozenset(name for name in document if name != "__metadata__"), data_read
 
 
-def _validate_safetensors_index(
-    document: Mapping[str, object], data_size: int
-) -> None:
+def _validate_safetensors_index(document: Mapping[str, object], data_size: int) -> None:
     metadata = document.get("__metadata__")
     if metadata is not None and (
         not isinstance(metadata, Mapping)
-        or any(not isinstance(k, str) or not isinstance(v, str) for k, v in metadata.items())
+        or any(
+            not isinstance(k, str) or not isinstance(v, str)
+            for k, v in metadata.items()
+        )
     ):
         raise RuntimeV1Error("safetensors metadata is invalid")
     intervals: list[tuple[int, int]] = []
@@ -1540,10 +1851,14 @@ def _validate_safetensors_index(
             not isinstance(dtype, str)
             or dtype not in _SAFETENSORS_DTYPES
             or not isinstance(shape, list)
-            or any(not isinstance(v, int) or isinstance(v, bool) or v < 0 for v in shape)
+            or any(
+                not isinstance(v, int) or isinstance(v, bool) or v < 0 for v in shape
+            )
             or not isinstance(offsets, list)
             or len(offsets) != 2
-            or any(not isinstance(v, int) or isinstance(v, bool) or v < 0 for v in offsets)
+            or any(
+                not isinstance(v, int) or isinstance(v, bool) or v < 0 for v in offsets
+            )
         ):
             raise RuntimeV1Error("safetensors tensor descriptor is invalid")
         start, end = offsets
@@ -1573,8 +1888,13 @@ def _add_stable_archive_member(
     descriptor = os.open(path, flags)
     with os.fdopen(descriptor, "rb") as content:
         before = os.fstat(content.fileno())
-        if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= _MAX_ARCHIVE_MEMBER_BYTES:
-            raise RuntimeV1Error("archive member must be bounded, nonempty, and regular")
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or not 0 < before.st_size <= _MAX_ARCHIVE_MEMBER_BYTES
+        ):
+            raise RuntimeV1Error(
+                "archive member must be bounded, nonempty, and regular"
+            )
         info = tarfile.TarInfo(relative)
         info.size = before.st_size
         info.mode = 0o644
@@ -1608,14 +1928,44 @@ class _HashingReader:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Canonical SFT runtime v1")
-    parser.add_argument("--canonical-workload-stdin", action="store_true", required=True)
+    transport = parser.add_mutually_exclusive_group(required=True)
+    transport.add_argument("--canonical-workload-stdin", action="store_true")
+    transport.add_argument("--canonical-workload-file")
+    parser.add_argument("--canonical-workload-control-root")
+    parser.add_argument("--canonical-workload-byte-count", type=int)
+    parser.add_argument("--canonical-workload-sha256")
+    parser.add_argument("--canonical-workload-fingerprint")
     return parser
 
 
+def _read_workload_input(args: argparse.Namespace) -> bytes:
+    file_bindings = (
+        args.canonical_workload_control_root,
+        args.canonical_workload_byte_count,
+        args.canonical_workload_sha256,
+        args.canonical_workload_fingerprint,
+    )
+    if args.canonical_workload_stdin:
+        if any(value is not None for value in file_bindings):
+            raise RuntimeV1Error(
+                "stdin workload transport cannot include file bindings"
+            )
+        return read_bounded_workload(sys.stdin.buffer)
+    if any(value is None for value in file_bindings):
+        raise RuntimeV1Error("file workload transport requires the complete binding")
+    return read_authenticated_workload_file(
+        Path(args.canonical_workload_file),
+        control_root=Path(args.canonical_workload_control_root),
+        expected_byte_count=args.canonical_workload_byte_count,
+        expected_sha256=args.canonical_workload_sha256,
+        expected_fingerprint=args.canonical_workload_fingerprint,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
-    build_parser().parse_args(argv)
+    args = build_parser().parse_args(argv)
     try:
-        payload = read_bounded_workload(sys.stdin.buffer)
+        payload = _read_workload_input(args)
         result = execute_runtime(
             payload,
             environment=os.environ,
@@ -1623,9 +1973,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except RuntimeV1Error as error:
         print("SFT_RUNTIME_V1_REJECTED", file=sys.stderr)
-        return _RUNTIME_STAGE_EXITS.get(
-            getattr(error, "diagnostic_code", ""), 2
-        )
+        return _RUNTIME_STAGE_EXITS.get(getattr(error, "diagnostic_code", ""), 2)
     print(
         _canonical_json(
             {
