@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from jsonschema.exceptions import ValidationError
 from jsonschema.validators import validator_for
 
 from tests.training.test_sft_compilation import _config, _execution_source
@@ -19,6 +20,7 @@ from tuner.execution.providers.modal.bundle import (
 )
 from tuner.execution.operation import ModalStageTargetV1, OperationBindingV1
 from tuner.training.methods.sft import compile_sft_workload
+from tuner.runtime.offline_sft_worker import load_packaged_offline_sft_worker_manifest
 
 
 D = "d" * 64
@@ -78,6 +80,7 @@ def documents() -> dict[str, bytes]:
         "max_chunk_bytes": 65536, "max_terminal_bytes": 65536,
     }
     policy_bytes = canonical(policy)
+    closure = load_packaged_offline_sft_worker_manifest()
     plan = {
         "schema_version": "synaptic-training-plan/v1", "run_id": source.run_id,
         "effect_id": effect().effect_id, "effect_key": effect().effect_key,
@@ -87,10 +90,22 @@ def documents() -> dict[str, bytes]:
         "artifact_contract_digest": sha(artifact_bytes), "log_policy_digest": sha(policy_bytes),
         "resource_digest": "9" * 64, "quote_digest": "a" * 64,
         "secret_requirements_digest": source.secret_requirements_digest,
+        "worker_closure_manifest_sha256": closure.sha256,
+        "worker_closure_digest": closure.closure.closure_digest,
     }
     plan_bytes = canonical(plan)
     environment = dict(source.environment)
+    environment.pop("PYTHONPATH")
     environment["SYNAPTIC_WORKLOAD_FINGERPRINT"] = workload.fingerprint
+    environment["SYNAPTIC_WORKER_CLOSURE_MANIFEST"] = (
+        "/workspace/control/operations/effect-1/input/offline-sft-worker-v1.json"
+    )
+    environment["SYNAPTIC_WORKER_CLOSURE_DIGEST"] = closure.closure.closure_digest
+    environment["SYNAPTIC_MODEL_SNAPSHOT"] = (
+        source.roots["cache"] + "/model/models--HuggingFaceTB--SmolLM2-135M-Instruct/snapshots/" + "b" * 40
+    )
+    environment["HF_HUB_OFFLINE"] = "1"
+    environment["TRANSFORMERS_OFFLINE"] = "1"
     invocation = {
         "schema_version": "synaptic-modal-invocation-intent/v1", "run_id": source.run_id,
         "effect_id": effect().effect_id, "plan_digest": sha(plan_bytes),
@@ -109,6 +124,7 @@ def documents() -> dict[str, bytes]:
         "log-terminal-policy.json": policy_bytes,
         "plan.json": plan_bytes,
         "workload.json": workload_bytes,
+        "worker-closure-manifest.json": closure.canonical_bytes,
     }
 
 
@@ -152,6 +168,20 @@ def test_bundle_wire_document_validates_against_checked_in_schema() -> None:
     )
     validator = validator_for(schema)(schema)
     validator.validate(bundle().to_dict())
+
+
+def test_schema_rejects_legacy_eight_member_bundle_without_worker_closure_manifest() -> None:
+    schema = json.loads(
+        (Path(__file__).parents[3] / "schemas" / "synaptic-modal-execution-bundle-v1.schema.json").read_text(encoding="utf-8")
+    )
+    validator = validator_for(schema)(schema)
+    document = bundle().to_dict()
+    document["members"] = [
+        member for member in document["members"]
+        if member["name"] != "worker-closure-manifest.json"
+    ]
+    with pytest.raises(ValidationError):
+        validator.validate(document)
 
 
 @pytest.mark.parametrize(
@@ -242,7 +272,7 @@ def test_direct_operation_construction_cannot_override_a_derived_predecessor_dig
 def test_bundle_factory_rejects_an_externally_supplied_stage_member() -> None:
     members = documents()
     members["stage-intent.json"] = canonical({"schema_version": "synaptic-modal-stage-intent/v1"})
-    with pytest.raises(ValueError, match="seven predecessor"):
+    with pytest.raises(ValueError, match="eight predecessor"):
         ModalExecutionBundleV1.build(operation=operation(), member_documents=members)
 
 

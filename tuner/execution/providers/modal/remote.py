@@ -9,10 +9,15 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from tuner.project.execution_source import ExecutionSourceV1
+from tuner.runtime.dispatch import WorkerControlLocationV1
+from tuner.runtime.offline_sft_worker import (
+    OFFLINE_SFT_MANIFEST_NAME,
+    parse_offline_sft_worker_manifest,
+)
 
 from ...broker import MutationCommandV1
 from .bundle import ModalExecutionBundleV1
@@ -119,6 +124,28 @@ class RemoteInvocationV1:
     argv: tuple[str, str, str]
     cwd: str
     environment: dict[str, str]
+    closure_manifest: bytes
+    closure_manifest_runtime_path: str
+
+
+def _read_locked_closure_manifest(source: ExecutionSourceV1) -> bytes:
+    locked_manifest = (
+        Path(source.roots["engine"])
+        / "tuner" / "runtime" / "manifests" / OFFLINE_SFT_MANIFEST_NAME
+    )
+    return locked_manifest.read_bytes()
+
+
+def _write_runtime_closure_manifest(path: str, payload: bytes) -> None:
+    runtime_manifest = Path(path)
+    runtime_manifest.parent.mkdir(parents=True, exist_ok=True)
+    with runtime_manifest.open("xb") as stream:
+        stream.write(payload)
+        stream.flush()
+        import os
+        os.fsync(stream.fileno())
+    if runtime_manifest.read_bytes() != payload:
+        raise OSError("manifest round trip mismatch")
 
 
 def admit_remote_invocation(
@@ -178,10 +205,34 @@ def admit_remote_invocation(
     deployment = ModalDeploymentSelectionV1(**deployment_document["selection"])
     invocation = _object(members["invocation-intent.json"], 1_048_576)
     workload = members["workload.json"]
+    closure_bytes = members["worker-closure-manifest.json"]
+    closure = parse_offline_sft_worker_manifest(
+        closure_bytes,
+        source_ref="modal-bundle:worker-closure-manifest.json",
+        manifest_path=Path("worker-closure-manifest.json"),
+    )
     environment = dict(source.environment)
+    if environment.get("PYTHONPATH") != source.roots["engine"]:
+        raise ValueError("remote source PYTHONPATH does not bind the engine root")
+    environment.pop("PYTHONPATH")
+    if {"PYTHONHOME", "PYTHONUSERBASE", "HF_TOKEN"} & set(environment):
+        raise ValueError("remote source environment contains a forbidden ambient variable")
     environment["SYNAPTIC_WORKLOAD_FINGERPRINT"] = hashlib.sha256(
         b"synaptic-training-workload/v1\0" + workload
     ).hexdigest()
+    control = WorkerControlLocationV1(
+        PurePosixPath("/workspace/control") / operation_path(command.effect.effect_id, "input")
+    )
+    workload_document = _object(workload, 1_048_576)
+    model = workload_document["configuration"]["document"]["model"]
+    environment["SYNAPTIC_MODEL_SNAPSHOT"] = (
+        source.roots["cache"] + "/model/models--"
+        + str(model["ref"]).replace("/", "--") + "/snapshots/" + str(model["revision"])
+    )
+    environment["HF_HUB_OFFLINE"] = "1"
+    environment["TRANSFORMERS_OFFLINE"] = "1"
+    environment["SYNAPTIC_WORKER_CLOSURE_MANIFEST"] = control.manifest_path.as_posix()
+    environment["SYNAPTIC_WORKER_CLOSURE_DIGEST"] = closure.closure.closure_digest
     argv = (
         source.python_executable,
         source.roots["engine"] + "/Trainers/sft/runtime_v1.py",
@@ -199,7 +250,8 @@ def admit_remote_invocation(
         raise ValueError("remote invocation differs from the fixed runtime command")
     return RemoteInvocationV1(
         command, bundle, source, deployment, workload, argv,
-        source.roots["tmp"], environment,
+        source.roots["tmp"], environment, closure_bytes,
+        control.manifest_path.as_posix(),
     )
 
 
@@ -213,6 +265,20 @@ def execute_remote_sft(
     if type(invocation) is not RemoteInvocationV1:
         raise TypeError("canonical remote invocation is required")
     sources.prepare_and_verify(invocation.source, invocation.deployment)
+    try:
+        locked_bytes = _read_locked_closure_manifest(invocation.source)
+    except OSError:
+        raise ModalRemotePhaseError(124, "locked_source_mismatch") from None
+    if locked_bytes != invocation.closure_manifest:
+        raise ModalRemotePhaseError(124, "locked_source_mismatch")
+    try:
+        _write_runtime_closure_manifest(
+            invocation.closure_manifest_runtime_path, invocation.closure_manifest
+        )
+    except FileExistsError:
+        raise ModalRemotePhaseError(122, "artifact_layout_collision") from None
+    except OSError:
+        raise ModalRemotePhaseError(122, "artifact_layout_failed") from None
     result = processes.run(
         invocation.argv,
         cwd=invocation.cwd,

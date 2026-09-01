@@ -30,6 +30,11 @@ from tuner.training.recipes import (
     CompiledWorkload,
     canonical_json_bytes,
 )
+from tuner.runtime.offline_sft_worker import (
+    OFFLINE_SFT_MANIFEST_NAME,
+    OfflineSFTWorkerManifestV1,
+    load_packaged_offline_sft_worker_manifest,
+)
 
 
 WORKER_INVOCATION_SCHEMA = "synaptic-worker-invocation/v1"
@@ -38,6 +43,9 @@ _WORKLOAD_FINGERPRINT_DOMAIN = b"synaptic-training-workload/v1\0"
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _ROOT_NAMES = ("engine", "project", "artifacts", "state", "tracking", "cache", "tmp")
 _ISSUANCE_KEY = secrets.token_bytes(32)
+_FORBIDDEN_WORKER_ENVIRONMENT = frozenset(
+    {"PYTHONHOME", "PYTHONUSERBASE", "HF_TOKEN"}
+)
 
 
 def _digest(value: object, label: str) -> str:
@@ -69,6 +77,22 @@ class CanonicalWorkloadFileLocationV1:
             "control_root",
             _absolute_runtime_path(self.control_root, "workload control root"),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerControlLocationV1:
+    control_root: PurePosixPath
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "control_root",
+            _absolute_runtime_path(self.control_root, "worker control root"),
+        )
+
+    @property
+    def manifest_path(self) -> PurePosixPath:
+        return self.control_root / OFFLINE_SFT_MANIFEST_NAME
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -112,6 +136,8 @@ class WorkerInvocationV1:
     environment: tuple[tuple[str, str], ...]
     interpreter: str
     transport: CanonicalWorkloadTransportV1
+    control_location: WorkerControlLocationV1
+    closure_manifest: OfflineSFTWorkerManifestV1
     schema_version: str = WORKER_INVOCATION_SCHEMA
     _issuance_seal: str = ""
     _plan: TrainingPlan | None = None
@@ -130,8 +156,17 @@ def _worker_environment(
     roots: Mapping[str, PurePosixPath],
     workload_fingerprint: str,
     model_snapshot: PurePosixPath,
+    control_location: WorkerControlLocationV1,
+    closure_manifest: OfflineSFTWorkerManifestV1,
+    base_environment: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
+    base = {} if base_environment is None else dict(base_environment)
+    if any(not isinstance(key, str) or not isinstance(value, str) for key, value in base.items()):
+        raise TypeError("worker environment must contain only text keys and values")
+    if _FORBIDDEN_WORKER_ENVIRONMENT & set(base):
+        raise ValueError("worker environment contains a forbidden ambient variable")
     return {
+        **base,
         "SYNAPTIC_ENGINE_ROOT": roots["engine"].as_posix(),
         "SYNAPTIC_PROJECT_ROOT": roots["project"].as_posix(),
         "SYNAPTIC_ARTIFACT_ROOT": roots["artifacts"].as_posix(),
@@ -141,11 +176,12 @@ def _worker_environment(
         "SYNAPTIC_TMP_ROOT": roots["tmp"].as_posix(),
         "SYNAPTIC_WORKLOAD_FINGERPRINT": workload_fingerprint,
         "SYNAPTIC_MODEL_SNAPSHOT": model_snapshot.as_posix(),
-        "PYTHONPATH": roots["engine"].as_posix(),
         "PYTHONNOUSERSITE": "1",
         "PYTHONSAFEPATH": "1",
         "HF_HUB_OFFLINE": "1",
         "TRANSFORMERS_OFFLINE": "1",
+        "SYNAPTIC_WORKER_CLOSURE_MANIFEST": control_location.manifest_path.as_posix(),
+        "SYNAPTIC_WORKER_CLOSURE_DIGEST": closure_manifest.closure.closure_digest,
     }
 
 
@@ -387,6 +423,7 @@ def _derive_worker_fields(
     plan: TrainingPlan,
     layout: CloudRuntimeLayout,
     file_location: CanonicalWorkloadFileLocationV1 | None,
+    control_location: WorkerControlLocationV1,
 ) -> tuple[
     str,
     CompiledWorkload,
@@ -395,6 +432,7 @@ def _derive_worker_fields(
     tuple[tuple[str, str], ...],
     str,
     CanonicalWorkloadTransportV1,
+    OfflineSFTWorkerManifestV1,
 ]:
     _require_exact_plan(plan)
     if type(layout) is not CloudRuntimeLayout:
@@ -404,6 +442,8 @@ def _derive_worker_fields(
         and type(file_location) is not CanonicalWorkloadFileLocationV1
     ):
         raise TypeError("file location must be exact CanonicalWorkloadFileLocationV1")
+    if type(control_location) is not WorkerControlLocationV1:
+        raise TypeError("control location must be exact WorkerControlLocationV1")
     before_fingerprint = plan.fingerprint
     workload = _compile_plan_workload(plan)
     entrypoint = PurePosixPath(workload.entrypoint)
@@ -431,15 +471,19 @@ def _derive_worker_fields(
         raise ValueError(
             "workload control root must be disjoint from all runtime roots"
         )
+    if any(_paths_overlap(control_location.control_root, path) for _, path in roots):
+        raise ValueError("worker control root must be disjoint from all runtime roots")
     _require_safe_staged_entrypoint(layout.engine.source, entrypoint)
     model_snapshot = _model_snapshot_path(dict(roots)["cache"], workload)
-    environment = tuple(
-        sorted(
-            _worker_environment(
-                dict(roots), workload.fingerprint, model_snapshot
-            ).items()
-        )
-    )
+    closure_manifest = load_packaged_offline_sft_worker_manifest()
+    planned_environment = dict(plan.execution_source.environment)
+    if planned_environment.get("PYTHONPATH") != dict(roots)["engine"].as_posix():
+        raise ValueError("source PYTHONPATH does not bind the authenticated engine root")
+    planned_environment.pop("PYTHONPATH")
+    environment = tuple(sorted(_worker_environment(
+        dict(roots), workload.fingerprint, model_snapshot, control_location,
+        closure_manifest, planned_environment,
+    ).items()))
     interpreter = _absolute_runtime_path(interpreter, "worker interpreter").as_posix()
     transport = _issue_transport(workload, file_location)
     after_fingerprint = plan.fingerprint
@@ -453,6 +497,7 @@ def _derive_worker_fields(
         environment,
         interpreter,
         transport,
+        closure_manifest,
     )
 
 
@@ -475,6 +520,12 @@ class WorkerBundleMaterializationV1:
     canonical_workload_bytes: bytes
     workload_byte_count: int
     workload_sha256: str
+    closure_manifest_bytes: bytes
+    closure_manifest_source: str
+    closure_manifest_byte_count: int
+    closure_manifest_sha256: str
+    closure_digest: str
+    closure_manifest_runtime_path: PurePosixPath
     dispatch: DispatchInvocation
     canonical_projection_bytes: bytes
     projection_sha256: str
@@ -510,12 +561,17 @@ def _worker_projection(worker: WorkerInvocationV1) -> dict[str, object]:
         "environment": [list(item) for item in worker.environment],
         "interpreter": worker.interpreter,
         "transport": _transport_projection(worker.transport),
+        "control_root": worker.control_location.control_root.as_posix(),
+        "closure_manifest_source": worker.closure_manifest.source_ref,
+        "closure_manifest_sha256": worker.closure_manifest.sha256,
+        "closure_digest": worker.closure_manifest.closure.closure_digest,
     }
 
 
 def build_worker_invocation(
     plan: TrainingPlan,
     layout: CloudRuntimeLayout,
+    control_location: WorkerControlLocationV1,
     file_location: CanonicalWorkloadFileLocationV1 | None = None,
 ) -> WorkerInvocationV1:
     (
@@ -526,7 +582,8 @@ def build_worker_invocation(
         environment,
         interpreter,
         transport,
-    ) = _derive_worker_fields(plan, layout, file_location)
+        closure_manifest,
+    ) = _derive_worker_fields(plan, layout, file_location, control_location)
     worker = object.__new__(WorkerInvocationV1)
     values = {
         "schema_version": WORKER_INVOCATION_SCHEMA,
@@ -537,6 +594,8 @@ def build_worker_invocation(
         "environment": environment,
         "interpreter": interpreter,
         "transport": transport,
+        "control_location": control_location,
+        "closure_manifest": closure_manifest,
         "_plan": plan,
         "_layout": layout,
         "_file_location": file_location,
@@ -551,10 +610,66 @@ def build_worker_invocation(
     return worker
 
 
+def build_source_worker_invocation(
+    plan: TrainingPlan,
+    control_location: WorkerControlLocationV1,
+) -> WorkerInvocationV1:
+    """Issue a worker from an authenticated source lock without host path probing."""
+
+    _require_exact_plan(plan)
+    if type(control_location) is not WorkerControlLocationV1:
+        raise TypeError("control location must be exact WorkerControlLocationV1")
+    workload = _compile_plan_workload(plan)
+    locked_roots, interpreter = _locked_runtime_binding(workload)
+    roots = tuple(
+        (name, _absolute_runtime_path(locked_roots[name], f"worker root {name}"))
+        for name in _ROOT_NAMES
+    )
+    _require_disjoint_roots(roots)
+    if any(_paths_overlap(control_location.control_root, path) for _, path in roots):
+        raise ValueError("worker control root must be disjoint from all runtime roots")
+    entrypoint = PurePosixPath(workload.entrypoint)
+    if entrypoint.is_absolute() or any(part in {"", ".", ".."} for part in entrypoint.parts):
+        raise ValueError("worker entrypoint is not contained engine-relative")
+    manifest = load_packaged_offline_sft_worker_manifest()
+    planned_environment = dict(plan.execution_source.environment)
+    if planned_environment.get("PYTHONPATH") != dict(roots)["engine"].as_posix():
+        raise ValueError("source PYTHONPATH does not bind the authenticated engine root")
+    planned_environment.pop("PYTHONPATH")
+    environment = tuple(sorted(_worker_environment(
+        dict(roots), workload.fingerprint,
+        _model_snapshot_path(dict(roots)["cache"], workload),
+        control_location, manifest, planned_environment,
+    ).items()))
+    worker = object.__new__(WorkerInvocationV1)
+    values = {
+        "schema_version": WORKER_INVOCATION_SCHEMA,
+        "plan_fingerprint": plan.fingerprint,
+        "workload_fingerprint": workload.fingerprint,
+        "entrypoint": entrypoint,
+        "roots": roots,
+        "environment": environment,
+        "interpreter": _absolute_runtime_path(interpreter, "worker interpreter").as_posix(),
+        "transport": _issue_transport(workload, None),
+        "control_location": control_location,
+        "closure_manifest": manifest,
+        "_plan": plan,
+        "_layout": None,
+        "_file_location": None,
+    }
+    for name, value in values.items():
+        object.__setattr__(worker, name, value)
+    object.__setattr__(
+        worker, "_issuance_seal",
+        _canonical_seal(b"synaptic-worker-invocation/v1", _worker_projection(worker)),
+    )
+    return worker
+
+
 def build_dispatch_invocation(
-    plan: TrainingPlan, layout: CloudRuntimeLayout
+    plan: TrainingPlan, layout: CloudRuntimeLayout, control_location: WorkerControlLocationV1
 ) -> DispatchInvocation:
-    return materialize_worker_invocation(build_worker_invocation(plan, layout))
+    return materialize_worker_invocation(build_worker_invocation(plan, layout, control_location))
 
 
 def _require_canonical_worker(worker: WorkerInvocationV1) -> None:
@@ -573,8 +688,12 @@ def _require_canonical_worker(worker: WorkerInvocationV1) -> None:
         authentic = False
     if not authentic:
         raise ValueError("worker invocation is not an authentic factory issuance")
-    expected = build_worker_invocation(
-        worker._plan, worker._layout, worker._file_location
+    expected = (
+        build_source_worker_invocation(worker._plan, worker.control_location)
+        if worker._layout is None
+        else build_worker_invocation(
+            worker._plan, worker._layout, worker.control_location, worker._file_location
+        )
     )
     if current_projection != _worker_projection(expected):
         raise ValueError("worker invocation differs from its canonical plan projection")
@@ -644,6 +763,14 @@ def materialize_worker_bundle(
             "byte_count": byte_count,
             "sha256": sha256,
         },
+        "closure_manifest": {
+            "payload_base64": base64.b64encode(worker.closure_manifest.canonical_bytes).decode("ascii"),
+            "source": worker.closure_manifest.source_ref,
+            "byte_count": worker.closure_manifest.byte_count,
+            "sha256": worker.closure_manifest.sha256,
+            "closure_digest": worker.closure_manifest.closure.closure_digest,
+            "runtime_path": worker.control_location.manifest_path.as_posix(),
+        },
         "dispatch": _dispatch_projection(dispatch),
     }
     projection_bytes = canonical_json_bytes(projection)
@@ -656,6 +783,12 @@ def materialize_worker_bundle(
         "canonical_workload_bytes": payload,
         "workload_byte_count": byte_count,
         "workload_sha256": sha256,
+        "closure_manifest_bytes": worker.closure_manifest.canonical_bytes,
+        "closure_manifest_source": worker.closure_manifest.source_ref,
+        "closure_manifest_byte_count": worker.closure_manifest.byte_count,
+        "closure_manifest_sha256": worker.closure_manifest.sha256,
+        "closure_digest": worker.closure_manifest.closure.closure_digest,
+        "closure_manifest_runtime_path": worker.control_location.manifest_path,
         "dispatch": dispatch,
         "canonical_projection_bytes": projection_bytes,
         "projection_sha256": projection_sha256,
@@ -730,7 +863,7 @@ class SubprocessRunner:
         child_environment = {
             key: value
             for key, value in self._base_environment.items()
-            if key not in {"PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE"}
+            if key not in (_FORBIDDEN_WORKER_ENVIRONMENT | {"PYTHONPATH"})
         }
         child_environment.update(invocation.environment_map)
         completed = subprocess.run(
@@ -754,8 +887,11 @@ class EngineDispatcher:
             raise TypeError("runner must implement ProcessRunner")
         self._runner = runner
 
-    def dispatch(self, plan: TrainingPlan, layout: CloudRuntimeLayout) -> ProcessResult:
-        return self._runner.run(build_dispatch_invocation(plan, layout))
+    def dispatch(
+        self, plan: TrainingPlan, layout: CloudRuntimeLayout,
+        control_location: WorkerControlLocationV1,
+    ) -> ProcessResult:
+        return self._runner.run(build_dispatch_invocation(plan, layout, control_location))
 
 
 __all__ = [
@@ -771,9 +907,11 @@ __all__ = [
     "WORKER_BUNDLE_MATERIALIZATION_SCHEMA",
     "WORKER_INVOCATION_SCHEMA",
     "WorkerBundleMaterializationV1",
+    "WorkerControlLocationV1",
     "WorkerInvocationV1",
     "build_dispatch_invocation",
     "build_worker_invocation",
+    "build_source_worker_invocation",
     "materialize_worker_bundle",
     "materialize_worker_invocation",
 ]

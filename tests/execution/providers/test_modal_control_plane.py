@@ -7,6 +7,7 @@ from tuner.execution.contracts import EffectDisposition,EffectIdentity,EffectKin
 from tuner.execution.operation import ModalStageTargetV1,OperationBindingV1
 from tuner.execution.providers.modal import *
 from tuner.execution.providers.modal.contracts import canonical_json,sha
+from tuner.runtime.offline_sft_worker import load_packaged_offline_sft_worker_manifest
 
 D="a"*64
 ROOT="operations/e";OUTPUT=ROOT+"/output";CONTROL=ROOT+"/control";EVIDENCE=ROOT+"/evidence";LOGS=ROOT+"/logs"
@@ -30,7 +31,7 @@ class Store:
     def load_modal_expectation(self,effect_id):return self.e
 def binding(version="1.5.4"):return ModalClientBinding("acct","work","env","client",version)
 def operation():
-    e=EffectIdentity("e","op",EffectKind.SUBMIT,ExecutionScope("modal","acct","env"));return OperationBindingV1("p","r",e,"g",D,D,D,D,D,D,D,D,D,D,D,"nonce",ModalStageTargetV1("slot","cv","av","operations/e/output",1,"key"))
+    e=EffectIdentity("e","op",EffectKind.SUBMIT,ExecutionScope("modal","acct","env"));return OperationBindingV1(project_ref="p",run_id="r",effect=e,grant_ref="g",plan_fingerprint=D,execution_source_digest=D,workload_digest=D,deployment_attestation_digest=D,artifact_contract_digest=D,log_policy_digest=D,invocation_intent_digest=D,worker_closure_manifest_digest=load_packaged_offline_sft_worker_manifest().sha256,resource_digest=D,quote_digest=D,secret_requirements_digest=D,invocation_arguments_digest=D,invocation_nonce="nonce",stage_target=ModalStageTargetV1("slot","cv","av","operations/e/output",1,"key"))
 def expectation():
     return StageExpectationV1(operation(),binding(),D,D,6)
 def stage_setup():

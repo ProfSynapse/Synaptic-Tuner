@@ -21,6 +21,16 @@ from tuner.training.methods.sft import SFT_ARTIFACT_CONTRACT, compile_sft_worklo
 from tests.training.test_sft_compilation import _execution_source
 
 
+_WorkloadBindingVerifier = WorkloadBindingVerifier
+
+
+def WorkloadBindingVerifier():
+    return _WorkloadBindingVerifier(
+        closure_digest="8" * 64,
+        closure_manifest_path="/workspace/control/offline-sft-worker-v1.json",
+    )
+
+
 def _entry(role: str, path: str, content: bytes) -> ArtifactEntry:
     return ArtifactEntry(role, path, hashlib.sha256(content).hexdigest(), len(content))
 
@@ -106,7 +116,8 @@ def _lineage(workload) -> bytes:
     run_dir = roots["state"] + "/runtime-v1-trainer/output/runtime-v1"
     dataset_path = f"{project_root}/data/train.jsonl"
     argv = [
-        "/usr/bin/python", f"{root}/Trainers/sft/train_sft.py", "--model-name", "example/model",
+        "/usr/bin/python", "-I", f"{root}/tuner/runtime/offline_sft_worker.py", "--",
+        "--model-name", "example/model",
         "--model-revision", "c" * 40, "--anonymous-model", "--model-cache-dir", roots["cache"] + "/model",
         "--model-snapshot", roots["cache"] + "/model/models--example--model/snapshots/" + "c" * 40,
         "--local-file", dataset_path, "--output-root", roots["state"] + "/runtime-v1-trainer/output",
@@ -129,11 +140,12 @@ def _lineage(workload) -> bytes:
         "SYNAPTIC_ARTIFACT_ROOT": roots["artifacts"], "SYNAPTIC_STATE_ROOT": roots["state"],
         "SYNAPTIC_TRACKING_ROOT": roots["tracking"], "SYNAPTIC_CACHE_ROOT": roots["cache"],
         "SYNAPTIC_TMP_ROOT": roots["tmp"], "SYNAPTIC_WORKLOAD_FINGERPRINT": workload.fingerprint,
-        "PYTHONPATH": root + ":" + root + "/Trainers/sft",
         "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1",
         "HF_HOME": roots["cache"] + "/huggingface", "TRANSFORMERS_CACHE": roots["cache"] + "/transformers",
         "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
         "SYNAPTIC_MODEL_SNAPSHOT": roots["cache"] + "/model/models--example--model/snapshots/" + "c" * 40,
+        "SYNAPTIC_WORKER_CLOSURE_MANIFEST": "/workspace/control/offline-sft-worker-v1.json",
+        "SYNAPTIC_WORKER_CLOSURE_DIGEST": "8" * 64,
         "WANDB_DISABLED": "true",
     }
     execution = {
@@ -402,6 +414,29 @@ def test_provider_rejects_invocation_or_environment_drift(field: str) -> None:
     values["training_lineage.json"] = _canonical(wrapper)
     report = _verify_current(workload, inventory, reader, values)
     assert report.status is VerificationStatus.INVALID
+
+
+def test_provider_rejects_legacy_direct_trainer_invocation() -> None:
+    workload, inventory, reader, values = _fixture()
+    wrapper = json.loads(values["training_lineage.json"])
+    evidence = wrapper["execution_evidence"]
+    evidence["argv"] = [
+        "/usr/bin/python",
+        "/workspace/engine/Trainers/sft/train_sft.py",
+        *evidence["argv"][4:],
+    ]
+    evidence["environment"]["PYTHONPATH"] = (
+        "/workspace/engine:/workspace/engine/Trainers/sft"
+    )
+    wrapper["execution_evidence_sha256"] = hashlib.sha256(
+        _canonical(evidence)
+    ).hexdigest()
+    values["training_lineage.json"] = _canonical(wrapper)
+
+    assert (
+        _verify_current(workload, inventory, reader, values).status
+        is VerificationStatus.INVALID
+    )
 
 
 def test_provider_maps_malformed_complete_evidence_to_invalid() -> None:

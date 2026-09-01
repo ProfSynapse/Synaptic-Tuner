@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, replace
+from pathlib import Path, PurePosixPath
 from typing import Mapping
 from urllib.parse import parse_qsl, urlsplit
 
@@ -15,6 +16,13 @@ from tuner.execution.contracts import EffectIdentity, safe_ref
 from tuner.execution.operation import OperationBindingV1
 from tuner.execution.providers.contracts import StageBundle
 from tuner.project.execution_source import ExecutionSourceV1
+from tuner.runtime.dispatch import WorkerControlLocationV1
+from tuner.runtime.offline_sft_worker import (
+    OFFLINE_SFT_CLOSURE_SCHEMA,
+    parse_offline_sft_worker_manifest,
+)
+
+from .contracts import operation_path
 
 
 MAX_TRANSPORT_BASE64_BYTES = 8_388_608
@@ -25,7 +33,7 @@ MODAL_BUNDLE_SCHEMA = "synaptic-modal-execution-bundle/v1"
 REQUIRED_MODAL_MEMBERS = (
     "artifact-contract.json", "deployment.json", "execution-source.json",
     "invocation-intent.json", "log-terminal-policy.json", "plan.json",
-    "stage-intent.json", "workload.json",
+    "stage-intent.json", "worker-closure-manifest.json", "workload.json",
 )
 _MEMBER_SCHEMAS = {
     "artifact-contract.json": "synaptic-sft-artifacts/v1",
@@ -36,6 +44,7 @@ _MEMBER_SCHEMAS = {
     "plan.json": "synaptic-training-plan/v1",
     "stage-intent.json": "synaptic-modal-stage-intent/v1",
     "workload.json": "synaptic-sft-workload/v1",
+    "worker-closure-manifest.json": OFFLINE_SFT_CLOSURE_SCHEMA,
 }
 _B64_RE = re.compile(rb"(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\Z")
 _JWT_RE = re.compile(r"^[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}$")
@@ -221,11 +230,13 @@ def _validate_member_shape(name: str, value: dict[str, object]) -> None:
     elif name == "log-terminal-policy.json":
         _exact(value, {"schema_version", "run_id", "effect_id", "generation", "control_prefix", "artifact_prefix", "max_log_chunks", "max_chunk_bytes", "max_terminal_bytes"}, "log policy")
     elif name == "plan.json":
-        _exact(value, {"schema_version", "run_id", "effect_id", "effect_key", "provider", "account_ref", "namespace_ref", "artifact_slot_ref", "deployment_digest", "execution_source_digest", "workload_digest", "artifact_contract_digest", "log_policy_digest", "resource_digest", "quote_digest", "secret_requirements_digest"}, "training plan")
+        _exact(value, {"schema_version", "run_id", "effect_id", "effect_key", "provider", "account_ref", "namespace_ref", "artifact_slot_ref", "deployment_digest", "execution_source_digest", "workload_digest", "artifact_contract_digest", "log_policy_digest", "resource_digest", "quote_digest", "secret_requirements_digest", "worker_closure_manifest_sha256", "worker_closure_digest"}, "training plan")
     elif name == "invocation-intent.json":
         _exact(value, {"schema_version", "run_id", "effect_id", "plan_digest", "deployment_digest", "execution_source_digest", "workload_digest", "interpreter", "argv", "cwd", "environment_digest", "invocation_nonce"}, "invocation intent")
     elif name == "stage-intent.json":
         _exact(value, {"schema_version", "operation_binding", "operation_binding_digest", "members"}, "stage intent")
+    elif name == "worker-closure-manifest.json":
+        return
 
 
 def _encoded_size(decoded_size: int) -> int:
@@ -256,10 +267,24 @@ class ModalBundleMemberV1:
             raise ValueError("unknown Modal bundle member")
         if not isinstance(self.content, bytes) or not 0 < len(self.content) <= MAX_MEMBER_DECODED_BYTES:
             raise ValueError("Modal bundle member exceeds its decoded bound")
-        _validate_member_shape(self.name, _strict_json(self.content))
+        if self.name == "worker-closure-manifest.json":
+            parse_offline_sft_worker_manifest(
+                self.content,
+                source_ref="modal-bundle:worker-closure-manifest.json",
+                manifest_path=Path("worker-closure-manifest.json"),
+            )
+        else:
+            _validate_member_shape(self.name, _strict_json(self.content))
 
     @property
     def document(self) -> dict[str, object]:
+        if self.name == "worker-closure-manifest.json":
+            parsed = parse_offline_sft_worker_manifest(
+                self.content,
+                source_ref="modal-bundle:worker-closure-manifest.json",
+                manifest_path=Path("worker-closure-manifest.json"),
+            )
+            return json.loads(parsed.canonical_bytes)
         return _strict_json(self.content)
 
     @property
@@ -282,6 +307,11 @@ def _validate_semantics(bundle: "ModalExecutionBundleV1") -> None:
     plan = documents["plan.json"]
     invocation = documents["invocation-intent.json"]
     stage = documents["stage-intent.json"]
+    closure = parse_offline_sft_worker_manifest(
+        members["worker-closure-manifest.json"].content,
+        source_ref="modal-bundle:worker-closure-manifest.json",
+        manifest_path=Path("worker-closure-manifest.json"),
+    )
     selection = deployment["selection"]
     source_value = ExecutionSourceV1.from_dict(source)
 
@@ -302,15 +332,36 @@ def _validate_semantics(bundle: "ModalExecutionBundleV1") -> None:
         "artifact_contract_digest": members["artifact-contract.json"].sha256,
         "log_policy_digest": members["log-terminal-policy.json"].sha256,
         "secret_requirements_digest": source_value.secret_requirements_digest,
+        "worker_closure_manifest_sha256": closure.sha256,
+        "worker_closure_digest": closure.closure.closure_digest,
     }
     if any(plan.get(key) != value for key, value in expected_plan.items()):
         raise ValueError("training plan does not bind the exact execution inputs")
     if policy.get("run_id") != source_value.run_id or policy.get("effect_id") != bundle.effect.effect_id:
         raise ValueError("log policy identity does not bind the plan")
     environment = dict(source_value.environment)
+    if environment.get("PYTHONPATH") != source_value.roots["engine"]:
+        raise ValueError("execution source PYTHONPATH does not bind the engine root")
+    environment.pop("PYTHONPATH")
+    if {"PYTHONHOME", "PYTHONUSERBASE", "HF_TOKEN"} & set(environment):
+        raise ValueError("execution source contains a forbidden worker variable")
+    control = WorkerControlLocationV1(
+        PurePosixPath("/workspace/control")
+        / operation_path(bundle.effect.effect_id, "input")
+    )
     environment["SYNAPTIC_WORKLOAD_FINGERPRINT"] = hashlib.sha256(
         b"synaptic-training-workload/v1\0" + members["workload.json"].content
     ).hexdigest()
+    environment["SYNAPTIC_WORKER_CLOSURE_MANIFEST"] = control.manifest_path.as_posix()
+    environment["SYNAPTIC_WORKER_CLOSURE_DIGEST"] = closure.closure.closure_digest
+    configuration = workload["configuration"]["document"]
+    model = configuration["model"]
+    environment["SYNAPTIC_MODEL_SNAPSHOT"] = (
+        source_value.roots["cache"] + "/model/models--"
+        + str(model["ref"]).replace("/", "--") + "/snapshots/" + str(model["revision"])
+    )
+    environment["HF_HUB_OFFLINE"] = "1"
+    environment["TRANSFORMERS_OFFLINE"] = "1"
     expected_invocation = {
         "run_id": source_value.run_id, "effect_id": bundle.effect.effect_id,
         "plan_digest": members["plan.json"].sha256,
@@ -367,7 +418,7 @@ def _validate_semantics(bundle: "ModalExecutionBundleV1") -> None:
         for name, member in members.items() if name != "stage-intent.json"
     }
     if declared != expected_members:
-        raise ValueError("stage intent does not bind the exact seven predecessor members")
+        raise ValueError("stage intent does not bind the exact eight predecessor members")
     if selection["account_ref"] != scope.account_ref or selection["environment_ref"] != scope.namespace_ref:
         raise ValueError("deployment scope does not bind the effect scope")
 
@@ -429,7 +480,7 @@ class ModalExecutionBundleV1:
         if not isinstance(operation, OperationBindingV1):
             raise TypeError("operation must be OperationBindingV1")
         if not isinstance(member_documents, Mapping) or set(member_documents) != predecessors:
-            raise ValueError("Modal execution bundle requires exactly seven predecessor members")
+            raise ValueError("Modal execution bundle requires exactly eight predecessor members")
         validated = {
             name: ModalBundleMemberV1(name, member_documents[name]) for name in predecessors
         }

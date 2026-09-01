@@ -7,11 +7,12 @@ from tuner.execution.broker import MutationBroker,MutationCommandV1
 from tuner.execution.contracts import *
 from tuner.execution.operation import ModalStageTargetV1,OperationBindingV1
 from tuner.execution.service import LifecycleService
+from tuner.runtime.offline_sft_worker import load_packaged_offline_sft_worker_manifest
 from tests.execution.fakes import InMemoryLifecycleRepository
 D="a"*64;NOW="2026-08-25T12:00:00Z";LATER="2026-08-25T13:00:00Z"
 def ident(kind=EffectKind.SUBMIT,key="op",eid="e"):return EffectIdentity(eid,key,kind,ExecutionScope("modal","acct","env"))
 def command(kind=EffectKind.SUBMIT,target=None,nonce="nonce",key="op",eid="e"):
-    operation=OperationBindingV1(project_ref="p",run_id="r",effect=ident(kind,key,eid),grant_ref="g-"+key,plan_fingerprint=D,execution_source_digest=D,workload_digest=D,deployment_attestation_digest=D,artifact_contract_digest=D,log_policy_digest=D,invocation_intent_digest=D,resource_digest=D,quote_digest=D,secret_requirements_digest=D,invocation_arguments_digest=D,invocation_nonce=nonce,stage_target=ModalStageTargetV1("slot","cv","av",f"operations/{eid}/output",1,"key"),target_provider_job_ref=target)
+    operation=OperationBindingV1(project_ref="p",run_id="r",effect=ident(kind,key,eid),grant_ref="g-"+key,plan_fingerprint=D,execution_source_digest=D,workload_digest=D,deployment_attestation_digest=D,artifact_contract_digest=D,log_policy_digest=D,invocation_intent_digest=D,worker_closure_manifest_digest=load_packaged_offline_sft_worker_manifest().sha256,resource_digest=D,quote_digest=D,secret_requirements_digest=D,invocation_arguments_digest=D,invocation_nonce=nonce,stage_target=ModalStageTargetV1("slot","cv","av",f"operations/{eid}/output",1,"key"),target_provider_job_ref=target)
     return MutationCommandV1(operation,D,D)
 def grant(c,**changes):
     operation=replace(c.operation,**changes) if changes else c.operation
@@ -46,6 +47,7 @@ def test_all_pre_stage_execution_fields_are_authorized_by_operation_binding():
         dict(plan_fingerprint="b"*64),dict(deployment_attestation_digest="b"*64),
         dict(invocation_arguments_digest="b"*64),dict(invocation_nonce="other"),
         dict(execution_source_digest="b"*64),dict(workload_digest="b"*64),
+        dict(worker_closure_manifest_digest="b"*64),
         dict(secret_requirements_digest="b"*64),
         dict(quote_digest="b"*64),dict(resource_digest="b"*64),
     ]

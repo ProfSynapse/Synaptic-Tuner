@@ -189,6 +189,15 @@ class SemanticVerifier(Protocol):
 class WorkloadBindingVerifier:
     """Base semantic check binding produced artifacts to the exact workload."""
 
+    def __init__(self, *, closure_digest: str, closure_manifest_path: str) -> None:
+        if not isinstance(closure_digest, str) or re.fullmatch(r"[0-9a-f]{64}", closure_digest) is None:
+            raise ValueError("authoritative closure digest is invalid")
+        normalized = _absolute_normalized_path(closure_manifest_path)
+        if normalized is None:
+            raise ValueError("authoritative closure manifest path is invalid")
+        self._closure_digest = closure_digest
+        self._closure_manifest_path = normalized
+
     def verify(
         self,
         *,
@@ -225,7 +234,12 @@ class WorkloadBindingVerifier:
                 ValueError,
             ):
                 document = None
-            lineage_ok = _validate_lineage_document(document, workload)
+            lineage_ok = _validate_lineage_document(
+                document,
+                workload,
+                closure_digest=self._closure_digest,
+                closure_manifest_path=self._closure_manifest_path,
+            )
         model_members: frozenset[str] = frozenset()
         tokenizer_members: frozenset[str] = frozenset()
         model_ok = False
@@ -324,15 +338,26 @@ def _strict_json(content: bytes, *, require_canonical: bool = False) -> object:
     return value
 
 
-def _validate_lineage_document(document: object, workload: CompiledWorkload) -> bool:
+def _validate_lineage_document(
+    document: object,
+    workload: CompiledWorkload,
+    *,
+    closure_digest: str,
+    closure_manifest_path: str,
+) -> bool:
     try:
-        return _validate_lineage_document_unchecked(document, workload)
+        return _validate_lineage_document_unchecked(
+            document, workload,
+            closure_digest=closure_digest,
+            closure_manifest_path=closure_manifest_path,
+        )
     except (AttributeError, IndexError, KeyError, TypeError, ValueError, InvalidOperation, OverflowError):
         return False
 
 
 def _validate_lineage_document_unchecked(
-    document: object, workload: CompiledWorkload
+    document: object, workload: CompiledWorkload, *,
+    closure_digest: str, closure_manifest_path: str,
 ) -> bool:
     if not isinstance(document, dict) or set(document) != {
         "schema_version",
@@ -360,13 +385,18 @@ def _validate_lineage_document_unchecked(
         and isinstance(evidence, dict)
         and document.get("execution_evidence_sha256")
         == hashlib.sha256(_canonical_json(evidence)).hexdigest()
-        and _validate_execution_evidence(evidence, workload)
+        and _validate_execution_evidence(
+            evidence, workload,
+            closure_digest=closure_digest,
+            closure_manifest_path=closure_manifest_path,
+        )
         and _validate_embedded_trainer_lineage(trainer, workload, evidence)
     )
 
 
 def _validate_execution_evidence(
-    evidence: dict[str, object], workload: CompiledWorkload
+    evidence: dict[str, object], workload: CompiledWorkload, *,
+    closure_digest: str, closure_manifest_path: str,
 ) -> bool:
     if set(evidence) != {
         "schema_version", "workload_fingerprint", "configuration_revision",
@@ -411,7 +441,11 @@ def _validate_execution_evidence(
         and _json_type_equal(result, {"exit_code": 0, "status": "completed"})
     ):
         return False
-    return _validate_evidence_paths_and_argv(evidence, workload)
+    return _validate_evidence_paths_and_argv(
+        evidence, workload,
+        closure_digest=closure_digest,
+        closure_manifest_path=closure_manifest_path,
+    )
 
 
 def _normalized_path(value: object) -> str | None:
@@ -524,7 +558,8 @@ def _python_executable_matches(actual: str, interpreter: dict[str, object]) -> b
 
 
 def _validate_evidence_paths_and_argv(
-    evidence: dict[str, object], workload: CompiledWorkload
+    evidence: dict[str, object], workload: CompiledWorkload, *,
+    closure_digest: str, closure_manifest_path: str,
 ) -> bool:
     source_runtime = workload.document["execution_source"].get("runtime")
     if not isinstance(source_runtime, dict) or not isinstance(source_runtime.get("roots"), dict):
@@ -568,6 +603,11 @@ def _validate_evidence_paths_and_argv(
     )
     if not isinstance(planned_environment, dict):
         return False
+    if (
+        planned_environment.get("PYTHONPATH") != source_runtime["roots"]["engine"]
+        or {"PYTHONHOME", "PYTHONUSERBASE", "HF_TOKEN"} & set(planned_environment)
+    ):
+        return False
     executable = _normalized_path(evidence["argv"][0])
     if executable is None or not _python_executable_matches(executable, interpreter):
         return False
@@ -581,7 +621,6 @@ def _validate_evidence_paths_and_argv(
     ):
         return False
     env = environment
-    path_separator = ";" if re.fullmatch(r"[A-Za-z]:/.*", normalized["engine"]) else ":"
     required_env = {
         "SYNAPTIC_ENGINE_ROOT": normalized["engine"],
         "SYNAPTIC_PROJECT_ROOT": normalized["project"],
@@ -591,9 +630,6 @@ def _validate_evidence_paths_and_argv(
         "SYNAPTIC_CACHE_ROOT": normalized["cache"],
         "SYNAPTIC_TMP_ROOT": normalized["tmp"],
         "SYNAPTIC_WORKLOAD_FINGERPRINT": workload.fingerprint,
-        "PYTHONPATH": path_separator.join((
-            normalized["engine"], _join_path(normalized["engine"], "Trainers", "sft")
-        )),
         "PYTHONNOUSERSITE": "1",
         "PYTHONSAFEPATH": "1",
         "HF_HOME": f"{normalized['cache']}/huggingface",
@@ -605,14 +641,19 @@ def _validate_evidence_paths_and_argv(
             f"models--{str(config['model']['ref']).replace('/', '--')}/snapshots/"
             f"{config['model']['revision']}"
         ),
+        "SYNAPTIC_WORKER_CLOSURE_MANIFEST": closure_manifest_path,
+        "SYNAPTIC_WORKER_CLOSURE_DIGEST": closure_digest,
         "WANDB_DISABLED": "true",
     }
     if any(not isinstance(k, str) or not isinstance(v, str) for k, v in planned_environment.items()):
         return False
-    expected_env = {**planned_environment, **required_env}
+    expected_env = {
+        **{key: value for key, value in planned_environment.items() if key != "PYTHONPATH"},
+        **required_env,
+    }
     return (
         env == expected_env
-        and not ({"PYTHONHOME", "PYTHONUSERBASE", "HF_TOKEN"} & set(env))
+        and not ({"PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE", "HF_TOKEN"} & set(env))
     )
 
 
@@ -626,7 +667,10 @@ def _expected_trainer_argv(
     model = config["model"]
     sft = config["sft"]
     argv = [
-        python, f"{roots['engine']}/Trainers/sft/train_sft.py",
+        python,
+        "-I",
+        f"{roots['engine']}/tuner/runtime/offline_sft_worker.py",
+        "--",
         "--model-name", str(model["ref"]), "--model-revision", str(model["revision"]),
         "--anonymous-model", "--model-cache-dir", f"{roots['cache']}/model",
         "--model-snapshot",

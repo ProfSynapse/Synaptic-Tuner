@@ -10,6 +10,7 @@ from tests.execution.providers.test_modal_bundle import bundle
 from tuner.execution.broker import MutationCommandV1
 from tuner.execution.providers.modal.binding import ModalClientBinding
 from tuner.execution.providers.modal.remote import ModalRemotePhaseError, MountedModalWorkerV1, ProcessResultV1, admit_remote_invocation, execute_remote_sft
+import tuner.execution.providers.modal.remote as remote_module
 from tuner.execution.providers.modal.producer import MountedCompletionProducerV1
 from tuner.execution.providers.modal.mounted_io import read_regular, write_exclusive
 from tuner.execution.providers.modal import mounted_io
@@ -50,8 +51,10 @@ def test_remote_admission_rejects_tag_command_claim_and_bundle_mutations():
         admit_remote_invocation(changed.canonical_bytes,claim=material.claim,claim_tag=material.claim_tag,bundle_transport=material.bundle,verifier=Auth())
 
 
-def test_remote_execution_has_no_shell_or_runtime_override_surface():
+def test_remote_execution_has_no_shell_or_runtime_override_surface(monkeypatch):
     invocation,_,_=admitted();calls=[]
+    monkeypatch.setattr(remote_module, "_read_locked_closure_manifest", lambda source: invocation.closure_manifest)
+    monkeypatch.setattr(remote_module, "_write_runtime_closure_manifest", lambda path, payload: None)
     class Sources:
         def prepare_and_verify(self,source,deployment):calls.append(("source",source,deployment))
     class Processes:
@@ -63,8 +66,10 @@ def test_remote_execution_has_no_shell_or_runtime_override_surface():
     assert "shell" not in Processes.run.__annotations__
 
 
-def test_mounted_worker_reads_only_fixed_two_volume_paths(tmp_path):
+def test_mounted_worker_reads_only_fixed_two_volume_paths(tmp_path, monkeypatch):
     invocation,command,material=admitted();control=tmp_path/"control-volume";artifact=tmp_path/"artifact-volume"
+    monkeypatch.setattr(remote_module, "_read_locked_closure_manifest", lambda source: invocation.closure_manifest)
+    monkeypatch.setattr(remote_module, "_write_runtime_closure_manifest", lambda path, payload: None)
     control_dir=control/"operations"/"effect-1"/"control";input_dir=artifact/"operations"/"effect-1"/"input"
     control_dir.mkdir(parents=True);input_dir.mkdir(parents=True)
     (control_dir/"stage-claim.v1.json").write_bytes(material.claim)

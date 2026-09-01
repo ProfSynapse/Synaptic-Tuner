@@ -31,8 +31,8 @@
     },
     "members": {
       "type": "array",
-      "minItems": 8,
-      "maxItems": 8,
+      "minItems": 9,
+      "maxItems": 9,
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/member"},
       "allOf": [
@@ -43,6 +43,7 @@
         {"contains": {"properties": {"name": {"const": "log-terminal-policy.json"}}}, "minContains": 1, "maxContains": 1},
         {"contains": {"properties": {"name": {"const": "plan.json"}}}, "minContains": 1, "maxContains": 1},
         {"contains": {"properties": {"name": {"const": "stage-intent.json"}}}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"name": {"const": "worker-closure-manifest.json"}}}, "minContains": 1, "maxContains": 1},
         {"contains": {"properties": {"name": {"const": "workload.json"}}}, "minContains": 1, "maxContains": 1}
       ]
     }
@@ -55,7 +56,7 @@
       "additionalProperties": false,
       "required": ["name", "decoded_size", "encoded_size", "sha256", "content_base64"],
       "properties": {
-        "name": {"enum": ["artifact-contract.json", "deployment.json", "execution-source.json", "invocation-intent.json", "log-terminal-policy.json", "plan.json", "stage-intent.json", "workload.json"]},
+        "name": {"enum": ["artifact-contract.json", "deployment.json", "execution-source.json", "invocation-intent.json", "log-terminal-policy.json", "plan.json", "stage-intent.json", "worker-closure-manifest.json", "workload.json"]},
         "decoded_size": {"type": "integer", "minimum": 1, "maximum": 1048576},
         "encoded_size": {"type": "integer", "minimum": 4, "maximum": 1398104},
         "sha256": {"$ref": "#/$defs/sha256"},

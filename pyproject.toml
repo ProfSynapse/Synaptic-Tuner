@@ -54,6 +54,7 @@ namespaces = true
 
 [tool.setuptools.package-data]
 "tuner.execution.providers.modal" = ["modal-runtime-v1.lock.json"]
+"tuner.runtime" = ["manifests/offline-sft-worker-v1.json"]
 
 # The Modal runtime lock is part of the importable engine contract. Broader
 # runtime scripts, schemas, templates, containers, and configuration assets are

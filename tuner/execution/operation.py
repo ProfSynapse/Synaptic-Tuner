@@ -18,7 +18,7 @@ from .contracts import EffectIdentity, EffectKind, digest, safe_ref
 _PREDECESSORS = frozenset({
     "artifact-contract.json", "deployment.json", "execution-source.json",
     "invocation-intent.json", "log-terminal-policy.json", "plan.json",
-    "workload.json",
+    "workload.json", "worker-closure-manifest.json",
 })
 
 
@@ -28,14 +28,18 @@ def _canonical(value: object) -> bytes:
     ).encode("utf-8")
 
 
-def _load_canonical(value: bytes, name: str) -> dict[str, object]:
+def _load_canonical(
+    value: bytes, name: str, *, allow_terminal_newline: bool = False
+) -> dict[str, object]:
     if not isinstance(value, bytes) or not value:
         raise ValueError(f"{name} must be nonempty canonical JSON bytes")
     try:
         document = json.loads(value.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{name} must be canonical JSON") from exc
-    if not isinstance(document, dict) or _canonical(document) != value:
+    expected = _canonical(document)
+    accepted = (expected, expected + b"\n") if allow_terminal_newline else (expected,)
+    if not isinstance(document, dict) or value not in accepted:
         raise ValueError(f"{name} must be a canonical JSON object")
     return document
 
@@ -88,6 +92,7 @@ class OperationBindingV1:
     artifact_contract_digest: str
     log_policy_digest: str
     invocation_intent_digest: str
+    worker_closure_manifest_digest: str
     resource_digest: str
     quote_digest: str
     secret_requirements_digest: str
@@ -107,6 +112,7 @@ class OperationBindingV1:
             "plan_fingerprint", "execution_source_digest", "workload_digest",
             "deployment_attestation_digest", "artifact_contract_digest",
             "log_policy_digest", "invocation_intent_digest", "resource_digest",
+            "worker_closure_manifest_digest",
             "quote_digest", "secret_requirements_digest", "invocation_arguments_digest",
         ):
             object.__setattr__(self, name, digest(getattr(self, name), name))
@@ -153,6 +159,7 @@ class OperationBindingV1:
             "artifact_contract_digest": self.artifact_contract_digest,
             "log_policy_digest": self.log_policy_digest,
             "invocation_intent_digest": self.invocation_intent_digest,
+            "worker_closure_manifest_digest": self.worker_closure_manifest_digest,
             "resource_digest": self.resource_digest, "quote_digest": self.quote_digest,
             "secret_requirements_digest": self.secret_requirements_digest,
             "invocation_arguments_digest": self.invocation_arguments_digest,
@@ -176,12 +183,20 @@ class OperationBindingV1:
         target_provider_job_ref: str | None = None,
     ) -> "OperationBindingV1":
         if not isinstance(member_documents, Mapping) or set(member_documents) != _PREDECESSORS:
-            raise ValueError("operation binding requires the exact seven predecessor members")
-        docs = {name: _load_canonical(member_documents[name], name) for name in _PREDECESSORS}
+            raise ValueError("operation binding requires the exact eight predecessor members")
+        docs = {
+            name: _load_canonical(
+                member_documents[name], name,
+                allow_terminal_newline=name == "worker-closure-manifest.json",
+            )
+            for name in _PREDECESSORS
+        }
         plan = docs["plan.json"]
         invocation = docs["invocation-intent.json"]
         deployment = docs["deployment.json"]
         source = docs["execution-source.json"]
+        closure = docs["worker-closure-manifest.json"]
+        closure_manifest_digest = _sha(member_documents["worker-closure-manifest.json"])
         if (
             plan.get("effect_id") != effect.effect_id
             or plan.get("effect_key") != effect.effect_key
@@ -192,6 +207,8 @@ class OperationBindingV1:
             or invocation.get("invocation_nonce") is None
             or invocation.get("run_id") != plan.get("run_id")
             or source.get("run_id") != plan.get("run_id")
+            or plan.get("worker_closure_manifest_sha256") != closure_manifest_digest
+            or plan.get("worker_closure_digest") != closure.get("closure_digest")
         ):
             raise ValueError("predecessor members do not bind one operation identity")
         arguments = {
@@ -208,6 +225,7 @@ class OperationBindingV1:
             artifact_contract_digest=_sha(member_documents["artifact-contract.json"]),
             log_policy_digest=_sha(member_documents["log-terminal-policy.json"]),
             invocation_intent_digest=_sha(member_documents["invocation-intent.json"]),
+            worker_closure_manifest_digest=closure_manifest_digest,
             resource_digest=plan["resource_digest"], quote_digest=plan["quote_digest"],
             secret_requirements_digest=plan["secret_requirements_digest"],
             invocation_arguments_digest=_sha(_canonical(arguments)),
@@ -222,6 +240,7 @@ class OperationBindingV1:
             "plan_fingerprint", "execution_source_digest", "workload_digest",
             "deployment_attestation_digest", "artifact_contract_digest",
             "log_policy_digest", "invocation_intent_digest", "resource_digest",
+            "worker_closure_manifest_digest",
             "quote_digest", "secret_requirements_digest", "invocation_arguments_digest",
             "invocation_nonce", "stage_target", "target_provider_job_ref",
         }
@@ -259,6 +278,7 @@ class OperationBindingV1:
             artifact_contract_digest=value["artifact_contract_digest"],
             log_policy_digest=value["log_policy_digest"],
             invocation_intent_digest=value["invocation_intent_digest"],
+            worker_closure_manifest_digest=value["worker_closure_manifest_digest"],
             resource_digest=value["resource_digest"], quote_digest=value["quote_digest"],
             secret_requirements_digest=value["secret_requirements_digest"],
             invocation_arguments_digest=value["invocation_arguments_digest"],

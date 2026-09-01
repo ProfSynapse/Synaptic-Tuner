@@ -82,18 +82,20 @@ def _fixture(
         )
     project = (tmp_path / "host-project").resolve()
     engine = (tmp_path / "training-engine").resolve()
-    schemas = engine / "schemas"
-    schemas.mkdir(parents=True)
-    for name in (
-        "synaptic-sft-workload-v1.schema.json",
-        "synaptic-execution-source-v1.schema.json",
-    ):
-        shutil.copy2(_REPO / "schemas" / name, schemas / name)
+    manifest_source = (
+        _REPO / "tuner" / "runtime" / "manifests" / "offline-sft-worker-v1.json"
+    )
+    manifest_document = json.loads(manifest_source.read_text(encoding="utf-8"))
+    for member in manifest_document["members"]:
+        relative = Path(*member["path"].split("/"))
+        destination = engine / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_REPO / relative, destination)
+    control = tmp_path / "control"
+    control.mkdir()
+    closure_manifest = control / "offline-sft-worker-v1.json"
+    shutil.copy2(manifest_source, closure_manifest)
     engine_file = engine / "Trainers" / "sft" / "runtime_v1.py"
-    engine_file.parent.mkdir(parents=True)
-    engine_file.write_text("# fixture runtime entrypoint\n", encoding="utf-8")
-    trainer_file = engine / "Trainers" / "sft" / "train_sft.py"
-    trainer_file.write_text("# fixture trainer\n", encoding="utf-8")
     dataset = project / "data" / "train.jsonl"
     dataset.parent.mkdir(parents=True)
     dataset.write_bytes(b'{"messages":[]}\n')
@@ -261,6 +263,10 @@ def _fixture(
         execution_source=execution_source,
     )
     environment = dict(planned_environment)
+    environment["SYNAPTIC_WORKER_CLOSURE_MANIFEST"] = str(closure_manifest)
+    environment["SYNAPTIC_WORKER_CLOSURE_DIGEST"] = manifest_document[
+        "closure_digest"
+    ]
     environment["SYNAPTIC_WORKLOAD_FINGERPRINT"] = workload.fingerprint
     return workload, environment, engine_file, roots, dataset
 
@@ -344,9 +350,14 @@ def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
 
     invocation = runner.calls[0]
     assert invocation.cwd == roots["tmp"]
-    assert invocation.argv[:2] == (
+    assert invocation.argv[:4] == (
         sys.executable,
-        str(Path(environment["SYNAPTIC_ENGINE_ROOT"]) / "Trainers/sft/train_sft.py"),
+        "-I",
+        str(
+            Path(environment["SYNAPTIC_ENGINE_ROOT"])
+            / "tuner/runtime/offline_sft_worker.py"
+        ),
+        "--",
     )
     assert "--local-file" in invocation.argv
     assert invocation.argv[invocation.argv.index("--local-file") + 1] == str(dataset)
@@ -357,16 +368,17 @@ def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
     assert "--no-load-in-4bit" in invocation.argv
     assert not any(";" in item or "&&" in item for item in invocation.argv)
     assert "HF_TOKEN" not in dict(invocation.environment)
-    assert dict(invocation.environment)["PYTHONPATH"] == os.pathsep.join(
-        (
-            environment["SYNAPTIC_ENGINE_ROOT"],
-            str(Path(environment["SYNAPTIC_ENGINE_ROOT"]) / "Trainers/sft"),
-        )
-    )
+    assert "PYTHONPATH" not in dict(invocation.environment)
     assert dict(invocation.environment)["PYTHONNOUSERSITE"] == "1"
     assert dict(invocation.environment)["PYTHONSAFEPATH"] == "1"
     assert dict(invocation.environment)["HF_HUB_OFFLINE"] == "1"
     assert dict(invocation.environment)["TRANSFORMERS_OFFLINE"] == "1"
+    assert dict(invocation.environment)["SYNAPTIC_WORKER_CLOSURE_MANIFEST"] == (
+        environment["SYNAPTIC_WORKER_CLOSURE_MANIFEST"]
+    )
+    assert dict(invocation.environment)["SYNAPTIC_WORKER_CLOSURE_DIGEST"] == (
+        environment["SYNAPTIC_WORKER_CLOSURE_DIGEST"]
+    )
     assert type(invocation.expected_projection["training"]["num_epochs"]) is int
     assert {item["role"] for item in result.artifacts} == {
         "workload_record",
@@ -499,12 +511,7 @@ def test_runtime_replaces_hostile_python_environment(tmp_path: Path) -> None:
         engine_file=engine_file,
     )
     child = dict(runner.calls[0].environment)
-    assert child["PYTHONPATH"] == os.pathsep.join(
-        (
-            environment["SYNAPTIC_ENGINE_ROOT"],
-            str(Path(environment["SYNAPTIC_ENGINE_ROOT"]) / "Trainers/sft"),
-        )
-    )
+    assert "PYTHONPATH" not in child
     assert child["PYTHONNOUSERSITE"] == "1"
     assert child["PYTHONSAFEPATH"] == "1"
     assert "PYTHONHOME" not in child
@@ -969,7 +976,11 @@ def test_runtime_accepts_one_locked_provider_capability_redirect(
         (roots["artifacts"] / "training_lineage.json").read_text(encoding="utf-8")
     )
     execution = lineage["execution_evidence"]
-    assert _validate_execution_evidence(execution, workload)
+    assert _validate_execution_evidence(
+        execution, workload,
+        closure_digest=execution["environment"]["SYNAPTIC_WORKER_CLOSURE_DIGEST"],
+        closure_manifest_path=execution["environment"]["SYNAPTIC_WORKER_CLOSURE_MANIFEST"],
+    )
     assert _validate_embedded_trainer_lineage(
         lineage["trainer_lineage"], workload, execution
     )
@@ -1016,7 +1027,11 @@ def test_semantic_verifier_accepts_one_consistent_provider_root_relocation(
 ) -> None:
     workload, lineage = _relocated_runtime_lineage(tmp_path)
     execution = lineage["execution_evidence"]
-    assert _validate_execution_evidence(execution, workload)
+    assert _validate_execution_evidence(
+        execution, workload,
+        closure_digest=execution["environment"]["SYNAPTIC_WORKER_CLOSURE_DIGEST"],
+        closure_manifest_path=execution["environment"]["SYNAPTIC_WORKER_CLOSURE_MANIFEST"],
+    )
     assert _validate_embedded_trainer_lineage(
         lineage["trainer_lineage"], workload, execution
     )
@@ -1030,7 +1045,11 @@ def test_semantic_verifier_rejects_inconsistent_provider_root_relocation(
     execution["environment"]["SYNAPTIC_CACHE_ROOT"] = str(
         (tmp_path / "different-provider-root" / "cache").resolve()
     ).replace("\\", "/")
-    assert not _validate_execution_evidence(execution, workload)
+    assert not _validate_execution_evidence(
+        execution, workload,
+        closure_digest=execution["environment"]["SYNAPTIC_WORKER_CLOSURE_DIGEST"],
+        closure_manifest_path=execution["environment"]["SYNAPTIC_WORKER_CLOSURE_MANIFEST"],
+    )
 
 
 def test_runtime_rejects_redirect_below_locked_capability_boundary(

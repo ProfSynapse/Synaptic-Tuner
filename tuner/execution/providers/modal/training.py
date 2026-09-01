@@ -12,6 +12,7 @@ import base64
 import binascii
 import json
 from dataclasses import dataclass, replace
+from pathlib import PurePosixPath
 from typing import Mapping, Protocol, runtime_checkable
 
 from synaptic_tuner.api.v1.execution import (
@@ -68,7 +69,12 @@ from tuner.execution.service import LifecycleService
 from tuner.execution.lifecycle import apply_event, initial_record
 from tuner.project.context import ProjectContext
 from tuner.runtime.artifacts import ArtifactEntry, ArtifactInventory
-from tuner.runtime.dispatch import ProcessResult
+from tuner.runtime.dispatch import (
+    ProcessResult,
+    WorkerControlLocationV1,
+    build_source_worker_invocation,
+    materialize_worker_bundle,
+)
 from tuner.runtime.verification import (
     ArtifactReadError,
     VerificationService,
@@ -909,6 +915,12 @@ def _build_preparation(
             "max_terminal_bytes": 65536,
         }
     )
+    control = WorkerControlLocationV1(
+        PurePosixPath("/workspace/control") / operation_path(effect.effect_id, "input")
+    )
+    worker_bundle = materialize_worker_bundle(
+        build_source_worker_invocation(plan, control)
+    )
     plan_bytes = canonical_json(
         {
             "schema_version": "synaptic-training-plan/v1",
@@ -927,12 +939,11 @@ def _build_preparation(
             "resource_digest": context.resource_digest,
             "quote_digest": context.quote_digest,
             "secret_requirements_digest": source.secret_requirements_digest,
+            "worker_closure_manifest_sha256": worker_bundle.closure_manifest_sha256,
+            "worker_closure_digest": worker_bundle.closure_digest,
         }
     )
-    environment = dict(source.environment)
-    environment["SYNAPTIC_WORKLOAD_FINGERPRINT"] = hashlib.sha256(
-        b"synaptic-training-workload/v1\0" + workload_bytes
-    ).hexdigest()
+    environment = dict(worker_bundle.dispatch.environment)
     invocation_bytes = canonical_json(
         {
             "schema_version": "synaptic-modal-invocation-intent/v1",
@@ -942,13 +953,9 @@ def _build_preparation(
             "deployment_digest": sha(deployment_bytes),
             "execution_source_digest": sha(source_bytes),
             "workload_digest": sha(workload_bytes),
-            "interpreter": source.python_executable,
-            "argv": [
-                source.python_executable,
-                source.roots["engine"] + "/Trainers/sft/runtime_v1.py",
-                "--canonical-workload-stdin",
-            ],
-            "cwd": source.roots["tmp"],
+            "interpreter": worker_bundle.dispatch.argv[0],
+            "argv": list(worker_bundle.dispatch.argv),
+            "cwd": worker_bundle.dispatch.cwd.as_posix(),
             "environment_digest": sha(canonical_json(environment)),
             "invocation_nonce": context.invocation_nonce,
         }
@@ -961,6 +968,7 @@ def _build_preparation(
         "log-terminal-policy.json": policy_bytes,
         "plan.json": plan_bytes,
         "workload.json": workload_bytes,
+        "worker-closure-manifest.json": worker_bundle.closure_manifest_bytes,
     }
     operation = OperationBindingV1.from_predecessors(
         project_ref=context.project_ref,
@@ -1590,7 +1598,19 @@ class ModalTrainingOperations:
                 except Exception:
                     raise ArtifactReadError("artifact read unavailable") from None
 
-        report = VerificationService(WorkloadBindingVerifier()).verify(
+        closure_member = next(
+            member for member in bundle.members
+            if member.name == "worker-closure-manifest.json"
+        )
+        closure_digest = closure_member.document["closure_digest"]
+        closure_path = WorkerControlLocationV1(
+            PurePosixPath("/workspace/control")
+            / operation_path(preparation.operation.effect.effect_id, "input")
+        ).manifest_path.as_posix()
+        report = VerificationService(WorkloadBindingVerifier(
+            closure_digest=closure_digest,
+            closure_manifest_path=closure_path,
+        )).verify(
             provider_completed=True,
             process=ProcessResult(0),
             workload=workload,

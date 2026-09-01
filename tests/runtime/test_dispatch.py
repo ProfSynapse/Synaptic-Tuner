@@ -28,6 +28,7 @@ from tuner.runtime.dispatch import (
     SubprocessRunner,
     WorkerInvocationV1,
     WorkerBundleMaterializationV1,
+    WorkerControlLocationV1,
     build_dispatch_invocation,
     build_worker_invocation,
     materialize_worker_invocation,
@@ -86,12 +87,16 @@ def _layout(tmp_path: Path) -> CloudRuntimeLayout:
     )
 
 
+def _control() -> WorkerControlLocationV1:
+    return WorkerControlLocationV1(PurePosixPath("/source/control"))
+
+
 def test_factory_derives_closed_byte_invocation_from_the_exact_plan(
     tmp_path: Path,
 ) -> None:
     plan = _plan()
     layout = _layout(tmp_path)
-    worker = build_worker_invocation(plan, layout)
+    worker = build_worker_invocation(plan, layout, _control())
     invocation = materialize_worker_invocation(worker)
 
     assert worker.schema_version == "synaptic-worker-invocation/v1"
@@ -129,7 +134,7 @@ def test_worker_bundle_is_factory_issued_durable_and_host_path_free(
     tmp_path: Path,
 ) -> None:
     plan = _plan()
-    worker = build_worker_invocation(plan, _layout(tmp_path))
+    worker = build_worker_invocation(plan, _layout(tmp_path), _control())
     bundle = materialize_worker_bundle(worker)
     projection = json.loads(bundle.canonical_projection_bytes)
 
@@ -168,9 +173,9 @@ def test_dispatcher_passes_one_canonical_invocation_to_runner(
             calls.append(invocation)
             return ProcessResult(0, "ok", "")
 
-    result = EngineDispatcher(Runner()).dispatch(plan, layout)
+    result = EngineDispatcher(Runner()).dispatch(plan, layout, _control())
     assert result.exit_code == 0
-    assert calls == [build_dispatch_invocation(plan, layout)]
+    assert calls == [build_dispatch_invocation(plan, layout, _control())]
 
 
 def test_factory_rejects_redirected_staged_entrypoint(tmp_path: Path) -> None:
@@ -185,13 +190,13 @@ def test_factory_rejects_redirected_staged_entrypoint(tmp_path: Path) -> None:
         pytest.skip("symlink creation is unavailable on this platform")
 
     with pytest.raises(ValueError, match="redirected"):
-        build_worker_invocation(_plan(), layout)
+        build_worker_invocation(_plan(), layout, _control())
 
 
 def test_subprocess_runner_removes_hostile_python_environment(
     tmp_path: Path, monkeypatch
 ) -> None:
-    invocation = build_dispatch_invocation(_plan(), _layout(tmp_path))
+    invocation = build_dispatch_invocation(_plan(), _layout(tmp_path), _control())
     observed = {}
 
     def fake_run(*args, **kwargs):
@@ -208,7 +213,7 @@ def test_subprocess_runner_removes_hostile_python_environment(
         }
     ).run(invocation)
 
-    assert observed["PYTHONPATH"] == "/workspace/engine"
+    assert "PYTHONPATH" not in observed
     assert observed["PYTHONNOUSERSITE"] == "1"
     assert observed["PYTHONSAFEPATH"] == "1"
     assert "PYTHONHOME" not in observed
@@ -222,6 +227,7 @@ def test_file_location_derives_all_authenticated_file_fields(
     worker = build_worker_invocation(
         plan,
         _layout(tmp_path),
+        _control(),
         CanonicalWorkloadFileLocationV1(PurePosixPath("/control/sealed")),
     )
     invocation = materialize_worker_invocation(worker)
@@ -268,7 +274,7 @@ def test_factory_recompilation_rejects_plan_component_swaps(
         )
 
     with pytest.raises(ValueError, match="differ"):
-        build_worker_invocation(hostile, _layout(tmp_path))
+        build_worker_invocation(hostile, _layout(tmp_path), _control())
 
 
 def test_factory_rejects_ambiguous_plan_subclasses(tmp_path: Path) -> None:
@@ -286,7 +292,7 @@ def test_factory_rejects_ambiguous_plan_subclasses(tmp_path: Path) -> None:
         plan.artifact_policy,
     )
     with pytest.raises(TypeError, match="exact canonical TrainingPlan"):
-        build_worker_invocation(foreign, _layout(tmp_path))
+        build_worker_invocation(foreign, _layout(tmp_path), _control())
 
 
 def test_invocations_and_transports_reject_direct_construction() -> None:
@@ -302,7 +308,7 @@ def test_invocations_and_transports_reject_direct_construction() -> None:
 
 def test_factory_accepts_no_caller_authored_identity_fields(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="unexpected keyword"):
-        build_worker_invocation(_plan(), _layout(tmp_path), plan_fingerprint="f" * 64)
+        build_worker_invocation(_plan(), _layout(tmp_path), _control(), plan_fingerprint="f" * 64)
 
 
 def test_runtime_package_exports_only_the_new_worker_contract() -> None:
@@ -314,10 +320,14 @@ def test_runtime_package_exports_only_the_new_worker_contract() -> None:
     )
     with pytest.raises(AttributeError):
         runtime_api.DispatchSpec
+    assert not hasattr(runtime_api, "build_worker_environment")
+    assert "build_worker_environment" not in runtime_api.__all__
+    assert not hasattr(dispatch_module, "build_worker_environment")
+    assert "build_worker_environment" not in dispatch_module.__all__
 
 
 def test_materializer_rejects_replace_and_object_tampering(tmp_path: Path) -> None:
-    worker = build_worker_invocation(_plan(), _layout(tmp_path))
+    worker = build_worker_invocation(_plan(), _layout(tmp_path), _control())
     with pytest.raises(TypeError):
         replace(worker, plan_fingerprint="f" * 64)
 
@@ -327,7 +337,7 @@ def test_materializer_rejects_replace_and_object_tampering(tmp_path: Path) -> No
 
 
 def test_materializer_rejects_transport_tampering(tmp_path: Path) -> None:
-    worker = build_worker_invocation(_plan(), _layout(tmp_path))
+    worker = build_worker_invocation(_plan(), _layout(tmp_path), _control())
     object.__setattr__(worker.transport, "sha256", "f" * 64)
     with pytest.raises(ValueError, match="authentic factory issuance"):
         materialize_worker_invocation(worker)
@@ -336,7 +346,7 @@ def test_materializer_rejects_transport_tampering(tmp_path: Path) -> None:
 def test_materializer_rejects_payload_tampering_and_fabrication(
     tmp_path: Path,
 ) -> None:
-    worker = build_worker_invocation(_plan(), _layout(tmp_path))
+    worker = build_worker_invocation(_plan(), _layout(tmp_path), _control())
     object.__setattr__(worker.transport, "payload", b"{}")
     with pytest.raises(ValueError, match="authentic factory issuance"):
         materialize_worker_invocation(worker)
@@ -355,7 +365,7 @@ def test_factory_rejects_root_ancestry_overlap_after_layout_tamper(
         layout.project, "target", PurePosixPath("/workspace/engine/project")
     )
     with pytest.raises(ValueError, match="overlap"):
-        build_worker_invocation(_plan(), layout)
+        build_worker_invocation(_plan(), layout, _control())
 
 
 @pytest.mark.parametrize(
@@ -373,6 +383,7 @@ def test_factory_rejects_file_control_root_ancestry_collisions(
         build_worker_invocation(
             _plan(),
             _layout(tmp_path),
+            _control(),
             CanonicalWorkloadFileLocationV1(control_root),
         )
 
@@ -383,4 +394,4 @@ def test_factory_rejects_layout_roots_outside_the_workload_lock(
     layout = _layout(tmp_path)
     object.__setattr__(layout.engine, "target", PurePosixPath("/other/engine"))
     with pytest.raises(ValueError, match="compiled workload roots"):
-        build_worker_invocation(_plan(), layout)
+        build_worker_invocation(_plan(), layout, _control())

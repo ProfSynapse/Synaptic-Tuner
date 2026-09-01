@@ -28,6 +28,11 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _MODEL_REVISION_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _MODEL_REF_PART_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 _ENTRYPOINT = PurePosixPath("Trainers/sft/runtime_v1.py")
+_OFFLINE_WORKER = PurePosixPath("tuner/runtime/offline_sft_worker.py")
+_CLOSURE_ENV = (
+    "SYNAPTIC_WORKER_CLOSURE_MANIFEST",
+    "SYNAPTIC_WORKER_CLOSURE_DIGEST",
+)
 _ROOT_ENV = {
     "engine": "SYNAPTIC_ENGINE_ROOT",
     "project": "SYNAPTIC_PROJECT_ROOT",
@@ -447,6 +452,79 @@ def _ensure_engine_import(engine_root: Path) -> None:
     value = str(engine_root)
     if value not in sys.path:
         sys.path.insert(0, value)
+
+
+def _authenticate_worker_closure(
+    environment: Mapping[str, str], engine_root: Path, engine_file: Path
+) -> object:
+    manifest_text = environment.get(_CLOSURE_ENV[0])
+    expected_digest = environment.get(_CLOSURE_ENV[1])
+    if (
+        not isinstance(manifest_text, str)
+        or not manifest_text
+        or not Path(manifest_text).is_absolute()
+        or not isinstance(expected_digest, str)
+        or _DIGEST_RE.fullmatch(expected_digest) is None
+    ):
+        raise RuntimeV1Error("offline worker closure binding is unavailable")
+    manifest_path = Path(manifest_text)
+    if manifest_path.name != "offline-sft-worker-v1.json":
+        raise RuntimeV1Error("offline worker closure manifest path is not fixed")
+    document = _strict_json_bytes(
+        _read_regular(manifest_path, maximum=1024 * 1024),
+        label="offline worker closure manifest",
+    )
+    if not isinstance(document, Mapping):
+        raise RuntimeV1Error("offline worker closure manifest is malformed")
+    projected = dict(document)
+    recorded_digest = projected.pop("closure_digest", None)
+    observed_digest = hashlib.sha256(_canonical_json(projected)).hexdigest()
+    if (
+        not isinstance(recorded_digest, str)
+        or not hmac.compare_digest(recorded_digest, expected_digest)
+        or not hmac.compare_digest(recorded_digest, observed_digest)
+    ):
+        raise RuntimeV1Error("offline worker closure digest does not match")
+    raw_members = document.get("members")
+    loader_member = None
+    if isinstance(raw_members, list):
+        loader_member = next(
+            (
+                item
+                for item in raw_members
+                if isinstance(item, Mapping)
+                and item.get("path") == _OFFLINE_WORKER.as_posix()
+            ),
+            None,
+        )
+    if not isinstance(loader_member, Mapping):
+        raise RuntimeV1Error("offline worker closure lacks its validator")
+    loader_path = engine_root.joinpath(*_OFFLINE_WORKER.parts)
+    loader_payload = _read_regular(loader_path, maximum=1024 * 1024)
+    if (
+        loader_member.get("size_bytes") != len(loader_payload)
+        or loader_member.get("sha256")
+        != hashlib.sha256(loader_payload).hexdigest()
+    ):
+        raise RuntimeV1Error("offline worker closure validator is not authentic")
+    module_name = "_synaptic_offline_sft_worker_v1"
+    module = type(sys)(module_name)
+    module.__file__ = str(loader_path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    try:
+        exec(compile(loader_payload, str(loader_path), "exec"), module.__dict__)
+        closure = module.load_offline_sft_worker_environment(
+            environment, engine_root=engine_root
+        )
+        if engine_file.resolve(strict=True) == Path(__file__).resolve(strict=True):
+            module.verify_loaded_owned_module_origins(
+                closure, engine_root=engine_root
+            )
+            module.install_owned_module_guard(closure, engine_root=engine_root)
+    except Exception as exc:
+        raise RuntimeV1Error("offline worker closure validation failed") from exc
+    return closure
 
 
 def _validate_schema(document: Mapping[str, object], engine_root: Path) -> None:
@@ -882,6 +960,7 @@ def decode_and_validate_workload(
             expected_entrypoint, engine_root, label="runtime entrypoint"
         ):
             raise RuntimeV1Error("engine root does not own this runtime entrypoint")
+        _authenticate_worker_closure(environment, engine_root, engine_file)
         _ensure_engine_import(engine_root)
     except RuntimeV1Error as error:
         raise _mark_runtime_stage(error, "runtime_workload_engine_rejected")
@@ -1025,6 +1104,11 @@ def build_trainer_invocation(
         roots.engine,
         label="SFT trainer",
     )
+    worker_path = _require_contained_regular(
+        roots.engine.joinpath(*_OFFLINE_WORKER.parts),
+        roots.engine,
+        label="offline SFT worker",
+    )
     requirements = document.get("runtime_requirements")
     _validate_portable_runtime_requirements(requirements)
     runtime_lock = document["execution_source"].get("runtime")
@@ -1071,9 +1155,17 @@ def build_trainer_invocation(
         raise RuntimeV1Error(
             "resolved runtime environment violates portable requirements"
         )
+    for name in _CLOSURE_ENV:
+        if (
+            not isinstance(environment.get(name), str)
+            or not environment.get(name)
+        ):
+            raise RuntimeV1Error("offline worker closure binding changed")
     argv = [
         str(Path(python_executable).resolve()),
-        str(trainer_path),
+        "-I",
+        str(worker_path),
+        "--",
         "--model-name",
         str(model["ref"]),
         "--model-revision",
@@ -1104,13 +1196,12 @@ def build_trainer_invocation(
     ]
     _append_sft_arguments(argv, sft, model)
     child_env = dict(planned_environment)
+    child_env.pop("PYTHONPATH", None)
+    child_env.update({name: environment[name] for name in _CLOSURE_ENV})
     child_env.update({_ROOT_ENV[name]: str(getattr(roots, name)) for name in _ROOT_ENV})
     child_env.update(
         {
             "SYNAPTIC_WORKLOAD_FINGERPRINT": workload.fingerprint,
-            "PYTHONPATH": os.pathsep.join(
-                (str(roots.engine), str(trainer_path.parent))
-            ),
             "PYTHONNOUSERSITE": "1",
             "PYTHONSAFEPATH": "1",
             "HF_HOME": str(roots.cache / "huggingface"),
