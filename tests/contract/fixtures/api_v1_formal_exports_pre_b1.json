@@ -1,5 +1,5 @@
 [
-  "APIHost", "AttemptAdmission", "AttemptDisposition", "ArtifactDestination",
+  "APIHost", "AcceleratorDeviceRequestV1", "AttemptAdmission", "AttemptDisposition", "ArtifactDestination",
   "ArtifactDestinationRegistryPortV1", "ArtifactPolicy", "ArtifactRef", "ArtifactSpoolPortV1",
   "ArtifactState", "ArtifactsAPI", "ArtifactsOperations", "AuthenticatedDestinationInventoryV1",
   "AuthenticatedDestinationV1", "AuthenticatedLookupV1", "AuthenticatedPublicationReceiptV1",
@@ -25,7 +25,7 @@
   "AuthenticatedSourceEvidenceV1", "ExecutionSourceV1", "LocalSourceInspectionPort",
   "PushedSourceVerificationPort", "TrainingAPI", "TrainingOperations", "TrainingOutcome", "TrainingPlan",
   "TrainingPreflight", "TrainingRequest", "TrainingRequestResolver", "TrainingResolutionError",
-  "TrainingRunRef", "TrainingRunState", "TrainingSubmission", "TransferAdmissionV1",
+  "TrainingRunRef", "TrainingRunState", "TrainingSubmission", "compile_training_plan_v1", "TransferAdmissionV1",
   "TransferDispositionV1", "TransferOwnershipV1", "VerificationStatus", "VerifiedArtifact",
   "VerifiedArtifactSourcePortV1", "SpooledArtifactV1", "SpoolSinkPortV1",
   "StrongInMemoryPublicationStoreV1", "InvalidTransition", "apply_lifecycle_event",

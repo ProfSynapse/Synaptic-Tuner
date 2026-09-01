@@ -2,6 +2,7 @@ from dataclasses import FrozenInstanceError, fields, replace
 
 import pytest
 
+from synaptic_tuner.api.v1.training import AcceleratorDeviceRequestV1
 from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderDescriptor, ProviderRef
 from tuner.execution.foundation_v2.executors import AdapterDescriptorV1, ExecutorDescriptorV1
 from tuner.execution.foundation_v2.references import ExecutionScopeV1
@@ -82,6 +83,15 @@ def _with_provider_id(profile, provider_id):
     lambda p: replace(p, runtime=replace(p.runtime, cpu_count=3)),
     lambda p: replace(p, runtime=replace(p.runtime, memory_bytes=2_147_483_648)),
     lambda p: replace(p, runtime=replace(p.runtime, timeout_seconds=7200)),
+    lambda p: replace(
+        p,
+        runtime=replace(
+            p.runtime,
+            accelerator_devices=AcceleratorDeviceRequestV1(
+                "nvidia", (0,), ("gpu",)
+            ),
+        ),
+    ),
     lambda p: replace(p, workload=replace(
         p.workload, arguments=("python", "/source/other.py"),
     )),
@@ -138,6 +148,7 @@ def test_profile_rejects_every_hostile_nested_subclass(profile, field):
     (("adapter_descriptor",), "adapter_id", ""),
     (("image",), "presence_policy", "pull"),
     (("runtime",), "network_mode", "bridge"),
+    (("runtime", "accelerator_devices"), "kind", "amd"),
     (("workload",), "arguments", ["mutable"]),
     (("roots",), "source_read_only", False),
     (("artifacts",), "roles", ("z", "a")),
@@ -180,11 +191,45 @@ def test_image_rejects_latest_and_requires_present_only(bad):
         DockerImageV1("repo", "sha256:" + "a" * 64, "pull")
 
 
-def test_cpu_network_and_workload_bounds_are_closed():
+def test_docker_runtime_accepts_only_explicit_cpu_or_nvidia_device_zero():
+    cpu = AcceleratorDeviceRequestV1("cpu", (), ())
+    gpu = AcceleratorDeviceRequestV1("nvidia", (0,), ("gpu",))
+    assert DockerRuntimeV1(1, 1024, 10, cpu).accelerator_devices == cpu
+    assert DockerRuntimeV1(1, 1024, 10, gpu).accelerator_devices == gpu
+
+    for unsupported in (
+        AcceleratorDeviceRequestV1("nvidia", (1,), ("gpu",)),
+        AcceleratorDeviceRequestV1("nvidia", (0, 1), ("gpu",)),
+        AcceleratorDeviceRequestV1("amd", (0,), ("gpu",)),
+        AcceleratorDeviceRequestV1("nvidia", (0,), ("compute",)),
+    ):
+        with pytest.raises(ValueError):
+            DockerRuntimeV1(1, 1024, 10, unsupported)
+
+    class HostileAcceleratorRequest(AcceleratorDeviceRequestV1):
+        pass
+
+    with pytest.raises(TypeError):
+        DockerRuntimeV1(1, 1024, 10, HostileAcceleratorRequest("cpu", (), ()))
+
+
+def test_profile_snapshot_rejects_postconstruction_hostile_accelerator_request(profile):
+    class HostileAcceleratorRequest(AcceleratorDeviceRequestV1):
+        pass
+
+    object.__setattr__(
+        profile.runtime,
+        "accelerator_devices",
+        HostileAcceleratorRequest("cpu", (), ()),
+    )
+    with pytest.raises(TypeError):
+        validated_profile_snapshot(profile)
+
+
+def test_network_and_workload_bounds_are_closed():
+    cpu = AcceleratorDeviceRequestV1("cpu", (), ())
     with pytest.raises(ValueError):
-        DockerRuntimeV1(1, 1024, 10, "bridge", False)
-    with pytest.raises(ValueError):
-        DockerRuntimeV1(1, 1024, 10, "none", True)
+        DockerRuntimeV1(1, 1024, 10, cpu, "bridge")
     with pytest.raises(ValueError):
         DockerWorkloadV1(("x" * 40_000,), (), "1" * 64)
     with pytest.raises(ValueError):

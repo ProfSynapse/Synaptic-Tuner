@@ -23,6 +23,7 @@ from .execution import (
     RunStatus,
 )
 from .sources import ExecutionSourceV1
+from ._contract import contract_digest
 
 
 def _required(value: str, field_name: str) -> str:
@@ -41,6 +42,7 @@ def _positive(value: int, field_name: str) -> None:
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _PINNED_IMAGE_PATTERN = re.compile(r"^\S+@sha256:(?P<digest>[0-9a-f]{64})$")
+_ACCELERATOR_TOKEN_PATTERN = re.compile(r"^[a-z][a-z0-9._-]*$")
 
 
 def _canonical_document(value: Mapping[str, object]) -> str:
@@ -83,6 +85,66 @@ class CanonicalDocument:
         if not isinstance(value, dict):  # pragma: no cover - constructor invariant
             raise TypeError("canonical document must decode to an object")
         return value
+
+
+@dataclass(frozen=True, slots=True)
+class AcceleratorDeviceRequestV1:
+    """Canonical provider-neutral selection of concrete accelerator devices."""
+
+    kind: str
+    device_indices: tuple[int, ...]
+    capabilities: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.kind) is not str:
+            raise TypeError("kind must be an exact string")
+        if _ACCELERATOR_TOKEN_PATTERN.fullmatch(self.kind) is None:
+            raise ValueError("kind must be a canonical lowercase token")
+        if type(self.device_indices) is not tuple:
+            raise TypeError("device_indices must be an exact tuple")
+        if any(type(value) is not int for value in self.device_indices):
+            raise TypeError("device_indices must contain exact integers")
+        if any(value < 0 for value in self.device_indices):
+            raise ValueError("device_indices must be nonnegative")
+        if (
+            self.device_indices != tuple(sorted(self.device_indices))
+            or len(self.device_indices) != len(set(self.device_indices))
+        ):
+            raise ValueError("device_indices must be unique canonical ascending")
+        if type(self.capabilities) is not tuple:
+            raise TypeError("capabilities must be an exact tuple")
+        if any(type(value) is not str for value in self.capabilities):
+            raise TypeError("capabilities must contain exact strings")
+        if any(
+            _ACCELERATOR_TOKEN_PATTERN.fullmatch(value) is None
+            for value in self.capabilities
+        ):
+            raise ValueError("capabilities must contain canonical lowercase tokens")
+        if (
+            self.capabilities != tuple(sorted(self.capabilities))
+            or len(self.capabilities) != len(set(self.capabilities))
+        ):
+            raise ValueError("capabilities must be unique canonical ascending")
+        if self.kind == "cpu":
+            if self.device_indices or self.capabilities:
+                raise ValueError("cpu requests cannot select devices or capabilities")
+        elif not self.device_indices or not self.capabilities:
+            raise ValueError(
+                "accelerator requests require device indices and capabilities"
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "device_indices": list(self.device_indices),
+            "capabilities": list(self.capabilities),
+        }
+
+    @property
+    def accelerator_device_request_digest(self) -> str:
+        return contract_digest(
+            "synaptic-accelerator-device-request/v1", self.to_dict()
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,6 +546,7 @@ class TrainingAPI:
         return self._operations.reverify(submission)
 
 __all__ = [
+    "AcceleratorDeviceRequestV1",
     "ArtifactPolicy",
     "CanonicalDocument",
     "ResolvedTrainingComponents",

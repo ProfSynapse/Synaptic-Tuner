@@ -8,6 +8,7 @@ import re
 
 from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderDescriptor, ProviderRef
 from synaptic_tuner.api.v1.results import VerifiedArtifact
+from synaptic_tuner.api.v1.training import AcceleratorDeviceRequestV1
 
 from ...foundation_v2.canonical import canonical_bytes, digest_text, domain_digest, safe_ref
 from ...foundation_v2.executors import AdapterDescriptorV1, ExecutorDescriptorV1
@@ -99,20 +100,28 @@ class DockerRuntimeV1:
     cpu_count: int
     memory_bytes: int
     timeout_seconds: int
+    accelerator_devices: AcceleratorDeviceRequestV1
     network_mode: str = "none"
-    gpu_enabled: bool = False
 
     def __post_init__(self) -> None:
         _exact_positive(self.cpu_count, "cpu_count", 256)
         _exact_positive(self.memory_bytes, "memory_bytes", 2**50)
         _exact_positive(self.timeout_seconds, "timeout_seconds", 7 * 24 * 3600)
-        if self.network_mode != "none" or self.gpu_enabled is not False:
-            raise ValueError("Docker v1 is CPU-only and network-disabled")
+        if type(self.accelerator_devices) is not AcceleratorDeviceRequestV1:
+            raise TypeError("exact accelerator device request required")
+        devices = self.accelerator_devices
+        if devices not in (
+            AcceleratorDeviceRequestV1("cpu", (), ()),
+            AcceleratorDeviceRequestV1("nvidia", (0,), ("gpu",)),
+        ):
+            raise ValueError("Docker v1 requires CPU or NVIDIA device 0")
+        if self.network_mode != "none":
+            raise ValueError("Docker v1 is network-disabled")
 
     def to_dict(self) -> dict[str, object]:
         return {"cpu_count": self.cpu_count, "memory_bytes": self.memory_bytes,
                 "timeout_seconds": self.timeout_seconds, "network_mode": self.network_mode,
-                "gpu_enabled": self.gpu_enabled}
+                "accelerator_devices": self.accelerator_devices.to_dict()}
 
     @property
     def digest(self) -> str:
@@ -283,7 +292,7 @@ def _profile_document(profile: DockerProfileV1) -> dict[str, object]:
                 "memory_bytes": profile.runtime.memory_bytes,
                 "timeout_seconds": profile.runtime.timeout_seconds,
                 "network_mode": profile.runtime.network_mode,
-                "gpu_enabled": profile.runtime.gpu_enabled,
+                "accelerator_devices": profile.runtime.accelerator_devices.to_dict(),
             },
             "workload": {
                 "arguments": list(profile.workload.arguments),
@@ -317,6 +326,7 @@ def validated_profile_snapshot(profile: DockerProfileV1) -> DockerProfileV1:
             or type(profile.adapter_descriptor) is not AdapterDescriptorV1
             or type(profile.image) is not DockerImageV1
             or type(profile.runtime) is not DockerRuntimeV1
+            or type(profile.runtime.accelerator_devices) is not AcceleratorDeviceRequestV1
             or type(profile.workload) is not DockerWorkloadV1
             or type(profile.roots) is not DockerRootsV1
             or type(profile.artifacts) is not DockerArtifactContractV1):
@@ -353,8 +363,13 @@ def validated_profile_snapshot(profile: DockerProfileV1) -> DockerProfileV1:
         ),
         runtime=DockerRuntimeV1(
             profile.runtime.cpu_count, profile.runtime.memory_bytes,
-            profile.runtime.timeout_seconds, profile.runtime.network_mode,
-            profile.runtime.gpu_enabled,
+            profile.runtime.timeout_seconds,
+            AcceleratorDeviceRequestV1(
+                profile.runtime.accelerator_devices.kind,
+                profile.runtime.accelerator_devices.device_indices,
+                profile.runtime.accelerator_devices.capabilities,
+            ),
+            profile.runtime.network_mode,
         ),
         workload=DockerWorkloadV1(
             profile.workload.arguments, profile.workload.environment_keys,

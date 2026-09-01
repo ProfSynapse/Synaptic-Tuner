@@ -73,7 +73,7 @@ _LAZY_MODULE_ATTRIBUTES = {
         "SourceLockProvenanceViewV1", "validate_source_lock_provenance_v1",
     },
     "training": {
-        "ArtifactPolicy", "CanonicalDocument", "ResolvedTrainingComponents",
+        "AcceleratorDeviceRequestV1", "ArtifactPolicy", "CanonicalDocument", "ResolvedTrainingComponents",
         "ResolvedTrainingRequest", "ResourceSpec", "RuntimeSpec", "TrainingAPI",
         "TrainingOperations", "TrainingOutcome", "TrainingPlan", "TrainingPreflight",
         "TrainingRequest", "TrainingRequestResolver", "TrainingResolutionError",
@@ -98,7 +98,7 @@ _LAZY_ATTRIBUTES = {
 }
 
 _FORMAL_EXPORTS = (
-    "APIHost", "AttemptAdmission", "AttemptDisposition", "ArtifactDestination",
+    "APIHost", "AcceleratorDeviceRequestV1", "AttemptAdmission", "AttemptDisposition", "ArtifactDestination",
     "ArtifactDestinationRegistryPortV1", "ArtifactPolicy", "ArtifactRef",
     "ArtifactSpoolPortV1", "ArtifactState", "ArtifactsAPI", "ArtifactsOperations",
     "AuthenticatedDestinationInventoryV1", "AuthenticatedDestinationV1",

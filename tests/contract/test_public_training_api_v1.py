@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from synaptic_tuner.api.v1 import (
+    AcceleratorDeviceRequestV1,
     ArtifactPolicy,
     CanonicalDocument,
     ExecutionGrant,
@@ -37,6 +38,60 @@ from synaptic_tuner.api.v1 import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_accelerator_device_request_is_canonical_immutable_and_digest_bound():
+    cpu = AcceleratorDeviceRequestV1("cpu", (), ())
+    gpu = AcceleratorDeviceRequestV1("nvidia", (0,), ("gpu",))
+
+    assert cpu.to_dict() == {
+        "kind": "cpu",
+        "device_indices": [],
+        "capabilities": [],
+    }
+    assert gpu.accelerator_device_request_digest == AcceleratorDeviceRequestV1(
+        "nvidia", (0,), ("gpu",)
+    ).accelerator_device_request_digest
+    assert len(gpu.accelerator_device_request_digest) == 64
+    assert len({
+        gpu.accelerator_device_request_digest,
+        AcceleratorDeviceRequestV1(
+            "amd", (0,), ("gpu",)
+        ).accelerator_device_request_digest,
+        AcceleratorDeviceRequestV1(
+            "nvidia", (1,), ("gpu",)
+        ).accelerator_device_request_digest,
+        AcceleratorDeviceRequestV1(
+            "nvidia", (0,), ("compute",)
+        ).accelerator_device_request_digest,
+    }) == 4
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        gpu.kind = "amd"
+
+
+@pytest.mark.parametrize("values", (
+    {"kind": True, "device_indices": (), "capabilities": ()},
+    {"kind": "NVIDIA", "device_indices": (0,), "capabilities": ("gpu",)},
+    {"kind": " cpu", "device_indices": (), "capabilities": ()},
+    {"kind": "cpu", "device_indices": (0,), "capabilities": ()},
+    {"kind": "cpu", "device_indices": (), "capabilities": ("gpu",)},
+    {"kind": "nvidia", "device_indices": [], "capabilities": ("gpu",)},
+    {"kind": "nvidia", "device_indices": (True,), "capabilities": ("gpu",)},
+    {"kind": "nvidia", "device_indices": ("0",), "capabilities": ("gpu",)},
+    {"kind": "nvidia", "device_indices": (-1,), "capabilities": ("gpu",)},
+    {"kind": "nvidia", "device_indices": (1, 0), "capabilities": ("gpu",)},
+    {"kind": "nvidia", "device_indices": (0, 0), "capabilities": ("gpu",)},
+    {"kind": "nvidia", "device_indices": (0,), "capabilities": ["gpu"]},
+    {"kind": "nvidia", "device_indices": (0,), "capabilities": (True,)},
+    {"kind": "nvidia", "device_indices": (0,), "capabilities": ("GPU",)},
+    {"kind": "nvidia", "device_indices": (0,), "capabilities": ("gpu", "compute")},
+    {"kind": "nvidia", "device_indices": (0,), "capabilities": ("gpu", "gpu")},
+    {"kind": "nvidia", "device_indices": (), "capabilities": ("gpu",)},
+    {"kind": "nvidia", "device_indices": (0,), "capabilities": ()},
+))
+def test_accelerator_device_request_rejects_noncanonical_values(values):
+    with pytest.raises((TypeError, ValueError)):
+        AcceleratorDeviceRequestV1(**values)
 
 
 def _execution_source(

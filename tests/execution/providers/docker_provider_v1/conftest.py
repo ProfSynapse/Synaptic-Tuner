@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from synaptic_tuner.api.v1.training import AcceleratorDeviceRequestV1
 from synaptic_tuner.api.v1.planning import ProviderPlanRef, TrainingPlan, TrainingPlanBasisV1
 from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderDescriptor, ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef
@@ -33,7 +34,9 @@ def profile(request):
         "synaptic-provider-descriptor/v1", "docker", "Docker", "1.0.0",
         ProviderCapabilities(True, True, True, True, True, False),
     )
-    runtime = DockerRuntimeV1(2, 1_073_741_824, 3600)
+    runtime = DockerRuntimeV1(
+        2, 1_073_741_824, 3600, AcceleratorDeviceRequestV1("cpu", (), ())
+    )
     workload = DockerWorkloadV1(("python", "/source/run_fixture.py", "/source", "/artifacts"), (), D[0])
     artifacts = DockerArtifactContractV1(("result",), 1_048_576, 1_048_576)
     return DockerProfileV1.build(
