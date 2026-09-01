@@ -36,6 +36,7 @@ from tuner.execution.providers.docker_provider_v1.preparation import (
     DockerTrainingPreparationBridgeV1,
 )
 from tuner.runtime.dispatch import (
+    CanonicalWorkloadFileLocationV1,
     WorkerControlLocationV1,
     build_source_worker_invocation,
     materialize_worker_bundle,
@@ -96,7 +97,8 @@ def _public_bridge_values(profile):
     bundle = materialize_worker_bundle(
         build_source_worker_invocation(
             plan,
-            WorkerControlLocationV1(PurePosixPath("/workspace/control")),
+            WorkerControlLocationV1(PurePosixPath("/source/control")),
+            CanonicalWorkloadFileLocationV1(PurePosixPath("/source/control")),
         )
     )
     resource_digest = _document_digest(
@@ -311,6 +313,12 @@ def test_public_training_bridge_preserves_the_exact_plan_and_recomputes_preparat
     assert preparation.resource_digest == aligned.resource_digest
     assert preparation.artifact_contract_digest == aligned.artifacts.digest
     assert second.prepare(public_plan, public_run, source_digest) == preparation
+    assert "--canonical-workload-file" in aligned.workload.arguments
+    assert "--canonical-workload-stdin" not in aligned.workload.arguments
+    assert "/source/control/workload.json" in aligned.workload.arguments
+    assert all(
+        "/workspace/control" not in value for value in aligned.workload.arguments
+    )
 
     prepared = second.prepared(
         preparation=preparation,
@@ -450,6 +458,39 @@ def test_public_training_bridge_accepts_opaque_roots_and_contextually_binds_them
             source_digest=source_digest,
         )
     assert str(caught.value) == "docker_binding_mismatch"
+
+
+def test_public_training_bridge_rejects_stdin_and_workspace_profile_arguments(
+    profile,
+):
+    public_plan, aligned, public_run, source_digest = _public_bridge_values(profile)
+    byte_bundle = materialize_worker_bundle(
+        build_source_worker_invocation(
+            public_plan,
+            WorkerControlLocationV1(PurePosixPath("/source/control")),
+        )
+    )
+    byte_profile = replace(
+        aligned,
+        workload=replace(aligned.workload, arguments=byte_bundle.dispatch.argv),
+    )
+    workspace_profile = replace(
+        aligned,
+        workload=replace(
+            aligned.workload,
+            arguments=tuple(
+                value.replace("/source/control", "/workspace/control")
+                for value in aligned.workload.arguments
+            ),
+        ),
+    )
+
+    for foreign in (byte_profile, workspace_profile):
+        with pytest.raises(DockerProviderError) as caught:
+            DockerTrainingPreparationBridgeV1(foreign).prepare(
+                public_plan, public_run, source_digest
+            )
+        assert str(caught.value) == "docker_invalid_plan"
 
 
 def test_public_training_bridge_rejects_plan_run_source_and_preparation_swaps(profile):

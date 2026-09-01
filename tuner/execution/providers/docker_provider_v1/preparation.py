@@ -19,6 +19,7 @@ from ...foundation_v2.commands import CanonicalProviderPayloadV1
 from ...foundation_v2.identities import EffectKind
 from ...foundation_v2.preparation import CanonicalPreparationV2
 from ....runtime.dispatch import (
+    CanonicalWorkloadFileLocationV1,
     WorkerBundleMaterializationV1,
     WorkerControlLocationV1,
     build_source_worker_invocation,
@@ -30,7 +31,7 @@ from .model import (
 )
 
 
-_DOCKER_CONTROL_ROOT = PurePosixPath("/workspace/control")
+_DOCKER_CONTROL_ROOT = PurePosixPath("/source/control")
 _ARTIFACT_ROLES = (
     "final_model",
     "tokenizer",
@@ -246,9 +247,11 @@ class DockerTrainingPreparationBridgeV1:
         digest_text(source_digest, "source_digest")
         profile = self._snapshot()
         source = plan.execution_source
+        control_location = WorkerControlLocationV1(_DOCKER_CONTROL_ROOT)
         worker = build_source_worker_invocation(
             plan,
-            WorkerControlLocationV1(_DOCKER_CONTROL_ROOT),
+            control_location,
+            CanonicalWorkloadFileLocationV1(control_location.control_root),
         )
         bundle = materialize_worker_bundle(worker)
         environment_keys = tuple(sorted(dict(bundle.dispatch.environment)))

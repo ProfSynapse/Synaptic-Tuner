@@ -30,6 +30,7 @@ from tuner.runtime.dispatch import (
     WorkerBundleMaterializationV1,
     WorkerControlLocationV1,
     build_dispatch_invocation,
+    build_source_worker_invocation,
     build_worker_invocation,
     materialize_worker_invocation,
     materialize_worker_bundle,
@@ -249,6 +250,60 @@ def test_file_location_derives_all_authenticated_file_fields(
         "--canonical-workload-control-root",
         "/control/sealed",
     )
+
+
+def test_source_worker_preserves_byte_transport_as_an_active_contract() -> None:
+    worker = build_source_worker_invocation(_plan(), _control())
+    invocation = materialize_worker_invocation(worker)
+
+    assert type(worker.transport) is CanonicalWorkloadBytesV1
+    assert worker._file_location is None
+    assert invocation.argv[-1] == "--canonical-workload-stdin"
+    assert invocation.stdin == _plan().workload.canonical_json.encode("utf-8")
+
+
+def test_source_worker_authentically_reconstructs_matching_file_transport() -> None:
+    location = CanonicalWorkloadFileLocationV1(_control().control_root)
+    worker = build_source_worker_invocation(_plan(), _control(), location)
+    first = materialize_worker_bundle(worker)
+    second = materialize_worker_bundle(worker)
+
+    assert type(worker.transport) is CanonicalWorkloadFileV1
+    assert worker._file_location == location
+    assert worker.transport.path == PurePosixPath("/source/control/workload.json")
+    assert first.dispatch == second.dispatch
+    assert first.dispatch.stdin == b""
+    assert first.dispatch.argv[2:6] == (
+        "--canonical-workload-file",
+        "/source/control/workload.json",
+        "--canonical-workload-control-root",
+        "/source/control",
+    )
+    assert all("/workspace/control" not in value for value in first.dispatch.argv)
+
+
+def test_source_worker_rejects_wrong_or_mismatched_file_location() -> None:
+    with pytest.raises(TypeError, match="exact CanonicalWorkloadFileLocationV1"):
+        build_source_worker_invocation(_plan(), _control(), object())
+    with pytest.raises(ValueError, match="control roots must match"):
+        build_source_worker_invocation(
+            _plan(),
+            _control(),
+            CanonicalWorkloadFileLocationV1(PurePosixPath("/other/control")),
+        )
+
+
+def test_source_worker_reconstruction_rejects_hidden_file_location_tamper() -> None:
+    location = CanonicalWorkloadFileLocationV1(_control().control_root)
+    worker = build_source_worker_invocation(_plan(), _control(), location)
+    object.__setattr__(
+        worker,
+        "_file_location",
+        CanonicalWorkloadFileLocationV1(PurePosixPath("/other/control")),
+    )
+
+    with pytest.raises(ValueError, match="control roots must match"):
+        materialize_worker_bundle(worker)
 
 
 @pytest.mark.parametrize("mutation", ("workload", "config", "source", "artifacts"))

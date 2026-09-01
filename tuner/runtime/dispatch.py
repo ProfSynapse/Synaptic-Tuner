@@ -613,12 +613,23 @@ def build_worker_invocation(
 def build_source_worker_invocation(
     plan: TrainingPlan,
     control_location: WorkerControlLocationV1,
+    file_location: CanonicalWorkloadFileLocationV1 | None = None,
 ) -> WorkerInvocationV1:
     """Issue a worker from an authenticated source lock without host path probing."""
 
     _require_exact_plan(plan)
     if type(control_location) is not WorkerControlLocationV1:
         raise TypeError("control location must be exact WorkerControlLocationV1")
+    if (
+        file_location is not None
+        and type(file_location) is not CanonicalWorkloadFileLocationV1
+    ):
+        raise TypeError("file location must be exact CanonicalWorkloadFileLocationV1")
+    if (
+        file_location is not None
+        and file_location.control_root != control_location.control_root
+    ):
+        raise ValueError("source worker control roots must match")
     workload = _compile_plan_workload(plan)
     locked_roots, interpreter = _locked_runtime_binding(workload)
     roots = tuple(
@@ -650,12 +661,12 @@ def build_source_worker_invocation(
         "roots": roots,
         "environment": environment,
         "interpreter": _absolute_runtime_path(interpreter, "worker interpreter").as_posix(),
-        "transport": _issue_transport(workload, None),
+        "transport": _issue_transport(workload, file_location),
         "control_location": control_location,
         "closure_manifest": manifest,
         "_plan": plan,
         "_layout": None,
-        "_file_location": None,
+        "_file_location": file_location,
     }
     for name, value in values.items():
         object.__setattr__(worker, name, value)
@@ -689,7 +700,9 @@ def _require_canonical_worker(worker: WorkerInvocationV1) -> None:
     if not authentic:
         raise ValueError("worker invocation is not an authentic factory issuance")
     expected = (
-        build_source_worker_invocation(worker._plan, worker.control_location)
+        build_source_worker_invocation(
+            worker._plan, worker.control_location, worker._file_location
+        )
         if worker._layout is None
         else build_worker_invocation(
             worker._plan, worker._layout, worker.control_location, worker._file_location
