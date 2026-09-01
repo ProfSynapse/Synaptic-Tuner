@@ -77,7 +77,7 @@ _LAZY_MODULE_ATTRIBUTES = {
         "ResolvedTrainingRequest", "ResourceSpec", "RuntimeSpec", "TrainingAPI",
         "TrainingOperations", "TrainingOutcome", "TrainingPlan", "TrainingPreflight",
         "TrainingRequest", "TrainingRequestResolver", "TrainingResolutionError",
-        "TrainingSubmission",
+        "TrainingSubmission", "compile_training_plan_v1",
     },
     "training_input": {
         "SFTTrainingHyperparametersV1", "TrainingArtifactRequirementsV1",
@@ -136,6 +136,7 @@ _FORMAL_EXPORTS = (
     "TrainingOperations", "TrainingOutcome", "TrainingPlan", "TrainingPreflight",
     "TrainingRequest", "TrainingRequestResolver", "TrainingResolutionError",
     "TrainingRunRef", "TrainingRunState", "TrainingSubmission",
+    "compile_training_plan_v1",
     "TransferAdmissionV1", "TransferDispositionV1", "TransferOwnershipV1",
     "VerificationStatus", "VerifiedArtifact", "VerifiedArtifactSourcePortV1",
     "SpooledArtifactV1", "SpoolSinkPortV1", "StrongInMemoryPublicationStoreV1",

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import json
+import subprocess
+import sys
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +19,7 @@ from synaptic_tuner.api.v1 import (
     GitCliLocalSourceInspector,
     AuthenticatedSourceEvidenceV1,
     ExecutionSourceV1,
+    ProjectContext,
     ResolvedTrainingRequest,
     ResolvedTrainingComponents,
     ResourceSpec,
@@ -22,11 +27,16 @@ from synaptic_tuner.api.v1 import (
     SourceLock,
     SourceLockBindingV1,
     TrainingAPI,
+    TrainingInputV1,
     TrainingPlan,
     TrainingPreflight,
     TrainingRequest,
     TrainingRequestResolver,
+    compile_training_plan_v1,
 )
+
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _execution_source(
@@ -137,6 +147,92 @@ def _plan(**changes: object) -> TrainingPlan:
     return TrainingPlan(**values)  # type: ignore[arg-type]
 
 
+def _training_input() -> TrainingInputV1:
+    return TrainingInputV1.from_dict(
+        {
+            "schema_version": "synaptic-training-input/v1",
+            "method": "sft",
+            "model": {
+                "ref": "example/model",
+                "revision": "model-revision",
+                "tokenizer_revision": "tokenizer-revision",
+            },
+            "dataset": {"ref": "dataset://example/training"},
+            "hyperparameters": {
+                "schema_version": "synaptic-sft-hyperparameters/v1",
+                "batch_size": 1,
+                "gradient_accumulation_steps": 1,
+                "learning_rate": 0.0002,
+                "duration": {"max_steps": 1, "num_epochs": None},
+                "max_seq_length": 512,
+                "seed": 42,
+                "save_steps": 1,
+                "save_total_limit": 1,
+                "lora_rank": 8,
+                "lora_alpha": 16,
+                "lora_dropout": 0.0,
+                "lora_target_modules": ["k_proj", "q_proj", "v_proj"],
+                "use_dora": False,
+                "use_rslora": False,
+                "init_lora_weights": True,
+                "split_dataset": False,
+            },
+            "artifacts": {
+                "required_kinds": ["final_model", "training_lineage"],
+                "retain_checkpoints": True,
+            },
+        }
+    )
+
+
+def _planning_context(tmp_path: Path) -> ProjectContext:
+    project = tmp_path / "product"
+    engine = project / "vendor" / "engine"
+    engine.mkdir(parents=True)
+    return ProjectContext.host(engine_root=engine, project_root=project)
+
+
+class PlanningResolver:
+    def __init__(self) -> None:
+        self.request: TrainingRequest | None = None
+        self.context: ProjectContext | None = None
+        self.resolve_calls = 0
+
+    def resolve(self, request: TrainingRequest, *, context: ProjectContext):
+        self.resolve_calls += 1
+        self.request = request
+        self.context = context
+        return ResolvedTrainingComponents(
+            execution_source=_execution_source(),
+            execution_context=CanonicalDocument.from_mapping(
+                {"schema_version": "synaptic-test-execution-context/v1"}
+            ),
+            resolved_config=CanonicalDocument.from_mapping(
+                {
+                    "schema_version": "synaptic-sft-config/v1",
+                    "method": "sft",
+                    "model": {
+                        "ref": "example/model",
+                        "revision": "c" * 40,
+                        "tokenizer_revision": "d" * 40,
+                        "load_in_4bit": False,
+                    },
+                    "dataset": {
+                        "ref": "project://data.jsonl",
+                        "revision": "e" * 40,
+                    },
+                    "sft": {"max_steps": 1},
+                }
+            ),
+            runtime=RuntimeSpec(
+                image="example/trainer@sha256:" + "1" * 64,
+                dependency_lock_digest="2" * 64,
+                python_version="3.12.7",
+            ),
+            resources=ResourceSpec(accelerator="a10g"),
+        )
+
+
 def test_training_api_has_only_the_accepted_verbs() -> None:
     verbs = {
         name
@@ -156,6 +252,223 @@ def test_host_resolver_contract_is_public_and_structural() -> None:
     assert isinstance(Resolver(), TrainingRequestResolver)
     assert dataclasses.is_dataclass(ResolvedTrainingComponents)
     assert callable(GitCliLocalSourceInspector().inspect)
+
+
+def test_public_compile_training_plan_owns_the_complete_planning_pipeline(
+    tmp_path: Path,
+) -> None:
+    training_input = _training_input()
+    context = _planning_context(tmp_path)
+    resolver = PlanningResolver()
+
+    plan = compile_training_plan_v1(
+        training_input=training_input,
+        context=context,
+        resolver=resolver,
+    )
+
+    assert type(plan) is TrainingPlan
+    assert len(plan.fingerprint) == 64
+    assert resolver.resolve_calls == 1
+    assert resolver.context is context
+    assert resolver.request is not None
+    assert resolver.request.document == CanonicalDocument(
+        training_input.canonical_json()
+    )
+    assert plan.workload.to_dict()["entrypoint"] == "Trainers/sft/runtime_v1.py"
+
+
+def test_public_compile_training_plan_has_only_the_closed_keyword_contract() -> None:
+    parameters = inspect.signature(compile_training_plan_v1).parameters
+    assert tuple(parameters) == ("training_input", "context", "resolver")
+    assert all(
+        parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        for parameter in parameters.values()
+    )
+
+
+def test_public_compile_training_plan_rejects_foreign_boundary_types(
+    tmp_path: Path,
+) -> None:
+    training_input = _training_input()
+    context = _planning_context(tmp_path)
+    resolver = PlanningResolver()
+
+    class TrainingInputSubclass(TrainingInputV1):
+        __slots__ = ()
+
+    foreign_input = TrainingInputSubclass(
+        training_input.schema_version,
+        training_input.method,
+        training_input.model,
+        training_input.dataset,
+        training_input.hyperparameters,
+        training_input.artifacts,
+    )
+    with pytest.raises(TypeError, match="exact TrainingInputV1"):
+        compile_training_plan_v1(
+            training_input=foreign_input,
+            context=context,
+            resolver=resolver,
+        )
+
+    class ProjectContextSubclass(ProjectContext):
+        pass
+
+    foreign_context = ProjectContextSubclass(
+        **{
+            field.name: getattr(context, field.name)
+            for field in dataclasses.fields(ProjectContext)
+        }
+    )
+    with pytest.raises(TypeError, match="exact ProjectContext"):
+        compile_training_plan_v1(
+            training_input=training_input,
+            context=foreign_context,
+            resolver=resolver,
+        )
+
+    class InvalidResolver:
+        resolve = None
+
+    with pytest.raises(TypeError, match="TrainingRequestResolver"):
+        compile_training_plan_v1(
+            training_input=training_input,
+            context=context,
+            resolver=InvalidResolver(),  # type: ignore[arg-type]
+        )
+
+
+def test_public_compile_training_plan_never_executes_dynamic_resolver_lookup(
+    tmp_path: Path,
+) -> None:
+    dynamic_lookups = 0
+
+    class DynamicResolver:
+        def __getattr__(self, name: str):
+            nonlocal dynamic_lookups
+            dynamic_lookups += 1
+            raise AssertionError(f"dynamic lookup executed for {name}")
+
+    with pytest.raises(TypeError, match="TrainingRequestResolver"):
+        compile_training_plan_v1(
+            training_input=_training_input(),
+            context=_planning_context(tmp_path),
+            resolver=DynamicResolver(),  # type: ignore[arg-type]
+        )
+    assert dynamic_lookups == 0
+
+
+def test_public_compile_training_plan_rejects_descriptors_without_execution(
+    tmp_path: Path,
+) -> None:
+    descriptor_calls = 0
+
+    class HostileDescriptor:
+        def __get__(self, instance, owner):
+            nonlocal descriptor_calls
+            descriptor_calls += 1
+            raise AssertionError("resolver descriptor executed")
+
+    class DescriptorResolver:
+        resolve = HostileDescriptor()
+
+    with pytest.raises(TypeError, match="TrainingRequestResolver"):
+        compile_training_plan_v1(
+            training_input=_training_input(),
+            context=_planning_context(tmp_path),
+            resolver=DescriptorResolver(),  # type: ignore[arg-type]
+        )
+    assert descriptor_calls == 0
+
+
+def test_public_compile_training_plan_rejects_callable_instance_attributes(
+    tmp_path: Path,
+) -> None:
+    class InstanceAttributeResolver:
+        pass
+
+    resolver = InstanceAttributeResolver()
+    resolver.resolve = lambda request, *, context: None
+    with pytest.raises(TypeError, match="TrainingRequestResolver"):
+        compile_training_plan_v1(
+            training_input=_training_input(),
+            context=_planning_context(tmp_path),
+            resolver=resolver,  # type: ignore[arg-type]
+        )
+
+
+def test_public_compile_training_plan_binds_before_the_one_deliberate_call(
+    tmp_path: Path,
+) -> None:
+    class LookupHostileResolver(PlanningResolver):
+        def __getattribute__(self, name: str):
+            if name == "resolve":
+                raise AssertionError("caller-controlled resolve lookup executed")
+            return object.__getattribute__(self, name)
+
+        def resolve(self, request: TrainingRequest, *, context: ProjectContext):
+            return super().resolve(request, context=context)
+
+    resolver = LookupHostileResolver()
+    plan = compile_training_plan_v1(
+        training_input=_training_input(),
+        context=_planning_context(tmp_path),
+        resolver=resolver,
+    )
+
+    assert type(plan) is TrainingPlan
+    assert resolver.resolve_calls == 1
+
+
+def test_public_compile_training_plan_rejects_a_foreign_service_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tuner.training import TrainingService
+
+    monkeypatch.setattr(TrainingService, "plan", lambda self, resolved: object())
+    with pytest.raises(TypeError, match="exact TrainingPlan"):
+        compile_training_plan_v1(
+            training_input=_training_input(),
+            context=_planning_context(tmp_path),
+            resolver=PlanningResolver(),
+        )
+
+
+def test_public_compile_training_plan_eagerly_validates_the_fingerprint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        TrainingPlan,
+        "fingerprint",
+        property(lambda self: "not-a-fingerprint"),
+    )
+    with pytest.raises(ValueError, match="fingerprint"):
+        compile_training_plan_v1(
+            training_input=_training_input(),
+            context=_planning_context(tmp_path),
+            resolver=PlanningResolver(),
+        )
+
+
+def test_public_compile_training_plan_symbol_import_is_provider_light() -> None:
+    script = f"""
+import json, sys
+sys.path.insert(0, {str(ROOT)!r})
+before = set(sys.modules)
+from synaptic_tuner.api.v1 import compile_training_plan_v1
+after = set(sys.modules) - before
+forbidden = sorted(name for name in after if name == 'tuner.training' or name.startswith(('tuner.training.', 'tuner.backends', 'tuner.execution.providers', 'docker', 'modal', 'huggingface_hub', 'runpod', 'sqlite3', 'torch', 'transformers', 'unsloth')))
+print(json.dumps(forbidden))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(completed.stdout) == []
 
 
 def test_public_records_and_config_are_immutable() -> None:

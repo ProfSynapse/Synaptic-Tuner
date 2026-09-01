@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Mapping, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from .context import ProjectContext
+    from .training_input import TrainingInputV1
 
 from .execution import (
     ArtifactRef,
@@ -212,6 +213,40 @@ class TrainingRequestResolver(Protocol):
     ) -> ResolvedTrainingComponents: ...
 
 
+class _StaticTrainingRequestResolverAdapter:
+    __slots__ = ("_resolve",)
+
+    def __init__(self, resolve) -> None:
+        self._resolve = resolve
+
+    def resolve(
+        self,
+        request: TrainingRequest,
+        *,
+        context: "ProjectContext",
+    ) -> ResolvedTrainingComponents:
+        return self._resolve(request, context=context)
+
+
+def _safe_training_request_resolver(
+    resolver: object,
+) -> _StaticTrainingRequestResolverAdapter:
+    from inspect import getattr_static
+    from types import FunctionType, MethodType
+
+    missing = object()
+    member = getattr_static(type(resolver), "resolve", missing)
+    if type(member) is FunctionType:
+        bound_resolve = MethodType(member, resolver)
+    elif type(member) is staticmethod and type(member.__func__) is FunctionType:
+        bound_resolve = member.__func__
+    elif type(member) is classmethod and type(member.__func__) is FunctionType:
+        bound_resolve = MethodType(member.__func__, type(resolver))
+    else:
+        raise TypeError("resolver must implement TrainingRequestResolver")
+    return _StaticTrainingRequestResolverAdapter(bound_resolve)
+
+
 @dataclass(frozen=True, slots=True)
 class TrainingPlan:
     execution_source: ExecutionSourceV1
@@ -262,6 +297,42 @@ class TrainingPlan:
             payload, sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode("utf-8")
         return hashlib.sha256(b"synaptic-training-plan/v1\0" + encoded).hexdigest()
+
+
+def compile_training_plan_v1(
+    *,
+    training_input: "TrainingInputV1",
+    context: "ProjectContext",
+    resolver: TrainingRequestResolver,
+) -> TrainingPlan:
+    """Compile one canonical input through the provider-neutral planning core."""
+
+    from .context import ProjectContext
+    from .training_input import TrainingInputV1
+
+    if type(training_input) is not TrainingInputV1:
+        raise TypeError("training_input must be exact TrainingInputV1")
+    if type(context) is not ProjectContext:
+        raise TypeError("context must be exact ProjectContext")
+    safe_resolver = _safe_training_request_resolver(resolver)
+
+    from tuner.training import TrainingService, default_recipe_registry
+
+    service = TrainingService(
+        context=context,
+        resolver=safe_resolver,
+        recipes=default_recipe_registry(),
+    )
+    document = CanonicalDocument(training_input.canonical_json())
+    request = service.load(document)
+    resolved = service.resolve(request)
+    plan = service.plan(resolved)
+    if type(plan) is not TrainingPlan:
+        raise TypeError("planning must return exact TrainingPlan")
+    fingerprint = plan.fingerprint
+    if type(fingerprint) is not str or _SHA256_PATTERN.fullmatch(fingerprint) is None:
+        raise ValueError("training plan fingerprint is invalid")
+    return plan
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,4 +499,5 @@ __all__ = [
     "TrainingRequestResolver",
     "TrainingResolutionError",
     "TrainingSubmission",
+    "compile_training_plan_v1",
 ]
