@@ -54,9 +54,11 @@ def _runtime_requirements() -> dict[str, object]:
             "LD_LIBRARY_PATH", "NVIDIA_VISIBLE_DEVICES", "PATH", "PATHEXT",
             "PYTHONIOENCODING", "SystemRoot", "WINDIR", "PYTHONNOUSERSITE",
             "PYTHONSAFEPATH", "PYTHONPATH", "HF_HOME", "TRANSFORMERS_CACHE",
-            "WANDB_DISABLED", "SYNAPTIC_ENGINE_ROOT", "SYNAPTIC_PROJECT_ROOT",
+            "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "WANDB_DISABLED",
+            "SYNAPTIC_ENGINE_ROOT", "SYNAPTIC_PROJECT_ROOT",
             "SYNAPTIC_ARTIFACT_ROOT", "SYNAPTIC_STATE_ROOT",
             "SYNAPTIC_TRACKING_ROOT", "SYNAPTIC_CACHE_ROOT", "SYNAPTIC_TMP_ROOT",
+            "SYNAPTIC_MODEL_SNAPSHOT",
         ],
         "trainer_projection_schema": "synaptic-sft-trainer-projection/v1",
         "artifact_formats": {

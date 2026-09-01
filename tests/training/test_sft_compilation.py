@@ -168,6 +168,9 @@ def test_sft_workload_is_canonical_and_deterministic() -> None:
     requirements = first.document["runtime_requirements"]
     assert requirements["schema_version"] == "synaptic-sft-runtime-requirements/v1"
     assert requirements["trainer_projection_schema"] == "synaptic-sft-trainer-projection/v1"
+    assert {"HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "SYNAPTIC_MODEL_SNAPSHOT"}.issubset(
+        requirements["allowed_environment"]
+    )
     assert "python_executable" not in json.dumps(requirements)
 
 

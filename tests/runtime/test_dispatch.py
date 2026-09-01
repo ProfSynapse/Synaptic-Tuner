@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -24,9 +27,11 @@ from tuner.runtime.dispatch import (
     ProcessResult,
     SubprocessRunner,
     WorkerInvocationV1,
+    WorkerBundleMaterializationV1,
     build_dispatch_invocation,
     build_worker_invocation,
     materialize_worker_invocation,
+    materialize_worker_bundle,
 )
 from tuner.training.methods.sft import compile_sft_workload
 from tests.training.test_sft_compilation import _config, _execution_source
@@ -112,6 +117,43 @@ def test_factory_derives_closed_byte_invocation_from_the_exact_plan(
     assert invocation.environment_map["SYNAPTIC_WORKLOAD_FINGERPRINT"] == (
         worker.workload_fingerprint
     )
+    assert invocation.environment_map["HF_HUB_OFFLINE"] == "1"
+    assert invocation.environment_map["TRANSFORMERS_OFFLINE"] == "1"
+    assert invocation.environment_map["SYNAPTIC_MODEL_SNAPSHOT"] == (
+        "/workspace/run/run-1/cache/model/"
+        "models--HuggingFaceTB--SmolLM2-135M-Instruct/snapshots/" + "b" * 40
+    )
+
+
+def test_worker_bundle_is_factory_issued_durable_and_host_path_free(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    worker = build_worker_invocation(plan, _layout(tmp_path))
+    bundle = materialize_worker_bundle(worker)
+    projection = json.loads(bundle.canonical_projection_bytes)
+
+    assert type(bundle) is WorkerBundleMaterializationV1
+    assert bundle.plan_fingerprint == plan.fingerprint
+    assert bundle.workload_fingerprint == worker.workload_fingerprint
+    assert bundle.canonical_workload_bytes == plan.workload.canonical_json.encode(
+        "utf-8"
+    )
+    assert bundle.workload_byte_count == len(bundle.canonical_workload_bytes)
+    assert bundle.workload_sha256 == hashlib.sha256(
+        bundle.canonical_workload_bytes
+    ).hexdigest()
+    assert bundle.projection_sha256 == hashlib.sha256(
+        bundle.canonical_projection_bytes
+    ).hexdigest()
+    assert bundle.dispatch == materialize_worker_invocation(worker)
+    assert projection["plan_fingerprint"] == plan.fingerprint
+    assert base64.b64decode(projection["workload"]["payload_base64"]) == (
+        bundle.canonical_workload_bytes
+    )
+    serialized = bundle.canonical_projection_bytes.decode("utf-8").lower()
+    assert str(tmp_path).lower().replace("\\", "/") not in serialized
+    assert all(term not in serialized for term in ("host_path", "docker", "provider"))
 
 
 def test_dispatcher_passes_one_canonical_invocation_to_runner(
@@ -183,6 +225,7 @@ def test_file_location_derives_all_authenticated_file_fields(
         CanonicalWorkloadFileLocationV1(PurePosixPath("/control/sealed")),
     )
     invocation = materialize_worker_invocation(worker)
+    bundle = materialize_worker_bundle(worker)
 
     assert type(worker.transport) is CanonicalWorkloadFileV1
     assert worker.transport.path == PurePosixPath("/control/sealed/workload.json")
@@ -190,6 +233,10 @@ def test_file_location_derives_all_authenticated_file_fields(
         plan.workload.canonical_json.encode("utf-8")
     )
     assert invocation.stdin == b""
+    assert bundle.canonical_workload_bytes == plan.workload.canonical_json.encode(
+        "utf-8"
+    )
+    assert bundle.dispatch == invocation
     assert invocation.argv[2:6] == (
         "--canonical-workload-file",
         "/control/sealed/workload.json",
@@ -247,6 +294,7 @@ def test_invocations_and_transports_reject_direct_construction() -> None:
         CanonicalWorkloadBytesV1,
         CanonicalWorkloadFileV1,
         WorkerInvocationV1,
+        WorkerBundleMaterializationV1,
     ):
         with pytest.raises(TypeError, match="factory-issued"):
             constructor()
@@ -259,6 +307,8 @@ def test_factory_accepts_no_caller_authored_identity_fields(tmp_path: Path) -> N
 
 def test_runtime_package_exports_only_the_new_worker_contract() -> None:
     assert runtime_api.WorkerInvocationV1 is WorkerInvocationV1
+    assert runtime_api.WorkerBundleMaterializationV1 is WorkerBundleMaterializationV1
+    assert runtime_api.materialize_worker_bundle is materialize_worker_bundle
     assert runtime_api.CanonicalWorkloadFileLocationV1 is (
         CanonicalWorkloadFileLocationV1
     )

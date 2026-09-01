@@ -508,6 +508,8 @@ def parse_args(argv=None):
                        help="Disable token use for public model/tokenizer loading")
     parser.add_argument("--model-cache-dir", type=str,
                        help="Controlled model/tokenizer cache directory")
+    parser.add_argument("--model-snapshot", type=str,
+                       help="Exact pre-materialized local model/tokenizer snapshot")
 
     # Training parameters
     parser.add_argument("--batch-size", type=int,
@@ -724,6 +726,16 @@ def parse_args(argv=None):
 def run(args: argparse.Namespace):
     """Execute training with the provided CLI arguments."""
     runtime_v1_requested = _runtime_v1_projection_requested(args)
+    if runtime_v1_requested and (
+        args.model_snapshot is None
+        or args.model_cache_dir is None
+        or os.environ.get("SYNAPTIC_MODEL_SNAPSHOT") != args.model_snapshot
+        or os.environ.get("HF_HUB_OFFLINE") != "1"
+        or os.environ.get("TRANSFORMERS_OFFLINE") != "1"
+    ):
+        raise ValueError(
+            "Runtime v1 requires one environment-bound offline model snapshot"
+        )
     run_metadata = {
         "train_size": None,
         "eval_size": None,
@@ -1054,6 +1066,8 @@ def run(args: argparse.Namespace):
         use_safetensors=getattr(config.model, "use_safetensors", None),
         cache_dir=getattr(config.model, "cache_dir", None),
         require_resolved_revision=bool(args.protected_smoke_evidence),
+        model_snapshot=args.model_snapshot,
+        require_local_snapshot=args.model_snapshot is not None,
     )
 
     # Prefer the pretrained chat template when available; otherwise, apply a

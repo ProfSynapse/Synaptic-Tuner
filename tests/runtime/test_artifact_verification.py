@@ -108,6 +108,7 @@ def _lineage(workload) -> bytes:
     argv = [
         "/usr/bin/python", f"{root}/Trainers/sft/train_sft.py", "--model-name", "example/model",
         "--model-revision", "c" * 40, "--anonymous-model", "--model-cache-dir", roots["cache"] + "/model",
+        "--model-snapshot", roots["cache"] + "/model/models--example--model/snapshots/" + "c" * 40,
         "--local-file", dataset_path, "--output-root", roots["state"] + "/runtime-v1-trainer/output",
         "--run-timestamp", "runtime-v1", "--no-dashboard", "--quiet",
         "--runtime-v1-workload-fingerprint", workload.fingerprint,
@@ -131,6 +132,8 @@ def _lineage(workload) -> bytes:
         "PYTHONPATH": root + ":" + root + "/Trainers/sft",
         "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1",
         "HF_HOME": roots["cache"] + "/huggingface", "TRANSFORMERS_CACHE": roots["cache"] + "/transformers",
+        "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+        "SYNAPTIC_MODEL_SNAPSHOT": roots["cache"] + "/model/models--example--model/snapshots/" + "c" * 40,
         "WANDB_DISABLED": "true",
     }
     execution = {

@@ -193,6 +193,15 @@ def _fixture(
             },
         }
     )
+    model_snapshot = (
+        roots["cache"]
+        / "model"
+        / "models--example--model"
+        / "snapshots"
+        / ("c" * 40)
+    )
+    model_snapshot.mkdir(parents=True)
+    (model_snapshot / "config.json").write_text("{}", encoding="utf-8")
     planned_environment = {
         "PATH": "fixture-path",
         "PYTHONNOUSERSITE": "1",
@@ -207,6 +216,9 @@ def _fixture(
         "SYNAPTIC_TMP_ROOT": locked_roots["tmp"],
         "HF_HOME": locked_roots["cache"] + "/huggingface",
         "TRANSFORMERS_CACHE": locked_roots["cache"] + "/transformers",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "SYNAPTIC_MODEL_SNAPSHOT": str(model_snapshot),
         "WANDB_DISABLED": "true",
     }
     execution_source = ExecutionSourceV1(
@@ -339,6 +351,9 @@ def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
     assert "--local-file" in invocation.argv
     assert invocation.argv[invocation.argv.index("--local-file") + 1] == str(dataset)
     assert "--max-steps" in invocation.argv
+    assert invocation.argv[invocation.argv.index("--model-snapshot") + 1] == (
+        environment["SYNAPTIC_MODEL_SNAPSHOT"]
+    )
     assert "--no-load-in-4bit" in invocation.argv
     assert not any(";" in item or "&&" in item for item in invocation.argv)
     assert "HF_TOKEN" not in dict(invocation.environment)
@@ -350,6 +365,8 @@ def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
     )
     assert dict(invocation.environment)["PYTHONNOUSERSITE"] == "1"
     assert dict(invocation.environment)["PYTHONSAFEPATH"] == "1"
+    assert dict(invocation.environment)["HF_HUB_OFFLINE"] == "1"
+    assert dict(invocation.environment)["TRANSFORMERS_OFFLINE"] == "1"
     assert type(invocation.expected_projection["training"]["num_epochs"]) is int
     assert {item["role"] for item in result.artifacts} == {
         "workload_record",
@@ -387,6 +404,71 @@ def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
     assert (roots["artifacts"] / "final_model.tar").read_bytes() != (
         roots["artifacts"] / "tokenizer.tar"
     ).read_bytes()
+
+
+def test_runtime_rejects_missing_local_model_snapshot(tmp_path: Path) -> None:
+    workload, environment, engine_file, _, _ = _fixture(tmp_path)
+    snapshot = Path(environment["SYNAPTIC_MODEL_SNAPSHOT"])
+    shutil.rmtree(snapshot)
+
+    with pytest.raises(RuntimeV1Error, match="snapshot is unavailable"):
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=FakeRunner(),
+            engine_file=engine_file,
+        )
+
+
+def test_runtime_rejects_foreign_model_snapshot_binding(tmp_path: Path) -> None:
+    workload, environment, engine_file, roots, _ = _fixture(tmp_path)
+    environment["SYNAPTIC_MODEL_SNAPSHOT"] = str(
+        roots["cache"] / "model" / "foreign" / ("c" * 40)
+    )
+
+    with pytest.raises(RuntimeV1Error, match="canonical binding"):
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=FakeRunner(),
+            engine_file=engine_file,
+        )
+
+
+@pytest.mark.parametrize("name", ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"))
+def test_runtime_requires_exact_offline_model_controls(
+    tmp_path: Path, name: str
+) -> None:
+    workload, environment, engine_file, _, _ = _fixture(tmp_path)
+    environment[name] = "0"
+
+    with pytest.raises(RuntimeV1Error, match="offline model controls"):
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=FakeRunner(),
+            engine_file=engine_file,
+        )
+
+
+def test_runtime_rejects_redirected_model_snapshot_member(tmp_path: Path) -> None:
+    workload, environment, engine_file, _, _ = _fixture(tmp_path)
+    snapshot = Path(environment["SYNAPTIC_MODEL_SNAPSHOT"])
+    (snapshot / "config.json").unlink()
+    outside = tmp_path / "outside-model.bin"
+    outside.write_bytes(b"model")
+    try:
+        (snapshot / "model.bin").symlink_to(outside)
+    except OSError:
+        pytest.skip("file symlinks are unavailable")
+
+    with pytest.raises(RuntimeV1Error, match="redirect"):
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=FakeRunner(),
+            engine_file=engine_file,
+        )
 
 
 def test_runtime_accepts_only_the_finalized_dual_clone_topology(tmp_path: Path) -> None:
@@ -955,7 +1037,7 @@ def test_runtime_rejects_redirect_below_locked_capability_boundary(
     tmp_path: Path,
 ) -> None:
     workload, environment, engine_file, roots, _ = _fixture(tmp_path)
-    roots["cache"].rmdir()
+    shutil.rmtree(roots["cache"])
     outside = tmp_path / "outside-cache"
     outside.mkdir()
     try:

@@ -75,6 +75,10 @@ def test_train_sft_threads_protected_revision_and_evidence_without_ambient_token
     assert '"--protected-smoke-evidence"' in source
     assert 'model_revision=getattr(config.model, "model_revision", None)' in source
     assert 'require_resolved_revision=bool(args.protected_smoke_evidence)' in source
+    assert '"--model-snapshot"' in source
+    assert "model_snapshot=args.model_snapshot" in source
+    assert "require_local_snapshot=args.model_snapshot is not None" in source
+    assert "Runtime v1 requires one environment-bound offline model snapshot" in source
     assert "Protected smoke rejects ambient Hugging Face credentials" in source
     assert "capture_trainable_snapshot(model)" in source
     assert "finalize_protected_evidence(" in source

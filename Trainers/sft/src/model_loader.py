@@ -3,7 +3,9 @@ Model loading with Unsloth optimizations for RTX 3090.
 """
 
 from unsloth import FastLanguageModel, is_bfloat16_supported
+import os
 from pathlib import Path
+import stat
 from typing import Tuple, Optional
 import re
 import torch
@@ -35,6 +37,106 @@ def _is_mistral_model(model_name: str) -> bool:
     return 'mistral' in model_name_lower
 
 
+def _is_redirect(path: Path) -> bool:
+    if path.is_symlink() or (
+        hasattr(os.path, "isjunction") and os.path.isjunction(path)
+    ):
+        return True
+    try:
+        attributes = path.lstat().st_file_attributes
+    except (AttributeError, OSError):
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+def _assert_link_free(path: Path) -> None:
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        try:
+            current.lstat()
+        except OSError as exc:
+            raise RuntimeError("Local model snapshot is unavailable") from exc
+        if _is_redirect(current):
+            raise RuntimeError("Local model snapshot traverses a redirect")
+
+
+def _local_snapshot_path(model_name: str, model_revision: str, cache_dir: str) -> Path:
+    if re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", model_revision) is None:
+        raise RuntimeError("Local model snapshot requires an exact revision")
+    parts = model_name.split("/")
+    component = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
+    if (
+        len(parts) not in (1, 2)
+        or any(
+            component.fullmatch(part) is None or "--" in part or ".." in part
+            for part in parts
+        )
+    ):
+        raise RuntimeError("Model ref has no canonical local snapshot layout")
+    cache_root = Path(cache_dir)
+    if not cache_root.is_absolute():
+        raise RuntimeError("Local model cache root must be absolute")
+    return (
+        cache_root
+        / ("models--" + "--".join(parts))
+        / "snapshots"
+        / model_revision
+    )
+
+
+def _validate_local_snapshot(
+    model_name: str,
+    model_revision: str,
+    cache_dir: str,
+    model_snapshot: str,
+) -> Path:
+    expected = _local_snapshot_path(model_name, model_revision, cache_dir)
+    supplied = Path(model_snapshot)
+    if not supplied.is_absolute() or supplied != expected:
+        raise RuntimeError("Local model snapshot does not match its exact binding")
+    _assert_link_free(supplied)
+    try:
+        cache_root = Path(cache_dir).resolve(strict=True)
+        resolved = supplied.resolve(strict=True)
+        info = supplied.lstat()
+    except OSError as exc:
+        raise RuntimeError("Local model snapshot is unavailable") from exc
+    if (
+        cache_root not in resolved.parents
+        or resolved != supplied
+        or supplied.name != model_revision
+        or not stat.S_ISDIR(info.st_mode)
+        or _is_redirect(supplied)
+    ):
+        raise RuntimeError("Local model snapshot must be contained and link-free")
+    pending = [supplied]
+    regular_files = 0
+    while pending:
+        current = pending.pop()
+        try:
+            entries = tuple(os.scandir(current))
+        except OSError as exc:
+            raise RuntimeError("Local model snapshot could not be inspected") from exc
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                entry_info = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise RuntimeError("Local model snapshot member is unavailable") from exc
+            if _is_redirect(path):
+                raise RuntimeError("Local model snapshot contains a redirect")
+            if stat.S_ISDIR(entry_info.st_mode):
+                pending.append(path)
+            elif stat.S_ISREG(entry_info.st_mode):
+                regular_files += 1
+            else:
+                raise RuntimeError("Local model snapshot contains a non-regular member")
+    if regular_files == 0:
+        raise RuntimeError("Local model snapshot contains no regular files")
+    return resolved
+
+
 def load_model_and_tokenizer(
     model_name: str,
     max_seq_length: int = 2048,
@@ -46,6 +148,8 @@ def load_model_and_tokenizer(
     use_safetensors: Optional[bool] = None,
     cache_dir: Optional[str] = None,
     require_resolved_revision: bool = False,
+    model_snapshot: Optional[str] = None,
+    require_local_snapshot: bool = False,
 ) -> Tuple:
     """
     Load model and tokenizer with Unsloth optimizations.
@@ -73,7 +177,19 @@ def load_model_and_tokenizer(
     # rewrite a Hub model name to an optimized mirror whose commit identity is
     # different from the approved source revision.
     protected_snapshot: Path | None = None
-    if require_resolved_revision:
+    if require_local_snapshot:
+        if (
+            not isinstance(model_revision, str)
+            or not isinstance(cache_dir, str)
+            or not isinstance(model_snapshot, str)
+        ):
+            raise RuntimeError("Local model loading requires a complete snapshot binding")
+        protected_snapshot = _validate_local_snapshot(
+            model_name, model_revision, cache_dir, model_snapshot
+        )
+    elif model_snapshot is not None:
+        raise RuntimeError("Local model snapshot requires the closed local-only mode")
+    elif require_resolved_revision:
         if not isinstance(model_revision, str) or re.fullmatch(r"[0-9a-f]{40}", model_revision) is None:
             raise RuntimeError("Protected model loading requires an exact revision")
         from huggingface_hub import snapshot_download
@@ -107,9 +223,11 @@ def load_model_and_tokenizer(
         load_kwargs["use_safetensors"] = use_safetensors
     if cache_dir is not None:
         load_kwargs["cache_dir"] = cache_dir
+    if require_local_snapshot:
+        load_kwargs["local_files_only"] = True
     model, tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
 
-    if require_resolved_revision:
+    if require_resolved_revision or require_local_snapshot:
         assert protected_snapshot is not None
         model_source = getattr(getattr(model, "config", None), "_name_or_path", None)
         tokenizer_source = getattr(tokenizer, "name_or_path", None)

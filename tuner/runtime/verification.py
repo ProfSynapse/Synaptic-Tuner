@@ -598,6 +598,13 @@ def _validate_evidence_paths_and_argv(
         "PYTHONSAFEPATH": "1",
         "HF_HOME": f"{normalized['cache']}/huggingface",
         "TRANSFORMERS_CACHE": f"{normalized['cache']}/transformers",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "SYNAPTIC_MODEL_SNAPSHOT": (
+            f"{normalized['cache']}/model/"
+            f"models--{str(config['model']['ref']).replace('/', '--')}/snapshots/"
+            f"{config['model']['revision']}"
+        ),
         "WANDB_DISABLED": "true",
     }
     if any(not isinstance(k, str) or not isinstance(v, str) for k, v in planned_environment.items()):
@@ -622,6 +629,8 @@ def _expected_trainer_argv(
         python, f"{roots['engine']}/Trainers/sft/train_sft.py",
         "--model-name", str(model["ref"]), "--model-revision", str(model["revision"]),
         "--anonymous-model", "--model-cache-dir", f"{roots['cache']}/model",
+        "--model-snapshot",
+        f"{roots['cache']}/model/models--{str(model['ref']).replace('/', '--')}/snapshots/{model['revision']}",
         "--local-file", dataset_path, "--output-root",
         f"{roots['state']}/runtime-v1-trainer/output", "--run-timestamp", "runtime-v1",
         "--no-dashboard", "--quiet",

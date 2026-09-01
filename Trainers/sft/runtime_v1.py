@@ -25,6 +25,8 @@ EXECUTION_SOURCE_SCHEMA = "synaptic-execution-source/v1"
 RUNTIME_SCHEMA = "synaptic-training-runtime/v1"
 _WORKLOAD_FINGERPRINT_DOMAIN = b"synaptic-training-workload/v1\0"
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_MODEL_REVISION_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+_MODEL_REF_PART_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 _ENTRYPOINT = PurePosixPath("Trainers/sft/runtime_v1.py")
 _ROOT_ENV = {
     "engine": "SYNAPTIC_ENGINE_ROOT",
@@ -551,6 +553,94 @@ class RuntimeRoots:
         return tuple(getattr(self, name) for name in _WRITABLE_NAMES)
 
 
+def _model_snapshot_path(model: Mapping[str, object], cache_root: Path) -> Path:
+    model_ref = model.get("ref")
+    revision = model.get("revision")
+    if (
+        not isinstance(model_ref, str)
+        or not isinstance(revision, str)
+        or _MODEL_REVISION_RE.fullmatch(revision) is None
+    ):
+        raise RuntimeV1Error("resolved model identity is malformed")
+    parts = model_ref.split("/")
+    if len(parts) not in (1, 2) or any(
+        _MODEL_REF_PART_RE.fullmatch(part) is None or "--" in part or ".." in part
+        for part in parts
+    ):
+        raise RuntimeV1Error("resolved model ref has no canonical snapshot layout")
+    return (
+        cache_root / "model" / ("models--" + "--".join(parts)) / "snapshots" / revision
+    )
+
+
+def _require_local_model_snapshot(
+    model: Mapping[str, object],
+    roots: RuntimeRoots,
+    environment: Mapping[str, str],
+) -> Path:
+    expected = _model_snapshot_path(model, roots.cache)
+    locked_cache = environment.get("SYNAPTIC_CACHE_ROOT")
+    raw = environment.get("SYNAPTIC_MODEL_SNAPSHOT")
+    if (
+        not isinstance(locked_cache, str)
+        or not isinstance(raw, str)
+        or raw != str(_model_snapshot_path(model, Path(locked_cache)))
+    ):
+        raise RuntimeV1Error("model snapshot does not match its canonical binding")
+    if (
+        environment.get("HF_HUB_OFFLINE") != "1"
+        or environment.get("TRANSFORMERS_OFFLINE") != "1"
+    ):
+        raise RuntimeV1Error("runtime requires exact offline model controls")
+    _assert_no_redirected_components(expected)
+    try:
+        info = expected.lstat()
+        supplied = Path(raw).resolve(strict=True)
+        resolved = expected.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeV1Error("required local model snapshot is unavailable") from exc
+    if (
+        resolved != expected
+        or supplied != resolved
+        or roots.cache not in resolved.parents
+        or not stat.S_ISDIR(info.st_mode)
+        or _is_redirect(expected)
+        or expected.name != model["revision"]
+    ):
+        raise RuntimeV1Error(
+            "local model snapshot must be contained, exact, and link-free"
+        )
+    pending = [expected]
+    regular_files = 0
+    while pending:
+        current = pending.pop()
+        try:
+            entries = tuple(os.scandir(current))
+        except OSError as exc:
+            raise RuntimeV1Error("local model snapshot could not be inspected") from exc
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                entry_info = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise RuntimeV1Error(
+                    "local model snapshot member is unavailable"
+                ) from exc
+            if _is_redirect(path):
+                raise RuntimeV1Error("local model snapshot contains a redirect")
+            if stat.S_ISDIR(entry_info.st_mode):
+                pending.append(path)
+            elif stat.S_ISREG(entry_info.st_mode):
+                regular_files += 1
+            else:
+                raise RuntimeV1Error(
+                    "local model snapshot contains a non-regular member"
+                )
+    if regular_files == 0:
+        raise RuntimeV1Error("local model snapshot contains no regular files")
+    return resolved
+
+
 def bind_runtime_roots(
     document: Mapping[str, object],
     environment: Mapping[str, str],
@@ -901,6 +991,7 @@ def build_trainer_invocation(
     model_revision = model.get("revision")
     if model.get("tokenizer_revision") != model_revision:
         raise RuntimeV1Error("runtime v1 requires one exact model/tokenizer snapshot")
+    model_snapshot = _require_local_model_snapshot(model, roots, environment)
     dataset_ref = dataset.get("ref")
     if not isinstance(dataset_ref, str) or not dataset_ref.startswith("project://"):
         raise RuntimeV1Error("runtime v1 requires a locked project-local dataset")
@@ -990,6 +1081,8 @@ def build_trainer_invocation(
         "--anonymous-model",
         "--model-cache-dir",
         str(roots.cache / "model"),
+        "--model-snapshot",
+        str(model_snapshot),
         "--local-file",
         str(dataset_path),
         "--output-root",
@@ -1022,6 +1115,9 @@ def build_trainer_invocation(
             "PYTHONSAFEPATH": "1",
             "HF_HOME": str(roots.cache / "huggingface"),
             "TRANSFORMERS_CACHE": str(roots.cache / "transformers"),
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "SYNAPTIC_MODEL_SNAPSHOT": str(model_snapshot),
             "WANDB_DISABLED": "true",
         }
     )

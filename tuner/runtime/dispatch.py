@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -32,6 +33,7 @@ from tuner.training.recipes import (
 
 
 WORKER_INVOCATION_SCHEMA = "synaptic-worker-invocation/v1"
+WORKER_BUNDLE_MATERIALIZATION_SCHEMA = "synaptic-worker-bundle-materialization/v1"
 _WORKLOAD_FINGERPRINT_DOMAIN = b"synaptic-training-workload/v1\0"
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _ROOT_NAMES = ("engine", "project", "artifacts", "state", "tracking", "cache", "tmp")
@@ -125,7 +127,9 @@ class WorkerInvocationV1:
 
 
 def _worker_environment(
-    roots: Mapping[str, PurePosixPath], workload_fingerprint: str
+    roots: Mapping[str, PurePosixPath],
+    workload_fingerprint: str,
+    model_snapshot: PurePosixPath,
 ) -> dict[str, str]:
     return {
         "SYNAPTIC_ENGINE_ROOT": roots["engine"].as_posix(),
@@ -136,10 +140,39 @@ def _worker_environment(
         "SYNAPTIC_CACHE_ROOT": roots["cache"].as_posix(),
         "SYNAPTIC_TMP_ROOT": roots["tmp"].as_posix(),
         "SYNAPTIC_WORKLOAD_FINGERPRINT": workload_fingerprint,
+        "SYNAPTIC_MODEL_SNAPSHOT": model_snapshot.as_posix(),
         "PYTHONPATH": roots["engine"].as_posix(),
         "PYTHONNOUSERSITE": "1",
         "PYTHONSAFEPATH": "1",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
     }
+
+
+def _model_snapshot_path(
+    cache_root: PurePosixPath, workload: CompiledWorkload
+) -> PurePosixPath:
+    configuration = workload.document.get("configuration")
+    document = configuration.get("document") if type(configuration) is dict else None
+    model = document.get("model") if type(document) is dict else None
+    model_ref = model.get("ref") if type(model) is dict else None
+    revision = model.get("revision") if type(model) is dict else None
+    if (
+        type(model_ref) is not str
+        or type(revision) is not str
+        or re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", revision) is None
+    ):
+        raise ValueError("compiled workload model identity is malformed")
+    parts = model_ref.split("/")
+    if len(parts) not in (1, 2) or any(
+        re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", part) is None
+        or "--" in part
+        or ".." in part
+        for part in parts
+    ):
+        raise ValueError("compiled workload model ref has no canonical snapshot layout")
+    repository_folder = "models--" + "--".join(parts)
+    return cache_root / "model" / repository_folder / "snapshots" / revision
 
 
 def _canonical_seal(domain: bytes, value: Mapping[str, object]) -> str:
@@ -399,8 +432,13 @@ def _derive_worker_fields(
             "workload control root must be disjoint from all runtime roots"
         )
     _require_safe_staged_entrypoint(layout.engine.source, entrypoint)
+    model_snapshot = _model_snapshot_path(dict(roots)["cache"], workload)
     environment = tuple(
-        sorted(_worker_environment(dict(roots), workload.fingerprint).items())
+        sorted(
+            _worker_environment(
+                dict(roots), workload.fingerprint, model_snapshot
+            ).items()
+        )
     )
     interpreter = _absolute_runtime_path(interpreter, "worker interpreter").as_posix()
     transport = _issue_transport(workload, file_location)
@@ -428,6 +466,25 @@ class DispatchInvocation:
     @property
     def environment_map(self) -> Mapping[str, str]:
         return dict(self.environment)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class WorkerBundleMaterializationV1:
+    plan_fingerprint: str
+    workload_fingerprint: str
+    canonical_workload_bytes: bytes
+    workload_byte_count: int
+    workload_sha256: str
+    dispatch: DispatchInvocation
+    canonical_projection_bytes: bytes
+    projection_sha256: str
+    schema_version: str = WORKER_BUNDLE_MATERIALIZATION_SCHEMA
+    _issuance_seal: str = ""
+
+    def __new__(
+        cls, *args: object, **kwargs: object
+    ) -> "WorkerBundleMaterializationV1":
+        raise TypeError("worker bundle materializations are factory-issued")
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,7 +557,7 @@ def build_dispatch_invocation(
     return materialize_worker_invocation(build_worker_invocation(plan, layout))
 
 
-def materialize_worker_invocation(worker: WorkerInvocationV1) -> DispatchInvocation:
+def _require_canonical_worker(worker: WorkerInvocationV1) -> None:
     if type(worker) is not WorkerInvocationV1:
         raise TypeError("worker must be an exact WorkerInvocationV1")
     try:
@@ -521,6 +578,9 @@ def materialize_worker_invocation(worker: WorkerInvocationV1) -> DispatchInvocat
     )
     if current_projection != _worker_projection(expected):
         raise ValueError("worker invocation differs from its canonical plan projection")
+
+
+def _dispatch_invocation(worker: WorkerInvocationV1) -> DispatchInvocation:
     roots = worker.roots_map
     entrypoint = (roots["engine"] / worker.entrypoint).as_posix()
     if type(worker.transport) is CanonicalWorkloadBytesV1:
@@ -549,6 +609,69 @@ def materialize_worker_invocation(worker: WorkerInvocationV1) -> DispatchInvocat
         environment=worker.environment,
         stdin=stdin,
     )
+
+
+def _dispatch_projection(dispatch: DispatchInvocation) -> dict[str, object]:
+    return {
+        "argv": list(dispatch.argv),
+        "cwd": dispatch.cwd.as_posix(),
+        "environment": [list(item) for item in dispatch.environment],
+        "stdin_base64": base64.b64encode(dispatch.stdin).decode("ascii"),
+    }
+
+
+def materialize_worker_bundle(
+    worker: WorkerInvocationV1,
+) -> WorkerBundleMaterializationV1:
+    _require_canonical_worker(worker)
+    workload = _compile_plan_workload(worker._plan)
+    payload = workload.canonical_bytes
+    byte_count = len(payload)
+    sha256 = hashlib.sha256(payload).hexdigest()
+    if (
+        workload.fingerprint != worker.workload_fingerprint
+        or byte_count != worker.transport.byte_count
+        or sha256 != worker.transport.sha256
+    ):
+        raise ValueError("worker workload differs from its authenticated transport")
+    dispatch = _dispatch_invocation(worker)
+    projection = {
+        "schema_version": WORKER_BUNDLE_MATERIALIZATION_SCHEMA,
+        "plan_fingerprint": worker.plan_fingerprint,
+        "workload_fingerprint": worker.workload_fingerprint,
+        "workload": {
+            "payload_base64": base64.b64encode(payload).decode("ascii"),
+            "byte_count": byte_count,
+            "sha256": sha256,
+        },
+        "dispatch": _dispatch_projection(dispatch),
+    }
+    projection_bytes = canonical_json_bytes(projection)
+    projection_sha256 = hashlib.sha256(projection_bytes).hexdigest()
+    bundle = object.__new__(WorkerBundleMaterializationV1)
+    values = {
+        "schema_version": WORKER_BUNDLE_MATERIALIZATION_SCHEMA,
+        "plan_fingerprint": worker.plan_fingerprint,
+        "workload_fingerprint": worker.workload_fingerprint,
+        "canonical_workload_bytes": payload,
+        "workload_byte_count": byte_count,
+        "workload_sha256": sha256,
+        "dispatch": dispatch,
+        "canonical_projection_bytes": projection_bytes,
+        "projection_sha256": projection_sha256,
+    }
+    for name, value in values.items():
+        object.__setattr__(bundle, name, value)
+    object.__setattr__(
+        bundle,
+        "_issuance_seal",
+        _canonical_seal(b"synaptic-worker-bundle-materialization/v1", projection),
+    )
+    return bundle
+
+
+def materialize_worker_invocation(worker: WorkerInvocationV1) -> DispatchInvocation:
+    return materialize_worker_bundle(worker).dispatch
 
 
 def _require_safe_staged_entrypoint(
@@ -645,9 +768,12 @@ __all__ = [
     "ProcessResult",
     "ProcessRunner",
     "SubprocessRunner",
+    "WORKER_BUNDLE_MATERIALIZATION_SCHEMA",
     "WORKER_INVOCATION_SCHEMA",
+    "WorkerBundleMaterializationV1",
     "WorkerInvocationV1",
     "build_dispatch_invocation",
     "build_worker_invocation",
+    "materialize_worker_bundle",
     "materialize_worker_invocation",
 ]
