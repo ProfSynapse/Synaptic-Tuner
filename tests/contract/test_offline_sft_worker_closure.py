@@ -124,3 +124,26 @@ def test_manifest_is_the_exact_authoritative_offline_sft_closure() -> None:
 def test_manifest_is_declared_as_tuner_runtime_package_data() -> None:
     pyproject = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert '"tuner.runtime" = ["manifests/offline-sft-worker-v1.json"]' in pyproject
+
+
+def test_regenerator_reports_no_drift_on_the_checked_in_manifest() -> None:
+    # The regenerator refreshes this manifest after a closure-member edit. Pin
+    # the tool to the same exact-bytes contract that pins the manifest, so a
+    # generator that drifts from the canonical form is caught here rather than
+    # at the next regeneration. --check is the default and never mutates.
+    import subprocess
+    import sys
+
+    script = _ROOT / "scripts" / "regenerate_offline_sft_worker_closure.py"
+    assert script.is_file()
+
+    completed = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, (
+        "regenerator reports drift or fault on the checked-in manifest; "
+        f"exit={completed.returncode} stdout={completed.stdout} stderr={completed.stderr}"
+    )

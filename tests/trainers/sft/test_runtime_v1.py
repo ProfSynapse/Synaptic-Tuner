@@ -646,6 +646,7 @@ def test_runtime_rejects_unrecognized_or_empty_model_output(tmp_path: Path) -> N
     (
         "mixed-family",
         "base-drift",
+        "snapshot-path",
         "unknown-weight",
         "incomplete-shards",
         "mixed-shard-unsharded",
@@ -671,6 +672,21 @@ def test_runtime_rejects_ambiguous_or_incomplete_model_family(
             elif attack == "base-drift":
                 (root / "adapter_config.json").write_text(
                     '{"base_model_name_or_path":"attacker/model","peft_type":"LORA"}',
+                    encoding="utf-8",
+                )
+            elif attack == "snapshot-path":
+                # The exact shape B-2 produces in the field: peft derives
+                # base_model_name_or_path from the loaded model's _name_or_path,
+                # which the SFT model loader asserts is the offline snapshot
+                # directory, so an unstamped run writes a PATH here. base-drift
+                # only proves the check rejects a different repo id; this proves
+                # it rejects a path. The FakeRunner writes an already-correct
+                # "example/model", so without this case the suite never sees one.
+                (root / "adapter_config.json").write_text(
+                    '{"base_model_name_or_path":'
+                    '"/artifacts/cache/model/models--HuggingFaceTB--SmolLM2-135M-Instruct'
+                    '/snapshots/12fd25f77366fa6b3b4b768ec3050bf629380bac",'
+                    '"peft_type":"LORA"}',
                     encoding="utf-8",
                 )
             elif attack == "unknown-weight":

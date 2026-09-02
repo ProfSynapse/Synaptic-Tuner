@@ -205,3 +205,80 @@ def test_runtime_v1_projection_is_opt_in_atomic_and_post_save() -> None:
     assert "os.replace(temporary, destination)" in source
     assert source.index("trainer.save_model(") < source.index("write_runtime_v1_projection_atomic(", source.index("def run("))
     assert 'lineage["synaptic_runtime_projection"] = runtime_projection' in source
+
+
+def _stamp_block(source: str) -> str:
+    """Return the adapter_config stamp block, sliced back from its write.
+
+    The assertions below must hold for the STAMP specifically, not anywhere in
+    the 1500-line module, so every check is scoped to this slice.
+    """
+    marker = 'document["base_model_name_or_path"] = locked_ref'
+    assert source.count(marker) == 1, (
+        "expected exactly one adapter_config base_model_name_or_path assignment, "
+        f"found {source.count(marker)}"
+    )
+    end = source.index(marker) + len(marker)
+    start = source.rindex("if runtime_v1_requested:", 0, end)
+    return source[start:end]
+
+
+def test_train_sft_stamps_locked_model_ref_into_adapter_config() -> None:
+    # B-2. peft writes base_model_name_or_path as the offline SNAPSHOT PATH
+    # (src/model_loader.py asserts _name_or_path is the snapshot dir), but the
+    # host verifies that field for equality against the locked repo id. The
+    # trainer re-reads and rewrites the file after the final save.
+    #
+    # train_sft imports unsloth at module load, so this is pinned at the source
+    # level. A bare grep for "base_model_name_or_path" would pass against a
+    # version that stamps the snapshot path — which IS the bug — so all three
+    # properties are asserted, scoped to the stamp block.
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    block = _stamp_block(source)
+
+    # 1. The stamped value is the locked model ref, never the snapshot path.
+    assert "locked_ref = config.model.model_name" in block
+    assert "args.model_snapshot" not in block, (
+        "the stamp must not read the snapshot path; that value is the defect"
+    )
+
+    # 2. The write is gated on runtime_v1_requested, so every other lane
+    #    (notably local --compute-losses, which feeds this string back to
+    #    transformers_loss_loader as a path to load from) stays byte-identical.
+    assert block.startswith("if runtime_v1_requested:")
+
+    # 3. A non-string or empty ref raises; there is no fallback branch.
+    assert "if not isinstance(locked_ref, str) or not locked_ref:" in block
+    assert "raise RuntimeError(" in block
+    assert (
+        "runtime-v1 run has no usable model ref to stamp into adapter_config.json"
+        in block
+    )
+    assert "runtime-v1 run produced no adapter_config.json to stamp" in block
+    assert "adapter_config.json is not a JSON object" in block
+    for fallback in ("except", "try:", "pass"):
+        assert fallback not in block, (
+            f"the stamp must fail closed; found a {fallback!r} in the stamp block"
+        )
+
+
+def test_train_sft_guards_locked_model_ref_before_training_starts() -> None:
+    # The same fail-closed guard is repeated immediately after the LoRA attach
+    # so an unusable ref fails in seconds rather than after a full training run.
+    # It is repeated rather than hoisted because the two sites are ~280 lines
+    # apart and each must be independently fail-closed.
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+
+    attach_end = source.index("init_lora_weights=config.lora.init_lora_weights,")
+    guard_region = source[attach_end : source.index("protected_before = None")]
+
+    assert "if runtime_v1_requested:" in guard_region
+    assert "locked_ref = config.model.model_name" in guard_region
+    assert "if not isinstance(locked_ref, str) or not locked_ref:" in guard_region
+    assert "raise RuntimeError(" in guard_region
+
+    # The early guard must precede training, and the stamp must follow the save.
+    assert attach_end < source.index("trainer.save_model(")
+    assert source.index("trainer.save_model(") < source.index(
+        'document["base_model_name_or_path"] = locked_ref'
+    )

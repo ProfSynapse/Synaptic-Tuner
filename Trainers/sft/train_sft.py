@@ -1170,6 +1170,20 @@ def run(args: argparse.Namespace):
         init_lora_weights=config.lora.init_lora_weights,
     )
 
+    # Runtime v1 stamps the locked model ref into the saved adapter_config.json
+    # (see the stamp after the final save below). peft derives
+    # base_model_name_or_path from the loaded model's _name_or_path, which
+    # src/model_loader.py deliberately asserts is the offline snapshot
+    # directory, so the saved value is a path and the host's equality check
+    # against the locked ref rejects it. Fail closed here, seconds after the
+    # attach, rather than after a full training run.
+    if runtime_v1_requested:
+        locked_ref = config.model.model_name
+        if not isinstance(locked_ref, str) or not locked_ref:
+            raise RuntimeError(
+                "runtime-v1 run has no usable model ref to stamp into adapter_config.json"
+            )
+
     protected_before = None
     protected_callback = None
     if args.protected_smoke_evidence:
@@ -1450,6 +1464,33 @@ def run(args: argparse.Namespace):
     trainer.save_model(str(final_model_path))
     if args.protected_smoke_evidence or runtime_v1_requested:
         tokenizer.save_pretrained(str(final_model_path))
+
+    # Runtime v1 only: peft wrote base_model_name_or_path as the offline
+    # snapshot directory, but the artifact contract requires the locked repo
+    # id, which the host verifies for equality against the same workload field
+    # this value is bound from. Re-read and rewrite the file after peft is
+    # finished with it, so no unsloth/peft version can undo the stamp. Gated so
+    # every other lane stays byte-identical: local runs with --compute-losses
+    # feed this string back to transformers_loss_loader as a model source to
+    # load from, where a hub id would break an offline run. Every failure
+    # raises; the snapshot path is never left in place as a fallback.
+    if runtime_v1_requested:
+        locked_ref = config.model.model_name
+        if not isinstance(locked_ref, str) or not locked_ref:
+            raise RuntimeError(
+                "runtime-v1 run has no usable model ref to stamp into adapter_config.json"
+            )
+        adapter_config_path = final_model_path / "adapter_config.json"
+        if not adapter_config_path.is_file():
+            raise RuntimeError("runtime-v1 run produced no adapter_config.json to stamp")
+        document = json.loads(adapter_config_path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            raise RuntimeError("adapter_config.json is not a JSON object")
+        document["base_model_name_or_path"] = locked_ref
+        adapter_config_path.write_text(
+            json.dumps(document, indent=2), encoding="utf-8"
+        )
+        print(f"[runtime_v1] stamped adapter_config base_model_name_or_path: {locked_ref}")
 
     if protected_callback is not None and protected_before is not None:
         from src.protected_smoke_evidence import finalize_protected_evidence
