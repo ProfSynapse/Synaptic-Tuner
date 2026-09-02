@@ -75,6 +75,7 @@ def _fixture(
     dataset_ref: str = "project://data/train.jsonl",
     mode: str = "dual_clone",
     redirected_capability: bool = False,
+    extra_environment: dict[str, str] | None = None,
 ):
     if mode != "dual_clone":
         raise ValueError(
@@ -223,6 +224,8 @@ def _fixture(
         "SYNAPTIC_MODEL_SNAPSHOT": str(model_snapshot),
         "WANDB_DISABLED": "true",
     }
+    if extra_environment is not None:
+        planned_environment.update(extra_environment)
     execution_source = ExecutionSourceV1(
         run_id=source_lock.run_id,
         created_at=source_lock.created_at,
@@ -621,6 +624,65 @@ def test_portable_runtime_requirements_enforce_implementation_and_version(
     monkeypatch.setitem(requirements["python"], "implementation", "pypy")
     with pytest.raises(RuntimeV1Error, match="implementation"):
         runtime_v1._validate_portable_runtime_requirements(requirements)
+
+
+_REDIRECTED_CACHE_ENVIRONMENT = {
+    "HOME": "/tmp/home",
+    "XDG_CACHE_HOME": "/tmp/xdg",
+    "TORCH_HOME": "/tmp/torch",
+    "TRITON_CACHE_DIR": "/tmp/triton",
+}
+
+
+def test_runtime_admits_the_redirected_cache_environment(tmp_path: Path) -> None:
+    """B-9-R1: the four cache-root keys pass the allowlist subset gate.
+
+    The container runs as a foreign uid with an unwritable ``HOME``, so the Host
+    redirects the torch/triton/XDG caches under ``/tmp``. That dispatch
+    environment only reaches the trainer if every key is inside
+    ``allowed_environment`` (``tuner/training/methods/sft.py``), which
+    ``execute_runtime`` enforces as a subset check. This drives that gate and
+    then confirms the keys survive into the child process environment, which is
+    the whole point of admitting them.
+    """
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path, extra_environment=dict(_REDIRECTED_CACHE_ENVIRONMENT)
+    )
+    runner = FakeRunner()
+
+    execute_runtime(
+        workload.canonical_bytes,
+        environment=environment,
+        runner=runner,
+        engine_file=engine_file,
+    )
+
+    child_environment = dict(runner.calls[0].environment)
+    for name, value in _REDIRECTED_CACHE_ENVIRONMENT.items():
+        assert child_environment[name] == value
+
+
+def test_runtime_rejects_a_dispatch_environment_key_outside_the_allowlist(
+    tmp_path: Path,
+) -> None:
+    """The gate above is live: an unadmitted key still fails closed.
+
+    ``TMPDIR`` is deliberately excluded from ``allowed_environment`` because
+    ``/tmp`` is already writable, so it is the exact counter-case for the test
+    above. Same fixture, one extra key, opposite outcome.
+    """
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path,
+        extra_environment={**_REDIRECTED_CACHE_ENVIRONMENT, "TMPDIR": "/tmp/other"},
+    )
+
+    with pytest.raises(RuntimeV1Error, match="violates portable requirements"):
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=FakeRunner(),
+            engine_file=engine_file,
+        )
 
 
 def test_runtime_rejects_unrecognized_or_empty_model_output(tmp_path: Path) -> None:

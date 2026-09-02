@@ -174,6 +174,27 @@ def test_sft_workload_is_canonical_and_deterministic() -> None:
     assert "python_executable" not in json.dumps(requirements)
 
 
+def test_allowed_environment_admits_the_redirected_cache_roots_and_not_tmpdir() -> None:
+    """B-9-R1: the container's caches are redirected under /tmp, not HOME.
+
+    The prepared path runs the container as a foreign uid whose ``HOME`` is ``/``
+    and unwritable, so the Host redirects torch, triton and XDG caches. The
+    trainer applies ``allowed_environment`` as a subset gate over that dispatch
+    environment, so each key has to be admitted here or the run fails before
+    training. ``TMPDIR`` is deliberately NOT admitted: ``/tmp`` is already the
+    measured default and already writable, so admitting it would widen the
+    allowlist for no need.
+    """
+    requirements = compile_sft_workload(
+        resolved_config=_config(), execution_source=_execution_source()
+    ).document["runtime_requirements"]
+    allowed = requirements["allowed_environment"]
+
+    assert {"HOME", "XDG_CACHE_HOME", "TORCH_HOME", "TRITON_CACHE_DIR"}.issubset(allowed)
+    assert "TMPDIR" not in allowed
+    assert len(allowed) == len(set(allowed))
+
+
 def test_execution_source_schema_rejects_the_removed_modal_runtime_alias() -> None:
     workload = compile_sft_workload(
         resolved_config=_config(), execution_source=_execution_source()
