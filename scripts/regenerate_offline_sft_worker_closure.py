@@ -135,11 +135,35 @@ def _git_index_modes(root: Path, paths: list[str]) -> dict[str, str]:
     still records ``100644``, so a stat-based check would refuse all 66 members
     on a tree that is in fact correct (architecture ruling 15.13).
 
+    ``safe.directory`` is passed per invocation with ``-c`` and names only this
+    repository root. A checkout whose owner differs from the invoking user (any
+    Windows-backed mount read from WSL) otherwise trips git's dubious-ownership
+    guard and the oracle is unavailable exactly where it is most needed. The
+    override is deliberately NOT a config write: the tool must not mutate the
+    user's git configuration as a side effect of running, and the exemption must
+    not outlive the one read. Scope is narrow by construction, since the
+    generator already reads these members' bytes from this same root, so trusting
+    the index of that root adds no reachable surface (architecture ruling 15.13).
+
+    The mode is compared as the literal first whitespace-delimited field. Parsing
+    it as an int would drop the leading zero and stop matching ``git_mode``.
+
     Fails closed: if git is absent, refuses the repository, or does not report a
     member, the caller aborts rather than guessing a mode.
     """
 
-    command = ["git", "-C", str(root), "ls-files", "-s", "-z", "--", *paths]
+    command = [
+        "git",
+        "-c",
+        f"safe.directory={root}",
+        "-C",
+        str(root),
+        "ls-files",
+        "-s",
+        "-z",
+        "--",
+        *paths,
+    ]
     try:
         completed = subprocess.run(command, capture_output=True, timeout=120)
     except (OSError, subprocess.SubprocessError) as exc:
