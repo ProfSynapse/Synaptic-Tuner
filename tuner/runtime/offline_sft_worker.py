@@ -435,10 +435,6 @@ def load_offline_sft_worker_closure(
             hashlib.sha256(payload).hexdigest(), member.sha256
         ):
             raise OfflineSFTWorkerError("staged worker member does not match closure")
-        if os.name == "posix":
-            executable = bool(path.stat().st_mode & 0o111)
-            if executable != (member.git_mode == "100755"):
-                raise OfflineSFTWorkerError("staged worker member mode does not match")
     return closure
 
 

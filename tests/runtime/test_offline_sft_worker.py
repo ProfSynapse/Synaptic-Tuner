@@ -141,3 +141,120 @@ def test_isolated_bootstrap_rejects_optional_feature_without_traceback(
 
     assert completed.returncode == 2
     assert completed.stderr.strip() == "OFFLINE_SFT_WORKER_REJECTED"
+
+
+_WORKER = "tuner/runtime/offline_sft_worker.py"
+
+
+def _chmod_every_member(
+    engine: Path, document: dict[str, object], mode: int
+) -> None:
+    for member in document["members"]:
+        os.chmod(engine / Path(*member["path"].split("/")), mode)
+
+
+def test_closure_authenticates_members_carrying_a_synthesized_execute_bit(
+    tmp_path: Path,
+) -> None:
+    """T1 (section 23.4): git_mode 100644 presented as 0o744 authenticates.
+
+    DrvFs with ``metadata`` stores a real POSIX mode only for Linux-written
+    files and synthesizes 0744 for every Windows-written one, so on the
+    mandated bind all 66 members carry the owner-execute bit while every one
+    of them records 100644. Modes are set explicitly rather than inherited
+    from the source tree so the fixture is deterministic on ext4.
+    """
+
+    engine, manifest, document = _stage(tmp_path)
+    assert {member["git_mode"] for member in document["members"]} == {"100644"}
+    _chmod_every_member(engine, document, 0o744)
+
+    closure = load_offline_sft_worker_closure(
+        manifest,
+        expected_digest=document["closure_digest"],
+        engine_root=engine,
+    )
+
+    assert len(closure.members) == len(document["members"])
+
+
+def test_closure_rejects_a_longer_member_carrying_the_execute_bit(
+    tmp_path: Path,
+) -> None:
+    """T2 (section 23.4): the size_bytes branch still rejects."""
+
+    engine, manifest, document = _stage(tmp_path)
+    target = engine / "shared" / "env_bootstrap.py"
+    original = target.read_bytes()
+    target.write_bytes(original + b"\n")
+    os.chmod(target, 0o744)
+
+    with pytest.raises(OfflineSFTWorkerError, match="does not match closure"):
+        load_offline_sft_worker_closure(
+            manifest,
+            expected_digest=document["closure_digest"],
+            engine_root=engine,
+        )
+
+
+def test_closure_rejects_an_edited_member_of_equal_length(
+    tmp_path: Path,
+) -> None:
+    """T3 (section 23.4): the sha256 branch still rejects at equal length."""
+
+    engine, manifest, document = _stage(tmp_path)
+    target = engine / "shared" / "env_bootstrap.py"
+    original = target.read_bytes()
+    edited = original[:-1] + b" "
+    assert len(edited) == len(original) and edited != original
+    target.write_bytes(edited)
+    os.chmod(target, 0o744)
+
+    with pytest.raises(OfflineSFTWorkerError, match="does not match closure"):
+        load_offline_sft_worker_closure(
+            manifest,
+            expected_digest=document["closure_digest"],
+            engine_root=engine,
+        )
+
+
+def test_closure_authenticates_a_member_recording_100755_without_the_bit(
+    tmp_path: Path,
+) -> None:
+    """T4 (section 23.4): the mode is compared in NEITHER direction.
+
+    T1 covers a member recorded 100644 whose file is executable. This covers
+    the opposite pairing, and it is the test that fails if the comparison is
+    relaxed to tolerate only the DrvFs direction instead of being deleted.
+    No member of the real closure records 100755, so the manifest is
+    synthesized and its digest re-derived; the parser enforces
+    recorded == observed == expected.
+    """
+
+    engine, manifest, document = _stage(tmp_path)
+    for member in document["members"]:
+        if member["path"] == _WORKER:
+            member["git_mode"] = "100755"
+            break
+    else:  # pragma: no cover - the worker module is always a member
+        raise AssertionError(f"{_WORKER} is not a closure member")
+    document["closure_digest"] = closure_digest(document)
+    manifest.write_bytes(
+        json.dumps(
+            document,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    os.chmod(engine / Path(*_WORKER.split("/")), 0o644)
+
+    closure = load_offline_sft_worker_closure(
+        manifest,
+        expected_digest=document["closure_digest"],
+        engine_root=engine,
+    )
+
+    assert any(member.git_mode == "100755" for member in closure.members)
