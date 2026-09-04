@@ -685,6 +685,41 @@ def test_runtime_rejects_a_dispatch_environment_key_outside_the_allowlist(
         )
 
 
+def test_runtime_admits_the_container_user_name_environment(tmp_path: Path) -> None:
+    """B-16 E3: ``USER`` passes the subset gate and reaches the child.
+
+    The prepared path runs the container as ``--user 1000:1000``, a uid the
+    pinned image's password database does not name, so ``getpass.getuser()``
+    deep inside the unsloth import chain falls through to ``pwd.getpwuid`` and
+    raises. ``getpass`` reads ``USER`` from the environment before it consults
+    ``pwd``, so the Host binds it to a literal name. That binding only survives
+    into the trainer's child process if ``allowed_environment`` admits the key,
+    which ``build_trainer_invocation`` enforces as a subset check.
+
+    This is the positive direction of that gate. Its counter-test is
+    ``test_runtime_rejects_a_dispatch_environment_key_outside_the_allowlist``
+    above: same fixture, one unadmitted key, opposite outcome. Without that
+    pair a blanket allowlist would satisfy this assertion.
+
+    Neither test proves B-16 is closed. The failing import is a third-party
+    chain inside a pinned image and only run 11 can prove it passes; these prove
+    the gate will let the remedy through.
+    """
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path, extra_environment={"USER": "synaptic"}
+    )
+    runner = FakeRunner()
+
+    execute_runtime(
+        workload.canonical_bytes,
+        environment=environment,
+        runner=runner,
+        engine_file=engine_file,
+    )
+
+    assert dict(runner.calls[0].environment)["USER"] == "synaptic"
+
+
 def test_runtime_rejects_unrecognized_or_empty_model_output(tmp_path: Path) -> None:
     workload, environment, engine_file, _, _ = _fixture(tmp_path)
 

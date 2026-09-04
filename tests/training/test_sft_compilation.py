@@ -14,7 +14,11 @@ from tuner.project.execution_source import (
     ExecutionSourceV1,
 )
 from tuner.project.source_bundle import SourceLock
-from tuner.training.methods.sft import SFTRecipe, compile_sft_workload
+from tuner.training.methods.sft import (
+    SFTRecipe,
+    _runtime_requirements,
+    compile_sft_workload,
+)
 
 
 _ROOT = Path(__file__).parents[2]
@@ -320,3 +324,58 @@ def test_workload_schema_rejects_nonexact_artifact_role_sets(mutation: str) -> N
         }
 
     assert list(_workload_validator().iter_errors(document))
+
+
+def test_allowed_environment_admits_the_container_user_name_and_not_tmpdir() -> None:
+    """B-16 E1: the container's ``USER`` name passes the trainer allowlist.
+
+    The prepared path runs the container as ``--user 1000:1000``, a uid the
+    pinned image's password database does not name. Deep inside the unsloth
+    import chain ``getpass.getuser()`` falls through to ``pwd.getpwuid`` and
+    raises, so the Host binds ``USER`` to a literal name. ``getpass`` reads that
+    name before it ever consults ``pwd``. The trainer applies
+    ``allowed_environment`` as a subset gate over the dispatch environment, so
+    the key only reaches the container if it is admitted here.
+
+    ``TMPDIR`` stays excluded (18.24): ``/tmp`` is already the writable default,
+    so admitting it would widen the allowlist for no need. It is the standing
+    counter-case that keeps this assertion from passing on a blanket allowlist.
+    """
+    requirements = compile_sft_workload(
+        resolved_config=_config(), execution_source=_execution_source()
+    ).document["runtime_requirements"]
+    allowed = requirements["allowed_environment"]
+
+    assert "USER" in allowed
+    assert "TMPDIR" not in allowed
+    assert len(allowed) == len(set(allowed))
+
+
+def test_allowed_environment_agrees_between_the_python_list_and_the_schema_enum() -> None:
+    """B-16 E2: the allowlist's two copies are one allowlist.
+
+    ``allowed_environment`` is written twice and enforced twice. The Python list
+    in ``_runtime_requirements`` is enforced as a subset gate inside the trainer
+    (exit 22); the closed ``enum`` in the workload schema is enforced by schema
+    validation at admission (exit 32). Nothing in the tree made them agree, and
+    a key added to one alone fails at whichever gate it did not reach. B-9-R1
+    was surprised by exactly that, so this pins the equality rather than the
+    two lists' contents.
+
+    The comparison is by SET, deliberately. The Python list is grouped by
+    concern and the schema enum is ASCII-sorted; both orders are intended and
+    neither should be reordered to match the other.
+    """
+    document = json.loads(
+        (_ROOT / "schemas" / "synaptic-sft-workload-v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    schema_enum = document["properties"]["runtime_requirements"]["properties"][
+        "allowed_environment"
+    ]["items"]["enum"]
+    python_list = _runtime_requirements()["allowed_environment"]
+
+    assert set(python_list) == set(schema_enum)
+    assert len(python_list) == len(set(python_list))
+    assert len(schema_enum) == len(set(schema_enum))
