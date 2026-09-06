@@ -18,7 +18,7 @@
     },
     "modal_remote": {
       "path": "tuner/execution/providers/modal/remote.py",
-      "sha256": "88d20d1abba8d15e2ed4441c02f4b83f8511e9c116473e28c910672500575663"
+      "sha256": "8574b80084d3b10aa4a5a24ebb7c00ea6606336a55d66f5c1a76b45c7d984241"
     },
     "modal_runtime": {
       "path": "tuner/execution/providers/modal/runtime.py",
@@ -26,7 +26,7 @@
     },
     "sft_runtime": {
       "path": "Trainers/sft/runtime_v1.py",
-      "sha256": "da1f0f0717a970486fa19ab2df44826c93aae5db86797cc052890c30ac2ace83"
+      "sha256": "d838cc5070366af22d6dea737639c687194e5cc4e944edea1a787481685b9bb7"
     }
   },
   "ml_stack": {
