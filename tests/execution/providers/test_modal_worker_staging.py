@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tuner.execution.providers.modal.remote import _stage_runtime_worker
+from tuner.execution.providers.modal.remote import ModalRemotePhaseError, _stage_runtime_worker
 from tuner.runtime.offline_sft_worker import load_offline_sft_worker_closure
 
 
@@ -65,6 +65,24 @@ def test_invalid_member_is_rejected_and_original_retained(tmp_path, mutation):
         member.unlink()
         if mutation == "symlink":
             member.symlink_to(ROOT / document["members"][0]["path"])
-    with pytest.raises(ValueError):
+    with pytest.raises(ModalRemotePhaseError) as failure:
         _stage_runtime_worker(SimpleNamespace(roots={"engine": str(engine)}), str(manifest), payload)
+    assert failure.value.diagnostic_code == "worker_source_copy_failed"
     assert (tmp_path / "engine-source/checkout/.git/HEAD").exists()
+
+
+@pytest.mark.parametrize("aliased", ["engine", "control"])
+def test_aliased_workspace_is_classified_before_moving_checkout(tmp_path, aliased):
+    real = tmp_path / "real"
+    real.mkdir()
+    engine, manifest, payload, _ = checkout(real)
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    selected_engine = alias / "engine" if aliased == "engine" else engine
+    selected_manifest = alias / "control" / manifest.name if aliased == "control" else manifest
+    with pytest.raises(ModalRemotePhaseError) as failure:
+        _stage_runtime_worker(SimpleNamespace(roots={"engine": str(selected_engine)}), str(selected_manifest), payload)
+    expected = "worker_source_path_noncanonical" if aliased == "engine" else "worker_control_path_noncanonical"
+    assert failure.value.diagnostic_code == expected
+    assert (engine / ".git/HEAD").exists()
+    assert not (real / "engine-source").exists()

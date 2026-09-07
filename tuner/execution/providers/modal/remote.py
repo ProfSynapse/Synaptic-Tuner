@@ -52,6 +52,11 @@ _DIAGNOSTIC_CODES = frozenset({
     "runtime_workload_roots_rejected",
     "runtime_workload_schema_rejected",
     "source_topology_invalid",
+    "worker_source_path_noncanonical",
+    "worker_control_path_noncanonical",
+    "worker_source_retain_failed",
+    "worker_source_copy_failed",
+    "worker_closure_rejected",
     "trainer_invocation_failed",
     "trainer_nonzero",
 })
@@ -155,25 +160,42 @@ def _stage_runtime_worker(source: ExecutionSourceV1, manifest_path: str, payload
     manifest = parse_offline_sft_worker_manifest(
         payload, source_ref="verified-engine-closure", manifest_path=Path(manifest_path)
     )
+    if engine.resolve(strict=True) != engine:
+        raise ModalRemotePhaseError(124, "worker_source_path_noncanonical")
+    if Path(manifest_path).resolve(strict=True) != Path(manifest_path):
+        raise ModalRemotePhaseError(124, "worker_control_path_noncanonical")
     # The backup directory is exclusively claimed before any rename. Never
     # overwrite a prior checkout or prune a repository into a runtime tree.
     retained = engine.with_name(engine.name + "-source")
     retained.mkdir(exist_ok=False)
     checkout = retained / "checkout"
-    engine.rename(checkout)
-    engine.mkdir(exist_ok=False)
-    for member in manifest.closure.members:
-        contents = read_regular(checkout, checkout / member.path, member.size_bytes)
-        if len(contents) != member.size_bytes or hashlib.sha256(contents).hexdigest() != member.sha256:
-            raise ValueError("worker source member differs from locked closure")
-        destination = engine / member.path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("xb") as stream:
-            stream.write(contents)
-        destination.chmod(0o755 if member.git_mode == "100755" else 0o644)
-    load_offline_sft_worker_closure(
-        Path(manifest_path), expected_digest=manifest.closure.closure_digest, engine_root=engine
-    )
+    try:
+        engine.rename(checkout)
+        engine.mkdir(exist_ok=False)
+    except FileExistsError:
+        raise
+    except OSError:
+        raise ModalRemotePhaseError(124, "worker_source_retain_failed") from None
+    try:
+        for member in manifest.closure.members:
+            contents = read_regular(checkout, checkout / member.path, member.size_bytes)
+            if len(contents) != member.size_bytes or hashlib.sha256(contents).hexdigest() != member.sha256:
+                raise ValueError("worker source member differs from locked closure")
+            destination = engine / member.path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open("xb") as stream:
+                stream.write(contents)
+            destination.chmod(0o755 if member.git_mode == "100755" else 0o644)
+    except FileExistsError:
+        raise
+    except Exception:
+        raise ModalRemotePhaseError(124, "worker_source_copy_failed") from None
+    try:
+        load_offline_sft_worker_closure(
+            Path(manifest_path), expected_digest=manifest.closure.closure_digest, engine_root=engine
+        )
+    except Exception:
+        raise ModalRemotePhaseError(124, "worker_closure_rejected") from None
 
 
 def admit_remote_invocation(
@@ -311,6 +333,8 @@ def execute_remote_sft(
         _stage_runtime_worker(
             invocation.source, invocation.closure_manifest_runtime_path, invocation.closure_manifest
         )
+    except ModalRemotePhaseError:
+        raise
     except FileExistsError:
         raise ModalRemotePhaseError(122, "artifact_layout_collision") from None
     except Exception:

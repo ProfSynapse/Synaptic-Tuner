@@ -70,6 +70,11 @@ def test_remote_execution_has_no_shell_or_runtime_override_surface(monkeypatch):
 @pytest.mark.parametrize("failure,code", [
     (FileExistsError, "artifact_layout_collision"),
     (ValueError, "locked_source_mismatch"),
+    (lambda _: ModalRemotePhaseError(124, "worker_source_path_noncanonical"), "worker_source_path_noncanonical"),
+    (lambda _: ModalRemotePhaseError(124, "worker_control_path_noncanonical"), "worker_control_path_noncanonical"),
+    (lambda _: ModalRemotePhaseError(124, "worker_source_retain_failed"), "worker_source_retain_failed"),
+    (lambda _: ModalRemotePhaseError(124, "worker_source_copy_failed"), "worker_source_copy_failed"),
+    (lambda _: ModalRemotePhaseError(124, "worker_closure_rejected"), "worker_closure_rejected"),
 ])
 def test_staging_failure_never_invokes_trainer(monkeypatch, failure, code):
     invocation, _, _ = admitted()
