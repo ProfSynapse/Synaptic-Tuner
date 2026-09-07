@@ -55,21 +55,46 @@ def test_remote_execution_has_no_shell_or_runtime_override_surface(monkeypatch):
     invocation,_,_=admitted();calls=[]
     monkeypatch.setattr(remote_module, "_read_locked_closure_manifest", lambda source: invocation.closure_manifest)
     monkeypatch.setattr(remote_module, "_write_runtime_closure_manifest", lambda path, payload: None)
+    monkeypatch.setattr(remote_module, "_stage_runtime_worker", lambda *args: calls.append(("stage", args)))
     class Sources:
         def prepare_and_verify(self,source,deployment):calls.append(("source",source,deployment))
     class Processes:
         def run(self,argv,*,cwd,environment,stdin):
             calls.append(("process",argv,cwd,environment,stdin));return ProcessResultV1(0,b"ok",b"")
     result=execute_remote_sft(invocation,sources=Sources(),processes=Processes())
-    assert result.returncode==0 and calls[0][0]=="source" and calls[1][0]=="process"
-    assert calls[1][1]==invocation.argv and calls[1][4]==invocation.workload
+    assert result.returncode==0 and [call[0] for call in calls]==["source", "stage", "process"]
+    assert calls[2][1]==invocation.argv and calls[2][4]==invocation.workload
     assert "shell" not in Processes.run.__annotations__
+
+
+@pytest.mark.parametrize("failure,code", [
+    (FileExistsError, "artifact_layout_collision"),
+    (ValueError, "locked_source_mismatch"),
+])
+def test_staging_failure_never_invokes_trainer(monkeypatch, failure, code):
+    invocation, _, _ = admitted()
+    monkeypatch.setattr(remote_module, "_read_locked_closure_manifest", lambda source: invocation.closure_manifest)
+    monkeypatch.setattr(remote_module, "_write_runtime_closure_manifest", lambda *args: None)
+    def reject(*args):
+        raise failure("private diagnostic must not escape")
+    monkeypatch.setattr(remote_module, "_stage_runtime_worker", reject)
+    class Sources:
+        def prepare_and_verify(self, source, deployment):
+            pass
+    class Processes:
+        def run(self, *args, **kwargs):
+            pytest.fail("trainer invoked after staging failure")
+    with pytest.raises(remote_module.ModalRemotePhaseError) as error:
+        execute_remote_sft(invocation, sources=Sources(), processes=Processes())
+    assert error.value.diagnostic_code == code
+    assert str(error.value) == code
 
 
 def test_mounted_worker_reads_only_fixed_two_volume_paths(tmp_path, monkeypatch):
     invocation,command,material=admitted();control=tmp_path/"control-volume";artifact=tmp_path/"artifact-volume"
     monkeypatch.setattr(remote_module, "_read_locked_closure_manifest", lambda source: invocation.closure_manifest)
     monkeypatch.setattr(remote_module, "_write_runtime_closure_manifest", lambda path, payload: None)
+    monkeypatch.setattr(remote_module, "_stage_runtime_worker", lambda *args: None)
     control_dir=control/"operations"/"effect-1"/"control";input_dir=artifact/"operations"/"effect-1"/"input"
     control_dir.mkdir(parents=True);input_dir.mkdir(parents=True)
     (control_dir/"stage-claim.v1.json").write_bytes(material.claim)
