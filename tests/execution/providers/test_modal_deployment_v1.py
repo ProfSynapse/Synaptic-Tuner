@@ -59,7 +59,10 @@ class SDK:
 
 
 def test_deployment_factory_is_exact_explicit_and_does_not_submit():
-    client=object();worker=lambda value,job_ref:(value,job_ref)
+    client=object()
+    def worker(value, job_ref, commit_prepared):
+        commit_prepared()
+        return value, job_ref
     spec=ModalDeploymentSpecV1(
         DEPLOYMENT_REF, FUNCTION_NAME,
         "registry.example/runtime@sha256:"+"a"*64,
@@ -68,7 +71,7 @@ def test_deployment_factory_is_exact_explicit_and_does_not_submit():
     )
     built=build_modal_deployment(sdk=SDK,client=client,environment_name="env",spec=spec,worker=worker)
     assert built.app.args==(APP_NAME,) and built.function(b"command")==(b"command","fc-1")
-    assert built.artifact_volume.commits==1 and built.control_volume.commits==1
+    assert built.artifact_volume.commits==2 and built.control_volume.commits==1
     for call in Volume.calls[-2:]:
         assert call.kwargs=={"environment_name":"env","create_if_missing":False,"version":1,"client":client}
     assert Secret.calls[-1].kwargs=={"environment_name":"env","required_keys":["HF_TOKEN","SYNAPTIC_EVIDENCE_MAC_KEY"],"client":client}

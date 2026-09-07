@@ -59,9 +59,9 @@ def test_remote_execution_has_no_shell_or_runtime_override_surface(monkeypatch):
     class Sources:
         def prepare_and_verify(self,source,deployment):calls.append(("source",source,deployment))
     class Processes:
-        def run(self,argv,*,cwd,environment,stdin):
+        def run(self,argv,*,cwd,environment,stdin,commit_prepared):
             calls.append(("process",argv,cwd,environment,stdin));return ProcessResultV1(0,b"ok",b"")
-    result=execute_remote_sft(invocation,sources=Sources(),processes=Processes())
+    result=execute_remote_sft(invocation,sources=Sources(),processes=Processes(),commit_prepared=lambda: None)
     assert result.returncode==0 and [call[0] for call in calls]==["source", "stage", "process"]
     assert calls[2][1]==invocation.argv and calls[2][4]==invocation.workload
     assert "shell" not in Processes.run.__annotations__
@@ -90,7 +90,7 @@ def test_staging_failure_never_invokes_trainer(monkeypatch, failure, code):
         def run(self, *args, **kwargs):
             pytest.fail("trainer invoked after staging failure")
     with pytest.raises(remote_module.ModalRemotePhaseError) as error:
-        execute_remote_sft(invocation, sources=Sources(), processes=Processes())
+        execute_remote_sft(invocation, sources=Sources(), processes=Processes(),commit_prepared=lambda: None)
     assert error.value.diagnostic_code == code
     assert str(error.value) == code
 
@@ -108,13 +108,13 @@ def test_mounted_worker_reads_only_fixed_two_volume_paths(tmp_path, monkeypatch)
     class Sources:
         def prepare_and_verify(self,source,deployment):pass
     class Processes:
-        def run(self,argv,*,cwd,environment,stdin):return ProcessResultV1(0)
+        def run(self,argv,*,cwd,environment,stdin,commit_prepared):return ProcessResultV1(0)
     class Completion:
         def finalize(self,invocation,result,*,job_ref):return type("Done",(),{"status_code":"completed"})()
     worker=MountedModalWorkerV1(verifier=Auth(),sources=Sources(),processes=Processes(),completion=Completion(),control_root=str(control),artifact_root=str(artifact))
-    assert worker(command.canonical_bytes,"fc-1")=={"schema_version":"synaptic-modal-worker-result/v1","effect_id":invocation.command.effect.effect_id,"returncode":0,"status_code":"completed"}
+    assert worker(command.canonical_bytes,"fc-1",lambda: None)=={"schema_version":"synaptic-modal-worker-result/v1","effect_id":invocation.command.effect.effect_id,"returncode":0,"status_code":"completed"}
     (input_dir/"bundle.bin").unlink();(input_dir/"bundle.bin").mkdir()
-    with pytest.raises(ValueError,match="unavailable"):worker(command.canonical_bytes,"fc-1")
+    with pytest.raises(ValueError,match="unavailable"):worker(command.canonical_bytes,"fc-1",lambda: None)
 
 
 def test_mounted_worker_preserves_only_closed_remote_phase_diagnostics(tmp_path):
@@ -128,14 +128,14 @@ def test_mounted_worker_preserves_only_closed_remote_phase_diagnostics(tmp_path)
         def prepare_and_verify(self,source,deployment):
             raise ModalRemotePhaseError(124,"engine_clone_failed")
     class Processes:
-        def run(self,argv,*,cwd,environment,stdin):raise AssertionError
+        def run(self,argv,*,cwd,environment,stdin,commit_prepared):raise AssertionError
     observed=[]
     class Completion:
         def finalize(self,invocation,result,*,job_ref):
             observed.append(result)
             return type("Done",(),{"status_code":"failed"})()
     worker=MountedModalWorkerV1(verifier=Auth(),sources=Sources(),processes=Processes(),completion=Completion(),control_root=str(control),artifact_root=str(artifact))
-    result=worker(command.canonical_bytes,"fc-1")
+    result=worker(command.canonical_bytes,"fc-1",lambda: None)
     assert result["returncode"]==124 and result["status_code"]=="failed"
     assert observed[0].diagnostic_code=="engine_clone_failed"
 

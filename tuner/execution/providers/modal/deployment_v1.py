@@ -89,7 +89,7 @@ def build_modal_deployment(
     client: object,
     environment_name: str,
     spec: ModalDeploymentSpecV1,
-    worker: Callable[[bytes, str], object],
+    worker: Callable[[bytes, str, Callable[[], None]], object],
 ) -> ModalDeploymentObjectsV1:
     """Build, but do not deploy or invoke, the immutable Modal application."""
     if getattr(sdk, "__version__", None) != EXACT_MODAL_SDK_VERSION:
@@ -150,7 +150,7 @@ def build_modal_deployment(
         job_ref = sdk.current_function_call_id()
         if not isinstance(job_ref, str) or not job_ref:
             raise ValueError("Modal function call identity is unavailable")
-        result = worker(canonical_command, job_ref)
+        result = worker(canonical_command, job_ref, artifact.commit)
         artifact.commit()
         control.commit()
         return result

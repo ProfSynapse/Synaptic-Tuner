@@ -186,7 +186,7 @@ def copy_regular(
         if (
             not stat.S_ISREG(before.st_mode)
             or (source_parent is None and _is_link_or_reparse(source_path, before))
-            or not 0 < before.st_size <= maximum
+            or not 0 <= before.st_size <= maximum
         ):
             raise ValueError("runtime artifact is not a bounded regular file")
         source_descriptor = _open_leaf(

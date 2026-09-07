@@ -10,7 +10,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import Callable, Protocol
 
 from tuner.project.execution_source import ExecutionSourceV1
 from tuner.runtime.dispatch import WorkerControlLocationV1
@@ -35,6 +35,8 @@ _DIAGNOSTIC_CODES = frozenset({
     "engine_gitlink_mismatch",
     "generic_failure",
     "locked_source_mismatch",
+    "model_preparation_failed",
+    "model_cache_commit_failed",
     "project_clone_failed",
     "runtime_identity_mismatch",
     "runtime_artifact_precondition",
@@ -111,6 +113,7 @@ class FixedProcessRunner(Protocol):
         cwd: str,
         environment: dict[str, str],
         stdin: bytes,
+        commit_prepared: Callable[[], None],
     ) -> ProcessResultV1: ...
 
 
@@ -316,6 +319,7 @@ def execute_remote_sft(
     *,
     sources: SourceMaterializer,
     processes: FixedProcessRunner,
+    commit_prepared: Callable[[], None],
 ) -> ProcessResultV1:
     """Verify dual-clone materialization, then invoke only runtime_v1 without a shell."""
     if type(invocation) is not RemoteInvocationV1:
@@ -350,6 +354,7 @@ def execute_remote_sft(
         cwd=invocation.cwd,
         environment=dict(invocation.environment),
         stdin=invocation.workload,
+        commit_prepared=commit_prepared,
     )
     if type(result) is not ProcessResultV1:
         raise TypeError("process runner returned a noncanonical result")
@@ -382,7 +387,7 @@ class MountedModalWorkerV1:
         self._artifact = Path(artifact_root)
         self._bounds = bounds
 
-    def __call__(self, canonical_command: bytes, job_ref: str) -> dict[str, object]:
+    def __call__(self, canonical_command: bytes, job_ref: str, commit_prepared: Callable[[], None]) -> dict[str, object]:
         command = MutationCommandV1.from_bytes(canonical_command)
         effect_id = command.effect.effect_id
         claim = read_regular(
@@ -408,7 +413,8 @@ class MountedModalWorkerV1:
         )
         try:
             result = execute_remote_sft(
-                invocation, sources=self._sources, processes=self._processes
+                invocation, sources=self._sources, processes=self._processes,
+                commit_prepared=commit_prepared,
             )
         except ModalRemotePhaseError as error:
             result = ProcessResultV1(

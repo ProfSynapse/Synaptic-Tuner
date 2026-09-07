@@ -80,6 +80,16 @@ The cross-provider contract and proof matrix live in
 
 ## Storage and evidence
 
+Model preparation belongs on the execution machine, before the offline trainer.
+The provider must automatically obtain the exact configured model revision using
+the Hugging Face SDK and reuse verified cached weights. Do not require operators
+to download weights locally and upload them to Modal. Keep model credentials in
+the preparation wrapper, never in the trainer subprocess; preserve the runtime's
+exact revision, link-free snapshot, and offline checks. Cache integration must
+treat the persistent Volume as untrusted and must not let SDK filesystem writes
+follow attacker-controlled cache paths. This is an internal preparation phase,
+not a new submission command or a separate downloader service.
+
 Modal Volume is the authoritative provider-native artifact store for a Modal
 run. Hub publication is optional and separately authorized. The remote producer
 emits exactly five artifacts: workload record, training lineage, training
