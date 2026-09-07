@@ -18,7 +18,7 @@
     },
     "modal_remote": {
       "path": "tuner/execution/providers/modal/remote.py",
-      "sha256": "d491809d688bb8a4c65ac35e2609d8494b305f457461248b98a09af4b19830ad"
+      "sha256": "aea497ba5beb6542425d9932f055a5b598d92f1df10330ccaab760ba7154582f"
     },
     "modal_runtime": {
       "path": "tuner/execution/providers/modal/runtime.py",

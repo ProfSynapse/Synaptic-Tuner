@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tuner.execution.providers.modal.remote import ModalRemotePhaseError, _stage_runtime_worker
+from tuner.execution.providers.modal.remote import ModalRemotePhaseError, _stage_runtime_worker, _write_runtime_closure_manifest
 from tuner.runtime.offline_sft_worker import load_offline_sft_worker_closure
 
 
@@ -53,6 +53,34 @@ def test_retained_checkout_collision_leaves_source_untouched(tmp_path):
         _stage_runtime_worker(SimpleNamespace(roots={"engine": str(engine)}), str(manifest), payload)
     assert (engine / ".git/HEAD").exists()
     assert (engine / "extra.py").exists()
+
+
+def test_local_bootstrap_control_is_independent_of_aliased_provider_volume(tmp_path):
+    engine, volume_manifest, payload, document = checkout(tmp_path)
+    mounted = tmp_path / "mounted-control"
+    mounted.symlink_to(volume_manifest.parent, target_is_directory=True)
+    with pytest.raises(ModalRemotePhaseError) as failure:
+        _stage_runtime_worker(SimpleNamespace(roots={"engine": str(engine)}), str(mounted / volume_manifest.name), payload)
+    assert failure.value.diagnostic_code == "worker_control_path_noncanonical"
+    local_manifest = tmp_path / "worker-control/operations/effect-test/input" / volume_manifest.name
+    _write_runtime_closure_manifest(str(local_manifest), payload)
+    _stage_runtime_worker(SimpleNamespace(roots={"engine": str(engine)}), str(local_manifest), payload)
+    closure = load_offline_sft_worker_closure(local_manifest, expected_digest=document["closure_digest"], engine_root=engine)
+    assert len(closure.members) == document["member_count"]
+    assert volume_manifest.read_bytes() == payload
+    with pytest.raises(FileExistsError):
+        _write_runtime_closure_manifest(str(local_manifest), payload)
+
+
+def test_bootstrap_manifest_writer_rejects_alias_before_any_write(tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    alias = tmp_path / "worker-control"
+    alias.symlink_to(target, target_is_directory=True)
+    with pytest.raises(ModalRemotePhaseError) as failure:
+        _write_runtime_closure_manifest(str(alias / "new-parent/offline-sft-worker-v1.json"), b"unused")
+    assert failure.value.diagnostic_code == "worker_control_path_noncanonical"
+    assert list(target.iterdir()) == []
 
 
 @pytest.mark.parametrize("mutation", ["changed", "missing", "symlink"])

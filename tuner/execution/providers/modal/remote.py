@@ -144,7 +144,13 @@ def _read_locked_closure_manifest(source: ExecutionSourceV1) -> bytes:
 
 def _write_runtime_closure_manifest(path: str, payload: bytes) -> None:
     runtime_manifest = Path(path)
+    # Bootstrap control is local, not a provider Volume alias. Refuse redirects
+    # before creating parents or writing the authenticated manifest.
+    if not runtime_manifest.is_absolute() or runtime_manifest.resolve() != runtime_manifest:
+        raise ModalRemotePhaseError(124, "worker_control_path_noncanonical")
     runtime_manifest.parent.mkdir(parents=True, exist_ok=True)
+    if runtime_manifest.parent.resolve(strict=True) != runtime_manifest.parent:
+        raise ModalRemotePhaseError(124, "worker_control_path_noncanonical")
     with runtime_manifest.open("xb") as stream:
         stream.write(payload)
         stream.flush()
@@ -271,7 +277,7 @@ def admit_remote_invocation(
         b"synaptic-training-workload/v1\0" + workload
     ).hexdigest()
     control = WorkerControlLocationV1(
-        PurePosixPath("/workspace/control") / operation_path(command.effect.effect_id, "input")
+        PurePosixPath("/workspace/worker-control") / operation_path(command.effect.effect_id, "input")
     )
     workload_document = _object(workload, 1_048_576)
     model = workload_document["configuration"]["document"]["model"]

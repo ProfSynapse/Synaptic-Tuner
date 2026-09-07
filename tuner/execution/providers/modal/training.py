@@ -916,7 +916,7 @@ def _build_preparation(
         }
     )
     control = WorkerControlLocationV1(
-        PurePosixPath("/workspace/control") / operation_path(effect.effect_id, "input")
+        PurePosixPath("/workspace/worker-control") / operation_path(effect.effect_id, "input")
     )
     worker_bundle = materialize_worker_bundle(
         build_source_worker_invocation(plan, control)
@@ -1604,7 +1604,7 @@ class ModalTrainingOperations:
         )
         closure_digest = closure_member.document["closure_digest"]
         closure_path = WorkerControlLocationV1(
-            PurePosixPath("/workspace/control")
+            PurePosixPath("/workspace/worker-control")
             / operation_path(preparation.operation.effect.effect_id, "input")
         ).manifest_path.as_posix()
         report = VerificationService(WorkloadBindingVerifier(

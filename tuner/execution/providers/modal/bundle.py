@@ -346,7 +346,7 @@ def _validate_semantics(bundle: "ModalExecutionBundleV1") -> None:
     if {"PYTHONHOME", "PYTHONUSERBASE", "HF_TOKEN"} & set(environment):
         raise ValueError("execution source contains a forbidden worker variable")
     control = WorkerControlLocationV1(
-        PurePosixPath("/workspace/control")
+        PurePosixPath("/workspace/worker-control")
         / operation_path(bundle.effect.effect_id, "input")
     )
     environment["SYNAPTIC_WORKLOAD_FINGERPRINT"] = hashlib.sha256(
