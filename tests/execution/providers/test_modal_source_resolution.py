@@ -628,7 +628,14 @@ def test_finalizer_rejects_symlink_or_reparse_roots(tmp_path: Path) -> None:
         linked_project.symlink_to(real_project, target_is_directory=True)
     except OSError:
         pytest.skip("directory symlinks are unavailable")
-    context = ProjectContext.host(
+    canonical = ProjectContext.host(
+        project_root=real_project, engine_root=real_project / "vendor" / "engine"
+    )
+    # ProjectContext.host canonicalizes convenience inputs. Replace only the
+    # locked roots so this test reaches the finalizer's independent redirect
+    # guard with the original symlink-bearing paths.
+    context = replace(
+        canonical,
         project_root=linked_project, engine_root=linked_project / "vendor" / "engine"
     )
     with pytest.raises(SourceLockError, match="reparse"):
