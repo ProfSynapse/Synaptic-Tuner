@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 
 import jsonschema
 
@@ -19,3 +20,39 @@ def test_modal_runtime_lock_schema_and_file_digests_are_exact():
     for member in lock["locked_files"].values():
         assert hashlib.sha256((ROOT / member["path"]).read_bytes()).hexdigest() == member["sha256"]
     assert lock["registry_reference"].endswith("@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39")
+
+
+def test_modal_launcher_lock_checkout_preserves_hash_bound_lf_bytes(tmp_path):
+    source = ROOT / "requirements/modal-launcher-v1.lock"
+    expected = source.read_bytes()
+    assert b"\r" not in expected
+
+    repository = tmp_path / "checkout"
+    repository.mkdir()
+
+    def git(*arguments: str) -> None:
+        subprocess.run(
+            ["git", *arguments], cwd=repository, check=True,
+            text=True, capture_output=True,
+        )
+
+    git("init", "--quiet")
+    git("config", "core.autocrlf", "true")
+    git("config", "user.name", "Modal lock test")
+    git("config", "user.email", "modal-lock-test@example.invalid")
+    (repository / ".gitattributes").write_bytes(
+        (ROOT / ".gitattributes").read_bytes()
+    )
+    lock = repository / "requirements/modal-launcher-v1.lock"
+    lock.parent.mkdir()
+    lock.write_bytes(expected)
+    control = repository / "native-checkout.txt"
+    control.write_bytes(b"one\ntwo\n")
+    git("add", ".gitattributes", "requirements/modal-launcher-v1.lock", "native-checkout.txt")
+    git("commit", "--quiet", "-m", "fixture")
+    lock.unlink()
+    control.unlink()
+    git("checkout", "--quiet", "--", "requirements/modal-launcher-v1.lock", "native-checkout.txt")
+
+    assert control.read_bytes() == b"one\r\ntwo\r\n"
+    assert lock.read_bytes() == expected
