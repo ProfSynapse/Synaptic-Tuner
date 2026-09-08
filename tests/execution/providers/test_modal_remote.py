@@ -208,7 +208,7 @@ def test_mounted_reads_and_writes_reject_symlinked_ancestors(tmp_path):
     except OSError:
         pytest.skip("symlink creation is unavailable")
     (outside/"member.bin").write_bytes(b"secret")
-    with pytest.raises(ValueError,match="unavailable"):
+    with pytest.raises(ValueError,match="parent is not a trusted directory"):
         read_regular(root,link/"member.bin",32)
     with pytest.raises(ValueError,match="trusted directory"):
         write_exclusive(root,link/"new.bin",b"content")

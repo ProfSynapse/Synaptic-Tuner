@@ -9,8 +9,10 @@ import shutil
 import subprocess
 import sys
 import tarfile
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -39,6 +41,107 @@ from tuner.runtime.verification import (
 
 
 _REPO = Path(__file__).parents[3]
+_OWNED_PREFIXES = frozenset(
+    {"tuner", "synaptic_tuner", "Trainers", "shared", "SynthChat", "Evaluator", "MechInterp", "configs", "src"}
+)
+
+
+@contextmanager
+def _isolated_runtime_import_state():
+    """Restore every process-global import surface changed by the runtime."""
+    original_path = list(sys.path)
+    original_meta_path = list(sys.meta_path)
+    original_argv_object = sys.argv
+    original_argv = list(sys.argv)
+    original_owned_modules = {
+        name: module
+        for name, module in sys.modules.items()
+        if name.partition(".")[0] in _OWNED_PREFIXES
+    }
+    original_owned_attributes = {
+        name: dict(module.__dict__)
+        for name, module in original_owned_modules.items()
+        if isinstance(module, ModuleType)
+    }
+    try:
+        yield
+    finally:
+        sys.path[:] = original_path
+        sys.meta_path[:] = original_meta_path
+        sys.argv = original_argv_object
+        sys.argv[:] = original_argv
+        current_owned_names = {
+            name
+            for name in sys.modules
+            if name.partition(".")[0] in _OWNED_PREFIXES
+        }
+        child_names = set(original_owned_modules) | current_owned_names
+        for parent_name, parent in original_owned_modules.items():
+            if not isinstance(parent, ModuleType):
+                continue
+            for value in parent.__dict__.values():
+                if (
+                    isinstance(value, ModuleType)
+                    and value.__name__.startswith(parent_name + ".")
+                    and value.__name__.partition(".")[0] in _OWNED_PREFIXES
+                ):
+                    child_names.add(value.__name__)
+        for child_name in child_names:
+            if "." not in child_name:
+                continue
+            parent_name, attribute = child_name.rsplit(".", 1)
+            parent = original_owned_modules.get(parent_name)
+            baseline = original_owned_attributes.get(parent_name)
+            if not isinstance(parent, ModuleType) or baseline is None:
+                continue
+            if attribute in baseline:
+                setattr(parent, attribute, baseline[attribute])
+            else:
+                parent.__dict__.pop(attribute, None)
+        for name in tuple(sys.modules):
+            if (
+                name.partition(".")[0] in _OWNED_PREFIXES
+                and name not in original_owned_modules
+            ):
+                sys.modules.pop(name, None)
+        sys.modules.update(original_owned_modules)
+
+
+@pytest.fixture(autouse=True)
+def _restore_runtime_import_state():
+    """Keep staged runtime state from escaping one test."""
+    with _isolated_runtime_import_state():
+        yield
+
+
+@pytest.mark.parametrize("raises", [False, True], ids=["success", "failure"])
+def test_runtime_import_state_is_restored_on_every_exit(raises):
+    import tuner
+
+    original_argv_object = sys.argv
+    original_argv = list(sys.argv)
+    child_name = "tuner.fixture_runtime_child"
+    assert child_name not in sys.modules
+    assert not hasattr(tuner, "fixture_runtime_child")
+    marker = ModuleType(child_name)
+
+    with pytest.raises(RuntimeError) if raises else nullcontext():
+        with _isolated_runtime_import_state():
+            sys.path.insert(0, "/staged/runtime")
+            sys.meta_path.insert(0, object())
+            sys.argv = ["staged-runtime", "--fixture"]
+            sys.modules[child_name] = marker
+            tuner.fixture_runtime_child = marker
+            # Failed imports can remove sys.modules while leaving a parent
+            # package attribute behind; restoration must cover that shape too.
+            sys.modules.pop(child_name)
+            if raises:
+                raise RuntimeError("fixture failure")
+
+    assert sys.argv is original_argv_object
+    assert sys.argv == original_argv
+    assert child_name not in sys.modules
+    assert not hasattr(tuner, "fixture_runtime_child")
 
 
 def _read_fifo_transport_child(path_text: str, control_root_text: str, result) -> None:
@@ -93,7 +196,8 @@ def _fixture(
         destination = engine / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(_REPO / relative, destination)
-    control = tmp_path / "control"
+    # Closure control and sealed-file transport are distinct trust fixtures.
+    control = tmp_path / "closure-control"
     control.mkdir()
     closure_manifest = control / "offline-sft-worker-v1.json"
     shutil.copy2(manifest_source, closure_manifest)
