@@ -98,7 +98,7 @@ def documents() -> dict[str, bytes]:
     environment.pop("PYTHONPATH")
     environment["SYNAPTIC_WORKLOAD_FINGERPRINT"] = workload.fingerprint
     environment["SYNAPTIC_WORKER_CLOSURE_MANIFEST"] = (
-        "/workspace/control/operations/effect-1/input/offline-sft-worker-v1.json"
+        "/workspace/worker-control/operations/effect-1/input/offline-sft-worker-v1.json"
     )
     environment["SYNAPTIC_WORKER_CLOSURE_DIGEST"] = closure.closure.closure_digest
     environment["SYNAPTIC_MODEL_SNAPSHOT"] = (

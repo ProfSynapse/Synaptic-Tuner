@@ -490,6 +490,20 @@ def _module_projection(
     return modules, namespaces
 
 
+class _OwnedSourceLoader(importlib.machinery.SourceFileLoader):
+    """Compile owned source without reading or writing bytecode cache files.
+
+    Both the outer runtime and isolated trainer authenticate the same exact
+    file inventory. Normal source imports must not add files between those
+    checks, even when Python starts with bytecode caching enabled.
+    """
+
+    def get_code(self, fullname: str):
+        if fullname != self.name:
+            raise ImportError("owned source loader name mismatch")
+        return self.source_to_code(self.get_data(self.path), self.path)
+
+
 class _OwnedModuleFinder(importlib.abc.MetaPathFinder):
     def __init__(self, closure: OfflineSFTWorkerClosure, engine_root: Path) -> None:
         self._prefixes = frozenset(closure.owned_module_prefixes)
@@ -520,7 +534,9 @@ class _OwnedModuleFinder(importlib.abc.MetaPathFinder):
                 ) from exc
             package_locations = [str(resolved.parent)] if expected.name == "__init__.py" else None
             spec = importlib.util.spec_from_file_location(
-                fullname, str(resolved), submodule_search_locations=package_locations
+                fullname, str(resolved),
+                loader=_OwnedSourceLoader(fullname, str(resolved)),
+                submodule_search_locations=package_locations,
             )
             if spec is None:
                 raise ModuleNotFoundError(f"owned module {fullname!r} is unavailable")

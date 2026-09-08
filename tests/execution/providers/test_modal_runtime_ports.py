@@ -41,13 +41,14 @@ def test_subprocess_runner_uses_no_shell_and_never_returns_captured_secret_outpu
     def run(argv,**kwargs):calls.append((argv,kwargs));return SimpleNamespace(returncode=7,stdout=b"token=secret",stderr=b"Bearer secret")
     monkeypatch.setattr("tuner.execution.providers.modal.runtime.subprocess.run",run)
     monkeypatch.setenv("HF_TOKEN","secret")
-    runner=SubprocessSftRunner(secret_keys=("HF_TOKEN",),timeout_seconds=10)
-    result=runner.run(("/python","/runtime.py","--canonical-workload-stdin"),cwd="/tmp",environment={"SAFE":"1"},stdin=b"workload")
+    monkeypatch.setattr(SubprocessSftRunner, "_prepare_model", lambda *args: None)
+    runner=SubprocessSftRunner(secret_keys=("HF_TOKEN",),model_token_key="HF_TOKEN",timeout_seconds=10)
+    result=runner.run(("/python","/runtime.py","--canonical-workload-stdin"),cwd="/tmp",environment={"SAFE":"1"},stdin=b"workload",commit_prepared=lambda: None)
     assert result.returncode==123 and result.stdout==result.stderr==b""
     assert result.diagnostic_code=="trainer_nonzero"
     argv,kwargs=calls[0]
     assert argv==("/python","/runtime.py","--canonical-workload-stdin")
-    assert kwargs["shell"] is False and kwargs["env"]["HF_TOKEN"]=="secret"
+    assert kwargs["shell"] is False and "HF_TOKEN" not in kwargs["env"]
     assert kwargs["input"]==b"workload" and kwargs["timeout"]==10
 
 
@@ -77,9 +78,10 @@ def test_subprocess_runner_maps_closed_runtime_stages(
         "tuner.execution.providers.modal.runtime.subprocess.run",
         lambda *args, **kwargs: SimpleNamespace(returncode=runtime_exit),
     )
-    result = SubprocessSftRunner(secret_keys=("HF_TOKEN",), timeout_seconds=10).run(
+    monkeypatch.setattr(SubprocessSftRunner, "_prepare_model", lambda *args: None)
+    result = SubprocessSftRunner(secret_keys=("HF_TOKEN",), model_token_key="HF_TOKEN", timeout_seconds=10).run(
         ("/python", "/runtime.py", "--canonical-workload-stdin"),
-        cwd="/tmp", environment={}, stdin=b"workload",
+        cwd="/tmp", environment={}, stdin=b"workload", commit_prepared=lambda: None,
     )
     assert (result.returncode, result.diagnostic_code) == (
         remote_exit, diagnostic_code
@@ -88,11 +90,11 @@ def test_subprocess_runner_maps_closed_runtime_stages(
 
 def test_subprocess_runner_rejects_missing_secret_and_command_override(monkeypatch):
     monkeypatch.delenv("HF_TOKEN",raising=False)
-    runner=SubprocessSftRunner(secret_keys=("HF_TOKEN",),timeout_seconds=10)
+    runner=SubprocessSftRunner(secret_keys=("HF_TOKEN",),model_token_key="HF_TOKEN",timeout_seconds=10)
     with pytest.raises(ValueError,match="command"):
-        runner.run(("/python","/runtime.py","--other"),cwd="/tmp",environment={},stdin=b"x")
+        runner.run(("/python","/runtime.py","--other"),cwd="/tmp",environment={},stdin=b"x",commit_prepared=lambda: None)
     with pytest.raises(ModalRemotePhaseError) as failure:
-        runner.run(("/python","/runtime.py","--canonical-workload-stdin"),cwd="/tmp",environment={},stdin=b"x")
+        runner.run(("/python","/runtime.py","--canonical-workload-stdin"),cwd="/tmp",environment={},stdin=b"x",commit_prepared=lambda: None)
     assert (failure.value.returncode,failure.value.diagnostic_code)==(120,"credential_unavailable")
 
 

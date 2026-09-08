@@ -52,7 +52,8 @@ def test_exact_selective_closure_loads(tmp_path: Path) -> None:
     assert closure.closure_digest == closure_digest(document)
 
 
-def test_closure_rejects_changed_and_extra_members(tmp_path: Path) -> None:
+@pytest.mark.parametrize("extra_name", ["shared/ambient.py", "shared/__pycache__/ambient.cpython-311.pyc"])
+def test_closure_rejects_changed_and_extra_members(tmp_path: Path, extra_name: str) -> None:
     engine, manifest, document = _stage(tmp_path)
     target = engine / "shared" / "env_bootstrap.py"
     target.write_bytes(target.read_bytes() + b"\n")
@@ -65,7 +66,8 @@ def test_closure_rejects_changed_and_extra_members(tmp_path: Path) -> None:
         )
 
     shutil.copy2(_ROOT / "shared" / "env_bootstrap.py", target)
-    extra = engine / "shared" / "ambient.py"
+    extra = engine / extra_name
+    extra.parent.mkdir(parents=True, exist_ok=True)
     extra.write_text("VALUE = 1\n", encoding="utf-8")
     with pytest.raises(OfflineSFTWorkerError, match="exactly match"):
         load_offline_sft_worker_closure(
@@ -106,6 +108,35 @@ def test_fixed_trainer_arguments_reject_optional_features() -> None:
         offline_sft_worker._validate_trainer_arguments(
             ["--evolutionary-enabled", "--max-steps", "1", "--no-load-in-4bit"]
         )
+
+
+def test_owned_loader_reads_source_only_and_never_writes_bytecode(tmp_path, monkeypatch):
+    source = tmp_path / "member.py"
+    source.write_text("VALUE = 7\n", encoding="utf-8")
+    loader = offline_sft_worker._OwnedSourceLoader("fixture_member", str(source))
+    reads = []
+    original = loader.get_data
+    def read(path):
+        reads.append(path)
+        assert path == str(source), "loader attempted to read a bytecode cache"
+        return original(path)
+    def write(*args, **kwargs):
+        pytest.fail("loader attempted to write a bytecode cache")
+    monkeypatch.setattr(loader, "get_data", read)
+    monkeypatch.setattr(loader, "set_data", write)
+    namespace = {}
+    exec(loader.get_code("fixture_member"), namespace)
+    assert namespace["VALUE"] == 7
+    assert reads == [str(source)]
+    assert list(tmp_path.iterdir()) == [source]
+
+
+def test_owned_loader_rejects_a_different_module_name(tmp_path):
+    source = tmp_path / "member.py"
+    source.write_text("raise AssertionError('must not execute')\n", encoding="utf-8")
+    loader = offline_sft_worker._OwnedSourceLoader("fixture_member", str(source))
+    with pytest.raises(ImportError, match="name mismatch"):
+        loader.get_code("other_member")
 
 
 def test_isolated_bootstrap_rejects_optional_feature_without_traceback(

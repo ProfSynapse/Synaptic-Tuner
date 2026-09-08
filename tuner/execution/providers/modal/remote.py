@@ -10,12 +10,13 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import Callable, Protocol
 
 from tuner.project.execution_source import ExecutionSourceV1
 from tuner.runtime.dispatch import WorkerControlLocationV1
 from tuner.runtime.offline_sft_worker import (
     OFFLINE_SFT_MANIFEST_NAME,
+    load_offline_sft_worker_closure,
     parse_offline_sft_worker_manifest,
 )
 
@@ -34,6 +35,8 @@ _DIAGNOSTIC_CODES = frozenset({
     "engine_gitlink_mismatch",
     "generic_failure",
     "locked_source_mismatch",
+    "model_preparation_failed",
+    "model_cache_commit_failed",
     "project_clone_failed",
     "runtime_identity_mismatch",
     "runtime_artifact_precondition",
@@ -51,6 +54,11 @@ _DIAGNOSTIC_CODES = frozenset({
     "runtime_workload_roots_rejected",
     "runtime_workload_schema_rejected",
     "source_topology_invalid",
+    "worker_source_path_noncanonical",
+    "worker_control_path_noncanonical",
+    "worker_source_retain_failed",
+    "worker_source_copy_failed",
+    "worker_closure_rejected",
     "trainer_invocation_failed",
     "trainer_nonzero",
 })
@@ -105,6 +113,7 @@ class FixedProcessRunner(Protocol):
         cwd: str,
         environment: dict[str, str],
         stdin: bytes,
+        commit_prepared: Callable[[], None],
     ) -> ProcessResultV1: ...
 
 
@@ -138,7 +147,13 @@ def _read_locked_closure_manifest(source: ExecutionSourceV1) -> bytes:
 
 def _write_runtime_closure_manifest(path: str, payload: bytes) -> None:
     runtime_manifest = Path(path)
+    # Bootstrap control is local, not a provider Volume alias. Refuse redirects
+    # before creating parents or writing the authenticated manifest.
+    if not runtime_manifest.is_absolute() or runtime_manifest.resolve() != runtime_manifest:
+        raise ModalRemotePhaseError(124, "worker_control_path_noncanonical")
     runtime_manifest.parent.mkdir(parents=True, exist_ok=True)
+    if runtime_manifest.parent.resolve(strict=True) != runtime_manifest.parent:
+        raise ModalRemotePhaseError(124, "worker_control_path_noncanonical")
     with runtime_manifest.open("xb") as stream:
         stream.write(payload)
         stream.flush()
@@ -146,6 +161,50 @@ def _write_runtime_closure_manifest(path: str, payload: bytes) -> None:
         os.fsync(stream.fileno())
     if runtime_manifest.read_bytes() != payload:
         raise OSError("manifest round trip mismatch")
+
+
+def _stage_runtime_worker(source: ExecutionSourceV1, manifest_path: str, payload: bytes) -> None:
+    """Retain the verified checkout and expose only its authenticated worker files."""
+    engine = Path(source.roots["engine"])
+    manifest = parse_offline_sft_worker_manifest(
+        payload, source_ref="verified-engine-closure", manifest_path=Path(manifest_path)
+    )
+    if engine.resolve(strict=True) != engine:
+        raise ModalRemotePhaseError(124, "worker_source_path_noncanonical")
+    if Path(manifest_path).resolve(strict=True) != Path(manifest_path):
+        raise ModalRemotePhaseError(124, "worker_control_path_noncanonical")
+    # The backup directory is exclusively claimed before any rename. Never
+    # overwrite a prior checkout or prune a repository into a runtime tree.
+    retained = engine.with_name(engine.name + "-source")
+    retained.mkdir(exist_ok=False)
+    checkout = retained / "checkout"
+    try:
+        engine.rename(checkout)
+        engine.mkdir(exist_ok=False)
+    except FileExistsError:
+        raise
+    except OSError:
+        raise ModalRemotePhaseError(124, "worker_source_retain_failed") from None
+    try:
+        for member in manifest.closure.members:
+            contents = read_regular(checkout, checkout / member.path, member.size_bytes)
+            if len(contents) != member.size_bytes or hashlib.sha256(contents).hexdigest() != member.sha256:
+                raise ValueError("worker source member differs from locked closure")
+            destination = engine / member.path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open("xb") as stream:
+                stream.write(contents)
+            destination.chmod(0o755 if member.git_mode == "100755" else 0o644)
+    except FileExistsError:
+        raise
+    except Exception:
+        raise ModalRemotePhaseError(124, "worker_source_copy_failed") from None
+    try:
+        load_offline_sft_worker_closure(
+            Path(manifest_path), expected_digest=manifest.closure.closure_digest, engine_root=engine
+        )
+    except Exception:
+        raise ModalRemotePhaseError(124, "worker_closure_rejected") from None
 
 
 def admit_remote_invocation(
@@ -221,7 +280,7 @@ def admit_remote_invocation(
         b"synaptic-training-workload/v1\0" + workload
     ).hexdigest()
     control = WorkerControlLocationV1(
-        PurePosixPath("/workspace/control") / operation_path(command.effect.effect_id, "input")
+        PurePosixPath("/workspace/worker-control") / operation_path(command.effect.effect_id, "input")
     )
     workload_document = _object(workload, 1_048_576)
     model = workload_document["configuration"]["document"]["model"]
@@ -260,6 +319,7 @@ def execute_remote_sft(
     *,
     sources: SourceMaterializer,
     processes: FixedProcessRunner,
+    commit_prepared: Callable[[], None],
 ) -> ProcessResultV1:
     """Verify dual-clone materialization, then invoke only runtime_v1 without a shell."""
     if type(invocation) is not RemoteInvocationV1:
@@ -279,11 +339,22 @@ def execute_remote_sft(
         raise ModalRemotePhaseError(122, "artifact_layout_collision") from None
     except OSError:
         raise ModalRemotePhaseError(122, "artifact_layout_failed") from None
+    try:
+        _stage_runtime_worker(
+            invocation.source, invocation.closure_manifest_runtime_path, invocation.closure_manifest
+        )
+    except ModalRemotePhaseError:
+        raise
+    except FileExistsError:
+        raise ModalRemotePhaseError(122, "artifact_layout_collision") from None
+    except Exception:
+        raise ModalRemotePhaseError(124, "locked_source_mismatch") from None
     result = processes.run(
         invocation.argv,
         cwd=invocation.cwd,
         environment=dict(invocation.environment),
         stdin=invocation.workload,
+        commit_prepared=commit_prepared,
     )
     if type(result) is not ProcessResultV1:
         raise TypeError("process runner returned a noncanonical result")
@@ -316,7 +387,7 @@ class MountedModalWorkerV1:
         self._artifact = Path(artifact_root)
         self._bounds = bounds
 
-    def __call__(self, canonical_command: bytes, job_ref: str) -> dict[str, object]:
+    def __call__(self, canonical_command: bytes, job_ref: str, commit_prepared: Callable[[], None]) -> dict[str, object]:
         command = MutationCommandV1.from_bytes(canonical_command)
         effect_id = command.effect.effect_id
         claim = read_regular(
@@ -342,7 +413,8 @@ class MountedModalWorkerV1:
         )
         try:
             result = execute_remote_sft(
-                invocation, sources=self._sources, processes=self._processes
+                invocation, sources=self._sources, processes=self._processes,
+                commit_prepared=commit_prepared,
             )
         except ModalRemotePhaseError as error:
             result = ProcessResultV1(

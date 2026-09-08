@@ -48,6 +48,7 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Prepare pinned models automatically on the execution machine using the Hub SDK in private scratch; never expose hostile shared cache paths to SDK writes. Reuse only independently verified repository files, commit the persistent cache before training, and keep the offline trainer subprocess credential-free. No operator weight upload step is required.
 - Modal training is available only behind the provider-neutral public `TrainingAPI`; do not recreate a `modal run` launcher, provider-specific public verb, or engine-owned database.
 - The consuming host owns configuration, credentials, grants, lifecycle/preparation persistence, data, and product state. The engine defines `ModalTrainingRepository` as a protocol only.
 - Enforce the packaged `modal-runtime-v1.lock.json` at composition and again in the remote source materializer. The CPython 3.11/Linux launcher dependency file must contain the complete transitive closure with exact hashes; install it with `--require-hashes` and never resolve additional packages at runtime.

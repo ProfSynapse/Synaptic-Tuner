@@ -5,6 +5,7 @@ import hashlib
 import base64
 import binascii
 import hmac
+import json
 import os
 import subprocess
 import sys
@@ -203,15 +204,47 @@ class GitDualCloneMaterializer:
 class SubprocessSftRunner:
     """Invoke the fixed runtime without a shell and without returning secret-bearing output."""
 
-    __slots__ = ("_secret_keys", "_timeout")
+    __slots__ = ("_secret_keys", "_model_token_key", "_timeout")
 
-    def __init__(self, *, secret_keys: tuple[str, ...], timeout_seconds: int) -> None:
+    def __init__(self, *, secret_keys: tuple[str, ...], model_token_key: str, timeout_seconds: int) -> None:
         if not secret_keys or len(secret_keys) != len(set(secret_keys)):
             raise ValueError("exact runtime secret keys are required")
         self._secret_keys = tuple(secret_keys)
+        if model_token_key not in self._secret_keys:
+            raise ValueError("model credential must be a named runtime secret")
+        self._model_token_key = model_token_key
         if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 86400:
             raise ValueError("runtime timeout must be bounded")
         self._timeout = timeout_seconds
+
+    def _prepare_model(self, environment: dict[str, str], stdin: bytes) -> None:
+        from .model_snapshot import prepare_model_snapshot
+
+        try:
+            model = json.loads(stdin)["configuration"]["document"]["model"]
+            lexical_root = Path("/workspace/run")
+            lexical_cache = Path(environment["SYNAPTIC_CACHE_ROOT"])
+            relative = lexical_cache.relative_to(lexical_root)
+            if len(relative.parts) != 2 or relative.parts[1] != "cache" or not relative.parts[0].startswith("run-"):
+                raise ValueError("model cache binding differs")
+            expected = lexical_cache / "model" / ("models--" + model["ref"].replace("/", "--")) / "snapshots" / model["revision"]
+            if environment["SYNAPTIC_MODEL_SNAPSHOT"] != str(expected):
+                raise ValueError("model snapshot binding differs")
+            # Only the authenticated mount boundary may resolve elsewhere.
+            physical_root = lexical_root.resolve(strict=True)
+            cache = physical_root / relative
+            persistent = physical_root / "model-cache"
+            persistent.mkdir(exist_ok=True)
+            scratch = Path("/workspace/model-preparation")
+            scratch.mkdir(exist_ok=True)
+            prepare_model_snapshot(
+                model_ref=model["ref"], revision=model["revision"],
+                token=os.environ[self._model_token_key],
+                persistent_root=persistent, destination_root=cache,
+                scratch_root=scratch,
+            )
+        except Exception:
+            raise ModalRemotePhaseError(124, "model_preparation_failed") from None
 
     def run(
         self,
@@ -220,15 +253,21 @@ class SubprocessSftRunner:
         cwd: str,
         environment: dict[str, str],
         stdin: bytes,
+        commit_prepared: Callable[[], None],
     ) -> ProcessResultV1:
         if len(argv) != 3 or argv[2] != "--canonical-workload-stdin":
             raise ValueError("runtime command is not fixed")
         process_environment = dict(environment)
         for key in self._secret_keys:
             value = os.environ.get(key)
-            if not isinstance(value, str) or not value:
+            if not isinstance(value, str) or not value.strip():
                 raise ModalRemotePhaseError(120, "credential_unavailable")
-            process_environment[key] = value
+            process_environment.pop(key, None)
+        self._prepare_model(process_environment, stdin)
+        try:
+            commit_prepared()
+        except Exception:
+            raise ModalRemotePhaseError(122, "model_cache_commit_failed") from None
         try:
             completed = subprocess.run(
                 argv,

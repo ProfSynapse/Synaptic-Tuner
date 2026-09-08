@@ -21,7 +21,7 @@
     },
     "locked_files": {
       "type": "object", "additionalProperties": false,
-      "required": ["dependency_lock", "deployment_wrapper", "modal_mounted_io", "modal_producer", "modal_remote", "modal_runtime", "sft_runtime"],
+      "required": ["dependency_lock", "deployment_wrapper", "modal_mounted_io", "modal_producer", "modal_remote", "modal_runtime", "model_preparation", "sft_runtime"],
       "properties": {
         "dependency_lock": {"$ref": "#/$defs/file"},
         "deployment_wrapper": {"$ref": "#/$defs/file"},
@@ -29,6 +29,7 @@
         "modal_producer": {"$ref": "#/$defs/file"},
         "modal_remote": {"$ref": "#/$defs/file"},
         "modal_runtime": {"$ref": "#/$defs/file"},
+        "model_preparation": {"$ref": "#/$defs/file"},
         "sft_runtime": {"$ref": "#/$defs/file"}
       }
     },

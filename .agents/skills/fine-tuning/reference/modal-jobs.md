@@ -64,6 +64,13 @@ The cross-provider contract and proof matrix live in
 - The remote job independently clones the exact pushed host project and exact
   engine commit, verifies the project gitlink, and invokes only
   `Trainers/sft/runtime_v1.py --canonical-workload-stdin` without a shell.
+- Before invocation, the remote worker retains the verified full engine checkout
+  separately and stages only the authenticated offline-worker manifest members
+  at the execution engine root. A full checkout is not a prepared worker: extra
+  files, including Git metadata, fail the exact-closure guard. This preparation
+  is internal to the provider, not an additional operator command. Collisions
+  or invalid members fail before trainer invocation; never relax the guard or
+  retry a submitted job to recover from them.
 - The verified runtime is CPython 3.11.14 at `/opt/conda/bin/python3`; its
   executable, image, complete hash-pinned launcher dependency closure,
   deployment wrapper, remote worker/producer/runtime modules, SFT entrypoint,
@@ -72,6 +79,16 @@ The cross-provider contract and proof matrix live in
   again against the reconstructed exact checkout.
 
 ## Storage and evidence
+
+Model preparation belongs on the execution machine, before the offline trainer.
+The provider must automatically obtain the exact configured model revision using
+the Hugging Face SDK and reuse verified cached weights. Do not require operators
+to download weights locally and upload them to Modal. Keep model credentials in
+the preparation wrapper, never in the trainer subprocess; preserve the runtime's
+exact revision, link-free snapshot, and offline checks. Cache integration must
+treat the persistent Volume as untrusted and must not let SDK filesystem writes
+follow attacker-controlled cache paths. This is an internal preparation phase,
+not a new submission command or a separate downloader service.
 
 Modal Volume is the authoritative provider-native artifact store for a Modal
 run. Hub publication is optional and separately authorized. The remote producer
