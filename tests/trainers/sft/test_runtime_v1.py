@@ -6,6 +6,7 @@ import json
 import multiprocessing
 import os
 import shutil
+import subprocess
 import sys
 import tarfile
 from copy import deepcopy
@@ -272,6 +273,52 @@ def _fixture(
     ]
     environment["SYNAPTIC_WORKLOAD_FINGERPRINT"] = workload.fingerprint
     return workload, environment, engine_file, roots, dataset
+
+
+def test_real_decoder_and_isolated_worker_preserve_exact_closure(tmp_path):
+    """Exercise both Python generations with bytecode enabled, without ML."""
+    workload, environment, engine_file, roots, _ = _fixture(tmp_path)
+    environment.pop("PYTHONPATH")
+    child_code = r'''
+import os, runpy, sys
+from pathlib import Path
+assert sys.dont_write_bytecode is False
+bootstrap = runpy.run_path(sys.argv[1], run_name="fixture_bootstrap")
+def fixture_trainer(path, *, run_name):
+    assert Path(path).name == "train_sft.py"
+    import shared.env_bootstrap
+    return {}
+runpy.run_path = fixture_trainer
+assert bootstrap["run_offline_sft_worker"](sys.argv[2:]) == 0
+root = Path(os.environ["SYNAPTIC_ENGINE_ROOT"])
+assert not list(root.rglob("*.pyc")), "isolated worker wrote into its closure"
+print("BOOTSTRAP_PASS")
+'''
+    outer_code = r'''
+import os, runpy, subprocess, sys
+from pathlib import Path
+assert sys.dont_write_bytecode is False
+runtime = runpy.run_path(sys.argv[1], run_name="fixture_runtime")
+workload, roots = runtime["decode_and_validate_workload"](sys.stdin.buffer.read(), os.environ, engine_file=Path(sys.argv[1]))
+assert not list(roots.engine.rglob("*.pyc")), "decoder wrote into its closure"
+invocation = runtime["build_trainer_invocation"](workload, roots, os.environ)
+completed = subprocess.run(
+    [invocation.argv[0], "-I", "-c", sys.argv[2], *invocation.argv[2:]],
+    cwd=invocation.cwd, env=dict(invocation.environment),
+    stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False,
+)
+assert completed.returncode == 0, completed.stderr
+assert completed.stdout.strip() == "BOOTSTRAP_PASS"
+assert not list(roots.engine.rglob("*.pyc")), "worker modified its closure"
+print("TWO_GENERATIONS_PASS")
+'''
+    completed = subprocess.run(
+        [str(Path(sys.executable).resolve()), "-I", "-c", outer_code, str(engine_file), child_code],
+        input=workload.canonical_bytes, env=environment, cwd=roots["tmp"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+    assert completed.stdout.strip() == b"TWO_GENERATIONS_PASS"
 
 
 class FakeRunner:
