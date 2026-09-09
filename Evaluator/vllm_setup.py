@@ -383,6 +383,19 @@ def start_vllm_server(
     """
     global _server_process
 
+    # This module owns at most one process.  Refuse to replace the retained
+    # handle: cleanup must never target a server this invocation did not spawn.
+    if _server_process is not None:
+        try:
+            retained_running = _server_process.poll() is None
+        except Exception:
+            retained_running = True
+        if retained_running:
+            print("A managed vLLM server process already exists.")
+            return False
+        # A completed retained child owns no GPU resources and needs no signal.
+        _server_process = None
+
     # Build command
     resolved_tensor_parallel = int(tensor_parallel_size or 0)
     if resolved_tensor_parallel <= 0:
@@ -448,9 +461,11 @@ def start_vllm_server(
     else:
         print(f"[vLLM] Disabled torch.compile; using VLLM_USE_V1={env['VLLM_USE_V1']}\n")
 
+    spawned_process: Optional[subprocess.Popen] = None
+    started = False
     try:
         # Start server process with live output
-        _server_process = subprocess.Popen(
+        spawned_process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -458,14 +473,28 @@ def start_vllm_server(
             bufsize=1,  # Line buffered
             env=env,  # Use modified environment
         )
+        _server_process = spawned_process
 
         if wait_for_ready:
-            return _wait_for_server(host, port, timeout, show_logs=show_logs)
-        return True
+            started = _wait_for_server(host, port, timeout, show_logs=show_logs)
+        else:
+            started = True
+        return started
 
     except Exception as e:
         print(f"Failed to start vLLM server: {e}")
         return False
+    finally:
+        # Includes readiness timeout, health-check failure, and cancellation.
+        # Cleanup targets the local identity even if another owner concurrently
+        # replaced the module handle, and must not mask the original outcome.
+        if spawned_process is not None and not started:
+            try:
+                stopped = _stop_vllm_process(spawned_process)
+            except BaseException:
+                stopped = False
+            if stopped and _server_process is spawned_process:
+                _server_process = None
 
 
 def _wait_for_server(host: str, port: int, timeout: int, show_logs: bool = True) -> bool:
@@ -551,6 +580,33 @@ def _wait_for_server(host: str, port: int, timeout: int, show_logs: bool = True)
     return False
 
 
+def _stop_vllm_process(process: subprocess.Popen) -> bool:
+    """Stop and reap one exact owned child, retaining failures for retry."""
+
+    try:
+        if process.poll() is not None:
+            return True
+    except Exception:
+        pass
+
+    try:
+        process.terminate()
+        process.wait(timeout=10)
+        return True
+    except subprocess.TimeoutExpired:
+        pass
+    except Exception as error:
+        print(f"Error stopping server: {error}")
+
+    try:
+        process.kill()
+        process.wait(timeout=10)
+        return True
+    except Exception as error:
+        print(f"Error killing server: {error}")
+        return False
+
+
 def stop_vllm_server() -> bool:
     """Stop the vLLM server if running.
 
@@ -562,18 +618,11 @@ def stop_vllm_server() -> bool:
     if _server_process is None:
         return True
 
-    try:
-        _server_process.terminate()
-        _server_process.wait(timeout=10)
+    process = _server_process
+    stopped = _stop_vllm_process(process)
+    if stopped and _server_process is process:
         _server_process = None
-        return True
-    except subprocess.TimeoutExpired:
-        _server_process.kill()
-        _server_process = None
-        return True
-    except Exception as e:
-        print(f"Error stopping server: {e}")
-        return False
+    return stopped
 
 
 def is_server_managed() -> bool:
