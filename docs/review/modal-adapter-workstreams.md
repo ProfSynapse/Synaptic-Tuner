@@ -218,6 +218,24 @@ ten-member lock is not a complete new-bootstrap inventory. That inventory
 must be explicitly qualified before remote activation; the 66-member trainer
 closure is a separate artifact.
 
+The reviewed read/preflight/factories checkpoint is local commit `ec02dc0`.
+The next integrated selection passed **1,369 tests in 233.76 seconds** in the
+same clean environment. It includes the concrete generic training service,
+consumer-owned retention, and inactive candidate deployment builder. Both
+stage and submit now have direct post-publication crash/fresh-wrapper retry
+regressions; retained launch assessments and signatures are reused exactly.
+The candidate builder rejects any declared Secret keys beyond its two distinct
+model/evidence symbols, including Modal host-token names. This checks the
+declaration, not the contents of an existing provider Secret. The last installed
+wheel result above predates these three modules.
+
+Current non-overlapping work is internal compilation-contract ownership
+(reader), an actual service/Foundation/Modal transport consumer proof (effects),
+and an independently checked bootstrap inventory (conformance). The lead owns
+public cutover, lock updates, combined testing and integration. Agent status is
+explicitly polled while this session is active; a completed handoff triggers
+review and the next bounded task rather than a pause for user input.
+
 ## Shared contract checkpoint
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

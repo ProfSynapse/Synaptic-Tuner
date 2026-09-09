@@ -123,9 +123,12 @@ jobs:
           import tuner.execution.providers.modal.coordinator_factories
           import tuner.execution.providers.modal.coordinator_read_transport
           import tuner.execution.providers.modal.coordinator_transport
+          import tuner.execution.providers.modal.coordinator_deployment
+          import tuner.execution.providers.modal.coordinator_retention
           import tuner.execution.providers.modal.worker_ports
           import tuner.execution.providers.modal.worker_source
           import tuner.training.coordinator_material
+          import tuner.training.coordinator_service
           PY
 
       - name: Check source hashes without refreshing the runtime lock
