@@ -163,3 +163,19 @@ modules and both packaged runtime resources passed from a neutral working
 directory. The new runtime-lock maintenance module separately passed 13 tests
 in 0.29 seconds. These measurements precede launch/bundle integration and
 do not replace pending production cutover, CI execution or live qualification.
+
+Correction (2026-09-09, later local integration): the host can now derive an
+immutable resolved-material record, recompile it into an exact eight-member
+stage bundle, authenticate Foundation stage/submit lineage, and encode one
+bounded dispatch argument. Remote wire admission receives no Host grant,
+receipt repository or signing authority. The fixed worker must independently
+match its static deployment selection and authenticate the launch before
+mounted reads, then authenticate stage evidence and recompile the bundle
+before source or process effects. These contracts do not activate the public
+adapter: production transport, worker completion, preflight and atomic legacy
+lifecycle removal remain outstanding.
+
+The expanded material/bundle/wire selection passed 1,177 tests in 167.59
+seconds; dispatch/wire subsequently passed 19 tests in 11.78 seconds. Both
+used the clean CPython 3.12.9 / pytest 8.4.2 environment without Modal. These
+are distinct checkpoints, not a live execution or a combined final gate.

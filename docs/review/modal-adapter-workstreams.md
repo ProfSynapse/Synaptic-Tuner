@@ -97,6 +97,38 @@ connect the generic planning DTO to exact recompiled source/workload bytes,
 keep domain fingerprints distinct from raw SHA-256, and retain no mutable
 caller input. The wire lane receives no host grant/signing services.
 
+Correction (2026-09-09, subsequent integration): the first bounded adapter
+checkpoint is committed locally as `eecdb93f1f614f8458b5dba9ae90cb24fbe3ddc8`.
+Resolved material, the eight-member bundle, remote wire admission and the
+single-argument dispatch codec have since passed their independent reviews.
+The lead measured 1,177 tests passing in 167.59 seconds before dispatch
+integration, then 19 dispatch/wire tests in 11.78 seconds. These are separate
+runs, not one combined result. The candidate wheel containing those four new
+modules imports from its installation in a neutral directory without Modal;
+its SHA-256 is
+`5404e0972a607433499fe38d2937fb966b82d9a9d0419e473a04b568fec52760`.
+
+The current bounded lanes are now worker mechanics extraction (effects),
+Foundation-native worker admission/orchestration (reader), and host semantic
+submit preparation plus a real coordinator/bundle test fixture (conformance).
+The latter positive path uses real stage and submit records, semantic bundle
+compilation, dispatch encoding and wire admission; only the external authority
+ports are provider-free fakes. Lead review and combined tests precede local
+integration. Worker extraction changes locked runtime sources, so the lock
+inventory and hashes must be updated together before qualification.
+
+Worker review correction (2026-09-09): checking a dispatch's shape and static
+deployment identity is not launch authentication. The mounted worker must
+verify its embedded launch claim before any Volume-file read, then perform
+full stage/bundle admission before source or process effects. The admitted
+invocation is immutable reconstructed data, not a new authority service or
+permission to execute independently of that admission boundary.
+
+The next combined lead run passed **1,192 tests in 175.25 seconds**, including
+dispatch and real host submit preparation, under the same clean pytest 8
+environment. This checkpoint predates worker extraction and its runtime-lock
+refresh. No cloud call, CI dispatch, push or merge has occurred.
+
 ## Shared contract checkpoint
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

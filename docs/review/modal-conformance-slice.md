@@ -32,6 +32,7 @@ The workflow executes:
 - `tests/execution/test_fake_provider_v1_conformance.py`
 - `tests/execution/test_mutation_broker.py`
 - `tests/execution/providers/test_modal_*.py`
+- `tests/training/`
 
 The Modal adapter test drives the real generic coordinator against its
 synthetic Foundation executor, verifies refusal by production preflight, and
@@ -87,6 +88,7 @@ python -B -m pytest -q -p no:cacheprovider \
   tests/execution/foundation_v2 \
   tests/execution/test_fake_provider_v1_conformance.py \
   tests/execution/test_mutation_broker.py \
+  tests/training \
   tests/execution/providers/test_modal_*.py
 ```
 
@@ -127,6 +129,23 @@ Wheel SHA-256:
 Bundle, resolved-material and remote-wire additions remain outside this
 checkpoint. The workflow test wildcard will include their provider tests as
 they are integrated; the new generic material test requires an explicit entry.
+
+Correction (2026-09-09): the lane now explicitly includes `tests/training`,
+including resolved material, and wheel imports cover material, bundle, wire
+and dispatch. The lead's expanded selection passed 1,177 tests in 167.59
+seconds before dispatch integration; a later 19-test dispatch/wire selection
+passed in 11.78 seconds. The rebuilt wheel imported those modules from its
+installed location in a neutral directory with the Modal SDK absent. Its
+SHA-256 is `5404e0972a607433499fe38d2937fb966b82d9a9d0419e473a04b568fec52760`.
+This wheel predates host submit-preparation and worker integration. No combined
+final count or new runtime-lock qualification is implied by these checkpoints.
+
+Subsequent combined lead run: **1,192 passed in 175.25 seconds**, including
+dispatch and host submit preparation, in clean CPython 3.12.9 / pytest 8.4.2.
+This precedes worker extraction and its lock refresh. Review also added the
+shared fixture's exact path to CI triggers and host submit preparation to the
+installed-wheel import checks; the preceding wheel measurement is not evidence
+that this new import has already run from a rebuilt wheel.
 
 The workflow pins external actions to immutable commits. On 2026-09-09 the lead
 verified the official upstream release refs with read-only `git ls-remote`:

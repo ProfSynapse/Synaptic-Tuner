@@ -8,15 +8,20 @@ on:
       - "tuner/execution/foundation_v2/**"
       - "tuner/execution/fake_provider_v1.py"
       - "tuner/execution/providers/modal/**"
+      - "tuner/training/**"
+      - "tuner/project/**"
+      - "tuner/runtime/**"
       - "tests/contract/test_modal_optional_dependency.py"
       - "tests/contract/test_modal_runtime_lock*.py"
       - "tests/contract/test_public_runs_api_v1.py"
       - "tests/contract/test_public_training_api_v1.py"
       - "tests/contract/test_provider_neutral_foundation_v1.py"
       - "tests/conftest.py"
+      - "tests/training/**"
       - "tests/execution/coordinator_v1/**"
       - "tests/execution/foundation_v2/**"
       - "tests/execution/providers/test_modal_*.py"
+      - "tests/execution/providers/modal_coordinator_fixtures.py"
       - "tests/execution/test_mutation_broker.py"
       - "tuner/execution/broker.py"
       - "tests/execution/test_fake_provider_v1_conformance.py"
@@ -107,6 +112,11 @@ jobs:
           import tuner.execution.providers.modal.coordinator_reader
           import tuner.execution.providers.modal.coordinator_staging
           import tuner.execution.providers.modal.coordinator_launch
+          import tuner.execution.providers.modal.coordinator_wire
+          import tuner.execution.providers.modal.coordinator_bundle
+          import tuner.execution.providers.modal.coordinator_dispatch
+          import tuner.execution.providers.modal.coordinator_submit_preparation
+          import tuner.training.coordinator_material
           PY
 
       - name: Check source hashes without refreshing the runtime lock
@@ -131,4 +141,5 @@ jobs:
             tests/execution/foundation_v2 \
             tests/execution/test_fake_provider_v1_conformance.py \
             tests/execution/test_mutation_broker.py \
+            tests/training \
             tests/execution/providers/test_modal_*.py
