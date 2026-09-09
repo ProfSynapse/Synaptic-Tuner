@@ -196,6 +196,28 @@ nonterminal assumption: a provider poll timeout cannot prove either queued or
 running, so the read transport must report unavailable rather than invent a
 phase until authenticated evidence establishes one.
 
+That reviewed checkpoint is committed locally as
+`2c42bef67a96283568e6834f78d88744df20308d`. Operational preflight was then
+independently reviewed and integrated; the lead measured 112 preflight,
+preparation, bundle and facade tests passing in 3.29 seconds. Its quote policy
+requires a maximum five-minute age/lifetime, with full source/deployment/quote
+authentication and trusted identities checked before provider reads. The
+factories lane and consumer-owned retention/delegation lane are now active;
+the reader lane is adding unpatched-facade fake-Volume integration coverage.
+
+The reader subsequently passed final independent review with the unpatched
+explicit-client facade and fake SDK Volumes. Its lead integration, preflight
+and inactive factories passed **1,326 tests in 223.91 seconds** together. The
+installed wheel passed neutral-directory imports of 20 modules and both
+packaged resources with no Modal SDK; SHA-256:
+`af7724f83af1a8c3c95c5893e75f177b32ef267550c2f257121e1cdba18c05b4`.
+Generic load/resolve/plan service composition and the candidate remote wrapper
+are now separately in progress. An import probe measured 86 engine source
+files loaded by the current worker/producer/runtime entrypoints: the current
+ten-member lock is not a complete new-bootstrap inventory. That inventory
+must be explicitly qualified before remote activation; the 66-member trainer
+closure is a separate artifact.
+
 ## Shared contract checkpoint
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

@@ -179,3 +179,15 @@ The expanded material/bundle/wire selection passed 1,177 tests in 167.59
 seconds; dispatch/wire subsequently passed 19 tests in 11.78 seconds. Both
 used the clean CPython 3.12.9 / pytest 8.4.2 environment without Modal. These
 are distinct checkpoints, not a live execution or a combined final gate.
+
+Correction (2026-09-09, subsequent local implementation): the Foundation worker,
+timestamped evidence producer, one-attempt host transport, authenticated read
+transport, current-fact preflight and inactive registry factories are now
+integrated. The combined provider-free selection passed 1,326 tests in 223.91
+seconds in the clean pytest 8 environment; the corresponding installed wheel
+passed SDK-free imports and packaged-resource checks. This closes the earlier
+individual transport/preflight implementation gaps, not the activation gate.
+Consumer-owned restart retention, the generic five-method training service,
+candidate deployment/bootstrap qualification, and atomic public legacy removal
+remain in progress. Unknown live provider phase is reported unavailable rather
+than inferred from a poll timeout.

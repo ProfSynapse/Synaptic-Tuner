@@ -119,6 +119,9 @@ jobs:
           import tuner.execution.providers.modal.coordinator_worker
           import tuner.execution.providers.modal.coordinator_producer
           import tuner.execution.providers.modal.coordinator_logs
+          import tuner.execution.providers.modal.coordinator_preflight
+          import tuner.execution.providers.modal.coordinator_factories
+          import tuner.execution.providers.modal.coordinator_read_transport
           import tuner.execution.providers.modal.coordinator_transport
           import tuner.execution.providers.modal.worker_ports
           import tuner.execution.providers.modal.worker_source

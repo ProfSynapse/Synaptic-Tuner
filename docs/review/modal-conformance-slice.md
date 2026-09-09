@@ -177,6 +177,14 @@ seconds**. The runtime lock remains current at ten members and skill mirrors
 pass their synchronization check. Authenticated read transport and operational
 preflight are still outside this checkpoint. No live provider check is implied.
 
+The next combined checkpoint includes authenticated reads, operational preflight
+and inactive registry factories: **1,326 passed in 223.91 seconds**. Its installed
+wheel passed 20 module imports and both resources from a neutral directory
+without Modal. SHA-256:
+`af7724f83af1a8c3c95c5893e75f177b32ef267550c2f257121e1cdba18c05b4`.
+Retention/delegation, generic training-service composition, candidate deployment
+and the new bootstrap inventory are not covered by this checkpoint.
+
 The workflow pins external actions to immutable commits. On 2026-09-09 the lead
 verified the official upstream release refs with read-only `git ls-remote`:
 `actions/checkout` tag `v4.3.0` resolves to
