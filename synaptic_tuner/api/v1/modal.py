@@ -47,6 +47,10 @@ from tuner.execution.providers.modal.training import (
     ModalTrainingRepository,
     compose_modal_training_operations,
 )
+from tuner.execution.providers.modal.run_reads import (
+    ModalVerifiedRunsOperationsV1,
+    compose_modal_verified_run_reads,
+)
 
 __all__ = [
     "ModalDurablePreparationV1",
@@ -66,6 +70,7 @@ __all__ = [
     "ModalTrainingOperations",
     "ModalTrainingRepository",
     "ModalVerificationPolicyV1",
+    "ModalVerifiedRunsOperationsV1",
     "MountedCompletionProducerV1",
     "MountedModalWorkerV1",
     "EnvironmentHmacAuthenticator",
@@ -78,4 +83,5 @@ __all__ = [
     "modal_function_name",
     "compose_modal_source_finalizer",
     "compose_modal_training_operations",
+    "compose_modal_verified_run_reads",
 ]
