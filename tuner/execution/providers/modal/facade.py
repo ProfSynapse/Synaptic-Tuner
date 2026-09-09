@@ -133,7 +133,11 @@ class ExplicitModal154ReadFacade:
                 client=self.client,
             )
             volume.hydrate(self.client)
-            if getattr(volume, "is_hydrated", False) is not True:
+            if (
+                getattr(volume, "is_hydrated", False) is not True
+                or safe_ref(getattr(volume, "object_id", None), "volume_object_id")
+                != volume_id
+            ):
                 raise ValueError
             return volume
         except Exception:

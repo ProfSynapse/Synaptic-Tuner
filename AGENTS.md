@@ -48,6 +48,12 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- After changing any file already listed in `modal-runtime-v1.lock.json`, run
+  `python3 scripts/regenerate_modal_runtime_lock.py` first; use `--write` only
+  for an intentional reviewed hash refresh, then rerun the default check. The
+  tool must never be used to change the locked inventory or runtime/image pins;
+  `CURRENT` confirms only agreement with the current policy-valid lock's source
+  hashes, not independent approval of its non-hash pins.
 - Prepare pinned models automatically on the execution machine using the Hub SDK in private scratch; never expose hostile shared cache paths to SDK writes. Reuse only independently verified repository files, commit the persistent cache before training, and keep the offline trainer subprocess credential-free. No operator weight upload step is required.
 - Modal training is available only behind the provider-neutral public `TrainingAPI`; do not recreate a `modal run` launcher, provider-specific public verb, or engine-owned database.
 - The consuming host owns configuration, credentials, grants, lifecycle/preparation persistence, data, and product state. The engine defines `ModalTrainingRepository` as a protocol only.

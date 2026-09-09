@@ -118,6 +118,42 @@ class ModalPreparationAdapter:
         self._basis = canonical_bytes(TrainingPlanBasisV1.from_resolved(resolved).to_dict())
         self._clock = clock
 
+    def snapshot(self) -> bytes:
+        """Non-secret configuration for consumer-owned retention; not authority."""
+        return canonical_bytes({
+            "schema_version": "synaptic-modal-preparation-snapshot/v1",
+            "configuration": parse_canonical_object(self._configuration, name="configuration"),
+            "basis": parse_canonical_object(self._basis, name="basis"),
+        })
+
+    @classmethod
+    def restore(cls, snapshot: bytes, *, clock: CoordinatorClockPortV1):
+        """Re-run construction policy instead of trusting retained digest fields."""
+        document = parse_canonical_object(snapshot, name="Modal preparation snapshot")
+        if (set(document) != {"schema_version", "configuration", "basis"}
+                or document["schema_version"] != "synaptic-modal-preparation-snapshot/v1"):
+            raise ValueError("invalid Modal preparation snapshot")
+        configuration = document["configuration"]
+        if type(configuration) is not dict or set(configuration) != {"profile", "selection", "quote_digest"}:
+            raise ValueError("invalid retained Modal configuration")
+        selection = ModalDeploymentSelectionV1.from_dict(configuration["selection"])
+        basis = TrainingPlanBasisV1.from_dict(document["basis"]).to_dict()
+        basis["schema_version"] = "synaptic-resolved-training-request/v1"
+        restored = cls(
+            profile=ModalProviderProfileV1.from_mapping(configuration["profile"]),
+            binding=ModalClientBinding(
+                selection.account_ref, selection.workspace_ref, selection.environment_ref,
+                selection.client_ref, selection.sdk_version,
+            ),
+            resolved=ResolvedTrainingRequest.from_dict(basis),
+            runtime_environment=selection.runtime_environment,
+            quote_digest=configuration["quote_digest"],
+            timeout_seconds=selection.timeout_seconds, clock=clock,
+        )
+        if restored.snapshot() != snapshot:
+            raise ValueError("retained Modal configuration differs from reconstructed policy")
+        return restored
+
     def _snapshot(self):
         document = parse_canonical_object(self._configuration, name="Modal configuration")
         selection = ModalDeploymentSelectionV1.from_dict(document["selection"])

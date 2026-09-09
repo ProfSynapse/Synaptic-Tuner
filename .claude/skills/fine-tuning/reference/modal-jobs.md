@@ -146,3 +146,33 @@ Provider/runtime failures should be fixed in the provider profile, runtime lock,
 deployment wrapper, or reusable engine contract. Model, dataset, tool schema,
 and training choices stay in host configuration; do not hardcode the current
 smoke into runtime code.
+
+## Runtime-lock maintenance
+
+When a file already named by `modal-runtime-v1.lock.json` changes, verify the
+lock from the repository root:
+
+```bash
+python3 scripts/regenerate_modal_runtime_lock.py
+```
+
+The default is read-only and exits nonzero when a declared source hash is
+stale. `CURRENT` means only that the eight declared source hashes agree with
+the current canonical, policy-valid lock; it is not independent approval of
+the dependency, image, Python, SDK, or ML-stack pins. After reviewing the
+source change, refresh only those SHA-256 values and then verify again:
+
+```bash
+python3 scripts/regenerate_modal_runtime_lock.py --write
+python3 scripts/regenerate_modal_runtime_lock.py
+```
+
+This is an offline local maintenance command. It does not contact Modal, load
+the provider SDK, resolve packages, inspect an image, or authenticate source or
+quote evidence. It preserves the exact eight-file inventory and preserves all
+non-hash fields supplied by the current policy-valid lock without approving
+them. Inventory or pin changes require a separate deliberate lock/schema
+review; never use this command to discover, add, remove, or redirect locked
+members. Its pathname and identity rechecks are
+best-effort protection for local maintenance races, not hostile-volume
+retained-directory-descriptor or compare-and-swap safety.

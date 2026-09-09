@@ -149,6 +149,16 @@ def test_absent_prefix_on_hydrated_volume_is_an_empty_listing():
     assert facade.list_prefix("cv","operations/new-effect/",max_entries=1)==()
 
 
+def test_volume_name_replacement_with_wrong_hydrated_id_is_rejected_before_upload():
+    facade,_=make_facade()
+    replacement=FakeVolume("replacement-id")
+    FakeVolume.registry["artifact-name"]=replacement
+    material=prepare_modal_stage(command().operation,facade.binding,b"bundle",Auth())
+    with pytest.raises(ModalFacadeError,match="volume_unavailable"):
+        _ExplicitModal154VolumeWriter(facade).stage_once(material)
+    assert replacement.files=={}
+
+
 def test_prepare_persist_stage_readback_and_no_overwrite():
     facade,_=make_facade();material=prepare_modal_stage(command().operation,facade.binding,b"bundle",Auth())
     # A real host persists material.expectation durably before this call.

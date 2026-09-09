@@ -1,6 +1,7 @@
 # Modal adapter cutover
 
-Status: preparation slice implemented; execution cutover incomplete.
+Status: preparation, complete-command configuration binding and injected
+effect/read boundaries implemented locally; production execution cutover incomplete.
 
 This work belongs to the engine. Consumers supply configuration, credentials,
 approval, and durable stores. No research-project implementation is required
@@ -63,13 +64,14 @@ code, SQLite, or the old Modal training lifecycle.
 
 ## Remaining work before activation
 
-1. Implement the Foundation executor and lookup adapter. Bind each command to
-   the exact resolved session, prepared inputs, and durable grant. Reuse the
-   existing Modal staging and worker mechanisms without nesting the old broker
-   or minting a second authority from a new-format command.
-2. Implement the generic authenticated run-reader port. Require the complete
-   Foundation submit record and assessment before provider reads. Preserve
-   authenticated terminal, log, artifact inventory, and byte verification.
+1. Connect the Foundation executor and lookup adapter to a Foundation-native
+   staging, submit, cancellation and evidence transport. Their injected-port
+   tests do not establish production transport. The older stage material and
+   worker command still use different contracts; do not convert a new command
+   into old authority or send it to a parser expecting the old wire format.
+2. Connect the authenticated run-reader boundary to real terminal/log/inventory
+   reads. Inventory authentication must not download model bodies; byte streams
+   independently verify exact membership, identity, bounds and hashes.
 3. Connect authenticated preflight, including deployment/Volume identities,
    quote expiry, runtime/source locks, and explicit client selection. A digest
    alone must never become authority. Persist the exact resolved configuration
@@ -85,6 +87,56 @@ code, SQLite, or the old Modal training lifecycle.
 Internal adapter/service names do not need numeric suffixes. Existing public
 namespaces and persisted or signed schema versions remain explicit; changing
 an implementation does not itself require a new schema version.
+
+## Complete-command configuration binding
+
+`ModalPreparationAdapter.snapshot()` emits canonical non-secret configuration
+and plan-basis bytes for consumer-owned retention. `restore()` runs the normal
+profile/runtime/environment policy again and requires a byte-identical rebuilt
+snapshot. It does not simply accept the retained digest fields as correct.
+
+`ModalCommandBinding` retains only immutable command, preparation-snapshot and
+deployment bytes. It reconstructs the complete expected preparation, payload
+and executor from that configuration and requires exact deployment-selection
+equivalence. A changed source/workload/runtime/resource/quote/secret commitment
+cannot reuse an old command. Parsed nested objects are detached from retained
+bytes. The catalog's separate authority must authenticate the full canonical
+content; the binding digest is an identifier, not a signature or permission.
+
+This establishes equivalence to the retained configuration, not evidence that
+source is pushed/available, a quote remains fresh, or a deployment attestation
+is authentic. Those are explicit preflight and composition responsibilities.
+The preparation adapter remains non-operational after snapshot restoration.
+
+## Remote cutover constraint
+
+The existing `remote.py` admits `MutationCommandV1` and a v1 stage claim;
+`bundle.py` retains `OperationBindingV1`. Foundation stage and submit are
+different effects, with submit carrying the exact authenticated stage
+predecessor. Relabeling the older bundle or launching it through a wrapper
+would not preserve that lineage.
+
+The new stage writer therefore writes its bounded bundle and v2 claim below
+the stage effect. Host-local launch preparation must derive the authenticated
+Foundation stage result, prove that result established the exact staged
+material, and bind the subsequent submit. A valid signature on each of two
+unrelated objects does not prove their relationship.
+
+Remote admission must receive a bounded authenticated wire record, not host
+grant/receipt/assessment authenticators, catalogs, repositories, or signing
+authority. It must independently check the exact stage and submit commands,
+stage material and deployment identities before source or process I/O.
+Worker logs, output artifacts and terminal evidence belong to the submit
+effect, not the staging effect. A stage bundle cannot contain an as-yet
+unknown submit effect or accept caller-supplied runtime argv as authority.
+
+The atomic activation set is the Foundation-native bundle and launch wire,
+durable submit transport and reconciliation, remote admission/invocation,
+worker evidence production, authenticated reader transport, and public
+composition/registry cutover with old lifecycle removal. Local wire codecs
+and injected transports may be reviewed before activation, but do not make
+the provider executable. The engine continues to define ports rather than
+selecting a consumer database.
 
 ## Verification checkpoint (2026-09-09)
 
@@ -102,3 +154,12 @@ declared test extra currently specifies pytest below 9; this is a same-environme
 regression comparison, not a pinned release-environment qualification. No
 provider lookup, cloud mutation, paid training, publication, or chat serving
 was performed. EHR was not changed.
+
+Correction (2026-09-09): after complete-command binding, effects, reader and
+stage-writer integration, the expanded provider-free selection passed 1,070
+tests in 166.20 seconds under clean CPython 3.12.9 / pytest 8.4.2 without the
+Modal SDK or system-site packages. Installed-wheel imports of those adapter
+modules and both packaged runtime resources passed from a neutral working
+directory. The new runtime-lock maintenance module separately passed 13 tests
+in 0.29 seconds. These measurements precede launch/bundle integration and
+do not replace pending production cutover, CI execution or live qualification.
