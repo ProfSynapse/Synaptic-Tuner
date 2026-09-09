@@ -10,19 +10,27 @@
     },
     "modal_mounted_io": {
       "path": "tuner/execution/providers/modal/mounted_io.py",
-      "sha256": "aafe11f60d7d822b87cf5b4f25d7935afbaec44c9e04e1aae9884f03b5e4cf05"
+      "sha256": "70d67b5d8efd496fb68b059a1eb52558d7a337900199b5194b3f21cce145b52c"
     },
     "modal_producer": {
       "path": "tuner/execution/providers/modal/producer.py",
-      "sha256": "6a20cba0adc8fb5cf8a97b5ee3cafcd292533dc112fc426893ea7177807e043b"
+      "sha256": "705294ee5b458f3cc270e05fb30de2f9b229f49fe206f5fcdd40a5a762ede866"
     },
     "modal_remote": {
       "path": "tuner/execution/providers/modal/remote.py",
-      "sha256": "e8c0fc1223759230d38ceb8567bd1c0a7e51da9064a17a7a6354d5c60bffdc86"
+      "sha256": "dfbec4e5efa14eda94aade232c7d14c2f33b18b8c774a5692bb41c797e5671cb"
     },
     "modal_runtime": {
       "path": "tuner/execution/providers/modal/runtime.py",
-      "sha256": "b33dfb0c9da3d40f22544a0999e25d240806082af4e8bb62f9e7471adcf28de4"
+      "sha256": "11da9868d5fa0778dfe0082bad1cd00aabe4a0ab0caeae6cafc0b655ae91fdb8"
+    },
+    "modal_worker_ports": {
+      "path": "tuner/execution/providers/modal/worker_ports.py",
+      "sha256": "78fbbbf14a7ae2c5b2bc66a061b43c126cb1f7ac2635a3a934280daf738e6c76"
+    },
+    "modal_worker_source": {
+      "path": "tuner/execution/providers/modal/worker_source.py",
+      "sha256": "4d82d80442b003cd8f9e7064842d6c0ef145cecb117f81b083e98d6a9e94c071"
     },
     "model_preparation": {
       "path": "tuner/execution/providers/modal/model_snapshot.py",

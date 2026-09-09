@@ -250,6 +250,26 @@ class ExplicitModal154ReadFacade:
         except Exception:
             raise ModalFacadeError("modal_function_unavailable") from None
 
+    def observe_known_call_pending(self, provider_job_ref: str) -> ModalFunctionCallState:
+        """Return only a nonterminal polling hint, never trust a worker result."""
+        provider_job_ref = safe_ref(provider_job_ref, "provider_job_ref")
+        try:
+            call = self.sdk.FunctionCall.from_id(provider_job_ref, client=self.client)
+            if getattr(call, "object_id", None) != provider_job_ref:
+                return ModalFunctionCallState.UNKNOWN
+        except Exception:
+            return ModalFunctionCallState.UNKNOWN
+        try:
+            call.get(timeout=0)
+        except Exception as error:
+            # Modal 1.5.4 poll_function raises the exact built-in TimeoutError
+            # when outputs are not ready. Remote timeout subclasses and SDK
+            # failures do not establish a pending state.
+            if type(error) is TimeoutError:
+                return ModalFunctionCallState.PENDING
+            return ModalFunctionCallState.UNKNOWN
+        return ModalFunctionCallState.UNKNOWN
+
     def observe_function_call(self, provider_job_ref: str) -> ModalFunctionCallState:
         """Poll one exact call without treating its result as completion evidence."""
         provider_job_ref = safe_ref(provider_job_ref, "provider_job_ref")

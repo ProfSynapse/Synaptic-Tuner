@@ -9,7 +9,8 @@ import pytest
 from tests.execution.providers.test_modal_bundle import bundle
 from tuner.execution.broker import MutationCommandV1
 from tuner.execution.providers.modal.binding import ModalClientBinding
-from tuner.execution.providers.modal.remote import ModalRemotePhaseError, MountedModalWorkerV1, ProcessResultV1, admit_remote_invocation, execute_remote_sft
+from tuner.execution.providers.modal.remote import MountedModalWorkerV1, admit_remote_invocation, execute_remote_sft
+from tuner.execution.providers.modal.worker_ports import ModalProcessResult, ModalRemotePhaseError
 import tuner.execution.providers.modal.remote as remote_module
 from tuner.execution.providers.modal.producer import MountedCompletionProducerV1
 from tuner.execution.providers.modal.mounted_io import read_regular, write_exclusive
@@ -53,14 +54,14 @@ def test_remote_admission_rejects_tag_command_claim_and_bundle_mutations():
 
 def test_remote_execution_has_no_shell_or_runtime_override_surface(monkeypatch):
     invocation,_,_=admitted();calls=[]
-    monkeypatch.setattr(remote_module, "_read_locked_closure_manifest", lambda source: invocation.closure_manifest)
-    monkeypatch.setattr(remote_module, "_write_runtime_closure_manifest", lambda path, payload: None)
-    monkeypatch.setattr(remote_module, "_stage_runtime_worker", lambda *args: calls.append(("stage", args)))
+    monkeypatch.setattr(remote_module.worker_source, "read_locked_closure_manifest", lambda source: invocation.closure_manifest)
+    monkeypatch.setattr(remote_module.worker_source, "write_runtime_closure_manifest", lambda path, payload: None)
+    monkeypatch.setattr(remote_module.worker_source, "stage_runtime_worker", lambda *args: calls.append(("stage", args)))
     class Sources:
         def prepare_and_verify(self,source,deployment):calls.append(("source",source,deployment))
     class Processes:
         def run(self,argv,*,cwd,environment,stdin,commit_prepared):
-            calls.append(("process",argv,cwd,environment,stdin));return ProcessResultV1(0,b"ok",b"")
+            calls.append(("process",argv,cwd,environment,stdin));return ModalProcessResult(0,b"ok",b"")
     result=execute_remote_sft(invocation,sources=Sources(),processes=Processes(),commit_prepared=lambda: None)
     assert result.returncode==0 and [call[0] for call in calls]==["source", "stage", "process"]
     assert calls[2][1]==invocation.argv and calls[2][4]==invocation.workload
@@ -78,18 +79,18 @@ def test_remote_execution_has_no_shell_or_runtime_override_surface(monkeypatch):
 ])
 def test_staging_failure_never_invokes_trainer(monkeypatch, failure, code):
     invocation, _, _ = admitted()
-    monkeypatch.setattr(remote_module, "_read_locked_closure_manifest", lambda source: invocation.closure_manifest)
-    monkeypatch.setattr(remote_module, "_write_runtime_closure_manifest", lambda *args: None)
+    monkeypatch.setattr(remote_module.worker_source, "read_locked_closure_manifest", lambda source: invocation.closure_manifest)
+    monkeypatch.setattr(remote_module.worker_source, "write_runtime_closure_manifest", lambda *args: None)
     def reject(*args):
         raise failure("private diagnostic must not escape")
-    monkeypatch.setattr(remote_module, "_stage_runtime_worker", reject)
+    monkeypatch.setattr(remote_module.worker_source, "stage_runtime_worker", reject)
     class Sources:
         def prepare_and_verify(self, source, deployment):
             pass
     class Processes:
         def run(self, *args, **kwargs):
             pytest.fail("trainer invoked after staging failure")
-    with pytest.raises(remote_module.ModalRemotePhaseError) as error:
+    with pytest.raises(ModalRemotePhaseError) as error:
         execute_remote_sft(invocation, sources=Sources(), processes=Processes(),commit_prepared=lambda: None)
     assert error.value.diagnostic_code == code
     assert str(error.value) == code
@@ -97,9 +98,9 @@ def test_staging_failure_never_invokes_trainer(monkeypatch, failure, code):
 
 def test_mounted_worker_reads_only_fixed_two_volume_paths(tmp_path, monkeypatch):
     invocation,command,material=admitted();control=tmp_path/"control-volume";artifact=tmp_path/"artifact-volume"
-    monkeypatch.setattr(remote_module, "_read_locked_closure_manifest", lambda source: invocation.closure_manifest)
-    monkeypatch.setattr(remote_module, "_write_runtime_closure_manifest", lambda path, payload: None)
-    monkeypatch.setattr(remote_module, "_stage_runtime_worker", lambda *args: None)
+    monkeypatch.setattr(remote_module.worker_source, "read_locked_closure_manifest", lambda source: invocation.closure_manifest)
+    monkeypatch.setattr(remote_module.worker_source, "write_runtime_closure_manifest", lambda path, payload: None)
+    monkeypatch.setattr(remote_module.worker_source, "stage_runtime_worker", lambda *args: None)
     control_dir=control/"operations"/"effect-1"/"control";input_dir=artifact/"operations"/"effect-1"/"input"
     control_dir.mkdir(parents=True);input_dir.mkdir(parents=True)
     (control_dir/"stage-claim.v1.json").write_bytes(material.claim)
@@ -108,7 +109,7 @@ def test_mounted_worker_reads_only_fixed_two_volume_paths(tmp_path, monkeypatch)
     class Sources:
         def prepare_and_verify(self,source,deployment):pass
     class Processes:
-        def run(self,argv,*,cwd,environment,stdin,commit_prepared):return ProcessResultV1(0)
+        def run(self,argv,*,cwd,environment,stdin,commit_prepared):return ModalProcessResult(0)
     class Completion:
         def finalize(self,invocation,result,*,job_ref):return type("Done",(),{"status_code":"completed"})()
     worker=MountedModalWorkerV1(verifier=Auth(),sources=Sources(),processes=Processes(),completion=Completion(),control_root=str(control),artifact_root=str(artifact))
@@ -143,7 +144,7 @@ def test_mounted_worker_preserves_only_closed_remote_phase_diagnostics(tmp_path)
 def test_completion_failure_log_contains_only_closed_diagnostic_code(tmp_path):
     invocation,_,_=admitted();control=tmp_path/"control";artifact=tmp_path/"artifact"
     completed=MountedCompletionProducerV1(Auth(),control_root=str(control),artifact_root=str(artifact)).finalize(
-        invocation,ProcessResultV1(121,diagnostic_code="runtime_lock_mismatch"),job_ref="fc-1"
+        invocation,ModalProcessResult(121,diagnostic_code="runtime_lock_mismatch"),job_ref="fc-1"
     )
     assert completed.status_code=="failed"
     value=__import__("json").loads((control/"operations"/"effect-1"/"logs"/"chunks"/"000.json").read_bytes())
@@ -171,7 +172,7 @@ def test_completion_producer_publishes_exact_five_and_authenticated_terminal(tmp
     (volume/invocation.source.run_id/"state"/"runtime-v1-inventory.json").write_bytes(canonical_json({"schema_version":"synaptic-artifact-inventory/v1","workload_fingerprint":workload_fingerprint,"artifacts":records}))
     class SigningAuth(Auth):
         def sign(self,purpose,payload,key_ref):return b"signed-tag"
-    completed=MountedCompletionProducerV1(SigningAuth(),control_root=str(control),artifact_root=str(volume)).finalize(invocation,ProcessResultV1(0),job_ref="fc-1")
+    completed=MountedCompletionProducerV1(SigningAuth(),control_root=str(control),artifact_root=str(volume)).finalize(invocation,ModalProcessResult(0),job_ref="fc-1")
     root="operations/effect-1"
     assert completed.status_code=="completed"
     assert len(list((volume/root/"output").iterdir()))==5
@@ -197,7 +198,7 @@ def test_completion_producer_rejects_inventory_from_another_workload(tmp_path):
         name=role.value+".bin";content=b"unrelated"+role.value.encode();(Path(roots["artifacts"])/name).write_bytes(content);records.append({"role":role.value,"path":name,"sha256":hashlib.sha256(content).hexdigest(),"size":len(content)})
     (Path(roots["state"])/"runtime-v1-inventory.json").write_bytes(canonical_json({"schema_version":"synaptic-artifact-inventory/v1","workload_fingerprint":"a"*64,"artifacts":records}))
     with pytest.raises(ValueError,match="workload mismatch"):
-        MountedCompletionProducerV1(Auth(),control_root=str(control),artifact_root=str(volume)).finalize(invocation,ProcessResultV1(0),job_ref="fc-1")
+        MountedCompletionProducerV1(Auth(),control_root=str(control),artifact_root=str(volume)).finalize(invocation,ModalProcessResult(0),job_ref="fc-1")
 
 
 def test_mounted_reads_and_writes_reject_symlinked_ancestors(tmp_path):

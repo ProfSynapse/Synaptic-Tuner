@@ -25,6 +25,8 @@ LOCKED_FILES = {
     "modal_producer": "tuner/execution/providers/modal/producer.py",
     "modal_remote": "tuner/execution/providers/modal/remote.py",
     "modal_runtime": "tuner/execution/providers/modal/runtime.py",
+    "modal_worker_ports": "tuner/execution/providers/modal/worker_ports.py",
+    "modal_worker_source": "tuner/execution/providers/modal/worker_source.py",
     "model_preparation": "tuner/execution/providers/modal/model_snapshot.py",
     "sft_runtime": "Trainers/sft/runtime_v1.py",
 }

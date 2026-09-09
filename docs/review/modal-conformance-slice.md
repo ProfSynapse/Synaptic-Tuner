@@ -147,6 +147,36 @@ shared fixture's exact path to CI triggers and host submit preparation to the
 installed-wheel import checks; the preceding wheel measurement is not evidence
 that this new import has already run from a rebuilt wheel.
 
+Extraction checkpoint (2026-09-09): 166 focused tests passed in 1.62 seconds,
+including the expanded runtime-lock tests, the six directly affected runtime
+test files, deployment/configuration and optional-dependency contracts. The
+ten-member lock is current; only three existing source hashes and two new
+helper entries changed, with all runtime pins preserved. Fresh-process runtime
+imports exclude the legacy worker, bundle and broker; public API imports remain
+SDK-free. This is not a combined worker/producer/transport qualification.
+
+Next combined checkpoint: **1,210 passed in 181.88 seconds**, including the
+Foundation worker and extraction. Later mounted-I/O changes separately passed
+43 helper/legacy-producer tests in 0.80 seconds. The new Foundation producer
+then independently passed 15 tests, including actual temporary-filesystem
+publication, and the host transport passed its review plus 12 focused tests.
+None of these counts is a claim that the later timestamped-log/read/preflight
+work is complete. Linux retained-directory-descriptor tests do not establish
+equivalent hostile-volume race protection for the best-effort Windows fallback.
+
+Later combined checkpoint: **1,264 passed in 199.55 seconds** in the same clean
+SDK-free environment. The corresponding installed worker wheel passed all 16
+module imports and both packaged resources from a neutral directory, with
+SHA-256 `34d74b732b66b4f55fefce38f891085465e68d68bc0ecbda39d5f3a7b609b18f`.
+This predates timestamped logs, read transport and preflight. After integrating
+the timestamped codec and producer revision, 97 focused tests passed in 26.74
+seconds. Those are separate measurements, not a new combined-suite count.
+
+The subsequent timestamped-log integrated run passed **1,279 tests in 201.16
+seconds**. The runtime lock remains current at ten members and skill mirrors
+pass their synchronization check. Authenticated read transport and operational
+preflight are still outside this checkpoint. No live provider check is implied.
+
 The workflow pins external actions to immutable commits. On 2026-09-09 the lead
 verified the official upstream release refs with read-only `git ls-remote`:
 `actions/checkout` tag `v4.3.0` resolves to

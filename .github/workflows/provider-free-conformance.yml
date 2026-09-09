@@ -116,6 +116,12 @@ jobs:
           import tuner.execution.providers.modal.coordinator_bundle
           import tuner.execution.providers.modal.coordinator_dispatch
           import tuner.execution.providers.modal.coordinator_submit_preparation
+          import tuner.execution.providers.modal.coordinator_worker
+          import tuner.execution.providers.modal.coordinator_producer
+          import tuner.execution.providers.modal.coordinator_logs
+          import tuner.execution.providers.modal.coordinator_transport
+          import tuner.execution.providers.modal.worker_ports
+          import tuner.execution.providers.modal.worker_source
           import tuner.training.coordinator_material
           PY
 

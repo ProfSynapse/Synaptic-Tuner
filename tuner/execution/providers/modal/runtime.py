@@ -14,7 +14,7 @@ from typing import Callable, Mapping, Sequence
 
 from tuner.project.execution_source import ExecutionSourceV1
 
-from .remote import ModalRemotePhaseError, ProcessResultV1
+from .worker_ports import ModalProcessResult, ModalRemotePhaseError
 from .resolution import ModalDeploymentSelectionV1
 from .config import ModalRuntimeLockV1
 
@@ -254,7 +254,7 @@ class SubprocessSftRunner:
         environment: dict[str, str],
         stdin: bytes,
         commit_prepared: Callable[[], None],
-    ) -> ProcessResultV1:
+    ) -> ModalProcessResult:
         if len(argv) != 3 or argv[2] != "--canonical-workload-stdin":
             raise ValueError("runtime command is not fixed")
         process_environment = dict(environment)
@@ -283,7 +283,7 @@ class SubprocessSftRunner:
         except Exception:
             raise ModalRemotePhaseError(123, "trainer_invocation_failed") from None
         if completed.returncode == 0:
-            return ProcessResultV1(0)
+            return ModalProcessResult(0)
         returncode, diagnostic_code = {
             2: (121, "runtime_unclassified_rejection"),
             20: (124, "runtime_workload_rejected"),
@@ -299,7 +299,7 @@ class SubprocessSftRunner:
             34: (124, "runtime_workload_fingerprint_rejected"),
             35: (124, "runtime_workload_roots_rejected"),
         }.get(completed.returncode, (123, "trainer_nonzero"))
-        return ProcessResultV1(returncode, diagnostic_code=diagnostic_code)
+        return ModalProcessResult(returncode, diagnostic_code=diagnostic_code)
 
 
 __all__ = ["EnvironmentHmacAuthenticator", "GitDualCloneMaterializer", "SubprocessSftRunner"]

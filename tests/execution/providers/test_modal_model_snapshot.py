@@ -219,7 +219,7 @@ def test_real_runner_prepares_before_credential_free_offline_child(fixture, tmp_
 
 def test_runner_preparation_failure_never_launches_child(monkeypatch):
     from tuner.execution.providers.modal import runtime
-    from tuner.execution.providers.modal.remote import ModalRemotePhaseError
+    from tuner.execution.providers.modal.worker_ports import ModalRemotePhaseError
 
     monkeypatch.setenv("MODEL_CREDENTIAL", "fixture")
     calls = []
@@ -233,7 +233,7 @@ def test_runner_preparation_failure_never_launches_child(monkeypatch):
 
 def test_cache_commit_failure_never_launches_child(monkeypatch):
     from tuner.execution.providers.modal import runtime
-    from tuner.execution.providers.modal.remote import ModalRemotePhaseError
+    from tuner.execution.providers.modal.worker_ports import ModalRemotePhaseError
 
     monkeypatch.setenv("MODEL_CREDENTIAL", "fixture")
     calls = []

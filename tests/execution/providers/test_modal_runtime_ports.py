@@ -10,7 +10,32 @@ from tuner.execution.providers.modal.runtime import (
     SubprocessSftRunner,
     _same_executable,
 )
-from tuner.execution.providers.modal.remote import ModalRemotePhaseError
+from tuner.execution.providers.modal.worker_ports import ModalProcessResult, ModalRemotePhaseError
+
+
+def test_runtime_import_does_not_load_legacy_remote_bundle_or_broker():
+    import subprocess
+    import sys
+    root = __import__("pathlib").Path(__file__).resolve().parents[3]
+    code = f"""
+import sys
+sys.path.insert(0, {str(root)!r})
+import tuner.execution.providers.modal.runtime
+for name in ('tuner.execution.providers.modal.remote',
+             'tuner.execution.providers.modal.bundle',
+             'tuner.execution.broker'):
+    assert name not in sys.modules, name
+"""
+    completed = subprocess.run(
+        [sys.executable, "-B", "-c", code], check=False, cwd=root,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+
+
+def test_process_result_requires_exact_output_bytes():
+    with pytest.raises(TypeError, match="exact bytes"):
+        ModalProcessResult(0, bytearray(b"not-exact"))
 
 
 def test_runtime_identity_accepts_distinct_paths_to_same_binary(tmp_path):

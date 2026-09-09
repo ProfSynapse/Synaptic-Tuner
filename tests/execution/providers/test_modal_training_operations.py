@@ -37,7 +37,8 @@ from tuner.execution.providers.modal.config import (
 from tuner.execution.providers.modal.deployment_identity import modal_function_name
 from tuner.execution.providers.modal.contracts import canonical_json, sha
 from tuner.execution.providers.modal.producer import MountedCompletionProducerV1
-from tuner.execution.providers.modal.remote import ProcessResultV1,admit_remote_invocation
+from tuner.execution.providers.modal.remote import admit_remote_invocation
+from tuner.execution.providers.modal.worker_ports import ModalProcessResult
 from tuner.execution.providers.modal.resolution import ModalDeploymentSelectionV1
 from tuner.execution.providers.modal.training import (
     MODAL_PLAN_CONTEXT_SCHEMA,
@@ -447,7 +448,7 @@ def _publish_unrelated_completed_run(value, repository, tmp_path):
         name=role.value+".bin";content=("unrelated-"+role.value).encode();(runtime/"artifacts"/name).write_bytes(content);records.append({"role":role.value,"path":name,"sha256":hashlib.sha256(content).hexdigest(),"size":len(content)})
     workload_fingerprint=hashlib.sha256(b"synaptic-training-workload/v1\0"+invocation.workload).hexdigest()
     (runtime/"state"/"runtime-v1-inventory.json").write_bytes(canonical_json({"schema_version":"synaptic-artifact-inventory/v1","workload_fingerprint":workload_fingerprint,"artifacts":records}))
-    MountedCompletionProducerV1(Auth(),control_root=str(control),artifact_root=str(artifact_volume)).finalize(invocation,ProcessResultV1(0),job_ref="fc-1")
+    MountedCompletionProducerV1(Auth(),control_root=str(control),artifact_root=str(artifact_volume)).finalize(invocation,ModalProcessResult(0),job_ref="fc-1")
     from tests.execution.providers.test_modal_sdk154_adapter import FakeVolume
     for root,volume_name in ((control,"control-name"),(artifact_volume,"artifact-name")):
         for path in root.rglob("*"):

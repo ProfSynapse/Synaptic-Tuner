@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 
 import jsonschema
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -56,3 +57,16 @@ def test_modal_launcher_lock_checkout_preserves_hash_bound_lf_bytes(tmp_path):
 
     assert control.read_bytes() == b"one\r\ntwo\r\n"
     assert lock.read_bytes() == expected
+
+
+@pytest.mark.parametrize("member", ["modal_worker_ports", "modal_worker_source"])
+def test_extracted_worker_source_cannot_disappear_from_lock(member):
+    from tuner.execution.providers.modal.config import ModalRuntimeLockV1
+
+    document = ModalRuntimeLockV1.packaged().to_dict()
+    del document["locked_files"][member]
+    schema = json.loads((ROOT / "schemas/synaptic-modal-runtime-lock-v1.schema.json").read_text(encoding="utf-8"))
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.Draft202012Validator(schema).validate(document)
+    with pytest.raises(ValueError):
+        ModalRuntimeLockV1(document)

@@ -1,4 +1,8 @@
-"""Descriptor-relative I/O for hostile shared Modal mounts."""
+"""Descriptor-relative I/O for hostile shared Modal mounts.
+
+The locked Linux runtime requires the secure dir_fd implementation. Platforms
+without it use best-effort pathname checks, not equivalent race protection.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -107,6 +111,8 @@ def _open_leaf(
 
 def read_regular(root: Path, path: Path, maximum: int) -> bytes:
     """Read one bounded regular leaf without reopening an ancestor path."""
+    if type(maximum) is not int or maximum < 0:
+        raise ValueError("mounted member bound must be a nonnegative exact integer")
     parent, leaf, full_path = _parent_handle(root, path, create=False)
     try:
         before = _leaf_info(parent, leaf, full_path)
@@ -140,8 +146,61 @@ def read_regular(root: Path, path: Path, maximum: int) -> bytes:
     return content
 
 
+def hash_regular(root: Path, path: Path, maximum: int) -> tuple[int, str]:
+    """Hash a bounded regular leaf with at most one MiB of working buffer.
+
+    As with read_regular, the Linux path is opened relative to a retained
+    parent descriptor; a pathname replacement cannot redirect an ongoing read.
+    The returned size/digest describes that opened file, not a future read.
+    """
+    if type(maximum) is not int or maximum < 0:
+        raise ValueError("mounted member bound must be a nonnegative exact integer")
+    parent, leaf, full_path = _parent_handle(root, path, create=False)
+    try:
+        before = _leaf_info(parent, leaf, full_path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (parent is None and _is_link_or_reparse(full_path, before))
+            or not 0 <= before.st_size <= maximum
+        ):
+            raise ValueError("mounted member is not a bounded regular file")
+        descriptor = _open_leaf(
+            parent, leaf, full_path,
+            os.O_RDONLY | _BINARY | _NOFOLLOW | _CLOEXEC,
+        )
+    except Exception:
+        raise ValueError("mounted member unavailable") from None
+    finally:
+        if parent is not None:
+            os.close(parent)
+    digest = hashlib.sha256()
+    size = 0
+    with os.fdopen(descriptor, "rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened.st_mode) or (
+            opened.st_dev, opened.st_ino
+        ) != (before.st_dev, before.st_ino):
+            raise ValueError("mounted member changed before hash")
+        while True:
+            chunk = stream.read(min(1024 * 1024, maximum + 1 - size))
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > maximum:
+                raise ValueError("mounted member exceeds its bound")
+            digest.update(chunk)
+        after = os.fstat(stream.fileno())
+    if size != before.st_size or (
+        after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+    ) != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns):
+        raise ValueError("mounted member changed during hash")
+    return size, digest.hexdigest()
+
+
 def write_exclusive(root: Path, path: Path, content: bytes) -> None:
     """Create one leaf relative to a retained trusted parent descriptor."""
+    if type(content) is not bytes:
+        raise TypeError("mounted write requires exact bytes")
     parent, leaf, full_path = _parent_handle(root, path, create=True)
     try:
         descriptor = _open_leaf(
@@ -160,6 +219,50 @@ def write_exclusive(root: Path, path: Path, content: bytes) -> None:
         os.fsync(stream.fileno())
 
 
+def claim_directory(root: Path, path: Path) -> None:
+    """Exclusively create one output directory; existing paths are collisions."""
+    parent, leaf, full_path = _parent_handle(root, path, create=True)
+    try:
+        if parent is None:
+            full_path.mkdir(mode=0o700)
+        else:
+            os.mkdir(leaf, 0o700, dir_fd=parent)
+    finally:
+        if parent is not None:
+            os.close(parent)
+
+
+def list_regular_sizes(
+    root: Path, directory: Path, maximum_entries: int,
+) -> tuple[tuple[str, int], ...]:
+    """Bounded regular-file inventory of one retained output directory.
+
+    This is a snapshot, not a guarantee against later mutation. Artifact
+    readers must independently revalidate their exact inventory and content.
+    """
+    if type(maximum_entries) is not int or maximum_entries < 0:
+        raise ValueError("directory entry bound must be a nonnegative exact integer")
+    # Only the parent is opened; this synthetic leaf is never read or created.
+    parent, _, _ = _parent_handle(root, directory / ".inventory", create=False)
+    result: list[tuple[str, int]] = []
+    try:
+        with os.scandir(directory if parent is None else parent) as entries:
+            for entry in entries:
+                if len(result) >= maximum_entries:
+                    raise ValueError("output directory exceeds its entry bound")
+                info = entry.stat(follow_symlinks=False)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or (parent is None and _is_link_or_reparse(directory / entry.name, info))
+                ):
+                    raise ValueError("output directory contains a nonregular member")
+                result.append((entry.name, info.st_size))
+    finally:
+        if parent is not None:
+            os.close(parent)
+    return tuple(sorted(result))
+
+
 def copy_regular(
     source_root: Path,
     source: Path,
@@ -169,6 +272,8 @@ def copy_regular(
     maximum: int,
 ) -> tuple[int, str]:
     """Copy one bounded regular leaf between retained mount directories."""
+    if type(maximum) is not int or maximum < 0:
+        raise ValueError("mounted member bound must be a nonnegative exact integer")
     source_parent, source_leaf, source_path = _parent_handle(
         source_root, source, create=False
     )
@@ -237,4 +342,7 @@ def copy_regular(
     return size, digest.hexdigest()
 
 
-__all__ = ["copy_regular", "read_regular", "write_exclusive"]
+__all__ = [
+    "claim_directory", "copy_regular", "hash_regular", "list_regular_sizes",
+    "read_regular", "write_exclusive",
+]

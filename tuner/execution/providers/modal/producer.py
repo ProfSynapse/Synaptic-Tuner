@@ -21,7 +21,8 @@ from .contracts import (
 from .logs import StructuredLogChunkV1
 from .manifest import CompletionManifestV1
 from .mounted_io import copy_regular, read_regular, write_exclusive
-from .remote import ProcessResultV1, RemoteInvocationV1
+from .remote import RemoteInvocationV1
+from .worker_ports import ModalProcessResult
 
 
 class RemoteEvidenceAuthenticator(Protocol):
@@ -148,11 +149,11 @@ class MountedCompletionProducerV1:
     def finalize(
         self,
         invocation: RemoteInvocationV1,
-        result: ProcessResultV1,
+        result: ModalProcessResult,
         *,
         job_ref: str,
     ) -> RemoteCompletionResultV1:
-        if type(invocation) is not RemoteInvocationV1 or type(result) is not ProcessResultV1:
+        if type(invocation) is not RemoteInvocationV1 or type(result) is not ModalProcessResult:
             raise TypeError("canonical invocation and process result are required")
         identity = self._identity(invocation, job_ref)
         effect_id = invocation.command.effect.effect_id

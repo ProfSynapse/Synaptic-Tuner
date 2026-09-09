@@ -39,10 +39,11 @@ def test_checked_in_modal_runtime_lock_is_current():
     assert tool.regenerate(ROOT) == 0
 
 
-def test_write_changes_only_expected_hash_and_is_idempotent(tmp_path):
+@pytest.mark.parametrize("member", ["modal_remote", "modal_worker_ports", "modal_worker_source"])
+def test_write_changes_only_expected_hash_and_is_idempotent(tmp_path, member):
     root = _fixture(tmp_path)
     before = _document(root)
-    relative = tool.LOCKED_FILES["modal_remote"]
+    relative = tool.LOCKED_FILES[member]
     changed = root / relative
     changed.write_bytes(changed.read_bytes() + b"\n")
     original_lock = (root / tool.LOCK_RELATIVE).read_bytes()
@@ -52,7 +53,7 @@ def test_write_changes_only_expected_hash_and_is_idempotent(tmp_path):
     assert tool.regenerate(root, write=True) == 0
     after = _document(root)
     expected = json.loads(json.dumps(before))
-    expected["locked_files"]["modal_remote"]["sha256"] = hashlib.sha256(
+    expected["locked_files"][member]["sha256"] = hashlib.sha256(
         changed.read_bytes()
     ).hexdigest()
     assert after == expected

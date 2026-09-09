@@ -157,7 +157,7 @@ python3 scripts/regenerate_modal_runtime_lock.py
 ```
 
 The default is read-only and exits nonzero when a declared source hash is
-stale. `CURRENT` means only that the eight declared source hashes agree with
+stale. `CURRENT` means only that the ten declared source hashes agree with
 the current canonical, policy-valid lock; it is not independent approval of
 the dependency, image, Python, SDK, or ML-stack pins. After reviewing the
 source change, refresh only those SHA-256 values and then verify again:
@@ -169,10 +169,18 @@ python3 scripts/regenerate_modal_runtime_lock.py
 
 This is an offline local maintenance command. It does not contact Modal, load
 the provider SDK, resolve packages, inspect an image, or authenticate source or
-quote evidence. It preserves the exact eight-file inventory and preserves all
+quote evidence. It preserves the exact ten-file inventory and preserves all
 non-hash fields supplied by the current policy-valid lock without approving
 them. Inventory or pin changes require a separate deliberate lock/schema
 review; never use this command to discover, add, remove, or redirect locked
 members. Its pathname and identity rechecks are
 best-effort protection for local maintenance races, not hostile-volume
 retained-directory-descriptor or compare-and-swap safety.
+
+Correction (2026-09-09): extraction of low-level worker ports and source-staging
+helpers deliberately expanded the lock, schema, runtime policy and maintenance
+inventory together from eight to ten files. The new members are `worker_ports.py`
+and `worker_source.py`; runtime/image/dependency/Python pins are unchanged.
+This is the currently composed worker's source lock, not qualification of the
+still-disabled Foundation worker. Its eventual production cutover must review
+and lock the new bootstrap path before enabling execution.

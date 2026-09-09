@@ -14,112 +14,26 @@ from typing import Callable, Protocol
 
 from tuner.project.execution_source import ExecutionSourceV1
 from tuner.runtime.dispatch import WorkerControlLocationV1
-from tuner.runtime.offline_sft_worker import (
-    OFFLINE_SFT_MANIFEST_NAME,
-    load_offline_sft_worker_closure,
-    parse_offline_sft_worker_manifest,
-)
+from tuner.runtime.offline_sft_worker import parse_offline_sft_worker_manifest
 
 from ...broker import MutationCommandV1
 from .bundle import ModalExecutionBundleV1
 from .contracts import BoundsPolicyV1, _object, operation_path, sha
 from .mounted_io import read_regular
 from .resolution import ModalDeploymentSelectionV1
-
-
-_DIAGNOSTIC_CODES = frozenset({
-    "artifact_layout_collision",
-    "artifact_layout_failed",
-    "credential_unavailable",
-    "engine_clone_failed",
-    "engine_gitlink_mismatch",
-    "generic_failure",
-    "locked_source_mismatch",
-    "model_preparation_failed",
-    "model_cache_commit_failed",
-    "project_clone_failed",
-    "runtime_identity_mismatch",
-    "runtime_artifact_precondition",
-    "runtime_artifact_rejected",
-    "runtime_evidence_rejected",
-    "runtime_invocation_rejected",
-    "runtime_lock_mismatch",
-    "runtime_trainer_failed",
-    "runtime_unclassified_rejection",
-    "runtime_workload_rejected",
-    "runtime_workload_document_rejected",
-    "runtime_workload_engine_rejected",
-    "runtime_workload_fingerprint_rejected",
-    "runtime_workload_reconstruction_rejected",
-    "runtime_workload_roots_rejected",
-    "runtime_workload_schema_rejected",
-    "source_topology_invalid",
-    "worker_source_path_noncanonical",
-    "worker_control_path_noncanonical",
-    "worker_source_retain_failed",
-    "worker_source_copy_failed",
-    "worker_closure_rejected",
-    "trainer_invocation_failed",
-    "trainer_nonzero",
-})
-
-
-class ModalRemotePhaseError(Exception):
-    """Closed, non-secret failure identity safe for durable remote logs."""
-
-    def __init__(self, returncode: int, diagnostic_code: str) -> None:
-        if returncode not in {120, 121, 122, 123, 124, 125}:
-            raise ValueError("remote phase returncode is invalid")
-        if diagnostic_code not in _DIAGNOSTIC_CODES:
-            raise ValueError("remote diagnostic code is invalid")
-        super().__init__(diagnostic_code)
-        self.returncode = returncode
-        self.diagnostic_code = diagnostic_code
+from .worker_ports import (
+    FixedProcessRunner, ModalProcessResult, ModalRemotePhaseError, SourceMaterializer,
+)
+from . import worker_source
 
 
 class RemoteStageVerifier(Protocol):
     def verify(self, purpose: str, payload: bytes, tag: bytes, key_ref: str) -> bool: ...
 
 
-class SourceMaterializer(Protocol):
-    def prepare_and_verify(
-        self,
-        source: ExecutionSourceV1,
-        deployment: ModalDeploymentSelectionV1,
-    ) -> None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class ProcessResultV1:
-    returncode: int
-    stdout: bytes = b""
-    stderr: bytes = b""
-    diagnostic_code: str | None = None
-
-    def __post_init__(self) -> None:
-        if type(self.returncode) is not int:
-            raise TypeError("returncode must be an exact integer")
-        if not isinstance(self.stdout, bytes) or not isinstance(self.stderr, bytes):
-            raise TypeError("process output must be bytes")
-        if self.diagnostic_code is not None and self.diagnostic_code not in _DIAGNOSTIC_CODES:
-            raise ValueError("process diagnostic code is invalid")
-
-
-class FixedProcessRunner(Protocol):
-    def run(
-        self,
-        argv: tuple[str, str, str],
-        *,
-        cwd: str,
-        environment: dict[str, str],
-        stdin: bytes,
-        commit_prepared: Callable[[], None],
-    ) -> ProcessResultV1: ...
-
-
 class RemoteCompletionProducer(Protocol):
     def finalize(
-        self, invocation: "RemoteInvocationV1", result: ProcessResultV1, *, job_ref: str
+        self, invocation: "RemoteInvocationV1", result: ModalProcessResult, *, job_ref: str
     ) -> object: ...
 
 
@@ -135,76 +49,6 @@ class RemoteInvocationV1:
     environment: dict[str, str]
     closure_manifest: bytes
     closure_manifest_runtime_path: str
-
-
-def _read_locked_closure_manifest(source: ExecutionSourceV1) -> bytes:
-    locked_manifest = (
-        Path(source.roots["engine"])
-        / "tuner" / "runtime" / "manifests" / OFFLINE_SFT_MANIFEST_NAME
-    )
-    return locked_manifest.read_bytes()
-
-
-def _write_runtime_closure_manifest(path: str, payload: bytes) -> None:
-    runtime_manifest = Path(path)
-    # Bootstrap control is local, not a provider Volume alias. Refuse redirects
-    # before creating parents or writing the authenticated manifest.
-    if not runtime_manifest.is_absolute() or runtime_manifest.resolve() != runtime_manifest:
-        raise ModalRemotePhaseError(124, "worker_control_path_noncanonical")
-    runtime_manifest.parent.mkdir(parents=True, exist_ok=True)
-    if runtime_manifest.parent.resolve(strict=True) != runtime_manifest.parent:
-        raise ModalRemotePhaseError(124, "worker_control_path_noncanonical")
-    with runtime_manifest.open("xb") as stream:
-        stream.write(payload)
-        stream.flush()
-        import os
-        os.fsync(stream.fileno())
-    if runtime_manifest.read_bytes() != payload:
-        raise OSError("manifest round trip mismatch")
-
-
-def _stage_runtime_worker(source: ExecutionSourceV1, manifest_path: str, payload: bytes) -> None:
-    """Retain the verified checkout and expose only its authenticated worker files."""
-    engine = Path(source.roots["engine"])
-    manifest = parse_offline_sft_worker_manifest(
-        payload, source_ref="verified-engine-closure", manifest_path=Path(manifest_path)
-    )
-    if engine.resolve(strict=True) != engine:
-        raise ModalRemotePhaseError(124, "worker_source_path_noncanonical")
-    if Path(manifest_path).resolve(strict=True) != Path(manifest_path):
-        raise ModalRemotePhaseError(124, "worker_control_path_noncanonical")
-    # The backup directory is exclusively claimed before any rename. Never
-    # overwrite a prior checkout or prune a repository into a runtime tree.
-    retained = engine.with_name(engine.name + "-source")
-    retained.mkdir(exist_ok=False)
-    checkout = retained / "checkout"
-    try:
-        engine.rename(checkout)
-        engine.mkdir(exist_ok=False)
-    except FileExistsError:
-        raise
-    except OSError:
-        raise ModalRemotePhaseError(124, "worker_source_retain_failed") from None
-    try:
-        for member in manifest.closure.members:
-            contents = read_regular(checkout, checkout / member.path, member.size_bytes)
-            if len(contents) != member.size_bytes or hashlib.sha256(contents).hexdigest() != member.sha256:
-                raise ValueError("worker source member differs from locked closure")
-            destination = engine / member.path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with destination.open("xb") as stream:
-                stream.write(contents)
-            destination.chmod(0o755 if member.git_mode == "100755" else 0o644)
-    except FileExistsError:
-        raise
-    except Exception:
-        raise ModalRemotePhaseError(124, "worker_source_copy_failed") from None
-    try:
-        load_offline_sft_worker_closure(
-            Path(manifest_path), expected_digest=manifest.closure.closure_digest, engine_root=engine
-        )
-    except Exception:
-        raise ModalRemotePhaseError(124, "worker_closure_rejected") from None
 
 
 def admit_remote_invocation(
@@ -320,19 +164,19 @@ def execute_remote_sft(
     sources: SourceMaterializer,
     processes: FixedProcessRunner,
     commit_prepared: Callable[[], None],
-) -> ProcessResultV1:
+) -> ModalProcessResult:
     """Verify dual-clone materialization, then invoke only runtime_v1 without a shell."""
     if type(invocation) is not RemoteInvocationV1:
         raise TypeError("canonical remote invocation is required")
     sources.prepare_and_verify(invocation.source, invocation.deployment)
     try:
-        locked_bytes = _read_locked_closure_manifest(invocation.source)
+        locked_bytes = worker_source.read_locked_closure_manifest(invocation.source)
     except OSError:
         raise ModalRemotePhaseError(124, "locked_source_mismatch") from None
     if locked_bytes != invocation.closure_manifest:
         raise ModalRemotePhaseError(124, "locked_source_mismatch")
     try:
-        _write_runtime_closure_manifest(
+        worker_source.write_runtime_closure_manifest(
             invocation.closure_manifest_runtime_path, invocation.closure_manifest
         )
     except FileExistsError:
@@ -340,7 +184,7 @@ def execute_remote_sft(
     except OSError:
         raise ModalRemotePhaseError(122, "artifact_layout_failed") from None
     try:
-        _stage_runtime_worker(
+        worker_source.stage_runtime_worker(
             invocation.source, invocation.closure_manifest_runtime_path, invocation.closure_manifest
         )
     except ModalRemotePhaseError:
@@ -356,7 +200,7 @@ def execute_remote_sft(
         stdin=invocation.workload,
         commit_prepared=commit_prepared,
     )
-    if type(result) is not ProcessResultV1:
+    if type(result) is not ModalProcessResult:
         raise TypeError("process runner returned a noncanonical result")
     return result
 
@@ -417,11 +261,11 @@ class MountedModalWorkerV1:
                 commit_prepared=commit_prepared,
             )
         except ModalRemotePhaseError as error:
-            result = ProcessResultV1(
+            result = ModalProcessResult(
                 error.returncode, diagnostic_code=error.diagnostic_code
             )
         except Exception:
-            result = ProcessResultV1(125, diagnostic_code="generic_failure")
+            result = ModalProcessResult(125, diagnostic_code="generic_failure")
         completion = self._completion.finalize(invocation, result, job_ref=job_ref)
         status_code = getattr(completion, "status_code", None)
         if status_code not in {"completed", "failed"}:
@@ -435,8 +279,6 @@ class MountedModalWorkerV1:
 
 
 __all__ = [
-    "FixedProcessRunner", "ModalRemotePhaseError", "MountedModalWorkerV1",
-    "ProcessResultV1", "RemoteCompletionProducer", "RemoteInvocationV1",
-    "RemoteStageVerifier", "SourceMaterializer", "admit_remote_invocation",
-    "execute_remote_sft",
+    "MountedModalWorkerV1", "RemoteCompletionProducer", "RemoteInvocationV1",
+    "RemoteStageVerifier", "admit_remote_invocation", "execute_remote_sft",
 ]

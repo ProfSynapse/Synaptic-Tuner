@@ -124,6 +124,43 @@ def test_exact_sdk_version_is_mandatory(version):
         ExplicitModal154ReadFacade(binding,sdk=bad,client=object(),scope_observer=lambda _:(),deployment_observer=lambda **_:None,volume_names={"cv":"control"})
 
 
+def test_known_call_pending_hint_uses_exact_client_and_no_result_schema():
+    facade, _ = make_facade()
+    FakeFunctionCall.calls = []
+    assert facade.observe_known_call_pending("fc-known") is ModalFunctionCallState.PENDING
+    assert FakeFunctionCall.calls == [("fc-known", facade.client)]
+    FakeCall.result = {
+        "schema_version": "synaptic-modal-worker-result/v2", "effect_id": "effect",
+        "returncode": 0, "status_code": "completed",
+    }
+    assert facade.observe_known_call_pending("fc-known") is ModalFunctionCallState.UNKNOWN
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("unavailable"), type("RemoteTimeout", (TimeoutError,), {})()])
+def test_known_call_error_never_establishes_pending(failure):
+    facade, _ = make_facade()
+    FakeCall.result = failure
+    assert facade.observe_known_call_pending("fc-known") is ModalFunctionCallState.UNKNOWN
+
+
+def test_known_call_wrong_handle_is_not_polled(monkeypatch):
+    facade, _ = make_facade()
+    calls = []
+    class Wrong:
+        object_id = "fc-other"
+        def get(self, **kwargs): calls.append(kwargs)
+    monkeypatch.setattr(FakeFunctionCall, "from_id", lambda *a, **kw: Wrong())
+    assert facade.observe_known_call_pending("fc-known") is ModalFunctionCallState.UNKNOWN
+    assert calls == []
+
+
+def test_known_call_resolution_timeout_does_not_establish_pending(monkeypatch):
+    facade, _ = make_facade()
+    def unavailable(*args, **kwargs): raise TimeoutError()
+    monkeypatch.setattr(FakeFunctionCall, "from_id", unavailable)
+    assert facade.observe_known_call_pending("fc-known") is ModalFunctionCallState.UNKNOWN
+
+
 def test_read_list_and_deployment_use_only_explicit_client_environment_and_v1():
     facade,selection=make_facade();FakeVolume.registry["control-name"].files["control/x"]=b"abcdef"
     assert readiness(facade.binding,facade) is Readiness.READY

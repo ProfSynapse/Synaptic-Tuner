@@ -54,6 +54,11 @@ This repository has a few cloud-training constraints that are easy to relearn th
   tool must never be used to change the locked inventory or runtime/image pins;
   `CURRENT` confirms only agreement with the current policy-valid lock's source
   hashes, not independent approval of its non-hash pins.
+- When extracting code from a locked runtime member, explicitly review and
+  update the lock inventory, JSON schema, runtime policy and maintenance script
+  together before refreshing hashes. Moving code must not remove it from the
+  locked source boundary. Bootstrap provider modules and the offline trainer
+  closure are separate inventories; change only the inventory actually affected.
 - Prepare pinned models automatically on the execution machine using the Hub SDK in private scratch; never expose hostile shared cache paths to SDK writes. Reuse only independently verified repository files, commit the persistent cache before training, and keep the offline trainer subprocess credential-free. No operator weight upload step is required.
 - Modal training is available only behind the provider-neutral public `TrainingAPI`; do not recreate a `modal run` launcher, provider-specific public verb, or engine-owned database.
 - The consuming host owns configuration, credentials, grants, lifecycle/preparation persistence, data, and product state. The engine defines `ModalTrainingRepository` as a protocol only.

@@ -129,6 +129,73 @@ dispatch and real host submit preparation, under the same clean pytest 8
 environment. This checkpoint predates worker extraction and its runtime-lock
 refresh. No cloud call, CI dispatch, push or merge has occurred.
 
+This material/dispatch checkpoint is local commit
+`353cdeeca93b07ea638e3f5508e71686b96ca8e8`. The subsequent worker-mechanics
+extraction passed independent review, and the lead passed 166 focused tests in
+1.62 seconds after updating its lock. The lock schema, runtime policy and
+maintenance script explicitly require ten members, including the extracted
+`worker_ports.py` and `worker_source.py`; its check reports `CURRENT` and both
+skill mirrors are synchronized. Image, dependency, SDK, Python and ML-stack
+pins are unchanged. The unchanged 66-member offline trainer closure does not
+contain these provider bootstrap files.
+
+Import correction (2026-09-09): previous adapter checks proved absence of the
+SDK and old training lifecycle, not absence of every legacy provider import.
+The internal package initializer still eagerly imported the old bundle then.
+It now has no reexports, and a fresh-process runtime import loads neither the
+legacy remote module, bundle nor broker. The public Modal API files remain
+unchanged and its import still needs no optional SDK.
+
+The corrected Foundation worker has now been integrated for combined testing;
+its author measured 12 focused tests passing after fixing pre-read launch
+authentication and source/workload digest reconstruction. It is still not
+installed in the production wrapper. The effects lane owns the new completion
+producer; conformance owns a Foundation host transport with one-attempt
+spawn/cancel and conservative indeterminate reconciliation. Consumer-owned
+retained stage and launch facts must be connected during composition; these
+new source protocols grant no authority and add no engine database.
+
+The worker/extraction combined checkpoint passed **1,210 tests in 181.88
+seconds**. Subsequent review strengthened mounted artifact I/O with streaming
+hash verification, exclusive output-directory claims and bounded exact regular
+file inventories; malformed bounds/content now fail before creating output
+paths. Those helper and existing producer regressions passed 43 tests in 0.80
+seconds. The lock's mounted-I/O source hash was deliberately refreshed; this
+postdates the extraction-only hash-delta audit above.
+
+The Foundation producer passed 15 focused tests, including actual temporary
+filesystem publication and verification of all three evidence MACs; independent
+review also passed. The host transport passed independent review and then 12
+focused tests after added malformed-result/deployment/verifier cases. These
+modules are integrated locally, not installed in production composition.
+
+Read integration exposed a timestamp gap: the old log wire has only code and
+message, while the public log entry requires a timestamp. The conformance lane
+now owns a separate timestamped Foundation log codec, leaving the old parser
+unchanged; reader owns authenticated metadata-only inventory and separate bounded
+artifact streams. Effects owns operational preflight design using existing Host
+evidence authority, exact Volume/Secret hydration and an explicitly authenticated
+price-policy fact. No invented live pricing API or secret-value read is required.
+
+The combined worker/producer/transport checkpoint passed **1,264 tests in
+199.55 seconds**. Its installed wheel passed SDK-free imports of 16 modules
+and both packaged resources from a neutral directory; wheel SHA-256:
+`34d74b732b66b4f55fefce38f891085465e68d68bc0ecbda39d5f3a7b609b18f`.
+That wheel and full-suite result predate the timestamped log revision. After
+integrating that revision, the lead separately measured **97 tests passing in
+26.74 seconds** across logs, producer, worker, transport, facade and mounted
+I/O. Independent review closed the mounted-input and pending-poll fixes.
+Authenticated read transport and operational preflight remain under review;
+none of these local results activates the public cloud path.
+
+The next combined run, including timestamped logs, passed **1,279 tests in
+201.16 seconds**. The ten-member runtime lock reports `CURRENT`, skill mirrors
+are synchronized, and the working diff passes whitespace checks. Read transport
+and preflight are not included in this result. Review corrected an earlier
+nonterminal assumption: a provider poll timeout cannot prove either queued or
+running, so the read transport must report unavailable rather than invent a
+phase until authenticated evidence establishes one.
+
 ## Shared contract checkpoint
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

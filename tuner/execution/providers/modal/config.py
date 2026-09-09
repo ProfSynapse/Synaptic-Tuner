@@ -191,6 +191,7 @@ class ModalRuntimeLockV1:
                 "dependency_lock", "deployment_wrapper", "modal_mounted_io",
                 "modal_runtime", "modal_remote", "modal_producer", "sft_runtime",
                 "model_preparation",
+                "modal_worker_ports", "modal_worker_source",
             },
             "Modal locked files",
         )
