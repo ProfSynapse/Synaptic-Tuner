@@ -68,11 +68,13 @@ or owned cleanup. Independent review, all 2,613 selected regression tests and
 the exact-commit installed wheel pass; measured results are recorded in
 `../review/modal-inference-launch.md`.
 
-Mounted-preparation slice (2026-09-10): compose fresh launch admission with the
+Mounted-preparation update (2026-09-10): fresh launch admission is composed with the
 existing mounted artifact reader, shared private materializer, pinned-base
 preparer and `ServingTarget`. This is internal worker preparation, not an
 executable bootstrap, SDK dispatch, inference-lock check or bounded session.
-Qualification is tracked in `../review/modal-inference-worker.md`.
+Independent review, 36 final worker tests, 513 affected regression tests and the
+exact-commit installed wheel pass. Collection/revision boundaries and measured
+results are recorded in `../review/modal-inference-worker.md`.
 
 ## Product boundary
 
