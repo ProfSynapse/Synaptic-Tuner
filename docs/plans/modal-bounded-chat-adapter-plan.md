@@ -76,6 +76,16 @@ Independent review, 36 final worker tests, 513 affected regression tests and the
 exact-commit installed wheel pass. Collection/revision boundaries and measured
 results are recorded in `../review/modal-inference-worker.md`.
 
+Runtime-prerequisite slice (2026-09-10): code inspection found that the reusable
+vLLM controller always selected the current interpreter and the HTTP client did
+not enforce an admitted request-body bound. Add explicit interpreter selection
+and bounded whole-body serialization to those existing components first; no
+parallel server/controller is needed. This does not project or authenticate the
+remaining Modal serving settings. Configuration or the separately inspected
+runtime lock must still bind generation/readiness/vLLM choices before bootstrap
+execution. Qualification is tracked in
+`../review/inference-runtime-prerequisites.md`.
+
 ## Product boundary
 
 A consumer chooses a runtime for one verified training run and explicitly sends

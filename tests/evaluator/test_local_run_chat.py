@@ -70,7 +70,13 @@ def test_adapter_preserves_target_and_delegates_without_extra_validation(
 
     monkeypatch.setattr(local_run_chat, "verified_vllm_chat", fake_open)
     adapter = _adapter(
-        tmp_path, startup_options={"port": 9123, "tensor_parallel_size": 2}
+        tmp_path,
+        startup_options={
+            "port": 9123,
+            "tensor_parallel_size": 2,
+            "python_executable": "/opt/inference/bin/python3",
+        },
+        max_request_bytes=8192,
     )
     with adapter.open(runs, run) as prepared:
         assert type(prepared.session) is ChatSession
@@ -84,10 +90,18 @@ def test_adapter_preserves_target_and_delegates_without_extra_validation(
     assert type(startup.source) is vllm_runtime.VerifiedLocalVLLMSource
     assert startup.source.target is target
     assert startup.port == 9123 and startup.tensor_parallel_size == 2
+    assert startup.python_executable == "/opt/inference/bin/python3"
     assert startup.served_model_name == "trained"
     assert policy is adapter.policy
     assert kwargs["environment"]["HF_HUB_OFFLINE"] == "1"
     assert kwargs["max_tokens"] == 128
+    assert kwargs["max_request_bytes"] == 8192
+
+
+@pytest.mark.parametrize("bound", (None, True, 0, -1, 1.5, 64 * 1024 * 1024 + 1))
+def test_adapter_rejects_invalid_request_limit_before_open(tmp_path, bound):
+    with pytest.raises(ValueError):
+        _adapter(tmp_path, max_request_bytes=bound)
 
 
 def test_adapter_snapshots_mutable_config_and_redacts_environment(tmp_path):

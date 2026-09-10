@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import http.client
 import json
 import math
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import socket
 import sys
@@ -25,12 +25,27 @@ _MAX_STARTUP_SECONDS = 1800.0
 _MAX_PROBE_SECONDS = 30.0
 _MAX_RESPONSE_BYTES = 1 << 20
 _LORA_BASE_ALIAS = "synaptic-base"
-_LOCAL_ENV_EXACT = frozenset({
-    "PATH", "LD_LIBRARY_PATH", "CUDA_HOME", "CUDA_VISIBLE_DEVICES",
-    "CUDA_DEVICE_ORDER", "NVIDIA_VISIBLE_DEVICES", "VIRTUAL_ENV", "TMPDIR",
-    "TMP", "TEMP", "NCCL_P2P_DISABLE", "NCCL_IB_DISABLE", "NCCL_DEBUG",
-    "TORCH_COMPILE_DISABLE", "VLLM_USE_V1", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
-})
+_LOCAL_ENV_EXACT = frozenset(
+    {
+        "PATH",
+        "LD_LIBRARY_PATH",
+        "CUDA_HOME",
+        "CUDA_VISIBLE_DEVICES",
+        "CUDA_DEVICE_ORDER",
+        "NVIDIA_VISIBLE_DEVICES",
+        "VIRTUAL_ENV",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "NCCL_P2P_DISABLE",
+        "NCCL_IB_DISABLE",
+        "NCCL_DEBUG",
+        "TORCH_COMPILE_DISABLE",
+        "VLLM_USE_V1",
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+    }
+)
 _OFFLINE_ENV = {
     "HF_HUB_OFFLINE": "1",
     "TRANSFORMERS_OFFLINE": "1",
@@ -77,13 +92,19 @@ class VLLMStartupSpec:
     max_lora_rank: int = 64
     startup_timeout_s: float = 600.0
     readiness_request_timeout_s: float = 2.0
+    python_executable: str = field(default_factory=lambda: sys.executable)
 
 
 class VLLMRuntimeLease:
     """One vLLM endpoint and the exact process family that owns it."""
 
     def __init__(
-        self, process: OwnedProcessLease, *, host: str, port: int, served_model_name: str
+        self,
+        process: OwnedProcessLease,
+        *,
+        host: str,
+        port: int,
+        served_model_name: str,
     ) -> None:
         self._process = process
         self._host = host
@@ -159,7 +180,12 @@ def start_vllm_runtime(
             if remaining <= 0:
                 raise VLLMRuntimeError("vLLM readiness deadline expired")
             timeout = min(projection.readiness_request_timeout_s, remaining)
-            if _ready(projection.host, projection.port, projection.expected_model_names, timeout):
+            if _ready(
+                projection.host,
+                projection.port,
+                projection.expected_model_names,
+                timeout,
+            ):
                 if _monotonic() >= deadline or not _leader_alive(process):
                     raise VLLMRuntimeError("vLLM readiness was not timely and live")
                 return VLLMRuntimeLease(
@@ -198,6 +224,7 @@ def _projection(
 ) -> _Projection:
     if type(spec) is not VLLMStartupSpec:
         raise TypeError("spec must be an exact VLLMStartupSpec")
+    python_executable = _python_executable(spec.python_executable)
     if not isinstance(cwd, Path) or not cwd.is_absolute() or not cwd.is_dir():
         raise TypeError("cwd must be an existing absolute Path")
     name = _text(spec.served_model_name, "served model name", _MAX_NAME)
@@ -206,7 +233,10 @@ def _projection(
     if type(spec.port) is not int or not 1 <= spec.port <= 65535:
         raise ValueError("port is invalid")
     gpu = _finite(spec.gpu_memory_utilization, "GPU utilization", 0.01, 1.0)
-    if type(spec.tensor_parallel_size) is not int or not 1 <= spec.tensor_parallel_size <= 256:
+    if (
+        type(spec.tensor_parallel_size) is not int
+        or not 1 <= spec.tensor_parallel_size <= 256
+    ):
         raise ValueError("tensor parallel size is invalid")
     if type(spec.enforce_eager) is not bool:
         raise TypeError("enforce_eager must be bool")
@@ -214,16 +244,28 @@ def _projection(
         raise ValueError("tokenizer mode is invalid")
     if type(spec.max_lora_rank) is not int or not 1 <= spec.max_lora_rank <= 1024:
         raise ValueError("maximum LoRA rank is invalid")
-    startup = _finite(spec.startup_timeout_s, "startup timeout", 0.01, _MAX_STARTUP_SECONDS)
-    probe = _finite(spec.readiness_request_timeout_s, "probe timeout", 0.01, _MAX_PROBE_SECONDS)
+    startup = _finite(
+        spec.startup_timeout_s, "startup timeout", 0.01, _MAX_STARTUP_SECONDS
+    )
+    probe = _finite(
+        spec.readiness_request_timeout_s, "probe timeout", 0.01, _MAX_PROBE_SECONDS
+    )
     env = _environment(environment)
     expected_names = (name,)
     argv = [
-        sys.executable, "-m", "vllm.entrypoints.openai.api_server",
-        "--host", spec.host, "--port", str(spec.port),
-        "--served-model-name", name,
-        "--gpu-memory-utilization", str(gpu),
-        "--tensor-parallel-size", str(spec.tensor_parallel_size),
+        python_executable,
+        "-m",
+        "vllm.entrypoints.openai.api_server",
+        "--host",
+        spec.host,
+        "--port",
+        str(spec.port),
+        "--served-model-name",
+        name,
+        "--gpu-memory-utilization",
+        str(gpu),
+        "--tensor-parallel-size",
+        str(spec.tensor_parallel_size),
     ]
     if spec.enforce_eager:
         argv.append("--enforce-eager")
@@ -252,10 +294,15 @@ def _projection(
             expected_names = tuple(sorted((_LORA_BASE_ALIAS, name)))
         argv.extend(("--model", str(model), "--tokenizer", str(tokenizer)))
         if adapter is not None:
-            argv.extend((
-                "--enable-lora", "--max-lora-rank", str(spec.max_lora_rank),
-                "--lora-modules", f"{name}={adapter}",
-            ))
+            argv.extend(
+                (
+                    "--enable-lora",
+                    "--max-lora-rank",
+                    str(spec.max_lora_rank),
+                    "--lora-modules",
+                    f"{name}={adapter}",
+                )
+            )
         env = _local_environment(env)
     elif type(spec.source) is ExplicitNetworkVLLMSource:
         source = spec.source
@@ -264,35 +311,87 @@ def _projection(
         if source.revision is not None:
             argv.extend(("--revision", _text(source.revision, "revision", _MAX_REF)))
         if source.tokenizer_ref is not None:
-            argv.extend(("--tokenizer", _text(source.tokenizer_ref, "tokenizer ref", _MAX_REF)))
+            argv.extend(
+                ("--tokenizer", _text(source.tokenizer_ref, "tokenizer ref", _MAX_REF))
+            )
         if source.lora is not None:
             if type(source.lora) is not ExplicitNetworkLoRA:
                 raise TypeError("network LoRA is invalid")
             lora_name = _lora_name(source.lora.name)
             if lora_name != name or name == _LORA_BASE_ALIAS:
-                raise ValueError("network LoRA name must equal the distinct served model name")
+                raise ValueError(
+                    "network LoRA name must equal the distinct served model name"
+                )
             if (
                 not isinstance(source.lora.path, Path)
                 or not source.lora.path.is_absolute()
                 or not source.lora.path.is_dir()
             ):
-                raise TypeError("network LoRA path must be an existing absolute directory")
+                raise TypeError(
+                    "network LoRA path must be an existing absolute directory"
+                )
             argv[argv.index("--served-model-name") + 1] = _LORA_BASE_ALIAS
             expected_names = tuple(sorted((_LORA_BASE_ALIAS, name)))
-            argv.extend((
-                "--enable-lora", "--max-lora-rank", str(spec.max_lora_rank),
-                "--lora-modules", f"{lora_name}={source.lora.path}",
-            ))
+            argv.extend(
+                (
+                    "--enable-lora",
+                    "--max-lora-rank",
+                    str(spec.max_lora_rank),
+                    "--lora-modules",
+                    f"{lora_name}={source.lora.path}",
+                )
+            )
     else:
         raise TypeError("startup source type is invalid")
     return _Projection(
-        tuple(argv), cwd, env, spec.host, spec.port, name, expected_names, startup, probe,
+        tuple(argv),
+        cwd,
+        env,
+        spec.host,
+        spec.port,
+        name,
+        expected_names,
+        startup,
+        probe,
     )
 
 
 def _text(value: object, label: str, maximum: int) -> str:
-    if type(value) is not str or not value or len(value.encode("utf-8")) > maximum or "\0" in value:
+    if (
+        type(value) is not str
+        or not value
+        or len(value.encode("utf-8")) > maximum
+        or "\0" in value
+    ):
         raise ValueError(f"{label} is invalid")
+    return value
+
+
+def _python_executable(value: object) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > 4096
+        or "\0" in value
+        or "\\" in value
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise ValueError("Python executable is invalid")
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("Python executable is invalid") from None
+    if len(encoded) > 4096:
+        raise ValueError("Python executable is invalid")
+    path = PurePosixPath(value)
+    if (
+        not path.is_absolute()
+        or path == PurePosixPath("/")
+        or path.as_posix() != value
+        or "//" in value
+        or any(part in {"", ".", ".."} for part in path.parts[1:])
+    ):
+        raise ValueError("Python executable must be a canonical absolute POSIX path")
     return value
 
 
@@ -304,7 +403,11 @@ def _lora_name(value: object) -> str:
 
 
 def _finite(value: object, label: str, minimum: float, maximum: float) -> float:
-    if type(value) not in (int, float) or isinstance(value, bool) or not math.isfinite(value):
+    if (
+        type(value) not in (int, float)
+        or isinstance(value, bool)
+        or not math.isfinite(value)
+    ):
         raise TypeError(f"{label} must be finite")
     result = float(value)
     if not minimum <= result <= maximum:
@@ -317,8 +420,11 @@ def _environment(value: Mapping[str, str]) -> dict[str, str]:
         raise TypeError("environment must be an explicit dict")
     result = dict(value)
     if any(
-        type(key) is not str or type(item) is not str or not key
-        or "=" in key or "\0" in key + item
+        type(key) is not str
+        or type(item) is not str
+        or not key
+        or "=" in key
+        or "\0" in key + item
         for key, item in result.items()
     ):
         raise TypeError("environment is invalid")
@@ -328,15 +434,26 @@ def _environment(value: Mapping[str, str]) -> dict[str, str]:
 def _local_environment(value: dict[str, str]) -> dict[str, str]:
     for key in value:
         upper = key.upper()
-        if (
-            key not in _LOCAL_ENV_EXACT
-            and key not in _OFFLINE_ENV
-        ):
-            raise ValueError("verified local environment contains a non-allowlisted name")
-        if any(word in upper for word in (
-            "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "PROXY", "API_KEY", "AUTH",
-        )) or upper in {
-            "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT",
+        if key not in _LOCAL_ENV_EXACT and key not in _OFFLINE_ENV:
+            raise ValueError(
+                "verified local environment contains a non-allowlisted name"
+            )
+        if any(
+            word in upper
+            for word in (
+                "TOKEN",
+                "SECRET",
+                "PASSWORD",
+                "CREDENTIAL",
+                "PROXY",
+                "API_KEY",
+                "AUTH",
+            )
+        ) or upper in {
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "PYTHONSTARTUP",
+            "PYTHONINSPECT",
         }:
             raise ValueError("verified local environment contains a forbidden name")
     result = dict(value)
@@ -366,7 +483,9 @@ def _port_available(host: str, port: int) -> bool:
         probe.close()
 
 
-def _ready(host: str, port: int, expected_names: tuple[str, ...], timeout: float) -> bool:
+def _ready(
+    host: str, port: int, expected_names: tuple[str, ...], timeout: float
+) -> bool:
     connection = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
         connection.request("GET", "/v1/models", headers={"Accept": "application/json"})
@@ -384,7 +503,11 @@ def _ready(host: str, port: int, expected_names: tuple[str, ...], timeout: float
         if len(raw) > _MAX_RESPONSE_BYTES:
             return False
         payload = json.loads(raw)
-        if type(payload) is not dict or set(payload) != {"object", "data"} or payload["object"] != "list":
+        if (
+            type(payload) is not dict
+            or set(payload) != {"object", "data"}
+            or payload["object"] != "list"
+        ):
             return False
         data = payload["data"]
         if type(data) is not list or not 1 <= len(data) <= 256:

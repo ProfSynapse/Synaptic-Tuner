@@ -43,6 +43,7 @@ class LocalVLLMRunChatRuntime:
     max_tokens: int = 128
     temperature: float = 0.0
     top_p: float = 1.0
+    max_request_bytes: int = 1 << 20
     max_response_bytes: int = 1 << 20
 
     def __post_init__(self) -> None:
@@ -82,6 +83,11 @@ class LocalVLLMRunChatRuntime:
             raise TypeError("served_model_name must be a string")
         if type(self.max_tokens) is not int or type(self.max_response_bytes) is not int:
             raise TypeError("generation limits must be exact integers")
+        if (
+            type(self.max_request_bytes) is not int
+            or not 1 <= self.max_request_bytes <= 64 * 1024 * 1024
+        ):
+            raise ValueError("max_request_bytes is outside its bound")
         if type(self.temperature) not in (int, float) or type(self.top_p) not in (
             int,
             float,
@@ -110,6 +116,7 @@ class LocalVLLMRunChatRuntime:
             max_tokens=self.max_tokens,
             temperature=self.temperature,
             top_p=self.top_p,
+            max_request_bytes=self.max_request_bytes,
             max_response_bytes=self.max_response_bytes,
         ) as session:
             yield PreparedRunChat(

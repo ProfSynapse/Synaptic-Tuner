@@ -37,6 +37,7 @@ runtime = LocalVLLMRunChatRuntime(
     preparer=pinned_model_preparer,
     startup_options={"port": 9137, "startup_timeout_s": 300.0},
     max_tokens=128,
+    max_request_bytes=8192,
 )
 with open_run_chat(
     host.runs,
@@ -56,6 +57,11 @@ explicit dictionary of allowed runtime settings, never `dict(os.environ)`:
 credential, proxy and import-injection names are rejected, and offline model
 loading is forced. The Python runtime must already have compatible vLLM/GPU
 dependencies installed. This helper does not install packages or provision GPUs.
+Set `startup_options["python_executable"]` to select an exact canonical absolute
+POSIX interpreter path; otherwise a startup spec captures the current interpreter.
+The runtime uses that path directly without shell/PATH lookup or fallback. This
+selects an interpreter; it does not authenticate its version, executable hash,
+installed packages or image. Those checks remain required for a locked deployment.
 Cheap configuration is snapshotted at adapter construction; full startup and
 generation validation occurs on opening, before process creation, and can occur
 after artifact retrieval. Preparation validates the target, and the runtime
@@ -95,6 +101,15 @@ exit triggers owned cleanup. Unresolved cleanup is reported rather than claimed
 successful; retain an exposed cleanup lease when retrying that exact cleanup.
 These local bounds are not a provider billing guarantee or protection against
 machine shutdown, kernel failure or a killed controlling process.
+
+The local adapter and `verified_vllm_chat` also enforce `max_request_bytes`
+(1 MiB by default) for the complete serialized UTF-8 HTTP JSON body, including
+model/generation fields and accumulated messages. This is separate from the
+history bound and may reject a request before that bound is reached. Invalid or
+oversized bodies are rejected before constructing the HTTP transport and are
+not retried; the owned chat session still cleans up its runtime. The checked
+body is sent as the same bytes, not re-serialized by the HTTP library. Headers,
+request lines, TLS/socket buffers and backend memory are outside this byte cap.
 
 ## Adapter boundary and qualification
 

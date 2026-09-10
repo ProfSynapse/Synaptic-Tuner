@@ -31,6 +31,7 @@ on:
       - "tests/evaluator/test_local_run_chat.py"
       - "tests/evaluator/test_run_chat_local_integration.py"
       - "tests/evaluator/test_http_transport_policy.py"
+      - "tests/evaluator/test_http_request_bounds.py"
       - "tests/test_evaluator_clients.py"
       - "tests/cloud/test_vllm_setup.py"
       - "tests/cloud/test_cloud_hf_job_vllm.py"
@@ -230,12 +231,14 @@ jobs:
             tests/runtime \
             tests/evaluator/test_owned_process.py \
             tests/evaluator/test_vllm_runtime.py \
+            tests/evaluator/test_vllm_interpreter.py \
             tests/evaluator/test_vllm_startup_cleanup.py \
             tests/evaluator/test_chat_session.py \
             tests/evaluator/test_verified_vllm_chat.py \
             tests/evaluator/test_local_run_chat.py \
             tests/evaluator/test_run_chat_local_integration.py \
             tests/evaluator/test_http_transport_policy.py \
+            tests/evaluator/test_http_request_bounds.py \
             tests/test_evaluator_clients.py \
             tests/cloud/test_vllm_setup.py \
             tests/inference \

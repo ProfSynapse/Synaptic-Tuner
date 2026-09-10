@@ -6,6 +6,7 @@ common patterns like retry logic and message extraction to avoid code duplicatio
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 from abc import ABC, abstractmethod
@@ -16,6 +17,119 @@ import requests
 from .protocols import BackendError, BackendResponse, BackendSettings
 
 T = TypeVar("T")
+_MAX_HTTP_BODY_BYTES = 64 * 1024 * 1024
+_MAX_JSON_DEPTH = 64
+
+
+def _bounded_json_bytes(value: Any, maximum_bytes: int) -> bytes:
+    """Encode an ordinary JSON value once after bounded structural validation."""
+    active: set[int] = set()
+    nodes = 0
+
+    def add(total: int, amount: int) -> int:
+        total += amount
+        if total > maximum_bytes:
+            raise ValueError("HTTP request JSON is invalid or exceeds its bound")
+        return total
+
+    def string_size(item: str) -> int:
+        if len(item) > maximum_bytes:
+            raise ValueError("HTTP request JSON is invalid or exceeds its bound")
+        size = 2
+        for character in item:
+            codepoint = ord(character)
+            if character in ('"', "\\") or character in "\b\f\n\r\t":
+                size = add(size, 2)
+            elif codepoint < 0x20:
+                size = add(size, 6)
+            elif 0xD800 <= codepoint <= 0xDFFF:
+                raise ValueError("HTTP request JSON is invalid or exceeds its bound")
+            elif codepoint < 0x80:
+                size = add(size, 1)
+            elif codepoint < 0x800:
+                size = add(size, 2)
+            elif codepoint < 0x10000:
+                size = add(size, 3)
+            else:
+                size = add(size, 4)
+        return size
+
+    def visit(item: Any, depth: int) -> tuple[int, Any]:
+        nonlocal nodes
+        nodes += 1
+        if nodes > maximum_bytes or depth > _MAX_JSON_DEPTH:
+            raise ValueError("HTTP request JSON is invalid or exceeds its bound")
+        if item is None:
+            return 4, None
+        if type(item) is bool:
+            return (4 if item else 5), item
+        if type(item) is str:
+            return string_size(item), item
+        if type(item) is int:
+            if item.bit_length() > maximum_bytes * 4 + 1:
+                raise ValueError("HTTP request JSON is invalid or exceeds its bound")
+            try:
+                return add(0, len(str(item))), item
+            except ValueError:
+                raise ValueError(
+                    "HTTP request JSON is invalid or exceeds its bound"
+                ) from None
+        if type(item) is float:
+            if not math.isfinite(item):
+                raise ValueError("HTTP request JSON is invalid or exceeds its bound")
+            return add(0, len(json.dumps(item, allow_nan=False))), item
+        if type(item) not in (dict, list, tuple):
+            raise ValueError("HTTP request JSON is invalid or exceeds its bound")
+        identity = id(item)
+        if identity in active:
+            raise ValueError("HTTP request JSON is invalid or exceeds its bound")
+        active.add(identity)
+        try:
+            if type(item) is dict:
+                size = 2
+                first = True
+                snapshot = {}
+                for key, child in item.items():
+                    if type(key) is not str:
+                        raise ValueError(
+                            "HTTP request JSON is invalid or exceeds its bound"
+                        )
+                    if not first:
+                        size = add(size, 1)
+                    first = False
+                    size = add(size, string_size(key))
+                    size = add(size, 1)
+                    child_size, child_snapshot = visit(child, depth + 1)
+                    size = add(size, child_size)
+                    snapshot[key] = child_snapshot
+            else:
+                size = 2
+                first = True
+                snapshot = []
+                for child in item:
+                    if not first:
+                        size = add(size, 1)
+                    first = False
+                    child_size, child_snapshot = visit(child, depth + 1)
+                    size = add(size, child_size)
+                    snapshot.append(child_snapshot)
+            return size, snapshot
+        finally:
+            active.remove(identity)
+
+    try:
+        expected_size, snapshot = visit(value, 0)
+    except (RuntimeError, KeyError):
+        raise ValueError("HTTP request JSON is invalid or exceeds its bound") from None
+    try:
+        encoded = json.dumps(
+            snapshot, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError, RecursionError):
+        raise ValueError("HTTP request JSON is invalid or exceeds its bound") from None
+    if len(encoded) != expected_size or len(encoded) > maximum_bytes:
+        raise ValueError("HTTP request JSON is invalid or exceeds its bound")
+    return encoded
 
 
 class BaseBackendClient(ABC):
@@ -41,6 +155,7 @@ class BaseBackendClient(ABC):
         trust_environment: bool = True,
         allow_redirects: bool = True,
         max_response_bytes: int | None = None,
+        max_request_bytes: int | None = None,
     ) -> None:
         """Initialize the client.
 
@@ -54,15 +169,15 @@ class BaseBackendClient(ABC):
         self.retries = max(0, retries)
         if type(trust_environment) is not bool or type(allow_redirects) is not bool:
             raise TypeError("HTTP transport flags must be exact booleans")
-        if max_response_bytes is not None and (
-            type(max_response_bytes) is not int
-            or isinstance(max_response_bytes, bool)
-            or not 0 < max_response_bytes <= 64 * 1024 * 1024
-        ):
-            raise ValueError("HTTP response bound must be a positive exact integer")
+        for name, value in (("response", max_response_bytes), ("request", max_request_bytes)):
+            if value is not None and (
+                type(value) is not int or not 0 < value <= _MAX_HTTP_BODY_BYTES
+            ):
+                raise ValueError(f"HTTP {name} bound must be a positive exact integer")
         self._trust_environment = trust_environment
         self._allow_redirects = allow_redirects
         self._max_response_bytes = max_response_bytes
+        self._max_request_bytes = max_request_bytes
 
     @property
     def trust_environment(self) -> bool:
@@ -75,6 +190,10 @@ class BaseBackendClient(ABC):
     @property
     def max_response_bytes(self) -> int | None:
         return self._max_response_bytes
+
+    @property
+    def max_request_bytes(self) -> int | None:
+        return self._max_request_bytes
 
     def chat(self, messages: Sequence[Mapping[str, str]]) -> BackendResponse:
         """Send a chat conversation to the backend.
@@ -92,13 +211,20 @@ class BaseBackendClient(ABC):
         """
         payload = self._build_payload(messages)
         url = self._get_chat_url()
+        request_body = (
+            _bounded_json_bytes(payload, self.max_request_bytes)
+            if self.max_request_bytes is not None
+            else None
+        )
 
         return self._execute_with_retry(
-            operation=lambda: self._make_chat_request(url, payload),
+            operation=lambda: self._make_chat_request(url, payload, request_body),
             error_message=f"{self._client_name} chat request failed",
         )
 
-    def _make_chat_request(self, url: str, payload: Dict[str, Any]) -> BackendResponse:
+    def _make_chat_request(
+        self, url: str, payload: Dict[str, Any], request_body: bytes | None = None
+    ) -> BackendResponse:
         """Execute a single chat request.
 
         Args:
@@ -109,17 +235,34 @@ class BaseBackendClient(ABC):
             BackendResponse with the result
         """
         start = time.perf_counter()
-        data = self._request_json("POST", url, payload=payload)
+        data = self._request_json(
+            "POST", url, payload=payload, request_body=request_body
+        )
         latency_s = time.perf_counter() - start
         return self._extract_response(data, latency_s)
 
     def _request_json(
-        self, method: str, url: str, *, payload: Dict[str, Any] | None = None
+        self,
+        method: str,
+        url: str,
+        *,
+        payload: Dict[str, Any] | None = None,
+        request_body: bytes | None = None,
     ) -> Any:
+        if self.max_request_bytes is not None:
+            if request_body is None and payload is not None:
+                request_body = _bounded_json_bytes(payload, self.max_request_bytes)
+            elif request_body is not None and (
+                type(request_body) is not bytes
+                or len(request_body) > self.max_request_bytes
+            ):
+                raise ValueError("HTTP request JSON is invalid or exceeds its bound")
         if (
             self.trust_environment
             and self.allow_redirects
             and self.max_response_bytes is None
+            and self.max_request_bytes is None
+            and request_body is None
         ):
             function = requests.post if method == "POST" else requests.get
             kwargs = {"timeout": self.timeout, "headers": self._request_headers()}
@@ -132,14 +275,22 @@ class BaseBackendClient(ABC):
         session.trust_env = self.trust_environment
         response = None
         try:
+            headers = self._request_headers()
+            request_kwargs = {}
+            if request_body is not None:
+                headers = dict(headers)
+                headers["Content-Type"] = "application/json"
+                request_kwargs["data"] = request_body
+            elif payload is not None:
+                request_kwargs["json"] = payload
             response = session.request(
                 method,
                 url,
-                json=payload,
                 timeout=self.timeout,
-                headers=self._request_headers(),
+                headers=headers,
                 allow_redirects=self.allow_redirects,
                 stream=self.max_response_bytes is not None,
+                **request_kwargs,
             )
             if not self.allow_redirects and 300 <= response.status_code < 400:
                 raise ValueError("HTTP redirect is prohibited")
@@ -161,6 +312,7 @@ class BaseBackendClient(ABC):
             self.trust_environment
             and self.allow_redirects
             and self.max_response_bytes is None
+            and self.max_request_bytes is None
         ):
             function = requests.get if method == "GET" else requests.post
             return function(

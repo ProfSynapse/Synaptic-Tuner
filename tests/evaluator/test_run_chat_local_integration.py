@@ -79,7 +79,11 @@ def test_verified_run_to_local_vllm_chat_uses_one_owned_runtime(
         {},
         destination=destination,
         preparer=preparer,
-        startup_options={"port": 9137},
+        startup_options={
+            "port": 9137,
+            "python_executable": "/opt/inference/bin/python3",
+        },
+        max_request_bytes=8192,
     )
 
     with open_run_chat(
@@ -96,6 +100,7 @@ def test_verified_run_to_local_vllm_chat_uses_one_owned_runtime(
 
     assert len(spawned) == 1 and len(requests) == 1
     argv, spawn_kwargs = spawned[0]
+    assert argv[0] == "/opt/inference/bin/python3"
     assert argv[argv.index("--model") + 1] == str(
         tmp_path / "base" / "model" / "snapshots" / ("c" * 40)
         if preparer is not None
@@ -105,9 +110,12 @@ def test_verified_run_to_local_vllm_chat_uses_one_owned_runtime(
         assert preparer.calls == [("example/model", "c" * 40)]
     assert argv[argv.index("--tokenizer") + 1] == str(opened.local_model.tokenizer_path)
     assert spawn_kwargs["environment"]["HF_HUB_OFFLINE"] == "1"
-    assert requests[0][1]["json"]["model"] == "trained"
-    assert requests[0][1]["json"]["messages"] == [{"role": "user", "content": "Hi"}]
-    assert requests[0][1]["headers"] == {}
+    assert type(requests[0][1]["data"]) is bytes
+    assert len(requests[0][1]["data"]) <= 8192
+    payload = json.loads(requests[0][1]["data"])
+    assert payload["model"] == "trained"
+    assert payload["messages"] == [{"role": "user", "content": "Hi"}]
+    assert requests[0][1]["headers"] == {"Content-Type": "application/json"}
     assert requests[0][1]["allow_redirects"] is False
     assert sessions[0].trust_env is False and sessions[0].closed
     assert process.stopped.wait(1) and process.calls == 1

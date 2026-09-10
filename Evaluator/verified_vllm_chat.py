@@ -39,6 +39,7 @@ def verified_vllm_chat(
     max_tokens: int = 128,
     temperature: float = 0.0,
     top_p: float = 1.0,
+    max_request_bytes: int = 1 << 20,
     max_response_bytes: int = 1 << 20,
 ) -> Iterator[ChatSession]:
     """Own one verified-local runtime and conversation for this context.
@@ -58,6 +59,11 @@ def verified_vllm_chat(
     policy.__post_init__()
     if type(max_tokens) is not int or not 1 <= max_tokens <= 32768:
         raise ValueError("max_tokens is outside its bound")
+    if (
+        type(max_request_bytes) is not int
+        or not 1 <= max_request_bytes <= 64 * 1024 * 1024
+    ):
+        raise ValueError("max_request_bytes is outside its bound")
     if (
         type(max_response_bytes) is not int
         or not 1 <= max_response_bytes <= 64 * 1024 * 1024
@@ -91,6 +97,7 @@ def verified_vllm_chat(
                     retries=0,
                     trust_environment=False,
                     allow_redirects=False,
+                    max_request_bytes=max_request_bytes,
                     max_response_bytes=max_response_bytes,
                 )
                 session = ChatSession(client, runtime, policy)

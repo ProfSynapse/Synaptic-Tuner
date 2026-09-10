@@ -174,6 +174,17 @@ dependency or bootstrap pins. Retained configuration/quote evidence is parsed
 structurally during recovery, not reclassified as fresh source admission or
 runtime qualification. See `docs/review/modal-inference-commands.md`.
 
+Runtime prerequisite update (2026-09-10): the existing vLLM startup spec accepts
+an explicit `python_executable`; the runtime uses that exact canonical absolute
+POSIX path rather than substituting the current interpreter. Selection alone
+does not authenticate the executable or inference image. The existing verified
+chat/local adapter also accepts `max_request_bytes` (default 1 MiB), enforcing
+the complete serialized HTTP JSON body before transport creation. A Modal
+composition must explicitly project its admitted interpreter and request limit
+into these fields; this update does not yet provide that composition, a runtime
+lock check or a runnable Modal service. See
+`docs/review/inference-runtime-prerequisites.md` for measured qualification.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical

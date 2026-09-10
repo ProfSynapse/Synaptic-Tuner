@@ -87,6 +87,7 @@ def test_composition_uses_one_runtime_client_and_explicit_prompt(
             "retries": 0,
             "trust_environment": False,
             "allow_redirects": False,
+            "max_request_bytes": 1 << 20,
             "max_response_bytes": 1 << 20,
         }
         assert chat.chat("Hi").message == "hello"
@@ -165,6 +166,11 @@ def test_user_exception_is_not_reclassified(setup, tmp_path):
         {"top_p": 0},
         {"max_response_bytes": True},
         {"max_response_bytes": 0},
+        {"max_request_bytes": True},
+        {"max_request_bytes": 0},
+        {"max_request_bytes": -1},
+        {"max_request_bytes": None},
+        {"max_request_bytes": 64 * 1024 * 1024 + 1},
     ],
 )
 def test_invalid_generation_is_rejected_before_startup(setup, tmp_path, kwargs):
@@ -175,6 +181,32 @@ def test_invalid_generation_is_rejected_before_startup(setup, tmp_path, kwargs):
         ):
             pytest.fail("yielded")
     assert captured["starts"] == []
+
+
+def test_request_limit_reaches_real_client_and_closes_owned_runtime(
+    setup, tmp_path, monkeypatch
+):
+    from Evaluator import base_client
+    from Evaluator.chat_session import ChatSessionError
+    from Evaluator.vllm_client import VLLMClient
+
+    spec, policy, process, runtime, captured = setup
+    attempts = []
+
+    def forbidden_session():
+        attempts.append("session")
+        raise AssertionError("oversized request reached HTTP")
+
+    monkeypatch.setattr(composition, "VLLMClient", VLLMClient)
+    monkeypatch.setattr(base_client.requests, "Session", forbidden_session)
+    with composition.verified_vllm_chat(
+        spec, policy, cwd=tmp_path, environment={}, max_request_bytes=32
+    ) as chat:
+        assert len(captured["starts"]) == 1
+        with pytest.raises(ChatSessionError):
+            chat.chat("Hi")
+    assert attempts == []
+    assert process.calls == 1 and not runtime.cleanup_pending
 
 
 def test_explicit_network_source_is_not_relabeled_verified(setup, tmp_path):
@@ -306,8 +338,8 @@ def test_real_target_runtime_client_session_chain_with_fake_effects(
         target.base_model_path or target.model_path
     )
     assert argv[argv.index("--tokenizer") + 1] == str(target.tokenizer_path)
-    assert requests[0][1]["json"]["model"] == "trained"
-    assert requests[0][1]["headers"] == {}
+    assert json.loads(requests[0][1]["data"])["model"] == "trained"
+    assert requests[0][1]["headers"] == {"Content-Type": "application/json"}
     assert requests[0][1]["allow_redirects"] is False
     assert not sessions[0].trust_env
     assert stopped.wait(1) and process.calls == 1
