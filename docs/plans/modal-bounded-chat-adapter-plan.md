@@ -21,6 +21,14 @@ qualification; see `../review/modal-mounted-inference-artifacts.md`. Remote
 launch admission, chat resource authorization and the inference runtime lock
 remain open.
 
+Preparation update (2026-09-10): the chat-specific configuration/resource
+preparation is implemented and locally qualified with 2,438 combined tests,
+independent review and an exact-commit wheel. It authenticates configuration and
+quote inputs, not a serving grant or an inspected inference runtime. Exact chat
+command retention, executor/transport, inference lock/deployment evidence
+production and remote launch admission remain open; see
+`../review/modal-inference-preparation.md`.
+
 ## Product boundary
 
 A consumer chooses a runtime for one verified training run and explicitly sends

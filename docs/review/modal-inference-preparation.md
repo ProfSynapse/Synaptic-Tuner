@@ -1,7 +1,8 @@
 # Modal chat preparation binding
 
-Engineering slice, 2026-09-10. Implementation and provider-free qualification in
-progress. This slice binds a separately selected inference configuration and
+Engineering slice, 2026-09-10. Implementation, independent review, combined
+provider-free and immutable package qualification complete locally. This slice
+binds a separately selected inference configuration and
 resource quote into the existing Foundation preparation and commands. It creates
 no grant, store, provider object, executable registration or serving session.
 
@@ -40,8 +41,25 @@ EHR, cloud resources, credentials, pushes and merges are out of scope.
 
 ## Qualification
 
-Pending frozen implementation, independent review and measured test/package
-results. Existing training source locks must remain unchanged and CURRENT.
+The final 35-case acceptance module passed in 95.47 seconds on clean CPython
+3.12.9 / pytest 8.4.2 with plugin autoload disabled and no Modal or PyTorch.
+Independent integrated qualification passed 51 cases in 144.58 seconds: the
+35 preparation cases plus the 16 existing workload-binding cases. Source review
+passed without blockers. The lead also measured 14 earlier clean-lane cases
+passing in 37.10 seconds. An initial eight-case agent run used a system-site
+helper interpreter; it is preliminary evidence, not the clean qualification.
+The configuration-assignment regression was measured failing before its sealing
+fix; the final case passes. No claim of a flaky production test is implied.
+
+The frozen source passed the defined combined selection: **2,438 tests in
+449.80 seconds**, using the same clean interpreter and `python -c` launch.
+This is the prior 2,403-case coordinator/Foundation/provider/training/runtime/
+inference selection plus the 35 new preparation cases, not the whole repository
+suite. No production or test source changed during that run.
+
+Both existing training locks remain CURRENT: 97 Modal pins and 66 offline
+trainer members (679,487 payload bytes). The checked-in skill synchronization
+check passes. These locks are unchanged and do not qualify an inference runtime.
 
 Review corrections: configuration authentication uses a distinct inference
 purpose, while quotes reuse the existing resource-only purpose. The selected
@@ -57,3 +75,23 @@ preparation digests cannot produce a different command. Evidence nonce values
 are authenticated identity metadata, not standalone replay protection. Actual
 receipt/grant authentication, freshness at execution and durable one-shot
 consumption remain outside this preparation factory.
+
+## Immutable package qualification
+
+Exact source commit `463d044094419d540b7a31b58df2e007df9e6b0e` was archived and
+built offline without dependency downloads. The wheel is 2,053,846 bytes with
+SHA-256
+`7ff80f020100749322b4aadd68cd047efaa600b1f5d4396a1cd99b3079823fa4`.
+Installed-package checks from a neutral directory passed the checked-in CI
+snippet's 38 engine/Evaluator imports and two resource checks. Factory,
+configuration, stage/submit and unchanged public run-chat signature binding also
+passed. Modal and PyTorch were absent from the disposable package environment;
+the trainer environment was untouched.
+
+Independent audit verified all 719 unique ZIP/RECORD entries and all 711 Python
+members against the immutable source archive. The preparation module's SHA-256
+is `cd21c48c2839a6e633f88a4c00e4b9d364a3ea229d1502165597d1a5a5c91659`.
+The source commit contains exactly eight intended paths. No unexpected
+secret/private-artifact filenames were found; this is not a content-level
+secret scan. No CI dispatch, provider execution, model loading or live-chat
+qualification is implied.
