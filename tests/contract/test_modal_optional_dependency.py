@@ -61,15 +61,22 @@ def test_provider_specific_public_contract_still_does_not_import_modal_sdk():
     module = __import__("synaptic_tuner.api.v1.modal", fromlist=["*"])
     added = set(sys.modules) - before
     assert "modal" not in added
-    assert hasattr(module, "ModalTrainingRepository")
-    assert hasattr(module, "ModalDurablePreparationV1")
-    assert hasattr(module, "ModalPreparedRunV1")
-    from tuner.execution.providers.modal.training import ModalPreparedRunV1
-    assert module.ModalPreparedRunV1 is ModalPreparedRunV1
+    for removed in ("ModalTrainingRepository", "ModalDurablePreparationV1",
+                    "ModalPreparedRunV1", "ModalTrainingOperations",
+                    "ModalVerifiedRunsOperationsV1", "MountedModalWorkerV1",
+                    "MountedCompletionProducerV1", "build_modal_deployment",
+                    "compose_modal_training_operations", "compose_modal_verified_run_reads"):
+        assert not hasattr(module, removed)
+    from tuner.execution.providers.modal.coordinator_factories import modal_coordinator_registration
+    assert module.modal_coordinator_registration is modal_coordinator_registration
+    assert hasattr(module, "ModalFoundationRetentionDelegate")
+    assert hasattr(module, "ModalOperationalPreflightAdapter")
+    assert hasattr(module, "ModalSourceVerificationPorts")
+    from tuner.execution.providers.modal.coordinator_composition import compose_modal_coordinator
+    assert module.compose_modal_coordinator is compose_modal_coordinator
     assert hasattr(module, "ExplicitModal154ReadFacade")
     assert hasattr(module, "ModalDeploymentSelectionV1")
     assert hasattr(module, "ModalDeploymentSpecV1")
     assert hasattr(module, "ModalVerificationPolicyV1")
-    assert hasattr(module, "MountedModalWorkerV1")
-    assert hasattr(module, "build_modal_deployment")
+    assert hasattr(module, "build_modal_coordinator_deployment")
     assert hasattr(module, "compose_modal_source_finalizer")

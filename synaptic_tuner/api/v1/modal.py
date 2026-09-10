@@ -11,14 +11,34 @@ from tuner.execution.providers.modal.config import (
 )
 from tuner.execution.providers.modal.binding import ModalClientBinding
 from tuner.execution.providers.modal.composition import (
+    ModalSourceVerificationPorts,
     ModalVerificationPolicyV1,
     compose_modal_source_finalizer,
 )
 from tuner.execution.providers.modal.deployment_v1 import (
     ModalDeploymentObjectsV1,
     ModalDeploymentSpecV1,
-    build_modal_deployment,
 )
+from tuner.execution.providers.modal.coordinator_deployment import build_modal_coordinator_deployment
+from tuner.execution.providers.modal.coordinator_composition import (
+    ModalCoordinatorComposition, ModalCoordinatorStorePorts,
+    ModalFoundationCompositionPorts, compose_modal_coordinator,
+)
+from tuner.execution.providers.modal.coordinator_adapter import ModalPreparationAdapter
+from tuner.execution.providers.modal.coordinator_effects import (
+    ModalFoundationEffectExecutor, ModalFoundationReconciliationAdapter,
+)
+from tuner.execution.providers.modal.coordinator_factories import modal_coordinator_registration
+from tuner.execution.providers.modal.coordinator_preflight import (
+    AuthenticatedModalQuote, ModalOperationalPreflightAdapter, ModalQuoteBody,
+    TrustedEvidenceIdentity,
+)
+from tuner.execution.providers.modal.coordinator_reader import ModalCoordinatorRunReader
+from tuner.execution.providers.modal.coordinator_read_transport import ModalFoundationReadTransport
+from tuner.execution.providers.modal.coordinator_retention import (
+    ModalFoundationRetentionDelegate, ModalRetainedPreparation,
+)
+from tuner.execution.providers.modal.coordinator_transport import ModalFoundationHostTransport
 from tuner.execution.providers.modal.deployment_identity import modal_function_name
 from tuner.execution.providers.modal.facade import (
     EXACT_MODAL_SDK_VERSION,
@@ -26,8 +46,6 @@ from tuner.execution.providers.modal.facade import (
     ModalFacadeError,
     ModalFunctionCallState,
 )
-from tuner.execution.providers.modal.producer import MountedCompletionProducerV1
-from tuner.execution.providers.modal.remote import MountedModalWorkerV1
 from tuner.execution.providers.modal.resolution import (
     ModalDeploymentSelectionV1,
     ModalDualCloneSourceFinalizer,
@@ -39,22 +57,25 @@ from tuner.execution.providers.modal.runtime import (
     GitDualCloneMaterializer,
     SubprocessSftRunner,
 )
-from tuner.execution.providers.modal.training import (
-    ModalDurablePreparationV1,
-    ModalPreparedRunV1,
-    ModalPlanContextV1,
-    ModalTrainingOperations,
-    ModalTrainingRepository,
-    compose_modal_training_operations,
-)
-from tuner.execution.providers.modal.run_reads import (
-    ModalVerifiedRunsOperationsV1,
-    compose_modal_verified_run_reads,
-)
 
 __all__ = [
-    "ModalDurablePreparationV1",
-    "ModalPreparedRunV1",
+    "AuthenticatedModalQuote",
+    "ModalCoordinatorComposition",
+    "ModalCoordinatorStorePorts",
+    "ModalFoundationCompositionPorts",
+    "compose_modal_coordinator",
+    "ModalCoordinatorRunReader",
+    "ModalFoundationEffectExecutor",
+    "ModalFoundationHostTransport",
+    "ModalFoundationReadTransport",
+    "ModalFoundationReconciliationAdapter",
+    "ModalFoundationRetentionDelegate",
+    "ModalOperationalPreflightAdapter",
+    "ModalPreparationAdapter",
+    "ModalQuoteBody",
+    "ModalRetainedPreparation",
+    "ModalSourceVerificationPorts",
+    "TrustedEvidenceIdentity",
     "ModalClientBinding",
     "ModalDeploymentObjectsV1",
     "ModalDeploymentSelectionV1",
@@ -63,25 +84,18 @@ __all__ = [
     "ModalExecutionSourceResolutionV1",
     "ModalFacadeError",
     "ModalFunctionCallState",
-    "ModalPlanContextV1",
     "ModalProviderProfileV1",
     "ModalRuntimeLockV1",
     "ModalSecretProfileV1",
-    "ModalTrainingOperations",
-    "ModalTrainingRepository",
     "ModalVerificationPolicyV1",
-    "ModalVerifiedRunsOperationsV1",
-    "MountedCompletionProducerV1",
-    "MountedModalWorkerV1",
     "EnvironmentHmacAuthenticator",
     "EXACT_MODAL_SDK_VERSION",
     "ExplicitModal154ReadFacade",
     "GitDualCloneMaterializer",
     "SubprocessSftRunner",
     "VerifiedModalDeploymentIdentityV1",
-    "build_modal_deployment",
+    "build_modal_coordinator_deployment",
+    "modal_coordinator_registration",
     "modal_function_name",
     "compose_modal_source_finalizer",
-    "compose_modal_training_operations",
-    "compose_modal_verified_run_reads",
 ]

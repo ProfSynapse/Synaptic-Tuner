@@ -8,11 +8,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Callable, Mapping
+from typing import Mapping
 
 from ...contracts import safe_ref
 from .deployment_identity import validate_modal_function_identity
-from .facade import EXACT_MODAL_SDK_VERSION, MODAL_VOLUME_V1, ModalFacadeError
 
 APP_NAME = "synaptic-training-v1"
 FUNCTION_FAMILY = "run_sft_v1"
@@ -83,83 +82,10 @@ class ModalDeploymentObjectsV1:
     runtime_secret: object
 
 
-def build_modal_deployment(
-    *,
-    sdk: object,
-    client: object,
-    environment_name: str,
-    spec: ModalDeploymentSpecV1,
-    worker: Callable[[bytes, str, Callable[[], None]], object],
-) -> ModalDeploymentObjectsV1:
-    """Build, but do not deploy or invoke, the immutable Modal application."""
-    if getattr(sdk, "__version__", None) != EXACT_MODAL_SDK_VERSION:
-        raise ModalFacadeError("modal_sdk_version_mismatch")
-    if client is None or not callable(worker):
-        raise TypeError("explicit Modal client and worker are required")
-    environment_name = safe_ref(environment_name, "environment_name")
-    if type(spec) is not ModalDeploymentSpecV1:
-        raise TypeError("ModalDeploymentSpecV1 is required")
-    control = sdk.Volume.from_name(
-        spec.control_volume_name,
-        environment_name=environment_name,
-        create_if_missing=False,
-        version=MODAL_VOLUME_V1,
-        client=client,
-    )
-    artifact = sdk.Volume.from_name(
-        spec.artifact_volume_name,
-        environment_name=environment_name,
-        create_if_missing=False,
-        version=MODAL_VOLUME_V1,
-        client=client,
-    )
-    secret = sdk.Secret.from_name(
-        spec.runtime_secret_name,
-        environment_name=environment_name,
-        required_keys=list(spec.runtime_secret_keys),
-        client=client,
-    )
-    image = (
-        sdk.Image.from_registry(spec.registry_reference)
-        .entrypoint([])
-        .env(dict(spec.environment))
-        .add_local_python_source(
-            *BOOTSTRAP_SOURCE_MODULES,
-            copy=False,
-            ignore=[],
-        )
-    )
-    app = sdk.App(APP_NAME, image=image, include_source=False)
-
-    @app.function(
-        name=spec.function_name,
-        serialized=True,
-        image=image,
-        gpu=GPU,
-        volumes={CONTROL_MOUNT: control, ARTIFACT_MOUNT: artifact},
-        secrets=[secret],
-        retries=0,
-        timeout=spec.timeout_seconds,
-        include_source=False,
-        restrict_modal_access=True,
-        single_use_containers=True,
-    )
-    def run_sft_v1(canonical_command: bytes):
-        if not isinstance(canonical_command, bytes):
-            raise ValueError("canonical mutation command bytes are required")
-        job_ref = sdk.current_function_call_id()
-        if not isinstance(job_ref, str) or not job_ref:
-            raise ValueError("Modal function call identity is unavailable")
-        result = worker(canonical_command, job_ref, artifact.commit)
-        artifact.commit()
-        control.commit()
-        return result
-
-    return ModalDeploymentObjectsV1(app, run_sft_v1, image, control, artifact, secret)
 
 
 __all__ = [
     "APP_NAME", "ARTIFACT_MOUNT", "BOOTSTRAP_SOURCE_MODULES", "CONTROL_MOUNT",
     "FUNCTION_FAMILY", "GPU",
-    "ModalDeploymentObjectsV1", "ModalDeploymentSpecV1", "build_modal_deployment",
+    "ModalDeploymentObjectsV1", "ModalDeploymentSpecV1",
 ]

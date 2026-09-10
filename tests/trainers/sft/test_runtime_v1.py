@@ -17,7 +17,7 @@ from types import ModuleType
 import pytest
 
 import Trainers.sft.runtime_v1 as runtime_v1
-from synaptic_tuner.api.v1.training import CanonicalDocument
+from tuner.training.contracts import CanonicalDocument
 from Trainers.sft.runtime_v1 import (
     MAX_WORKLOAD_BYTES,
     RuntimeV1Error,
@@ -505,7 +505,7 @@ def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
     invocation = runner.calls[0]
     assert invocation.cwd == roots["tmp"]
     assert invocation.argv[:4] == (
-        sys.executable,
+        str(Path(sys.executable).resolve(strict=True)),
         "-I",
         str(
             Path(environment["SYNAPTIC_ENGINE_ROOT"])

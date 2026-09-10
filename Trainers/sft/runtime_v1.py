@@ -968,7 +968,7 @@ def decode_and_validate_workload(
         _validate_schema(document, engine_root)
     except RuntimeV1Error as error:
         raise _mark_runtime_stage(error, "runtime_workload_schema_rejected")
-    from synaptic_tuner.api.v1.training import CanonicalDocument
+    from tuner.training.contracts import CanonicalDocument
     from tuner.project.execution_source import ExecutionSourceV1
     from tuner.training.methods.sft import compile_sft_workload
 

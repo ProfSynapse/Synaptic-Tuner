@@ -25,14 +25,20 @@ The workflow executes:
 - `tests/contract/test_modal_optional_dependency.py`
 - `tests/contract/test_modal_runtime_lock.py`
 - `tests/contract/test_modal_runtime_lock_regeneration.py`
+- `tests/contract/test_modal_bootstrap_closure.py`
+- `tests/contract/test_offline_sft_worker_closure.py`
 - `tests/contract/test_public_runs_api_v1.py`
 - `tests/contract/test_public_training_api_v1.py`
+- `tests/contract/test_public_publication_v1.py`
 - `tests/execution/coordinator_v1/`
 - `tests/execution/foundation_v2/`
 - `tests/execution/test_fake_provider_v1_conformance.py`
 - `tests/execution/test_mutation_broker.py`
 - `tests/execution/providers/test_modal_*.py`
 - `tests/training/`
+- `tests/runtime/`
+- `tests/trainers/sft/test_runtime_v1.py`
+- `tests/execution/providers/docker_provider_v1/`
 
 The Modal adapter test drives the real generic coordinator against its
 synthetic Foundation executor, verifies refusal by production preflight, and
@@ -82,13 +88,19 @@ python -B -m pytest -q -p no:cacheprovider \
   tests/contract/test_modal_optional_dependency.py \
   tests/contract/test_modal_runtime_lock.py \
   tests/contract/test_modal_runtime_lock_regeneration.py \
+  tests/contract/test_modal_bootstrap_closure.py \
+  tests/contract/test_offline_sft_worker_closure.py \
   tests/contract/test_public_runs_api_v1.py \
   tests/contract/test_public_training_api_v1.py \
+  tests/contract/test_public_publication_v1.py \
   tests/execution/coordinator_v1 \
   tests/execution/foundation_v2 \
   tests/execution/test_fake_provider_v1_conformance.py \
   tests/execution/test_mutation_broker.py \
   tests/training \
+  tests/runtime \
+  tests/trainers/sft/test_runtime_v1.py \
+  tests/execution/providers/docker_provider_v1 \
   tests/execution/providers/test_modal_*.py
 ```
 

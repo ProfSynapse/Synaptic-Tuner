@@ -11,7 +11,7 @@ import pytest
 
 import tuner.runtime as runtime_api
 import tuner.runtime.dispatch as dispatch_module
-from synaptic_tuner.api.v1.training import (
+from tuner.training.contracts import (
     ArtifactPolicy,
     CanonicalDocument,
     ResourceSpec,

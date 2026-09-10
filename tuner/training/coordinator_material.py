@@ -7,7 +7,7 @@ import hashlib
 import json
 
 from synaptic_tuner.api.v1.planning import ResolvedTrainingRequest as PlanningRequest
-from synaptic_tuner.api.v1.training import (
+from tuner.training.contracts import (
     ArtifactPolicy, CanonicalDocument, ResolvedTrainingRequest, ResourceSpec,
     RuntimeSpec, TrainingRequest,
 )

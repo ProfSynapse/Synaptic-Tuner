@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import Mapping, Protocol, runtime_checkable
 
-from synaptic_tuner.api.v1.training import CanonicalDocument
+from tuner.training.contracts import CanonicalDocument
 from tuner.project.execution_source import ExecutionSourceV1
 
 

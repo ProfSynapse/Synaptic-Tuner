@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Mapping, Protocol, TypeAlias, runtime_checkable
 
-from synaptic_tuner.api.v1.training import (
+from tuner.training.contracts import (
     ArtifactPolicy,
     CanonicalDocument,
     ResourceSpec,

@@ -13,11 +13,19 @@ on:
       - "tuner/runtime/**"
       - "tests/contract/test_modal_optional_dependency.py"
       - "tests/contract/test_modal_runtime_lock*.py"
+      - "tests/contract/test_modal_bootstrap_closure.py"
+      - "tests/contract/test_offline_sft_worker_closure.py"
+      - "tests/contract/fixtures/api_v1_formal_exports_coordinator.json"
       - "tests/contract/test_public_runs_api_v1.py"
       - "tests/contract/test_public_training_api_v1.py"
+      - "tests/contract/test_public_publication_v1.py"
       - "tests/contract/test_provider_neutral_foundation_v1.py"
       - "tests/conftest.py"
       - "tests/training/**"
+      - "tests/runtime/**"
+      - "tests/trainers/sft/test_runtime_v1.py"
+      - "tests/execution/providers/docker_provider_v1/**"
+      - "tuner/execution/providers/docker_provider_v1/**"
       - "tests/execution/coordinator_v1/**"
       - "tests/execution/foundation_v2/**"
       - "tests/execution/providers/test_modal_*.py"
@@ -28,8 +36,18 @@ on:
       - "examples/host-project/providers/modal-a10-v1.yaml"
       - "requirements/modal-launcher-v1.lock"
       - "tuner/runtime/manifests/offline-sft-worker-v1.json"
-      - "Trainers/sft/runtime_v1.py"
+      - "Trainers/sft/**"
+      - "Trainers/shared/**"
+      - "shared/**"
+      - "tuner/cloud/**"
+      - "tuner/execution/*.py"
+      - "tuner/__init__.py"
+      - "synaptic_tuner/__init__.py"
+      - "synaptic_tuner/_version.py"
+      - "synaptic_tuner/api/__init__.py"
+      - "schemas/**"
       - "scripts/regenerate_modal_runtime_lock.py"
+      - "scripts/regenerate_offline_sft_worker_closure.py"
       - ".gitattributes"
       - "pyproject.toml"
       - ".github/workflows/provider-free-conformance.yml"
@@ -125,14 +143,18 @@ jobs:
           import tuner.execution.providers.modal.coordinator_transport
           import tuner.execution.providers.modal.coordinator_deployment
           import tuner.execution.providers.modal.coordinator_retention
+          import tuner.execution.providers.modal.coordinator_composition
           import tuner.execution.providers.modal.worker_ports
           import tuner.execution.providers.modal.worker_source
           import tuner.training.coordinator_material
           import tuner.training.coordinator_service
+          import tuner.training.contracts
           PY
 
       - name: Check source hashes without refreshing the runtime lock
-        run: python -B scripts/regenerate_modal_runtime_lock.py
+        run: |
+          python -B scripts/regenerate_offline_sft_worker_closure.py
+          python -B scripts/regenerate_modal_runtime_lock.py
 
       - name: Run provider-free conformance contracts
         env:
@@ -147,11 +169,17 @@ jobs:
             tests/contract/test_modal_optional_dependency.py \
             tests/contract/test_modal_runtime_lock.py \
             tests/contract/test_modal_runtime_lock_regeneration.py \
+            tests/contract/test_modal_bootstrap_closure.py \
+            tests/contract/test_offline_sft_worker_closure.py \
             tests/contract/test_public_runs_api_v1.py \
             tests/contract/test_public_training_api_v1.py \
+            tests/contract/test_public_publication_v1.py \
             tests/execution/coordinator_v1 \
             tests/execution/foundation_v2 \
             tests/execution/test_fake_provider_v1_conformance.py \
             tests/execution/test_mutation_broker.py \
             tests/training \
+            tests/runtime \
+            tests/trainers/sft/test_runtime_v1.py \
+            tests/execution/providers/docker_provider_v1 \
             tests/execution/providers/test_modal_*.py

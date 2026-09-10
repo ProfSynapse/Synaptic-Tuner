@@ -8,7 +8,7 @@ from dataclasses import replace
 
 import pytest
 
-from synaptic_tuner.api.v1.training import CanonicalDocument
+from tuner.training.contracts import CanonicalDocument
 from tuner.runtime.artifacts import ArtifactEntry, ArtifactInventory, verify_inventory
 from tuner.runtime.dispatch import ProcessResult
 from tuner.runtime.verification import (

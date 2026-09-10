@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from synaptic_tuner.api.v1.training import (
+from tuner.training.contracts import (
     CanonicalDocument,
     ResourceSpec,
     RuntimeSpec,
@@ -12,12 +12,8 @@ from synaptic_tuner.api.v1.training import (
 from tuner.project.context import ProjectContext
 from tuner.project.execution_source import AuthenticatedSourceEvidenceV1, ExecutionSourceV1
 from tuner.project.source_bundle import SourceLock
-from tuner.training import (
-    ResolvedTrainingComponents,
-    TrainingResolutionError,
-    TrainingService,
-    default_recipe_registry,
-)
+from tuner.training import TrainingService, default_recipe_registry
+from tuner.training.contracts import ResolvedTrainingComponents, TrainingResolutionError
 
 
 def _execution_source(submodule_path: str) -> ExecutionSourceV1:

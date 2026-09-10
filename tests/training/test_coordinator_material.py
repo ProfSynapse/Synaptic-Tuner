@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from synaptic_tuner.api.v1.training import CanonicalDocument
+from tuner.training.contracts import CanonicalDocument
 from tuner.training import TrainingService, default_recipe_registry
 from tuner.training.recipes import CompiledWorkload, RecipeRegistry
 from tuner.training.coordinator_material import (

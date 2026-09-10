@@ -265,11 +265,12 @@ def test_run_parsers_reject_hostile_field_name_subclasses_without_callbacks() ->
 
 
 def test_api_host_uses_the_canonical_runs_facade() -> None:
+    class Clock:
+        def now(self):
+            return "2026-08-30T12:00:00Z"
+
     ports = HostPorts(
-        lifecycle=object(), runs=object(), grants=object(), secrets=object(),
-        evidence_replay=object(), authenticator=object(),
-        clock=lambda: "2026-08-30T12:00:00Z", git_remote=object(),
-        modal_reads=object(), training_resolver=object(),
+        runs=object(), clock=Clock(),
     )
     host = APIHost(object(), ports)
     assert type(host.runs) is RunsAPI

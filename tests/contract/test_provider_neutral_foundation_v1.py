@@ -161,7 +161,7 @@ def test_formal_v1_exports_are_frozen_exactly() -> None:
     import synaptic_tuner.api.v1 as api
 
     baseline = json.loads(
-        (ROOT / "tests/contract/fixtures/api_v1_formal_exports_pre_b1.json").read_text(
+        (ROOT / "tests/contract/fixtures/api_v1_formal_exports_coordinator.json").read_text(
             encoding="utf-8"
         )
     )
@@ -169,7 +169,7 @@ def test_formal_v1_exports_are_frozen_exactly() -> None:
     assert "EventCode" not in api.__all__
     assert "EventCode" in dir(api)
     assert api.EventCode.__name__ == "EventCode"
-    assert "ProviderDescriptor" not in api.__all__
+    assert "ProviderDescriptor" in api.__all__
     with pytest.raises(AttributeError):
         getattr(api, "DefinitelyNotAPublicAttribute")
 

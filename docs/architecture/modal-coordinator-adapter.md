@@ -1,24 +1,27 @@
 # Modal adapter cutover
 
-Status: preparation, complete-command configuration binding and injected
-effect/read boundaries implemented locally; production execution cutover incomplete.
+Status: Foundation-native engine cutover implemented locally; public execution
+capabilities remain disabled pending consumer integration and live qualification.
 
 This work belongs to the engine. Consumers supply configuration, credentials,
 approval, and durable stores. No research-project implementation is required
 by the adapter or its tests.
 
-## Existing boundaries
+## Current boundaries
 
-The engine contains two execution paths. The existing Modal implementation in
-`tuner/execution/providers/modal/training.py` still owns its lifecycle. The newer
-`TrainingCoordinatorV1` in `tuner/execution/coordinator_v1` owns provider-neutral
-stage, submit, cancellation, reconciliation, and durable transition ordering.
-Docker already implements ports for that coordinator.
+`TrainingCoordinatorV1` and the Foundation V2 broker own provider-neutral stage,
+submit, cancellation, reconciliation, and durable transition ordering. The
+Modal implementation now composes those existing engine contracts with exact
+command binding, consumer-retained stage and launch facts, one-attempt provider
+effects, authenticated reads, and the fixed remote worker. The former Modal
+lifecycle modules were removed rather than wrapped or converted into a second
+authority path.
 
-Connecting Modal means implementing those same ports, not wrapping the old
-Modal lifecycle behind a renamed service. The existing Foundation registry,
-broker, coordinator, public contracts, and consumer-owned persistence remain
-the integration points. This slice does not add another registry or database.
+The consuming host still owns authorization, evidence keys, configuration,
+durable Foundation state, retained immutable catalogs, and explicit Modal SDK
+client construction. The engine supplies ports and composition; it does not add
+a provider database, adopt historical lifecycle records, or infer authority
+from digests.
 
 ## Implemented preparation adapter
 
@@ -42,51 +45,61 @@ names, Volume names, runtime environment values, and Secret declarations remain
 inside the adapter. A supplied quote digest and a locally constructed deployment
 selection are commitments, not authenticated provider observations.
 
-Preparation does not grant permission to stage or submit. The adapter advertises
-no operational capabilities and returns `ready=False` with the closed diagnostic
-`modal_coordinator_execution_unavailable`. It is not registered as an executable
-provider. There is no fallback to the older Modal lifecycle.
+Preparation alone does not grant permission to stage or submit. The preparation
+adapter still advertises no operational capabilities and its own preflight
+refuses execution. Production composition instead requires the separately
+authenticated operational preflight, the exact shared preparation, deployment,
+explicit client, quote, source, clock, authorities, and consumer stores. The
+checked-in registration remains capability-disabled, so this local cutover does
+not by itself authorize provider execution. There is no fallback to the former
+Modal lifecycle.
 
-The tests drive the real generic coordinator through stage and submit using its
-existing synthetic Foundation backend. They check one-shot/restart behavior,
-preparation and command lineage, substituted inputs, consumer-input mutation,
-scope binding, and the refusal of the adapter's production preflight. Synthetic
-success does not prove a Modal API call, deployment, training run, or artifact.
+Provider-free tests drive the real generic coordinator, Foundation broker,
+retention delegate, Modal host transport, worker admission, producer, and reader
+against consumer-owned fakes. They check one-shot/restart behavior, complete
+stage-to-submit lineage, cancellation targeting, substituted inputs, source and
+deployment binding, bounded evidence, and zero provider I/O on denial. Synthetic
+success does not prove a Modal API call, deployment, training run, artifact,
+model quality, or spending approval.
 
 ## Import boundary
 
-The provider package no longer eagerly imports Modal. The internal Modal package
-no longer re-exports its older composition functions. Import those from their
-defining module, or use the existing public `synaptic_tuner.api.v1.modal` surface.
-No compatibility aliases were added. The public API exports remain unchanged.
-Importing the new adapter is tested without loading a provider SDK, consumer
-code, SQLite, or the old Modal training lifecycle.
+The provider package does not eagerly import the optional Modal SDK. The internal
+Modal package has no compatibility re-exports for the removed lifecycle. The
+explicit `synaptic_tuner.api.v1.modal` surface now exports the reviewed
+Foundation-native composition types and functions; removed public lifecycle
+names have no aliases. Importing the provider-neutral public API root remains
+lazy and does not load `tuner`, Modal, SQLite, or host implementation code. SDK-free source and
+installed-wheel checks cover the new Modal modules and packaged lock resources.
 
 ## Remaining work before activation
 
-1. Connect the Foundation executor and lookup adapter to a Foundation-native
-   staging, submit, cancellation and evidence transport. Their injected-port
-   tests do not establish production transport. The older stage material and
-   worker command still use different contracts; do not convert a new command
-   into old authority or send it to a parser expecting the old wire format.
-2. Connect the authenticated run-reader boundary to real terminal/log/inventory
-   reads. Inventory authentication must not download model bodies; byte streams
-   independently verify exact membership, identity, bounds and hashes.
-3. Connect authenticated preflight, including deployment/Volume identities,
-   quote expiry, runtime/source locks, and explicit client selection. A digest
-   alone must never become authority. Persist the exact resolved configuration
-   through consumer-owned ports before allowing restart.
-4. Register only the implemented factories and capabilities in the existing
-   lazy registry. Test interruption, ambiguity, restart, cancellation, and
-   artifact retrieval through the same coordinator as other adapters.
-5. Cut over the public composition atomically, remove the old Modal lifecycle
-   path and `HostPorts.modal_reads`, and verify a clean minimal consumer. Do not
-   migrate historical run authority implicitly. Live proof remains a separate
-   gate after provider-free conformance and review.
+1. A consumer must bind the public composition to its reviewed durable stores,
+   authorities, explicit Modal client, retained input source, configuration, and
+   secret declarations. The engine intentionally provides no default database,
+   credential source, signing key, or ambient-client fallback.
+2. The capability-disabled registration must remain disabled until the exact
+   committed and pushed tree passes the security/release barrier and an
+   authorized live preflight. Provider-free tests and fake SDK objects do not
+   establish current account, deployment, Volume, Secret, quote, or price facts.
+3. Any paid smoke requires separate explicit approval and must preserve the
+   existing one-attempt/indeterminate semantics. Historical legacy records are
+   not migrated or admitted as Foundation authority.
+4. A successful live run must verify authenticated terminal/log/completion
+   evidence and exact bounded artifacts through the generic reader before any
+   capability or release-readiness claim changes.
 
 Internal adapter/service names do not need numeric suffixes. Existing public
 namespaces and persisted or signed schema versions remain explicit; changing
 an implementation does not itself require a new schema version.
+
+Correction (2026-09-09): the earlier sections described the preparation-only
+checkpoint and the now-removed Modal lifecycle as current. The atomic local
+cutover now uses the Foundation-native coordinator composition, removes the old
+runtime/producer/training/read path and `HostPorts.modal_reads`, and exposes the
+new explicit Modal surface without compatibility aliases. This correction does
+not turn provider-free conformance into live-provider or release qualification;
+the registration remains capability-disabled.
 
 ## Complete-command configuration binding
 
@@ -110,8 +123,9 @@ The preparation adapter remains non-operational after snapshot restoration.
 
 ## Remote cutover constraint
 
-The existing `remote.py` admits `MutationCommandV1` and a v1 stage claim;
-`bundle.py` retains `OperationBindingV1`. Foundation stage and submit are
+The removed `remote.py` admitted `MutationCommandV1` and a v1 stage claim;
+the historical `bundle.py` retains `OperationBindingV1` but is not used by the
+new coordinator worker. Foundation stage and submit are
 different effects, with submit carrying the exact authenticated stage
 predecessor. Relabeling the older bundle or launching it through a wrapper
 would not preserve that lineage.
@@ -191,3 +205,13 @@ Consumer-owned restart retention, the generic five-method training service,
 candidate deployment/bootstrap qualification, and atomic public legacy removal
 remain in progress. Unknown live provider phase is reported unavailable rather
 than inferred from a poll timeout.
+
+Correction (2026-09-09, public cutover): the retention, generic service,
+candidate deployment builder, explicit bootstrap inventory, and public legacy
+removal described above are now integrated and independently reviewed locally.
+The public composition supplies both training and the existing generic runs
+service to `APIHost`; list/show are exercised through the host facade, while
+provider outcome/log/artifact reads remain capability-denied. The 97-member
+Modal inventory and separate 66-member trainer closure both report `CURRENT`.
+CI triggers cover every member of both inventories. These checks do not enable
+live execution, prove consumer database durability, or qualify a release.

@@ -8,7 +8,7 @@ import re
 
 from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderDescriptor, ProviderRef
 from synaptic_tuner.api.v1.results import VerifiedArtifact
-from synaptic_tuner.api.v1.training import AcceleratorDeviceRequestV1
+from tuner.training.contracts import AcceleratorDeviceRequestV1
 
 from ...foundation_v2.canonical import canonical_bytes, digest_text, domain_digest, safe_ref
 from ...foundation_v2.executors import AdapterDescriptorV1, ExecutorDescriptorV1

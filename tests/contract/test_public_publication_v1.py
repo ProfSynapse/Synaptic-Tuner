@@ -410,7 +410,7 @@ def test_publication_contracts_detach_nested_run_and_reference_identities() -> N
 
 
 def test_legacy_training_start_publication_surface_is_absent() -> None:
-    from synaptic_tuner.api.v1.training import TrainingAPI, TrainingOperations
+    from synaptic_tuner.api.v1.training_facade import TrainingAPI, TrainingOperations
     from synaptic_tuner.api.v1.host import HostPorts
 
     assert "publish" not in TrainingAPI.__dict__

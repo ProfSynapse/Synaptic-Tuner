@@ -8,7 +8,7 @@ from dataclasses import replace
 import pytest
 
 from synaptic_tuner.api.v1.results import TrainingRunRef
-from synaptic_tuner.api.v1.training import (
+from tuner.training.contracts import (
     ArtifactPolicy, CanonicalDocument, ResolvedTrainingRequest, ResourceSpec,
     RuntimeSpec, TrainingRequest,
 )

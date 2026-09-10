@@ -4,7 +4,7 @@ import pytest
 
 from tuner.execution.providers.modal.deployment_v1 import (
     APP_NAME, ARTIFACT_MOUNT, BOOTSTRAP_SOURCE_MODULES, CONTROL_MOUNT,
-    ModalDeploymentSpecV1, build_modal_deployment,
+    ModalDeploymentSpecV1,
 )
 from tuner.execution.providers.modal.deployment_identity import modal_function_name
 
@@ -58,34 +58,6 @@ class SDK:
     def current_function_call_id():return "fc-1"
 
 
-def test_deployment_factory_is_exact_explicit_and_does_not_submit():
-    client=object()
-    def worker(value, job_ref, commit_prepared):
-        commit_prepared()
-        return value, job_ref
-    spec=ModalDeploymentSpecV1(
-        DEPLOYMENT_REF, FUNCTION_NAME,
-        "registry.example/runtime@sha256:"+"a"*64,
-        "control-v1","artifact-v1","runtime-v1",("HF_TOKEN","SYNAPTIC_EVIDENCE_MAC_KEY"),
-        {"PYTHONNOUSERSITE":"1"},timeout_seconds=900,
-    )
-    built=build_modal_deployment(sdk=SDK,client=client,environment_name="env",spec=spec,worker=worker)
-    assert built.app.args==(APP_NAME,) and built.function(b"command")==(b"command","fc-1")
-    assert built.artifact_volume.commits==2 and built.control_volume.commits==1
-    for call in Volume.calls[-2:]:
-        assert call.kwargs=={"environment_name":"env","create_if_missing":False,"version":1,"client":client}
-    assert Secret.calls[-1].kwargs=={"environment_name":"env","required_keys":["HF_TOKEN","SYNAPTIC_EVIDENCE_MAC_KEY"],"client":client}
-    assert built.image.entrypoint_value==[] and built.image.environment=={"PYTHONNOUSERSITE":"1"}
-    assert built.image.local_sources==(BOOTSTRAP_SOURCE_MODULES,{"copy":False,"ignore":[]})
-    assert built.app.kwargs["include_source"] is False
-    kwargs=built.app.function_kwargs
-    assert kwargs["name"]==FUNCTION_NAME and kwargs["gpu"]=="A10"
-    assert kwargs["serialized"] is True
-    assert kwargs["include_source"] is False
-    assert kwargs["volumes"]=={CONTROL_MOUNT:built.control_volume,ARTIFACT_MOUNT:built.artifact_volume}
-    assert kwargs["retries"]==0 and kwargs["timeout"]==900
-    assert kwargs["restrict_modal_access"] is True and kwargs["single_use_containers"] is True
-    assert not hasattr(built.function,"spawn") and not hasattr(built.function,"remote")
 
 
 @pytest.mark.parametrize(

@@ -1,59 +1,1557 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://synapticlabs.ai/schemas/synaptic-modal-runtime-lock-v1.schema.json",
-  "title": "Synaptic Modal Runtime Lock v1",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema_version", "sdk_version", "registry_reference", "python", "locked_files", "ml_stack"],
-  "properties": {
-    "schema_version": {"const": "synaptic-modal-runtime-lock/v1"},
-    "sdk_version": {"const": "1.5.4"},
-    "registry_reference": {"type": "string", "pattern": "^unsloth/unsloth:[^@]+@sha256:[0-9a-f]{64}$"},
-    "python": {
-      "type": "object", "additionalProperties": false,
-      "required": ["implementation", "version", "executable", "executable_sha256"],
-      "properties": {
-        "implementation": {"const": "cpython"},
-        "version": {"const": "3.11.14"},
-        "executable": {"const": "/opt/conda/bin/python3"},
-        "executable_sha256": {"$ref": "#/$defs/digest"}
-      }
+  "$defs": {
+    "digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
     },
-    "locked_files": {
-      "type": "object", "additionalProperties": false,
-      "required": ["dependency_lock", "deployment_wrapper", "modal_mounted_io", "modal_producer", "modal_remote", "modal_runtime", "modal_worker_ports", "modal_worker_source", "model_preparation", "sft_runtime"],
+    "file": {
+      "additionalProperties": false,
       "properties": {
-        "dependency_lock": {"$ref": "#/$defs/file"},
-        "deployment_wrapper": {"$ref": "#/$defs/file"},
-        "modal_mounted_io": {"$ref": "#/$defs/file"},
-        "modal_producer": {"$ref": "#/$defs/file"},
-        "modal_remote": {"$ref": "#/$defs/file"},
-        "modal_runtime": {"$ref": "#/$defs/file"},
-        "modal_worker_ports": {"$ref": "#/$defs/file"},
-        "modal_worker_source": {"$ref": "#/$defs/file"},
-        "model_preparation": {"$ref": "#/$defs/file"},
-        "sft_runtime": {"$ref": "#/$defs/file"}
-      }
-    },
-    "ml_stack": {
-      "type": "object", "additionalProperties": false,
-      "required": ["torch", "transformers", "trl"],
-      "properties": {
-        "torch": {"const": "2.9.0+cu128"},
-        "transformers": {"const": "4.57.1"},
-        "trl": {"const": "0.24.0"}
-      }
+        "path": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]+$",
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "type": "object"
     }
   },
-  "$defs": {
-    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "file": {
-      "type": "object", "additionalProperties": false,
-      "required": ["path", "sha256"],
+  "$id": "https://synapticlabs.ai/schemas/synaptic-modal-runtime-lock-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "locked_files": {
+      "additionalProperties": false,
       "properties": {
-        "path": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]+$"},
-        "sha256": {"$ref": "#/$defs/digest"}
-      }
+        "bootstrap__synaptic_tuner____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner___version_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/_version.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1___contract_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/_contract.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1___timestamps_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/_timestamps.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1__context_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/context.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1__execution_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/execution.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1__planning_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/planning.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1__providers_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/providers.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1__results_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/results.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1__runs_facade_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/runs_facade.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1__sources_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/sources.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1__training_facade_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/training_facade.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__synaptic_tuner__api__v1__training_input_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "synaptic_tuner/api/v1/training_input.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__cloud____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/cloud/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__cloud__runtime_layout_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/cloud/runtime_layout.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution___effect_executor_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/_effect_executor.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__broker_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/broker.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__contracts_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/contracts.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__coordinator_v1____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/coordinator_v1/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__coordinator_v1__coordinator_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/coordinator_v1/coordinator.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__coordinator_v1__cursors_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/coordinator_v1/cursors.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__coordinator_v1__foundation_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/coordinator_v1/foundation.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__coordinator_v1__model_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/coordinator_v1/model.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__coordinator_v1__ports_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/coordinator_v1/ports.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__coordinator_v1__state_machine_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/coordinator_v1/state_machine.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__evidence_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/evidence.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__authority_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/authority.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__canonical_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/canonical.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__commands_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/commands.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__executors_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/executors.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__identities_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/identities.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__observations_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/observations.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__operations_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/operations.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__preparation_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/preparation.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__receipts_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/receipts.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__references_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/references.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__foundation_v2__repository_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/foundation_v2/repository.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__lifecycle_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/lifecycle.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__operation_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/operation.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__contracts_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/contracts.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__binding_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/binding.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__config_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/config.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__contracts_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/contracts.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__control_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/control.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__coordinator_adapter_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/coordinator_adapter.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__coordinator_binding_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/coordinator_binding.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__coordinator_bundle_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/coordinator_bundle.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__coordinator_dispatch_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/coordinator_dispatch.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__coordinator_logs_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/coordinator_logs.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__coordinator_producer_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/coordinator_producer.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__coordinator_wire_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/coordinator_wire.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__coordinator_worker_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/coordinator_worker.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__deployment_identity_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/deployment_identity.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__deployment_v1_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/deployment_v1.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__facade_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/facade.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__manifest_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/manifest.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__providers__modal__resolution_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/resolution.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__registry_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/registry.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__execution__service_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/service.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__project____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/project/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__project__config_layers_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/project/config_layers.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__project__context_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/project/context.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__project__errors_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/project/errors.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__project__execution_source_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/project/execution_source.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__project__git_verification_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/project/git_verification.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__project__manifest_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/project/manifest.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__project__path_refs_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/project/path_refs.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__project__secrets_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/project/secrets.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__project__source_bundle_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/project/source_bundle.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__runtime____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/runtime/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__runtime__artifacts_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/runtime/artifacts.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__runtime__dispatch_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/runtime/dispatch.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__runtime__manifests__offline-sft-worker-v1_json": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/runtime/manifests/offline-sft-worker-v1.json"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__runtime__offline_sft_worker_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/runtime/offline_sft_worker.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__training____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/training/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__training__contracts_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/training/contracts.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__training__coordinator_material_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/training/coordinator_material.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__training__methods____init___py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/training/methods/__init__.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__training__methods__sft_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/training/methods/sft.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__training__recipes_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/training/recipes.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__training__resolution_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/training/resolution.py"
+                }
+              }
+            }
+          ]
+        },
+        "bootstrap__tuner__training__service_py": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/training/service.py"
+                }
+              }
+            }
+          ]
+        },
+        "dependency_lock": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "requirements/modal-launcher-v1.lock"
+                }
+              }
+            }
+          ]
+        },
+        "deployment_wrapper": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/coordinator_deployment.py"
+                }
+              }
+            }
+          ]
+        },
+        "modal_mounted_io": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/mounted_io.py"
+                }
+              }
+            }
+          ]
+        },
+        "modal_runtime": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/runtime.py"
+                }
+              }
+            }
+          ]
+        },
+        "modal_worker_ports": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/worker_ports.py"
+                }
+              }
+            }
+          ]
+        },
+        "modal_worker_source": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/worker_source.py"
+                }
+              }
+            }
+          ]
+        },
+        "model_preparation": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/model_snapshot.py"
+                }
+              }
+            }
+          ]
+        },
+        "sft_runtime": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "Trainers/sft/runtime_v1.py"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "bootstrap__synaptic_tuner____init___py",
+        "bootstrap__synaptic_tuner___version_py",
+        "bootstrap__synaptic_tuner__api____init___py",
+        "bootstrap__synaptic_tuner__api__v1____init___py",
+        "bootstrap__synaptic_tuner__api__v1___contract_py",
+        "bootstrap__synaptic_tuner__api__v1___timestamps_py",
+        "bootstrap__synaptic_tuner__api__v1__context_py",
+        "bootstrap__synaptic_tuner__api__v1__execution_py",
+        "bootstrap__synaptic_tuner__api__v1__planning_py",
+        "bootstrap__synaptic_tuner__api__v1__providers_py",
+        "bootstrap__synaptic_tuner__api__v1__results_py",
+        "bootstrap__synaptic_tuner__api__v1__runs_facade_py",
+        "bootstrap__synaptic_tuner__api__v1__sources_py",
+        "bootstrap__synaptic_tuner__api__v1__training_facade_py",
+        "bootstrap__synaptic_tuner__api__v1__training_input_py",
+        "bootstrap__tuner____init___py",
+        "bootstrap__tuner__cloud____init___py",
+        "bootstrap__tuner__cloud__runtime_layout_py",
+        "bootstrap__tuner__execution____init___py",
+        "bootstrap__tuner__execution___effect_executor_py",
+        "bootstrap__tuner__execution__broker_py",
+        "bootstrap__tuner__execution__contracts_py",
+        "bootstrap__tuner__execution__coordinator_v1____init___py",
+        "bootstrap__tuner__execution__coordinator_v1__coordinator_py",
+        "bootstrap__tuner__execution__coordinator_v1__cursors_py",
+        "bootstrap__tuner__execution__coordinator_v1__foundation_py",
+        "bootstrap__tuner__execution__coordinator_v1__model_py",
+        "bootstrap__tuner__execution__coordinator_v1__ports_py",
+        "bootstrap__tuner__execution__coordinator_v1__state_machine_py",
+        "bootstrap__tuner__execution__evidence_py",
+        "bootstrap__tuner__execution__foundation_v2____init___py",
+        "bootstrap__tuner__execution__foundation_v2__authority_py",
+        "bootstrap__tuner__execution__foundation_v2__canonical_py",
+        "bootstrap__tuner__execution__foundation_v2__commands_py",
+        "bootstrap__tuner__execution__foundation_v2__executors_py",
+        "bootstrap__tuner__execution__foundation_v2__identities_py",
+        "bootstrap__tuner__execution__foundation_v2__observations_py",
+        "bootstrap__tuner__execution__foundation_v2__operations_py",
+        "bootstrap__tuner__execution__foundation_v2__preparation_py",
+        "bootstrap__tuner__execution__foundation_v2__receipts_py",
+        "bootstrap__tuner__execution__foundation_v2__references_py",
+        "bootstrap__tuner__execution__foundation_v2__repository_py",
+        "bootstrap__tuner__execution__lifecycle_py",
+        "bootstrap__tuner__execution__operation_py",
+        "bootstrap__tuner__execution__providers____init___py",
+        "bootstrap__tuner__execution__providers__contracts_py",
+        "bootstrap__tuner__execution__providers__modal____init___py",
+        "bootstrap__tuner__execution__providers__modal__binding_py",
+        "bootstrap__tuner__execution__providers__modal__config_py",
+        "bootstrap__tuner__execution__providers__modal__contracts_py",
+        "bootstrap__tuner__execution__providers__modal__control_py",
+        "bootstrap__tuner__execution__providers__modal__coordinator_adapter_py",
+        "bootstrap__tuner__execution__providers__modal__coordinator_binding_py",
+        "bootstrap__tuner__execution__providers__modal__coordinator_bundle_py",
+        "bootstrap__tuner__execution__providers__modal__coordinator_dispatch_py",
+        "bootstrap__tuner__execution__providers__modal__coordinator_logs_py",
+        "bootstrap__tuner__execution__providers__modal__coordinator_producer_py",
+        "bootstrap__tuner__execution__providers__modal__coordinator_wire_py",
+        "bootstrap__tuner__execution__providers__modal__coordinator_worker_py",
+        "bootstrap__tuner__execution__providers__modal__deployment_identity_py",
+        "bootstrap__tuner__execution__providers__modal__deployment_v1_py",
+        "bootstrap__tuner__execution__providers__modal__facade_py",
+        "bootstrap__tuner__execution__providers__modal__manifest_py",
+        "bootstrap__tuner__execution__providers__modal__resolution_py",
+        "bootstrap__tuner__execution__registry_py",
+        "bootstrap__tuner__execution__service_py",
+        "bootstrap__tuner__project____init___py",
+        "bootstrap__tuner__project__config_layers_py",
+        "bootstrap__tuner__project__context_py",
+        "bootstrap__tuner__project__errors_py",
+        "bootstrap__tuner__project__execution_source_py",
+        "bootstrap__tuner__project__git_verification_py",
+        "bootstrap__tuner__project__manifest_py",
+        "bootstrap__tuner__project__path_refs_py",
+        "bootstrap__tuner__project__secrets_py",
+        "bootstrap__tuner__project__source_bundle_py",
+        "bootstrap__tuner__runtime____init___py",
+        "bootstrap__tuner__runtime__artifacts_py",
+        "bootstrap__tuner__runtime__dispatch_py",
+        "bootstrap__tuner__runtime__manifests__offline-sft-worker-v1_json",
+        "bootstrap__tuner__runtime__offline_sft_worker_py",
+        "bootstrap__tuner__training____init___py",
+        "bootstrap__tuner__training__contracts_py",
+        "bootstrap__tuner__training__coordinator_material_py",
+        "bootstrap__tuner__training__methods____init___py",
+        "bootstrap__tuner__training__methods__sft_py",
+        "bootstrap__tuner__training__recipes_py",
+        "bootstrap__tuner__training__resolution_py",
+        "bootstrap__tuner__training__service_py",
+        "dependency_lock",
+        "deployment_wrapper",
+        "modal_mounted_io",
+        "modal_runtime",
+        "modal_worker_ports",
+        "modal_worker_source",
+        "model_preparation",
+        "sft_runtime"
+      ],
+      "type": "object"
+    },
+    "ml_stack": {
+      "additionalProperties": false,
+      "properties": {
+        "torch": {
+          "const": "2.9.0+cu128"
+        },
+        "transformers": {
+          "const": "4.57.1"
+        },
+        "trl": {
+          "const": "0.24.0"
+        }
+      },
+      "required": [
+        "torch",
+        "transformers",
+        "trl"
+      ],
+      "type": "object"
+    },
+    "python": {
+      "additionalProperties": false,
+      "properties": {
+        "executable": {
+          "const": "/opt/conda/bin/python3"
+        },
+        "executable_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "implementation": {
+          "const": "cpython"
+        },
+        "version": {
+          "const": "3.11.14"
+        }
+      },
+      "required": [
+        "implementation",
+        "version",
+        "executable",
+        "executable_sha256"
+      ],
+      "type": "object"
+    },
+    "registry_reference": {
+      "pattern": "^unsloth/unsloth:[^@]+@sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "synaptic-modal-runtime-lock/v1"
+    },
+    "sdk_version": {
+      "const": "1.5.4"
     }
-  }
+  },
+  "required": [
+    "schema_version",
+    "sdk_version",
+    "registry_reference",
+    "python",
+    "locked_files",
+    "ml_stack"
+  ],
+  "title": "Synaptic Modal Runtime Lock v1",
+  "type": "object"
 }

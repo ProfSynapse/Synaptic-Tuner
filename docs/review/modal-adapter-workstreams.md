@@ -12,12 +12,12 @@ regressions, not live cloud or trained-model readiness.
 | Slice | Deliverable | Dependency / ownership |
 | --- | --- | --- |
 | 0. Preparation | Generic planning, binding, canonical preparation; executable preflight refuses | Complete locally at the common base |
-| 1. Effects | Foundation stage, submit, cancel and conservative lookup/reconciliation | Sol effects lane; production transport depends on 3 |
-| 2. Authenticated reads | Full submit-proof validation before status/log/inventory/byte reads | Sol reader lane; common command binding and evidence depend on 3 |
-| 3. Remote wire and shared authority | One canonical command lineage through staging, remote admission and worker evidence; packaged source/runtime locks updated together | Lead; coordinate signatures before agents depend on them |
-| 4. Real preflight and restart | Authenticated deployment/client/Volume/quote checks; exact configuration retained through consumer-owned persistence | Lead / subsequent bounded lane after 3; no new engine database |
-| 5. Public cutover and consumer proof | Existing lazy registry and generic coordinator composition; remove old lifecycle and Modal-specific host field; minimal consumer fixture inside engine | Integrate 1–4; atomic cutover, no legacy fallback |
-| 6. Retrieved-model usability | Verified local materialization and explicit model-load/inference check; no claim that training completion alone proves usable weights | After reader and public cutover; separate from model quality evaluation |
+| 1. Effects | Foundation stage, submit, cancel and conservative lookup/reconciliation | Integrated and independently reviewed; provider-free proof only |
+| 2. Authenticated reads | Full submit-proof validation before status/log/inventory/byte reads | Integrated and independently reviewed; live capability remains disabled |
+| 3. Remote wire and shared authority | One canonical command lineage through staging, remote admission and worker evidence; packaged source/runtime locks updated together | Integrated; current explicit 97-pin bootstrap and 66-member trainer inventories |
+| 4. Real preflight and restart | Authenticated deployment/client/Volume/quote checks; exact configuration retained through consumer-owned persistence | Integrated; fake-provider tests, not live account or database crash proof |
+| 5. Public cutover and consumer proof | Existing lazy registry and generic coordinator composition; remove old lifecycle and Modal-specific host field; minimal consumer fixture inside engine | Integrated, independently reviewed, 2,043 provider-free tests and installed-wheel check passed |
+| 6. Retrieved-model usability | Verified local materialization and explicit model-load/inference check; no claim that training completion alone proves usable weights | Stream-validator prerequisite under review; materializer and loader not implemented |
 | 7. Bounded chat | Easy local/Modal conversation using shared inference/evaluation plumbing, explicit stop and bounded GPU lifetime | After 5–6; no perpetual endpoint by default |
 | 8. Qualification and release | Repeatable provider-free CI now; integrated conformance, independent audit, scoped live proof, docs and feature-branch integration later | Sol conformance lane now; lead owns final activation/release decisions |
 
@@ -237,6 +237,50 @@ explicitly polled while this session is active; a completed handoff triggers
 review and the next bounded task rather than a pause for user input.
 
 ## Shared contract checkpoint
+
+### Public cutover checkpoint (2026-09-09 local / 2026-09-10 UTC)
+
+The complete combined selection passed **2,043 tests in 286.36 seconds** under
+clean CPython 3.12.9 / pytest 8.4.2, without system-site packages or Modal SDK.
+It includes coordinator/Foundation, all remaining Modal provider tests, generic
+training/runtime, the 82 SFT runtime tests, and adjacent Docker provider tests
+(provider-free; no Docker process). Earlier attempts exposed the stale SFT
+internal import and then a test's unresolved interpreter-symlink expectation;
+both were corrected before this green run. The rich compiler regressions were
+preserved under internal training ownership; removed lifecycle facades have no
+compatibility aliases.
+
+Both source inventories independently report `CURRENT`: 97 Modal pins and 66
+offline trainer members. CI trigger coverage was measured for every member of
+both inventories. The two direct offline manifest/package-data tests passed;
+the third test's Git subprocess cannot resolve this WSL worktree's Windows Git
+administrative path. Its same checked-in regenerator instead passed separately
+with the exact Git metadata supplied only to that command. This is not a claim
+that all three tests ran together locally. GitHub CI has not been dispatched.
+
+The non-editable candidate wheel built offline, then passed neutral-directory
+imports of 27 modules, public cutover/removed-module checks, and both packaged
+resources with the Modal SDK absent. Wheel SHA-256:
+`157c676053e3555f5411542cbe1ee2204044f598fe9a853a321ea44dee1d060c`.
+This wheel predates the separately reviewed seekable-archive prerequisite.
+
+Independent review found no remaining local-commit blocker. The candidate engine
+composition reuses the existing runs service and exact factory-owned reader;
+`APIHost` list/show work while provider reads remain deliberately disabled.
+The vLLM startup cleanup is separately committed as `a6fb43e`; its 18 mocked
+regressions passed in 1.02 seconds using system-site evaluator dependencies,
+not the clean coordinator environment. No server, cloud object, paid job,
+publication, push, merge, or EHR change was made for these checkpoints.
+
+The next slice is verified private local model materialization. Its receipt
+replay and freshly hash-checked artifact streams form the admission chain;
+training success alone does not permit loading arbitrary files. A seekable
+archive-validator prerequisite is independently reviewed, but safe extraction,
+model loading, and bounded chat remain separate implementation/qualification
+work. Active agents continue in isolated non-overlapping worktrees with manual
+clock-based status polling.
+
+### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an
 identity, not authentication: resolution must recover and authenticate the full

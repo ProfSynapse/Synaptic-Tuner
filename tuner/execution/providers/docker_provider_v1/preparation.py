@@ -11,7 +11,7 @@ from synaptic_tuner.api.v1.planning import (
 )
 from synaptic_tuner.api.v1.providers import ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef
-from synaptic_tuner.api.v1.training import TrainingPlan
+from tuner.training.contracts import TrainingPlan
 
 from ...coordinator_v1.model import ProviderExecutionBindingV1
 from ...foundation_v2.canonical import canonical_bytes, digest_text

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from synaptic_tuner.api.v1.training import AcceleratorDeviceRequestV1
+from tuner.training.contracts import AcceleratorDeviceRequestV1
 from synaptic_tuner.api.v1.planning import ProviderPlanRef, TrainingPlan, TrainingPlanBasisV1
 from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderDescriptor, ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef

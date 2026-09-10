@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from synaptic_tuner.api.v1.training import (
-    ResolvedTrainingComponents,
-    TrainingRequestResolver,
-    TrainingResolutionError,
-)
+from tuner.training.contracts import TrainingResolutionError
 from tuner.project.context import ProjectContext
 from tuner.project.execution_source import ExecutionSourceV1
 
@@ -35,8 +31,5 @@ def validate_source_topology(
 
 
 __all__ = [
-    "ResolvedTrainingComponents",
-    "TrainingRequestResolver",
-    "TrainingResolutionError",
     "validate_source_topology",
 ]

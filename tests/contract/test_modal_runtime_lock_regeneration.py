@@ -39,7 +39,7 @@ def test_checked_in_modal_runtime_lock_is_current():
     assert tool.regenerate(ROOT) == 0
 
 
-@pytest.mark.parametrize("member", ["modal_remote", "modal_worker_ports", "modal_worker_source"])
+@pytest.mark.parametrize("member", ["deployment_wrapper", "modal_worker_ports", "modal_worker_source"])
 def test_write_changes_only_expected_hash_and_is_idempotent(tmp_path, member):
     root = _fixture(tmp_path)
     before = _document(root)
@@ -69,11 +69,11 @@ def test_invalid_inputs_fail_without_changing_lock(tmp_path, fault):
     root = _fixture(tmp_path)
     lock = root / tool.LOCK_RELATIVE
     original = lock.read_bytes()
-    source = root / tool.LOCKED_FILES["modal_remote"]
+    source = root / tool.LOCKED_FILES["deployment_wrapper"]
     if fault == "invalid":
         document = _document(root)
         document["locked_files"]["unexpected"] = {
-            "path": tool.LOCKED_FILES["modal_remote"], "sha256": "0" * 64,
+            "path": tool.LOCKED_FILES["deployment_wrapper"], "sha256": "0" * 64,
         }
         lock.write_bytes(tool._canonical(document))
         original = lock.read_bytes()
@@ -81,7 +81,7 @@ def test_invalid_inputs_fail_without_changing_lock(tmp_path, fault):
         source.unlink()
     elif fault == "escape":
         document = _document(root)
-        document["locked_files"]["modal_remote"]["path"] = "../outside.py"
+        document["locked_files"]["deployment_wrapper"]["path"] = "../outside.py"
         lock.write_bytes(tool._canonical(document))
         original = lock.read_bytes()
     elif fault == "source_symlink":
@@ -145,7 +145,7 @@ def test_reparse_source_is_refused_without_changing_lock(tmp_path, monkeypatch):
     root = _fixture(tmp_path)
     lock = root / tool.LOCK_RELATIVE
     original = lock.read_bytes()
-    source = root / tool.LOCKED_FILES["modal_remote"]
+    source = root / tool.LOCKED_FILES["deployment_wrapper"]
     real_lstat = Path.lstat
 
     def marked_lstat(path):

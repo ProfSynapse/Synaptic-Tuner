@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from synaptic_tuner.api.v1.training import (
+from tuner.training.contracts import (
     CanonicalDocument,
     ResolvedTrainingRequest,
     TrainingPlan,
     TrainingRequest,
+    TrainingRequestResolver,
 )
 from tuner.project.context import ProjectContext
 
 from .recipes import RecipeRegistry
-from .resolution import TrainingRequestResolver, validate_source_topology
+from .resolution import validate_source_topology
 
 
 class TrainingService:

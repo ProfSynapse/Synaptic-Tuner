@@ -8,7 +8,7 @@ import pytest
 from jsonschema.validators import validator_for
 from referencing import Registry, Resource
 
-from synaptic_tuner.api.v1.training import CanonicalDocument
+from tuner.training.contracts import CanonicalDocument
 from tuner.project.execution_source import (
     AuthenticatedSourceEvidenceV1,
     ExecutionSourceV1,

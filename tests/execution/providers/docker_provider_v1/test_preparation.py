@@ -7,7 +7,7 @@ import pytest
 from synaptic_tuner.api.v1.planning import ProviderPlanContextV1
 from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef
-from synaptic_tuner.api.v1.training import (
+from tuner.training.contracts import (
     AcceleratorDeviceRequestV1,
     ArtifactPolicy,
     CanonicalDocument,

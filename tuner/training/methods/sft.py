@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Mapping
 
-from synaptic_tuner.api.v1.training import CanonicalDocument
+from tuner.training.contracts import CanonicalDocument
 from tuner.project.execution_source import ExecutionSourceV1
 from tuner.runtime.artifacts import ArtifactContract, ArtifactRequirement
 from tuner.training.recipes import (

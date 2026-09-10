@@ -1,8 +1,8 @@
 """Supported Synaptic Tuner API v1.
 
-The current operational surface remains available during the B1/B2 staged
-cutover, but its implementation modules are imported only when an operational
-export is requested. Importing a B1 contract module cannot therefore load
+Operational implementations are imported only when an operational export is
+requested. Training uses the generic planning/start facade; subsequent run
+operations use RunsAPI. Importing a contract module cannot therefore load
 ``tuner.*``, a provider SDK, SQLite, or host code.
 """
 
@@ -23,13 +23,13 @@ _LAZY_MODULE_ATTRIBUTES = {
     "context": {"PathRef", "ProjectContext"},
     "events": {"EventEnvelope", "ResultEnvelope"},
     "execution": {
-        "ArtifactRef", "ArtifactState", "AuthorizationRequirement", "ErrorCode",
+        "ArtifactRef", "ArtifactState", "ErrorCode",
         "ExecutionError", "ExecutionGrant", "RunRef", "RunState", "RunStatus",
     },
     "host": {
         "APIHost", "Clock", "EvidenceAuthenticator", "EvidenceReplayStore",
         "GitRemoteReader", "GrantProvider", "HostPorts", "LifecycleRepository",
-        "ModalDeploymentReader", "SecretProvider",
+        "SecretProvider",
     },
     "persistence": {
         "AttemptAdmission", "AttemptDisposition", "AuthorizationMismatch",
@@ -42,6 +42,8 @@ _LAZY_MODULE_ATTRIBUTES = {
         "apply_lifecycle_event",
     },
     "plugins": {"PluginBinding", "PluginContext"},
+    "planning": {"ResolvedTrainingRequest", "TrainingPlan"},
+    "providers": {"ProviderCapabilities", "ProviderDescriptor", "ProviderRef"},
     "publication": {
         "ArtifactDestinationRegistryPortV1", "ArtifactSpoolPortV1",
         "AuthenticatedDestinationInventoryV1", "AuthenticatedDestinationV1",
@@ -72,12 +74,9 @@ _LAZY_MODULE_ATTRIBUTES = {
         "PushedSourceVerificationPort", "SourceLock", "SourceLockBindingV1",
         "SourceLockProvenanceViewV1", "validate_source_lock_provenance_v1",
     },
-    "training": {
-        "AcceleratorDeviceRequestV1", "ArtifactPolicy", "CanonicalDocument", "ResolvedTrainingComponents",
-        "ResolvedTrainingRequest", "ResourceSpec", "RuntimeSpec", "TrainingAPI",
-        "TrainingOperations", "TrainingOutcome", "TrainingPlan", "TrainingPreflight",
-        "TrainingRequest", "TrainingRequestResolver", "TrainingResolutionError",
-        "TrainingSubmission", "compile_training_plan_v1",
+    "training_facade": {
+        "AuthorizationRequirement", "TrainingAPI", "TrainingOperations",
+        "TrainingPreflight", "TrainingRequest", "TrainingStart",
     },
     "training_input": {
         "SFTTrainingHyperparametersV1", "TrainingArtifactRequirementsV1",
@@ -98,45 +97,44 @@ _LAZY_ATTRIBUTES = {
 }
 
 _FORMAL_EXPORTS = (
-    "APIHost", "AcceleratorDeviceRequestV1", "AttemptAdmission", "AttemptDisposition", "ArtifactDestination",
-    "ArtifactDestinationRegistryPortV1", "ArtifactPolicy", "ArtifactRef",
+    "APIHost", "AttemptAdmission", "AttemptDisposition", "ArtifactDestination",
+    "ArtifactDestinationRegistryPortV1", "ArtifactRef",
     "ArtifactSpoolPortV1", "ArtifactState", "ArtifactsAPI", "ArtifactsOperations",
     "AuthenticatedDestinationInventoryV1", "AuthenticatedDestinationV1",
     "AuthenticatedLookupV1", "AuthenticatedPublicationReceiptV1",
     "AuthenticatedPublicationTombstoneV1", "AuthenticatedVerifiedSourceV1",
     "AuthorizationRequirement",
-    "AuthorizationMismatch", "CapabilityDescriptor", "CanonicalDocument",
+    "AuthorizationMismatch", "CapabilityDescriptor",
     "ErrorCode", "EffectCollision", "EffectDisposition", "EffectIdentity", "EffectKind",
     "EffectObservation", "EffectRecord", "EffectState", "EvidenceReplayRepository",
     "EventEnvelope", "ExecutionError", "ExecutionGrant", "ExecutionScope",
     "EvidenceAuthenticator", "EvidenceReplayStore", "Clock", "GitRemoteReader",
     "GitCliLocalSourceInspector", "GrantProvider", "GrantBinding", "HostPorts",
     "LifecycleRepository", "LifecycleEvent", "LifecyclePhase", "LifecycleRecord",
-    "LifecycleRunPage", "ModalDeploymentReader", "MessageCode", "DestinationArtifactV1",
+    "LifecycleRunPage", "MessageCode", "DestinationArtifactV1",
     "DestinationInventoryV1", "DestinationPage", "DestinationPublicationPortV1",
     "EvidenceAuthorityPortV1", "LookupOutcomeV1", "LookupRecoveryPermitV1",
     "MaterializedSourceV1", "PathRef", "PluginBinding", "PluginContext",
-    "OperationBindingV1", "ProjectContext", "PublicationCodeV1", "PublicationErrorV1",
+    "OperationBindingV1", "ProjectContext", "ProviderCapabilities", "ProviderDescriptor", "ProviderRef",
+    "PublicationCodeV1", "PublicationErrorV1",
     "PublicationEventKindV1", "PublicationEventV1", "PublicationOperationsV1",
     "PublicationPage", "PublicationPhaseV1", "PublicationRecordV1", "PublicationRef",
     "PublicationRequest", "PublicationResult", "PublicationState",
     "PublicationStorePortV1", "PublicationTransitionKernelV1",
     "PublicationVerification", "RecoveryDecisionV1",
     "RecoveryDispositionV1", "ResolvedTrainingRequest",
-    "ResolvedTrainingComponents", "ResultEnvelope", "ResourceSpec", "RunArtifactRequest",
+    "ResultEnvelope", "RunArtifactRequest",
     "RunArtifactStream", "RunListRequest", "RunLogEntry", "RunLogLevel", "RunLogPage",
     "RunLogsRequest", "RunOperationCode", "RunOperationError", "RunOutcome", "RunPage",
     "RunRef", "RunAlreadyExists",
     "RunNotFound", "RunState", "RunStatus", "RunVerification", "RunsAPI",
-    "RunsOperations", "RuntimeSpec", "ReplayDisposition", "RevisionConflict", "SecretRef",
+    "RunsOperations", "ReplayDisposition", "RevisionConflict", "SecretRef",
     "SecretProvider", "SourceLock", "SourceLockBindingV1",
     "SourceLockProvenanceViewV1", "validate_source_lock_provenance_v1",
     "AuthenticatedSourceEvidenceV1", "ExecutionSourceV1",
     "LocalSourceInspectionPort", "PushedSourceVerificationPort", "TrainingAPI",
-    "TrainingOperations", "TrainingOutcome", "TrainingPlan", "TrainingPreflight",
-    "TrainingRequest", "TrainingRequestResolver", "TrainingResolutionError",
-    "TrainingRunRef", "TrainingRunState", "TrainingSubmission",
-    "compile_training_plan_v1",
+    "TrainingOperations", "TrainingPlan", "TrainingPreflight", "TrainingRequest",
+    "TrainingRunRef", "TrainingRunState", "TrainingStart",
     "TransferAdmissionV1", "TransferDispositionV1", "TransferOwnershipV1",
     "VerificationStatus", "VerifiedArtifact", "VerifiedArtifactSourcePortV1",
     "SpooledArtifactV1", "SpoolSinkPortV1", "StrongInMemoryPublicationStoreV1",

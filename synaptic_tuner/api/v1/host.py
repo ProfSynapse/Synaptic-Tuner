@@ -9,7 +9,7 @@ from .execution import AuthorizationRequirement, ExecutionGrant
 from .persistence import EvidenceReplayRepository, LifecycleRepository
 from .runs_facade import RunsAPI, RunsOperations
 from .secrets import SecretRef
-from .training import TrainingAPI, TrainingOperations, TrainingRequestResolver
+from .training_facade import TrainingAPI, TrainingOperations
 
 
 class GrantProvider(Protocol):
@@ -43,34 +43,17 @@ class EvidenceAuthenticator(Protocol):
 
 
 class Clock(Protocol):
-    def __call__(self) -> str: ...
+    def now(self) -> str: ...
 
 
 class GitRemoteReader(Protocol):
     def read_ref(self, *, canonical_url: str, exact_ref: str) -> bytes: ...
 
 
-class ModalDeploymentReader(Protocol):
-    def bound_scope(self): ...
-    def capability_proof(self, binding): ...
-    def inspect_deployment(self, *, app_name: str, function_name: str): ...
-
-
-TrainingResolver = TrainingRequestResolver
-
-
 @dataclass(frozen=True, slots=True)
 class HostPorts:
-    lifecycle: LifecycleRepository
     runs: RunsOperations
-    grants: GrantProvider
-    secrets: SecretProvider
-    evidence_replay: EvidenceReplayStore
-    authenticator: EvidenceAuthenticator
     clock: Clock
-    git_remote: GitRemoteReader
-    modal_reads: ModalDeploymentReader
-    training_resolver: TrainingRequestResolver
 
 
 class APIHost:
@@ -79,7 +62,7 @@ class APIHost:
     __slots__ = ("ports", "training", "_runs")
 
     def __init__(self, training: TrainingOperations, ports: HostPorts) -> None:
-        self.training = TrainingAPI(training)
+        self.training = TrainingAPI(training, clock=ports.clock)
         self.ports = ports
         self._runs = RunsAPI(ports.runs)
 
@@ -95,8 +78,6 @@ __all__ = [
     "EvidenceReplayStore",
     "Clock",
     "GitRemoteReader",
-    "ModalDeploymentReader",
-    "TrainingResolver",
     "HostPorts",
     "LifecycleRepository",
     "SecretProvider",

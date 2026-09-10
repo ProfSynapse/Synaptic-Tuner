@@ -9,25 +9,42 @@ broker, and the fixed remote worker.
 
 ## Product flow
 
-1. The host loads a `synaptic-training-request/v1` document.
-2. `TrainingAPI.resolve` locks the host project, engine submodule, model,
-   dataset, provider profile, runtime, and artifact policy.
-3. `TrainingAPI.plan` produces one immutable plan whose canonical, non-secret
-   `synaptic-modal-plan-context/v1` binds the verified deployment, explicit
-   client scope, exact Volume IDs, quote/expiry, cost ceiling, and unique
-   operation identity.
-4. `TrainingAPI.preflight` performs read-only source, deployment, Volume,
-   capability, quote, and authorization checks.
-5. The host obtains an opaque grant and calls `TrainingAPI.start` once.
-6. `TrainingAPI.outcome` reconciles the provider call and verifies the exact
-   terminal records and artifacts.
+1. The host calls `TrainingAPI.load(canonical_json)` through its configured
+   loader, retaining the exact request and project identity.
+2. `TrainingAPI.resolve(request)` obtains the exact source, model, dataset,
+   configuration, runtime and artifact-policy fingerprints from the host's
+   resolver; rich compilation contracts belong to `tuner.training.contracts`.
+3. `TrainingAPI.plan(resolved, provider)` retains a generic immutable plan and
+   provider context. Modal-specific configuration stays in authenticated
+   consumer-owned preparation, stage and launch catalogs, not a second plan API.
+4. `TrainingAPI.preflight(plan)` authenticates current source, deployment and
+   quote facts before explicit-client Volume/Secret readiness checks.
+5. `TrainingAPI.start(plan, preflight)` uses the generic durable coordinator;
+   its host authorization port supplies the exact effect grants. A restart
+   must reuse retained authority and outcomes, never infer a new submission.
+6. Post-start observation, reconciliation and verification belong to `RunsAPI`,
+   not `TrainingAPI.outcome` or a Modal-specific lifecycle facade.
 
-The engine now provides `ModalTrainingOperations` and
-`compose_modal_training_operations`. A consuming main project must still
-provide a conforming durable repository and authenticated host ports before a
-live provider proof; do not use a manual launch as a substitute.
+Correction (2026-09-09): the old `ModalTrainingOperations`, repository and
+composition entrypoints have been removed in the local coordinator cutover.
+The replacement uses existing generic Foundation/coordinator ports and
+`CoordinatorTrainingService`. The Modal registration remains capability-inactive
+pending consumer binding, live activation, and security/release qualification. Do not treat
+these local code changes or provider-free tests as a newly qualified live path.
+
+`synaptic_tuner.api.v1.modal.compose_modal_coordinator` takes explicit
+`ModalCoordinatorStorePorts` and `ModalFoundationCompositionPorts`, plus the
+existing read-evidence collaborators. Its result supplies `training` and `runs`
+for `APIHost(composed.training, HostPorts(runs=composed.runs, clock=clock))`.
+Use the same clock object throughout composition. The factory performs no
+provider I/O; it does not choose storage, mint credentials, or activate the
+registration. Provider-free list/show proof does not enable live outcome, log,
+or artifact reads while the descriptor capabilities remain false.
 
 ## Frozen live evidence
+
+This evidence describes the pre-coordinator implementation. It is historical
+evidence, not a live qualification of the replacement worker or public cutover.
 
 Modal SFT is live-proven for run
 `modal-sft-20260826T144636Z-7aec224e893d` and provider call
@@ -52,9 +69,10 @@ The cross-provider contract and proof matrix live in
 
 - Exact Modal SDK `1.5.4` and one explicit authenticated client; no ambient
   profile or `Client.from_env()` fallback in engine code.
-- Fixed deployed app/function `synaptic-training-v1/run_sft_v1`.
+- Fixed app `synaptic-training-v1`; the exact function name is derived by
+  `modal_function_name(deployment_ref)` and includes the deployment identity.
 - One A10 GPU, one canonical command argument, `retries=0`, and one detached
-  `.spawn()` call behind `MutationBroker`.
+  `.spawn()` call behind the authenticated Foundation effect broker.
 - One digest-pinned Unsloth registry image with its inherited entrypoint
   cleared.
 - One existing Modal Volume v1 for control/log/evidence records and one
@@ -97,12 +115,12 @@ metrics, final model, and tokenizer.
 
 The control Volume contains operation-scoped, authenticated structured logs,
 terminal evidence, and the completion manifest. The host database stores the
-expected operation identity, lifecycle, one-shot authority consumption,
-provider job reference, and verification result. It implements
-`ModalTrainingRepository`, including an atomic preparation commit. The engine
-derives result expectations from the durable preparation plus canonical
-attempt record; it does not select or ship a concrete database and must not
-create SQLite state.
+expected workflow/effect identities, one-shot authority consumption, provider
+job reference and verification result using the existing generic stores. Exact
+Modal configuration, signed stage material and launch envelopes are published
+through consumer-owned catalogs before the unchanged Foundation dispatches.
+Restart reuses the retained signed launch and assessment. The engine does not
+select or ship a concrete database and must not create SQLite state.
 
 Mounted Volume writes are committed explicitly after the producer finishes.
 The artifact Volume is committed before the control Volume so an intentionally
@@ -157,7 +175,7 @@ python3 scripts/regenerate_modal_runtime_lock.py
 ```
 
 The default is read-only and exits nonzero when a declared source hash is
-stale. `CURRENT` means only that the ten declared source hashes agree with
+stale. `CURRENT` means only that the declared source hashes agree with
 the current canonical, policy-valid lock; it is not independent approval of
 the dependency, image, Python, SDK, or ML-stack pins. After reviewing the
 source change, refresh only those SHA-256 values and then verify again:
@@ -169,7 +187,7 @@ python3 scripts/regenerate_modal_runtime_lock.py
 
 This is an offline local maintenance command. It does not contact Modal, load
 the provider SDK, resolve packages, inspect an image, or authenticate source or
-quote evidence. It preserves the exact ten-file inventory and preserves all
+quote evidence. It preserves the exact reviewed inventory and preserves all
 non-hash fields supplied by the current policy-valid lock without approving
 them. Inventory or pin changes require a separate deliberate lock/schema
 review; never use this command to discover, add, remove, or redirect locked
@@ -184,3 +202,14 @@ and `worker_source.py`; runtime/image/dependency/Python pins are unchanged.
 This is the currently composed worker's source lock, not qualification of the
 still-disabled Foundation worker. Its eventual production cutover must review
 and lock the new bootstrap path before enabling execution.
+
+Correction (2026-09-09, coordinator cutover): the reviewed declaration now has
+97 members. The bounded static import audit plus explicitly reviewed lazy
+imports covers 91 Python files and one resource. Three additional public API
+files (`context.py`, `execution.py`, `sources.py`) remain conservative integrity
+pins, and the launcher dependency lock and SFT entrypoint are separate runtime
+pins. The wrapper digest now identifies `coordinator_deployment.py`; removed
+legacy remote/producer files are not part of the new declaration. This audit is
+not arbitrary dynamic-import discovery or a live-runtime proof. The separate
+trainer closure still has 66 members: its old public rich-training module has
+been replaced by `tuner/training/contracts.py`, with reviewed importer hashes.

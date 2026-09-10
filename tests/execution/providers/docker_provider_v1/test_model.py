@@ -2,7 +2,7 @@ from dataclasses import FrozenInstanceError, fields, replace
 
 import pytest
 
-from synaptic_tuner.api.v1.training import AcceleratorDeviceRequestV1
+from tuner.training.contracts import AcceleratorDeviceRequestV1
 from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderDescriptor, ProviderRef
 from tuner.execution.foundation_v2.executors import AdapterDescriptorV1, ExecutorDescriptorV1
 from tuner.execution.foundation_v2.references import ExecutionScopeV1
