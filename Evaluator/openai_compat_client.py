@@ -64,7 +64,7 @@ class OpenAICompatClient(BaseBackendClient):
         """
         payload: Dict[str, Any] = {
             "model": self.settings.model,
-            "messages": list(messages),
+            "messages": [dict(message) for message in messages],
             "stream": False,
             "temperature": self.settings.temperature,
             "top_p": self.settings.top_p,
@@ -128,9 +128,7 @@ class OpenAICompatClient(BaseBackendClient):
         url = f"{self.settings.base_url()}/v1/models"
 
         def fetch_models() -> List[str]:
-            response = requests.get(url, timeout=self.timeout, headers=self._request_headers())
-            response.raise_for_status()
-            data = response.json()
+            data = self._request_json("GET", url)
             return extract_models_from_list(data)
 
         return self._execute_with_retry(
@@ -146,7 +144,6 @@ class OpenAICompatClient(BaseBackendClient):
         """
         try:
             url = f"{self.settings.base_url()}/v1/models"
-            response = requests.get(url, timeout=5, headers=self._request_headers())
-            return response.status_code == 200
-        except requests.RequestException:
+            return self._request_status("GET", url, timeout=5) == 200
+        except (requests.RequestException, ValueError):
             return False

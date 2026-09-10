@@ -6,6 +6,7 @@ common patterns like retry logic and message extraction to avoid code duplicatio
 from __future__ import annotations
 
 import json
+import sys
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Mapping, Sequence, TypeVar
@@ -36,6 +37,10 @@ class BaseBackendClient(ABC):
         settings: BackendSettings,
         timeout: float = 60.0,
         retries: int = 2,
+        *,
+        trust_environment: bool = True,
+        allow_redirects: bool = True,
+        max_response_bytes: int | None = None,
     ) -> None:
         """Initialize the client.
 
@@ -47,6 +52,29 @@ class BaseBackendClient(ABC):
         self.settings = settings
         self.timeout = timeout
         self.retries = max(0, retries)
+        if type(trust_environment) is not bool or type(allow_redirects) is not bool:
+            raise TypeError("HTTP transport flags must be exact booleans")
+        if max_response_bytes is not None and (
+            type(max_response_bytes) is not int
+            or isinstance(max_response_bytes, bool)
+            or not 0 < max_response_bytes <= 64 * 1024 * 1024
+        ):
+            raise ValueError("HTTP response bound must be a positive exact integer")
+        self._trust_environment = trust_environment
+        self._allow_redirects = allow_redirects
+        self._max_response_bytes = max_response_bytes
+
+    @property
+    def trust_environment(self) -> bool:
+        return self._trust_environment
+
+    @property
+    def allow_redirects(self) -> bool:
+        return self._allow_redirects
+
+    @property
+    def max_response_bytes(self) -> int | None:
+        return self._max_response_bytes
 
     def chat(self, messages: Sequence[Mapping[str, str]]) -> BackendResponse:
         """Send a chat conversation to the backend.
@@ -81,16 +109,97 @@ class BaseBackendClient(ABC):
             BackendResponse with the result
         """
         start = time.perf_counter()
-        response = requests.post(
-            url,
-            json=payload,
-            timeout=self.timeout,
-            headers=self._request_headers(),
-        )
-        response.raise_for_status()
-        data = response.json()
+        data = self._request_json("POST", url, payload=payload)
         latency_s = time.perf_counter() - start
         return self._extract_response(data, latency_s)
+
+    def _request_json(
+        self, method: str, url: str, *, payload: Dict[str, Any] | None = None
+    ) -> Any:
+        if (
+            self.trust_environment
+            and self.allow_redirects
+            and self.max_response_bytes is None
+        ):
+            function = requests.post if method == "POST" else requests.get
+            kwargs = {"timeout": self.timeout, "headers": self._request_headers()}
+            if payload is not None:
+                kwargs["json"] = payload
+            response = function(url, **kwargs)
+            response.raise_for_status()
+            return response.json()
+        session = requests.Session()
+        session.trust_env = self.trust_environment
+        response = None
+        try:
+            response = session.request(
+                method,
+                url,
+                json=payload,
+                timeout=self.timeout,
+                headers=self._request_headers(),
+                allow_redirects=self.allow_redirects,
+                stream=self.max_response_bytes is not None,
+            )
+            if not self.allow_redirects and 300 <= response.status_code < 400:
+                raise ValueError("HTTP redirect is prohibited")
+            response.raise_for_status()
+            if self.max_response_bytes is None:
+                return response.json()
+            content = bytearray()
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                remaining = self.max_response_bytes + 1 - len(content)
+                content.extend(chunk[:remaining])
+                if len(content) > self.max_response_bytes:
+                    raise ValueError("HTTP response exceeds its bound")
+            return json.loads(bytes(content))
+        finally:
+            self._close_transport(response, session)
+
+    def _request_status(self, method: str, url: str, *, timeout: float) -> int:
+        if (
+            self.trust_environment
+            and self.allow_redirects
+            and self.max_response_bytes is None
+        ):
+            function = requests.get if method == "GET" else requests.post
+            return function(
+                url, timeout=timeout, headers=self._request_headers()
+            ).status_code
+        session = requests.Session()
+        session.trust_env = self.trust_environment
+        response = None
+        try:
+            response = session.request(
+                method, url, timeout=timeout, headers=self._request_headers(),
+                allow_redirects=self.allow_redirects, stream=True,
+            )
+            if not self.allow_redirects and 300 <= response.status_code < 400:
+                raise ValueError("HTTP redirect is prohibited")
+            return response.status_code
+        finally:
+            self._close_transport(response, session)
+
+    @staticmethod
+    def _close_transport(response: Any, session: Any) -> None:
+        active_failure = sys.exc_info()[0] is not None
+        cleanup_failure: BaseException | None = None
+        if response is not None:
+            try:
+                response.close()
+            except BaseException as error:
+                cleanup_failure = error
+        try:
+            session.close()
+        except BaseException as error:
+            if cleanup_failure is None or isinstance(error, (KeyboardInterrupt, SystemExit)):
+                cleanup_failure = error
+        if active_failure or cleanup_failure is None:
+            return
+        if isinstance(cleanup_failure, (KeyboardInterrupt, SystemExit)):
+            raise cleanup_failure
+        if cleanup_failure is not None:
+            raise ValueError("HTTP transport cleanup failed") from None
 
     def _request_headers(self) -> Dict[str, str]:
         headers: Dict[str, str] = {}

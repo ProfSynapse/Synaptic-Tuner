@@ -351,6 +351,17 @@ Both source inventories remain CURRENT. CPU evaluator CI is configured but
 unrun. The chat controller remains under independent failure-path review;
 actual model-load/GPU qualification and end-user chat composition remain open.
 
+Correction (2026-09-10, subsequent chat integration): local commit `b9d33f7`
+contains the atomic runtime/caller migration. Its full provider-free selection
+passed **2,182 tests in 276.03 seconds**, before the chat integration. The
+reviewed bounded controller, generic HTTP policy and verified-local chat
+composition then passed a separate **181-test selection in 1.44 seconds**.
+Minimal CI requires `requests` because setup/lifecycle tests import it eagerly;
+that dependency is now explicit. The new composition reuses existing startup
+and evaluation interfaces, submits no hidden prompt and owns teardown across
+client/session failures. End-user CLI/consumer wiring, actual model-load/inference
+evidence, live Modal qualification and feature-branch integration remain open.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

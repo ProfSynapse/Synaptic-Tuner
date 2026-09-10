@@ -19,8 +19,15 @@ on:
       - "Evaluator/interactive_cli.py"
       - "Evaluator/cloud_hf_job_vllm.py"
       - "Evaluator/cli.py"
+      - "Evaluator/base_client.py"
+      - "Evaluator/openai_compat_client.py"
+      - "Evaluator/chat_session.py"
+      - "Evaluator/verified_vllm_chat.py"
       - "tests/evaluator/test_owned_process.py"
       - "tests/evaluator/test_vllm_*.py"
+      - "tests/evaluator/test_chat_session.py"
+      - "tests/evaluator/test_verified_vllm_chat.py"
+      - "tests/evaluator/test_http_transport_policy.py"
       - "tests/cloud/test_vllm_setup.py"
       - "tests/cloud/test_cloud_hf_job_vllm.py"
       - "tests/contract/test_modal_optional_dependency.py"
@@ -102,6 +109,7 @@ jobs:
             'numpy>=1.24,<3' \
             'pandas>=2,<3' \
             'setuptools>=68' \
+            'requests>=2.32,<3' \
             wheel
           python -m pip wheel --no-deps --no-build-isolation \
             --wheel-dir "$RUNNER_TEMP/wheelhouse" .
@@ -163,6 +171,8 @@ jobs:
           import tuner.training.contracts
           import Evaluator.owned_process
           import Evaluator.vllm_runtime
+          import Evaluator.chat_session
+          import Evaluator.verified_vllm_chat
           import tuner.inference.retrieved_model
           import tuner.inference.serving_target
           import tuner.execution.providers.modal.inference_model
@@ -200,6 +210,9 @@ jobs:
             tests/evaluator/test_owned_process.py \
             tests/evaluator/test_vllm_runtime.py \
             tests/evaluator/test_vllm_startup_cleanup.py \
+            tests/evaluator/test_chat_session.py \
+            tests/evaluator/test_verified_vllm_chat.py \
+            tests/evaluator/test_http_transport_policy.py \
             tests/cloud/test_vllm_setup.py \
             tests/inference \
             tests/trainers/sft/test_runtime_v1.py \
