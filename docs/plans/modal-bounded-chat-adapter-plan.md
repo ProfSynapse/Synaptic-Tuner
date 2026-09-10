@@ -117,6 +117,16 @@ guess that the first allocation is absent.
    Separate inference deployment/resource policy and chat-specific execution
    binding remain open. Do not reuse a training grant or add a new generic
    authority system to fill that gap.
+
+   Current implementation slice (2026-09-10): bind one separately authenticated
+   Sandbox inference configuration and the existing resource-only quote into a
+   chat-specific Foundation preparation. Keep source/workload freshness in the
+   existing caller admission chain and perform complete consistency checks here.
+   Parsing configuration is not authentication; authentication is not a grant
+   or proof that a supplied inference image/lock has been inspected. The selected
+   inference profile and chat control/key configuration need not equal training
+   values. Exact authenticated artifact placement remains tied to the source run.
+   See `../review/modal-inference-preparation.md` for implementation status.
 3. **Remote worker and provider boundary.** Separate locked inference source/image
    and SDK adapter. Reverify exact mounted artifact bytes using existing bounded
    archive/descriptor-relative primitives; obtain pinned base weights on Modal

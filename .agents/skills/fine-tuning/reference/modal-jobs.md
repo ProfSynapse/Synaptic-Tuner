@@ -112,6 +112,15 @@ stream consumers must close abandoned iterators (the shared materializer does).
 Remote launch composition, separate inference locks and chat authority remain
 unimplemented; this transport is not live Modal-chat qualification.
 
+Chat preparation must use its own session identity, inference resources and
+Foundation commands. Reuse the resource-quote and evidence-verifier contracts,
+but authenticate the separate inference configuration and recompute its resource
+commitment; never inherit a training quote or grant. Source/workload values must
+come directly from the existing fresh admission chain. A configuration signature
+does not replace inference image/lock review or authorize a serving allocation.
+This is internal adapter composition, not another operator step; current local
+implementation status is in `docs/review/modal-inference-preparation.md`.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical
