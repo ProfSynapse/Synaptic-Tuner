@@ -424,6 +424,15 @@ lifetime/cost safeguards. The existing Modal training deployment is not that
 adapter. No provider/credential access, cloud mutation, GPU run, push, merge,
 publication or EHR modification was performed for this consumer slice.
 
+The embedded consumer source checkpoint is local commit `8032f5e`. Its immutable
+offline wheel (SHA-256
+`eb276815360aa725f3a07784560c5296c2d981ee9aad33dbe29e6b5bf4eff0f1`)
+passed the archived neutral-directory CI import/resource step locally: **34
+installed modules and both resources**, with Modal/PyTorch absent. Independent
+archive/RECORD inspection passed for all 715 entries and matched all 707 Python
+files to committed source. This closes this slice's local package/import check,
+not execution of GitHub CI or the outstanding live inference qualification.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

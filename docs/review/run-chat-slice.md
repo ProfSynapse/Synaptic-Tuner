@@ -64,3 +64,22 @@ usage and the exact ownership/lifetime limits. Real GPU loading, inference
 quality and a Modal-hosted inference adapter remain unqualified. Local deadlines
 are not provider-side cost controls. No provider/credential access, GPU run,
 publication, push, merge or consuming-project edit is part of this checkpoint.
+
+## Immutable-source package check
+
+Source commit `8032f5eb0255165cbf267fb64fc9ceb742a488f2` was archived and built
+offline, without dependency resolution, into `synaptic_tuner-1.1.0-py3-none-any.whl`.
+Its size is **2,031,440 bytes** and SHA-256 is
+`eb276815360aa725f3a07784560c5296c2d981ee9aad33dbe29e6b5bf4eff0f1`.
+The wheel was installed without dependencies into the existing disposable,
+non-system-site package-verification environment, replacing only its previous
+engine wheel. The archived CI neutral-directory resource/import step passed:
+**34 installed engine/evaluator module imports and both resources**, with Modal
+and PyTorch absent. Both new module paths resolved from `site-packages`.
+
+Independent read-only ZIP audit verified 715 unique members, a clean ZIP CRC
+check, complete RECORD coverage with every declared hash/size correct, and all
+707 packaged Python files byte-identical to the immutable archive. The new
+run-chat modules and 97/66 source-inventory resources are present and exact;
+the retired legacy modules remain absent. This is local package integrity and
+import evidence, not a CI run, GPU/model-load test or live provider qualification.
