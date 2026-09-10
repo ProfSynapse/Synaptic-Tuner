@@ -15,6 +15,12 @@ Correction (2026-09-10): slice 3 now has a private shared materializer and a
 mounted-artifact byte transport under local qualification. This is partial
 implementation, not an authenticated remote worker or a deployable adapter.
 
+Qualification update (2026-09-10): this transport and its shared iterator cleanup
+passed 2,403 combined provider-free tests, independent review and immutable-wheel
+qualification; see `../review/modal-mounted-inference-artifacts.md`. Remote
+launch admission, chat resource authorization and the inference runtime lock
+remain open.
+
 ## Product boundary
 
 A consumer chooses a runtime for one verified training run and explicitly sends
