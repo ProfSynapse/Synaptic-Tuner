@@ -48,6 +48,16 @@ a Foundation dispatch, serving grant or runtime-lock gate. The next implementati
 work is the authenticated chat worker and executor/transport, followed by its
 complete inference lock and bounded session adapter.
 
+Effects update (2026-09-10): chat-specific Foundation executor, reconciliation
+adapter and resolvers are implemented and independently reviewed. The broad
+regression selection passed 2,503 tests; the final focused selection passed 59,
+with overlap and collection boundaries recorded in
+`../review/modal-inference-effects.md`. The exact-commit wheel passed clean
+dependency-only imports and an independent archive/RECORD audit. Consumer-owned
+Foundation remains the grant, predecessor, one-shot and receipt authority.
+Next is authenticated remote worker admission and SDK transport; the separate
+inference runtime lock and bounded owned session cleanup remain unfinished.
+
 ## Product boundary
 
 A consumer chooses a runtime for one verified training run and explicitly sends
