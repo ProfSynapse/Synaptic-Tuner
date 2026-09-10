@@ -1,6 +1,6 @@
 # Modal chat launch admission
 
-Status: implementation and local qualification in progress, 2026-09-10.
+Status: locally qualified, 2026-09-10.
 Engine-only; no provider calls, executable remote worker or live qualification.
 
 ## Boundary
@@ -36,14 +36,62 @@ process startup, credential resolution or provider call occurs in these helpers.
 
 ## Qualification
 
-Pending final source review, unit and real Foundation integration tests,
-regression checks and exact-commit installed-wheel verification. No completed
-qualification is claimed yet.
+Source commit: `fcd2cf163473b00b440a353e7cd07763a7376d88`. Independent source
+review passed the frozen launch and wire modules, SHA-256 respectively:
+
+- `e1ffb55ab8843900fa998e92f771d5cd115c421bb83387731195462ff3abe016`
+- `0492c10c6a384596bba04b3b409dc34f1f1a4afa88b7321d0d1a6fac5e29a1fb`
+
+Review corrections covered exact input types before callbacks, preservation of
+original and owned inputs across authority/signing callbacks, and independent
+worker expectation guards around verification and clock callbacks. Host signing
+now requires an actual clock, rejects future issuance (including one second),
+and checks freshness before signing. Worker admission retains the existing
+30-second clock-skew policy; neither window replaces a bounded serving lease.
+
+The integrated selection contains 41 independently authored launch/admission
+cases and 17 real Foundation integration cases. The source owner independently
+ran the latter: **17 passed in 55.10 seconds**. They exercise actual STAGE
+receipts and records, forged predecessors, independent assessment authority,
+time/configuration mismatches and callback mutations. The broker integration
+observes consumed SUBMIT authority before transport, then proves a duplicate
+dispatch does not sign or admit again. The pure builder test separately confirms
+that preparing/admitting a launch does not create a Foundation SUBMIT record.
+The combined regression selection passed **2,613 tests in 938.20 seconds** under
+isolated CPython 3.12.9 / pytest 8.4.2, without system site packages, Modal or
+Torch, and with automatic pytest plug-ins disabled. It includes all 58 final
+launch/admission cases, coordinator and Foundation, provider-neutral/public API,
+training/runtime, Docker provider, inference, selected Evaluator/client callers
+and all selected Modal provider tests. This is not the entire repository suite;
+the independent 17-case result overlaps it and is not an additional test count.
+
+The exact Git archive produced `synaptic_tuner-1.1.0-py3-none-any.whl`,
+**2,070,369 bytes**, SHA-256
+`90c67d968e3906bb05b9dc11bb46878bb215c89f8db156c28bc61fd1778d2ef8`.
+Independent audit verified 724 unique ZIP/RECORD entries, every recorded hash
+and size, and all 716 Python members byte-for-byte against the source archive.
+The packaged launch and wire modules match the reviewed hashes above.
+
+A fresh install containing only the wheel and declared dependencies passed the
+checked-in CI probe's **43 engine/Evaluator imports**, both packaged-resource
+checks and four credential-free `inspect.Signature.bind` checks for the host
+builder, worker admission, expectation and launch envelope. The two new modules
+were imported from the installed environment, from a neutral directory under
+isolated Python. Modal, Torch, pytest, NumPy and pandas were absent. The signature
+probes call no entry point and assert none hides required parameters in `**kwargs`.
+
+The unchanged 97-file training runtime lock and separate 66-member offline
+worker closure (679,487 payload bytes) report `CURRENT`; both are schema-valid
+in the wheel. The mixed Windows/WSL checkout's offline closure check used scoped
+local `GIT_DIR`/`GIT_WORK_TREE`, never `PYTHONPATH`. Canonical skill mirrors match.
+A filename-only package scan found no test paths or private artifact filenames;
+it is not a content-level credential audit. No cloud resources, model downloads,
+GPU jobs, push, merge or EHR changes were part of this slice.
 
 ## Remaining work
 
-Implement explicit-client SDK transport and authenticated physical mount/source
-admission, then reuse the existing artifact materializer, pinned-model preparer
+Implement explicit-client SDK transport with trusted exact Volume-to-mount
+composition, then reuse the existing artifact materializer, pinned-model preparer
 and vLLM controller on the worker. Capture the separate inference runtime/image
 and bootstrap lock. Durable owned leases, readiness and request bounds,
 exact-target cleanup and ChatSession integration remain required before live

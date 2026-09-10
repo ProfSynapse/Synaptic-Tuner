@@ -58,13 +58,15 @@ Foundation remains the grant, predecessor, one-shot and receipt authority.
 Next is authenticated remote worker admission and SDK transport; the separate
 inference runtime lock and bounded owned session cleanup remain unfinished.
 
-Current launch-admission slice (2026-09-10): add one chat-specific host-signed
-claim and pure worker admission. Reuse actual Foundation stage evidence and
+Launch-admission update (2026-09-10): one chat-specific host-signed claim and
+pure worker admission are locally qualified. They reuse actual Foundation stage evidence and
 the shared preparation snapshot; do not duplicate the model/source/native
 inventory into another runtime truth. Independently supplied configuration and
 command expectations anchor admission. This does not implement SDK dispatch,
 physical Volume authentication, an executable worker, inference-lock inspection
-or owned cleanup. Track measured results in `../review/modal-inference-launch.md`.
+or owned cleanup. Independent review, all 2,613 selected regression tests and
+the exact-commit installed wheel pass; measured results are recorded in
+`../review/modal-inference-launch.md`.
 
 ## Product boundary
 
@@ -205,9 +207,20 @@ guess that the first allocation is absent.
    canonical five-member projections, exact byte hashes and sizes, no-link file
    identities and output-directory identity at EOF. It borrows the mount root
    descriptor and closes its own descriptors when iteration ends or is aborted.
-   These are filesystem consistency checks: a future authenticated worker must
-   still prove the exact Volume-to-mount mapping before construction. A claimed
-   Volume ID and a deterministic provider-entry digest are not authentication.
+   These are filesystem consistency checks: a future trusted deployment must
+   bind the exact selected Volume objects to the configured mount roots before
+   worker construction. A claimed Volume ID and a deterministic provider-entry
+   digest are not authentication.
+
+   Trust-boundary correction (2026-09-10): physical mount mapping is owned by
+   the explicit-client deployment adapter, which resolves and checks exact
+   Volume objects and supplies those same objects in the provider mount map.
+   The worker trusts Modal to honor that map, then retains no-follow directory
+   descriptors and verifies the authenticated artifact inventory and bytes.
+   No one-use mount-anchor files are required: they would add cloud writes and
+   cleanup races without independently proving the provider's mapping. Mounted
+   preparation can be composed and tested before the runnable worker/bootstrap
+   and separate inference lock exist; that does not qualify a live deployment.
 4. **Session adapter and qualification.** Compose the existing `ChatSession`
    controller with the authenticated remote client and durable owned lease.
    Test full/LoRA flow, client disappearance, post-create ambiguity, startup and
