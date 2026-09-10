@@ -483,6 +483,11 @@ locks remain CURRENT. Details and fixture limitations are recorded in
 `modal-inference-source-binding.md`. Slice 2b workload/resource/mutation binding,
 the remote worker and the bounded Sandbox/session adapter remain open.
 
+The native source checkpoint is local commit `5d69327`. Its immutable wheel
+passed 35 installed imports, two resources and signature binding, plus independent
+716-entry ZIP/RECORD and 708-Python-member source equivalence checks. Exact
+wheel digest and environment limits are recorded in the source-binding review.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

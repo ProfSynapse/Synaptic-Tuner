@@ -63,8 +63,18 @@ its clean combined acceptance/integration run passed 26 tests in 22.70 seconds,
 and its integration/existing-reader run passed 22 tests in 20.98 seconds.
 Independent scope/document review also passed. The Modal 97-pin and offline
 66-member lock checks remain `CURRENT`, with no lock changes, and the canonical
-skill mirrors are synchronized. Exact-commit wheel qualification follows the
-local source checkpoint.
+skill mirrors are synchronized.
+
+Source is locally committed as `5d69327231acce4780fe823e2d92f7e7596ced64`.
+Its offline-built wheel is 2,037,109 bytes with SHA-256
+`615b45ce2ed7fd716359b7d73eb51facc67b83935e8aaa9f6b6d2890e5e87230`.
+The existing disposable non-system-site package environment passed the checked-in
+35-module neutral-directory import probe, both resource checks and binder
+signature binding without Modal or PyTorch installed. Independent archive audit
+passed all 716 unique ZIP/RECORD entries and their recorded sizes/hashes; all
+708 packaged Python members match the immutable commit archive. A filename scan
+found no credential-named files; this is not a content-level secret scan or a
+live provider test. CI was not dispatched.
 
 These fixtures use consumer authority/verifier test doubles, not live provider
 authentication. The shared launch fixture is a semantic bundle fixture, not a
