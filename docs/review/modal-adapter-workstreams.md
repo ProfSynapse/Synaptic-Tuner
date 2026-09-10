@@ -17,7 +17,7 @@ regressions, not live cloud or trained-model readiness.
 | 3. Remote wire and shared authority | One canonical command lineage through staging, remote admission and worker evidence; packaged source/runtime locks updated together | Integrated; current explicit 97-pin bootstrap and 66-member trainer inventories |
 | 4. Real preflight and restart | Authenticated deployment/client/Volume/quote checks; exact configuration retained through consumer-owned persistence | Integrated; fake-provider tests, not live account or database crash proof |
 | 5. Public cutover and consumer proof | Existing lazy registry and generic coordinator composition; remove old lifecycle and Modal-specific host field; minimal consumer fixture inside engine | Integrated, independently reviewed, 2,043 provider-free tests and installed-wheel check passed |
-| 6. Retrieved-model usability | Verified local materialization and explicit model-load/inference check; no claim that training completion alone proves usable weights | Stream-validator prerequisite under review; materializer and loader not implemented |
+| 6. Retrieved-model usability | Verified local materialization and explicit model-load/inference check; no claim that training completion alone proves usable weights | Stream-validator prerequisite committed at `a1f1826`; materializer isolated under review; loader not implemented |
 | 7. Bounded chat | Easy local/Modal conversation using shared inference/evaluation plumbing, explicit stop and bounded GPU lifetime | After 5–6; no perpetual endpoint by default |
 | 8. Qualification and release | Repeatable provider-free CI now; integrated conformance, independent audit, scoped live proof, docs and feature-branch integration later | Sol conformance lane now; lead owns final activation/release decisions |
 
@@ -289,10 +289,24 @@ digest: the last wheel still predates the archive helper change. All 95 Python
 members of the Modal lock also parse with Python 3.11 grammar; that static
 check is not execution under the pinned Linux CPython 3.11 runtime.
 
+Correction (2026-09-09, packaging follow-through): a fresh offline wheel of
+the reviewed source through `cdf4a07`, including the archive helper, passed
+27 installed-module imports, public-cutover assertions, and both packaged
+resource checks from `/tmp` without the Modal SDK. Its SHA-256 is
+`83e0f5ae41238fce623c74c6c89a2f335336a43aa2bf9c517a60bc8c97abd5b4`.
+This supersedes the earlier wheel result only; it includes neither active
+materializer nor process-family draft and is not a live runtime qualification.
+
 The model materializer remains an isolated, unintegrated agent draft until its
 filesystem, streaming, archive, and receipt-boundary reviews pass. The next
 chat prerequisite is exact process-family ownership; the committed vLLM
-cleanup only proves direct-child behavior. LoRA chat additionally requires an
+cleanup only proves direct-child behavior. A separately reviewed internal
+Linux process-group lease has now passed 25 integrated tests in 0.84 seconds,
+including real CPU parent/descendant cleanup, retained startup-failure cleanup,
+and unknown-state denial/retry. It is not wired into vLLM yet and does not
+prove GPU cleanup, detached-session containment, or survival across restart.
+Its deadlines bound userspace polling, not arbitrary kernel syscall latency.
+LoRA chat additionally requires an
 exact locally verified base snapshot and tokenizer, reusing existing automatic
 model preparation rather than adding an operator weight-staging step.
 

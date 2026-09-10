@@ -11,6 +11,8 @@ on:
       - "tuner/training/**"
       - "tuner/project/**"
       - "tuner/runtime/**"
+      - "Evaluator/owned_process.py"
+      - "tests/evaluator/test_owned_process.py"
       - "tests/contract/test_modal_optional_dependency.py"
       - "tests/contract/test_modal_runtime_lock*.py"
       - "tests/contract/test_modal_bootstrap_closure.py"
@@ -149,6 +151,7 @@ jobs:
           import tuner.training.coordinator_material
           import tuner.training.coordinator_service
           import tuner.training.contracts
+          import Evaluator.owned_process
           PY
 
       - name: Check source hashes without refreshing the runtime lock
@@ -180,6 +183,7 @@ jobs:
             tests/execution/test_mutation_broker.py \
             tests/training \
             tests/runtime \
+            tests/evaluator/test_owned_process.py \
             tests/trainers/sft/test_runtime_v1.py \
             tests/execution/providers/docker_provider_v1 \
             tests/execution/providers/test_modal_*.py
