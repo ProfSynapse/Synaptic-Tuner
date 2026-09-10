@@ -17,8 +17,8 @@ regressions, not live cloud or trained-model readiness.
 | 3. Remote wire and shared authority | One canonical command lineage through staging, remote admission and worker evidence; packaged source/runtime locks updated together | Integrated; current explicit 97-pin bootstrap and 66-member trainer inventories |
 | 4. Real preflight and restart | Authenticated deployment/client/Volume/quote checks; exact configuration retained through consumer-owned persistence | Integrated; fake-provider tests, not live account or database crash proof |
 | 5. Public cutover and consumer proof | Existing lazy registry and generic coordinator composition; remove old lifecycle and Modal-specific host field; minimal consumer fixture inside engine | Integrated, independently reviewed, 2,043 provider-free tests and installed-wheel check passed |
-| 6. Retrieved-model usability | Verified local materialization and explicit model-load/inference check; no claim that training completion alone proves usable weights | Stream validator and reviewed materializer integrated; loader not implemented |
-| 7. Bounded chat | Easy local/Modal conversation using shared inference/evaluation plumbing, explicit stop and bounded GPU lifetime | After 5–6; no perpetual endpoint by default |
+| 6. Retrieved-model usability | Verified local materialization and explicit model-load/inference check; no claim that training completion alone proves usable weights | Materializer, pinned-base preparation and verified-local vLLM composition integrated; fake-effect qualification only, live model-load/inference proof open |
+| 7. Bounded chat | Easy local/Modal conversation using shared inference/evaluation plumbing, explicit stop and bounded GPU lifetime | Local controller/composition integrated; consumer entrypoint and Modal inference deployment remain open; no perpetual endpoint by default |
 | 8. Qualification and release | Repeatable provider-free CI now; integrated conformance, independent audit, scoped live proof, docs and feature-branch integration later | Sol conformance lane now; lead owns final activation/release decisions |
 
 This map is for the agreed Modal/submodule-first scope, not a requirement to
@@ -361,6 +361,34 @@ that dependency is now explicit. The new composition reuses existing startup
 and evaluation interfaces, submits no hidden prompt and owns teardown across
 client/session failures. End-user CLI/consumer wiring, actual model-load/inference
 evidence, live Modal qualification and feature-branch integration remain open.
+
+The local chat/HTTP checkpoint is `a0a9ae6`. A non-editable wheel built from its
+immutable archive has SHA-256
+`1acfb1af5d9241feba5820ca463b8f4f4db377ae984365caf244ae1b740fc1ee`.
+In a fresh non-system-site environment it passed the checked-in neutral-directory
+wheel test: 32 installed modules and both resources, with Modal and PyTorch
+absent. Independent ZIP inspection found 713 unique entries, exact archived
+bytes for all seven inference/runtime/chat modules and both resources, and no
+retired public training/legacy remote modules. This is packaging evidence only.
+
+Consumer boundary: the existing `list-runs` registry and HF `cloud-eval` CLI are
+not authenticated Foundation run access. A consuming application supplies its
+already-composed `APIHost.runs` / `RunsAPI` and exact run reference; the engine
+must not fabricate retained stores, signing/grant services or provider authority
+to make a standalone chat command appear operational. The present reviewed
+Modal deployment is a training worker, not an inference/chat deployment.
+
+Final combined local checkpoint (2026-09-10): **2,259 tests passed in 284.26
+seconds** at `a0a9ae6`, including all previous coordinator/provider-free slices,
+verified materialization/preparation, owned runtime, HTTP policy, chat controller
+and full/LoRA composition tests. CPython 3.12.9 / pytest 8.4.2 used a clean
+non-system-site environment without Modal or PyTorch. The separate 97-pin and
+66-member source-inventory checks remain CURRENT, and canonical skill mirrors
+are synchronized. The runner-selection/baseline failures from the exploratory
+evaluator suite are documented in `verified-vllm-chat-slice.md`; they are not
+part of this green selection. CI, live model/GPU/Modal inference and publication
+remain unexecuted. All assigned agent implementations and reviews have been
+consumed into local integration; none is pending a handoff.
 
 ### Foundation binding contract
 

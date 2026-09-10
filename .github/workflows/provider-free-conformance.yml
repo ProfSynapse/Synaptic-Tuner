@@ -28,6 +28,7 @@ on:
       - "tests/evaluator/test_chat_session.py"
       - "tests/evaluator/test_verified_vllm_chat.py"
       - "tests/evaluator/test_http_transport_policy.py"
+      - "tests/test_evaluator_clients.py"
       - "tests/cloud/test_vllm_setup.py"
       - "tests/cloud/test_cloud_hf_job_vllm.py"
       - "tests/contract/test_modal_optional_dependency.py"
@@ -213,6 +214,7 @@ jobs:
             tests/evaluator/test_chat_session.py \
             tests/evaluator/test_verified_vllm_chat.py \
             tests/evaluator/test_http_transport_policy.py \
+            tests/test_evaluator_clients.py \
             tests/cloud/test_vllm_setup.py \
             tests/inference \
             tests/trainers/sft/test_runtime_v1.py \
