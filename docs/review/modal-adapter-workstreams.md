@@ -17,7 +17,7 @@ regressions, not live cloud or trained-model readiness.
 | 3. Remote wire and shared authority | One canonical command lineage through staging, remote admission and worker evidence; packaged source/runtime locks updated together | Integrated; current explicit 97-pin bootstrap and 66-member trainer inventories |
 | 4. Real preflight and restart | Authenticated deployment/client/Volume/quote checks; exact configuration retained through consumer-owned persistence | Integrated; fake-provider tests, not live account or database crash proof |
 | 5. Public cutover and consumer proof | Existing lazy registry and generic coordinator composition; remove old lifecycle and Modal-specific host field; minimal consumer fixture inside engine | Integrated, independently reviewed, 2,043 provider-free tests and installed-wheel check passed |
-| 6. Retrieved-model usability | Verified local materialization and explicit model-load/inference check; no claim that training completion alone proves usable weights | Stream-validator prerequisite committed at `a1f1826`; materializer isolated under review; loader not implemented |
+| 6. Retrieved-model usability | Verified local materialization and explicit model-load/inference check; no claim that training completion alone proves usable weights | Stream validator and reviewed materializer integrated; loader not implemented |
 | 7. Bounded chat | Easy local/Modal conversation using shared inference/evaluation plumbing, explicit stop and bounded GPU lifetime | After 5–6; no perpetual endpoint by default |
 | 8. Qualification and release | Repeatable provider-free CI now; integrated conformance, independent audit, scoped live proof, docs and feature-branch integration later | Sol conformance lane now; lead owns final activation/release decisions |
 
@@ -297,8 +297,15 @@ resource checks from `/tmp` without the Modal SDK. Its SHA-256 is
 This supersedes the earlier wheel result only; it includes neither active
 materializer nor process-family draft and is not a live runtime qualification.
 
-The model materializer remains an isolated, unintegrated agent draft until its
-filesystem, streaming, archive, and receipt-boundary reviews pass. The next
+Correction (2026-09-09, materializer integration): independent review passed
+the materializer, including exclusive extraction, source/member identity
+checks, and rollback that preserves unknown or replaced leaves. The integrated
+materializer, all runtime tests, and process-family tests passed **181 tests
+in 1.54 seconds** in the clean environment. Its trust boundary is the injected
+reviewed Runs operations; an arbitrary API wrapper is not authentication.
+Cleanup is identity-checked best effort in a private root, not a sandbox
+against hostile same-user races. This remains an internal, unregistered
+materializer, not a model-load or inference check. The next
 chat prerequisite is exact process-family ownership; the committed vLLM
 cleanup only proves direct-child behavior. A separately reviewed internal
 Linux process-group lease has now passed 25 integrated tests in 0.84 seconds,
