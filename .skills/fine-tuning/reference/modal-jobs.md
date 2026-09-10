@@ -44,6 +44,32 @@ provider I/O; it does not choose storage, mint credentials, or activate the
 registration. Provider-free list/show proof does not enable live outcome, log,
 or artifact reads while the descriptor capabilities remain false.
 
+## Chat after training (embedded consumer workflow)
+
+Use the checked-in `tuner.inference.run_chat.open_run_chat` entrypoint with the
+consuming project's authenticated `APIHost.runs`, retained run reference,
+private artifact destination and selected runtime adapter. It joins verified
+artifact retrieval, exact serving-target preparation and one bounded session;
+it does not add a CLI, registry, database, authority loader or publication step.
+For Linux/WSL local vLLM, use `Evaluator.local_run_chat.LocalVLLMRunChatRuntime`.
+The embedding example and ownership contract are in the repository-root
+`docs/architecture/verified-run-chat.md`. Use this existing composition instead
+of adding throwaway retrieval/start/chat scripts.
+
+Successful materialization persists the consumer's model files after session
+cleanup. The helper sends no hidden prompt and does not save conversations
+automatically. Full models need no upstream preparer; LoRA uses the existing
+`PinnedModelPreparer` seam for the exact authenticated base revision. Preparation
+belongs on the selected execution machine, not a manual local weight-staging
+step for cloud execution. Inference children remain credential-free and offline.
+
+Correction (2026-09-10): this is locally tested adapter composition, not live
+Modal inference qualification. The current Modal deployment is training-only.
+A Modal chat adapter still requires exact-source deployment, remote model and
+artifact preparation, authenticated access, provider-side lifetime/cost controls
+and separate live verification. A local session timer is not a cloud billing
+guarantee. Do not silently route to another runtime if a selected adapter fails.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical

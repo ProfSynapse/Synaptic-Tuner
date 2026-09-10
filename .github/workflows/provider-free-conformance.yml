@@ -23,10 +23,13 @@ on:
       - "Evaluator/openai_compat_client.py"
       - "Evaluator/chat_session.py"
       - "Evaluator/verified_vllm_chat.py"
+      - "Evaluator/local_run_chat.py"
       - "tests/evaluator/test_owned_process.py"
       - "tests/evaluator/test_vllm_*.py"
       - "tests/evaluator/test_chat_session.py"
       - "tests/evaluator/test_verified_vllm_chat.py"
+      - "tests/evaluator/test_local_run_chat.py"
+      - "tests/evaluator/test_run_chat_local_integration.py"
       - "tests/evaluator/test_http_transport_policy.py"
       - "tests/test_evaluator_clients.py"
       - "tests/cloud/test_vllm_setup.py"
@@ -174,8 +177,10 @@ jobs:
           import Evaluator.vllm_runtime
           import Evaluator.chat_session
           import Evaluator.verified_vllm_chat
+          import Evaluator.local_run_chat
           import tuner.inference.retrieved_model
           import tuner.inference.serving_target
+          import tuner.inference.run_chat
           import tuner.execution.providers.modal.inference_model
           PY
 
@@ -213,6 +218,8 @@ jobs:
             tests/evaluator/test_vllm_startup_cleanup.py \
             tests/evaluator/test_chat_session.py \
             tests/evaluator/test_verified_vllm_chat.py \
+            tests/evaluator/test_local_run_chat.py \
+            tests/evaluator/test_run_chat_local_integration.py \
             tests/evaluator/test_http_transport_policy.py \
             tests/test_evaluator_clients.py \
             tests/cloud/test_vllm_setup.py \

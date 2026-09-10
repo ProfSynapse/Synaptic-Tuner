@@ -390,6 +390,40 @@ part of this green selection. CI, live model/GPU/Modal inference and publication
 remain unexecuted. All assigned agent implementations and reviews have been
 consumed into local integration; none is pending a handoff.
 
+Correction (2026-09-10, embedded verified-run chat): the consumer composition is
+now implemented as `tuner.inference.run_chat.open_run_chat`, with an injected
+`RunChatRuntime` and a concrete `Evaluator.local_run_chat.LocalVLLMRunChatRuntime`.
+It reuses authenticated `APIHost.runs`, verified materialization and exact
+full/LoRA preparation, opens one bounded session, sends no hidden prompt and
+retains the consumer's model files after owned cleanup. A second fake runtime
+proves the generic seam needs no vLLM/provider registry. No standalone CLI,
+new authority/storage loader or public re-export is added. This closes the
+embedded consumer-wiring item, not real GPU loading or Modal inference serving.
+
+All three Sol workstreams were polled, reviewed and integrated. The focused
+combined selection passed **109 tests in 0.56 seconds** on clean CPython 3.12.9 /
+pytest 8.4.2; independent final adapter/integration/consumer review passed
+**21 tests in 0.32 seconds**. The embedding guide was checked against real
+constructor signatures and corrected to distinguish preparation validation
+from the fresh pre-spawn file/inventory validation. Canonical fine-tuning
+guidance and both managed copies are synchronized. CI now selects all new
+tests and both new wheel imports. The 97-pin and 66-member inventories remain
+CURRENT without hash refresh. See `run-chat-slice.md` and
+`../architecture/verified-run-chat.md` for evidence and limits.
+
+The full established provider-free selection plus this slice's 29 new cases
+passed **2,288 tests in 265.15 seconds**. Final test-only formatting was followed
+by another **109 passed in 0.55 seconds**. The earlier exploratory evaluator
+baseline exclusions remain unchanged; this is not a claim that every evaluator
+test is green. Both source-inventory checks were run separately as above.
+
+Remaining release work still includes exact-source packaging/CI qualification,
+live GPU model loading and inference evidence, and a separately qualified Modal
+chat adapter with remote preparation, authenticated access and provider-side
+lifetime/cost safeguards. The existing Modal training deployment is not that
+adapter. No provider/credential access, cloud mutation, GPU run, push, merge,
+publication or EHR modification was performed for this consumer slice.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an
