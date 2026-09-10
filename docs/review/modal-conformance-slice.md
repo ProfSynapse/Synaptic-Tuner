@@ -15,7 +15,10 @@ Passing this lane means those synthetic and local contracts conform in the
 tested source revision. Fake-provider success is **not** evidence of a live
 Modal API call, authenticated provider observation, cloud execution, training,
 artifact retrieval, model quality, release publication, or spending approval.
-It cannot activate the currently non-operational Modal coordinator adapter.
+It supplies no live account credentials or consumer authority and performs only
+fake-provider mutations. It also does not enable or qualify the descriptor's six
+advertised read, lifecycle, artifact-streaming, and cost-quote flags. Those flags
+are not a master switch for an otherwise authenticated start.
 
 ## Exact test surface
 
@@ -190,7 +193,8 @@ pass their synchronization check. Authenticated read transport and operational
 preflight are still outside this checkpoint. No live provider check is implied.
 
 The next combined checkpoint includes authenticated reads, operational preflight
-and inactive registry factories: **1,326 passed in 223.91 seconds**. Its installed
+and registry factories advertising six false capability flags: **1,326 passed
+in 223.91 seconds**. Its installed
 wheel passed 20 module imports and both resources from a neutral directory
 without Modal. SHA-256:
 `af7724f83af1a8c3c95c5893e75f177b32ef267550c2f257121e1cdba18c05b4`.

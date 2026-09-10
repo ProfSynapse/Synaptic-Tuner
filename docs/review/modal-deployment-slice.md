@@ -24,7 +24,8 @@ The model-cache preparation commit occurs before the child trainer. After worker
 completion, the artifact Volume is committed before the control Volume so signed
 success evidence cannot become durable before its artifacts. Retries remain zero.
 
-Public exports, deployment, provider registration, and capability activation are
-absent. The lead-owned runtime-lock maintenance must add the candidate wrapper and
+Public exports, deployment, provider registration, and qualification of the six
+advertised read, lifecycle, artifact-streaming, and cost-quote surfaces are absent.
+The lead-owned runtime-lock maintenance must add the candidate wrapper and
 its complete image-bootstrap import closure; the separately authenticated 66-file
 trainer closure remains unchanged.

@@ -1,6 +1,8 @@
 # Submodule-first training product v1
 
 Status: Phase 0 evidence and contract baseline
+Current implementation correction: see the dated coordinator checkpoint below;
+the frozen matrix remains historical evidence for its explicitly named commit.
 Approved roadmap: [`../plans/submodule-first-training-product-roadmap-plan.md`](../plans/submodule-first-training-product-roadmap-plan.md)
 
 This document is the authoritative product boundary and evidence matrix for the
@@ -67,7 +69,30 @@ level must never be used as evidence for a later level.
 | KTO, DPO, embedding, GRPO through the public training API | `NOT_IMPLEMENTED` | SFT is the only method in the new path. |
 | Evaluation and persisted pipelines through public APIs | `NOT_IMPLEMENTED` | Legacy evaluation/experiment paths remain outside v1. |
 
-## Frozen Modal evidence
+## Current coordinator checkpoint (2026-09-09)
+
+The engine-only candidate at local commit `f6571a9` replaces the former Modal
+lifecycle with the existing provider-neutral coordinator and Foundation
+composition. `HostPorts` now contains only `runs` and `clock`; provider source
+verification and explicit client construction remain separate consumer-owned
+inputs. The public training facade uses its generic five-method contract, and
+the candidate composition also supplies the existing generic runs service.
+No historical lifecycle record is implicitly converted into new authority.
+
+This checkpoint is `IMPLEMENTED_FAKE_TESTED`, not `LIVE_PROVEN`: 2,043 tests
+passed in the clean SDK-free selection, with a separate installed-wheel check.
+It does not meet the live local-Docker Phase 2 gate below merely because
+provider-free Docker adapter tests are included. The Modal descriptor's six
+advertised read, lifecycle, artifact-streaming, and cost-quote flags remain
+false; they are not a master switch for authenticated start. The earlier live
+run and publication receipts qualify only their recorded implementation, not
+this replacement. Verified local model loading
+and bounded chat are still separate work, and no main-branch release is implied.
+
+Current scope and local measurements are tracked in
+[`../review/modal-adapter-workstreams.md`](../review/modal-adapter-workstreams.md).
+
+## Frozen Modal evidence details
 
 The repository fixture is
 [`../../tests/fixtures/training_product/modal_live_v1/evidence-index.json`](../../tests/fixtures/training_product/modal_live_v1/evidence-index.json).

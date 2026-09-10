@@ -28,9 +28,12 @@ broker, and the fixed remote worker.
 Correction (2026-09-09): the old `ModalTrainingOperations`, repository and
 composition entrypoints have been removed in the local coordinator cutover.
 The replacement uses existing generic Foundation/coordinator ports and
-`CoordinatorTrainingService`. The Modal registration remains capability-inactive
-pending consumer binding, live activation, and security/release qualification. Do not treat
-these local code changes or provider-free tests as a newly qualified live path.
+`CoordinatorTrainingService`. The Modal registration's six advertised read,
+lifecycle, artifact-streaming, and cost-quote flags remain false pending consumer
+binding and security/release qualification. They are not a master start switch:
+exact authenticated preflight, consumer effect grants, and Foundation lineage are
+required. Do not treat these local code changes or provider-free tests as a newly
+qualified live path.
 
 `synaptic_tuner.api.v1.modal.compose_modal_coordinator` takes explicit
 `ModalCoordinatorStorePorts` and `ModalFoundationCompositionPorts`, plus the

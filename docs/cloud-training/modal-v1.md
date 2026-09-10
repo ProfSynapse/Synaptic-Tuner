@@ -2,7 +2,9 @@
 
 Correction (2026-09-09): the current Modal coordinator adapter is undergoing
 provider-free qualification behind `synaptic_tuner.api.v1.TrainingAPI`.
-Its advertised capabilities remain inactive. The frozen live proof below
+Its six advertised read, lifecycle, artifact-streaming, and cost-quote flags
+remain false. They are not a master start switch: exact consumer effect grants,
+authenticated preflight, and Foundation lineage are required. The frozen live proof below
 belongs to the earlier implementation, not this coordinator cutover.
 The consuming application owns project configuration, its database, execution
 grants, secrets, and persistence. The Toolset-Training submodule owns the
@@ -22,7 +24,7 @@ host request/config
   -> exact Modal Function.spawn()
   -> fixed remote SFT runtime
   -> authenticated Volume evidence
-  -> RunsAPI (provider reads require qualified capability activation)
+  -> RunsAPI (provider reads require the corresponding advertised flag and qualification)
 ```
 
 The fixed provider topology is SDK 1.5.4, an explicit authenticated client, a
@@ -80,7 +82,8 @@ tree.
 ## Frozen live proof
 
 Historical evidence only: this section records the earlier implementation.
-It does not qualify the current inactive coordinator or its updated source lock.
+It does not qualify live execution of the current coordinator, its six
+advertised read/lifecycle surfaces, or its updated source lock.
 
 The first successful product run is
 `modal-sft-20260826T144636Z-7aec224e893d`, bound to provider call

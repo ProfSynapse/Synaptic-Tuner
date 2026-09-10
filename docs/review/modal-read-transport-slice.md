@@ -1,6 +1,6 @@
 # Modal coordinator read transport slice
 
-This disabled internal slice implements provider reads only after reconstructing
+This internal authenticated slice implements provider reads only after reconstructing
 the exact authenticated submit binding and retained stage-to-submit launch
 envelope.  Host Foundation, assessment, binding, stage, and launch authorities
 remain on the host; the adapter introduces no database, grant, or recovery

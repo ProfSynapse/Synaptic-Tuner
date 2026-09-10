@@ -13,7 +13,7 @@ regressions, not live cloud or trained-model readiness.
 | --- | --- | --- |
 | 0. Preparation | Generic planning, binding, canonical preparation; executable preflight refuses | Complete locally at the common base |
 | 1. Effects | Foundation stage, submit, cancel and conservative lookup/reconciliation | Integrated and independently reviewed; provider-free proof only |
-| 2. Authenticated reads | Full submit-proof validation before status/log/inventory/byte reads | Integrated and independently reviewed; live capability remains disabled |
+| 2. Authenticated reads | Full submit-proof validation before status/log/inventory/byte reads | Integrated and independently reviewed; the corresponding advertised flags remain false and live reads are unqualified |
 | 3. Remote wire and shared authority | One canonical command lineage through staging, remote admission and worker evidence; packaged source/runtime locks updated together | Integrated; current explicit 97-pin bootstrap and 66-member trainer inventories |
 | 4. Real preflight and restart | Authenticated deployment/client/Volume/quote checks; exact configuration retained through consumer-owned persistence | Integrated; fake-provider tests, not live account or database crash proof |
 | 5. Public cutover and consumer proof | Existing lazy registry and generic coordinator composition; remove old lifecycle and Modal-specific host field; minimal consumer fixture inside engine | Integrated, independently reviewed, 2,043 provider-free tests and installed-wheel check passed |
@@ -207,7 +207,8 @@ the reader lane is adding unpatched-facade fake-Volume integration coverage.
 
 The reader subsequently passed final independent review with the unpatched
 explicit-client facade and fake SDK Volumes. Its lead integration, preflight
-and inactive factories passed **1,326 tests in 223.91 seconds** together. The
+and factories advertising six false capability flags passed **1,326 tests in
+223.91 seconds** together. The
 installed wheel passed neutral-directory imports of 20 modules and both
 packaged resources with no Modal SDK; SHA-256:
 `af7724f83af1a8c3c95c5893e75f177b32ef267550c2f257121e1cdba18c05b4`.
@@ -221,7 +222,7 @@ closure is a separate artifact.
 The reviewed read/preflight/factories checkpoint is local commit `ec02dc0`.
 The next integrated selection passed **1,369 tests in 233.76 seconds** in the
 same clean environment. It includes the concrete generic training service,
-consumer-owned retention, and inactive candidate deployment builder. Both
+consumer-owned retention, and candidate deployment builder. Both
 stage and submit now have direct post-publication crash/fresh-wrapper retry
 regressions; retained launch assessments and signatures are reused exactly.
 The candidate builder rejects any declared Secret keys beyond its two distinct
@@ -279,6 +280,21 @@ archive-validator prerequisite is independently reviewed, but safe extraction,
 model loading, and bounded chat remain separate implementation/qualification
 work. Active agents continue in isolated non-overlapping worktrees with manual
 clock-based status polling.
+
+Follow-up checkpoint: `f6571a9` records the atomic public cutover;
+`a1f1826` records the separately reviewed seekable archive validator. After
+both, the same expanded selection passed **2,057 tests in 275.87 seconds** in
+the clean environment. This supersedes the test count, not the earlier wheel
+digest: the last wheel still predates the archive helper change. All 95 Python
+members of the Modal lock also parse with Python 3.11 grammar; that static
+check is not execution under the pinned Linux CPython 3.11 runtime.
+
+The model materializer remains an isolated, unintegrated agent draft until its
+filesystem, streaming, archive, and receipt-boundary reviews pass. The next
+chat prerequisite is exact process-family ownership; the committed vLLM
+cleanup only proves direct-child behavior. LoRA chat additionally requires an
+exact locally verified base snapshot and tokenizer, reusing existing automatic
+model preparation rather than adding an operator weight-staging step.
 
 ### Foundation binding contract
 

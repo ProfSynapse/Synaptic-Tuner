@@ -14,6 +14,8 @@ authentication: composition owns its catalog, Foundation authentication,
 evidence authority, and transport, and the reader reauthenticates each request.
 
 Construction, registration, listing, and factory inspection perform no SDK or
-provider calls. The retained public descriptor continues to advertise no
-executable capabilities. Public registration and capability activation remain
-an atomic-cutover responsibility outside this internal slice.
+provider calls. The retained public descriptor continues to advertise its six
+read, lifecycle, artifact-streaming, and cost-quote flags as false. Those flags
+do not govern authenticated start, and factory construction grants no effect
+authority. Public registration and qualification of those advertised surfaces
+remain an atomic-cutover responsibility outside this internal slice.

@@ -2,7 +2,7 @@
 
 This private candidate adapter combines the provider-free preparation adapter
 with current authenticated operational facts. It does not change the public
-Modal descriptor or register executable capabilities.
+Modal descriptor or register or qualify any advertised read/lifecycle surface.
 
 The quote has a deliberately one-way identity. Its canonical body binds the
 provider, profile, scope, resources, USD maximum cost, validity window, and
@@ -25,4 +25,6 @@ that they are the Secret's complete key inventory.
 
 Replay admission remains a composition/factory responsibility and is not
 repeated by preflight. Production composition, public registration, and
-capability activation remain outside this slice.
+qualification of the six advertised capability surfaces remain outside this
+slice. Those flags do not authorize start; exact preflight and consumer effect
+grants are separate requirements.

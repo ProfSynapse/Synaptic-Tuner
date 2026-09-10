@@ -1,7 +1,8 @@
 # Modal adapter cutover
 
-Status: Foundation-native engine cutover implemented locally; public execution
-capabilities remain disabled pending consumer integration and live qualification.
+Status: Foundation-native engine cutover implemented locally; the six advertised
+read, lifecycle, artifact-streaming, and cost-quote flags remain false pending
+consumer integration and live qualification.
 
 This work belongs to the engine. Consumers supply configuration, credentials,
 approval, and durable stores. No research-project implementation is required
@@ -46,13 +47,15 @@ inside the adapter. A supplied quote digest and a locally constructed deployment
 selection are commitments, not authenticated provider observations.
 
 Preparation alone does not grant permission to stage or submit. The preparation
-adapter still advertises no operational capabilities and its own preflight
-refuses execution. Production composition instead requires the separately
+adapter advertises the descriptor's six read/lifecycle flags as false and its
+own preflight refuses execution. Production composition instead requires the separately
 authenticated operational preflight, the exact shared preparation, deployment,
 explicit client, quote, source, clock, authorities, and consumer stores. The
-checked-in registration remains capability-disabled, so this local cutover does
-not by itself authorize provider execution. There is no fallback to the former
-Modal lifecycle.
+checked-in registration advertises those six flags as false. Those flags are not
+a master start switch: only an exact authenticated preflight, consumer-owned
+effect grants, and Foundation lineage authorize stage or submit. This local
+cutover does not supply that authority or qualify live execution. There is no
+fallback to the former Modal lifecycle.
 
 Provider-free tests drive the real generic coordinator, Foundation broker,
 retention delegate, Modal host transport, worker admission, producer, and reader
@@ -72,16 +75,18 @@ names have no aliases. Importing the provider-neutral public API root remains
 lazy and does not load `tuner`, Modal, SQLite, or host implementation code. SDK-free source and
 installed-wheel checks cover the new Modal modules and packaged lock resources.
 
-## Remaining work before activation
+## Remaining work before live qualification
 
 1. A consumer must bind the public composition to its reviewed durable stores,
    authorities, explicit Modal client, retained input source, configuration, and
    secret declarations. The engine intentionally provides no default database,
    credential source, signing key, or ambient-client fallback.
-2. The capability-disabled registration must remain disabled until the exact
-   committed and pushed tree passes the security/release barrier and an
-   authorized live preflight. Provider-free tests and fake SDK objects do not
-   establish current account, deployment, Volume, Secret, quote, or price facts.
+2. The registration's six advertised read, lifecycle, artifact-streaming, and
+   cost-quote flags must remain false until their corresponding surfaces pass the
+   security/release barrier and an authorized live preflight. These flags do not
+   grant or revoke start authority; exact consumer grants and authenticated
+   Foundation lineage do. Provider-free tests and fake SDK objects do not establish
+   current account, deployment, Volume, Secret, quote, or price facts.
 3. Any paid smoke requires separate explicit approval and must preserve the
    existing one-attempt/indeterminate semantics. Historical legacy records are
    not migrated or admitted as Foundation authority.
@@ -99,7 +104,8 @@ cutover now uses the Foundation-native coordinator composition, removes the old
 runtime/producer/training/read path and `HostPorts.modal_reads`, and exposes the
 new explicit Modal surface without compatibility aliases. This correction does
 not turn provider-free conformance into live-provider or release qualification;
-the registration remains capability-disabled.
+the six advertised capability flags remain false; this statement is not an
+execution-authority switch.
 
 ## Complete-command configuration binding
 
@@ -196,7 +202,8 @@ are distinct checkpoints, not a live execution or a combined final gate.
 
 Correction (2026-09-09, subsequent local implementation): the Foundation worker,
 timestamped evidence producer, one-attempt host transport, authenticated read
-transport, current-fact preflight and inactive registry factories are now
+transport, current-fact preflight and registry factories advertising six false
+capability flags are now
 integrated. The combined provider-free selection passed 1,326 tests in 223.91
 seconds in the clean pytest 8 environment; the corresponding installed wheel
 passed SDK-free imports and packaged-resource checks. This closes the earlier

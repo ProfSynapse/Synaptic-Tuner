@@ -1,6 +1,6 @@
 # Modal coordinator retention slice
 
-This disabled internal slice wraps, but does not replace, the existing
+This internal, unregistered-by-itself slice wraps, but does not replace, the existing
 Foundation. It authenticates the exact execution grant against the complete
 command before consulting a consumer store. It then reconstructs and
 authenticates the command binding and publishes it with publish-if-absent and
