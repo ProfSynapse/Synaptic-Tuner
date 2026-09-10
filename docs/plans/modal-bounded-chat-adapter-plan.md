@@ -114,6 +114,17 @@ guess that the first allocation is absent.
    of inference. Respect persistent data ownership and exact Volume identity.
    Create once only after durable authority consumption, retain the returned ID,
    and bound readiness, access-token issuance, request and exact-target cleanup.
+
+   Implementation clarification (2026-09-10): existing filesystem materialization,
+   `ServingTarget`, pinned-base preparation and vLLM process ownership can run on
+   Modal itself. Reuse them there; do not add a parallel launch controller merely
+   because the machine is remote. The implemented extraction shares only private
+   post-admission byte-stream materialization. Public local RunsAPI verification
+   and remote authenticated mounted-source admission remain separate callers.
+   An internal byte reader is transport, not authentication or serving authority;
+   it cannot substitute arbitrary source paths for verified materialized files.
+   The checked-in vLLM image tag is not an inference image/runtime lock. Capturing
+   a separate reviewed lock remains required before a real deployment.
 4. **Session adapter and qualification.** Compose the existing `ChatSession`
    controller with the authenticated remote client and durable owned lease.
    Test full/LoRA flow, client disappearance, post-create ambiguity, startup and

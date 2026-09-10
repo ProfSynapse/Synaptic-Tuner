@@ -371,14 +371,31 @@ class RetrievedSFTModel:
 
 
 def _stream(
-    runs: RunsAPI,
+    read_artifact,
     run: TrainingRunRef,
     artifact: VerifiedArtifact,
     attempt: int,
     owned_files: dict[tuple[str, ...], tuple[int, int]],
 ) -> None:
-    stream = runs.artifacts(RunArtifactRequest(run, artifact.role, artifact.size_bytes))
-    if stream.run != run or stream.artifact != artifact:
+    expected_run = TrainingRunRef.from_dict(run.to_dict())
+    expected_artifact = VerifiedArtifact.from_dict(artifact.to_dict())
+    presented_run = TrainingRunRef.from_dict(run.to_dict())
+    presented_artifact = VerifiedArtifact.from_dict(artifact.to_dict())
+    stream = read_artifact(presented_run, presented_artifact)
+
+    def correspondence_is_exact() -> bool:
+        return (
+            type(presented_run) is TrainingRunRef
+            and presented_run == expected_run
+            and type(presented_artifact) is VerifiedArtifact
+            and presented_artifact == expected_artifact
+            and type(stream.run) is TrainingRunRef
+            and stream.run == expected_run
+            and type(stream.artifact) is VerifiedArtifact
+            and stream.artifact == expected_artifact
+        )
+
+    if not correspondence_is_exact() or not callable(stream.iter_bytes):
         raise ValueError("stream substituted")
     fd = os.open(
         artifact.role + ".tar",
@@ -392,6 +409,8 @@ def _stream(
         created = os.fstat(fd)
         owned_files[(artifact.role + ".tar",)] = (created.st_dev, created.st_ino)
         for chunk in stream.iter_bytes():
+            if not correspondence_is_exact():
+                raise ValueError("stream correspondence changed")
             if type(chunk) is not bytes or not chunk or len(chunk) > 1_048_576:
                 raise ValueError("chunk invalid")
             total += len(chunk)
@@ -404,6 +423,8 @@ def _stream(
                 if type(written) is not int or not 0 < written <= len(view):
                     raise OSError("short artifact write")
                 view = view[written:]
+        if not correspondence_is_exact():
+            raise ValueError("stream correspondence changed")
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -587,20 +608,38 @@ def _cleanup(
     os.rmdir(name, dir_fd=root)
 
 
-def materialize_verified_sft_model(
-    runs: RunsAPI,
-    run: TrainingRunRef,
-    root: Path,
+def _materialize_admitted_sft_model(
     *,
+    run: TrainingRunRef,
+    artifacts: tuple[VerifiedArtifact, ...],
+    root: Path,
+    root_fd: int,
+    read_artifact,
     maximum_artifact_bytes: int = MAX_ARTIFACT_BYTES,
     maximum_total_bytes: int = 2 * MAX_ARTIFACT_BYTES + 3 * MAX_SEMANTIC_ARTIFACT_BYTES,
 ) -> RetrievedSFTModel:
+    """Materialize bytes admitted by an immediately composing authority.
+
+    ``read_artifact`` is a transport capability, not authentication.  The
+    public Runs adapter and the Modal worker must authenticate their evidence
+    before calling this private helper.
+    """
     if (
-        type(runs) is not RunsAPI
-        or type(run) is not TrainingRunRef
+        type(run) is not TrainingRunRef
+        or type(artifacts) is not tuple
+        or any(type(item) is not VerifiedArtifact for item in artifacts)
         or not isinstance(root, Path)
+        or type(root_fd) is not int
+        or root_fd < 0
+        or not callable(read_artifact)
     ):
         raise TypeError("exact inputs required")
+    owned_run = TrainingRunRef.from_dict(run.to_dict())
+    owned_artifacts = tuple(
+        VerifiedArtifact.from_dict(artifact.to_dict()) for artifact in artifacts
+    )
+    if owned_run != run or owned_artifacts != artifacts:
+        raise ValueError("artifact inputs changed during reconstruction")
     if (
         type(maximum_artifact_bytes) is not int
         or not 1 <= maximum_artifact_bytes <= MAX_ARTIFACT_BYTES
@@ -616,36 +655,32 @@ def materialize_verified_sft_model(
     _platform()
     if not root.is_absolute() or Path(os.path.normpath(root)) != root:
         raise ValueError("private root must be absolute and lexically canonical")
-    root_fd = _open_root(root)
+    if tuple(item.role for item in owned_artifacts) != ROLES:
+        raise ValueError("artifacts are not the exact verified SFT result")
+    if any(
+        item.size_bytes <= 0
+        or item.size_bytes
+        > (
+            MAX_SEMANTIC_ARTIFACT_BYTES
+            if item.role in SMALL
+            else maximum_artifact_bytes
+        )
+        for item in owned_artifacts
+    ):
+        raise ValueError("artifact bound")
+    if sum(item.size_bytes for item in owned_artifacts) > maximum_total_bytes:
+        raise ValueError("total bound")
+    root_info = os.fstat(root_fd)
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise ValueError("private root descriptor is not a directory")
+    root_identity = (root_info.st_dev, root_info.st_ino)
+    named_root_fd = _open_root(root)
     try:
-        root_info = os.fstat(root_fd)
-        root_identity = (root_info.st_dev, root_info.st_ino)
-        verification = runs.reverify(run)
-        if verification.run != run or verification.verified is not True:
-            raise ValueError("run reverification failed")
-        outcome = runs.outcome(run)
-        if (
-            outcome.run != run
-            or outcome.state is not TrainingRunState.SUCCEEDED
-            or tuple(item.role for item in outcome.artifacts) != ROLES
-        ):
-            raise ValueError("run is not exact verified SFT result")
-        if any(
-            item.size_bytes <= 0
-            or item.size_bytes
-            > (
-                MAX_SEMANTIC_ARTIFACT_BYTES
-                if item.role in SMALL
-                else maximum_artifact_bytes
-            )
-            for item in outcome.artifacts
-        ):
-            raise ValueError("artifact bound")
-        if sum(item.size_bytes for item in outcome.artifacts) > maximum_total_bytes:
-            raise ValueError("total bound")
-    except BaseException:
-        os.close(root_fd)
-        raise
+        named_root = os.fstat(named_root_fd)
+        if (named_root.st_dev, named_root.st_ino) != root_identity:
+            raise ValueError("private root descriptor differs from path")
+    finally:
+        os.close(named_root_fd)
     name = ".retrieved-" + secrets.token_hex(16)
     attempt: int | None = None
     attempt_identity: tuple[int, int] | None = None
@@ -656,8 +691,10 @@ def materialize_verified_sft_model(
         attempt = os.open(name, READ | DIRECTORY, dir_fd=root_fd)
         attempt_info = os.fstat(attempt)
         attempt_identity = (attempt_info.st_dev, attempt_info.st_ino)
-        for artifact in outcome.artifacts:
-            _stream(runs, run, artifact, attempt, owned_files)
+        for artifact in owned_artifacts:
+            _stream(read_artifact, owned_run, artifact, attempt, owned_files)
+            if run != owned_run or artifacts != owned_artifacts:
+                raise ValueError("artifact inputs changed during materialization")
         for directory_name in ("model", "tokenizer"):
             os.mkdir(directory_name, 0o700, dir_fd=attempt)
             directories[directory_name] = os.open(
@@ -696,8 +733,8 @@ def materialize_verified_sft_model(
             else "full"
         )
         return RetrievedSFTModel._issue(
-            run,
-            outcome.artifacts,
+            owned_run,
+            owned_artifacts,
             root,
             root_identity,
             name,
@@ -728,4 +765,80 @@ def materialize_verified_sft_model(
             os.close(directory)
         if attempt is not None:
             os.close(attempt)
+
+
+def materialize_verified_sft_model(
+    runs: RunsAPI,
+    run: TrainingRunRef,
+    root: Path,
+    *,
+    maximum_artifact_bytes: int = MAX_ARTIFACT_BYTES,
+    maximum_total_bytes: int = 2 * MAX_ARTIFACT_BYTES + 3 * MAX_SEMANTIC_ARTIFACT_BYTES,
+) -> RetrievedSFTModel:
+    if (
+        type(runs) is not RunsAPI
+        or type(run) is not TrainingRunRef
+        or not isinstance(root, Path)
+    ):
+        raise TypeError("exact inputs required")
+    if (
+        type(maximum_artifact_bytes) is not int
+        or not 1 <= maximum_artifact_bytes <= MAX_ARTIFACT_BYTES
+    ):
+        raise ValueError("invalid bound")
+    if (
+        type(maximum_total_bytes) is not int
+        or not 1
+        <= maximum_total_bytes
+        <= 2 * MAX_ARTIFACT_BYTES + 3 * MAX_SEMANTIC_ARTIFACT_BYTES
+    ):
+        raise ValueError("invalid total bound")
+    _platform()
+    if not root.is_absolute() or Path(os.path.normpath(root)) != root:
+        raise ValueError("private root must be absolute and lexically canonical")
+    root_fd = _open_root(root)
+    try:
+        run_snapshot = run.to_dict()
+        owned_run = TrainingRunRef.from_dict(run_snapshot)
+
+        def check_run() -> None:
+            if run.to_dict() != run_snapshot or owned_run.to_dict() != run_snapshot:
+                raise ValueError("run changed during admission")
+
+        verification = runs.reverify(owned_run)
+        check_run()
+        if verification.run != owned_run or verification.verified is not True:
+            raise ValueError("run reverification failed")
+        outcome = runs.outcome(owned_run)
+        check_run()
+        if (
+            outcome.run != owned_run
+            or outcome.state is not TrainingRunState.SUCCEEDED
+            or tuple(item.role for item in outcome.artifacts) != ROLES
+        ):
+            raise ValueError("run is not exact verified SFT result")
+        artifacts = tuple(
+            VerifiedArtifact.from_dict(item.to_dict()) for item in outcome.artifacts
+        )
+
+        def read_artifact(selected_run, artifact):
+            check_run()
+            stream = runs.artifacts(
+                RunArtifactRequest(selected_run, artifact.role, artifact.size_bytes)
+            )
+            check_run()
+            return stream
+
+        result = _materialize_admitted_sft_model(
+            run=run,
+            artifacts=artifacts,
+            root=root,
+            root_fd=root_fd,
+            read_artifact=read_artifact,
+            maximum_artifact_bytes=maximum_artifact_bytes,
+            maximum_total_bytes=maximum_total_bytes,
+        )
+        check_run()
+        return result
+    finally:
         os.close(root_fd)

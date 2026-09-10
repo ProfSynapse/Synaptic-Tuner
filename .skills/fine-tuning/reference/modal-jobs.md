@@ -92,6 +92,16 @@ model/tokenizer identity, not actual archive kind or model usability. Its
 Remote archive verification/loading and separate chat authority are still
 required; this adds no operator-side download or new manual workflow.
 
+Implementation reuse boundary: filesystem-local means local to the selected
+execution machine, including a Modal worker. Reuse the existing materialization,
+`ServingTarget`, pinned-base preparer and vLLM process controller there instead
+of creating parallel serving mechanics. The private byte-stream materialization
+extraction is implemented and locally tested; its reader supplies transport,
+not authentication. Broader qualification remains separate.
+Local RunsAPI verification and remote authenticated mounted-artifact admission
+must remain outside that shared core. Never transfer operator filesystem receipts
+as proof of remote files or treat a training image lock as an inference lock.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical

@@ -506,6 +506,17 @@ Workload source is local commit `7ae6f7a`. Its immutable offline wheel passed
 717-entry ZIP/RECORD and 709-Python-member archive-equivalence checks. The exact
 wheel digest and environment limits are recorded in the workload-binding review.
 
+Next reuse slice (2026-09-10): the existing SFT materializer now has one private
+post-admission byte-reader core, preserving the public RunsAPI verification
+boundary and retained root-descriptor ownership. Reader owned the single source
+file, conformance supplied 29 boundary tests, effects independently reviewed,
+and the lead integrated caller-run snapshot checks and measured a red/green
+ordering regression. The complete selected suite passed **2,368 tests in
+332.87 seconds** after correcting a stdin-based test-launch mistake; this is
+not a Modal mounted-source adapter or new serving authority. Details are in
+`sft-materialization-core.md`. Existing `ServingTarget`, pinned-base preparation
+and vLLM process control remain shared on the selected execution machine.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

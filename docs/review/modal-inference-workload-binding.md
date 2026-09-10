@@ -46,6 +46,9 @@ copies, bringing the integrated workload module to 16 cases; all are included
 in the combined result. Both source-lock checks remain CURRENT (97 Modal
 bootstrap pins and 66 offline trainer members), formatting passes, and canonical
 skill mirrors are synchronized.
+The final independent source/workload selection also passed 42 tests in
+64.04 seconds; its original completed process was recovered without rerunning
+the tests. Final review of both post-authentication mutation cases passed.
 The old shared launch fixture's differing model/tokenizer revisions and
 synthetic workload-record body are not a valid positive for this additional
 check. Workload-binding positives must derive matching material before bundle
