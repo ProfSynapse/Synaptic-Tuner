@@ -501,6 +501,11 @@ locks remain CURRENT and skill mirrors are synchronized. See
 Separate chat resource/mutation binding, remote execution and live qualification
 remain open. No cloud, credential, push, merge or EHR actions occurred.
 
+Workload source is local commit `7ae6f7a`. Its immutable offline wheel passed
+36 installed imports, two resources and signature binding, plus independent
+717-entry ZIP/RECORD and 709-Python-member archive-equivalence checks. The exact
+wheel digest and environment limits are recorded in the workload-binding review.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

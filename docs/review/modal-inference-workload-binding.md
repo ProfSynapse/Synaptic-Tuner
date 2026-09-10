@@ -45,8 +45,7 @@ two post-authentication mutation regressions for the retained and owned launch
 copies, bringing the integrated workload module to 16 cases; all are included
 in the combined result. Both source-lock checks remain CURRENT (97 Modal
 bootstrap pins and 66 offline trainer members), formatting passes, and canonical
-skill mirrors are synchronized. The wheel check remains pending at this source
-checkpoint and is recorded separately after the immutable commit is packaged.
+skill mirrors are synchronized.
 The old shared launch fixture's differing model/tokenizer revisions and
 synthetic workload-record body are not a valid positive for this additional
 check. Workload-binding positives must derive matching material before bundle
@@ -56,3 +55,22 @@ No provider access, credentials, cloud objects, paid execution, push, merge or
 EHR changes are part of this slice. Separate chat resource/lifetime policy,
 mutation binding, locked remote inference execution and live qualification
 remain open.
+
+## Immutable package qualification
+
+Source commit `7ae6f7af36f4e6c2c006f0b6a05e05560bccc3c4` was archived and built
+offline without dependency downloads. The resulting wheel is 2,041,582 bytes,
+with SHA-256
+`fc6f6ca83f79b029595ffe37ea0b99fe6cbfb088211a1427464907235ffa5564`.
+Its installed package passed the checked-in neutral-directory CI snippet's
+36 engine/Evaluator imports and two resource checks, plus signature binding for
+the new factory. Modal and PyTorch were absent from the disposable package-check
+environment; the training environment was not changed.
+
+Independent audit passed all 717 unique ZIP/RECORD entries and verified all
+709 Python members byte-for-byte against the immutable source archive. The new
+module SHA-256 is
+`65437119436694f5b37d203eef3cdc144c8cf48ab57e955a4a67d7512b9c0053`.
+The commit contains exactly the nine intended paths. The filename-only scan
+found no unexpected credential/private-key artifacts; that is not a content-level
+secret scan. No CI dispatch or live Modal/model-load qualification is implied.
