@@ -4,7 +4,10 @@ Status: engineering plan, 2026-09-10. Engine-only; no provider access or live
 qualification is implied. The local run-chat composition is not a cloud service.
 Slice 1 is complete locally at `ffbb363`, with 2,297 provider-free tests and
 immutable-wheel/import qualification recorded in `../review/run-chat-slice.md`.
-Slices 2–4 remain unimplemented; no Sandbox has been created for this plan.
+Slice 2a (native artifact-source binding) is implemented locally, with its
+qualification recorded in `../review/modal-inference-source-binding.md`.
+Slice 2b (chat workload/resource and mutation binding) and slices 3–4 remain
+unimplemented; no Sandbox has been created for this plan.
 
 ## Product boundary
 
@@ -89,6 +92,16 @@ guess that the first allocation is absent.
    opaque workload digests; a new effect kind or authority framework is unnecessary.
    The existing training-specific Modal coordinator transports are not reusable
    as chat transports.
+
+   Slice 2a now uses `ModalInferenceSourceBinder`: the same consumer's current
+   public verification and retained workflow must match the complete native
+   manifest, including its source identity, and remain stable during admission.
+   It retains immutable metadata projections without streaming artifact bodies.
+   This is not a serving grant or a claim about actual full/LoRA archive kind.
+   Slice 2b still needs the authenticated retained workload/model commitments,
+   separate inference deployment/resource policy and chat-specific execution
+   binding described above. Do not reuse a training grant or add a new generic
+   authority system to fill that gap.
 3. **Remote worker and provider boundary.** Separate locked inference source/image
    and SDK adapter. Reverify exact mounted artifact bytes using existing bounded
    archive/descriptor-relative primitives; obtain pinned base weights on Modal

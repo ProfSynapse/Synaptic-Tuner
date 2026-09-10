@@ -469,6 +469,20 @@ with all 707 Python members matching committed source. Runtime-first plan slice
 lifecycle implementation in slices 2–4 remain open. All assigned Sol handoffs
 and reviews have been consumed; no agent is pending integration.
 
+Native inference source checkpoint (2026-09-10): bounded-chat plan slice 2a is
+implemented with the existing native reader and generic Foundation read-request
+derivation. The binder requires the same consumer's current public verification
+and complete retained manifest, exact producer paths/Volume-entry identities,
+immutable source projections and stable workflow readback. It streams no artifact
+bodies and grants no serving authority. Reader owned the new source, conformance
+owned 18 adversarial tests, effects independently reviewed the source, and the
+lead integrated eight real-Foundation/signed-transport/import checks. Full
+provider-free qualification passed **2,323 tests in 312.23 seconds**; independent
+acceptance/integration qualification passed 26 tests in 22.70 seconds. Both source
+locks remain CURRENT. Details and fixture limitations are recorded in
+`modal-inference-source-binding.md`. Slice 2b workload/resource/mutation binding,
+the remote worker and the bounded Sandbox/session adapter remain open.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

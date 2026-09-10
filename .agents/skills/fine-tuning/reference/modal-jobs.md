@@ -75,6 +75,16 @@ artifact preparation, authenticated access, provider-side lifetime/cost controls
 and separate live verification. A local session timer is not a cloud billing
 guarantee. Do not silently route to another runtime if a selected adapter fails.
 
+For Modal-native preparation, correlate the current verified workflow's complete
+artifact manifest with the authenticated native reader inventory; public
+role/hash/size values alone do not prove provider placement or the same attempt.
+The internal `ModalInferenceSourceBinder` is the reusable admission boundary for
+that correlation, composed with the same consumer's runs, stores and reader.
+It must not stream model archives to the operator. Its metadata result is not
+serving permission or proof that future mounted bytes are unchanged. Separate
+chat authority and remote byte verification remain required; see
+`docs/review/modal-inference-source-binding.md` for qualification limits.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical

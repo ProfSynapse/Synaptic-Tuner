@@ -481,7 +481,15 @@ class ModalCoordinatorRunReader:
         except Exception:
             raise ModalCoordinatorReaderError("modal_read_evidence_invalid") from None
 
-    def _inventory(self, request):
+    def native_artifacts(self, request):
+        """Authenticate native placement and its generic manifest together.
+
+        This provider-internal projection retains the exact command binding,
+        provider reference, native inventory and generic manifest for consumers
+        that prepare artifacts on the provider. It reads no artifact bodies and
+        grants no serving or mutation authority. Callers must bind the result to
+        their current retained workflow, not just compare public artifact hashes.
+        """
         binding, ref = self._validate(request, ProviderReadPurposeV1.ARTIFACTS)
         try:
             inventory = self._transport.artifact_inventory(
@@ -516,10 +524,10 @@ class ModalCoordinatorRunReader:
             raise ModalCoordinatorReaderError("modal_read_evidence_invalid") from None
 
     def artifacts(self, request):
-        return self._inventory(request)[3]
+        return self.native_artifacts(request)[3]
 
     def iter_artifact_bytes(self, request, manifest, role, *, maximum_bytes):
-        binding, ref, inventory, expected_manifest = self._inventory(request)
+        binding, ref, inventory, expected_manifest = self.native_artifacts(request)
         try:
             if type(manifest) is not ArtifactManifestV1 or manifest != expected_manifest:
                 raise ValueError
