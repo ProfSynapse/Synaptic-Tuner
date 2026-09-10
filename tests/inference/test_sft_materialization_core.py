@@ -363,6 +363,59 @@ def test_core_cleans_reader_failure_and_preserves_control_flow(tmp_path, failure
     assert not list(tmp_path.glob(".retrieved-*"))
 
 
+@pytest.mark.parametrize("close_fails", (False, True))
+@pytest.mark.parametrize("failure", ("chunk", "write", "interrupt"))
+def test_core_closes_retained_iterator_after_rejected_chunk(
+    tmp_path, monkeypatch, close_fails, failure
+):
+    import os
+
+    run, _, operations = _fixture(tmp_path)
+    retained, closed = [], []
+
+    if failure != "chunk":
+
+        def failed_write(*args):
+            if failure == "interrupt":
+                raise KeyboardInterrupt()
+            raise OSError("destination write failed")
+
+        monkeypatch.setattr(os, "write", failed_write)
+
+    def read(selected, artifact):
+        stream = _reader(operations)(selected, artifact)
+
+        def chunks():
+            try:
+                yield b"" if failure == "chunk" else b"x"
+            finally:
+                closed.append(artifact.role)
+                if close_fails:
+                    raise RuntimeError("iterator cleanup failed")
+
+        iterator = chunks()
+        retained.append(iterator)
+        stream.iter_bytes = lambda: iterator
+        return stream
+
+    try:
+        error_type, message = {
+            "chunk": (ValueError, "chunk invalid"),
+            "write": (OSError, "destination write failed"),
+            "interrupt": (KeyboardInterrupt, None),
+        }[failure]
+        with pytest.raises(error_type, match=message):
+            _core(run, operations, tmp_path, read)
+        assert closed == ["final_model"]
+        assert not list(tmp_path.glob(".retrieved-*"))
+    finally:
+        for iterator in retained:
+            try:
+                iterator.close()
+            except RuntimeError:
+                pass
+
+
 @pytest.mark.parametrize("invalid", ("duplicate", "order", "zero", "total"))
 def test_core_rejects_manifest_or_bounds_before_callback(tmp_path, invalid):
     run, _, operations = _fixture(tmp_path)

@@ -102,6 +102,16 @@ Local RunsAPI verification and remote authenticated mounted-artifact admission
 must remain outside that shared core. Never transfer operator filesystem receipts
 as proof of remote files or treat a training image lock as an inference lock.
 
+The internal `ModalMountedInferenceArtifactReader.read_artifact` is the mounted
+byte transport for that shared core, not a new operator command. Construct it
+only after authenticating the remote launch, native inventory and exact physical
+Volume mapping. It checks bounded exact inventory, no-link descriptor-relative
+files, hashes, sizes and retained identities, but cannot authenticate a mount
+from a supplied Volume ID. The caller retains ownership of its root descriptor;
+stream consumers must close abandoned iterators (the shared materializer does).
+Remote launch composition, separate inference locks and chat authority remain
+unimplemented; this transport is not live Modal-chat qualification.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical

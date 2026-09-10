@@ -408,21 +408,37 @@ def _stream(
     try:
         created = os.fstat(fd)
         owned_files[(artifact.role + ".tar",)] = (created.st_dev, created.st_ino)
-        for chunk in stream.iter_bytes():
-            if not correspondence_is_exact():
-                raise ValueError("stream correspondence changed")
-            if type(chunk) is not bytes or not chunk or len(chunk) > 1_048_576:
-                raise ValueError("chunk invalid")
-            total += len(chunk)
-            if total > artifact.size_bytes:
-                raise ValueError("stream overflow")
-            digest.update(chunk)
-            view = memoryview(chunk)
-            while view:
-                written = os.write(fd, view)
-                if type(written) is not int or not 0 < written <= len(view):
-                    raise OSError("short artifact write")
-                view = view[written:]
+        iterator = iter(stream.iter_bytes())
+        try:
+            for chunk in iterator:
+                if not correspondence_is_exact():
+                    raise ValueError("stream correspondence changed")
+                if type(chunk) is not bytes or not chunk or len(chunk) > 1_048_576:
+                    raise ValueError("chunk invalid")
+                total += len(chunk)
+                if total > artifact.size_bytes:
+                    raise ValueError("stream overflow")
+                digest.update(chunk)
+                view = memoryview(chunk)
+                while view:
+                    written = os.write(fd, view)
+                    if type(written) is not int or not 0 < written <= len(view):
+                        raise OSError("short artifact write")
+                    view = view[written:]
+        except BaseException:
+            # A retained generator may still own a mounted file. Close it
+            # explicitly, without replacing the active failure or interrupt.
+            try:
+                close = getattr(iterator, "close", None)
+                if callable(close):
+                    close()
+            except BaseException:
+                pass
+            raise
+        else:
+            close = getattr(iterator, "close", None)
+            if callable(close):
+                close()
         if not correspondence_is_exact():
             raise ValueError("stream correspondence changed")
         os.fsync(fd)

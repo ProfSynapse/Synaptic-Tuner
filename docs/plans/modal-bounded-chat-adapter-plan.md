@@ -11,6 +11,10 @@ its qualification is recorded in `../review/modal-inference-workload-binding.md`
 Separate chat resource/mutation binding and slices 3–4 remain unimplemented;
 no Sandbox has been created for this plan.
 
+Correction (2026-09-10): slice 3 now has a private shared materializer and a
+mounted-artifact byte transport under local qualification. This is partial
+implementation, not an authenticated remote worker or a deployable adapter.
+
 ## Product boundary
 
 A consumer chooses a runtime for one verified training run and explicitly sends
@@ -125,6 +129,15 @@ guess that the first allocation is absent.
    it cannot substitute arbitrary source paths for verified materialized files.
    The checked-in vLLM image tag is not an inference image/runtime lock. Capturing
    a separate reviewed lock remains required before a real deployment.
+
+   `ModalMountedInferenceArtifactReader` supplies bounded, descriptor-relative
+   streams from one retained mount to that same private materializer. It checks
+   canonical five-member projections, exact byte hashes and sizes, no-link file
+   identities and output-directory identity at EOF. It borrows the mount root
+   descriptor and closes its own descriptors when iteration ends or is aborted.
+   These are filesystem consistency checks: a future authenticated worker must
+   still prove the exact Volume-to-mount mapping before construction. A claimed
+   Volume ID and a deterministic provider-entry digest are not authentication.
 4. **Session adapter and qualification.** Compose the existing `ChatSession`
    controller with the authenticated remote client and durable owned lease.
    Test full/LoRA flow, client disappearance, post-create ambiguity, startup and
