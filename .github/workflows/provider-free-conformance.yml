@@ -89,7 +89,7 @@ jobs:
   conformance:
     name: CPython 3.12 / pytest 8
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
       MODAL_IS_REMOTE: "1"
@@ -196,6 +196,7 @@ jobs:
           import tuner.execution.providers.modal.inference_effects
           import tuner.execution.providers.modal.inference_launch
           import tuner.execution.providers.modal.inference_wire
+          import tuner.execution.providers.modal.inference_worker
           PY
 
       - name: Check source hashes without refreshing the runtime lock

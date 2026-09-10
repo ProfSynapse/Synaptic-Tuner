@@ -155,6 +155,18 @@ of physical Volume mounts, and matching runtime commitments is not inspection
 of an inference image or lock. No executable worker or operator command is added.
 See `docs/review/modal-inference-launch.md` for the qualification boundary.
 
+The private `prepare_modal_chat_worker` composition freshly admits that launch
+before filesystem access, verifies mounted artifacts through the shared byte
+reader/materializer and prepares the existing `ServingTarget`. Full models do
+not invoke base-model preparation; LoRA uses the existing pinned-model preparer
+on the execution machine. The trusted deployment must bind exact selected
+Volume objects to the admitted mount roots. The worker checks retained local
+directory identities, not the provider's mount implementation. Its destination
+must be worker-private and outside the artifact/control/cache mounts. No mount
+anchor, operator-side weight upload or local Docker launcher is needed. This
+composition is not yet a runnable bootstrap, inference-lock check, serving lease
+or SDK adapter; see `docs/review/modal-inference-worker.md`.
+
 Correction (2026-09-10, implementation order): finish the exact chat command and
 remote worker boundaries before freezing the inference runtime lock. The current
 training lock and vLLM image tag cannot supply missing inference image, Python,

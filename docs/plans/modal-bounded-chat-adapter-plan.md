@@ -68,6 +68,12 @@ or owned cleanup. Independent review, all 2,613 selected regression tests and
 the exact-commit installed wheel pass; measured results are recorded in
 `../review/modal-inference-launch.md`.
 
+Mounted-preparation slice (2026-09-10): compose fresh launch admission with the
+existing mounted artifact reader, shared private materializer, pinned-base
+preparer and `ServingTarget`. This is internal worker preparation, not an
+executable bootstrap, SDK dispatch, inference-lock check or bounded session.
+Qualification is tracked in `../review/modal-inference-worker.md`.
+
 ## Product boundary
 
 A consumer chooses a runtime for one verified training run and explicitly sends
