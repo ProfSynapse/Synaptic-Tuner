@@ -58,6 +58,14 @@ Foundation remains the grant, predecessor, one-shot and receipt authority.
 Next is authenticated remote worker admission and SDK transport; the separate
 inference runtime lock and bounded owned session cleanup remain unfinished.
 
+Current launch-admission slice (2026-09-10): add one chat-specific host-signed
+claim and pure worker admission. Reuse actual Foundation stage evidence and
+the shared preparation snapshot; do not duplicate the model/source/native
+inventory into another runtime truth. Independently supplied configuration and
+command expectations anchor admission. This does not implement SDK dispatch,
+physical Volume authentication, an executable worker, inference-lock inspection
+or owned cleanup. Track measured results in `../review/modal-inference-launch.md`.
+
 ## Product boundary
 
 A consumer chooses a runtime for one verified training run and explicitly sends

@@ -142,6 +142,19 @@ interrupted. These adapters do not yet supply a Modal SDK transport, authenticat
 remote worker, owned cleanup lease or live serving qualification. See
 `docs/review/modal-inference-effects.md`.
 
+Build chat launch evidence through `prepare_modal_chat_launch` and verify its
+single bounded argument through `admit_modal_chat_launch`. The host builder
+authenticates the actual Foundation STAGE receipt/record and complete SUBMIT
+predecessor; the worker admission compares the signed content to independently
+supplied exact configuration, command and mount-path expectations. Source/model
+and native inventory projections remain in the shared preparation snapshot.
+These pure helpers do not consume a SUBMIT grant: future SDK transport must use
+them only inside the existing authorized Foundation dispatch. Admission expiry
+is not a GPU billing deadline. Matching mount-path claims is not authentication
+of physical Volume mounts, and matching runtime commitments is not inspection
+of an inference image or lock. No executable worker or operator command is added.
+See `docs/review/modal-inference-launch.md` for the qualification boundary.
+
 Correction (2026-09-10, implementation order): finish the exact chat command and
 remote worker boundaries before freezing the inference runtime lock. The current
 training lock and vLLM image tag cannot supply missing inference image, Python,
