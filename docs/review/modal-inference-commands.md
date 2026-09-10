@@ -1,6 +1,6 @@
 # Exact Modal chat command retention
 
-Status: implemented, broader qualification in progress, 2026-09-10. Engine-only provider-free work;
+Status: locally qualified, 2026-09-10. Engine-only provider-free work;
 no Sandbox, serving grant, inference runtime lock or live qualification.
 
 ## Boundary
@@ -49,9 +49,18 @@ Source implementation is frozen and independently reviewed without a blocker.
 The original 37 acceptance cases passed in 100.15 seconds. Twenty additional
 lead-authored cases passed in 38.74 seconds, including independently rehashed
 invalid snapshots, same-command/different-content conflicts and callback
-mutation. Both runs used isolated CPython 3.12.9 / pytest 8.4.2 with no system
-site packages, Modal or Torch. No installed-wheel or full-selection pass is
-claimed yet; those checks are in progress.
+mutation. The final independent run passed all 57 command/retention cases plus
+35 existing preparation cases: **92 passed in 240.91 seconds**.
+
+The combined regression selection passed **2,495 tests in 565.00 seconds** under
+isolated CPython 3.12.9 / pytest 8.4.2, with no system site packages, Modal or
+Torch and automatic pytest plug-ins disabled. This is the previous 2,438-test
+selection plus 57 cases, not the entire repository suite. It covers the existing
+coordinator/Foundation, provider-neutral/public API, training/runtime, Docker
+provider, inference, selected Evaluator/client callers and Modal provider tests.
+The additional packaging regression described below was added after that run
+was collected; its five-test contract module separately passed in 0.33 seconds
+and was independently repeated. Do not report 2,496 as a single full-suite run.
 
 An initial real-fixture probe reproduced a wrapper-size defect: the preparation
 snapshot was 12,178 bytes and the valid SUBMIT command 4,225 bytes. Each fits the
@@ -67,5 +76,31 @@ wheel exposed a pre-existing packaging omission: importing
 which imports undeclared `requests`. The broader test environment already
 installed that dependency and masked the omission. Package metadata now declares
 the existing CI-compatible `requests>=2.32,<3` requirement; a regression assertion
-and a dependency-only installed-wheel CI lane prevent the same masking. A
-replacement exact-commit wheel still requires qualification below.
+and a dependency-only installed-wheel CI step prevent the same masking.
+
+The corrected source commit is
+`9764d85755d45905dcc55e184bb1421ba0c79085`. Its exact Git archive produced
+`synaptic_tuner-1.1.0-py3-none-any.whl`: **2,058,529 bytes**, SHA-256
+`4aabb69af67bb9cea16ad1d45230d8736082502aadb9cf614dfd872e0d029775`.
+Independent audit verified 721 unique ZIP/RECORD entries, every recorded size
+and hash, and all 713 Python members byte-for-byte against the archive. All 713
+Python payloads are also unchanged from the prior runtime-tested source wheel;
+the correction changes dependency metadata, CI, its regression test and this
+note, not runtime code. METADATA declares `Requires-Dist: requests<3,>=2.32`.
+
+Installed into a fresh environment containing only the wheel and its declared
+dependencies, the replacement passed all **40 engine/Evaluator imports**, both
+packaged resource checks and four credential-free `inspect.Signature.bind`
+checks. The probe used isolated Python from a neutral directory and confirmed
+the imported module belonged to that environment. Modal, Torch, pytest, NumPy
+and pandas were absent. The earlier wheel's missing-requests failure remains
+part of the evidence; it is not reclassified as a successful installed test.
+
+The 97-member training runtime lock and separate 66-member offline worker closure
+(679,487 payload bytes) both report `CURRENT`; no training inventory or runtime
+pin changed. On this mixed Windows/WSL worktree, the offline closure check needed
+explicit local `GIT_DIR`/`GIT_WORK_TREE` to address its Git oracle's UNC-path
+lookup; no `PYTHONPATH` was used. Canonical skill mirrors match. The independent
+wheel scan was filename-only and found no credential/private artifact indicators;
+it makes no content-level secrecy claim. No provider SDK, cloud resource, model
+download, training job, GPU, push, merge or EHR change was part of this slice.

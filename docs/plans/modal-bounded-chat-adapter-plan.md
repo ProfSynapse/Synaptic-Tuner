@@ -39,8 +39,14 @@ the required live gates. Current work is recorded in
 
 Command-retention update (2026-09-10): exact STAGE/SUBMIT binding and authenticated
 consumer-catalog retention are implemented. Independent source review and focused
-tests pass; combined regression and immutable-package qualification are in
-progress. This is not a Foundation dispatch, serving grant or runtime-lock gate.
+tests pass, with 2,495 combined regression tests and a corrected exact-commit
+wheel independently qualified. A dependency-only install exposed and resolved
+an undeclared HTTP-client dependency; CI now performs the same clean check.
+The new metadata regression passed separately after the combined run's collection.
+See the review note for exact counts and source/package boundaries. This is not
+a Foundation dispatch, serving grant or runtime-lock gate. The next implementation
+work is the authenticated chat worker and executor/transport, followed by its
+complete inference lock and bounded session adapter.
 
 ## Product boundary
 
