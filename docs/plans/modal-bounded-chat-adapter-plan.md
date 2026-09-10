@@ -6,8 +6,10 @@ Slice 1 is complete locally at `ffbb363`, with 2,297 provider-free tests and
 immutable-wheel/import qualification recorded in `../review/run-chat-slice.md`.
 Slice 2a (native artifact-source binding) is implemented locally, with its
 qualification recorded in `../review/modal-inference-source-binding.md`.
-Slice 2b (chat workload/resource and mutation binding) and slices 3–4 remain
-unimplemented; no Sandbox has been created for this plan.
+The workload/model-correlation portion of slice 2b is now implemented locally;
+its qualification is recorded in `../review/modal-inference-workload-binding.md`.
+Separate chat resource/mutation binding and slices 3–4 remain unimplemented;
+no Sandbox has been created for this plan.
 
 ## Product boundary
 
@@ -98,9 +100,12 @@ guess that the first allocation is absent.
    manifest, including its source identity, and remain stable during admission.
    It retains immutable metadata projections without streaming artifact bodies.
    This is not a serving grant or a claim about actual full/LoRA archive kind.
-   Slice 2b still needs the authenticated retained workload/model commitments,
-   separate inference deployment/resource policy and chat-specific execution
-   binding described above. Do not reuse a training grant or add a new generic
+   Slice 2b now correlates the authenticated retained workload/model commitments
+   through `bind_modal_inference_workload`, matching the exact workload-record
+   hash and size without artifact-body reads. It validates equal immutable
+   model/tokenizer revisions and preserves training configuration as metadata.
+   Separate inference deployment/resource policy and chat-specific execution
+   binding remain open. Do not reuse a training grant or add a new generic
    authority system to fill that gap.
 3. **Remote worker and provider boundary.** Separate locked inference source/image
    and SDK adapter. Reverify exact mounted artifact bytes using existing bounded

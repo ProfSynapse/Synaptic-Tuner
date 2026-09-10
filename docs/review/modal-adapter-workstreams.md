@@ -488,6 +488,19 @@ passed 35 installed imports, two resources and signature binding, plus independe
 716-entry ZIP/RECORD and 708-Python-member source equivalence checks. Exact
 wheel digest and environment limits are recorded in the source-binding review.
 
+Workload-correlation checkpoint (2026-09-10): the workload/model portion of
+bounded-chat slice 2b now reauthenticates the existing retained launch chain,
+correlates exact workload-record bytes and native placement, and binds intended
+immutable model revisions without reading model artifacts. Reader owned the new
+module, conformance owned its acceptance tests, effects independently reviewed
+it, and the lead added retained/owned post-authentication mutation regressions.
+The combined provider-free selection passed **2,339 tests in 329.86 seconds**,
+including all 16 workload cases; independent scoped review passed. Both source
+locks remain CURRENT and skill mirrors are synchronized. See
+`modal-inference-workload-binding.md` for qualification and fixture boundaries.
+Separate chat resource/mutation binding, remote execution and live qualification
+remain open. No cloud, credential, push, merge or EHR actions occurred.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

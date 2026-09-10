@@ -84,6 +84,13 @@ It must not stream model archives to the operator. Its metadata result is not
 serving permission or proof that future mounted bytes are unchanged. Separate
 chat authority and remote byte verification remain required; see
 `docs/review/modal-inference-source-binding.md` for qualification limits.
+After fresh source admission, the internal `bind_modal_inference_workload`
+function reauthenticates the retained launch and matches the exact workload
+bytes to the native workload-record hash and size. It exposes intended pinned
+model/tokenizer identity, not actual archive kind or model usability. Its
+`load_in_4bit` field describes training configuration, not inference precision.
+Remote archive verification/loading and separate chat authority are still
+required; this adds no operator-side download or new manual workflow.
 
 ## Frozen live evidence
 
