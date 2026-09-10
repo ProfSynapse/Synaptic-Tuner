@@ -14,6 +14,7 @@ from inspect import getattr_static
 import re
 
 from synaptic_tuner.api.v1.providers import ProviderRef
+from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
 from Evaluator.chat_session import ChatSessionPolicy
 from tuner.execution.coordinator_v1.ports import CoordinatorClockPortV1
 from tuner.execution.evidence import (
@@ -28,6 +29,7 @@ from tuner.execution.foundation_v2.canonical import (
     digest_text,
     domain_digest,
     exact_fields,
+    exact_integer,
     parse_canonical_object,
     safe_ref,
 )
@@ -55,9 +57,14 @@ from .coordinator_preflight import (
     TrustedEvidenceIdentity,
 )
 from .config import ModalSecretProfileV1
+from .contracts import (
+    ArtifactMemberV1,
+    ArtifactRole,
+    EXACT_ARTIFACT_ROLES,
+    provider_entry_identity,
+)
 from .inference_binding import ModalInferenceSourceBinding
 from .inference_workload import ModalInferenceWorkloadBinding, _model
-
 
 CONFIG_EVIDENCE_PURPOSE = "modal-inference-preparation-evidence/v1"
 _SCHEMA = "synaptic-modal-inference-preparation-config/v1"
@@ -621,6 +628,270 @@ def _derive_preparation(chat_input: dict[str, object], executor: ExecutorDescrip
     )
 
 
+def _validate_preparation_snapshot(raw: bytes) -> dict[str, object]:
+    """Reconstruct retained content, not fresh source or evidence authority.
+
+    Raw workload/native evidence is not duplicated here. Their original hashes
+    remain commitments authenticated by the consumer's complete-content catalog.
+    """
+    if type(raw) is not bytes or not raw:
+        raise TypeError("exact inference preparation bytes required")
+    document = parse_canonical_object(raw, name="inference preparation")
+    exact_fields(
+        document,
+        frozenset(
+            {
+                "schema_version",
+                "preparation",
+                "executor",
+                "configuration",
+                "configuration_digest",
+                "configuration_tag",
+                "quote",
+                "quote_tag",
+                "chat_input",
+                "chat_input_sha256",
+            }
+        ),
+        "inference preparation",
+    )
+    if document["schema_version"] != "synaptic-modal-inference-preparation/v1":
+        raise ValueError("unsupported inference preparation")
+    preparation = CanonicalPreparationV2.parse(canonical_bytes(document["preparation"]))
+    executor = ExecutorDescriptorV1(**document["executor"])
+    configuration_bytes = canonical_bytes(document["configuration"])
+    configuration = ModalInferencePreparationConfig.parse(configuration_bytes)
+    quote = ModalQuoteBody.parse(canonical_bytes(document["quote"]))
+    chat_input = document["chat_input"]
+    exact_fields(
+        chat_input,
+        frozenset(
+            {
+                "schema_version",
+                "session_id",
+                "source",
+                "workload",
+                "configuration",
+                "quote",
+            }
+        ),
+        "chat input",
+    )
+    if chat_input["schema_version"] != "synaptic-modal-chat-input/v1":
+        raise ValueError("unsupported chat input")
+    source = chat_input["source"]
+    workload = chat_input["workload"]
+    if type(source) is not dict or type(workload) is not dict:
+        raise TypeError("chat source and workload must be exact objects")
+    exact_fields(
+        source,
+        frozenset(
+            {
+                "run",
+                "artifacts",
+                "read_request_sha256",
+                "read_request_digest",
+                "source_workflow_record_digest",
+                "source_revision",
+                "manifest_digest",
+                "artifact_source_digest",
+                "provider",
+                "provider_job_ref",
+                "effect_id",
+                "provider_run_binding_digest",
+                "command_binding_digest",
+                "artifact_volume_id",
+                "members",
+                "native_evidence_sha256",
+            }
+        ),
+        "chat source",
+    )
+    expected_workload_fields = set(ModalInferenceWorkloadBinding.__dataclass_fields__)
+    expected_workload_fields.remove("_token")
+    exact_fields(workload, frozenset(expected_workload_fields), "chat workload")
+    for name in (
+        "read_request_sha256",
+        "read_request_digest",
+        "source_workflow_record_digest",
+        "manifest_digest",
+        "artifact_source_digest",
+        "provider_run_binding_digest",
+        "command_binding_digest",
+        "native_evidence_sha256",
+    ):
+        digest_text(source[name], name)
+    exact_integer(source["source_revision"], "source_revision")
+    for name in ("provider_job_ref", "effect_id", "artifact_volume_id"):
+        safe_ref(source[name], name)
+    workload_refs = {
+        "run_id",
+        "project_ref",
+        "provider_job_ref",
+        "submit_effect_id",
+        "stage_effect_id",
+        "control_volume_id",
+        "artifact_volume_id",
+        "key_ref",
+        "model_ref",
+    }
+    for name in workload_refs:
+        safe_ref(workload[name], name)
+    for name in (
+        expected_workload_fields
+        - workload_refs
+        - {
+            "workload_size",
+            "model_revision",
+            "tokenizer_revision",
+            "load_in_4bit",
+        }
+    ):
+        digest_text(workload[name], name)
+    if (
+        type(source["run"]) is not dict
+        or type(source["provider"]) is not list
+        or len(source["provider"]) != 4
+        or type(source["members"]) is not list
+        or type(source["artifacts"]) is not list
+        or any(type(item) is not dict for item in source["members"])
+        or any(type(item) is not dict for item in source["artifacts"])
+        or workload["run_id"] != source["run"].get("run_id")
+        or workload["project_ref"] != source["run"].get("project_ref")
+        or workload["read_request_digest"] != source["read_request_digest"]
+        or workload["manifest_digest"] != source["manifest_digest"]
+        or workload["artifact_source_digest"] != source["artifact_source_digest"]
+        or workload["provider_job_ref"] != source["provider_job_ref"]
+        or workload["submit_effect_id"] != source["effect_id"]
+        or workload["artifact_volume_id"] != source["artifact_volume_id"]
+        or workload["native_evidence_sha256"] != source["native_evidence_sha256"]
+    ):
+        raise ValueError("chat source and workload projections differ")
+    for value in source["provider"]:
+        safe_ref(value, "source provider identity")
+    run = TrainingRunRef.from_dict(source["run"])
+    artifacts = tuple(VerifiedArtifact.from_dict(item) for item in source["artifacts"])
+    for item in source["members"]:
+        exact_fields(
+            item,
+            frozenset({"role", "path", "size", "sha256", "provider_entry_id"}),
+            "native artifact member",
+        )
+    members = tuple(
+        ArtifactMemberV1(
+            ArtifactRole(item["role"]),
+            item["path"],
+            item["size"],
+            item["sha256"],
+            item["provider_entry_id"],
+        )
+        for item in source["members"]
+    )
+    try:
+        configuration_tag = bytes.fromhex(document["configuration_tag"])
+        quote_tag = bytes.fromhex(document["quote_tag"])
+    except (TypeError, ValueError):
+        raise ValueError("inference evidence tags are invalid") from None
+    if (
+        run.to_dict() != source["run"]
+        or len(artifacts) != len(EXACT_ARTIFACT_ROLES)
+        or {item.role for item in artifacts}
+        != {role.value for role in EXACT_ARTIFACT_ROLES}
+        or len(members) != len(EXACT_ARTIFACT_ROLES)
+        or {item.role for item in members} != EXACT_ARTIFACT_ROLES
+        or tuple((item.role.value, item.size, item.sha256) for item in members)
+        != tuple((item.role, item.size_bytes, item.sha256) for item in artifacts)
+        or not configuration_tag
+        or len(configuration_tag) > 128
+        or not quote_tag
+        or len(quote_tag) > 128
+        or configuration_tag.hex() != document["configuration_tag"]
+        or quote_tag.hex() != document["quote_tag"]
+        or type(workload["workload_size"]) is not int
+        or workload["workload_size"] <= 0
+        or workload["workload_bytes"] != workload["workload_sha256"]
+        or type(workload["load_in_4bit"]) is not bool
+        or type(workload["model_revision"]) is not str
+        or _REVISION.fullmatch(workload["model_revision"]) is None
+        or workload["tokenizer_revision"] != workload["model_revision"]
+    ):
+        raise ValueError("chat artifact projection is invalid")
+    for member in members:
+        if (
+            member.path
+            != f"operations/{source['effect_id']}/output/{member.role.value}"
+            or member.provider_entry_id
+            != provider_entry_identity(
+                source["artifact_volume_id"], member.path, member.size
+            )
+            or (
+                member.role is ArtifactRole.WORKLOAD_RECORD
+                and (
+                    member.size != workload["workload_size"]
+                    or member.sha256 != workload["workload_sha256"]
+                )
+            )
+        ):
+            raise ValueError("native artifact placement differs from chat source")
+    expected_preparation = _derive_preparation(chat_input, executor)
+    provider = configuration.document["provider"]
+    client = configuration.document["client"]
+    resource_digest = domain_digest(
+        "synaptic-modal-inference-resource/v1",
+        canonical_bytes(
+            {
+                "resources": configuration.document["resources"],
+                "volumes": configuration.document["volumes"],
+                "application": configuration.document["application"],
+            }
+        ),
+    )
+    if (
+        type(chat_input) is not dict
+        or hashlib.sha256(canonical_bytes(chat_input)).hexdigest()
+        != document["chat_input_sha256"]
+        or domain_digest(CONFIG_EVIDENCE_PURPOSE, configuration_bytes)
+        != document["configuration_digest"]
+        or chat_input.get("configuration") != configuration.document
+        or chat_input.get("quote")
+        != parse_canonical_object(quote.canonical_bytes, name="quote")
+        or preparation.quote_digest != quote.quote_digest
+        or preparation.provider.provider_id != executor.provider_id
+        or executor.executor_id != "modal-chat-executor"
+        or preparation != expected_preparation
+        or source["provider"][0] != provider["provider_id"]
+        or configuration.document["volumes"]["source_artifact_volume_id"]
+        != source["artifact_volume_id"]
+        or (
+            quote.provider_id,
+            quote.profile_ref,
+            quote.account_ref,
+            quote.namespace_ref,
+            quote.resource_digest,
+        )
+        != (
+            provider["provider_id"],
+            provider["profile_ref"],
+            source["provider"][2],
+            source["provider"][3],
+            resource_digest,
+        )
+        or source["provider"][2] != client["account_ref"]
+        or domain_digest(
+            "synaptic-modal-namespace/v1",
+            canonical_bytes(
+                {
+                    "workspace_ref": client["workspace_ref"],
+                    "environment_ref": client["environment_ref"],
+                }
+            ),
+        )
+        != source["provider"][3]
+    ):
+        raise ValueError("inference preparation projection differs")
+    return document
+
+
 class ModalInferencePreparation:
     __slots__ = ("_snapshot", "_token")
 
@@ -639,51 +910,7 @@ class ModalInferencePreparation:
         object.__setattr__(self, "_token", _TOKEN)
 
     def _document(self) -> dict[str, object]:
-        document = parse_canonical_object(self._snapshot, name="inference preparation")
-        exact_fields(
-            document,
-            frozenset(
-                {
-                    "schema_version",
-                    "preparation",
-                    "executor",
-                    "configuration",
-                    "configuration_digest",
-                    "configuration_tag",
-                    "quote",
-                    "quote_tag",
-                    "chat_input",
-                    "chat_input_sha256",
-                }
-            ),
-            "inference preparation",
-        )
-        if document["schema_version"] != "synaptic-modal-inference-preparation/v1":
-            raise ValueError("unsupported inference preparation")
-        preparation = CanonicalPreparationV2.parse(
-            canonical_bytes(document["preparation"])
-        )
-        executor = ExecutorDescriptorV1(**document["executor"])
-        configuration_bytes = canonical_bytes(document["configuration"])
-        configuration = ModalInferencePreparationConfig.parse(configuration_bytes)
-        quote = ModalQuoteBody.parse(canonical_bytes(document["quote"]))
-        chat_input = document["chat_input"]
-        expected_preparation = _derive_preparation(chat_input, executor)
-        if (
-            type(chat_input) is not dict
-            or hashlib.sha256(canonical_bytes(chat_input)).hexdigest()
-            != document["chat_input_sha256"]
-            or domain_digest(CONFIG_EVIDENCE_PURPOSE, configuration_bytes)
-            != document["configuration_digest"]
-            or chat_input.get("configuration") != configuration.document
-            or chat_input.get("quote")
-            != parse_canonical_object(quote.canonical_bytes, name="quote")
-            or preparation.quote_digest != quote.quote_digest
-            or preparation.provider.provider_id != executor.provider_id
-            or preparation != expected_preparation
-        ):
-            raise ValueError("inference preparation projection differs")
-        return document
+        return _validate_preparation_snapshot(self._snapshot)
 
     @property
     def preparation(self) -> CanonicalPreparationV2:

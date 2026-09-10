@@ -186,6 +186,8 @@ jobs:
           import tuner.execution.providers.modal.inference_workload
           import tuner.execution.providers.modal.inference_artifacts
           import tuner.execution.providers.modal.inference_preparation
+          import tuner.execution.providers.modal.inference_commands
+          import tuner.execution.providers.modal.inference_retention
           PY
 
       - name: Check source hashes without refreshing the runtime lock

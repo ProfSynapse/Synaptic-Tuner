@@ -121,6 +121,23 @@ does not replace inference image/lock review or authorize a serving allocation.
 This is internal adapter composition, not another operator step; current local
 implementation status is in `docs/review/modal-inference-preparation.md`.
 
+Retain chat STAGE/SUBMIT content through the internal
+`ModalInferenceCommandBinding` and `retain_modal_chat_command` helpers, using
+the consumer's existing `resolve`/`publish_if_absent` catalog semantics and a
+complete-content authentication authority. `load_modal_chat_command` performs
+authenticated read-only recovery. These helpers do not dispatch commands, issue
+grants or authenticate a stage receipt. A storage error must not trigger an
+overwrite or provider submission; the unchanged Foundation remains responsible
+for grants, predecessor evidence and one-shot execution. CANCEL binding is not
+available until an owned Sandbox target can be authenticated.
+
+Correction (2026-09-10, implementation order): finish the exact chat command and
+remote worker boundaries before freezing the inference runtime lock. The current
+training lock and vLLM image tag cannot supply missing inference image, Python,
+dependency or bootstrap pins. Retained configuration/quote evidence is parsed
+structurally during recovery, not reclassified as fresh source admission or
+runtime qualification. See `docs/review/modal-inference-commands.md`.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical
