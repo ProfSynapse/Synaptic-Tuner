@@ -517,6 +517,16 @@ not a Modal mounted-source adapter or new serving authority. Details are in
 `sft-materialization-core.md`. Existing `ServingTarget`, pinned-base preparation
 and vLLM process control remain shared on the selected execution machine.
 
+Materialization source is locally committed as `ad8eafd`. Its immutable offline
+wheel passed 36 installed imports, two resources, public/private signature
+checks and type-hint resolution, plus independent 717-entry ZIP/RECORD and
+709-Python-member archive-equivalence checks. Exact digest, corrected launch
+evidence and qualification limits are recorded in the materialization review.
+All Sol implementation/review handoffs for this slice are integrated. The
+remaining bounded-chat work is inference-specific runtime/deployment policy,
+chat mutation binding, authenticated mounted-source worker and bounded remote
+session/cleanup qualification; none is made operational by this extraction.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

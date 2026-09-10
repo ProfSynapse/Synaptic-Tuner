@@ -1,7 +1,7 @@
 # Shared post-admission SFT materialization
 
-Engineering slice, 2026-09-10: implementation, independent review and combined
-provider-free qualification complete; immutable package qualification follows.
+Engineering slice, 2026-09-10: implementation, independent review, combined
+provider-free qualification and immutable package qualification complete locally.
 This is engine-only code reuse, not a new public retrieval API or Modal deployment.
 
 The existing public `materialize_verified_sft_model` retains exact RunsAPI
@@ -57,7 +57,7 @@ runtime qualification. The corrected full selection passed **2,368 tests in
 332.87 seconds**, on clean CPython 3.12.9 / pytest 8.4.2 without Modal or PyTorch.
 This is the defined coordinator/Foundation/provider/training/runtime/inference
 selection, not every repository test. The immutable installed package check is
-recorded separately after the source commit is built.
+recorded below.
 
 Launch correction: the first combined attempt reported 2,367 passes and one
 failure in 344.50 seconds. The lead had invoked embedded pytest through Python
@@ -67,3 +67,24 @@ stdin. The FIFO test's multiprocessing child tried to reopen a nonexistent
 `python -c` launch. The full frozen selection then passed with that same
 launch form; this required no repository-code change and is not evidence of a
 flaky runtime test.
+
+## Immutable package qualification
+
+Exact source commit `ad8eafd497365231347a0ff7aa19572192943ce7` was archived and
+built offline without dependency downloads. The wheel is 2,042,313 bytes with
+SHA-256
+`f587c232c6d186ec40056024759ef13e841327a75557d565cf9785f923d312fa`.
+It passed the checked-in neutral-directory CI snippet's 36 installed
+engine/Evaluator imports and two resource checks, plus public/private signature
+binding and public type-hint resolution. The private root descriptor remains
+required; the public signature is unchanged. Modal and PyTorch were absent from
+the disposable package-check environment; the trainer environment was untouched.
+
+Independent audit passed all 717 unique ZIP/RECORD entries and verified all
+709 Python members against the immutable source archive. The materializer's
+SHA-256 is
+`ba59341ef0708d3c40a2e7f0f5facd9317aa2a997ff768dd8aefcbb163883f22`.
+The source commit contains exactly the nine intended paths. No unexpected
+credential/private artifact filenames were found; this is not a content-level
+secret scan. No CI dispatch, provider execution, model-load or live-chat
+qualification is implied.
