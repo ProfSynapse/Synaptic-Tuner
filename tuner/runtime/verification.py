@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from pathlib import PurePosixPath
-from typing import Protocol, runtime_checkable
+from typing import BinaryIO, Protocol, runtime_checkable
 
 from tuner.training.recipes import CompiledWorkload
 
@@ -248,8 +248,8 @@ class WorkloadBindingVerifier:
         try:
             if len(models) == 1:
                 model_raw = reader.read_bytes(models[0], maximum=MAX_ARTIFACT_BYTES)
-                model_members, model_ok = _validate_sft_archive(
-                    model_raw, "model",
+                model_members, model_ok = _validate_sft_archive_stream(
+                    io.BytesIO(model_raw), "model",
                     locked_model_ref=workload.document["configuration"]["document"]["model"]["ref"],
                 )
             else:
@@ -258,8 +258,8 @@ class WorkloadBindingVerifier:
                 tokenizer_raw = reader.read_bytes(
                     tokenizers[0], maximum=MAX_ARTIFACT_BYTES
                 )
-                tokenizer_members, tokenizer_ok = _validate_sft_archive(
-                    tokenizer_raw, "tokenizer"
+                tokenizer_members, tokenizer_ok = _validate_sft_archive_stream(
+                    io.BytesIO(tokenizer_raw), "tokenizer"
                 )
             else:
                 tokenizer_raw = b""
@@ -790,18 +790,21 @@ def _validate_embedded_trainer_lineage(
     )
 
 
-def _validate_sft_archive(
-    content: bytes, artifact_kind: str, *, locked_model_ref: str | None = None
+def _validate_sft_archive_stream(
+    stream: BinaryIO, artifact_kind: str, *, locked_model_ref: str | None = None
 ) -> tuple[frozenset[str], bool]:
-    if not content:
+    if not stream.seekable() or stream.tell() != 0:
+        raise ValueError("archive stream must be seekable and positioned at zero")
+    if not stream.read(1):
         return frozenset(), False
+    stream.seek(0)
     names: set[str] = set()
     configs: set[str] = set()
     payloads: set[str] = set()
     indexes: dict[str, dict[str, object]] = {}
     tensor_info: dict[str, tuple[frozenset[str], int]] = {}
     expanded = 0
-    with tarfile.open(fileobj=io.BytesIO(content), mode="r:") as archive:
+    with tarfile.open(fileobj=stream, mode="r:") as archive:
         members = archive.getmembers()
         if not members or len(members) > MAX_ARCHIVE_MEMBERS:
             return frozenset(), False
