@@ -162,6 +162,15 @@ guess that the first allocation is absent.
    Create once only after durable authority consumption, retain the returned ID,
    and bound readiness, access-token issuance, request and exact-target cleanup.
 
+   Correction (2026-09-10, adapter sequencing): connect retained chat commands
+   through chat-specific Foundation effect/reconciliation adapters before adding
+   the SDK transport and worker. Reuse Foundation grant consumption, predecessor
+   authentication, receipt admission and recovery ownership unchanged. This is
+   internal composition, not an extra operator step or a new authority system.
+   The provider-free boundary is tracked in
+   `../review/modal-inference-effects.md`; transport, worker, runtime lock and
+   bounded owned cleanup remain separate unfinished parts of this slice.
+
    Implementation clarification (2026-09-10): existing filesystem materialization,
    `ServingTarget`, pinned-base preparation and vLLM process ownership can run on
    Modal itself. Reuse them there; do not add a parallel launch controller merely

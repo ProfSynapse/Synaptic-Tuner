@@ -131,6 +131,17 @@ overwrite or provider submission; the unchanged Foundation remains responsible
 for grants, predecessor evidence and one-shot execution. CANCEL binding is not
 available until an owned Sandbox target can be authenticated.
 
+The internal `ModalChatEffectExecutor` and `ModalChatReconciliationAdapter`
+connect authenticated retained chat commands to the existing Foundation broker
+and reconciliation service. Consumers supply their catalog, content authority
+and transport; use the chat resolvers with Foundation, not a direct executor
+call as an authorization boundary. Foundation alone consumes grants, verifies
+the actual stage predecessor and retains authenticated receipts. A lost dispatch
+response remains unresolved/orphaned without resubmission; failed lookup remains
+interrupted. These adapters do not yet supply a Modal SDK transport, authenticated
+remote worker, owned cleanup lease or live serving qualification. See
+`docs/review/modal-inference-effects.md`.
+
 Correction (2026-09-10, implementation order): finish the exact chat command and
 remote worker boundaries before freezing the inference runtime lock. The current
 training lock and vLLM image tag cannot supply missing inference image, Python,
