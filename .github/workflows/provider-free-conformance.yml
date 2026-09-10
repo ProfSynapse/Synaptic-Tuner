@@ -14,7 +14,15 @@ on:
       - "tuner/inference/**"
       - "tests/inference/**"
       - "Evaluator/owned_process.py"
+      - "Evaluator/vllm_runtime.py"
+      - "Evaluator/vllm_setup.py"
+      - "Evaluator/interactive_cli.py"
+      - "Evaluator/cloud_hf_job_vllm.py"
+      - "Evaluator/cli.py"
       - "tests/evaluator/test_owned_process.py"
+      - "tests/evaluator/test_vllm_*.py"
+      - "tests/cloud/test_vllm_setup.py"
+      - "tests/cloud/test_cloud_hf_job_vllm.py"
       - "tests/contract/test_modal_optional_dependency.py"
       - "tests/contract/test_modal_runtime_lock*.py"
       - "tests/contract/test_modal_bootstrap_closure.py"
@@ -154,6 +162,7 @@ jobs:
           import tuner.training.coordinator_service
           import tuner.training.contracts
           import Evaluator.owned_process
+          import Evaluator.vllm_runtime
           import tuner.inference.retrieved_model
           import tuner.inference.serving_target
           import tuner.execution.providers.modal.inference_model
@@ -189,7 +198,46 @@ jobs:
             tests/training \
             tests/runtime \
             tests/evaluator/test_owned_process.py \
+            tests/evaluator/test_vllm_runtime.py \
+            tests/evaluator/test_vllm_startup_cleanup.py \
+            tests/cloud/test_vllm_setup.py \
             tests/inference \
             tests/trainers/sft/test_runtime_v1.py \
             tests/execution/providers/docker_provider_v1 \
             tests/execution/providers/test_modal_*.py
+
+  evaluator-callers:
+    name: CPU-only evaluator caller regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      MODAL_IS_REMOTE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      CUDA_VISIBLE_DEVICES: ""
+      HF_TOKEN: ""
+      HF_API_KEY: ""
+      MODAL_TOKEN_ID: ""
+      MODAL_TOKEN_SECRET: ""
+    steps:
+      - name: Check out source without persisted credentials
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Set up supported Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Install CPU evaluator test dependencies
+        run: |
+          python -m pip install 'torch>=2,<3' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'pytest>=8,<9' 'requests>=2.32,<3' 'numpy>=1.24,<3' 'pandas>=2,<3' tqdm .
+      - name: Run real caller bodies with fake external effects
+        run: |
+          python -B -m pytest -q -p no:cacheprovider \
+            tests/evaluator/test_vllm_callers.py \
+            tests/cloud/test_cloud_hf_job_vllm.py \
+            tests/cloud/test_vllm_setup.py \
+            tests/evaluator/test_vllm_runtime.py \
+            tests/evaluator/test_vllm_startup_cleanup.py \
+            tests/evaluator/test_owned_process.py

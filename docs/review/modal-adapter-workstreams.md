@@ -342,11 +342,14 @@ base preparation and LoRA targets bind the exact prepared base revision.
 Both source inventories remain current without regeneration. The last wheel
 above predates these two modules.
 
-The current isolated work is an owned vLLM startup API (conformance agent),
-independent runtime review (effects), and request/idle/absolute-lifetime chat
-control (reader). Lead owns atomic migration of the two existing vLLM callers
-and removal of the old global start/stop API. New runtime and chat drafts must
-not be presented as integrated or as actual model-load/GPU qualification.
+Correction (2026-09-10, owned runtime and caller migration): the explicit vLLM
+runtime and both caller migrations are integrated locally; the old global
+start/stop API is removed without aliases. The 77-test evaluator/runtime/
+cleanup selection passed in 2.72 seconds with system-site dependencies, and
+the separate clean 115-test inference/runtime selection passed in 1.08 seconds.
+Both source inventories remain CURRENT. CPU evaluator CI is configured but
+unrun. The chat controller remains under independent failure-path review;
+actual model-load/GPU qualification and end-user chat composition remain open.
 
 ### Foundation binding contract
 

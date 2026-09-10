@@ -65,6 +65,7 @@ from shared.experiment_tracking.lineage_enrichment import (
     write_json as write_lineage_json,
 )
 from shared.experiment_tracking.runtime_autotune import recommend_eval_max_workers
+from shared.utilities.env import get_hf_token
 from tuner.project import (
     ProjectContext,
     discover_project_context,
@@ -239,7 +240,7 @@ def _compute_optional_loss_outputs(
 
     from shared.experiment_tracking.per_example_loss import IncrementalLossWriter, compute_per_example_losses, save_losses
 
-    hf_token = args.hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
+    hf_token = args.hf_token or get_hf_token()
     resolved_dataset_path = (
         str(resolve_path(args.loss_dataset_path, project_context, from_cli=True, access="read"))
         if args.loss_dataset_path and project_context is not None
@@ -1107,7 +1108,7 @@ def main(
 
     # Upload to HuggingFace if requested
     if args.upload_to_hf:
-        hf_token = args.hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
+        hf_token = args.hf_token or get_hf_token()
         if not hf_token:
             print("\n❌ HuggingFace authentication required. Set HF_TOKEN env var or provide credentials via --hf flag.")
             return 1

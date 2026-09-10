@@ -4,14 +4,13 @@ This module provides utilities for:
 - Checking if vLLM is installed and ready
 - Installing vLLM if needed
 - Discovering training outputs (models/adapters)
-- Starting and stopping the vLLM server
+- Resolving explicit operator-selected runtime configuration
 """
 from __future__ import annotations
 
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -340,298 +339,59 @@ def discover_huggingface_models() -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# Server Management
+# Runtime Configuration
 # ---------------------------------------------------------------------------
 
-# Global to track server process
-_server_process: Optional[subprocess.Popen] = None
-
-
-def _looks_like_prequant_bnb_model(model: str) -> bool:
-    normalized = (model or "").strip().lower()
-    return any(marker in normalized for marker in ("bnb", "bitsandbytes", "4bit"))
-
-
-def start_vllm_server(
-    model: str,
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
-    gpu_memory_utilization: float = DEFAULT_GPU_MEMORY_UTILIZATION,
-    tensor_parallel_size: int = 0,
-    lora_modules: Optional[dict] = None,
-    enforce_eager: bool = True,
-    wait_for_ready: bool = True,
-    timeout: int = 120,
-    show_logs: bool = True,
-) -> bool:
-    """Start the vLLM server.
-
-    Args:
-        model: Model name or path
-        host: Server host
-        port: Server port
-        gpu_memory_utilization: GPU memory fraction (0.0-1.0)
-        tensor_parallel_size: Number of GPUs to shard the model across. 0 means auto-detect.
-        lora_modules: Dict of lora_name -> lora_path
-        enforce_eager: Disable vLLM compile/cudagraph startup paths for compatibility.
-        wait_for_ready: Wait for server to be ready
-        timeout: Timeout in seconds for server startup
-        show_logs: Show live server logs during startup
-
-    Returns:
-        True if server started successfully
-    """
-    global _server_process
-
-    # This module owns at most one process.  Refuse to replace the retained
-    # handle: cleanup must never target a server this invocation did not spawn.
-    if _server_process is not None:
-        try:
-            retained_running = _server_process.poll() is None
-        except Exception:
-            retained_running = True
-        if retained_running:
-            print("A managed vLLM server process already exists.")
-            return False
-        # A completed retained child owns no GPU resources and needs no signal.
-        _server_process = None
-
-    # Build command
-    resolved_tensor_parallel = int(tensor_parallel_size or 0)
-    if resolved_tensor_parallel <= 0:
+def resolve_tensor_parallel_size(model: str, requested: int = 0) -> int:
+    """Resolve the existing evaluator's explicit/automatic device policy."""
+    if type(requested) is not int or not 0 <= requested <= 256:
+        raise ValueError("tensor parallel size must be an integer from 0 through 256")
+    resolved = requested
+    if resolved == 0:
         try:
             import torch
 
-            if torch.cuda.is_available():
-                resolved_tensor_parallel = max(int(torch.cuda.device_count()), 1)
-            else:
-                resolved_tensor_parallel = 1
+            resolved = max(int(torch.cuda.device_count()), 1) if torch.cuda.is_available() else 1
         except Exception:
-            resolved_tensor_parallel = 1
-
-    if resolved_tensor_parallel > 1 and _looks_like_prequant_bnb_model(model):
-        print(
-            "[vLLM] Detected a prequantized BitsAndBytes model. "
-            "Tensor parallelism is not supported for this runtime path; "
-            "falling back to single-GPU eval."
-        )
-        resolved_tensor_parallel = 1
-
-    cmd = [
-        sys.executable, "-m", "vllm.entrypoints.openai.api_server",
-        "--model", model,
-        "--host", host,
-        "--port", str(port),
-        "--gpu-memory-utilization", str(gpu_memory_utilization),
-    ]
-    if resolved_tensor_parallel > 1:
-        cmd.extend(["--tensor-parallel-size", str(resolved_tensor_parallel)])
-    if enforce_eager:
-        cmd.append("--enforce-eager")
-
-    # Add Mistral-specific tokenizer mode for proper [TOOL_CALLS] handling
-    if "mistral" in model.lower():
-        cmd.extend(["--tokenizer-mode", "mistral"])
-        # Message extracted to a local so the print() call does not contain the
-        # substring "token" on the same line — that trips the PACT pre-commit hook's
-        # `print\s*\(.*token` secret-scan regex as a false positive (this is a log
-        # line about Mistral's tokenizer mode, not a credential). The variable name
-        # is deliberately "token"-free so the print() line itself stays clean.
-        # Output is unchanged.
-        mistral_mode_msg = "[vLLM] Using Mistral tokenizer mode for proper tool call handling"
-        print(mistral_mode_msg)
-
-    # Add LoRA modules if specified
-    if lora_modules:
-        cmd.append("--enable-lora")
-        cmd.extend(["--max-lora-rank", "64"])  # Support higher LoRA ranks from training
-        for name, path in lora_modules.items():
-            cmd.extend(["--lora-modules", f"{name}={path}"])
-
-    print(f"\n[vLLM] Command: {' '.join(cmd)}")
-
-    # Set environment for broadest compatibility across local and cloud vLLM runs.
-    env = os.environ.copy()
-    env["TORCH_COMPILE_DISABLE"] = "1"
-    # vLLM 0.11.0+ requires the V1 engine for the OpenAI API server path.
-    # Allow callers to override explicitly, but default to the modern engine.
-    env.setdefault("VLLM_USE_V1", "1")
-    if enforce_eager:
-        print(f"[vLLM] Enforcing eager mode; using VLLM_USE_V1={env['VLLM_USE_V1']}\n")
-    else:
-        print(f"[vLLM] Disabled torch.compile; using VLLM_USE_V1={env['VLLM_USE_V1']}\n")
-
-    spawned_process: Optional[subprocess.Popen] = None
-    started = False
-    try:
-        # Start server process with live output
-        spawned_process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,  # Line buffered
-            env=env,  # Use modified environment
-        )
-        _server_process = spawned_process
-
-        if wait_for_ready:
-            started = _wait_for_server(host, port, timeout, show_logs=show_logs)
-        else:
-            started = True
-        return started
-
-    except Exception as e:
-        print(f"Failed to start vLLM server: {e}")
-        return False
-    finally:
-        # Includes readiness timeout, health-check failure, and cancellation.
-        # Cleanup targets the local identity even if another owner concurrently
-        # replaced the module handle, and must not mask the original outcome.
-        if spawned_process is not None and not started:
-            try:
-                stopped = _stop_vllm_process(spawned_process)
-            except BaseException:
-                stopped = False
-            if stopped and _server_process is spawned_process:
-                _server_process = None
+            resolved = 1
+    normalized = model.strip().lower()
+    if resolved > 1 and any(
+        marker in normalized for marker in ("bnb", "bitsandbytes", "4bit")
+    ):
+        resolved = 1
+    return resolved
 
 
-def _wait_for_server(host: str, port: int, timeout: int, show_logs: bool = True) -> bool:
-    """Wait for server to become ready while showing live logs.
+def resolve_tokenizer_mode(model: str) -> str | None:
+    """Preserve the current operator-selected model policy explicitly."""
+    return "mistral" if "mistral" in model.lower() else None
 
-    Args:
-        host: Server host
-        port: Server port
-        timeout: Timeout in seconds
-        show_logs: Show live server output
 
-    Returns:
-        True if server is ready
+def network_runtime_environment() -> dict[str, str]:
+    """Project explicit network-enabled evaluator settings, never log values.
+
+    This policy is for the existing operator-selected evaluation workflows.
+    It is not the credential-free verified-local inference policy.
     """
-    import select
-
-    url = f"http://{host}:{port}/v1/models"
-    start_time = time.time()
-
-    print(f"Waiting for vLLM server to start (timeout: {timeout}s)...")
-    if show_logs:
-        print("-" * 60)
-        print("[vLLM Server Output]")
-        print("-" * 60)
-
-    while time.time() - start_time < timeout:
-        # Read and display any available output from vLLM
-        if show_logs and _server_process and _server_process.stdout:
-            try:
-                # Use select to check if there's data to read (non-blocking)
-                import os
-                import fcntl
-
-                # Make stdout non-blocking
-                fd = _server_process.stdout.fileno()
-                flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-                fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-                # Read available lines
-                while True:
-                    try:
-                        line = _server_process.stdout.readline()
-                        if line:
-                            print(f"[vLLM] {line.rstrip()}")
-                        else:
-                            break
-                    except (IOError, BlockingIOError):
-                        break
-            except Exception:
-                pass  # Continue even if log reading fails
-
-        # Check if server is ready
-        try:
-            response = requests.get(url, timeout=2)
-            if response.status_code == 200:
-                if show_logs:
-                    print("-" * 60)
-                print("\nvLLM server is ready!")
-                return True
-        except requests.RequestException:
-            pass
-
-        # Check if process died
-        if _server_process and _server_process.poll() is not None:
-            # Read any remaining output
-            if show_logs and _server_process.stdout:
-                remaining = _server_process.stdout.read()
-                if remaining:
-                    for line in remaining.splitlines():
-                        print(f"[vLLM] {line}")
-                print("-" * 60)
-            print("\nvLLM server process exited unexpectedly!")
-            print(f"Exit code: {_server_process.returncode}")
-            return False
-
-        time.sleep(1)
-
-    # Timeout - show any remaining output
-    if show_logs:
-        print("-" * 60)
-    print(f"\nTimeout waiting for vLLM server (>{timeout}s)")
-    print("The server may still be loading the model. Check GPU memory usage.")
-    return False
-
-
-def _stop_vllm_process(process: subprocess.Popen) -> bool:
-    """Stop and reap one exact owned child, retaining failures for retry."""
-
-    try:
-        if process.poll() is not None:
-            return True
-    except Exception:
-        pass
-
-    try:
-        process.terminate()
-        process.wait(timeout=10)
-        return True
-    except subprocess.TimeoutExpired:
-        pass
-    except Exception as error:
-        print(f"Error stopping server: {error}")
-
-    try:
-        process.kill()
-        process.wait(timeout=10)
-        return True
-    except Exception as error:
-        print(f"Error killing server: {error}")
-        return False
-
-
-def stop_vllm_server() -> bool:
-    """Stop the vLLM server if running.
-
-    Returns:
-        True if server was stopped
-    """
-    global _server_process
-
-    if _server_process is None:
-        return True
-
-    process = _server_process
-    stopped = _stop_vllm_process(process)
-    if stopped and _server_process is process:
-        _server_process = None
-    return stopped
-
-
-def is_server_managed() -> bool:
-    """Check if we're managing the server process.
-
-    Returns:
-        True if server was started by this module
-    """
-    return _server_process is not None
+    names = (
+        "PATH", "LD_LIBRARY_PATH", "CUDA_HOME", "CUDA_VISIBLE_DEVICES",
+        "NVIDIA_VISIBLE_DEVICES", "NVIDIA_DRIVER_CAPABILITIES", "VIRTUAL_ENV",
+        "TMPDIR", "TMP", "TEMP", "HF_HOME", "HF_HUB_CACHE", "TRANSFORMERS_CACHE",
+        "HF_ENDPOINT", "HF_TOKEN", "HF_API_KEY", "HUGGING_FACE_HUB_TOKEN",
+        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy",
+        "no_proxy", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS", "TOKENIZERS_PARALLELISM", "VLLM_USE_V1",
+        "VLLM_WORKER_MULTIPROC_METHOD", "VLLM_ATTENTION_BACKEND",
+        "PYTORCH_CUDA_ALLOC_CONF", "NCCL_DEBUG", "NCCL_P2P_DISABLE",
+        "NCCL_IB_DISABLE",
+    )
+    result = {name: os.environ[name] for name in names if name in os.environ}
+    for name in ("HF_TOKEN", "HF_API_KEY", "HUGGING_FACE_HUB_TOKEN"):
+        if name in result and not result[name].strip():
+            del result[name]
+    result["TORCH_COMPILE_DISABLE"] = "1"
+    result.setdefault("VLLM_USE_V1", "1")
+    return result
 
 
 # ---------------------------------------------------------------------------

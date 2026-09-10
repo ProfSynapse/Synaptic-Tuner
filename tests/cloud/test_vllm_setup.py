@@ -1,59 +1,47 @@
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from Evaluator.vllm_setup import start_vllm_server
+from Evaluator import vllm_setup
+from Evaluator.vllm_runtime import (
+    ExplicitNetworkVLLMSource,
+    VLLMStartupSpec,
+    _projection,
+)
 
 
-def test_start_vllm_server_defaults_to_v1_engine():
-    process = MagicMock()
+def test_network_runtime_defaults_to_v1_engine(tmp_path, monkeypatch):
+    monkeypatch.delenv("VLLM_USE_V1", raising=False)
+    environment = vllm_setup.network_runtime_environment()
+    spec = VLLMStartupSpec(
+        source=ExplicitNetworkVLLMSource("unsloth/qwen3-1.7b"),
+        served_model_name="model",
+    )
+    projection = _projection(spec, cwd=tmp_path, environment=environment)
+    assert projection.environment["TORCH_COMPILE_DISABLE"] == "1"
+    assert projection.environment["VLLM_USE_V1"] == "1"
+    assert "--enforce-eager" in projection.argv
 
-    with patch("Evaluator.vllm_setup.subprocess.Popen", return_value=process) as mock_popen:
-        started = start_vllm_server(
-            model="unsloth/qwen3-1.7b",
-            wait_for_ready=False,
-            show_logs=False,
+
+def test_operator_tensor_parallel_auto_detects_devices():
+    torch = SimpleNamespace(
+        cuda=SimpleNamespace(
+            is_available=lambda: True,
+            device_count=lambda: 4,
         )
-
-    assert started is True
-    env = mock_popen.call_args.kwargs["env"]
-    cmd = mock_popen.call_args.args[0]
-    assert env["TORCH_COMPILE_DISABLE"] == "1"
-    assert env["VLLM_USE_V1"] == "1"
-    assert "--enforce-eager" in cmd
+    )
+    with patch.dict("sys.modules", {"torch": torch}):
+        assert vllm_setup.resolve_tensor_parallel_size("Qwen/Qwen3-4B") == 4
 
 
-def test_start_vllm_server_auto_detects_tensor_parallel_size():
-    process = MagicMock()
-
-    with patch("Evaluator.vllm_setup.subprocess.Popen", return_value=process) as mock_popen:
-        with patch("torch.cuda.is_available", return_value=True):
-            with patch("torch.cuda.device_count", return_value=4):
-                started = start_vllm_server(
-                    model="Qwen/Qwen3-4B",
-                    wait_for_ready=False,
-                    show_logs=False,
-                )
-
-    assert started is True
-    cmd = mock_popen.call_args.args[0]
-    assert "--tensor-parallel-size" in cmd
-    tp_index = cmd.index("--tensor-parallel-size")
-    assert cmd[tp_index + 1] == "4"
-    assert "--enforce-eager" in cmd
-
-
-def test_start_vllm_server_disables_tensor_parallel_for_prequant_bnb_models():
-    process = MagicMock()
-
-    with patch("Evaluator.vllm_setup.subprocess.Popen", return_value=process) as mock_popen:
-        with patch("torch.cuda.is_available", return_value=True):
-            with patch("torch.cuda.device_count", return_value=4):
-                started = start_vllm_server(
-                    model="unsloth/qwen3-4b-unsloth-bnb-4bit",
-                    wait_for_ready=False,
-                    show_logs=False,
-                )
-
-    assert started is True
-    cmd = mock_popen.call_args.args[0]
-    assert "--tensor-parallel-size" not in cmd
-    assert "--enforce-eager" in cmd
+def test_operator_tensor_parallel_disables_prequant_bnb_sharding():
+    torch = SimpleNamespace(
+        cuda=SimpleNamespace(
+            is_available=lambda: True,
+            device_count=lambda: 4,
+        )
+    )
+    with patch.dict("sys.modules", {"torch": torch}):
+        assert (
+            vllm_setup.resolve_tensor_parallel_size("unsloth/qwen3-4b-unsloth-bnb-4bit")
+            == 1
+        )

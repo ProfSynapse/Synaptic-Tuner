@@ -1,5 +1,10 @@
 # vLLM startup cleanup slice
 
+Historical record, superseded 2026-09-10: the global start/stop API described
+below has been removed. Current callers own an explicit runtime lease; see
+`vllm-runtime-slice.md` and `vllm-callers-slice.md`. The measurements below
+describe the earlier implementation, not the current test inventory.
+
 `start_vllm_server` retains the exact process spawned by the current call and
 tears it down when readiness fails, times out, raises, or is interrupted.
 Cleanup terminates and waits for ten seconds, then kills and performs a bounded
