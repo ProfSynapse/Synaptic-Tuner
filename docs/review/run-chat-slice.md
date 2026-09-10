@@ -116,3 +116,15 @@ without regeneration; canonical skill mirrors and six touched Python files'
 format checks pass. The three constructors in the updated embedding example bind
 against the real signatures without executing them. Existing exploratory evaluator
 baseline exclusions remain unchanged; this is not a whole-repository test claim.
+
+Runtime-first source checkpoint: `ffbb3633478b3f09cc2717f21c1b9aa8505b431a`.
+Its immutable offline wheel is **2,032,668 bytes**, SHA-256
+`59bafa49d0210c9050b63013261d67180d6948021e72319af062c1d23e6f2075`.
+Installed without dependencies into the disposable non-system-site verification
+environment, it passed the archived neutral-directory step: **34 installed
+module imports and both resources**, with Modal/PyTorch absent. Installed
+signatures expose only the runtime-first generic call and the local adapter's
+destination/preparer configuration. Independent ZIP/RECORD audit verified all
+715 unique members and matched all 707 Python members byte-for-byte to the
+immutable source, including both changed modules and unchanged 97/66 resources.
+No live inference, cloud account access, CI dispatch, push or merge is implied.

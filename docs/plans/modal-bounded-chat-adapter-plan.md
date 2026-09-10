@@ -2,6 +2,9 @@
 
 Status: engineering plan, 2026-09-10. Engine-only; no provider access or live
 qualification is implied. The local run-chat composition is not a cloud service.
+Slice 1 is complete locally at `ffbb363`, with 2,297 provider-free tests and
+immutable-wheel/import qualification recorded in `../review/run-chat-slice.md`.
+Slices 2–4 remain unimplemented; no Sandbox has been created for this plan.
 
 ## Product boundary
 

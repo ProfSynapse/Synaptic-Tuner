@@ -460,6 +460,15 @@ remain CURRENT, formatting and skill synchronization pass, and the guide's three
 constructor signatures bind without execution. The earlier whole-evaluator
 baseline exclusions still apply. This is local provider-free qualification only.
 
+Runtime-first source is locally committed as `ffbb363`. Its immutable offline
+wheel (SHA-256 `59bafa49d0210c9050b63013261d67180d6948021e72319af062c1d23e6f2075`)
+passed 34 installed imports, both resource checks and installed signature checks
+from a neutral directory. Independent ZIP/RECORD audit passed all 715 entries,
+with all 707 Python members matching committed source. Runtime-first plan slice
+1 is complete locally; actual Modal binding/executor, remote worker and Sandbox
+lifecycle implementation in slices 2–4 remain open. All assigned Sol handoffs
+and reviews have been consumed; no agent is pending integration.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an
