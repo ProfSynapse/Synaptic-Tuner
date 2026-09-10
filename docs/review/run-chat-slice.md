@@ -5,14 +5,16 @@ artifact path to serving-target preparation and a selected chat runtime.  It
 adds no run lookup, persistence, authentication authority, provider registry,
 download cache, retry, fallback, or hidden inference prompt.
 
-`open_run_chat` validates its consumer configuration before run reads, then
-uses `materialize_verified_sft_model` and `prepare_serving_target` unchanged.
-It opens the supplied runtime exactly once and accepts only an exact bounded
-`ChatSession`.  That type check occurs inside the acquired runtime context, so
-an invalid result still receives the runtime adapter's normal teardown.
+`open_run_chat` validates its inputs, delegates the exact run to the selected
+runtime once, and checks a freshly reconstructed `PreparedRunChat` inside the
+acquired context. Wrong result/session types, run substitution and acquisition-time
+input mutation still receive the adapter's normal teardown. The selected trusted
+adapter owns mandatory current reverification and artifact admission; generic
+dispatch is not an authenticator.
 
-`PreparedRunChat` exposes the session together with the exact retrieved model
-and serving target used to open it.  Runtime selection is not authentication:
+`PreparedRunChat` exposes the session, run, canonical five-artifact inventory and
+prepared model identity. Its optional `local_model` preserves locally saved-file
+access but is absent for remote results. Runtime selection is not authentication:
 the consuming host must supply an already-authenticated `RunsAPI`, and a future
 provider runtime must honestly preserve the same target boundary.  This slice
 does not turn the existing Modal training deployment into inference serving.
@@ -23,7 +25,7 @@ composition performs no automatic deletion, retry, or local/provider fallback,
 and preserves runtime failures and control exceptions without imposing a new
 cleanup policy.
 
-## Local runtime adapter and qualification (2026-09-10)
+## Initial target-first qualification (2026-09-10, source 8032f5e)
 
 `Evaluator.local_run_chat.LocalVLLMRunChatRuntime` implements that seam with
 the existing `verified_vllm_chat` context. Its immutable configuration snapshots
@@ -65,7 +67,7 @@ quality and a Modal-hosted inference adapter remain unqualified. Local deadlines
 are not provider-side cost controls. No provider/credential access, GPU run,
 publication, push, merge or consuming-project edit is part of this checkpoint.
 
-## Immutable-source package check
+## Initial immutable-source package check
 
 Source commit `8032f5eb0255165cbf267fb64fc9ceb742a488f2` was archived and built
 offline, without dependency resolution, into `synaptic_tuner-1.1.0-py3-none-any.whl`.
@@ -83,3 +85,34 @@ check, complete RECORD coverage with every declared hash/size correct, and all
 run-chat modules and 97/66 source-inventory resources are present and exact;
 the retired legacy modules remain absent. This is local package integrity and
 import evidence, not a CI run, GPU/model-load test or live provider qualification.
+
+## Runtime-first correction (2026-09-10)
+
+The initial helper materialized local files before selecting a runtime, so it
+could not support remote-first Modal preparation. The internal signature is now
+`open_run_chat(runs, run, *, runtime)`, and `RunChatRuntime.open(runs, run)` yields
+the complete result context. Destination/preparer moved to the local adapter
+constructor; no old signature, provider-specific wrapper or compatibility alias
+remains. Model/artifact metadata is reconstructed without filesystem I/O, while
+the optional factory-issued local model is checked by direct field projection.
+Local materialization, serving-target preparation and pre-spawn validation retain
+their existing distinct checks. No new downloader or Foundation authority system
+is needed.
+
+The focused integrated selection passed **118 tests in 0.54 seconds**, and an
+independent reviewer ran the same selection: **118 passed in 0.61 seconds**.
+Real local adapter regressions prove failed reverification prevents preparation
+and startup and leaves no admitted attempt, while a missing private destination
+fails before run reads. A remote-style consumer fixture does current metadata
+reverification/outcome reads but never streams artifact bodies or prepares local
+weights. This proves the interface permits remote-first execution, not that a
+Modal runtime has been implemented or deployed. The earlier wheel evidence above
+belongs only to its named immutable source and predates this correction.
+
+The established broader provider-free selection passed **2,297 tests in 271.74
+seconds** after this correction (net nine more cases than the previous checkpoint).
+The 97-member Modal and 66-member offline source-inventory checks remain CURRENT
+without regeneration; canonical skill mirrors and six touched Python files'
+format checks pass. The three constructors in the updated embedding example bind
+against the real signatures without executing them. Existing exploratory evaluator
+baseline exclusions remain unchanged; this is not a whole-repository test claim.

@@ -2,18 +2,22 @@
 
 This slice exercises the smallest host-consumer composition for talking to a
 verified trained model. A minimal `APIHost` supplies its public `RunsAPI` to
-`open_run_chat`; the generic helper then performs real authenticated artifact
-reverification and materialization, prepares the exact serving target, and
-opens a consumer-supplied bounded `ChatSession` runtime.
+`open_run_chat`; the generic helper delegates run preparation to the selected
+runtime and verifies its returned run/model/artifact projections. The local
+consumer adapter performs real artifact reverification/materialization and
+serving-target preparation before opening its bounded `ChatSession`.
 
-The acceptance tests cover both LoRA and full SFT results. LoRA preparation is
-called once with the exact retained model identity; full-model chat performs no
-base-model preparation. Retrieved model and tokenizer paths remain available
-after runtime teardown. A backend error closes the owned runtime exactly once,
-while failed run authentication reaches neither the preparer nor runtime.
+Correction (2026-09-10, runtime-first): the consumer acceptance tests now cover
+real local LoRA preparation plus an independent remote-style runtime that performs
+current run reverification/outcome admission without artifact-body streaming or
+local preparation. Local model and tokenizer paths remain available after
+teardown; remote results expose model/artifact metadata and `local_model=None`.
+Failed remote reverification reaches neither serving startup nor the backend.
+Real local full/LoRA and backend-error teardown remain covered by the separate
+`tests/evaluator/test_run_chat_local_integration.py` selection.
 
-The first fake runtime models a local vLLM adapter. A second independently
-implemented local adapter exercises the same `RunChatRuntime.open(target)` seam.
+The first fake runtime models a local adapter. A second independently
+implemented remote-style adapter exercises the same `RunChatRuntime.open(runs, run)` seam.
 The generic helper receives no provider identifier, provider knobs, or global
 runtime registry, and it adds no prompt or wrapper: the sole caller message is
 passed through the existing generic role/content `BackendClient` contract.

@@ -18,7 +18,7 @@ regressions, not live cloud or trained-model readiness.
 | 4. Real preflight and restart | Authenticated deployment/client/Volume/quote checks; exact configuration retained through consumer-owned persistence | Integrated; fake-provider tests, not live account or database crash proof |
 | 5. Public cutover and consumer proof | Existing lazy registry and generic coordinator composition; remove old lifecycle and Modal-specific host field; minimal consumer fixture inside engine | Integrated, independently reviewed, 2,043 provider-free tests and installed-wheel check passed |
 | 6. Retrieved-model usability | Verified local materialization and explicit model-load/inference check; no claim that training completion alone proves usable weights | Materializer, pinned-base preparation and verified-local vLLM composition integrated; fake-effect qualification only, live model-load/inference proof open |
-| 7. Bounded chat | Easy local/Modal conversation using shared inference/evaluation plumbing, explicit stop and bounded GPU lifetime | Local controller/composition integrated; consumer entrypoint and Modal inference deployment remain open; no perpetual endpoint by default |
+| 7. Bounded chat | Easy local/Modal conversation using shared inference/evaluation plumbing, explicit stop and bounded GPU lifetime | Local controller and runtime-first consumer entrypoint integrated; Modal inference adapter/deployment remains open; no perpetual endpoint by default |
 | 8. Qualification and release | Repeatable provider-free CI now; integrated conformance, independent audit, scoped live proof, docs and feature-branch integration later | Sol conformance lane now; lead owns final activation/release decisions |
 
 This map is for the agreed Modal/submodule-first scope, not a requirement to
@@ -432,6 +432,33 @@ installed modules and both resources**, with Modal/PyTorch absent. Independent
 archive/RECORD inspection passed for all 715 entries and matched all 707 Python
 files to committed source. This closes this slice's local package/import check,
 not execution of GitHub CI or the outstanding live inference qualification.
+
+Correction (2026-09-10, remote-first boundary): a Modal runtime could not honestly
+accept the initial local `ServingTarget`, because it bound operator-local paths
+and device/inode identities. `open_run_chat` now passes the exact run before
+materialization. Local destination/preparer policy moved into the local adapter;
+the generic result exposes immutable run/model/artifact metadata and an optional
+explicitly local-only model capability. Runtime acquisition checks run mutation
+and substitution inside the acquired context. Adapter code remains trusted and
+owns mandatory current authentication/admission; generic metadata typing is not
+authentication. No legacy signature or parallel provider-specific helper remains.
+
+The corrected focused selection passed **118 tests in 0.54 seconds** and an
+independent **118 in 0.61 seconds**. Local failed reverification denies all
+preparation/startup, and the remote-style consumer test streams no artifact bodies
+or local weights. This closes the interface defect, not Modal implementation.
+The bounded Modal follow-up is documented in
+`../plans/modal-bounded-chat-adapter-plan.md`: separate authenticated native-source
+binding/executor, remote preparation, one owned finite Sandbox and exact cleanup.
+Read-only review confirmed Foundation's existing generic stage/submit/cancel
+commands and durable grants can be reused unchanged. No cloud/credential access,
+resource mutation, new authority framework or EHR changes occurred.
+
+The final runtime-first broader selection passed **2,297 tests in 271.74 seconds**
+on clean CPython 3.12.9 / pytest 8.4.2 without Modal or PyTorch. Both source locks
+remain CURRENT, formatting and skill synchronization pass, and the guide's three
+constructor signatures bind without execution. The earlier whole-evaluator
+baseline exclusions still apply. This is local provider-free qualification only.
 
 ### Foundation binding contract
 

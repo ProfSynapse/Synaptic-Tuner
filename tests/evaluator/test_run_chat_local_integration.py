@@ -77,29 +77,33 @@ def test_verified_run_to_local_vllm_chat_uses_one_owned_runtime(
         ChatSessionPolicy(1, 10, 20, 2, 4096),
         tmp_path,
         {},
+        destination=destination,
+        preparer=preparer,
         startup_options={"port": 9137},
     )
 
     with open_run_chat(
         runs,
         run,
-        destination=destination,
         runtime=runtime,
-        preparer=preparer,
     ) as opened:
         assert requests == []
-        assert opened.target.retrieved is opened.retrieved
-        assert opened.retrieved.model_kind == kind
-        attempt = opened.retrieved.root / opened.retrieved.attempt
+        assert opened.local_model.model_kind == kind
+        assert opened.model.model_kind == kind
+        attempt = opened.local_model.root / opened.local_model.attempt
         assert attempt.is_dir()
         assert opened.session.chat("Hi").message == "hello"
 
     assert len(spawned) == 1 and len(requests) == 1
     argv, spawn_kwargs = spawned[0]
     assert argv[argv.index("--model") + 1] == str(
-        opened.target.base_model_path or opened.target.model_path
+        tmp_path / "base" / "model" / "snapshots" / ("c" * 40)
+        if preparer is not None
+        else opened.local_model.model_path
     )
-    assert argv[argv.index("--tokenizer") + 1] == str(opened.target.tokenizer_path)
+    if preparer is not None:
+        assert preparer.calls == [("example/model", "c" * 40)]
+    assert argv[argv.index("--tokenizer") + 1] == str(opened.local_model.tokenizer_path)
     assert spawn_kwargs["environment"]["HF_HUB_OFFLINE"] == "1"
     assert requests[0][1]["json"]["model"] == "trained"
     assert requests[0][1]["json"]["messages"] == [{"role": "user", "content": "Hi"}]
@@ -156,18 +160,20 @@ def test_backend_failure_closes_runtime_once_and_retains_materialization(
 
     monkeypatch.setattr(base_client.requests, "Session", Session)
     runtime = LocalVLLMRunChatRuntime(
-        ChatSessionPolicy(1, 10, 20, 2, 4096), tmp_path, {}
+        ChatSessionPolicy(1, 10, 20, 2, 4096),
+        tmp_path,
+        {},
+        destination=destination,
+        preparer=preparer,
     )
 
     with pytest.raises(ChatSessionError) as caught:
         with open_run_chat(
             runs,
             run,
-            destination=destination,
             runtime=runtime,
-            preparer=preparer,
         ) as opened:
-            attempt = opened.retrieved.root / opened.retrieved.attempt
+            attempt = opened.local_model.root / opened.local_model.attempt
             opened.session.chat("Hi")
 
     assert "private backend detail" not in str(caught.value)

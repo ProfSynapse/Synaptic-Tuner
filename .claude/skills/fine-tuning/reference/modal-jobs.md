@@ -48,10 +48,13 @@ or artifact reads while the descriptor capabilities remain false.
 
 Use the checked-in `tuner.inference.run_chat.open_run_chat` entrypoint with the
 consuming project's authenticated `APIHost.runs`, retained run reference,
-private artifact destination and selected runtime adapter. It joins verified
-artifact retrieval, exact serving-target preparation and one bounded session;
+selected runtime adapter. The adapter owns current run reverification, artifact
+admission and model preparation on its execution machine, then one bounded session;
 it does not add a CLI, registry, database, authority loader or publication step.
 For Linux/WSL local vLLM, use `Evaluator.local_run_chat.LocalVLLMRunChatRuntime`.
+Pass the private artifact destination and optional pinned-base preparer to that
+local adapter constructor, not to the generic `open_run_chat` call. Generic
+dispatch checks result consistency but does not authenticate an arbitrary adapter.
 The embedding example and ownership contract are in the repository-root
 `docs/architecture/verified-run-chat.md`. Use this existing composition instead
 of adding throwaway retrieval/start/chat scripts.
@@ -62,6 +65,8 @@ automatically. Full models need no upstream preparer; LoRA uses the existing
 `PinnedModelPreparer` seam for the exact authenticated base revision. Preparation
 belongs on the selected execution machine, not a manual local weight-staging
 step for cloud execution. Inference children remain credential-free and offline.
+Generic results expose run, artifact and model metadata; `local_model` is an
+optional local-only path capability and must be absent for remote results.
 
 Correction (2026-09-10): this is locally tested adapter composition, not live
 Modal inference qualification. The current Modal deployment is training-only.

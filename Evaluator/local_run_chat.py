@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from contextlib import AbstractContextManager
+from contextlib import contextmanager
 from pathlib import Path
 from types import MappingProxyType
-from typing import Mapping
+from typing import Iterator, Mapping
 
-from tuner.inference.serving_target import ServingTarget
+from synaptic_tuner.api.v1.results import TrainingRunRef
+from synaptic_tuner.api.v1.runs_facade import RunsAPI
+from tuner.inference.retrieved_model import materialize_verified_sft_model
+from tuner.inference.run_chat import PreparedModelIdentity, PreparedRunChat
+from tuner.inference.serving_target import PinnedModelPreparer, prepare_serving_target
 
-from .chat_session import ChatSession, ChatSessionPolicy
+from .chat_session import ChatSessionPolicy
 from .verified_vllm_chat import verified_vllm_chat
 from .vllm_runtime import (
     VLLMStartupSpec,
@@ -22,7 +26,7 @@ from .vllm_runtime import (
 
 @dataclass(frozen=True, slots=True)
 class LocalVLLMRunChatRuntime:
-    """Retain local runtime policy without coupling generic run access to vLLM.
+    """Own local run preparation and serving without imposing it on other runtimes.
 
     Startup and generation ranges are enforced by the existing verified-chat
     path before process creation. Construction snapshots only primitive config;
@@ -32,6 +36,8 @@ class LocalVLLMRunChatRuntime:
     policy: ChatSessionPolicy
     cwd: Path
     environment: Mapping[str, str] = field(repr=False)
+    destination: Path
+    preparer: PinnedModelPreparer | None = field(default=None, repr=False)
     served_model_name: str = "trained"
     startup_options: Mapping[str, object] = field(default_factory=dict)
     max_tokens: int = 128
@@ -43,6 +49,12 @@ class LocalVLLMRunChatRuntime:
         if type(self.policy) is not ChatSessionPolicy:
             raise TypeError("policy must be an exact ChatSessionPolicy")
         self.policy.__post_init__()
+        if not isinstance(self.destination, Path) or not self.destination.is_absolute():
+            raise TypeError("destination must be an absolute Path")
+        if self.preparer is not None and not isinstance(
+            self.preparer, PinnedModelPreparer
+        ):
+            raise TypeError("preparer must implement PinnedModelPreparer")
         if (
             not isinstance(self.cwd, Path)
             or not self.cwd.is_absolute()
@@ -78,15 +90,19 @@ class LocalVLLMRunChatRuntime:
         object.__setattr__(self, "environment", MappingProxyType(environment))
         object.__setattr__(self, "startup_options", MappingProxyType(options))
 
-    def open(self, target: ServingTarget) -> AbstractContextManager[ChatSession]:
-        if type(target) is not ServingTarget:
-            raise TypeError("local chat requires an exact ServingTarget")
+    @contextmanager
+    def open(self, runs: RunsAPI, run: TrainingRunRef) -> Iterator[PreparedRunChat]:
+        # The selected adapter owns preparation on its execution machine. The
+        # materializer retains the exact RunsAPI reverification and private-root
+        # guards; these are not optional just because orchestration moved here.
+        retrieved = materialize_verified_sft_model(runs, run, self.destination)
+        target = prepare_serving_target(retrieved, self.preparer)
         startup = VLLMStartupSpec(
             source=VerifiedLocalVLLMSource(target),
             served_model_name=self.served_model_name,
             **dict(self.startup_options),
         )
-        return verified_vllm_chat(
+        with verified_vllm_chat(
             startup,
             self.policy,
             cwd=self.cwd,
@@ -95,4 +111,16 @@ class LocalVLLMRunChatRuntime:
             temperature=self.temperature,
             top_p=self.top_p,
             max_response_bytes=self.max_response_bytes,
-        )
+        ) as session:
+            yield PreparedRunChat(
+                session=session,
+                run=retrieved.run,
+                artifacts=retrieved.artifacts,
+                model=PreparedModelIdentity(
+                    model_ref=retrieved.model_ref,
+                    model_revision=retrieved.model_revision,
+                    tokenizer_revision=retrieved.tokenizer_revision,
+                    model_kind=retrieved.model_kind,
+                ),
+                local_model=retrieved,
+            )

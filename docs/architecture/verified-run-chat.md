@@ -1,8 +1,9 @@
 # Chat with a verified training run
 
 The engine provides an embedded workflow, `tuner.inference.run_chat.open_run_chat`,
-that retrieves a verified SFT run, prepares its exact model, and opens a bounded
-chat session through a consumer-selected runtime adapter. The consuming project
+that opens a verified SFT run through a consumer-selected runtime adapter. That
+adapter owns authentication, retrieval and preparation on its execution machine,
+followed by one bounded chat session. The consuming project
 owns run selection, authentication, storage and its user interface. No new CLI,
 run registry, database, publication step or authority loader is introduced.
 
@@ -32,19 +33,19 @@ runtime = LocalVLLMRunChatRuntime(
     ),
     cwd=runtime_directory,
     environment={},
+    destination=private_artifact_directory,
+    preparer=pinned_model_preparer,
     startup_options={"port": 9137, "startup_timeout_s": 300.0},
     max_tokens=128,
 )
 with open_run_chat(
     host.runs,
     retained_run,
-    destination=private_artifact_directory,
     runtime=runtime,
-    preparer=pinned_model_preparer,
 ) as opened:
     reply = opened.session.chat(user_prompt)
     # The consumer decides how to display/store reply.message and model identity.
-    retained_model = opened.retrieved
+    retained_model = opened.local_model  # Present for this local adapter.
 ```
 
 Both directories are existing absolute `Path` values. The artifact destination
@@ -71,13 +72,19 @@ The local adapter never downloads a model as a fallback.
 
 ## Ownership, saved files and limits
 
-Entering the context performs verification and bounded artifact materialization,
-then opens one selected runtime. It sends no hidden prompt. A consumer explicitly
+Entering the context invokes the selected adapter once. The local adapter
+performs verification and bounded artifact materialization before opening vLLM.
+It sends no hidden prompt. A consumer explicitly
 calls `opened.session.chat(...)` for each request; replies and conversation
 history are not automatically written to disk.
 
-`opened.retrieved` and `opened.target` retain the exact model identity and local
-paths. Successfully materialized files remain after exit or a later runtime
+`opened.run`, `opened.artifacts` and `opened.model` expose the run, canonical
+five-artifact inventory and prepared model identity without requiring local
+filesystem paths. `opened.local_model` is an optional, explicitly local-only
+capability: this adapter returns its factory-issued retrieved model for access
+to retained paths; a remote adapter must return `None`. Never serialize local
+device/inode identities as proof of a remote filesystem.
+Successfully materialized local files remain after exit or a later runtime
 failure. Closing the session tears down its owned process family, not those
 files and not unrelated servers. The consumer owns retention/deletion decisions.
 
@@ -91,11 +98,20 @@ machine shutdown, kernel failure or a killed controlling process.
 
 ## Adapter boundary and qualification
 
-Another runtime implements `RunChatRuntime.open(target)` as a context manager
-yielding the existing exact `ChatSession`. It must preserve target identity,
-own the runtime it starts, and honor bounded cleanup. This is trusted consumer
-code, not a sandbox for arbitrary plugins. There is no registry, dynamic import,
+Another runtime implements `RunChatRuntime.open(runs, run)` as a context manager
+yielding an exact `PreparedRunChat` containing the existing exact `ChatSession`.
+It must perform current run reverification and artifact admission before serving
+effects, bind any provider-native locator to that same proof, prepare on its
+execution machine, own the runtime it starts, and honor bounded cleanup.
+The generic helper checks inputs and returned metadata, not authentication:
+the selected adapter is trusted consumer code, not an arbitrary plugin sandbox.
+There is no registry, dynamic import,
 silent local/cloud fallback or new public API re-export.
+
+Correction (2026-09-10): the earlier target-first signature was machine-local;
+it downloaded weights before invoking an adapter. This internal API now delegates
+the run before materialization. Destination and upstream-preparer policy belong
+to the local adapter constructor. There is no deprecated signature or wrapper.
 
 CPU tests exercise real run retrieval, target preparation, controller and local
 runtime/client composition with fake OS/HTTP effects. They do not establish
