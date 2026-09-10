@@ -88,6 +88,17 @@ runtime lock must still bind generation/readiness/vLLM choices before bootstrap
 execution. Qualification and environment limits are recorded in
 `../review/inference-runtime-prerequisites.md`.
 
+Serving-projection slice (2026-09-10): require explicit generation, readiness
+and vLLM choices in the authenticated configuration and project them into the
+existing worker/runtime values. Retain the original launch admission alongside
+the prepared target; check expiry after preparation without renewing its lifetime.
+The result is non-authoritative data, not an executable service. The future
+bootstrap must reverify/rederive it and clamp time before and after startup.
+Independent qualification is tracked in
+`../review/modal-inference-serving-projection.md`. Inference image/source-lock
+verification, executable bootstrap, SDK transport and owned Sandbox cleanup
+remain unfinished.
+
 ## Product boundary
 
 A consumer chooses a runtime for one verified training run and explicitly sends

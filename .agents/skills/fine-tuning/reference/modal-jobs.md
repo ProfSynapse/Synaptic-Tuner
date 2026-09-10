@@ -185,6 +185,22 @@ into these fields; this update does not yet provide that composition, a runtime
 lock check or a runnable Modal service. See
 `docs/review/inference-runtime-prerequisites.md` for measured qualification.
 
+Serving-projection update (2026-09-10): the unreleased internal inference
+configuration requires a complete `serving` section; older bodies without it
+are rejected rather than filled with local defaults. Fractional generation/GPU
+values use integer thousandths and probe time uses milliseconds, preserving the
+existing integer-only canonical evidence format. Tensor parallelism derives
+from the exact configured accelerator count. The mounted worker returns its
+target inside `ModalChatWorkerPreparation.startup`, explicit generation/body
+bounds, the configured session policy and a retained copy of the original
+admission. It checks admission expiry again after model preparation.
+This is data projection, not a session or authority receipt. The future locked
+bootstrap must freshly verify and rederive these projections, then clamp startup
+and session durations to the original remaining deadline before and after
+startup. Never restart the full configured lifetime after preparation. No
+inference image/lock or Sandbox cleanup is qualified by this change; see
+`docs/review/modal-inference-serving-projection.md`.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical

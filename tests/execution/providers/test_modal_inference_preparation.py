@@ -98,6 +98,17 @@ def _document(source, **changes):
             "provider_idle_timeout_seconds": 300,
             "max_retries": 0,
         },
+        "serving": {
+            "served_model_name": "fixture-chat",
+            "gpu_memory_utilization_milli": 730,
+            "enforce_eager": False,
+            "tokenizer_mode": "mistral",
+            "max_lora_rank": 32,
+            "readiness_request_timeout_milliseconds": 750,
+            "max_tokens": 73,
+            "temperature_milli": 250,
+            "top_p_milli": 875,
+        },
         "policy": {
             "startup_timeout_seconds": 600,
             "request_timeout_seconds": 60,
@@ -274,6 +285,141 @@ def test_chat_preparation_is_factory_issued_and_config_is_canonical():
         ModalInferencePreparation(preparation=None, executor=None, snapshot=b"")
     with pytest.raises(ValueError):
         ModalInferencePreparationConfig.parse(b'{"provider":1}')
+
+
+@pytest.mark.parametrize("change", ["missing-section", "missing-field", "extra-field"])
+def test_serving_section_requires_exact_fields(monkeypatch, change):
+    source, _, _ = workload_case(monkeypatch)
+    document = _document(source)
+    if change == "missing-section":
+        del document["serving"]
+    elif change == "missing-field":
+        del document["serving"]["max_tokens"]
+    else:
+        document["serving"]["tensor_parallel_size"] = 1
+    with pytest.raises((TypeError, ValueError, KeyError)):
+        ModalInferencePreparationConfig.build(document)
+
+
+def test_every_fractional_and_integer_serving_bound_is_exact(monkeypatch):
+    source, _, _ = workload_case(monkeypatch)
+    bounds = {
+        "gpu_memory_utilization_milli": (10, 1000),
+        "max_lora_rank": (1, 1024),
+        "readiness_request_timeout_milliseconds": (10, 30000),
+        "max_tokens": (1, 32768),
+        "temperature_milli": (0, 2000),
+        "top_p_milli": (1, 1000),
+    }
+    for field, (minimum, maximum) in bounds.items():
+        for value in (minimum, maximum):
+            document = _document(source)
+            document["serving"][field] = value
+            config = ModalInferencePreparationConfig.build(document)
+            assert config.document["serving"][field] == value
+        for value in (minimum - 1, maximum + 1, True, False, "1", 1.5):
+            document = _document(source)
+            document["serving"][field] = value
+            with pytest.raises((TypeError, ValueError)):
+                ModalInferencePreparationConfig.build(document)
+    for path in ("/opt/\x7fpython", "/" + "é" * 2048):
+        document = _document(source)
+        document["runtime"]["python_executable"] = path
+        with pytest.raises((TypeError, ValueError)):
+            ModalInferencePreparationConfig.build(document)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/",
+        "python3",
+        "/opt//python3",
+        "/opt/../python3",
+        "/opt/./python3",
+        "/opt/python3/",
+        "/opt\\python3",
+        "/opt/python\x00",
+        "/opt/python\n",
+        "/opt/\ud800",
+        "/" + "x" * 4096,
+    ],
+)
+def test_python_executable_requires_canonical_bounded_posix_path(monkeypatch, path):
+    source, _, _ = workload_case(monkeypatch)
+    document = _document(source)
+    document["runtime"]["python_executable"] = path
+    with pytest.raises((TypeError, ValueError)):
+        ModalInferencePreparationConfig.build(document)
+
+
+@pytest.mark.parametrize(
+    ("field", "changed"),
+    [
+        ("served_model_name", "fixture-chat-v2"),
+        ("gpu_memory_utilization_milli", 731),
+        ("enforce_eager", True),
+        ("tokenizer_mode", None),
+        ("max_lora_rank", 33),
+        ("readiness_request_timeout_milliseconds", 751),
+        ("max_tokens", 74),
+        ("temperature_milli", 251),
+        ("top_p_milli", 876),
+    ],
+)
+def test_each_serving_value_is_committed_by_evidence_and_command_binding(
+    monkeypatch, field, changed
+):
+    baseline, source, workload, _, _ = _prepared(monkeypatch)
+    document = _document(source)
+    document["serving"][field] = changed
+    config = ModalInferencePreparationConfig.build(document)
+    tag = evidence_tag(CONFIG_EVIDENCE_PURPOSE, config.canonical_bytes, "config-key")
+    authenticated = AuthenticatedModalInferencePreparationConfig(
+        config.canonical_bytes, tag
+    )
+    resource = domain_digest(
+        "synaptic-modal-inference-resource/v1",
+        canonical_bytes(
+            {
+                "resources": document["resources"],
+                "volumes": document["volumes"],
+                "application": document["application"],
+            }
+        ),
+    )
+    raw = quote_body(
+        provider_id="modal",
+        profile_ref="chat-a10",
+        account_ref=source.account_ref,
+        namespace_ref=source.namespace_ref,
+        resource_digest=resource,
+    )
+    changed_preparation = prepare_modal_chat(
+        source,
+        workload,
+        configuration=authenticated,
+        configuration_trust=TrustedEvidenceIdentity(
+            "host-config", "config-key", "chat-session"
+        ),
+        quote=AuthenticatedModalQuote(
+            raw, evidence_tag(QUOTE_PURPOSE, raw, "quote-key")
+        ),
+        quote_trust=TrustedEvidenceIdentity("host-quoter", "quote-key", "project-run"),
+        evidence_authenticator=Auth(),
+        clock=Clock(),
+        session_id="chat-session-1",
+        executor_version="v1",
+    )
+    assert changed_preparation.canonical_bytes != baseline.canonical_bytes
+    assert (
+        changed_preparation.preparation.resource_digest
+        == baseline.preparation.resource_digest
+    )
+    assert (
+        changed_preparation.stage("same-nonce").canonical_bytes
+        != baseline.stage("same-nonce").canonical_bytes
+    )
 
 
 def test_training_submit_grant_cannot_authorize_chat_submit(monkeypatch):
@@ -486,11 +632,24 @@ def test_evidence_callback_mutation_is_rejected(monkeypatch, target):
         ("resources", "max_retries", True),
         ("resources", "service_port", 65536),
         ("resources", "provider_timeout_seconds", 86401),
-        ("policy", "startup_timeout_seconds", 86401),
+        ("resources", "accelerator_count", 257),
+        ("policy", "startup_timeout_seconds", 1801),
         ("policy", "request_timeout_seconds", 0),
         ("policy", "idle_timeout_seconds", 901),
         ("volumes", "chat_control_volume_id", "model-cache-id"),
         ("volumes", "chat_control_volume_ref", "model-cache"),
+        ("serving", "served_model_name", "synaptic-base"),
+        ("serving", "served_model_name", "bad=name"),
+        ("serving", "served_model_name", "a" * 97),
+        ("serving", "gpu_memory_utilization_milli", True),
+        ("serving", "gpu_memory_utilization_milli", 9),
+        ("serving", "max_lora_rank", 1025),
+        ("serving", "readiness_request_timeout_milliseconds", 9),
+        ("serving", "max_tokens", 32769),
+        ("serving", "temperature_milli", 2001),
+        ("serving", "top_p_milli", 0),
+        ("serving", "enforce_eager", 0),
+        ("serving", "tokenizer_mode", "auto"),
     ),
 )
 def test_configuration_rejects_wrong_types_bounds_and_colliding_volumes(

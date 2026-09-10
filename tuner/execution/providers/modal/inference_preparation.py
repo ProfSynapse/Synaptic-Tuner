@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 from inspect import getattr_static
+from pathlib import PurePosixPath
 import re
 
 from synaptic_tuner.api.v1.providers import ProviderRef
@@ -80,6 +81,7 @@ _TOP = frozenset(
         "runtime",
         "volumes",
         "resources",
+        "serving",
         "policy",
         "secrets",
         "evidence",
@@ -132,6 +134,19 @@ _NESTED = {
             "provider_timeout_seconds",
             "provider_idle_timeout_seconds",
             "max_retries",
+        }
+    ),
+    "serving": frozenset(
+        {
+            "served_model_name",
+            "gpu_memory_utilization_milli",
+            "enforce_eager",
+            "tokenizer_mode",
+            "max_lora_rank",
+            "readiness_request_timeout_milliseconds",
+            "max_tokens",
+            "temperature_milli",
+            "top_p_milli",
         }
     ),
     "policy": frozenset(
@@ -209,6 +224,7 @@ class ModalInferencePreparationConfig:
         runtime = document["runtime"]
         volumes = document["volumes"]
         resources = document["resources"]
+        serving = document["serving"]
         policy = document["policy"]
         secrets = document["secrets"]
         evidence = document["evidence"]
@@ -222,6 +238,7 @@ class ModalInferencePreparationConfig:
                 runtime,
                 volumes,
                 resources,
+                serving,
                 policy,
                 evidence,
             )
@@ -269,6 +286,7 @@ class ModalInferencePreparationConfig:
             "python_executable_digest",
         ):
             digest_text(runtime[name], name)
+        python_executable = runtime["python_executable"]
         if (
             type(runtime["python_version"]) is not str
             or re.fullmatch(
@@ -276,13 +294,29 @@ class ModalInferencePreparationConfig:
                 runtime["python_version"],
             )
             is None
-            or type(runtime["python_executable"]) is not str
-            or not runtime["python_executable"].startswith("/")
-            or "//" in runtime["python_executable"]
+            or type(python_executable) is not str
+            or not python_executable
+            or len(python_executable) > 4096
+            or "\0" in python_executable
+            or "\\" in python_executable
             or any(
-                part in {"", ".", ".."}
-                for part in runtime["python_executable"].split("/")[1:]
+                ord(character) < 32 or ord(character) == 127
+                for character in python_executable
             )
+        ):
+            raise ValueError("inference Python selection is invalid")
+        try:
+            encoded_executable = python_executable.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValueError("inference Python selection is invalid") from None
+        executable_path = PurePosixPath(python_executable)
+        if (
+            len(encoded_executable) > 4096
+            or not executable_path.is_absolute()
+            or executable_path == PurePosixPath("/")
+            or executable_path.as_posix() != python_executable
+            or "//" in python_executable
+            or any(part in {"", ".", ".."} for part in executable_path.parts[1:])
         ):
             raise ValueError("inference Python selection is invalid")
         if type(secrets) is not list or len(secrets) > 64:
@@ -298,6 +332,35 @@ class ModalInferencePreparationConfig:
             )
         if len({item.name for item in secret_profiles}) != len(secret_profiles):
             raise ValueError("secret names must be unique")
+        if (
+            type(serving["served_model_name"]) is not str
+            or re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}",
+                serving["served_model_name"],
+            )
+            is None
+            or serving["served_model_name"] == "synaptic-base"
+        ):
+            raise ValueError("served model name is invalid")
+        if type(serving["enforce_eager"]) is not bool:
+            raise TypeError("enforce_eager must be an exact boolean")
+        if serving["tokenizer_mode"] not in (None, "mistral") or (
+            serving["tokenizer_mode"] is not None
+            and type(serving["tokenizer_mode"]) is not str
+        ):
+            raise ValueError("tokenizer mode is invalid")
+        serving_bounds = {
+            "gpu_memory_utilization_milli": (10, 1000),
+            "max_lora_rank": (1, 1024),
+            "readiness_request_timeout_milliseconds": (10, 30000),
+            "max_tokens": (1, 32768),
+            "temperature_milli": (0, 2000),
+            "top_p_milli": (1, 1000),
+        }
+        for name, (minimum, maximum) in serving_bounds.items():
+            value = serving[name]
+            if type(value) is not int or not minimum <= value <= maximum:
+                raise ValueError(f"invalid {name}")
         integers = {
             **resources,
             **policy,
@@ -312,6 +375,8 @@ class ModalInferencePreparationConfig:
                 raise ValueError(f"invalid {name}")
         if not 1 <= resources["service_port"] <= 65535:
             raise ValueError("service port is invalid")
+        if not 1 <= resources["accelerator_count"] <= 256:
+            raise ValueError("accelerator count is invalid")
         if (
             resources["provider_idle_timeout_seconds"]
             > resources["provider_timeout_seconds"]
@@ -325,9 +390,9 @@ class ModalInferencePreparationConfig:
                     "provider_idle_timeout_seconds",
                 )
             )
-            or policy["startup_timeout_seconds"] > 24 * 60 * 60
+            or policy["startup_timeout_seconds"] > 1800
         ):
-            raise ValueError("inference timeout exceeds 24 hours")
+            raise ValueError("inference timeout exceeds its runtime bound")
         if policy["startup_timeout_seconds"] > policy["absolute_lifetime_seconds"]:
             raise ValueError("startup timeout exceeds absolute lifetime")
         if policy["idle_timeout_seconds"] > policy["absolute_lifetime_seconds"]:

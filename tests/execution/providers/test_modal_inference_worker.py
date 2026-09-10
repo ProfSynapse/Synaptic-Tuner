@@ -27,7 +27,8 @@ def test_real_signed_launch_materializes_exact_mounted_target(
     monkeypatch, tmp_path, model_kind
 ):
     case = mounted_launch_case(tmp_path, monkeypatch, model_kind=model_kind)
-    target = prepare_modal_chat_worker(case.envelope.argument_bytes, **case.kwargs)
+    prepared = prepare_modal_chat_worker(case.envelope.argument_bytes, **case.kwargs)
+    target = prepared.startup.source.target
     target.validate()
     assert target.retrieved.run.to_dict() == case.source["run"]
     assert tuple(item.to_dict() for item in target.retrieved.artifacts) == tuple(

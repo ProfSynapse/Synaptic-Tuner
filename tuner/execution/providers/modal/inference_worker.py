@@ -1,4 +1,4 @@
-"""Purely composed preparation of a Modal-local verified SFT serving target.
+"""Preparation of a Modal-local target and its admitted serving settings.
 
 The trusted deployment owns Volume-to-mount mapping.  This module validates
 the admitted launch and local descriptor identities; it does not authenticate
@@ -7,12 +7,20 @@ Modal mounts, start a server, or grant execution authority.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import stat
 import sys
 
+from Evaluator.chat_session import ChatSessionPolicy
+from Evaluator.vllm_runtime import VerifiedLocalVLLMSource, VLLMStartupSpec
 from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
+from tuner.execution.evidence import (
+    DEPLOYMENT_EVIDENCE_POLICY,
+    validate_evidence_window,
+)
+from tuner.execution.foundation_v2.canonical import parse_canonical_object
 from tuner.inference.retrieved_model import (
     ROLES,
     RetrievedSFTModel,
@@ -30,13 +38,81 @@ from .contracts import ArtifactMemberV1, ArtifactRole
 from .inference_artifacts import ModalMountedInferenceArtifactReader
 from .inference_preparation import _validate_preparation_snapshot
 from .inference_wire import (
+    ModalChatWorkerAdmission,
     ModalChatWorkerExpectation,
+    _clock_now,
     admit_modal_chat_launch,
 )
 
 
 class ModalInferenceWorkerError(RuntimeError):
     """Closed failure while preparing a Modal-local inference target."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ModalChatWorkerPreparation:
+    """Internal data projection, not a runtime grant or an executable session.
+
+    Keep the original admission: a future locked bootstrap must recheck its
+    deadline and reduce startup/session time by elapsed preparation and startup
+    time. ``configured_policy`` must never restart that admitted lifetime.
+    These constructible projections are not authentication receipts. Bootstrap
+    must rederive/compare them from freshly verified admission before use.
+    """
+
+    admission: ModalChatWorkerAdmission
+    startup: VLLMStartupSpec
+    configured_policy: ChatSessionPolicy
+    max_tokens: int
+    temperature: float
+    top_p: float
+    max_request_bytes: int
+    max_response_bytes: int
+
+
+def _serving_preparation(
+    admission: ModalChatWorkerAdmission, target: ServingTarget
+) -> ModalChatWorkerPreparation:
+    configuration = admission.configuration.document
+    serving = configuration["serving"]
+    policy = configuration["policy"]
+    # Every startup field is deliberate. Local defaults must not silently
+    # become the remote configuration, and training precision is not inference
+    # precision. All fractional config values are canonical integer thousandths.
+    startup = VLLMStartupSpec(
+        source=VerifiedLocalVLLMSource(target),
+        served_model_name=serving["served_model_name"],
+        host="127.0.0.1",
+        port=configuration["resources"]["service_port"],
+        gpu_memory_utilization=serving["gpu_memory_utilization_milli"] / 1000,
+        tensor_parallel_size=configuration["resources"]["accelerator_count"],
+        enforce_eager=serving["enforce_eager"],
+        tokenizer_mode=serving["tokenizer_mode"],
+        max_lora_rank=serving["max_lora_rank"],
+        startup_timeout_s=policy["startup_timeout_seconds"],
+        readiness_request_timeout_s=(
+            serving["readiness_request_timeout_milliseconds"] / 1000
+        ),
+        python_executable=configuration["runtime"]["python_executable"],
+    )
+    return ModalChatWorkerPreparation(
+        admission=ModalChatWorkerAdmission._create(
+            tuple(getattr(admission, name) for name in admission.__slots__)
+        ),
+        startup=startup,
+        configured_policy=ChatSessionPolicy(
+            request_timeout_seconds=policy["request_timeout_seconds"],
+            idle_timeout_seconds=policy["idle_timeout_seconds"],
+            absolute_lifetime_seconds=policy["absolute_lifetime_seconds"],
+            max_turns=policy["max_turns"],
+            max_history_bytes=policy["max_history_bytes"],
+        ),
+        max_tokens=serving["max_tokens"],
+        temperature=serving["temperature_milli"] / 1000,
+        top_p=serving["top_p_milli"] / 1000,
+        max_request_bytes=policy["max_request_bytes"],
+        max_response_bytes=policy["max_response_bytes"],
+    )
 
 
 def _close_owned(*descriptors: int | None) -> None:
@@ -139,8 +215,8 @@ def prepare_modal_chat_worker(
     clock,
     destination: Path,
     preparer: PinnedModelPreparer | None = None,
-) -> ServingTarget:
-    """Prepare one verified local target after complete launch admission."""
+) -> ModalChatWorkerPreparation:
+    """Prepare a verified target and explicit settings after launch admission."""
     try:
         admission = admit_modal_chat_launch(
             argument,
@@ -148,6 +224,7 @@ def prepare_modal_chat_worker(
             verifier=verifier,
             clock=clock,
         )
+        admitted_argument = admission.argument_bytes
         owned_expectation = ModalChatWorkerExpectation(
             **{
                 name: getattr(expectation, name)
@@ -206,6 +283,7 @@ def prepare_modal_chat_worker(
                     )
                     == expectation_snapshot
                     and admission.preparation_snapshot == snapshot_bytes
+                    and admission.argument_bytes == admitted_argument
                     and type(run) is TrainingRunRef
                     and run.to_dict() == run_snapshot
                     and type(artifacts) is tuple
@@ -275,7 +353,34 @@ def prepare_modal_chat_worker(
                 != model_snapshot
             ):
                 raise ValueError("worker inputs or roots changed")
-            return target
+            prepared = _serving_preparation(admission, target)
+            claim = parse_canonical_object(admission.claim, name="chat launch claim")
+            # Model preparation can be slow. Do not return usable preparation
+            # after its original admission expires, nor reset that deadline.
+            validate_evidence_window(
+                verified_at=claim["issued_at"],
+                expires_at=claim["expires_at"],
+                now=_clock_now(clock),
+                policy=DEPLOYMENT_EVIDENCE_POLICY,
+            )
+            if not worker_inputs_unchanged():
+                raise ValueError("worker inputs changed during final clock read")
+            target.validate()
+            if (
+                prepared.admission.argument_bytes != admitted_argument
+                or target.retrieved is not retrieved
+                or target.retrieved.run.to_dict() != run_snapshot
+                or tuple(item.to_dict() for item in target.retrieved.artifacts)
+                != artifact_snapshots
+                or (
+                    retrieved.model_ref,
+                    retrieved.model_revision,
+                    retrieved.tokenizer_revision,
+                )
+                != model_snapshot
+            ):
+                raise ValueError("prepared target differs from original launch")
+            return prepared
         finally:
             _close_owned(destination_fd, cache_fd, control_fd, artifact_fd)
     except (KeyboardInterrupt, SystemExit):
