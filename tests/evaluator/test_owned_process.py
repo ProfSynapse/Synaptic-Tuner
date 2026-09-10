@@ -19,23 +19,32 @@ _REAL_KILLPG = os.killpg
 _ACTIVE_LEASES: list[OwnedProcessLease] = []
 
 
+def _force_cleanup(lease: OwnedProcessLease) -> None:
+    if lease in _ACTIVE_LEASES:
+        _ACTIVE_LEASES.remove(lease)
+    try:
+        os.waitid(os.P_PID, lease.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError:
+        return
+    try:
+        _REAL_KILLPG(lease.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        lease._process.wait(timeout=2)
+    except (subprocess.TimeoutExpired, ChildProcessError):
+        pass
+
+
 @pytest.fixture(autouse=True)
 def _cleanup_process_families():
     del _ACTIVE_LEASES[:]
     try:
         yield
     finally:
-        for lease in _ACTIVE_LEASES:
-            if not lease.cleanup_pending:
-                continue
-            try:
-                _REAL_KILLPG(lease.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
-                os.waitpid(lease.pid, 0)
-            except ChildProcessError:
-                pass
+        for lease in tuple(_ACTIVE_LEASES):
+            if lease.cleanup_pending:
+                _force_cleanup(lease)
         del _ACTIVE_LEASES[:]
 
 
@@ -79,8 +88,7 @@ def _family(tmp_path: Path, *, ignore_term: bool = False, parent_exits: bool = F
     try:
         return lease, _wait_file(pid_file)
     except BaseException:
-        _REAL_KILLPG(lease.pid, signal.SIGKILL)
-        os.waitpid(lease.pid, 0)
+        _force_cleanup(lease)
         raise
 
 
@@ -128,8 +136,7 @@ def test_denied_signal_is_unresolved_and_not_retried(tmp_path: Path, monkeypatch
     assert not lease.close()
     assert len(calls) == 1
     monkeypatch.setattr(os, "killpg", real_killpg)
-    real_killpg(lease.pid, signal.SIGKILL)
-    os.waitpid(lease.pid, 0)
+    _force_cleanup(lease)
     for _ in range(100):
         if not _alive(grandchild):
             break
@@ -143,6 +150,26 @@ def test_start_failure_does_not_create_a_lease(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(subprocess, "Popen", fail)
     with pytest.raises(OSError, match="closed test failure"):
         OwnedProcessLease.spawn((sys.executable, "-c", "pass"), cwd=tmp_path, environment={})
+
+
+def test_guard_never_signals_an_already_reaped_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys as _sys
+
+    lease = OwnedProcessLease.spawn(
+        (sys.executable, "-c", "pass"), cwd=tmp_path, environment={}
+    )
+    _ACTIVE_LEASES.append(lease)
+    lease._process.wait(timeout=2)
+    calls: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        _sys.modules[__name__],
+        "_REAL_KILLPG",
+        lambda pgid, sig: calls.append((pgid, sig)),
+    )
+    _force_cleanup(lease)
+    assert calls == []
 
 
 def test_invalid_inputs_fail_before_spawn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,8 +192,7 @@ def test_nonfinite_or_unbounded_timeout_is_denied(tmp_path: Path, value: float) 
         with pytest.raises(TypeError):
             lease.close(term_timeout=value)
     finally:
-        os.killpg(lease.pid, signal.SIGKILL)
-        os.waitpid(lease.pid, 0)
+        _force_cleanup(lease)
 
 
 def test_direct_construction_cannot_adopt_a_group() -> None:
@@ -183,8 +209,7 @@ def test_changed_leader_identity_is_never_signaled(tmp_path: Path, monkeypatch: 
     assert not lease.close()
     assert lease.cleanup_pending
     monkeypatch.undo()
-    os.killpg(lease.pid, signal.SIGKILL)
-    os.waitpid(lease.pid, 0)
+    _force_cleanup(lease)
 
 
 def test_cleanup_exception_does_not_mask_keyboard_interrupt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,8 +221,7 @@ def test_cleanup_exception_does_not_mask_keyboard_interrupt(tmp_path: Path, monk
             raise KeyboardInterrupt
     assert lease.cleanup_pending
     monkeypatch.setattr(os, "killpg", real_killpg)
-    real_killpg(lease.pid, signal.SIGKILL)
-    os.waitpid(lease.pid, 0)
+    _force_cleanup(lease)
 
 
 def test_unknown_member_identity_retains_cleanup(

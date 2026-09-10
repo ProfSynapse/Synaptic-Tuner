@@ -317,6 +317,22 @@ LoRA chat additionally requires an
 exact locally verified base snapshot and tokenizer, reusing existing automatic
 model preparation rather than adding an operator weight-staging step.
 
+The combined materializer/process checkpoint at `2a345fb` passed **2,116 tests
+in 279.40 seconds**. A subsequent test-only process cleanup correction avoids
+signaling a manually reaped leader and bounds the final reap; its 26 tests
+passed separately in 0.85 seconds. These are separate runs, not a combined
+2,117-test result. The current installed wheel imports 29 modules and both
+packaged resources without Modal from a neutral directory; SHA-256:
+`2e5d44cf682164b880b885cc53631f110861149b51bc51cf60767adf69e5dd53`.
+
+Next isolated lanes: reader owns `tuner/inference/serving_target.py`, its
+inference test and review note; effects owns the Modal inference-model adapter,
+its provider test and review note. The former owns the shared bounded local
+snapshot inventory; the latter reuses existing automatic model preparation.
+Neither adds a downloader, cache framework, engine database, or model-loader
+claim. Review of checked-in platform guidance confirms managed vLLM hosting
+is already Linux/WSL-only; native Windows HTTP clients remain supported.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an
