@@ -60,3 +60,12 @@ The fixed-shape envelope now has an exact bound of two 16 KiB components plus
 99 bytes of schema/key overhead (32,867 bytes total). Both components still use
 the unchanged Foundation canonical parser and limits. These measurements
 are synthetic fixture content, not credentials or live provider evidence.
+
+A dependency-only install of the exact `bd6aff309f913d495d38079314e4cb2a319c500c`
+wheel exposed a pre-existing packaging omission: importing
+`Evaluator.verified_vllm_chat` reached `vllm_client` then `openai_compat_client`,
+which imports undeclared `requests`. The broader test environment already
+installed that dependency and masked the omission. Package metadata now declares
+the existing CI-compatible `requests>=2.32,<3` requirement; a regression assertion
+and a dependency-only installed-wheel CI lane prevent the same masking. A
+replacement exact-commit wheel still requires qualification below.

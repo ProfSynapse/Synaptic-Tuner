@@ -10,6 +10,11 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 
 
+def test_local_chat_http_client_dependency_is_declared():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "requests>=2.32,<3" in project["project"]["dependencies"]
+
+
 def test_modal_extra_and_launcher_lock_are_exact():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert project["project"]["optional-dependencies"]["modal"] == ["modal==1.5.4"]

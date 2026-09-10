@@ -134,10 +134,15 @@ jobs:
       - name: Verify wheel resources from a neutral working directory
         working-directory: ${{ runner.temp }}
         run: |
-          python -B - <<'PY'
+          python -m venv "$RUNNER_TEMP/wheel-import-venv"
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -m pip install "$RUNNER_TEMP"/wheelhouse/synaptic_tuner-*.whl
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PY'
           import importlib.resources
+          import importlib.util
           import json
 
+          assert importlib.util.find_spec("modal") is None
+          assert importlib.util.find_spec("torch") is None
           resource = importlib.resources.files(
               "tuner.execution.providers.modal"
           ).joinpath("modal-runtime-v1.lock.json")
