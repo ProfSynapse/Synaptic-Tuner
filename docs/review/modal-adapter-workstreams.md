@@ -333,6 +333,21 @@ Neither adds a downloader, cache framework, engine database, or model-loader
 claim. Review of checked-in platform guidance confirms managed vLLM hosting
 is already Linux/WSL-only; native Windows HTTP clients remain supported.
 
+Correction (2026-09-09, serving-target preparation): both lanes passed
+independent cross-review and the integrated selection passed **231 tests in
+1.67 seconds**, including all inference/runtime tests, original pinned-model
+preparation tests, the new adapter, and process ownership. The snapshot helper
+admits metadata and aggregate quotas before hashing; full models require no
+base preparation and LoRA targets bind the exact prepared base revision.
+Both source inventories remain current without regeneration. The last wheel
+above predates these two modules.
+
+The current isolated work is an owned vLLM startup API (conformance agent),
+independent runtime review (effects), and request/idle/absolute-lifetime chat
+control (reader). Lead owns atomic migration of the two existing vLLM callers
+and removal of the old global start/stop API. New runtime and chat drafts must
+not be presented as integrated or as actual model-load/GPU qualification.
+
 ### Foundation binding contract
 
 The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an

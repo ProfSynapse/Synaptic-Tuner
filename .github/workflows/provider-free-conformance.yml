@@ -155,6 +155,8 @@ jobs:
           import tuner.training.contracts
           import Evaluator.owned_process
           import tuner.inference.retrieved_model
+          import tuner.inference.serving_target
+          import tuner.execution.providers.modal.inference_model
           PY
 
       - name: Check source hashes without refreshing the runtime lock
