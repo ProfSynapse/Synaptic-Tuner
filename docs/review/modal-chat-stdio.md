@@ -253,6 +253,21 @@ verifier or a GPU chat session will pass. No inference pins have been invented.
 
 ## Remaining live path
 
+Isolated candidate success (2026-09-11): source `a3d76b3` passed strict capture
+in Sandbox `sb-srcV306hLidnqZKG2BN1x4` with exact cleanup confirmed. Evidence
+`evidence/modal-inference-isolated-a3d76b3.json` records CPython 3.12.13 at
+`/opt/synaptic-inference/bin/python`, SHA-256
+`185be5c01624944b5c422a8d1e4995a7df010036a99c9f9d84a80a09ae1bd72d`, and 220
+unique distributions. Modal remains absent. The interpreter-preparation and
+capture selection passed 99 tests in 0.41 seconds before this run.
+
+The next additive SDK image layer uses nine exact version/hash lines from the
+existing launcher lock, excluding all shared/ML packages. Integrated maintenance
+and additive-lock tests passed 104 tests in 0.45 seconds. The unchanged base has
+Packaging 26.0 while engine metadata currently requires <26; engine compatibility
+must be tested separately, not solved by shadowing or downgrading the image's
+shared package. No GPU or final inference admission has occurred.
+
 Inventory diagnosis (2026-09-11): source `eefc6a6` produced a successful
 `DIAGNOSTIC_ONLY` report from Sandbox `sb-Sj9OVAZ63CtcLlZ9SnPbuO`; capture exit 0
 confirms exact termination and a stopped poll. The full structured non-secret

@@ -1,0 +1,17 @@
+# Additive Modal SDK wheels for the measured vLLM inference image on isolated
+# CPython 3.12. Install this file with --no-deps --require-hashes only after
+# independently verifying the base image inventory captured in
+# docs/review/evidence/modal-inference-inventory-eefc6a6.json.
+#
+# This is deliberately not a complete inference runtime lock. It adds only the
+# packages absent from that measured image and must not replace its ML stack or
+# already-satisfied shared dependencies.
+grpclib==0.4.9 --hash=sha256:7762ec1c8ed94dfad597475152dd35cbd11aecaaca2f243e29702435ca24cf0e
+h2==4.4.1 --hash=sha256:0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6
+hpack==4.2.0 --hash=sha256:858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986
+hyperframe==6.1.0 --hash=sha256:b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5
+modal==1.5.4 --hash=sha256:3e54e26037c445af42f9a9ef9862b66bdd2e0b1faeced5fcc7adf3e5f59e44ed
+synchronicity==0.12.5 --hash=sha256:fdbbb10d437bc08a6b0f814fc66fddd1b58ffed314533d42f1ab555801e781af
+toml==0.10.2 --hash=sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b
+types-certifi==2021.10.8.3 --hash=sha256:b2d1e325e69f71f7c78e5943d410e650b4707bb0ef32e4ddf3da37f54176e88a
+types-toml==0.10.8.20260518 --hash=sha256:0e564ab05f6fde62a315b3b5a9b6624fda569399795d30a37e64705a70459303

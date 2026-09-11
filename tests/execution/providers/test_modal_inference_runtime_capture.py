@@ -291,6 +291,57 @@ def test_isolated_capture_rejects_wrong_interpreter_and_cleans_up():
     assert sandbox.terminate_calls == [False]
 
 
+def test_modal_additions_require_isolation_before_provider_reads():
+    sdk, _, calls = _sdk()
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture.capture_modal_inference_runtime(
+            sdk=sdk,
+            client=object(),
+            app_name="existing",
+            environment_name="isolated",
+            image=IMAGE,
+            source_commit=COMMIT,
+            modal_additions=True,
+        )
+    assert calls == []
+
+
+def test_modal_additions_are_hashed_no_deps_and_checked():
+    body = json.loads(_candidate())
+    body["python"]["executable"] = capture._ISOLATED_PYTHON
+    body["requirements"]["modal"] = {"present": True, "version": "1.5.4"}
+    body["distributions"]["modal"] = "1.5.4"
+    raw = (
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode("ascii") + b"\n"
+    )
+    sdk, sandbox, calls = _sdk(raw=raw)
+    report = json.loads(
+        capture.capture_modal_inference_runtime(
+            sdk=sdk,
+            client=object(),
+            app_name="existing",
+            environment_name="isolated",
+            image=IMAGE,
+            source_commit=COMMIT,
+            isolated_python=True,
+            modal_additions=True,
+        ).canonical_bytes
+    )
+    commands = [
+        command for call in calls if call[0] == "build_commands" for command in call[1]
+    ]
+    install = next(command for command in commands if " install " in command)
+    assert "--no-deps --require-hashes --only-binary=:all:" in install
+    assert capture._ISOLATED_PYTHON + " -I -m pip --isolated check" in commands
+    assert (
+        report["modal_additions_sha256"]
+        == capture._script_source(ROOT / "requirements/modal-inference-additions.lock")[
+            1
+        ]
+    )
+    assert sandbox.terminate_calls == [False]
+
+
 def test_create_ambiguity_has_no_retry_or_resource_adoption():
     sdk, _, calls = _sdk(create_error=RuntimeError("private"))
     with pytest.raises(capture.ModalInferenceRuntimeCaptureError) as caught:

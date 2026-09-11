@@ -31,6 +31,7 @@ _SDK_VERSION = "1.5.4"
 _REMOTE_SCRIPT = "/opt/synaptic/inspect_modal_inference_runtime.py"
 _REMOTE_PREPARER = "/opt/synaptic/prepare_modal_inference_python.py"
 _ISOLATED_PYTHON = "/opt/synaptic-inference/bin/python"
+_REMOTE_ADDITIONS = "/opt/synaptic/modal-inference-additions.lock"
 _MAX_CAPTURE_BYTES = 1024 * 1024
 _HOST_TIMEOUT_SECONDS = 600.0
 _SANDBOX_TIMEOUT_SECONDS = 300
@@ -693,9 +694,12 @@ def capture_modal_inference_runtime(
     source_commit: str,
     diagnose_distributions: bool = False,
     isolated_python: bool = False,
+    modal_additions: bool = False,
 ) -> ModalInferenceRuntimeCapture:
     """Run the inspector once, with a finite local and remote lifetime."""
 
+    if modal_additions and not isolated_python:
+        raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
     app_name = _exact_text(app_name, _NAME)
     environment_name = _exact_text(environment_name, _NAME)
     image = _exact_text(image, _IMAGE)
@@ -706,6 +710,10 @@ def capture_modal_inference_runtime(
     script_bytes, script_digest = _script_source(script)
     preparer = script.with_name("prepare_modal_inference_python.py")
     preparation = _script_source(preparer) if isolated_python else None
+    additions_path = (
+        script.parent.parent / "requirements" / "modal-inference-additions.lock"
+    )
+    additions = _script_source(additions_path) if modal_additions else None
     deadline = time.monotonic() + _HOST_TIMEOUT_SECONDS
     sandbox = None
     sandbox_id = None
@@ -743,6 +751,22 @@ def capture_modal_inference_runtime(
             image_value = image_value.add_local_file(
                 staged_preparer, _REMOTE_PREPARER, copy=True
             ).run_commands("python3 " + _REMOTE_PREPARER)
+        if additions is not None:
+            staged_additions = Path(temporary.name) / additions_path.name
+            _stage_source(staged_additions, additions[0])
+            if (
+                _script_source(staged_additions)[1] != additions[1]
+                or _script_source(additions_path)[1] != additions[1]
+            ):
+                raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
+            image_value = image_value.add_local_file(
+                staged_additions, _REMOTE_ADDITIONS, copy=True
+            ).run_commands(
+                _ISOLATED_PYTHON
+                + " -I -m pip --isolated install --no-deps --require-hashes --only-binary=:all: --no-compile --no-cache-dir --disable-pip-version-check -r "
+                + _REMOTE_ADDITIONS,
+                _ISOLATED_PYTHON + " -I -m pip --isolated check",
+            )
         if (
             _script_source(staged)[1] != script_digest
             or _script_source(script)[1] != script_digest
@@ -790,6 +814,8 @@ def capture_modal_inference_runtime(
             raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
         if preparation is not None and _script_source(preparer)[1] != preparation[1]:
             raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
+        if additions is not None and _script_source(additions_path)[1] != additions[1]:
+            raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
         parser = _parse_diagnostic if diagnose_distributions else _parse_candidate
         candidate = parser(raw, image=image, source_commit=source_commit)
         envelope = {
@@ -814,6 +840,13 @@ def capture_modal_inference_runtime(
                 "executable": _ISOLATED_PYTHON,
                 "qualification": "CANDIDATE_ONLY",
             }
+        if additions is not None:
+            if not diagnose_distributions and candidate["requirements"]["modal"] != {
+                "present": True,
+                "version": _SDK_VERSION,
+            }:
+                raise ModalInferenceRuntimeCaptureError("capture_output_invalid")
+            envelope["modal_additions_sha256"] = additions[1]
         encoded = json.dumps(
             envelope,
             ensure_ascii=True,
@@ -896,6 +929,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--diagnose-distributions", action="store_true")
     parser.add_argument("--isolated-python", action="store_true")
+    parser.add_argument("--modal-additions", action="store_true")
     parser.add_argument(
         "--modal-profile",
         type=lambda value: _exact_text(value, _NAME),
@@ -959,6 +993,7 @@ def main(argv: list[str] | None = None) -> int:
                         source_commit=arguments.source_commit,
                         diagnose_distributions=arguments.diagnose_distributions,
                         isolated_python=arguments.isolated_python,
+                        modal_additions=arguments.modal_additions,
                     )
                     output, success = capture.canonical_bytes, True
                 else:

@@ -351,6 +351,14 @@ The probe invokes that exact interpreter with `-I`; this is still not the final
 engine/SDK image. Capture final runtime commitments only after all reviewed
 dependency and engine layers have been installed and independently qualified.
 
+After isolated candidate inspection, `--modal-additions` (requires
+`--isolated-python`) installs only `requirements/modal-inference-additions.lock`
+into the venv with `--no-deps --require-hashes --only-binary=:all:` and runs
+`pip check`. This reviewed nine-package subset adds the absent SDK closure;
+never install the full training launcher lock over the ML image. Capture records
+the additive lock digest and requires measured Modal 1.5.4. The image still needs
+engine packaging and final runtime/source qualification before serving.
+
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's
 `assert_current(source)` to recheck current workflow/Foundation/native metadata
