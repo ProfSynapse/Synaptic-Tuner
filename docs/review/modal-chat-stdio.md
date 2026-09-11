@@ -253,6 +253,29 @@ verifier or a GPU chat session will pass. No inference pins have been invented.
 
 ## Remaining live path
 
+Engine-installed candidate success (2026-09-11): capture source `42da029`
+installed the exact `1e32e56` wheel and passed in Sandbox
+`sb-LTHkK1MJ6RQYyFHoe0N96J`; exact termination and stopped poll were confirmed.
+The hydrated Modal Image ID is `im-GddhKUqSRXy9dTeawAekzN`. Full evidence in
+`evidence/modal-inference-engine-42da029.json` records 230 unique distributions,
+including Synaptic Tuner 1.1.0, Modal 1.5.4 and vLLM 0.17.1, with the same
+CPython 3.12.13 path/hash. Image build `pip check` passed. The exact-wheel
+capture/inspection/preparation/additions selection passed 113 tests in 0.40
+seconds before this run. Emitted candidate metadata passed the credential-shape
+scan. This is package/image candidate evidence, not a model response or final
+runtime admission; the three inference commitment resources are not yet packaged.
+
+Consumer boundary audit: the existing embedded `open_run_chat` and internal
+`ModalRunChatRuntime` are the intended path. The complete checked-in test
+composition uses synthetic stores/grants/artifacts, and the historical live
+fixture explicitly omits payloads and authenticated command/completion material.
+It cannot supply a real training run for this smoke. End-to-end chat therefore
+needs either an existing consumer's retained authenticated run/resource bindings
+or an explicitly scoped example consumer. No EHR changes or fixture-as-live
+substitutions are authorized by this image work. The provider descriptor's six
+false lifecycle flags are not a master switch for the separate chat adapter;
+they must not be presented as proof of generic lifecycle readiness.
+
 Engine-wheel preparation (2026-09-11): exact package sources from commit
 `1e32e56a1351b4a95a1680ff1f0fc18f269d9655` built offline without dependency
 resolution as `synaptic_tuner-1.1.0-py3-none-any.whl` (2,108,890 bytes), SHA-256
