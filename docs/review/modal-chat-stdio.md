@@ -138,6 +138,19 @@ that distinction being hidden by a fake. The integrated capture/inspection
 selection passed 38 tests in 0.26 seconds. This source-only maintenance update
 does not change the installed engine wheel qualified above.
 
+Resume checkpoint (2026-09-11): the operator-selected CLI profile was identified
+as `synaptic-labs` without printing credentials or listing cloud objects. The
+committed capture/inspection scripts at
+`228920705f4ccfb3b42daceeee22aa45a2f12acb` were extracted from an immutable Git
+archive. The proposed CPU probe selects only app `synaptic-training-v1` in
+environment `synaptic-smoke-v1` and base image
+`docker.io/vllm/vllm-openai@sha256:116aa00ee0b68855616a56e1d7e1ae937e591a8bd6969ee45cbcedb246ddf355`.
+The platform approval reviewer rejected execution before process launch because
+this stored-profile cloud operation can incur charges and requires exact
+moment-of-execution approval. No provider request, Sandbox allocation, image
+capture or GPU chat occurred. Do not bypass this rejection; obtain explicit
+approval for the same bounded command before attempting it again.
+
 ## Remaining live path
 
 Correction (2026-09-11, SDK integration): the explicit-client transport now
