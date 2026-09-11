@@ -115,9 +115,11 @@ capturing its distinct inventory; runtime verification must gate actual serving
 and provider activation, with no caller-supplied bypass verifier.
 
 Bootstrap implementation checkpoint (2026-09-11): the remote-local worker
-composition and concrete packaged inference-runtime verifier passed 64 integrated
+composition and concrete packaged inference-runtime verifier at source `165b000`
+passed 64 integrated
 provider-free tests and independent source review, with 387 existing regressions
-passing separately. See `../review/modal-inference-bootstrap.md`. This connects
+passing separately. Exact-source installed-wheel checks also passed; see
+`../review/modal-inference-bootstrap.md` for qualification limits. This connects
 launch admission, remote preparation,
 the original deadline and the existing chat runtime. It does not add the SDK
 transport or an authenticated remote request service. The measured inference

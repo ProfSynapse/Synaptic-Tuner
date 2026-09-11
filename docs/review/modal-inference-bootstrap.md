@@ -1,7 +1,8 @@
 # Modal inference bootstrap and runtime verifier
 
-Status: source and tests locally qualified; final package checks pending,
-2026-09-11. Independent source review passed.
+Status: locally qualified source `165b000ab8098e853fdb153c1b3d0e7821e1ddc1`,
+2026-09-11. Independent source and archive-to-wheel audits, and isolated wheel
+checks passed.
 Engine-only; no cloud, GPU, model download, credential access or EHR changes.
 
 ## Implemented boundary
@@ -98,7 +99,40 @@ The two selections total 451 distinct tests. Black's single-worker Python 3.12
 check passed for all six new Python files; skill synchronization and whitespace
 checks passed. The first read-only-sandbox formatting check stalled and was
 stopped; the scoped local rerun passed. No training/server process was involved.
-Final wheel qualification remains pending.
+
+The final offline wheel from the exact source commit's completed archive is
+2,085,701 bytes, SHA-256
+`2d32e01d4b50b0b08ef28d0a7d91025fa6275e297366711c7881485225995e7f`.
+An earlier extraction started before the archive command completed and reported
+unexpected EOF. Its partial source/wheel were preserved separately as unqualified,
+never installed or published, and excluded from qualification. The final build
+used a fresh extraction after archive completion and successful archive listing.
+Independent audit verified 727 unique ZIP entries and all 727 RECORD rows with
+no missing/extra rows or hash/size mismatches. All 719 Python members matched
+the completed archive byte for byte. Existing training runtime/closure resources
+also matched; all three unreviewed inference resources were absent. Filename-only
+inspection found no `tests/` tree or private artifact names, with only expected
+secret-related source names and two pre-existing test-like trainer modules.
+This is a filename check, not a credential/content scan.
+
+The final wheel was installed offline without dependencies into the reused
+isolated declared-dependencies-only wheel environment, not a freshly resolved
+environment. From a neutral directory with isolated Python, the archive's exact
+CI probe passed 46 engine imports and two existing training-lock resource checks.
+Both new source hashes matched the installed modules:
+
+| Source | SHA-256 |
+| --- | --- |
+| `inference_bootstrap.py` | `03231442306c0febc9c650626c7edf6387a69784efb8583f9b5f29a17c54d18f` |
+| `inference_runtime.py` | `7c8045dbe38d1d638ab3cb4b8d1f0f7999193cf305b4c344970ca214023a9480` |
+
+Installed signature binding accepted the two exact entrypoint argument sets and
+rejected runtime-verifier, alternate-lock-path and alternate-clock keywords.
+All three unreviewed inference resources were absent. The actual installed
+verifier rejected a valid synthetic configuration with the closed missing-lock
+diagnostic. The bootstrap was not invoked. Modal, Torch, NumPy, pandas and pytest
+were absent in this wheel environment; these checks created no server or provider
+session.
 
 ## Next user-visible milestone
 
