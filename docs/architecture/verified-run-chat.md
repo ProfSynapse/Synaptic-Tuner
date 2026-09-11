@@ -102,6 +102,17 @@ successful; retain an exposed cleanup lease when retrying that exact cleanup.
 These local bounds are not a provider billing guarantee or protection against
 machine shutdown, kernel failure or a killed controlling process.
 
+The lower-level `verified_vllm_chat`, `start_vllm_runtime` and `ChatSession`
+also accept `deadline`, an optional absolute value in the controlling process's
+monotonic clock domain. This permits a bootstrap to preserve one deadline across
+startup and conversation rather than granting a fresh lifetime after readiness.
+The earliest external deadline and local limits win. Omission retains the local
+adapter's existing separate-startup/session behavior. With an injected session
+clock, the deadline must use that same clock domain. Never serialize this value
+as portable evidence or treat it as provider termination authority; a remote
+adapter must authenticate its UTC claim, conservatively derive local remaining
+time, verify the runtime and separately enforce provider lifecycle controls.
+
 The local adapter and `verified_vllm_chat` also enforce `max_request_bytes`
 (1 MiB by default) for the complete serialized UTF-8 HTTP JSON body, including
 model/generation fields and accumulated messages. This is separate from the

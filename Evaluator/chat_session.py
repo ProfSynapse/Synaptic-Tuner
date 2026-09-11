@@ -87,6 +87,20 @@ def _now(clock: Clock) -> float:
     return float(value)
 
 
+def _finite_deadline(value: float | None) -> float | None:
+    if value is None:
+        return None
+    if type(value) not in (int, float):
+        raise TypeError("session deadline must be a finite number")
+    try:
+        result = float(value)
+    except OverflowError:
+        raise ValueError("session deadline must be a finite number") from None
+    if not math.isfinite(result):
+        raise ValueError("session deadline must be a finite number")
+    return result
+
+
 def _response_text(response: BackendResponse, maximum_bytes: int) -> tuple[str, int]:
     if type(response) is not BackendResponse:
         raise ChatSessionError("backend returned the wrong response type")
@@ -230,6 +244,7 @@ class ChatSession:
         *,
         clock: Clock = time.monotonic,
         waiter: Waiter = _wait,
+        deadline: float | None = None,
     ) -> None:
         if not isinstance(client, BackendClient):
             raise TypeError("client must implement BackendClient")
@@ -239,6 +254,7 @@ class ChatSession:
             raise TypeError("policy must be an exact ChatSessionPolicy")
         if not callable(clock) or not callable(waiter):
             raise TypeError("clock and waiter must be callable")
+        deadline = _finite_deadline(deadline)
         self._client = client
         self._runtime = runtime
         self._policy = policy
@@ -268,6 +284,13 @@ class ChatSession:
             raise ChatSessionError("session clock failed") from None
         self._started = started
         self._last_activity = started
+        self._absolute_deadline = started + policy.absolute_lifetime_seconds
+        if deadline is not None:
+            self._absolute_deadline = min(self._absolute_deadline, deadline)
+        if started >= self._absolute_deadline:
+            with self._condition:
+                self._begin_close_locked()
+            raise ChatSessionError("session deadline expired")
         self._watchdog = threading.Thread(
             target=self._watch,
             name="chat-session-watchdog",
@@ -286,7 +309,7 @@ class ChatSession:
 
     def _expired(self, now: float) -> bool:
         return (
-            now - self._started >= self._policy.absolute_lifetime_seconds
+            now >= self._absolute_deadline
             or now - self._last_activity >= self._policy.idle_timeout_seconds
         )
 
@@ -298,7 +321,7 @@ class ChatSession:
                         return
                     now = _now(self._clock)
                     remaining = min(
-                        self._policy.absolute_lifetime_seconds - (now - self._started),
+                        self._absolute_deadline - now,
                         self._policy.idle_timeout_seconds - (now - self._last_activity),
                     )
                     if remaining <= 0:
@@ -411,6 +434,9 @@ class ChatSession:
             self._request_event = completed
             self._last_activity = now
             self._wake.set()
+            request_deadline = min(
+                now + self._policy.request_timeout_seconds, self._absolute_deadline
+            )
 
         result: list[object] = []
 
@@ -442,7 +468,8 @@ class ChatSession:
                 self._begin_close_locked()
             raise ChatSessionError("chat request worker failed") from None
         try:
-            finished = self._waiter(completed, self._policy.request_timeout_seconds)
+            remaining = max(0.0, request_deadline - _now(self._clock))
+            finished = self._waiter(completed, remaining)
         except BaseException as error:
             with self._condition:
                 self._begin_close_locked()
@@ -498,6 +525,17 @@ class ChatSession:
             if new_size > self._policy.max_history_bytes:
                 self._begin_close_locked()
                 raise ChatSessionError("chat session history bound reached")
+            try:
+                now = _now(self._clock)
+            except (KeyboardInterrupt, SystemExit):
+                self._begin_close_locked()
+                raise
+            except BaseException:
+                self._begin_close_locked()
+                raise ChatSessionError("session clock failed") from None
+            if self._expired(now):
+                self._begin_close_locked()
+                raise ChatSessionError("chat request deadline expired")
             self._history = messages + (
                 MappingProxyType({"role": "assistant", "content": assistant}),
             )

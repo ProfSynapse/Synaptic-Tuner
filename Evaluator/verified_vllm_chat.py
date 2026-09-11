@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import math
+import time
 from pathlib import Path
 from typing import Iterator
 
-from .chat_session import ChatSession, ChatSessionPolicy
+from .chat_session import ChatSession, ChatSessionPolicy, _finite_deadline
 from .config import VLLMSettings
 from .vllm_client import VLLMClient
 from .vllm_runtime import (
@@ -41,11 +42,15 @@ def verified_vllm_chat(
     top_p: float = 1.0,
     max_request_bytes: int = 1 << 20,
     max_response_bytes: int = 1 << 20,
+    deadline: float | None = None,
 ) -> Iterator[ChatSession]:
     """Own one verified-local runtime and conversation for this context.
 
     Startup verifies the requested loaded model identities. The caller's first
     explicit ``chat`` is the inference check; no hidden prompt is submitted.
+    An optional deadline is absolute in this process's monotonic clock domain;
+    it caps both startup and session lifetime, without renewing after readiness.
+    It is not a portable timestamp or a provider termination guarantee.
     Preparation and authenticated retrieval must already have supplied the
     startup target. This function neither downloads nor contacts a provider.
     """
@@ -71,14 +76,27 @@ def verified_vllm_chat(
         raise ValueError("max_response_bytes is outside its bound")
     temperature = _number(temperature, maximum=2.0)
     top_p = _number(top_p, maximum=1.0, positive=True)
+    deadline = _finite_deadline(deadline)
 
-    runtime = start_vllm_runtime(startup, cwd=cwd, environment=environment)
+    runtime = start_vllm_runtime(
+        startup, cwd=cwd, environment=environment, deadline=deadline
+    )
     try:
         # Register process ownership before client/session construction. The
         # lease serializes watchdog and outer-context cleanup and caches only
         # successful cleanup, so this outer guard can retry unresolved cleanup.
         with runtime:
             try:
+                if deadline is not None:
+                    now = time.monotonic()
+                    if (
+                        type(now) not in (int, float)
+                        or not math.isfinite(now)
+                        or now >= deadline
+                    ):
+                        raise VerifiedVLLMChatError(
+                            "verified local chat deadline expired"
+                        )
                 settings = VLLMSettings(
                     model=runtime.served_model_name,
                     scheme="http",
@@ -100,7 +118,9 @@ def verified_vllm_chat(
                     max_request_bytes=max_request_bytes,
                     max_response_bytes=max_response_bytes,
                 )
-                session = ChatSession(client, runtime, policy)
+                session = ChatSession(
+                    client, runtime, policy, clock=time.monotonic, deadline=deadline
+                )
             except (KeyboardInterrupt, SystemExit):
                 raise
             except Exception:
@@ -108,6 +128,16 @@ def verified_vllm_chat(
                     "verified local chat setup failed"
                 ) from None
             with session:
+                if deadline is not None:
+                    now = time.monotonic()
+                    if (
+                        type(now) not in (int, float)
+                        or not math.isfinite(now)
+                        or now >= deadline
+                    ):
+                        raise VerifiedVLLMChatError(
+                            "verified local chat deadline expired"
+                        )
                 yield session
     except BaseException as error:
         if runtime.cleanup_pending:

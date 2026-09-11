@@ -201,6 +201,20 @@ startup. Never restart the full configured lifetime after preparation. No
 inference image/lock or Sandbox cleanup is qualified by this change; see
 `docs/review/modal-inference-serving-projection.md`.
 
+Shared-deadline update (2026-09-11): the existing `start_vllm_runtime`,
+`verified_vllm_chat` and `ChatSession` accept an optional absolute `deadline`
+in the controlling process's monotonic clock domain. It is never a serialized
+UTC timestamp. Pass the same deadline across startup and session composition;
+local startup/session/request/idle limits can shorten it, never extend it.
+Expired startup is rejected before filesystem/port/process work, with repeated
+checks after potentially slow preparation, port probing and readiness. Session
+watchdog/request waits use remaining time; late validated responses cannot
+commit history. This closes the shared-timer prerequisite, not the Modal
+bootstrap: the latter still must freshly authenticate the original claim,
+derive remaining time without renewal, verify the separate inference runtime
+and own Sandbox cleanup. No verifier callback or guessed runtime lock was added.
+See `docs/review/inference-shared-deadline.md`.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical

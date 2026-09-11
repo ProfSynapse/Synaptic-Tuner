@@ -62,6 +62,101 @@ def wait_closed(session: ChatSession) -> None:
     assert session.state.closed
 
 
+@pytest.mark.parametrize("deadline", (99.0, 100.0))
+def test_expired_absolute_deadline_closes_owner_before_watchdog(deadline, monkeypatch):
+    runtime = Runtime()
+    names = []
+    original = threading.Thread.start
+
+    def start(thread):
+        names.append(thread.name)
+        return original(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", start)
+    with pytest.raises(ChatSessionError, match="deadline expired"):
+        ChatSession(Client(), runtime, policy(), clock=lambda: 100.0, deadline=deadline)
+    assert "chat-session-watchdog" not in names
+    assert names == ["chat-session-runtime-cleanup"]
+
+
+@pytest.mark.parametrize(
+    "deadline",
+    (True, "100", float("nan"), float("inf"), -(float("inf")), 10**400),
+    ids=("bool", "text", "nan", "inf", "negative-inf", "overflow"),
+)
+def test_invalid_absolute_deadline_precedes_owner_effects(deadline):
+    runtime = Runtime()
+    with pytest.raises((TypeError, ValueError), match="finite"):
+        ChatSession(Client(), runtime, policy(), deadline=deadline)
+    assert runtime.calls == 0
+
+
+@pytest.mark.parametrize("deadline, expected", ((100.25, 100.25), (1000.0, 102.0)))
+def test_external_deadline_and_local_policy_take_the_earlier_limit(deadline, expected):
+    now = [100.0]
+    runtime = Runtime()
+    with ChatSession(
+        Client(), runtime, policy(), clock=lambda: now[0], deadline=deadline
+    ) as session:
+        assert session._absolute_deadline == expected
+        now[0] = expected
+        session._wake.set()
+        wait_closed(session)
+        assert session.wait_closed(1).close_error is None
+    assert runtime.calls == 1
+
+
+def test_request_wait_is_clamped_to_remaining_external_deadline():
+    waits = []
+
+    def waiter(event, timeout):
+        if threading.current_thread() is threading.main_thread():
+            waits.append(timeout)
+        return event.wait(timeout)
+
+    runtime = Runtime()
+    with ChatSession(
+        Client(),
+        runtime,
+        policy(),
+        clock=lambda: 100.0,
+        waiter=waiter,
+        deadline=100.25,
+    ) as session:
+        assert session.chat("hello").message == "answer"
+        assert waits == [0.25]
+    assert runtime.calls == 1
+
+
+@pytest.mark.parametrize("phase", ("backend", "validation"))
+def test_response_crossing_absolute_deadline_never_updates_history(phase, monkeypatch):
+    now = [100.0]
+    runtime = Runtime()
+
+    class Late(Client):
+        def chat(self, messages):
+            if phase == "backend":
+                now[0] = 100.25
+            return super().chat(messages)
+
+    validate = chat_session_module._response_text
+
+    def response_text(*args):
+        result = validate(*args)
+        if phase == "validation":
+            now[0] = 100.25
+        return result
+
+    monkeypatch.setattr(chat_session_module, "_response_text", response_text)
+    with ChatSession(
+        Late(), runtime, policy(), clock=lambda: now[0], deadline=100.25
+    ) as session:
+        with pytest.raises(ChatSessionError):
+            session.chat("hello")
+        assert session.state.turns == session.state.history_bytes == 0
+    assert runtime.calls == 1
+
+
 def test_chat_uses_generic_history_and_returns_exact_response() -> None:
     runtime = Runtime()
     client = Client()
@@ -123,7 +218,7 @@ def test_caller_keyboard_interrupt_is_preserved_and_closes() -> None:
     runtime = Runtime()
 
     def interrupt(event, timeout):
-        if timeout == 0.123:
+        if threading.current_thread() is threading.main_thread():
             raise KeyboardInterrupt()
         return event.wait(min(timeout, 0.001))
 
@@ -139,7 +234,7 @@ def test_ordinary_waiter_failure_is_sanitized_and_closes() -> None:
     runtime = Runtime()
 
     def fail_request_wait(event, timeout):
-        if timeout == 0.123:
+        if threading.current_thread() is threading.main_thread():
             raise RuntimeError("private waiter detail")
         return event.wait(min(timeout, 0.001))
 
@@ -239,7 +334,9 @@ def test_request_worker_start_failure_and_invalid_waiter_close_cleanly(
         runtime,
         policy(request_timeout_seconds=0.123),
         waiter=lambda event, timeout: (
-            1 if timeout == 0.123 else event.wait(min(timeout, 0.001))
+            1
+            if threading.current_thread() is threading.main_thread()
+            else event.wait(min(timeout, 0.001))
         ),
     )
     with pytest.raises(ChatSessionError, match="invalid value"):

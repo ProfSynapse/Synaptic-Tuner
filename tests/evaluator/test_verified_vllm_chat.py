@@ -4,11 +4,12 @@ from dataclasses import replace
 import hashlib
 import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 
 from Evaluator import verified_vllm_chat as composition
-from Evaluator.chat_session import ChatSessionPolicy
+from Evaluator.chat_session import ChatSessionError, ChatSessionPolicy
 from Evaluator.protocols import BackendResponse
 from Evaluator.vllm_runtime import (
     ExplicitNetworkVLLMSource,
@@ -94,6 +95,72 @@ def test_composition_uses_one_runtime_client_and_explicit_prompt(
         assert len(captured["requests"]) == 1
     assert process.calls == 1
     assert not runtime.cleanup_pending
+
+
+def test_same_absolute_deadline_survives_startup(setup, tmp_path, monkeypatch):
+    spec, policy, process, runtime, captured = setup
+    now = [100.0]
+    start = composition.start_vllm_runtime
+
+    def slow_start(*args, **kwargs):
+        now[0] += 0.2
+        return start(*args, **kwargs)
+
+    monkeypatch.setattr(composition, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(composition, "start_vllm_runtime", slow_start)
+    with composition.verified_vllm_chat(
+        spec, policy, cwd=tmp_path, environment={}, deadline=100.25
+    ) as chat:
+        assert captured["starts"][0][1]["deadline"] == 100.25
+        assert chat._absolute_deadline == 100.25
+        assert captured["requests"] == []
+        now[0] = 100.25
+        with pytest.raises(ChatSessionError):
+            chat.chat("late")
+    assert process.calls == 1
+
+
+@pytest.mark.parametrize("phase", ("startup", "client", "session"))
+def test_deadline_expiry_during_construction_never_yields(
+    setup, tmp_path, monkeypatch, phase
+):
+    spec, policy, process, runtime, captured = setup
+    now = [100.0]
+    monkeypatch.setattr(composition, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    name = {
+        "startup": "start_vllm_runtime",
+        "client": "VLLMClient",
+        "session": "ChatSession",
+    }[phase]
+    original = getattr(composition, name)
+
+    def slow(*args, **kwargs):
+        value = original(*args, **kwargs)
+        now[0] = 101.0
+        return value
+
+    monkeypatch.setattr(composition, name, slow)
+    with pytest.raises(composition.VerifiedVLLMChatError):
+        with composition.verified_vllm_chat(
+            spec, policy, cwd=tmp_path, environment={}, deadline=101.0
+        ):
+            pytest.fail("yielded after absolute deadline")
+    assert process.calls == 1 and captured["requests"] == []
+    if phase == "startup":
+        assert "client" not in captured
+
+
+@pytest.mark.parametrize("deadline", (True, "100", float("nan"), float("inf")))
+def test_invalid_absolute_deadline_is_rejected_before_startup(
+    setup, tmp_path, deadline
+):
+    spec, policy, _, _, captured = setup
+    with pytest.raises((TypeError, ValueError)):
+        with composition.verified_vllm_chat(
+            spec, policy, cwd=tmp_path, environment={}, deadline=deadline
+        ):
+            pytest.fail("invalid deadline accepted")
+    assert captured["starts"] == []
 
 
 @pytest.mark.parametrize("point", ["settings", "client", "session"])
@@ -249,8 +316,9 @@ def _real_target(tmp_path, kind):
 
 @pytest.mark.parametrize("kind", ["full", "lora"])
 @pytest.mark.parametrize("outcome", ["success", "error", "interrupt", "timeout"])
+@pytest.mark.parametrize("with_deadline", [False, True])
 def test_real_target_runtime_client_session_chain_with_fake_effects(
-    tmp_path, monkeypatch, kind, outcome
+    tmp_path, monkeypatch, kind, outcome, with_deadline
 ):
     from Evaluator import base_client, vllm_runtime
     from Evaluator.chat_session import ChatSessionError
@@ -316,12 +384,15 @@ def test_real_target_runtime_client_session_chain_with_fake_effects(
     monkeypatch.setattr(base_client.requests, "Session", Session)
     spec = VLLMStartupSpec(VerifiedLocalVLLMSource(target), served_model_name="trained")
     policy = ChatSessionPolicy(0.05 if outcome == "timeout" else 1, 10, 20, 2, 4096)
+    deadline = composition.time.monotonic() + 10 if with_deadline else None
 
     def converse():
         with composition.verified_vllm_chat(
-            spec, policy, cwd=tmp_path, environment={}
+            spec, policy, cwd=tmp_path, environment={}, deadline=deadline
         ) as chat:
             assert requests == []
+            if with_deadline:
+                assert chat._absolute_deadline == deadline
             assert chat.chat("Hi").message == "hello"
 
     if outcome == "success":

@@ -160,14 +160,26 @@ def start_vllm_runtime(
     *,
     cwd: Path,
     environment: Mapping[str, str],
+    deadline: float | None = None,
 ) -> VLLMRuntimeLease:
     """Validate, spawn, and wait for one explicitly scoped vLLM runtime."""
+    absolute_deadline = _absolute_deadline(deadline)
+    if absolute_deadline is not None:
+        _deadline_now(absolute_deadline)
     projection = _projection(spec, cwd=cwd, environment=environment)
+    if absolute_deadline is not None:
+        _deadline_now(absolute_deadline)
     process: OwnedProcessLease | None = None
     try:
         if not _port_available(projection.host, projection.port):
             raise VLLMRuntimeError("managed vLLM loopback port is already in use")
-        deadline = _monotonic() + projection.startup_timeout_s
+        now = _startup_now(absolute_deadline)
+        if absolute_deadline is not None:
+            if now >= absolute_deadline:
+                raise VLLMRuntimeError("vLLM startup deadline expired")
+        startup_deadline = now + projection.startup_timeout_s
+        if absolute_deadline is not None:
+            startup_deadline = min(startup_deadline, absolute_deadline)
         process = _spawn(
             projection.argv,
             cwd=projection.cwd,
@@ -176,7 +188,7 @@ def start_vllm_runtime(
         while True:
             if not _leader_alive(process):
                 raise VLLMRuntimeError("vLLM process ended before readiness")
-            remaining = deadline - _monotonic()
+            remaining = startup_deadline - _startup_now(absolute_deadline)
             if remaining <= 0:
                 raise VLLMRuntimeError("vLLM readiness deadline expired")
             timeout = min(projection.readiness_request_timeout_s, remaining)
@@ -186,7 +198,9 @@ def start_vllm_runtime(
                 projection.expected_model_names,
                 timeout,
             ):
-                if _monotonic() >= deadline or not _leader_alive(process):
+                if _startup_now(
+                    absolute_deadline
+                ) >= startup_deadline or not _leader_alive(process):
                     raise VLLMRuntimeError("vLLM readiness was not timely and live")
                 return VLLMRuntimeLease(
                     process,
@@ -194,7 +208,12 @@ def start_vllm_runtime(
                     port=projection.port,
                     served_model_name=projection.served_model_name,
                 )
-            _sleep(min(0.05, max(0.0, deadline - _monotonic())))
+            _sleep(
+                min(
+                    0.05,
+                    max(0.0, startup_deadline - _startup_now(absolute_deadline)),
+                )
+            )
     except BaseException as error:
         if process is not None:
             try:
@@ -204,6 +223,41 @@ def start_vllm_runtime(
             if not resolved:
                 error.cleanup_lease = process  # type: ignore[attr-defined]
         raise
+
+
+def _absolute_deadline(value: object) -> float | None:
+    if value is None:
+        return None
+    if type(value) not in (int, float):
+        raise TypeError("vLLM startup deadline must be an exact number")
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        raise ValueError("vLLM startup deadline must be finite") from None
+    if not math.isfinite(result):
+        raise ValueError("vLLM startup deadline must be finite")
+    return result
+
+
+def _deadline_now(deadline: float) -> float:
+    now = _startup_now(deadline)
+    if now >= deadline:
+        raise VLLMRuntimeError("vLLM startup deadline expired")
+    return now
+
+
+def _startup_now(deadline: float | None) -> float:
+    now = _monotonic()
+    if deadline is not None:
+        if type(now) not in (int, float):
+            raise VLLMRuntimeError("vLLM monotonic clock is invalid")
+        try:
+            now = float(now)
+        except (OverflowError, ValueError):
+            raise VLLMRuntimeError("vLLM monotonic clock is invalid") from None
+        if not math.isfinite(now):
+            raise VLLMRuntimeError("vLLM monotonic clock is invalid")
+    return now
 
 
 @dataclass(frozen=True, slots=True)
