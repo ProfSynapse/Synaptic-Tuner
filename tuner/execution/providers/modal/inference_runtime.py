@@ -34,10 +34,13 @@ _REQUIRED_SOURCES = frozenset(
         "Evaluator/verified_vllm_chat.py",
         "Evaluator/vllm_runtime.py",
         "tuner/execution/providers/modal/inference_bootstrap.py",
+        "tuner/execution/providers/modal/inference_entrypoint.py",
+        "tuner/execution/providers/modal/inference_channel.py",
         "tuner/execution/providers/modal/inference_runtime.py",
         "tuner/execution/providers/modal/inference_wire.py",
         "tuner/execution/providers/modal/inference_worker.py",
         "tuner/inference/retrieved_model.py",
+        "tuner/inference/run_chat.py",
         "tuner/inference/serving_target.py",
     }
 )
@@ -141,7 +144,7 @@ def _manifest() -> tuple[bytes, dict[str, object]]:
             document,
             {
                 "schema_version",
-                "registry_reference",
+                "base_registry_reference",
                 "sdk_version",
                 "python",
                 "dependency_lock_path",
@@ -153,7 +156,9 @@ def _manifest() -> tuple[bytes, dict[str, object]]:
         )
         if root["schema_version"] != _SCHEMA:
             raise ValueError("unsupported runtime manifest")
-        reference = _text(root["registry_reference"], "registry reference", 1024)
+        reference = _text(
+            root["base_registry_reference"], "base registry reference", 1024
+        )
         if _REGISTRY.fullmatch(reference) is None:
             raise ValueError("registry reference is invalid")
         _text(root["sdk_version"], "SDK version", 64)
@@ -362,8 +367,8 @@ def verify_modal_inference_runtime(
         python = manifest["python"]
         if (
             hashlib.sha256(payload).hexdigest() != runtime["runtime_lock_digest"]
-            or manifest["registry_reference"] != image["registry_reference"]
-            or manifest["registry_reference"].rsplit("@sha256:", 1)[1]
+            or manifest["base_registry_reference"] != image["registry_reference"]
+            or manifest["base_registry_reference"].rsplit("@sha256:", 1)[1]
             != image["image_digest"]
             or manifest["sdk_version"] != client["sdk_version"]
             or python["version"] != runtime["python_version"]

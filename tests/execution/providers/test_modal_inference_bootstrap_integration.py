@@ -67,7 +67,9 @@ def test_signed_launch_reaches_real_chat_and_retains_model(
         **case.kwargs,
         cwd=tmp_path,
         environment={},
-    ) as session:
+    ) as prepared:
+        session = prepared.session
+        assert prepared.model.model_kind == kind
         assert requests == []
         if failure:
             from Evaluator.chat_session import ChatSessionError

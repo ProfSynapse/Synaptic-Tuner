@@ -8,7 +8,7 @@ A missing or mismatched packaged inference lock denies before model preparation.
 from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
-from dataclasses import fields
+from dataclasses import dataclass, fields
 import inspect
 import math
 from pathlib import Path
@@ -25,6 +25,7 @@ from Evaluator.vllm_runtime import (
 from tuner.execution.evidence import parse_utc
 from tuner.execution.foundation_v2.canonical import parse_canonical_object
 from tuner.inference.retrieved_model import RetrievedSFTModel
+from tuner.inference.run_chat import PreparedModelIdentity
 from tuner.inference.serving_target import PinnedModelPreparer, ServingTarget
 
 from .inference_preparation import _validate_preparation_snapshot
@@ -43,6 +44,14 @@ from .inference_worker import (
 
 class ModalInferenceBootstrapError(RuntimeError):
     """Closed setup failure; unresolved cleanup retains its exact lease."""
+
+
+@dataclass(frozen=True, slots=True)
+class ModalChatWorkerSession:
+    """Internal result projection, not a grant or standalone verification proof."""
+
+    session: ChatSession
+    model: PreparedModelIdentity
 
 
 def _closed(
@@ -178,7 +187,7 @@ def open_modal_chat_worker(
     cwd: Path,
     environment: dict[str, str],
     preparer: PinnedModelPreparer | None = None,
-) -> Iterator[ChatSession]:
+) -> Iterator[ModalChatWorkerSession]:
     """Admit, verify the runtime, prepare and own one bounded local session.
 
     No caller-supplied runtime verifier/lock or alternate timer is accepted.
@@ -314,7 +323,16 @@ def open_modal_chat_worker(
             raise _closed(error) from None
         # Consumer exceptions retain their own identity and existing owned
         # cleanup semantics; only bootstrap/setup failures are sanitized here.
-        yield session
+        retrieved = baseline_retrieved
+        yield ModalChatWorkerSession(
+            session,
+            PreparedModelIdentity(
+                retrieved.model_ref,
+                retrieved.model_revision,
+                retrieved.tokenizer_revision,
+                retrieved.model_kind,
+            ),
+        )
 
 
 __all__: list[str] = []

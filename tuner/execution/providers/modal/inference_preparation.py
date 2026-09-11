@@ -101,7 +101,7 @@ _NESTED = {
     "application": frozenset(
         {"app_name", "app_ref", "sandbox_entrypoint", "worker_ref"}
     ),
-    "image": frozenset({"registry_reference", "image_digest"}),
+    "image": frozenset({"registry_reference", "image_digest", "provider_image_id"}),
     "runtime": frozenset(
         {
             "dependency_lock_digest",
@@ -266,6 +266,7 @@ class ModalInferencePreparationConfig:
             raise ValueError("unsupported Modal SDK selection")
         reference = image["registry_reference"]
         digest = image["image_digest"]
+        provider_image_id = image["provider_image_id"]
         digest_text(digest, "image_digest")
         if (
             type(reference) is not str
@@ -278,6 +279,11 @@ class ModalInferencePreparationConfig:
             or "@" in reference.removesuffix("@sha256:" + digest)
         ):
             raise ValueError("image reference is not digest pinned")
+        if (
+            type(provider_image_id) is not str
+            or re.fullmatch(r"im-[A-Za-z0-9]{1,64}", provider_image_id) is None
+        ):
+            raise ValueError("provider image identity is invalid")
         for name in (
             "dependency_lock_digest",
             "runtime_lock_digest",

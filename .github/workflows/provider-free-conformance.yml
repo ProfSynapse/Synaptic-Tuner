@@ -72,6 +72,8 @@ on:
       - "schemas/**"
       - "scripts/regenerate_modal_runtime_lock.py"
       - "scripts/regenerate_offline_sft_worker_closure.py"
+      - "scripts/capture_modal_inference_runtime.py"
+      - "scripts/inspect_modal_inference_runtime.py"
       - ".gitattributes"
       - "pyproject.toml"
       - ".github/workflows/provider-free-conformance.yml"
@@ -200,6 +202,11 @@ jobs:
           import tuner.execution.providers.modal.inference_worker
           import tuner.execution.providers.modal.inference_runtime
           import tuner.execution.providers.modal.inference_bootstrap
+          import tuner.execution.providers.modal.inference_channel
+          import tuner.execution.providers.modal.inference_channel_client
+          import tuner.execution.providers.modal.inference_entrypoint
+          import tuner.execution.providers.modal.inference_transport
+          import tuner.execution.providers.modal.inference_run_chat
           PY
 
       - name: Check source hashes without refreshing the runtime lock

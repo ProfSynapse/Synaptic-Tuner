@@ -232,6 +232,96 @@ Sandbox cleanup adapter. Runtime-file checks assume the trusted immutable image
 and packaged source tree; they do not establish the provider's image identity
 or prevent arbitrary mutation of already imported Python code.
 
+Correction (2026-09-11, private chat connection): the executable worker reads one
+bounded startup frame from the authenticated SDK stdin of its newly created
+Sandbox, then serves bounded canonical chat frames on stdout. Use
+`inference_entrypoint.encode_modal_chat_start` for the startup frame; it carries
+the exact signed launch, independently supplied static expectation and declared
+credential **names**, never values. The image must pre-create
+`/workspace/modal-chat/{model,base,scratch}`. The deployment adapter remains
+responsible for the exact physical Volume mapping. Worker bootstrap still uses
+the concrete packaged runtime verifier; absent inference locks still deny.
+The executable accepts no command-line arguments and emits no raw exception
+diagnostics. This private module is not an operator-facing replacement for the
+provider-neutral run-chat workflow.
+
+The bootstrap yields the session plus its verified portable model identity;
+the ready frame carries that identity. Never infer full/LoRA kind from training
+configuration on the host. The host reconstructs `PreparedModelIdentity` from
+the bound ready frame and must compare its model/tokenizer refs and revisions
+to the authenticated workload before handing off the session.
+
+The remote channel uses the existing `ChatSession` watchdog and never derives a
+second deadline. It bounds startup-input waiting, frame size and blocked channel
+I/O, retains sequential request/session/launch bindings, and closes the session
+on EOF, stop or failure. Keep every public/encrypted service-port list empty:
+exposing the raw vLLM port would bypass the session's idle, turn and history
+limits. This replaces the earlier proposed HTTP access-token/tunnel path, not the
+existing ownership and authorization requirements. Provider-free channel tests
+are not live Modal qualification, and cleanup initiation is not proof of a
+provider billing deadline.
+
+For inference-runtime diagnosis, use the checked-in
+`scripts/capture_modal_inference_runtime.py` with explicit `--app`,
+`--environment`, exact digest `--image` and full `--source-commit` selections.
+This is a maintenance probe, not a training/chat submission API. Its CLI reads
+only the environment-provided `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` pair to make
+an explicit client. Do not put their values in argv or files. It resolves only
+the selected existing app (`create_if_missing=False`) and creates one CPU-only
+Sandbox: 1 CPU, 2048 MiB, 300-second provider timeout/idle timeout, no GPU,
+Volumes, Secrets or runtime network. Image preparation is remote; no local
+Docker image pull or model download is required. Treat image preparation as a
+cloud operation, not a guaranteed free local preflight.
+
+The remote stdlib-only `scripts/inspect_modal_inference_runtime.py` captures
+actual interpreter identity/hash and installed distribution metadata without
+importing ML packages. Missing Modal/vLLM are explicit candidate facts, not
+successful runtime admission. Reports bind the copied inspection script's hash
+and record image/engine commit as operator selections only: the base probe has
+not installed that engine commit and does not attest the final image. Do not
+turn candidate metadata into production pins without independent review.
+
+The capture launcher has a 600-second host wait plus an independent bounded
+cleanup attempt, with no automatic create retry. Ambiguous creation is not
+absence. A delayed returned handle is retained for exact-target cleanup while
+the owning process lives, but its daemon operation is not durable after CLI
+process death; an indeterminate report is not proof of shutdown. Known resources
+are checked through the exact returned handle, never listing/adoption. Keep the
+closed ownership/cleanup report and resolve ambiguity before another attempt.
+
+Correction (2026-09-11, source freshness): bind the source once when opening a
+session. Before requesting its SUBMIT grant, use the existing binder's
+`assert_current(source)` to recheck current workflow/Foundation/native metadata
+without another verification transition or model-body read. Calling `bind`
+again invokes `RunsAPI.reverify`, advances the workflow revision and invalidates
+the earlier preparation even when the model is unchanged. A read-only guard is
+not serving permission; the consumer still supplies separate exact STAGE and
+SUBMIT grants through Foundation. This is internal adapter work, not an extra
+operator command.
+
+The internal `ModalRunChatRuntime` now connects those existing binders, consumer
+catalog/content authority, exact grant port, Foundation broker and ready-lease
+handoff to `open_run_chat`. Construct one runtime per session attempt; a failed
+open must not silently start another attempt. The normal context exit closes
+the owned Sandbox. Retain `runtime.owned_lease` when cleanup remains unresolved,
+and retain the transport's pending ownership if no ready lease was obtained.
+The engine neither selects persistence nor mints the consumer's grants. This
+composition is provider-free tested, not yet live-image or serving qualification.
+
+Correction (2026-09-11, inference image identity): the signed configuration's
+`image.registry_reference` and `image.image_digest` select the pinned **base**
+image. Required `image.provider_image_id` identifies the separately built final
+Modal Image. The embedded runtime manifest uses `base_registry_reference`, with
+no legacy alias. An image cannot practically embed a manifest naming that same
+image's final OCI digest; do not create that circular commitment. Build and
+review the source/dependency/runtime layers separately, then bind the returned
+provider Image ID in the authenticated configuration. SUBMIT must resolve that
+exact existing Image with the explicit client and verify its hydrated identity;
+it must not construct a new image or add operator source at submission time.
+Runtime-file checks and provider object identity checks are complementary, not
+substitutes. Neither a signed ID nor a base-image candidate report qualifies the
+actual installed runtime by itself.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical

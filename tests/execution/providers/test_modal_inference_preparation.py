@@ -69,6 +69,7 @@ def _document(source, **changes):
         "image": {
             "registry_reference": "registry/chat@sha256:" + "1" * 64,
             "image_digest": "1" * 64,
+            "provider_image_id": "im-chat",
         },
         "runtime": {
             "dependency_lock_digest": "2" * 64,
@@ -299,6 +300,40 @@ def test_serving_section_requires_exact_fields(monkeypatch, change):
         document["serving"]["tensor_parallel_size"] = 1
     with pytest.raises((TypeError, ValueError, KeyError)):
         ModalInferencePreparationConfig.build(document)
+
+
+@pytest.mark.parametrize(
+    "provider_image_id",
+    (None, "", "image-chat", "im-chat_underscore", "im-chat/slash", True),
+)
+def test_provider_image_identity_is_required_and_exact(monkeypatch, provider_image_id):
+    source, _, _ = workload_case(monkeypatch)
+    document = _document(source)
+    if provider_image_id is None:
+        del document["image"]["provider_image_id"]
+    else:
+        document["image"]["provider_image_id"] = provider_image_id
+    with pytest.raises((TypeError, ValueError, KeyError)):
+        ModalInferencePreparationConfig.build(document)
+
+
+def test_provider_image_identity_is_committed_without_changing_base_selection(
+    monkeypatch,
+):
+    source, _, _ = workload_case(monkeypatch)
+    first = ModalInferencePreparationConfig.build(_document(source))
+    changed = _document(source)
+    changed["image"]["provider_image_id"] = "im-chat2"
+    second = ModalInferencePreparationConfig.build(changed)
+    assert (
+        first.document["image"]["registry_reference"]
+        == second.document["image"]["registry_reference"]
+    )
+    assert (
+        first.document["image"]["image_digest"]
+        == second.document["image"]["image_digest"]
+    )
+    assert first.canonical_bytes != second.canonical_bytes
 
 
 def test_every_fractional_and_integer_serving_bound_is_exact(monkeypatch):

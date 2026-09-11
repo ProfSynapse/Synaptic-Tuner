@@ -29,17 +29,20 @@ from tuner.execution.coordinator_v1.state_machine import (
     provider_run_read_request,
 )
 from tuner.execution.coordinator_v1.stores import _revalidate_workflow
-from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest
+from tuner.execution.foundation_v2.canonical import (
+    canonical_bytes,
+    domain_digest,
+    parse_canonical_object,
+)
 from tuner.execution.foundation_v2.commands import SubmitCommandV2, parse_exact_command
 from tuner.execution.foundation_v2.references import ScopedProviderRunRefV1
 
 from .binding import ModalClientBinding
-from .contracts import ArtifactMemberV1, provider_entry_identity
+from .contracts import ArtifactMemberV1, ArtifactRole, provider_entry_identity
 from .coordinator_binding import ModalCommandBinding
 from .control import CrossPlaneIdentityV1
 from .coordinator_reader import ModalArtifactInventory, ModalCoordinatorRunReader
 from .manifest import CompletionManifestV1
-
 
 _ROLES = (
     "final_model",
@@ -63,14 +66,22 @@ def _method(value: object, name: str) -> None:
 
 
 def _run(value: object) -> TrainingRunRef:
-    if type(value) is not TrainingRunRef:
+    if (
+        type(value) is not TrainingRunRef
+        or type(value.run_id) is not str
+        or type(value.project_ref) is not str
+    ):
         raise TypeError("run must be an exact TrainingRunRef")
     return TrainingRunRef.from_dict(value.to_dict())
 
 
 def _artifacts(values: object) -> tuple[VerifiedArtifact, ...]:
     if type(values) is not tuple or any(
-        type(item) is not VerifiedArtifact for item in values
+        type(item) is not VerifiedArtifact
+        or type(item.role) is not str
+        or type(item.sha256) is not str
+        or type(item.size_bytes) is not int
+        for item in values
     ):
         raise TypeError("artifacts must be an exact tuple of VerifiedArtifact values")
     rebuilt = tuple(VerifiedArtifact.from_dict(item.to_dict()) for item in values)
@@ -174,6 +185,99 @@ def _manifest(value: object) -> ArtifactManifestV1:
     if rebuilt != value:
         raise ValueError("artifact manifest changed during reconstruction")
     return rebuilt
+
+
+def _source_state(value: object) -> tuple[object, ...]:
+    if type(value) is not ModalInferenceSourceBinding or value._token is not _TOKEN:
+        raise TypeError("exact Modal inference source binding required")
+    _run(value.run)
+    _artifacts(value.artifacts)
+    if type(value.command_binding) is not ModalCommandBinding:
+        raise TypeError("exact Modal command binding required")
+    for item in (
+        value.read_request_bytes,
+        value.command_binding.command_bytes,
+        value.command_binding.preparation_snapshot,
+        value.command_binding.deployment_bytes,
+        value.native_evidence,
+    ):
+        if type(item) is not bytes:
+            raise TypeError("exact immutable source bytes required")
+    for item in (
+        value.read_request_digest,
+        value.source_workflow_record_digest,
+        value.manifest_digest,
+        value.artifact_source_digest,
+        value.provider_id,
+        value.profile_ref,
+        value.account_ref,
+        value.namespace_ref,
+        value.provider_job_ref,
+        value.effect_id,
+        value.provider_run_binding_digest,
+        value.artifact_volume_id,
+    ):
+        if type(item) is not str:
+            raise TypeError("exact source text required")
+    if type(value.source_revision) is not int:
+        raise TypeError("exact source revision required")
+    if type(value.native_members) is not tuple:
+        raise TypeError("exact native member tuple required")
+    for item in value.native_members:
+        if (
+            type(item) is not ArtifactMemberV1
+            or type(item.role) is not ArtifactRole
+            or type(item.path) is not str
+            or type(item.size) is not int
+            or type(item.sha256) is not str
+            or type(item.provider_entry_id) is not str
+        ):
+            raise TypeError("exact native artifact member required")
+    return (
+        value.run.to_dict(),
+        tuple(item.to_dict() for item in value.artifacts),
+        value.read_request_bytes,
+        value.read_request_digest,
+        value.source_workflow_record_digest,
+        value.source_revision,
+        value.manifest_digest,
+        value.artifact_source_digest,
+        value.provider_id,
+        value.profile_ref,
+        value.account_ref,
+        value.namespace_ref,
+        value.provider_job_ref,
+        value.effect_id,
+        value.provider_run_binding_digest,
+        value.command_binding.command_bytes,
+        value.command_binding.preparation_snapshot,
+        value.command_binding.deployment_bytes,
+        value.artifact_volume_id,
+        tuple(
+            (item.role.value, item.path, item.size, item.sha256, item.provider_entry_id)
+            for item in value.native_members
+        ),
+        value.native_evidence,
+    )
+
+
+def _committed_run(source: ModalInferenceSourceBinding) -> TrainingRunRef:
+    document = parse_canonical_object(
+        source.read_request_bytes, name="Modal inference read request"
+    )
+    if (
+        type(document) is not dict
+        or document.get("schema_version") != "synaptic-provider-run-read-request/v1"
+        or source.read_request_digest
+        != domain_digest(
+            "synaptic-provider-run-read-request/v1", source.read_request_bytes
+        )
+    ):
+        raise ValueError("retained provider read request is invalid")
+    committed = TrainingRunRef.from_dict(document.get("run"))
+    if committed != source.run:
+        raise ValueError("source run differs from retained provider read request")
+    return committed
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -415,6 +519,29 @@ class ModalInferenceSourceBinder:
         if verification.run != requested or verification.verified is not True:
             raise ValueError("run reverification failed")
         outcome = runs.outcome(requested)
+        result = self._admit(requested, outcome)
+        if _run(run) != requested:
+            raise ValueError("requested run changed during native admission")
+        return result
+
+    def assert_current(self, source: ModalInferenceSourceBinding) -> None:
+        """Recheck retained public/native metadata without a reverification transition."""
+
+        try:
+            baseline = _source_state(source)
+            requested = _committed_run(source)
+            outcome = self._runs.outcome(requested)
+            if _source_state(source) != baseline:
+                raise ValueError("inference source changed during public read")
+            current = self._admit(requested, outcome)
+            if _source_state(source) != baseline or current != source:
+                raise ValueError("inference source is no longer current")
+        except Exception:
+            raise ModalInferenceBindingError("modal_inference_source_invalid") from None
+
+    def _admit(
+        self, requested: TrainingRunRef, outcome: RunOutcome
+    ) -> ModalInferenceSourceBinding:
         if (
             type(outcome) is not RunOutcome
             or outcome.run != requested
@@ -464,7 +591,6 @@ class ModalInferenceSourceBinder:
             current != workflow
             or current.record_digest != workflow_digest
             or canonical_bytes(current.to_dict()) != workflow_bytes
-            or _run(run) != requested
         ):
             raise ValueError("retained workflow changed during native admission")
         return ModalInferenceSourceBinding(

@@ -64,8 +64,12 @@ def test_real_signed_mount_preparation_reaches_exact_bounded_runtime(
     case = mounted_launch_case(tmp_path, monkeypatch, model_kind=model_kind)
     now = [100.0]
     calls = _install_runtime(monkeypatch, now)
-    with _open(case) as session:
-        assert type(session) is _Session
+    with _open(case) as prepared:
+        assert type(prepared.session) is _Session
+        assert prepared.model.model_kind == model_kind
+        assert prepared.model.model_ref == case.workload["model_ref"]
+        assert prepared.model.model_revision == case.workload["model_revision"]
+        assert prepared.model.tokenizer_revision == case.workload["tokenizer_revision"]
     assert calls["verify"] == [
         case.kwargs["expectation"].configuration_bytes,
         case.kwargs["expectation"].configuration_bytes,

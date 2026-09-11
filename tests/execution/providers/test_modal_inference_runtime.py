@@ -72,6 +72,7 @@ def _configuration(
         "image": {
             "registry_reference": "registry.example/synaptic/chat@sha256:" + "1" * 64,
             "image_digest": "1" * 64,
+            "provider_image_id": "im-chat",
         },
         "runtime": runtime_values,
         "volumes": {
@@ -164,7 +165,7 @@ def _case(tmp_path: Path, monkeypatch):
     executable_digest = runtime._hash_executable(executable)
     manifest = {
         "schema_version": "synaptic-modal-inference-runtime-lock/v1",
-        "registry_reference": "registry.example/synaptic/chat@sha256:" + "1" * 64,
+        "base_registry_reference": "registry.example/synaptic/chat@sha256:" + "1" * 64,
         "sdk_version": "1.5.4",
         "python": {
             "implementation": "cpython",
@@ -204,6 +205,32 @@ def _case(tmp_path: Path, monkeypatch):
 def test_packaged_runtime_verifies_complete_exact_environment(tmp_path, monkeypatch):
     _, _, values = _case(tmp_path, monkeypatch)
     runtime.verify_modal_inference_runtime(_configuration(values))
+
+
+def test_embedded_base_registry_must_match_signed_base_selection(tmp_path, monkeypatch):
+    root, manifest, values = _case(tmp_path, monkeypatch)
+    manifest["base_registry_reference"] = (
+        "registry.example/synaptic/other@sha256:" + "2" * 64
+    )
+    payload = _canonical(manifest)
+    (root / "tuner/execution/providers/modal/inference-runtime.lock.json").write_bytes(
+        payload
+    )
+    values["runtime_lock_digest"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(runtime.ModalInferenceRuntimeError):
+        runtime.verify_modal_inference_runtime(_configuration(values))
+
+
+def test_old_self_referential_registry_field_has_no_alias(tmp_path, monkeypatch):
+    root, manifest, values = _case(tmp_path, monkeypatch)
+    manifest["registry_reference"] = manifest.pop("base_registry_reference")
+    payload = _canonical(manifest)
+    (root / "tuner/execution/providers/modal/inference-runtime.lock.json").write_bytes(
+        payload
+    )
+    values["runtime_lock_digest"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(runtime.ModalInferenceRuntimeError):
+        runtime.verify_modal_inference_runtime(_configuration(values))
 
 
 def test_missing_packaged_manifest_fails_closed(tmp_path, monkeypatch):

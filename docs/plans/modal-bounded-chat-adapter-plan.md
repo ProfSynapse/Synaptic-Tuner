@@ -129,6 +129,16 @@ those actual runtime pins, then finish provider creation, authenticated access
 and exact-instance cleanup. No current image identity or live serving proof is
 implied by the new verifier's source/configuration consistency checks.
 
+Working-tree update (2026-09-11): the executable private stdio channel and host
+channel client pass the recovered 173-test inference selection (137.82 seconds),
+including the required worker-derived ready-model identity. This is not a live
+response. A separate image-contract change passed 104 tests in an isolated
+lead-baseline overlay: configuration now distinguishes the pinned base registry
+image from the final `provider_image_id`, and the embedded manifest names only
+`base_registry_reference`. These selections overlap and must not be added.
+The concrete SDK transport and consumer `RunChatRuntime` composition are under
+integration review; final tree/package qualification remains open.
+
 ## Product boundary
 
 A consumer chooses a runtime for one verified training run and explicitly sends
@@ -180,14 +190,19 @@ creation, a remote admission/session deadline, explicit startup/request bounds,
 and provider lifetime configuration. Client death must not be the only cleanup
 trigger. See the [Sandbox lifecycle documentation](https://modal.com/docs/guide/sandboxes).
 
-Use an authenticated connection token for the exact admitted service port;
-do not expose a public tunnel or perpetual endpoint by default. The token is a
-host-side access credential, not a model/GPU credential. It must never enter
-argv, logs, documents, retained command bytes or the inference subprocess.
-Disable environment proxy/auth inheritance and redirects and keep HTTP responses
-bounded using the existing client policy. The endpoint must be validated against
-the retained exact Sandbox binding before attaching its token. See the
-[Sandbox networking documentation](https://modal.com/docs/guide/sandbox-networking).
+Correction (2026-09-11, authenticated connection): use the existing explicit
+Modal client's stdin/stdout streams to the newly created persistent Sandbox,
+with every public/encrypted service-port list empty. A bounded first frame
+transports the signed launch and static expectation; subsequent canonical frames
+bind the exact session, launch digest and sequential request ID. The executable
+uses the existing worker-local `ChatSession` and its watchdog; the underlying
+vLLM server stays on loopback. This replaces the earlier proposed HTTP
+access-token/tunnel path because directly exposing the vLLM port would bypass
+the session's idle, turn and history policy. It creates no separate connection
+secret or public endpoint. SDK stream authentication does not replace launch
+admission, durable allocation authority, runtime verification or exact-target
+termination. Local HTTP inference still disables proxy/auth inheritance and
+redirects and keeps responses bounded.
 
 `terminate(wait=True)` has no public timeout argument in SDK 1.5.4. It must not
 be wired directly into the existing finite `ChatSession` close contract. Use
@@ -292,6 +307,16 @@ guess that the first allocation is absent.
    and unredacted provider responses out of evidence.
 
 The current training runtime lock must not be relabeled an inference lock.
+Correction (2026-09-11, integrated adapter): the private stdio worker/client,
+explicit SDK transport and `ModalRunChatRuntime` composition are implemented.
+The affected selection passed 175 tests after correcting a completed-cleanup
+ownership race; final deterministic transport coverage passed 21 tests against
+the same source. The earlier broad inference selection passed 560 tests before
+the final ownership changes. These selections overlap and use simulated cloud
+effects. Actual inference-image capture, reviewed inference resources, installed
+package qualification and live chat/termination remain separate evidence gates;
+see `../review/modal-chat-stdio.md` for measured results and limitations.
+
 Image/ML stack and inference bootstrap inventory need separate deliberate review;
 no opportunistic package upgrades or guessed image digest. Actual cloud resource
 identities, quote/limits and required mutations remain explicit before a live run.

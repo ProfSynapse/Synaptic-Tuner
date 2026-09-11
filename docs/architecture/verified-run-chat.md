@@ -147,3 +147,26 @@ chat adapter still needs exact-source deployment, remote artifact/model
 preparation, authenticated access and provider-side lifetime/cost safeguards,
 followed by separate live qualification. Do not keep a GPU endpoint alive merely
 because a local client disappears.
+
+Correction (2026-09-11, Modal adapter implementation): the internal
+`tuner.execution.providers.modal.inference_run_chat.ModalRunChatRuntime` now
+implements this same runtime protocol. Consumers inject their trusted run/source
+and workload binders, authenticated inference configuration and quote, retained
+catalog, grant port, Foundation broker/evidence ports and the SDK transport's
+ready-lease handoff. There is no second serving CLI or operator weight upload.
+One instance permits one session attempt, including a failed attempt. It
+reverifies once, checks source freshness without another verification transition,
+and requests separate exact STAGE and SUBMIT grants. Only actual authenticated
+Foundation results and the matching ready lease can yield a session.
+
+The remote result has `local_model=None`; model files stay on the execution
+machine and saved training artifacts remain in their existing storage. The
+session uses the original host deadline across startup and conversation, with
+the remote worker and provider limits remaining independent protections.
+`runtime.owned_lease` retains known cleanup ownership after a failed open; before
+readiness, the transport retains pending/exact creation ownership. Neither is a
+durable registry after process death. Twelve focused integration tests passed
+with real Foundation/codec/client composition and simulated SDK/model effects;
+this does not qualify an inference image or establish a live Modal response.
+The interrupted-handoff regression checks recovery when one-use lease transfer
+returns but interruption prevents assignment in the consumer.
