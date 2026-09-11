@@ -322,6 +322,14 @@ invalid even if their versions match. Unproven/custom/ZIP identities cannot
 justify deduplication. Keep both the 512 unique-distribution cap and the 4096
 raw-discovery bound, and reject changes during identity verification.
 
+For a remaining collision, distinguish the closed diagnoses
+`DISTRIBUTION_IDENTITY_UNPROVEN` (a collision without physical identity proof),
+`DISTRIBUTION_PHYSICAL_DUPLICATE` (different proven metadata objects), and
+`DISTRIBUTION_PHYSICAL_METADATA_MISMATCH` (one proven object with conflicting
+name/version). These codes do not disclose package metadata or permit accepting
+any rejected inventory. Historical `DISTRIBUTION_IDENTITY_DUPLICATE` output
+cannot be retrospectively assigned one of these more precise causes.
+
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's
 `assert_current(source)` to recheck current workflow/Foundation/native metadata

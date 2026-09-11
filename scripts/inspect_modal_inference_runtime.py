@@ -231,8 +231,13 @@ def _distributions() -> dict[str, str]:
         )
         if normalized in result:
             previous = identities.get(normalized)
-            if previous != (stable_identity, version) or stable_identity is None:
-                raise _InspectionFailure("DISTRIBUTION_IDENTITY_DUPLICATE")
+            if previous is None or stable_identity is None:
+                raise _InspectionFailure("DISTRIBUTION_IDENTITY_UNPROVEN")
+            previous_identity, previous_version = previous
+            if previous_identity != stable_identity:
+                raise _InspectionFailure("DISTRIBUTION_PHYSICAL_DUPLICATE")
+            if previous_version != version:
+                raise _InspectionFailure("DISTRIBUTION_PHYSICAL_METADATA_MISMATCH")
             continue
         if len(result) >= _MAX_DISTRIBUTIONS:
             raise _InspectionFailure("DISTRIBUTION_COUNT_LIMIT")
@@ -242,7 +247,7 @@ def _distributions() -> dict[str, str]:
                 normalized,
                 version,
             ):
-                raise _InspectionFailure("DISTRIBUTION_IDENTITY_DUPLICATE")
+                raise _InspectionFailure("DISTRIBUTION_PHYSICAL_METADATA_MISMATCH")
             physical[stable_identity] = (normalized, version)
             identities[normalized] = (stable_identity, version)
         result[normalized] = version

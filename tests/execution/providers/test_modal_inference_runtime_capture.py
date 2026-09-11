@@ -591,8 +591,11 @@ def test_read_sandbox_reports_only_strict_remote_reason():
         "DISTRIBUTION_COUNT_LIMIT",
         "DISTRIBUTION_ENUMERATION_FAILED",
         "DISTRIBUTION_IDENTITY_DUPLICATE",
+        "DISTRIBUTION_IDENTITY_UNPROVEN",
         "DISTRIBUTION_METADATA_READ_FAILED",
         "DISTRIBUTION_NAME_INVALID",
+        "DISTRIBUTION_PHYSICAL_DUPLICATE",
+        "DISTRIBUTION_PHYSICAL_METADATA_MISMATCH",
         "DISTRIBUTION_VERSION_INVALID",
     ),
 )
@@ -618,7 +621,13 @@ def test_read_sandbox_accepts_closed_distribution_reason(reason):
         image=IMAGE,
         source_commit=COMMIT,
     )
-    assert json.loads(raw)["reason_code"] == reason
+    assert json.loads(raw) == {
+        "reason_code": reason,
+        "returncode": 125,
+        "sandbox_id": "sb-exact",
+        "schema_version": "synaptic-modal-inference-runtime-read/v1",
+        "status": "REMOTE_FAILED",
+    }
 
 
 @pytest.mark.parametrize(

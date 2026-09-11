@@ -214,6 +214,37 @@ Final corrective selection (2026-09-11): all 66 capture/inspection tests passed
 in 0.27 seconds under isolated CPython 3.12.9, including unstable identity on
 the first discovery, same-object aliases and distinct same-name installations.
 
+Correction (2026-09-11, corrective rerun consumed): source
+`f94e437d5b6a49edf090c9274d45fc457bdc1b02` executed the one authorized corrective
+CPU allocation. Sandbox `sb-SJySLXJYyL5pL6QCrArv7d` exited 125; the capture
+confirmed exact-target cleanup, and the read-only stopped-instance command
+again returned `DISTRIBUTION_IDENTITY_DUPLICATE`. Both closed results are
+preserved in `evidence/modal-inference-cpu-{probe,read}-f94e437.json`.
+The archived inspector SHA-256 was
+`76d459a694b2f5957b09f160404b6efff9d75f7af3c78f1a595f97fe62ac248b`.
+The same-object local correction therefore did not resolve this image's
+metadata condition. This result still cannot distinguish separate physical
+installations, unavailable identity proof or conflicting metadata on one object.
+No runtime candidate was accepted, no GPU was launched, and no further CPU
+allocation remains authorized by the follow-up-plus-one-corrective approval.
+Further local diagnosis may refine closed reason codes; another cloud probe
+requires new authority. Do not relax inventory verification or guess pins.
+
+The corrective capture and exact-read console outputs were scanned by credential
+shape (HF/Modal-style tokens, bearer values, JWTs and private-key headers), with
+no matches. This check covers the emitted closed reports only; raw provider logs
+were suppressed and are not claimed to have been retained or scanned.
+
+Local diagnostic follow-up (2026-09-11): inspector collisions now distinguish
+`DISTRIBUTION_IDENTITY_UNPROVEN`, `DISTRIBUTION_PHYSICAL_DUPLICATE` and
+`DISTRIBUTION_PHYSICAL_METADATA_MISMATCH`, without changing acceptance policy.
+The stopped-reader allowlist retains the historical generic code and accepts
+these three exact codes; it still emits no raw metadata or provider text.
+All 74 integrated capture/inspection tests passed in 0.26 seconds, including
+serialized failure-output non-disclosure and the reverse physical-identity map.
+This refinement has not executed remotely and does not reinterpret either
+historical duplicate failure. The production inference verifier is unchanged.
+
 Qualification boundary: the concrete engine verifier still has its separate
 duplicate-occurrence check in `inference_runtime.py`. Its identity policy must
 be reconciled with the measured installed-image facts before final runtime

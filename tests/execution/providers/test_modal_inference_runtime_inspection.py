@@ -103,7 +103,7 @@ def test_duplicate_distribution_still_fails(monkeypatch):
     )
     _metadata(monkeypatch, values)
     with pytest.raises(
-        inspection._InspectionFailure, match="DISTRIBUTION_IDENTITY_DUPLICATE"
+        inspection._InspectionFailure, match="DISTRIBUTION_IDENTITY_UNPROVEN"
     ):
         inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
 
@@ -145,7 +145,7 @@ def test_distinct_same_name_version_metadata_is_rejected(monkeypatch, tmp_path):
     values = inspection.importlib.metadata.distributions(path=[tmp_path])
     _metadata(monkeypatch, values)
     with pytest.raises(
-        inspection._InspectionFailure, match="DISTRIBUTION_IDENTITY_DUPLICATE"
+        inspection._InspectionFailure, match="DISTRIBUTION_PHYSICAL_DUPLICATE"
     ):
         inspection._distributions()
 
@@ -153,9 +153,69 @@ def test_distinct_same_name_version_metadata_is_rejected(monkeypatch, tmp_path):
 def test_custom_distributions_cannot_claim_physical_alias(monkeypatch):
     _metadata(monkeypatch, (Distribution("demo", "1"), Distribution("demo", "1")))
     with pytest.raises(
-        inspection._InspectionFailure, match="DISTRIBUTION_IDENTITY_DUPLICATE"
+        inspection._InspectionFailure, match="DISTRIBUTION_IDENTITY_UNPROVEN"
     ):
         inspection._distributions()
+
+
+def test_same_physical_identity_with_different_version_is_rejected(monkeypatch):
+    secret = "credential-like-private-version"
+    values = (Distribution("demo", "1"), Distribution("demo", secret))
+    _metadata(monkeypatch, values)
+    monkeypatch.setattr(inspection, "_metadata_identity", lambda value: (1,))
+    with pytest.raises(
+        inspection._InspectionFailure,
+        match="DISTRIBUTION_PHYSICAL_METADATA_MISMATCH",
+    ) as caught:
+        inspection._distributions()
+    assert secret not in str(caught.value)
+
+
+def test_same_physical_identity_with_different_name_is_rejected(monkeypatch):
+    values = (Distribution("first", "1"), Distribution("second", "1"))
+    _metadata(monkeypatch, values)
+    monkeypatch.setattr(inspection, "_metadata_identity", lambda value: (1,))
+    with pytest.raises(
+        inspection._InspectionFailure,
+        match="DISTRIBUTION_PHYSICAL_METADATA_MISMATCH",
+    ):
+        inspection._distributions()
+
+
+@pytest.mark.parametrize(
+    "identities,reason",
+    (
+        ((None, None, None, None), "DISTRIBUTION_IDENTITY_UNPROVEN"),
+        (((1,), (1,), (2,), (2,)), "DISTRIBUTION_PHYSICAL_DUPLICATE"),
+        (
+            ((1,), (1,), (1,), (1,)),
+            "DISTRIBUTION_PHYSICAL_METADATA_MISMATCH",
+        ),
+    ),
+)
+def test_distribution_collision_diagnostics_do_not_leak_metadata(
+    monkeypatch, capsys, identities, reason
+):
+    secret_name = "private-tokenlike-name"
+    secret_version = "private-tokenlike-version"
+    values = (
+        Distribution(secret_name, "1"),
+        Distribution(secret_name, secret_version),
+    )
+    _metadata(monkeypatch, values)
+    observed = iter(identities)
+    monkeypatch.setattr(inspection, "_metadata_identity", lambda value: next(observed))
+    assert inspection.main(["--image", IMAGE, "--source-commit", COMMIT]) == 125
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "reason_code": reason,
+        "schema_version": inspection._ERROR_SCHEMA,
+        "status": "FAILED",
+    }
+    rendered = captured.err
+    assert secret_name not in rendered
+    assert secret_version not in rendered
 
 
 def test_unstable_metadata_identity_cannot_be_deduplicated(monkeypatch):
