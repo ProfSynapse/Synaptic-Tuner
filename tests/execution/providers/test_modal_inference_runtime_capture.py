@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
+from types import ModuleType
 import time
 import threading
 
@@ -395,6 +397,126 @@ def test_cli_missing_credentials_is_closed(monkeypatch, capsys):
         == 125
     )
     assert "MODAL_TOKEN" not in capsys.readouterr().err
+
+
+def _cli_args(*extra):
+    return [
+        "--app",
+        "a",
+        "--environment",
+        "e",
+        "--image",
+        IMAGE,
+        "--source-commit",
+        COMMIT,
+        *extra,
+    ]
+
+
+def _fake_modal(monkeypatch, *, values=None, error=None):
+    calls = []
+
+    class Config:
+        @staticmethod
+        def get(key, *, profile=None, use_env=True):
+            calls.append(("get", key, profile, use_env))
+            if error is not None:
+                raise error
+            return values[key]
+
+    class Client:
+        @staticmethod
+        def from_credentials(token_id, token_secret):
+            calls.append(("client", token_id, token_secret))
+            return object()
+
+    module = SimpleNamespace(Client=Client)
+    config_module = ModuleType("modal.config")
+    config_module.config = Config
+    monkeypatch.setitem(sys.modules, "modal", module)
+    monkeypatch.setitem(sys.modules, "modal.config", config_module)
+    monkeypatch.setattr(capture.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        capture,
+        "capture_modal_inference_runtime",
+        lambda **kwargs: SimpleNamespace(canonical_bytes=b"{}"),
+    )
+    return calls
+
+
+def test_cli_explicit_profile_ignores_environment_and_disables_env_fallback(
+    monkeypatch, capsys
+):
+    monkeypatch.setenv("MODAL_TOKEN_ID", "environment-id")
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", "environment-secret")
+    calls = _fake_modal(
+        monkeypatch,
+        values={"token_id": "profile-id", "token_secret": "profile-secret"},
+    )
+    assert capture.main(_cli_args("--modal-profile", "synaptic-labs")) == 0
+    assert calls == [
+        ("get", "token_id", "synaptic-labs", False),
+        ("get", "token_secret", "synaptic-labs", False),
+        ("client", "profile-id", "profile-secret"),
+    ]
+    assert capsys.readouterr().err == ""
+
+
+def test_cli_environment_auth_never_reads_profile(monkeypatch, capsys):
+    monkeypatch.setenv("MODAL_TOKEN_ID", "environment-id")
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", "environment-secret")
+    calls = _fake_modal(monkeypatch, error=AssertionError("profile read"))
+    assert capture.main(_cli_args()) == 0
+    assert calls == [("client", "environment-id", "environment-secret")]
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize(
+    "values",
+    (
+        {"token_id": None, "token_secret": "secret"},
+        {"token_id": "", "token_secret": "secret"},
+        {"token_id": "id", "token_secret": "   "},
+    ),
+)
+def test_cli_profile_missing_or_blank_pair_fails_before_capture(
+    monkeypatch, capsys, values
+):
+    calls = _fake_modal(monkeypatch, values=values)
+    invoked = []
+    monkeypatch.setattr(
+        capture,
+        "capture_modal_inference_runtime",
+        lambda **kwargs: invoked.append(kwargs),
+    )
+    assert capture.main(_cli_args("--modal-profile", "synaptic-labs")) == 125
+    assert invoked == []
+    assert not any(call[0] == "client" for call in calls)
+    assert "secret" not in capsys.readouterr().err
+
+
+def test_cli_profile_lookup_diagnostics_and_values_are_closed(monkeypatch, capsys):
+    monkeypatch.setenv("MODAL_TOKEN_ID", "environment-id")
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", "environment-secret")
+    calls = _fake_modal(monkeypatch, error=RuntimeError("private-profile-value"))
+    assert capture.main(_cli_args("--modal-profile", "synaptic-labs")) == 125
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "private-profile-value" not in output.err
+    assert "environment-secret" not in output.err
+    assert calls == [("get", "token_id", "synaptic-labs", False)]
+
+
+@pytest.mark.parametrize("profile", ("", " bad", "bad/name", "a" * 65))
+def test_cli_profile_name_is_rejected_before_auth_resolution(
+    monkeypatch, capsys, profile
+):
+    calls = _fake_modal(
+        monkeypatch, values={"token_id": "id", "token_secret": "secret"}
+    )
+    assert capture.main(_cli_args("--modal-profile", profile)) == 125
+    assert calls == []
+    assert "secret" not in capsys.readouterr().err
 
 
 def test_cli_help_is_normal_success(capsys):

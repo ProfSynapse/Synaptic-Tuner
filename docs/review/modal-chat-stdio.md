@@ -127,6 +127,17 @@ closure at 66 members / 679,487 payload bytes. Skill mirrors were verified in
 sync, and both maintenance scripts now trigger PR conformance. No push, merge,
 cloud operation or live response is claimed by this record.
 
+Correction (2026-09-11, operator login selection): the maintenance capture CLI
+now accepts explicit `--modal-profile NAME`, resolving only that named SDK
+profile's credential pair with `use_env=False`; its default remains environment
+credentials only. Neither path falls back to the other. The installed SDK 1.5.4
+configuration shape was checked without credential lookup, with its configuration
+file redirected to `/dev/null`: `from modal.config import config` supplies the
+singleton, not the `modal.config` module. Corrected module-shaped tests prevent
+that distinction being hidden by a fake. The integrated capture/inspection
+selection passed 38 tests in 0.26 seconds. This source-only maintenance update
+does not change the installed engine wheel qualified above.
+
 ## Remaining live path
 
 Correction (2026-09-11, SDK integration): the explicit-client transport now

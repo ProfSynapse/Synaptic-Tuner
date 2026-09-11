@@ -648,28 +648,55 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--environment", required=True)
     parser.add_argument("--image", required=True)
     parser.add_argument("--source-commit", required=True)
+    parser.add_argument(
+        "--modal-profile",
+        type=lambda value: _exact_text(value, _NAME),
+        help="exact named Modal profile; never falls back to environment auth",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     try:
         arguments = build_parser().parse_args(argv)
-        token_id = os.environ.get("MODAL_TOKEN_ID")
-        token_secret = os.environ.get("MODAL_TOKEN_SECRET")
-        if (
-            not token_id
-            or not token_id.strip()
-            or not token_secret
-            or not token_secret.strip()
-        ):
-            raise ModalInferenceRuntimeCaptureError("modal_credentials_missing")
+        token_id = None
+        token_secret = None
+        if arguments.modal_profile is None:
+            token_id = os.environ.get("MODAL_TOKEN_ID")
+            token_secret = os.environ.get("MODAL_TOKEN_SECRET")
+            if (
+                not token_id
+                or not token_id.strip()
+                or not token_secret
+                or not token_secret.strip()
+            ):
+                raise ModalInferenceRuntimeCaptureError("modal_credentials_missing")
         spec = importlib.util.find_spec("modal")
         if spec is None:
             raise ModalInferenceRuntimeCaptureError("modal_sdk_invalid")
-        import modal
 
         with open(os.devnull, "w") as sink:
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+                import modal
+
+                if arguments.modal_profile is not None:
+                    from modal.config import config
+
+                    token_id = config.get(
+                        "token_id", profile=arguments.modal_profile, use_env=False
+                    )
+                    token_secret = config.get(
+                        "token_secret", profile=arguments.modal_profile, use_env=False
+                    )
+                    if (
+                        type(token_id) is not str
+                        or not token_id.strip()
+                        or type(token_secret) is not str
+                        or not token_secret.strip()
+                    ):
+                        raise ModalInferenceRuntimeCaptureError(
+                            "modal_credentials_missing"
+                        )
                 client = modal.Client.from_credentials(token_id, token_secret)
                 capture = capture_modal_inference_runtime(
                     sdk=modal,

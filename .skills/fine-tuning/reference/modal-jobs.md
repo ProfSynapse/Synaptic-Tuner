@@ -265,8 +265,12 @@ For inference-runtime diagnosis, use the checked-in
 `scripts/capture_modal_inference_runtime.py` with explicit `--app`,
 `--environment`, exact digest `--image` and full `--source-commit` selections.
 This is a maintenance probe, not a training/chat submission API. Its CLI reads
-only the environment-provided `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` pair to make
-an explicit client. Do not put their values in argv or files. It resolves only
+the environment-provided `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` pair by default.
+For an operator's existing CLI login, explicitly select `--modal-profile NAME`;
+that path reads only the named SDK profile's pair, with environment overrides
+disabled. Missing or blank credentials fail closed; neither path falls back to
+the other or calls `Client.from_env()`. Both construct an explicit client.
+Never put credential values in argv, reports or new files. It resolves only
 the selected existing app (`create_if_missing=False`) and creates one CPU-only
 Sandbox: 1 CPU, 2048 MiB, 300-second provider timeout/idle timeout, no GPU,
 Volumes, Secrets or runtime network. Image preparation is remote; no local
