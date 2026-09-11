@@ -340,6 +340,17 @@ It exposes no environment values or raw exceptions. Keep normal candidate
 validation strict; fix the image's packaging rather than dropping conflicting
 entries. Use the same flag for exact stopped-instance readback of that mode.
 
+For the measured Python 3.12 vLLM base with conflicting Ubuntu system metadata,
+`--isolated-python` builds a candidate-only layer using the checked-in
+`scripts/prepare_modal_inference_python.py`. The helper creates an exclusive
+copied-interpreter venv at `/opt/synaptic-inference`, without pip or system-site
+packages, and one `.pth` exposing only the measured ML package directory
+`/usr/local/lib/python3.12/dist-packages`. It does not remove system files,
+filter inventory, install packages, export PYTHONPATH or prepare models.
+The probe invokes that exact interpreter with `-I`; this is still not the final
+engine/SDK image. Capture final runtime commitments only after all reviewed
+dependency and engine layers have been installed and independently qualified.
+
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's
 `assert_current(source)` to recheck current workflow/Foundation/native metadata

@@ -29,6 +29,8 @@ _NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,62}[A-Za-z0-9])?")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _SDK_VERSION = "1.5.4"
 _REMOTE_SCRIPT = "/opt/synaptic/inspect_modal_inference_runtime.py"
+_REMOTE_PREPARER = "/opt/synaptic/prepare_modal_inference_python.py"
+_ISOLATED_PYTHON = "/opt/synaptic-inference/bin/python"
 _MAX_CAPTURE_BYTES = 1024 * 1024
 _HOST_TIMEOUT_SECONDS = 600.0
 _SANDBOX_TIMEOUT_SECONDS = 300
@@ -180,6 +182,20 @@ def _script_source(path: Path) -> tuple[bytes, str]:
                     raise ModalInferenceRuntimeCaptureError(
                         "inspection_source_invalid"
                     ) from None
+
+
+def _stage_source(path: Path, payload: bytes) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+    try:
+        offset = 0
+        while offset < len(payload):
+            written = os.write(descriptor, payload[offset:])
+            if type(written) is not int or written <= 0:
+                raise ModalInferenceRuntimeCaptureError("inspection_source_invalid")
+            offset += written
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 class _PendingOperation:
@@ -676,6 +692,7 @@ def capture_modal_inference_runtime(
     image: str,
     source_commit: str,
     diagnose_distributions: bool = False,
+    isolated_python: bool = False,
 ) -> ModalInferenceRuntimeCapture:
     """Run the inspector once, with a finite local and remote lifetime."""
 
@@ -687,6 +704,8 @@ def capture_modal_inference_runtime(
         raise ModalInferenceRuntimeCaptureError("modal_sdk_invalid")
     script = _script_path()
     script_bytes, script_digest = _script_source(script)
+    preparer = script.with_name("prepare_modal_inference_python.py")
+    preparation = _script_source(preparer) if isolated_python else None
     deadline = time.monotonic() + _HOST_TIMEOUT_SECONDS
     sandbox = None
     sandbox_id = None
@@ -707,22 +726,23 @@ def capture_modal_inference_runtime(
         )
         temporary = tempfile.TemporaryDirectory(prefix="synaptic-modal-inspection-")
         staged = Path(temporary.name) / "inspect_modal_inference_runtime.py"
-        descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
-        try:
-            offset = 0
-            while offset < len(script_bytes):
-                written = os.write(descriptor, script_bytes[offset:])
-                if type(written) is not int or written <= 0:
-                    raise ModalInferenceRuntimeCaptureError("inspection_source_invalid")
-                offset += written
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        _stage_source(staged, script_bytes)
         image_value = (
             sdk.Image.from_registry(image)
             .entrypoint([])
             .add_local_file(staged, _REMOTE_SCRIPT, copy=True)
         )
+        if preparation is not None:
+            staged_preparer = Path(temporary.name) / preparer.name
+            _stage_source(staged_preparer, preparation[0])
+            if (
+                _script_source(staged_preparer)[1] != preparation[1]
+                or _script_source(preparer)[1] != preparation[1]
+            ):
+                raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
+            image_value = image_value.add_local_file(
+                staged_preparer, _REMOTE_PREPARER, copy=True
+            ).run_commands("python3 " + _REMOTE_PREPARER)
         if (
             _script_source(staged)[1] != script_digest
             or _script_source(script)[1] != script_digest
@@ -732,7 +752,7 @@ def capture_modal_inference_runtime(
         def create_sandbox() -> object:
             try:
                 return sdk.Sandbox.create(
-                    "python3",
+                    *((_ISOLATED_PYTHON, "-I") if isolated_python else ("python3",)),
                     _REMOTE_SCRIPT,
                     "--image",
                     image,
@@ -768,6 +788,8 @@ def capture_modal_inference_runtime(
         )
         if _script_source(script)[1] != script_digest:
             raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
+        if preparation is not None and _script_source(preparer)[1] != preparation[1]:
+            raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
         parser = _parse_diagnostic if diagnose_distributions else _parse_candidate
         candidate = parser(raw, image=image, source_commit=source_commit)
         envelope = {
@@ -781,6 +803,17 @@ def capture_modal_inference_runtime(
                 else "synaptic-modal-inference-runtime-capture/v1"
             ),
         }
+        if preparation is not None:
+            if (
+                not diagnose_distributions
+                and candidate["python"]["executable"] != _ISOLATED_PYTHON
+            ):
+                raise ModalInferenceRuntimeCaptureError("capture_output_invalid")
+            envelope["python_preparation"] = {
+                "script_sha256": preparation[1],
+                "executable": _ISOLATED_PYTHON,
+                "qualification": "CANDIDATE_ONLY",
+            }
         encoded = json.dumps(
             envelope,
             ensure_ascii=True,
@@ -862,6 +895,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--image", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--diagnose-distributions", action="store_true")
+    parser.add_argument("--isolated-python", action="store_true")
     parser.add_argument(
         "--modal-profile",
         type=lambda value: _exact_text(value, _NAME),
@@ -924,6 +958,7 @@ def main(argv: list[str] | None = None) -> int:
                         image=arguments.image,
                         source_commit=arguments.source_commit,
                         diagnose_distributions=arguments.diagnose_distributions,
+                        isolated_python=arguments.isolated_python,
                     )
                     output, success = capture.canonical_bytes, True
                 else:

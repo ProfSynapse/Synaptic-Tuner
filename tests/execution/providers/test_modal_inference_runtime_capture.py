@@ -154,6 +154,10 @@ class Image:
         self.calls.append(("file", Path(local).name, remote, copy))
         return self
 
+    def run_commands(self, *commands):
+        self.calls.append(("build_commands", commands))
+        return self
+
 
 class Sandbox:
     object_id = "sb-123"
@@ -240,6 +244,51 @@ def test_capture_uses_existing_app_cpu_bounds_and_closes_exact_sandbox():
     )
     assert sandbox.terminate_calls == [False]
     assert sandbox.poll_calls == 1
+
+
+def test_isolated_capture_builds_exact_helper_and_invokes_exact_python():
+    body = json.loads(_candidate())
+    body["python"]["executable"] = capture._ISOLATED_PYTHON
+    raw = (
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode("ascii") + b"\n"
+    )
+    sdk, sandbox, calls = _sdk(raw=raw)
+    result = capture.capture_modal_inference_runtime(
+        sdk=sdk,
+        client=object(),
+        app_name="existing",
+        environment_name="isolated",
+        image=IMAGE,
+        source_commit=COMMIT,
+        isolated_python=True,
+    )
+    create = next(call for call in calls if call[0] == "create")
+    assert create[1][:2] == (capture._ISOLATED_PYTHON, "-I")
+    assert ("build_commands", ("python3 " + capture._REMOTE_PREPARER,)) in calls
+    report = json.loads(result.canonical_bytes)
+    assert report["python_preparation"]["qualification"] == "CANDIDATE_ONLY"
+    assert (
+        report["python_preparation"]["script_sha256"]
+        == capture._script_source(
+            capture._script_path().with_name("prepare_modal_inference_python.py")
+        )[1]
+    )
+    assert sandbox.terminate_calls == [False]
+
+
+def test_isolated_capture_rejects_wrong_interpreter_and_cleans_up():
+    sdk, sandbox, _ = _sdk()
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture.capture_modal_inference_runtime(
+            sdk=sdk,
+            client=object(),
+            app_name="existing",
+            environment_name="isolated",
+            image=IMAGE,
+            source_commit=COMMIT,
+            isolated_python=True,
+        )
+    assert sandbox.terminate_calls == [False]
 
 
 def test_create_ambiguity_has_no_retry_or_resource_adoption():

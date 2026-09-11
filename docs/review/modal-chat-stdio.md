@@ -253,6 +253,23 @@ verifier or a GPU chat session will pass. No inference pins have been invented.
 
 ## Remaining live path
 
+Inventory diagnosis (2026-09-11): source `eefc6a6` produced a successful
+`DIAGNOSTIC_ONLY` report from Sandbox `sb-Sj9OVAZ63CtcLlZ9SnPbuO`; capture exit 0
+confirms exact termination and a stopped poll. The full structured non-secret
+report is `evidence/modal-inference-inventory-eefc6a6.json`. Its 243 entries
+contain seven conflicting names across `/usr/lib/python3/dist-packages` and
+`/usr/local/lib/python3.12/dist-packages`: cryptography, distro,
+importlib-metadata, pyjwt, setuptools, six and zipp. Thus the failure is mixed
+OS/interpreter package discovery, not duplicate enumeration of one object.
+The measured ML stack includes vLLM 0.17.1, Torch 2.10.0+cu129 and Transformers
+4.57.6; Modal is absent. These diagnostic facts are not runtime pins or serving
+qualification. The emitted report passed the same credential-shape scan.
+
+The candidate packaging correction uses a dedicated copied Python interpreter
+and one reviewed ML-site path, leaving system Python untouched. Normal exact
+distribution verification stays strict. Final SDK/dependency installation,
+engine source packaging and complete runtime locks still follow separately.
+
 Update (2026-09-11, physical collision): source `e531329` executed once as
 approved. Sandbox `sb-8wENkdwVnbrNrEKJRMD6hU` exited 125 and exact cleanup was
 confirmed. Its stopped read reports `DISTRIBUTION_PHYSICAL_DUPLICATE`; the two
