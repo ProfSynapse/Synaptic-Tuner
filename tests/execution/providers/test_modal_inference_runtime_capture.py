@@ -519,6 +519,164 @@ def test_cli_profile_name_is_rejected_before_auth_resolution(
     assert "secret" not in capsys.readouterr().err
 
 
+class _ReadSandbox:
+    def __init__(self, sandbox_id="sb-exact", *, returncode=0, stdout=None, stderr=b""):
+        self.object_id = sandbox_id
+        self._returncode = returncode
+        self.stdout = [_candidate() if stdout is None else stdout]
+        self.stderr = [stderr] if stderr else []
+
+    def poll(self):
+        return self._returncode
+
+
+def _read_sdk(sandbox):
+    calls = []
+
+    class SandboxFactory:
+        @staticmethod
+        def from_id(sandbox_id, client=None):
+            calls.append(("from_id", sandbox_id, client))
+            return sandbox
+
+    return SimpleNamespace(__version__="1.5.4", Sandbox=SandboxFactory), calls
+
+
+def test_read_sandbox_uses_exact_stopped_handle_without_mutation_or_discovery():
+    sandbox = _ReadSandbox()
+    sdk, calls = _read_sdk(sandbox)
+    client = object()
+    raw = capture.read_modal_inference_runtime_sandbox(
+        sdk=sdk, client=client, sandbox_id="sb-exact", image=IMAGE, source_commit=COMMIT
+    )
+    assert json.loads(raw)["candidate"]["status"] == "CANDIDATE_ONLY"
+    assert calls == [("from_id", "sb-exact", client)]
+    assert not any(hasattr(sandbox, name) for name in ("terminate", "write", "create"))
+
+
+def test_read_sandbox_reports_only_strict_remote_reason():
+    error = (
+        json.dumps(
+            {
+                "reason_code": "PYTHON_INVALID",
+                "schema_version": "synaptic-modal-inference-runtime-inspection-error/v1",
+                "status": "FAILED",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        + b"\n"
+    )
+    sandbox = _ReadSandbox(returncode=125, stdout=b"", stderr=error)
+    sdk, _ = _read_sdk(sandbox)
+    raw = capture.read_modal_inference_runtime_sandbox(
+        sdk=sdk,
+        client=object(),
+        sandbox_id="sb-exact",
+        image=IMAGE,
+        source_commit=COMMIT,
+    )
+    assert json.loads(raw) == {
+        "reason_code": "PYTHON_INVALID",
+        "returncode": 125,
+        "sandbox_id": "sb-exact",
+        "schema_version": "synaptic-modal-inference-runtime-read/v1",
+        "status": "REMOTE_FAILED",
+    }
+
+
+@pytest.mark.parametrize(
+    "stderr", (b"private traceback\n", b'{"reason_code":"SECRET"}\n')
+)
+def test_read_sandbox_malformed_remote_log_is_closed_and_not_leaked(stderr):
+    sandbox = _ReadSandbox(returncode=125, stdout=b"", stderr=stderr)
+    sdk, _ = _read_sdk(sandbox)
+    raw = capture.read_modal_inference_runtime_sandbox(
+        sdk=sdk,
+        client=object(),
+        sandbox_id="sb-exact",
+        image=IMAGE,
+        source_commit=COMMIT,
+    )
+    assert json.loads(raw)["reason_code"] == "UNCLASSIFIED_OUTPUT"
+    assert b"private" not in raw
+
+
+def test_read_sandbox_invalid_success_output_preserves_known_result():
+    sandbox = _ReadSandbox(returncode=0, stdout=b"private invalid\n")
+    sdk, _ = _read_sdk(sandbox)
+    raw = capture.read_modal_inference_runtime_sandbox(
+        sdk=sdk,
+        client=object(),
+        sandbox_id="sb-exact",
+        image=IMAGE,
+        source_commit=COMMIT,
+    )
+    assert json.loads(raw) == {
+        "reason_code": "OUTPUT_INVALID",
+        "returncode": 0,
+        "sandbox_id": "sb-exact",
+        "schema_version": "synaptic-modal-inference-runtime-read/v1",
+        "status": "REMOTE_FAILED",
+    }
+    assert b"private" not in raw
+
+
+def test_read_sandbox_requires_stopped_before_stream_access():
+    sandbox = _ReadSandbox(returncode=None)
+
+    class Unreadable:
+        def __iter__(self):
+            raise AssertionError("stdout read")
+
+    sandbox.stdout = Unreadable()
+    sdk, _ = _read_sdk(sandbox)
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError) as caught:
+        capture.read_modal_inference_runtime_sandbox(
+            sdk=sdk,
+            client=object(),
+            sandbox_id="sb-exact",
+            image=IMAGE,
+            source_commit=COMMIT,
+        )
+    assert str(caught.value) == "sandbox_not_stopped"
+
+
+@pytest.mark.parametrize(
+    "sandbox_id", ("", "sb-bad/slash", "xx-exact", "sb-" + "a" * 65)
+)
+def test_read_sandbox_rejects_malformed_exact_id_before_sdk(sandbox_id):
+    sdk, calls = _read_sdk(_ReadSandbox())
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture.read_modal_inference_runtime_sandbox(
+            sdk=sdk,
+            client=object(),
+            sandbox_id=sandbox_id,
+            image=IMAGE,
+            source_commit=COMMIT,
+        )
+    assert calls == []
+
+
+def test_read_sandbox_aggregate_deadline_bounds_blocked_poll(monkeypatch):
+    sandbox = _ReadSandbox()
+    gate = threading.Event()
+    sandbox.poll = gate.wait
+    sdk, _ = _read_sdk(sandbox)
+    monkeypatch.setattr(capture, "_READ_TIMEOUT_SECONDS", 0.01)
+    started = time.monotonic()
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError) as caught:
+        capture.read_modal_inference_runtime_sandbox(
+            sdk=sdk,
+            client=object(),
+            sandbox_id="sb-exact",
+            image=IMAGE,
+            source_commit=COMMIT,
+        )
+    assert str(caught.value) == "sandbox_read_timeout"
+    assert time.monotonic() - started < 0.5
+
+
 def test_cli_help_is_normal_success(capsys):
     assert capture.main(["--help"]) == 0
     captured = capsys.readouterr()

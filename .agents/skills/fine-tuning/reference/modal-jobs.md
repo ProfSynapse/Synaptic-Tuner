@@ -293,6 +293,19 @@ process death; an indeterminate report is not proof of shutdown. Known resources
 are checked through the exact returned handle, never listing/adoption. Keep the
 closed ownership/cleanup report and resolve ambiguity before another attempt.
 
+For a failed capture that returned an exact Sandbox ID, diagnose that same
+instance through the maintenance command's explicit `--read-sandbox ID` mode.
+Keep the original image/source and app/environment selections as provenance;
+the latter flags alone do not attest a recovered Sandbox's environment. This
+mode requires a stopped exact instance, reads only bounded stdout/stderr, and
+performs no create, listing, termination or retry. It exposes only validated
+candidate metadata or the inspector's closed error codes, never arbitrary
+provider text. Unrecognized output retains the known exit code with a fixed
+unclassified marker, not a guessed cause. Its 30-second read deadline starts
+after explicit client construction; it does not bound SDK authentication.
+Do not infer failure cause from the capture process's generic
+`capture_failed` result or start another allocation to obtain diagnostics.
+
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's
 `assert_current(source)` to recheck current workflow/Foundation/native metadata

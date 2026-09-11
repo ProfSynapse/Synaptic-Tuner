@@ -2,7 +2,8 @@
 
 Working-tree qualification, 2026-09-11. Engine only. This record does not claim
 a deployed model, a live response, reviewed inference image pins, or confirmed
-cloud shutdown. No cloud call has been made for this change.
+cloud chat shutdown. The initially provider-free work is followed by the dated
+CPU-probe correction below; no GPU model response is claimed.
 
 ## Connection and ownership
 
@@ -150,6 +151,24 @@ this stored-profile cloud operation can incur charges and requires exact
 moment-of-execution approval. No provider request, Sandbox allocation, image
 capture or GPU chat occurred. Do not bypass this rejection; obtain explicit
 approval for the same bounded command before attempting it again.
+
+Correction (2026-09-11, explicitly approved CPU attempt): the operator approved
+the exact command and it executed once. The capture process exited 125 with
+`capture_failed`, returning Sandbox `sb-Hf9Gir2Fxu8Ns6b2BppBeg` and reporting
+`cleanup_requested=true`, `cleanup_confirmed=true`, `ownership_known=true`.
+The code requires exact-handle termination followed by a non-pending poll before
+reporting cleanup confirmed. No candidate runtime metadata was returned, and no
+second attempt was started. The preserved closed process result is in
+`evidence/modal-inference-cpu-probe-2289207.json`. This result does not identify
+the remote inspection failure cause; exact-instance read-only diagnosis is next.
+
+The existing maintenance command now supports `--read-sandbox ID` for this
+diagnosis. It requires an exact stopped Sandbox, performs no create/list/stop
+calls, and reads bounded stdout/stderr under one 30-second deadline after client
+construction. It preserves the known exit code and returns only validated
+candidate metadata, allowlisted inspector errors or fixed unknown-output codes.
+The integrated capture/inspection tests passed 49 tests in 0.26 seconds. This
+read mode does not authorize another probe or adopt the Sandbox for serving.
 
 ## Remaining live path
 

@@ -33,6 +33,19 @@ _MAX_CAPTURE_BYTES = 1024 * 1024
 _HOST_TIMEOUT_SECONDS = 600.0
 _SANDBOX_TIMEOUT_SECONDS = 300
 _CLEANUP_TIMEOUT_SECONDS = 10.0
+_READ_TIMEOUT_SECONDS = 30.0
+_SANDBOX_ID = re.compile(r"sb-[A-Za-z0-9]{1,64}")
+_INSPECTOR_REASONS = frozenset(
+    {
+        "ARGUMENT_INVALID",
+        "IMAGE_INVALID",
+        "INSPECTION_FAILED",
+        "METADATA_INVALID",
+        "OUTPUT_INVALID",
+        "PYTHON_INVALID",
+        "SOURCE_INVALID",
+    }
+)
 
 
 class ModalInferenceRuntimeCaptureError(RuntimeError):
@@ -375,6 +388,113 @@ def _late_cleanup(sandbox: object) -> tuple[bool, bool]:
     return _cleanup(sandbox)
 
 
+def _read_stream(stream: object) -> bytes:
+    output = bytearray()
+    for chunk in stream:
+        if type(chunk) is str:
+            try:
+                chunk = chunk.encode("utf-8")
+            except UnicodeError:
+                raise ModalInferenceRuntimeCaptureError(
+                    "sandbox_output_invalid"
+                ) from None
+        if type(chunk) is not bytes or len(chunk) > _MAX_CAPTURE_BYTES - len(output):
+            raise ModalInferenceRuntimeCaptureError("sandbox_output_invalid")
+        output.extend(chunk)
+    return bytes(output)
+
+
+def _remote_reason(payload: bytes) -> str:
+    def pairs(values: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in values:
+            if key in result:
+                raise ValueError
+            result[key] = value
+        return result
+
+    try:
+        document = json.loads(payload.decode("ascii"), object_pairs_hook=pairs)
+        if (
+            payload
+            != json.dumps(document, sort_keys=True, separators=(",", ":")).encode(
+                "ascii"
+            )
+            + b"\n"
+            or type(document) is not dict
+            or set(document) != {"reason_code", "schema_version", "status"}
+            or document["schema_version"]
+            != "synaptic-modal-inference-runtime-inspection-error/v1"
+            or document["status"] != "FAILED"
+            or document["reason_code"] not in _INSPECTOR_REASONS
+        ):
+            raise ValueError
+        return document["reason_code"]
+    except Exception:
+        raise ModalInferenceRuntimeCaptureError(
+            "sandbox_remote_failure_unknown"
+        ) from None
+
+
+def read_modal_inference_runtime_sandbox(
+    *, sdk: object, client: object, sandbox_id: str, image: str, source_commit: str
+) -> bytes:
+    """Read one exact stopped inspection Sandbox without mutation or discovery."""
+    sandbox_id = _exact_text(sandbox_id, _SANDBOX_ID)
+    image = _exact_text(image, _IMAGE)
+    source_commit = _exact_text(source_commit, _COMMIT)
+    if client is None or getattr(sdk, "__version__", None) != _SDK_VERSION:
+        raise ModalInferenceRuntimeCaptureError("modal_sdk_invalid")
+    deadline = time.monotonic() + _READ_TIMEOUT_SECONDS
+    sandbox = _bounded_call(
+        lambda: sdk.Sandbox.from_id(sandbox_id, client=client),
+        deadline=deadline,
+        timeout_code="sandbox_read_timeout",
+    )
+    if getattr(sandbox, "object_id", None) != sandbox_id:
+        raise ModalInferenceRuntimeCaptureError("sandbox_identity_invalid")
+    returncode = _bounded_call(
+        sandbox.poll, deadline=deadline, timeout_code="sandbox_read_timeout"
+    )
+    if type(returncode) is not int:
+        raise ModalInferenceRuntimeCaptureError("sandbox_not_stopped")
+    stdout = _bounded_call(
+        lambda: _read_stream(sandbox.stdout),
+        deadline=deadline,
+        timeout_code="sandbox_read_timeout",
+    )
+    stderr = _bounded_call(
+        lambda: _read_stream(sandbox.stderr),
+        deadline=deadline,
+        timeout_code="sandbox_read_timeout",
+    )
+    report = {
+        "returncode": returncode,
+        "sandbox_id": sandbox_id,
+        "schema_version": "synaptic-modal-inference-runtime-read/v1",
+    }
+    if returncode == 0:
+        try:
+            if stderr:
+                raise ValueError
+            candidate = _parse_candidate(
+                stdout, image=image, source_commit=source_commit
+            )
+        except Exception:
+            report.update(status="REMOTE_FAILED", reason_code="OUTPUT_INVALID")
+        else:
+            report.update(status="CANDIDATE_ONLY", candidate=candidate)
+    else:
+        try:
+            if stdout:
+                raise ValueError
+            reason = _remote_reason(stderr)
+        except Exception:
+            reason = "UNCLASSIFIED_OUTPUT"
+        report.update(status="REMOTE_FAILED", reason_code=reason)
+    return json.dumps(report, sort_keys=True, separators=(",", ":")).encode("ascii")
+
+
 def _parse_candidate(
     raw: bytes, *, image: str, source_commit: str
 ) -> dict[str, object]:
@@ -653,6 +773,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=lambda value: _exact_text(value, _NAME),
         help="exact named Modal profile; never falls back to environment auth",
     )
+    parser.add_argument(
+        "--read-sandbox", type=lambda value: _exact_text(value, _SANDBOX_ID)
+    )
     return parser
 
 
@@ -698,16 +821,27 @@ def main(argv: list[str] | None = None) -> int:
                             "modal_credentials_missing"
                         )
                 client = modal.Client.from_credentials(token_id, token_secret)
-                capture = capture_modal_inference_runtime(
-                    sdk=modal,
-                    client=client,
-                    app_name=arguments.app,
-                    environment_name=arguments.environment,
-                    image=arguments.image,
-                    source_commit=arguments.source_commit,
-                )
-        sys.stdout.buffer.write(capture.canonical_bytes + b"\n")
-        return 0
+                if arguments.read_sandbox is None:
+                    capture = capture_modal_inference_runtime(
+                        sdk=modal,
+                        client=client,
+                        app_name=arguments.app,
+                        environment_name=arguments.environment,
+                        image=arguments.image,
+                        source_commit=arguments.source_commit,
+                    )
+                    output, success = capture.canonical_bytes, True
+                else:
+                    output = read_modal_inference_runtime_sandbox(
+                        sdk=modal,
+                        client=client,
+                        sandbox_id=arguments.read_sandbox,
+                        image=arguments.image,
+                        source_commit=arguments.source_commit,
+                    )
+                    success = True
+        sys.stdout.buffer.write(output + b"\n")
+        return 0 if success else 125
     except (KeyboardInterrupt, SystemExit) as error:
         if isinstance(error, SystemExit) and error.code == 0:
             return 0
