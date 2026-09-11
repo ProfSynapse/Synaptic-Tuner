@@ -215,6 +215,23 @@ derive remaining time without renewal, verify the separate inference runtime
 and own Sandbox cleanup. No verifier callback or guessed runtime lock was added.
 See `docs/review/inference-shared-deadline.md`.
 
+Bootstrap implementation update (2026-09-11): the internal
+`open_modal_chat_worker` composes signed launch admission, concrete packaged
+inference-runtime verification, the existing mounted-model preparer and
+`verified_vllm_chat`. It derives one conservative monotonic deadline before
+preparation and does not renew it after startup. Fresh admission and rederived
+serving settings are required before startup and before yielding the session.
+No caller-supplied runtime verifier, alternate lock path, manual weight staging
+or new operator command is accepted. The distinct inference runtime manifest,
+worker closure and dependency lock are intentionally not supplied until their
+image/Python/dependency/source pins have been measured and independently reviewed;
+the concrete verifier therefore denies the current unqualified installation.
+Do not replace that denial with training pins or a bypass callback. This worker
+context is not yet a Modal deployment, authenticated remote request service or
+Sandbox cleanup adapter. Runtime-file checks assume the trusted immutable image
+and packaged source tree; they do not establish the provider's image identity
+or prevent arbitrary mutation of already imported Python code.
+
 ## Frozen live evidence
 
 This evidence describes the pre-coordinator implementation. It is historical

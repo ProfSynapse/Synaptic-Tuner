@@ -114,6 +114,19 @@ pins exist yet. Complete the inactive bootstrap's source/control boundary before
 capturing its distinct inventory; runtime verification must gate actual serving
 and provider activation, with no caller-supplied bypass verifier.
 
+Bootstrap implementation checkpoint (2026-09-11): the remote-local worker
+composition and concrete packaged inference-runtime verifier passed 64 integrated
+provider-free tests and independent source review, with 387 existing regressions
+passing separately. See `../review/modal-inference-bootstrap.md`. This connects
+launch admission, remote preparation,
+the original deadline and the existing chat runtime. It does not add the SDK
+transport or an authenticated remote request service. The measured inference
+runtime/closure/dependency resources are still absent, so the installed worker
+must deny before preparation or serving. Next capture and independently review
+those actual runtime pins, then finish provider creation, authenticated access
+and exact-instance cleanup. No current image identity or live serving proof is
+implied by the new verifier's source/configuration consistency checks.
+
 ## Product boundary
 
 A consumer chooses a runtime for one verified training run and explicitly sends

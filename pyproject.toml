@@ -54,7 +54,12 @@ include = [
 namespaces = true
 
 [tool.setuptools.package-data]
-"tuner.execution.providers.modal" = ["modal-runtime-v1.lock.json"]
+"tuner.execution.providers.modal" = [
+  "modal-runtime-v1.lock.json",
+  "inference-runtime.lock.json",
+  "inference-worker-closure.json",
+  "inference-dependencies.lock",
+]
 "tuner.runtime" = ["manifests/offline-sft-worker-v1.json"]
 
 # The Modal runtime lock is part of the importable engine contract. Broader
