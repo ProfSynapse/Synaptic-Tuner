@@ -103,8 +103,11 @@ remain unfinished.
 Shared-deadline prerequisite (2026-09-11): the existing runtime, verified-chat
 composition and session controller now accept the same optional process-local
 monotonic deadline. Startup cannot grant a new conversation lifetime; shorter
-local limits still win, and late responses cannot commit history. Qualification
-is recorded in `../review/inference-shared-deadline.md`. This is reusable timing
+local limits still win, and late responses cannot commit history. Source
+`c2efd11` passed 387 primary and three separate signed-worker tests, independent
+review, and exact-commit wheel/import checks; overlapping caller/subset lanes
+and environment limits are recorded in `../review/inference-shared-deadline.md`.
+This is reusable timing
 code, not the executable Modal bootstrap or a substitute inference lock. The
 training lock is SFT-specific, and no reviewed inference image/Python/dependency
 pins exist yet. Complete the inactive bootstrap's source/control boundary before
