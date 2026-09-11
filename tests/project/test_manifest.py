@@ -220,6 +220,18 @@ def test_engine_requirement_rejects_incompatible_version(tmp_path: Path) -> None
     }
 
 
+def test_engine_requirement_implicitly_excludes_prerelease(tmp_path: Path) -> None:
+    manifest = _manifest_with_requirement(tmp_path, ">=1.0,<2")
+    with pytest.raises(ManifestValidationError) as error:
+        validate_engine_requirement(manifest, "1.5rc1")
+    assert error.value.details["reason"] == "engine_version_incompatible"
+
+
+def test_engine_requirement_explicitly_allows_prerelease(tmp_path: Path) -> None:
+    manifest = _manifest_with_requirement(tmp_path, ">=1.5rc1,<2")
+    validate_engine_requirement(manifest, "1.5rc1")
+
+
 def test_engine_requirement_rejects_invalid_specifier(tmp_path: Path) -> None:
     manifest = _manifest_with_requirement(tmp_path, "definitely-not-a-specifier")
 

@@ -253,6 +253,24 @@ verifier or a GPU chat session will pass. No inference pins have been invented.
 
 ## Remaining live path
 
+SDK candidate success (2026-09-11): source `1280300` passed strict capture in
+Sandbox `sb-ExiSJ8TJGFTxSCA37MYM69`; exact cleanup was confirmed. Evidence
+`evidence/modal-inference-sdk-1280300.json` records 229 unique distributions,
+Modal 1.5.4, vLLM 0.17.1 and the same CPython 3.12.13 executable/hash. The image
+build also completed `pip check`. No existing ML package was selected for
+replacement by the nine-entry additive lock.
+
+Engine compatibility correction: `packaging>=23,<27` accepts the image's
+measured Packaging 26.0. The engine requirement check now explicitly uses
+`bool(specifier.prereleases)` to preserve Packaging 25's implicit prerelease
+exclusion and explicit prerelease opt-in. The integrated manifest and optional
+Modal dependency selection passed 23 tests on both Packaging 25.0 and 26.0.
+The existing offline trainer closure and containing training-runtime lock were
+refreshed by their checked-in hash-only tools: inventories remain 66 and 97,
+and runtime/image/dependency selections are unchanged. The only trainer source
+change is this one-line compatibility rule (+23 bytes). These refreshes are
+source-integrity maintenance, not a new training qualification.
+
 Isolated candidate success (2026-09-11): source `a3d76b3` passed strict capture
 in Sandbox `sb-srcV306hLidnqZKG2BN1x4` with exact cleanup confirmed. Evidence
 `evidence/modal-inference-isolated-a3d76b3.json` records CPython 3.12.13 at

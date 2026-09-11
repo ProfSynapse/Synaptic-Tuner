@@ -13,7 +13,7 @@ authors = [{ name = "Synaptic Labs" }]
 dependencies = [
   "PyYAML>=6,<7",
   "jsonschema>=4.18,<5",
-  "packaging>=23,<26",
+  "packaging>=23,<27",
   "python-dotenv>=1,<2",
   "requests>=2.32,<3",
 ]

@@ -226,7 +226,7 @@ def validate_engine_requirement(
             },
         ) from exc
 
-    if not specifier.contains(parsed_version, prereleases=None):
+    if not specifier.contains(parsed_version, prereleases=bool(specifier.prereleases)):
         raise ManifestValidationError(
             "Running engine version does not satisfy the project requirement",
             details={
