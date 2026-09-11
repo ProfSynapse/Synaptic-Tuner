@@ -400,3 +400,19 @@ review and package actual inference runtime/dependency/source locks, then qualif
 the exact pushed source with one authenticated trained run, real chat response
 and confirmed exact-instance termination. The CPU candidate report alone cannot
 qualify a final installed engine image or authorize a GPU session.
+
+Correction (2026-09-11, inference lock maintenance):
+`scripts/regenerate_modal_inference_lock.py` checks and refreshes content hashes
+only for an existing reviewed 118-source inference closure. It preserves runtime
+pins and dependency bytes and refuses missing locks; it does not initialize the
+three still-missing inference resources. Its two replacements are individually
+atomic, not a transaction: interruption between them fails closed and requires
+recovery of a reviewed consistent pair before retrying. CPU package inspection,
+including the engine-installed candidate above, is not final runtime admission
+or a successful model response.
+
+The integrated maintenance contract suite passed 11 tests in 0.44 seconds under
+isolated CPython 3.12.9/pytest 8.4.2 from the execution checkout. Direct invocation
+from that checkout without operator `PYTHONPATH` returned `FILE_MISSING`/125 as
+expected while the inference locks remain absent. Canonical skill mirrors are
+in sync. These are local tooling checks, not cloud inference evidence.

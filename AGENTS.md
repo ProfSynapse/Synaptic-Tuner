@@ -48,6 +48,12 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- For existing inference locks, use `python3 scripts/regenerate_modal_inference_lock.py`
+  (read-only check), then `--write` only after reviewing source changes. It
+  preserves the fixed inventory and pins and never initializes missing locks.
+  An interrupted two-file replacement requires recovery of the reviewed
+  consistent pair; do not bypass validation or assume a rerun repairs it.
+
 - After changing any file already listed in `modal-runtime-v1.lock.json`, run
   `python3 scripts/regenerate_modal_runtime_lock.py` first; use `--write` only
   for an intentional reviewed hash refresh, then rerun the default check. The

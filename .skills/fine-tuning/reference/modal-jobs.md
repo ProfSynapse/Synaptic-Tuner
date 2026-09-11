@@ -526,6 +526,17 @@ smoke into runtime code.
 
 ## Runtime-lock maintenance
 
+For the separate inference image, use `python3 scripts/regenerate_modal_inference_lock.py`
+to check already-reviewed inference locks, or add `--write` for an intentional
+source-content refresh and then rerun the check. This offline tool preserves
+the fixed 118-source inventory, dependency bytes, and runtime pins. It cannot
+initialize missing locks or qualify a CPU candidate for live chat. Run it only
+as a standalone maintenance process, never inside a serving process.
+The two lock replacements are individually atomic but not transactional. If
+interrupted between replacements, verification and reruns fail closed; recover
+the reviewed consistent lock pair before retrying. Do not bypass validation.
+Local pathname/race checks are best effort, not hostile-storage guarantees.
+
 When a file already named by `modal-runtime-v1.lock.json` changes, verify the
 lock from the repository root:
 
