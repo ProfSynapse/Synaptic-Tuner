@@ -586,6 +586,42 @@ def test_read_sandbox_reports_only_strict_remote_reason():
 
 
 @pytest.mark.parametrize(
+    "reason",
+    (
+        "DISTRIBUTION_COUNT_LIMIT",
+        "DISTRIBUTION_ENUMERATION_FAILED",
+        "DISTRIBUTION_IDENTITY_DUPLICATE",
+        "DISTRIBUTION_METADATA_READ_FAILED",
+        "DISTRIBUTION_NAME_INVALID",
+        "DISTRIBUTION_VERSION_INVALID",
+    ),
+)
+def test_read_sandbox_accepts_closed_distribution_reason(reason):
+    error = (
+        json.dumps(
+            {
+                "reason_code": reason,
+                "schema_version": "synaptic-modal-inference-runtime-inspection-error/v1",
+                "status": "FAILED",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        + b"\n"
+    )
+    sandbox = _ReadSandbox(returncode=125, stdout=b"", stderr=error)
+    sdk, _ = _read_sdk(sandbox)
+    raw = capture.read_modal_inference_runtime_sandbox(
+        sdk=sdk,
+        client=object(),
+        sandbox_id="sb-exact",
+        image=IMAGE,
+        source_commit=COMMIT,
+    )
+    assert json.loads(raw)["reason_code"] == reason
+
+
+@pytest.mark.parametrize(
     "stderr", (b"private traceback\n", b'{"reason_code":"SECRET"}\n')
 )
 def test_read_sandbox_malformed_remote_log_is_closed_and_not_leaked(stderr):

@@ -306,6 +306,13 @@ after explicit client construction; it does not bound SDK authentication.
 Do not infer failure cause from the capture process's generic
 `capture_failed` result or start another allocation to obtain diagnostics.
 
+An inspector metadata rejection is not permission to drop packages from the
+runtime inventory, accept duplicate distributions, raise limits or guess pins.
+Keep its validation intact and use closed, distinct diagnostics for enumeration
+limits, invalid names/versions, duplicate normalized names and metadata-read
+failures. A follow-up allocation still needs its own applicable authorization;
+reuse the exact stopped instance for read-only diagnosis first.
+
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's
 `assert_current(source)` to recheck current workflow/Foundation/native metadata

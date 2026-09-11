@@ -162,19 +162,38 @@ def _executable() -> tuple[str, str]:
 def _distributions() -> dict[str, str]:
     result: dict[str, str] = {}
     try:
-        for distribution in importlib.metadata.distributions():
-            if len(result) >= _MAX_DISTRIBUTIONS:
-                raise _InspectionFailure("METADATA_INVALID")
-            name = _bounded_text(distribution.metadata.get("Name"), maximum=128)
-            version = _bounded_text(distribution.version, maximum=256)
-            normalized = _DIST_SEPARATORS.sub("-", name).lower()
-            if not normalized or normalized in result:
-                raise _InspectionFailure("METADATA_INVALID")
-            result[normalized] = version
-    except _InspectionFailure:
-        raise
+        iterator = iter(importlib.metadata.distributions())
     except Exception:
-        raise _InspectionFailure("METADATA_INVALID") from None
+        raise _InspectionFailure("DISTRIBUTION_ENUMERATION_FAILED") from None
+    while True:
+        try:
+            distribution = next(iterator)
+        except StopIteration:
+            break
+        except Exception:
+            raise _InspectionFailure("DISTRIBUTION_ENUMERATION_FAILED") from None
+        if len(result) >= _MAX_DISTRIBUTIONS:
+            raise _InspectionFailure("DISTRIBUTION_COUNT_LIMIT")
+        try:
+            metadata = distribution.metadata
+            raw_name = metadata.get("Name")
+            raw_version = distribution.version
+        except Exception:
+            raise _InspectionFailure("DISTRIBUTION_METADATA_READ_FAILED") from None
+        try:
+            name = _bounded_text(raw_name, maximum=128)
+        except Exception:
+            raise _InspectionFailure("DISTRIBUTION_NAME_INVALID") from None
+        try:
+            version = _bounded_text(raw_version, maximum=256)
+        except Exception:
+            raise _InspectionFailure("DISTRIBUTION_VERSION_INVALID") from None
+        normalized = _DIST_SEPARATORS.sub("-", name).lower()
+        if not normalized:
+            raise _InspectionFailure("DISTRIBUTION_NAME_INVALID")
+        if normalized in result:
+            raise _InspectionFailure("DISTRIBUTION_IDENTITY_DUPLICATE")
+        result[normalized] = version
     return dict(sorted(result.items()))
 
 

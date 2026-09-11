@@ -170,6 +170,22 @@ candidate metadata, allowlisted inspector errors or fixed unknown-output codes.
 The integrated capture/inspection tests passed 49 tests in 0.26 seconds. This
 read mode does not authorize another probe or adopt the Sandbox for serving.
 
+Exact-instance diagnosis (2026-09-11): the committed read-only command read
+`sb-Hf9Gir2Fxu8Ns6b2BppBeg` without allocation or termination. The provider exit
+code is 125 and the inspector's validated stderr reports `METADATA_INVALID`.
+The result is preserved in `evidence/modal-inference-cpu-read-2289207.json`.
+This identifies the metadata-validation class, not which metadata constraint
+failed; it does not justify weakening duplicate checks or inventing runtime pins.
+
+Follow-up preparation (2026-09-11): the inspector now distinguishes distribution
+count limits, enumeration failures, metadata reads, invalid names, invalid
+versions and duplicate normalized identities with six closed error codes. No
+package values or raw exceptions are emitted, and existing limits and duplicate
+rejection remain unchanged. The capture reader accepts these exact codes.
+The integrated inspection/diagnosis selection passed 59 tests in 0.27 seconds.
+This is improved diagnosis, not a claimed fix for the image's unknown metadata
+condition. A further CPU allocation has not yet been made.
+
 ## Remaining live path
 
 Correction (2026-09-11, SDK integration): the explicit-client transport now

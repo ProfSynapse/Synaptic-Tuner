@@ -102,7 +102,9 @@ def test_duplicate_distribution_still_fails(monkeypatch):
         Distribution("modal", "1.5.4"),
     )
     _metadata(monkeypatch, values)
-    with pytest.raises(inspection._InspectionFailure):
+    with pytest.raises(
+        inspection._InspectionFailure, match="DISTRIBUTION_IDENTITY_DUPLICATE"
+    ):
         inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
 
 
@@ -110,8 +112,51 @@ def test_distribution_count_is_bounded(monkeypatch):
     values = [Distribution(f"package-{index}", "1") for index in range(513)]
     values[:2] = [Distribution("vllm", "0.17.1"), Distribution("modal", "1.5.4")]
     _metadata(monkeypatch, values)
-    with pytest.raises(inspection._InspectionFailure, match="METADATA_INVALID"):
+    with pytest.raises(inspection._InspectionFailure, match="DISTRIBUTION_COUNT_LIMIT"):
         inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
+
+
+@pytest.mark.parametrize(
+    "values,reason",
+    (
+        ((Distribution("", "1"),), "DISTRIBUTION_NAME_INVALID"),
+        ((Distribution("package", ""),), "DISTRIBUTION_VERSION_INVALID"),
+    ),
+)
+def test_invalid_distribution_fields_have_closed_granularity(
+    monkeypatch, values, reason
+):
+    _metadata(monkeypatch, values)
+    with pytest.raises(inspection._InspectionFailure, match=reason):
+        inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
+
+
+def test_distribution_enumeration_failure_is_closed(monkeypatch):
+    _metadata(monkeypatch)
+    monkeypatch.setattr(
+        inspection.importlib.metadata,
+        "distributions",
+        lambda: (_ for _ in ()).throw(RuntimeError("private-enumeration")),
+    )
+    with pytest.raises(
+        inspection._InspectionFailure, match="DISTRIBUTION_ENUMERATION_FAILED"
+    ) as caught:
+        inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
+    assert "private" not in str(caught.value)
+
+
+def test_distribution_metadata_read_failure_is_closed(monkeypatch):
+    class Unreadable:
+        @property
+        def metadata(self):
+            raise RuntimeError("private-metadata")
+
+    _metadata(monkeypatch, (Unreadable(),))
+    with pytest.raises(
+        inspection._InspectionFailure, match="DISTRIBUTION_METADATA_READ_FAILED"
+    ) as caught:
+        inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
+    assert "private" not in str(caught.value)
 
 
 def test_executable_records_canonical_symlink_target(monkeypatch, tmp_path):
