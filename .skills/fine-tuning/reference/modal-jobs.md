@@ -359,6 +359,14 @@ never install the full training launcher lock over the ML image. Capture records
 the additive lock digest and requires measured Modal 1.5.4. The image still needs
 engine packaging and final runtime/source qualification before serving.
 
+For an engine-installed candidate, pair `--engine-wheel` with its exact
+`--engine-wheel-sha256`, plus `--isolated-python --modal-additions`. Build that
+wheel offline from committed source first. Capture verifies/stages bounded
+regular wheel bytes and installs without index access or dependency resolution,
+then runs `pip check`. Its report records the wheel digest/name and the exact
+hydrated provider Image ID; these are candidate provenance, not serving approval.
+An image without packaged inference commitments must still fail admission.
+
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's
 `assert_current(source)` to recheck current workflow/Foundation/native metadata

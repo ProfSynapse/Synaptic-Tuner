@@ -27,17 +27,23 @@ _IMAGE = re.compile(r"docker\.io/vllm/vllm-openai@sha256:[0-9a-f]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,62}[A-Za-z0-9])?")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_WHEEL_NAME = re.compile(
+    r"synaptic_tuner-[A-Za-z0-9][A-Za-z0-9.!+_-]{0,127}-py3-none-any\.whl"
+)
 _SDK_VERSION = "1.5.4"
 _REMOTE_SCRIPT = "/opt/synaptic/inspect_modal_inference_runtime.py"
 _REMOTE_PREPARER = "/opt/synaptic/prepare_modal_inference_python.py"
 _ISOLATED_PYTHON = "/opt/synaptic-inference/bin/python"
 _REMOTE_ADDITIONS = "/opt/synaptic/modal-inference-additions.lock"
+_REMOTE_WHEEL_ROOT = "/opt/synaptic"
 _MAX_CAPTURE_BYTES = 1024 * 1024
+_MAX_WHEEL_BYTES = 32 * 1024 * 1024
 _HOST_TIMEOUT_SECONDS = 600.0
 _SANDBOX_TIMEOUT_SECONDS = 300
 _CLEANUP_TIMEOUT_SECONDS = 10.0
 _READ_TIMEOUT_SECONDS = 30.0
 _SANDBOX_ID = re.compile(r"sb-[A-Za-z0-9]{1,64}")
+_IMAGE_ID = re.compile(r"im-[A-Za-z0-9]{1,64}")
 _INSPECTOR_REASONS = frozenset(
     {
         "ARGUMENT_INVALID",
@@ -182,6 +188,60 @@ def _script_source(path: Path) -> tuple[bytes, str]:
                 if sys.exc_info()[0] is None:
                     raise ModalInferenceRuntimeCaptureError(
                         "inspection_source_invalid"
+                    ) from None
+
+
+def _wheel_source(path: Path) -> tuple[bytes, str, str]:
+    if type(path) is not type(Path()) or _WHEEL_NAME.fullmatch(path.name) is None:
+        raise ModalInferenceRuntimeCaptureError("engine_wheel_invalid")
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
+        )
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ModalInferenceRuntimeCaptureError("engine_wheel_invalid")
+        digest = hashlib.sha256()
+        content = bytearray()
+        size = 0
+        while True:
+            chunk = os.read(descriptor, min(1024 * 1024, _MAX_WHEEL_BYTES + 1 - size))
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > _MAX_WHEEL_BYTES:
+                raise ModalInferenceRuntimeCaptureError("engine_wheel_invalid")
+            digest.update(chunk)
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        identity = lambda value: (
+            value.st_dev,
+            value.st_ino,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+            value.st_nlink,
+        )
+        if size == 0 or size != before.st_size or identity(after) != identity(before):
+            raise ModalInferenceRuntimeCaptureError("engine_wheel_invalid")
+        return bytes(content), digest.hexdigest(), path.name
+    except ModalInferenceRuntimeCaptureError:
+        raise
+    except OSError:
+        raise ModalInferenceRuntimeCaptureError("engine_wheel_invalid") from None
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                if sys.exc_info()[0] is None:
+                    raise ModalInferenceRuntimeCaptureError(
+                        "engine_wheel_invalid"
                     ) from None
 
 
@@ -695,10 +755,17 @@ def capture_modal_inference_runtime(
     diagnose_distributions: bool = False,
     isolated_python: bool = False,
     modal_additions: bool = False,
+    engine_wheel: Path | None = None,
+    engine_wheel_sha256: str | None = None,
 ) -> ModalInferenceRuntimeCapture:
     """Run the inspector once, with a finite local and remote lifetime."""
 
     if modal_additions and not isolated_python:
+        raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
+    if (engine_wheel is None) != (engine_wheel_sha256 is None) or (
+        engine_wheel is not None
+        and (not isolated_python or not modal_additions or diagnose_distributions)
+    ):
         raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
     app_name = _exact_text(app_name, _NAME)
     environment_name = _exact_text(environment_name, _NAME)
@@ -714,6 +781,9 @@ def capture_modal_inference_runtime(
         script.parent.parent / "requirements" / "modal-inference-additions.lock"
     )
     additions = _script_source(additions_path) if modal_additions else None
+    wheel = _wheel_source(engine_wheel) if engine_wheel is not None else None
+    if wheel is not None and _exact_text(engine_wheel_sha256, _SHA256) != wheel[1]:
+        raise ModalInferenceRuntimeCaptureError("engine_wheel_invalid")
     deadline = time.monotonic() + _HOST_TIMEOUT_SECONDS
     sandbox = None
     sandbox_id = None
@@ -767,11 +837,27 @@ def capture_modal_inference_runtime(
                 + _REMOTE_ADDITIONS,
                 _ISOLATED_PYTHON + " -I -m pip --isolated check",
             )
+        if wheel is not None:
+            staged_wheel = Path(temporary.name) / wheel[2]
+            _stage_source(staged_wheel, wheel[0])
+            if _wheel_source(staged_wheel)[1:] != wheel[1:]:
+                raise ModalInferenceRuntimeCaptureError("engine_wheel_changed")
+            remote_wheel = _REMOTE_WHEEL_ROOT + "/" + wheel[2]
+            image_value = image_value.add_local_file(
+                staged_wheel, remote_wheel, copy=True
+            ).run_commands(
+                _ISOLATED_PYTHON
+                + " -I -m pip --isolated install --no-deps --no-index --no-compile "
+                + remote_wheel,
+                _ISOLATED_PYTHON + " -I -m pip --isolated check",
+            )
         if (
             _script_source(staged)[1] != script_digest
             or _script_source(script)[1] != script_digest
         ):
             raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
+        if wheel is not None and _wheel_source(engine_wheel)[1:] != wheel[1:]:
+            raise ModalInferenceRuntimeCaptureError("engine_wheel_changed")
 
         def create_sandbox() -> object:
             try:
@@ -805,6 +891,12 @@ def capture_modal_inference_runtime(
         )
         create_ownership.transfer(sandbox)
         sandbox_id = _sandbox_id(sandbox)
+        provider_image_id = getattr(image_value, "object_id", None)
+        if (
+            type(provider_image_id) is not str
+            or _IMAGE_ID.fullmatch(provider_image_id) is None
+        ):
+            raise ModalInferenceRuntimeCaptureError("capture_output_invalid")
         raw = _bounded_call(
             lambda: _read_output(sandbox),
             deadline=deadline,
@@ -816,12 +908,15 @@ def capture_modal_inference_runtime(
             raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
         if additions is not None and _script_source(additions_path)[1] != additions[1]:
             raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
+        if wheel is not None and _wheel_source(engine_wheel)[1:] != wheel[1:]:
+            raise ModalInferenceRuntimeCaptureError("engine_wheel_changed")
         parser = _parse_diagnostic if diagnose_distributions else _parse_candidate
         candidate = parser(raw, image=image, source_commit=source_commit)
         envelope = {
             ("diagnostic" if diagnose_distributions else "candidate"): candidate,
             "inspection_script_sha256": script_digest,
             "operator_selection_only": True,
+            "provider_image_id": provider_image_id,
             "sandbox_id": sandbox_id,
             "schema_version": (
                 "synaptic-modal-inference-distribution-diagnostic-capture/v1"
@@ -847,6 +942,14 @@ def capture_modal_inference_runtime(
             }:
                 raise ModalInferenceRuntimeCaptureError("capture_output_invalid")
             envelope["modal_additions_sha256"] = additions[1]
+        if wheel is not None:
+            if (
+                diagnose_distributions
+                or candidate["distributions"].get("synaptic-tuner") is None
+            ):
+                raise ModalInferenceRuntimeCaptureError("capture_output_invalid")
+            envelope["engine_wheel_name"] = wheel[2]
+            envelope["engine_wheel_sha256"] = wheel[1]
         encoded = json.dumps(
             envelope,
             ensure_ascii=True,
@@ -930,6 +1033,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--diagnose-distributions", action="store_true")
     parser.add_argument("--isolated-python", action="store_true")
     parser.add_argument("--modal-additions", action="store_true")
+    parser.add_argument("--engine-wheel", type=Path)
+    parser.add_argument("--engine-wheel-sha256")
     parser.add_argument(
         "--modal-profile",
         type=lambda value: _exact_text(value, _NAME),
@@ -994,6 +1099,8 @@ def main(argv: list[str] | None = None) -> int:
                         diagnose_distributions=arguments.diagnose_distributions,
                         isolated_python=arguments.isolated_python,
                         modal_additions=arguments.modal_additions,
+                        engine_wheel=arguments.engine_wheel,
+                        engine_wheel_sha256=arguments.engine_wheel_sha256,
                     )
                     output, success = capture.canonical_bytes, True
                 else:

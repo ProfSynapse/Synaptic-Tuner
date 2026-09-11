@@ -253,6 +253,16 @@ verifier or a GPU chat session will pass. No inference pins have been invented.
 
 ## Remaining live path
 
+Engine-wheel preparation (2026-09-11): exact package sources from commit
+`1e32e56a1351b4a95a1680ff1f0fc18f269d9655` built offline without dependency
+resolution as `synaptic_tuner-1.1.0-py3-none-any.whl` (2,108,890 bytes), SHA-256
+`101bb22a9efef9d811536b1ae4441555dad646b5bf52507201ecab2921ba338a`.
+Archive inspection confirms the updated engine requirement metadata and exact
+manifest source hash. The three inference commitment resources are still absent;
+this intermediate wheel cannot pass final inference admission. The existing
+training/offline closure and production inference verifier selection passed
+33 tests after the compatibility/source-hash refresh.
+
 SDK candidate success (2026-09-11): source `1280300` passed strict capture in
 Sandbox `sb-ExiSJ8TJGFTxSCA37MYM69`; exact cleanup was confirmed. Evidence
 `evidence/modal-inference-sdk-1280300.json` records 229 unique distributions,

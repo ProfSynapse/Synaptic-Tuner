@@ -145,6 +145,7 @@ def test_stopped_diagnostic_read_never_admits_candidate():
 class Image:
     def __init__(self, calls):
         self.calls = calls
+        self.object_id = "im-candidate"
 
     def entrypoint(self, value):
         self.calls.append(("entrypoint", value))
@@ -335,10 +336,183 @@ def test_modal_additions_are_hashed_no_deps_and_checked():
     assert capture._ISOLATED_PYTHON + " -I -m pip --isolated check" in commands
     assert (
         report["modal_additions_sha256"]
-        == capture._script_source(ROOT / "requirements/modal-inference-additions.lock")[
-            1
-        ]
+        == capture._script_source(
+            capture._script_path().parent.parent
+            / "requirements/modal-inference-additions.lock"
+        )[1]
     )
+    assert sandbox.terminate_calls == [False]
+
+
+def _engine_wheel(tmp_path: Path) -> tuple[Path, str]:
+    wheel = tmp_path / "synaptic_tuner-1.1.0-py3-none-any.whl"
+    wheel.write_bytes(b"exact-engine-wheel")
+    return wheel, capture.hashlib.sha256(wheel.read_bytes()).hexdigest()
+
+
+def test_real_tmp_path_engine_wheel_is_read_and_hashed(tmp_path):
+    wheel, digest = _engine_wheel(tmp_path)
+    payload, observed, name = capture._wheel_source(wheel)
+    assert payload == b"exact-engine-wheel"
+    assert observed == digest
+    assert name == wheel.name
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "oversize"])
+def test_engine_wheel_rejects_unsafe_file(tmp_path, monkeypatch, kind):
+    wheel, _ = _engine_wheel(tmp_path)
+    other = tmp_path / "synaptic_tuner-2.0.0-py3-none-any.whl"
+    if kind == "symlink":
+        other.symlink_to(wheel)
+    elif kind == "hardlink":
+        other.hardlink_to(wheel)
+    else:
+        other = wheel
+        monkeypatch.setattr(capture, "_MAX_WHEEL_BYTES", 1)
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture._wheel_source(other)
+
+
+def test_capture_missing_hydrated_image_id_still_cleans_exact_sandbox():
+    sdk, sandbox, _ = _sdk()
+    calls = []
+    image = Image(calls)
+    image.object_id = None
+    sdk.Image.from_registry = lambda value: image
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture.capture_modal_inference_runtime(
+            sdk=sdk,
+            client=object(),
+            app_name="existing",
+            environment_name="isolated",
+            image=IMAGE,
+            source_commit=COMMIT,
+        )
+    assert sandbox.terminate_calls == [False]
+
+
+def test_engine_wheel_requires_paired_isolation_and_additions_before_provider(
+    tmp_path,
+):
+    wheel, digest = _engine_wheel(tmp_path)
+    for kwargs in (
+        {"engine_wheel": wheel},
+        {"engine_wheel_sha256": digest},
+        {"engine_wheel": wheel, "engine_wheel_sha256": digest},
+        {
+            "engine_wheel": wheel,
+            "engine_wheel_sha256": digest,
+            "isolated_python": True,
+        },
+    ):
+        sdk, _, calls = _sdk()
+        with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+            capture.capture_modal_inference_runtime(
+                sdk=sdk,
+                client=object(),
+                app_name="existing",
+                environment_name="isolated",
+                image=IMAGE,
+                source_commit=COMMIT,
+                **kwargs,
+            )
+        assert calls == []
+
+
+def test_wrong_engine_wheel_hash_fails_before_provider_reads(tmp_path):
+    wheel, _ = _engine_wheel(tmp_path)
+    sdk, _, calls = _sdk()
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture.capture_modal_inference_runtime(
+            sdk=sdk,
+            client=object(),
+            app_name="existing",
+            environment_name="isolated",
+            image=IMAGE,
+            source_commit=COMMIT,
+            isolated_python=True,
+            modal_additions=True,
+            engine_wheel=wheel,
+            engine_wheel_sha256="0" * 64,
+        )
+    assert calls == []
+
+
+def test_engine_wheel_is_staged_installed_without_resolution_and_recorded(
+    tmp_path, monkeypatch
+):
+    wheel, digest = _engine_wheel(tmp_path)
+    reads = []
+    original_wheel_source = capture._wheel_source
+
+    def observed_wheel_source(path):
+        reads.append(path)
+        return original_wheel_source(path)
+
+    monkeypatch.setattr(capture, "_wheel_source", observed_wheel_source)
+    body = json.loads(_candidate())
+    body["python"]["executable"] = capture._ISOLATED_PYTHON
+    body["requirements"]["modal"] = {"present": True, "version": "1.5.4"}
+    body["distributions"].update({"modal": "1.5.4", "synaptic-tuner": "1.1.0"})
+    raw = json.dumps(body, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    sdk, sandbox, calls = _sdk(raw=raw)
+    report = json.loads(
+        capture.capture_modal_inference_runtime(
+            sdk=sdk,
+            client=object(),
+            app_name="existing",
+            environment_name="isolated",
+            image=IMAGE,
+            source_commit=COMMIT,
+            isolated_python=True,
+            modal_additions=True,
+            engine_wheel=wheel,
+            engine_wheel_sha256=digest,
+        ).canonical_bytes
+    )
+    remote = capture._REMOTE_WHEEL_ROOT + "/" + wheel.name
+    assert ("file", wheel.name, remote, True) in calls
+    commands = [
+        command for call in calls if call[0] == "build_commands" for command in call[1]
+    ]
+    install = next(command for command in commands if remote in command)
+    assert "--isolated install --no-deps --no-index --no-compile" in install
+    assert report["engine_wheel_name"] == wheel.name
+    assert report["engine_wheel_sha256"] == digest
+    assert report["provider_image_id"] == "im-candidate"
+    assert reads.count(wheel) == 3
+    assert sandbox.terminate_calls == [False]
+
+
+def test_changed_engine_wheel_is_rejected_and_sandbox_cleaned(tmp_path):
+    wheel, digest = _engine_wheel(tmp_path)
+    body = json.loads(_candidate())
+    body["python"]["executable"] = capture._ISOLATED_PYTHON
+    body["requirements"]["modal"] = {"present": True, "version": "1.5.4"}
+    body["distributions"].update({"modal": "1.5.4", "synaptic-tuner": "1.1.0"})
+    raw = json.dumps(body, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    sdk, sandbox, _ = _sdk(raw=raw)
+    original_create = sdk.Sandbox.create
+
+    def changed(*args, **kwargs):
+        result = original_create(*args, **kwargs)
+        wheel.write_bytes(b"changed-engine-wheel")
+        return result
+
+    sdk.Sandbox.create = staticmethod(changed)
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture.capture_modal_inference_runtime(
+            sdk=sdk,
+            client=object(),
+            app_name="existing",
+            environment_name="isolated",
+            image=IMAGE,
+            source_commit=COMMIT,
+            isolated_python=True,
+            modal_additions=True,
+            engine_wheel=wheel,
+            engine_wheel_sha256=digest,
+        )
     assert sandbox.terminate_calls == [False]
 
 
