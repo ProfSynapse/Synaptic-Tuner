@@ -416,3 +416,24 @@ isolated CPython 3.12.9/pytest 8.4.2 from the execution checkout. Direct invocat
 from that checkout without operator `PYTHONPATH` returned `FILE_MISSING`/125 as
 expected while the inference locks remain absent. Canonical skill mirrors are
 in sync. These are local tooling checks, not cloud inference evidence.
+
+Correction (2026-09-11, example consumer continuation): image preparation now
+exclusively creates `/workspace/modal-chat/{model,base,scratch}` with private
+permissions, rejecting symlinked parent chains before filesystem writes.
+The integrated capture/inspection/preparation selection passed 114 tests in
+0.45 seconds. No new image was built for this change: the earlier CPU candidate
+does not prove these directories exist or that its runtime user can access them.
+The minimal consumer is documented under `examples/modal_chat`; it does not
+remove the requirement for a pushed host superproject with an exact engine
+gitlink, or supply missing final inference locks and authenticated run evidence.
+
+The integrated minimal consumer and its private SQLite attempt/catalog store
+passed 22 tests in 0.20 seconds. The existing Modal/generic run-chat selection
+passed 27 tests in 77.43 seconds. Consumer/storage independent review passed
+after the response-allocation and interrupted-cleanup cases were corrected;
+the lead added explicit oversized ASCII/Unicode response coverage. All checks
+were provider-free, from the execution checkout, with isolated CPython 3.12.9
+and pytest 8.4.2. No cloud objects, pushes, merges, EHR edits, or paid runs were
+performed during this example-consumer continuation. Live host composition,
+the pushed superproject source, final inference resources/image qualification,
+and the real trained-run/chat smoke remain uncompleted.

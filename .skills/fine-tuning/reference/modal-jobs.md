@@ -46,6 +46,16 @@ or artifact reads while the descriptor capabilities remain false.
 
 ## Chat after training (embedded consumer workflow)
 
+The minimal consuming-layer example is `examples/modal_chat` in the repository
+root. It demonstrates single-attempt training and one-prompt chat with private
+saved state, not a new engine CLI or a complete live host factory. Its permanent
+attempt claim refuses automatic replay after a restart; the full generic
+coordinator/Foundation state still belongs to the live consumer process.
+Follow its README and supply real authenticated host/runtime composition.
+Current Modal training requires a clean pushed host superproject with the exact
+engine gitlink, so the in-repository example folder cannot itself act as the
+training source. Do not bypass this check or substitute historical test evidence.
+
 Use the checked-in `tuner.inference.run_chat.open_run_chat` entrypoint with the
 consuming project's authenticated `APIHost.runs`, retained run reference,
 selected runtime adapter. The adapter owns current run reverification, artifact
@@ -350,6 +360,13 @@ filter inventory, install packages, export PYTHONPATH or prepare models.
 The probe invokes that exact interpreter with `-I`; this is still not the final
 engine/SDK image. Capture final runtime commitments only after all reviewed
 dependency and engine layers have been installed and independently qualified.
+
+The image-preparation helper also creates the private chat root and its exact
+`model`, `base`, and `scratch` directories with exclusive creation and private
+permissions. It rejects a noncanonical or symlinked parent before creation.
+This changes the helper digest: earlier candidate evidence does not prove the
+new directories or runtime-user access. Rebuild and measure those properties
+before using the candidate for chat; do not infer access from build success.
 
 After isolated candidate inspection, `--modal-additions` (requires
 `--isolated-python`) installs only `requirements/modal-inference-additions.lock`

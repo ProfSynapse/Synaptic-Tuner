@@ -17,6 +17,8 @@ _DESTINATION = Path("/opt/synaptic-inference")
 _BASE_SITE = Path("/usr/local/lib/python3.12/dist-packages")
 _PTH_NAME = "synaptic-inference-base.pth"
 _PTH_BYTES = b"/usr/local/lib/python3.12/dist-packages\n"
+_PRIVATE_ROOT = Path("/workspace/modal-chat")
+_PRIVATE_CHILDREN = ("model", "base", "scratch")
 _MAX_RESULT_BYTES = 64 * 1024
 _DIST_SEPARATORS = re.compile(r"[-_.]+")
 
@@ -80,11 +82,47 @@ def _preflight_code(destination: Path, base_site: Path) -> str:
     )
 
 
+def _private_directories(root: Path) -> None:
+    paths = [root, *(root / name for name in _PRIVATE_CHILDREN)]
+    try:
+        parent = root.parent
+        parent_info = parent.lstat()
+        if (
+            not root.is_absolute()
+            or root != Path(os.path.normpath(root))
+            or not stat.S_ISDIR(parent_info.st_mode)
+            or parent.resolve(strict=True) != parent
+        ):
+            raise _PreparationFailure("PRIVATE_DIRECTORY_INVALID")
+        root.mkdir(mode=0o700)
+        for path in paths[1:]:
+            path.mkdir(mode=0o700)
+        identities = []
+        for path in paths:
+            info = path.lstat()
+            if (
+                not stat.S_ISDIR(info.st_mode)
+                or stat.S_IMODE(info.st_mode) & 0o077
+                or path.resolve(strict=True) != path
+            ):
+                raise _PreparationFailure("PRIVATE_DIRECTORY_INVALID")
+            identities.append((info.st_dev, info.st_ino))
+        if len(set(identities)) != len(identities):
+            raise _PreparationFailure("PRIVATE_DIRECTORY_INVALID")
+    except FileExistsError:
+        raise _PreparationFailure("PRIVATE_DIRECTORY_EXISTS") from None
+    except _PreparationFailure:
+        raise
+    except OSError:
+        raise _PreparationFailure("PRIVATE_DIRECTORY_INVALID") from None
+
+
 def _prepare(
     *,
     destination: Path,
     base_site: Path,
     pth_bytes: bytes,
+    private_root: Path,
     builder_factory=venv.EnvBuilder,
     runner=subprocess.run,
 ) -> None:
@@ -147,6 +185,7 @@ def _prepare(
             or result["os_site"] is not False
         ):
             raise _PreparationFailure("PREFLIGHT_FAILED")
+        _private_directories(private_root)
     except _PreparationFailure:
         raise
     except (OSError, ValueError, subprocess.SubprocessError, json.JSONDecodeError):
@@ -159,6 +198,7 @@ def main() -> int:
             destination=_DESTINATION,
             base_site=_BASE_SITE,
             pth_bytes=_PTH_BYTES,
+            private_root=_PRIVATE_ROOT,
         )
         sys.stdout.buffer.write(
             _line({"schema_version": _SCHEMA, "status": "CPU_CANDIDATE_PREPARED"})

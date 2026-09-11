@@ -48,6 +48,12 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Keep the minimal train/chat consumer under `examples/modal_chat`, not in
+  engine runtime modules. Its private attempt journal prevents automatic replay;
+  it is not durable recovery of all coordinator/Foundation state. Live training
+  still requires an actual pushed host superproject with the exact engine
+  gitlink. Do not use EHR or fabricate source/run evidence for this example.
+
 - For existing inference locks, use `python3 scripts/regenerate_modal_inference_lock.py`
   (read-only check), then `--write` only after reviewing source changes. It
   preserves the fixed inventory and pins and never initializes missing locks.

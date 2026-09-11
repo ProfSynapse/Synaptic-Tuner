@@ -55,6 +55,7 @@ def _runner(destination: Path, base: Path):
 def test_prepare_uses_isolated_copied_venv_and_exact_pth(tmp_path, monkeypatch):
     destination = tmp_path / "venv"
     base = _base(tmp_path)
+    (tmp_path / "workspace").mkdir()
     monkeypatch.setattr(
         preparation.platform, "python_implementation", lambda: "CPython"
     )
@@ -63,12 +64,68 @@ def test_prepare_uses_isolated_copied_venv_and_exact_pth(tmp_path, monkeypatch):
         destination=destination,
         base_site=base,
         pth_bytes=(str(base) + "\n").encode(),
+        private_root=tmp_path / "workspace/modal-chat",
         builder_factory=Builder,
         runner=_runner(destination, base),
     )
     assert (
         destination / "lib/python3.12/site-packages" / preparation._PTH_NAME
     ).read_bytes() == (str(base) + "\n").encode()
+    private = tmp_path / "workspace/modal-chat"
+    assert {path.name for path in private.iterdir()} == {"model", "base", "scratch"}
+    for path in (private, *(private / name for name in preparation._PRIVATE_CHILDREN)):
+        assert path.is_dir() and not path.is_symlink()
+        assert path.stat().st_mode & 0o077 == 0
+
+
+def test_private_directory_root_collision_is_rejected(tmp_path):
+    root = tmp_path / "workspace/modal-chat"
+    root.mkdir(parents=True)
+    with pytest.raises(
+        preparation._PreparationFailure, match="PRIVATE_DIRECTORY_EXISTS"
+    ):
+        preparation._private_directories(root)
+
+
+def test_private_directory_symlink_collision_is_rejected(tmp_path):
+    workspace = tmp_path / "workspace"
+    target = tmp_path / "target"
+    workspace.mkdir()
+    target.mkdir()
+    (workspace / "modal-chat").symlink_to(target, target_is_directory=True)
+    with pytest.raises(
+        preparation._PreparationFailure, match="PRIVATE_DIRECTORY_EXISTS"
+    ):
+        preparation._private_directories(workspace / "modal-chat")
+
+
+def test_symlinked_parent_is_rejected_before_external_target_is_touched(tmp_path):
+    external = tmp_path / "external"
+    external.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.symlink_to(external, target_is_directory=True)
+    with pytest.raises(
+        preparation._PreparationFailure, match="PRIVATE_DIRECTORY_INVALID"
+    ):
+        preparation._private_directories(workspace / "modal-chat")
+    assert list(external.iterdir()) == []
+
+
+def test_private_directory_child_collision_is_rejected(tmp_path, monkeypatch):
+    root = tmp_path / "workspace/modal-chat"
+    root.parent.mkdir()
+    original_mkdir = preparation.Path.mkdir
+
+    def collide(path, *args, **kwargs):
+        if path.name == "base":
+            raise FileExistsError
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(preparation.Path, "mkdir", collide)
+    with pytest.raises(
+        preparation._PreparationFailure, match="PRIVATE_DIRECTORY_EXISTS"
+    ):
+        preparation._private_directories(root)
 
 
 def test_existing_destination_is_rejected_before_builder(tmp_path, monkeypatch):
@@ -84,6 +141,7 @@ def test_existing_destination_is_rejected_before_builder(tmp_path, monkeypatch):
             destination=destination,
             base_site=base,
             pth_bytes=b"unused\n",
+            private_root=tmp_path / "workspace/modal-chat",
             builder_factory=lambda **kwargs: pytest.fail("builder called"),
         )
 
@@ -124,6 +182,7 @@ def test_preflight_mismatch_is_closed(tmp_path, monkeypatch):
             destination=destination,
             base_site=base,
             pth_bytes=(str(base) + "\n").encode(),
+            private_root=tmp_path / "workspace/modal-chat",
             builder_factory=Builder,
             runner=runner,
         )
@@ -155,8 +214,10 @@ def test_real_throwaway_venv_preflight(tmp_path):
         pytest.skip("requires CPython 3.12")
     destination = tmp_path / "venv"
     base = _base(tmp_path).resolve()
+    (tmp_path / "workspace").mkdir()
     preparation._prepare(
         destination=destination,
         base_site=base,
         pth_bytes=(str(base) + "\n").encode(),
+        private_root=tmp_path / "workspace/modal-chat",
     )
