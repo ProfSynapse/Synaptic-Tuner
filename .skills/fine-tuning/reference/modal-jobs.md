@@ -313,6 +313,15 @@ limits, invalid names/versions, duplicate normalized names and metadata-read
 failures. A follow-up allocation still needs its own applicable authorization;
 reuse the exact stopped instance for read-only diagnosis first.
 
+Repeated discovery of one physical `dist-info` object is not a second installed
+distribution: CPython can enumerate it again when search paths repeat. The
+inspector may count a proven stable filesystem metadata identity once only when
+its normalized name and version also agree. Never deduplicate by package name,
+version, installation root or pathname alone; distinct installations remain
+invalid even if their versions match. Unproven/custom/ZIP identities cannot
+justify deduplication. Keep both the 512 unique-distribution cap and the 4096
+raw-discovery bound, and reject changes during identity verification.
+
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's
 `assert_current(source)` to recheck current workflow/Foundation/native metadata

@@ -108,12 +108,99 @@ def test_duplicate_distribution_still_fails(monkeypatch):
         inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
 
 
+def _dist_info(root: Path, directory: str, name: str, version: str) -> None:
+    metadata = root / directory
+    metadata.mkdir(parents=True)
+    (metadata / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
+        encoding="utf-8",
+    )
+
+
+def test_same_physical_metadata_from_repeated_search_root_is_accepted(
+    monkeypatch, tmp_path
+):
+    _dist_info(tmp_path, "vllm-0.17.1.dist-info", "vllm", "0.17.1")
+    _dist_info(tmp_path, "modal-1.5.4.dist-info", "modal", "1.5.4")
+    values = inspection.importlib.metadata.distributions(path=[tmp_path, tmp_path])
+    _metadata(monkeypatch, values)
+    assert inspection._distributions() == {"modal": "1.5.4", "vllm": "0.17.1"}
+
+
+def test_same_physical_metadata_from_symlink_search_root_is_accepted(
+    monkeypatch, tmp_path
+):
+    packages = tmp_path / "packages"
+    alias = tmp_path / "alias"
+    _dist_info(packages, "vllm-0.17.1.dist-info", "vllm", "0.17.1")
+    alias.symlink_to(packages, target_is_directory=True)
+    values = inspection.importlib.metadata.distributions(path=[packages, alias])
+    _metadata(monkeypatch, values)
+    assert inspection._distributions() == {"vllm": "0.17.1"}
+
+
+def test_distinct_same_name_version_metadata_is_rejected(monkeypatch, tmp_path):
+    _dist_info(tmp_path, "demo-1.dist-info", "demo", "1")
+    _dist_info(tmp_path, "demo.other-1.dist-info", "demo", "1")
+    values = inspection.importlib.metadata.distributions(path=[tmp_path])
+    _metadata(monkeypatch, values)
+    with pytest.raises(
+        inspection._InspectionFailure, match="DISTRIBUTION_IDENTITY_DUPLICATE"
+    ):
+        inspection._distributions()
+
+
+def test_custom_distributions_cannot_claim_physical_alias(monkeypatch):
+    _metadata(monkeypatch, (Distribution("demo", "1"), Distribution("demo", "1")))
+    with pytest.raises(
+        inspection._InspectionFailure, match="DISTRIBUTION_IDENTITY_DUPLICATE"
+    ):
+        inspection._distributions()
+
+
+def test_unstable_metadata_identity_cannot_be_deduplicated(monkeypatch):
+    values = (Distribution("demo", "1"), Distribution("demo", "1"))
+    _metadata(monkeypatch, values)
+    identities = iter(((1,), (1,), (2,), (3,)))
+    monkeypatch.setattr(
+        inspection, "_metadata_identity", lambda value: next(identities)
+    )
+    with pytest.raises(
+        inspection._InspectionFailure, match="DISTRIBUTION_METADATA_READ_FAILED"
+    ):
+        inspection._distributions()
+
+
+def test_unstable_unique_metadata_identity_is_rejected(monkeypatch):
+    _metadata(monkeypatch, (Distribution("demo", "1"),))
+    identities = iter(((1,), (2,)))
+    monkeypatch.setattr(
+        inspection, "_metadata_identity", lambda value: next(identities)
+    )
+    with pytest.raises(
+        inspection._InspectionFailure, match="DISTRIBUTION_METADATA_READ_FAILED"
+    ):
+        inspection._distributions()
+
+
 def test_distribution_count_is_bounded(monkeypatch):
     values = [Distribution(f"package-{index}", "1") for index in range(513)]
     values[:2] = [Distribution("vllm", "0.17.1"), Distribution("modal", "1.5.4")]
     _metadata(monkeypatch, values)
     with pytest.raises(inspection._InspectionFailure, match="DISTRIBUTION_COUNT_LIMIT"):
         inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
+
+
+def test_distribution_occurrence_count_is_separately_bounded(monkeypatch):
+    value = Distribution("demo", "1")
+    monkeypatch.setattr(
+        inspection.importlib.metadata,
+        "distributions",
+        lambda: (value for _ in range(inspection._MAX_DISTRIBUTION_OCCURRENCES + 1)),
+    )
+    monkeypatch.setattr(inspection, "_metadata_identity", lambda distribution: (1,))
+    with pytest.raises(inspection._InspectionFailure, match="DISTRIBUTION_COUNT_LIMIT"):
+        inspection._distributions()
 
 
 @pytest.mark.parametrize(

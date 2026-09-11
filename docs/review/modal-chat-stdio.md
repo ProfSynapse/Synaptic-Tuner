@@ -186,6 +186,40 @@ The integrated inspection/diagnosis selection passed 59 tests in 0.27 seconds.
 This is improved diagnosis, not a claimed fix for the image's unknown metadata
 condition. A further CPU allocation has not yet been made.
 
+Correction (2026-09-11, approved follow-up): source `13298f3` executed once in
+the same dedicated environment. Sandbox `sb-ZnGMHCeYmrWG4VrgmOTdMM` failed with
+provider exit 125; exact-target cleanup was confirmed before read-only diagnosis.
+Its inspector error is `DISTRIBUTION_IDENTITY_DUPLICATE`, preserved with the
+process result in `evidence/modal-inference-cpu-{probe,read}-13298f3.json`.
+This code alone does not distinguish repeated discovery of the same physical
+metadata object from conflicting installed distributions.
+
+A credential-free local CPython reproduction discovered 30 distribution objects
+for 15 physical metadata directories when the same search root was supplied
+twice. The current inspector rejected this benign repetition with the same code.
+The corrective path must count only proven repetitions of one physical metadata
+object once; separate installations with the same name/version must still fail.
+The operator authorized at most one corrective CPU rerun after a tested fix and
+confirmed cleanup. That remaining rerun has not been used.
+
+The narrow inspector correction uses exact filesystem `PathDistribution`
+metadata identity before and after reading the normalized name/version. Stable
+repetitions can be counted once; distinct or unproven duplicate identities and
+identity changes remain rejected. The unique-distribution limit stays 512, with
+a separate 4096-occurrence traversal bound. On the same credential-free local
+reproduction, the corrected inspector accepted 15 unique distributions from 30
+occurrences. This does not prove which duplicate existed in the cloud image.
+
+Final corrective selection (2026-09-11): all 66 capture/inspection tests passed
+in 0.27 seconds under isolated CPython 3.12.9, including unstable identity on
+the first discovery, same-object aliases and distinct same-name installations.
+
+Qualification boundary: the concrete engine verifier still has its separate
+duplicate-occurrence check in `inference_runtime.py`. Its identity policy must
+be reconciled with the measured installed-image facts before final runtime
+qualification; a successful base-image candidate is not proof that this engine
+verifier or a GPU chat session will pass. No inference pins have been invented.
+
 ## Remaining live path
 
 Correction (2026-09-11, SDK integration): the explicit-client transport now

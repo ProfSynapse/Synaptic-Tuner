@@ -20,6 +20,7 @@ _COMMIT = re.compile(r"[0-9a-f]{40}")
 _VERSION = re.compile(r"[1-9][0-9]{0,2}\.(?:0|[1-9][0-9]{0,2})\.(?:0|[1-9][0-9]{0,2})")
 _DIST_SEPARATORS = re.compile(r"[-_.]+")
 _MAX_DISTRIBUTIONS = 512
+_MAX_DISTRIBUTION_OCCURRENCES = 4096
 _MAX_EXECUTABLE_BYTES = 64 * 1024 * 1024
 _MAX_OUTPUT_BYTES = 1024 * 1024
 
@@ -159,8 +160,33 @@ def _executable() -> tuple[str, str]:
                     raise _InspectionFailure("PYTHON_INVALID") from None
 
 
+def _metadata_identity(distribution: object) -> tuple[int, ...] | None:
+    if type(distribution) is not importlib.metadata.PathDistribution:
+        return None
+    path = getattr(distribution, "_path", None)
+    if type(path) is not type(Path()):
+        return None
+    try:
+        info = path.stat()
+    except (OSError, OverflowError, ValueError):
+        return None
+    if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+        return None
+    return (
+        stat.S_IFMT(info.st_mode),
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
 def _distributions() -> dict[str, str]:
     result: dict[str, str] = {}
+    identities: dict[str, tuple[tuple[int, ...], str]] = {}
+    physical: dict[tuple[int, ...], tuple[str, str]] = {}
+    occurrences = 0
     try:
         iterator = iter(importlib.metadata.distributions())
     except Exception:
@@ -172,8 +198,10 @@ def _distributions() -> dict[str, str]:
             break
         except Exception:
             raise _InspectionFailure("DISTRIBUTION_ENUMERATION_FAILED") from None
-        if len(result) >= _MAX_DISTRIBUTIONS:
+        occurrences += 1
+        if occurrences > _MAX_DISTRIBUTION_OCCURRENCES:
             raise _InspectionFailure("DISTRIBUTION_COUNT_LIMIT")
+        identity_before = _metadata_identity(distribution)
         try:
             metadata = distribution.metadata
             raw_name = metadata.get("Name")
@@ -191,8 +219,32 @@ def _distributions() -> dict[str, str]:
         normalized = _DIST_SEPARATORS.sub("-", name).lower()
         if not normalized:
             raise _InspectionFailure("DISTRIBUTION_NAME_INVALID")
+        identity_after = _metadata_identity(distribution)
+        if identity_before != identity_after and (
+            identity_before is not None or identity_after is not None
+        ):
+            raise _InspectionFailure("DISTRIBUTION_METADATA_READ_FAILED")
+        stable_identity = (
+            identity_before
+            if identity_before is not None and identity_before == identity_after
+            else None
+        )
         if normalized in result:
-            raise _InspectionFailure("DISTRIBUTION_IDENTITY_DUPLICATE")
+            previous = identities.get(normalized)
+            if previous != (stable_identity, version) or stable_identity is None:
+                raise _InspectionFailure("DISTRIBUTION_IDENTITY_DUPLICATE")
+            continue
+        if len(result) >= _MAX_DISTRIBUTIONS:
+            raise _InspectionFailure("DISTRIBUTION_COUNT_LIMIT")
+        if stable_identity is not None:
+            previous_physical = physical.get(stable_identity)
+            if previous_physical is not None and previous_physical != (
+                normalized,
+                version,
+            ):
+                raise _InspectionFailure("DISTRIBUTION_IDENTITY_DUPLICATE")
+            physical[stable_identity] = (normalized, version)
+            identities[normalized] = (stable_identity, version)
         result[normalized] = version
     return dict(sorted(result.items()))
 
