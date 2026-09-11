@@ -111,6 +111,22 @@ into deterministic completed and pending cases; that 21-test selection passed
 in 95.32 seconds against the same source. These overlapping provider-free runs
 qualify the covered source behavior, not an image, model response or deployment.
 
+Correction (2026-09-11, exact-source package qualification): source commit
+`bbdbbd56d9af4d18b5d4d3dab5e7cfdf3d1494d3` was archived with Windows Git and
+built offline with no dependency resolution. The resulting
+`synaptic_tuner-1.1.0-py3-none-any.whl` is 2,108,895 bytes, SHA-256
+`71474dc27b2eb1566984b986e3b0bb13664c275584c4316962fff30559acf216`.
+Installed into a fresh dependency-only environment, it passed the checked-in
+neutral-directory import/resource probe: 51 engine imports and both training
+resources, with Modal, Torch, NumPy, pandas and pytest absent. All three
+inference resources remain absent and unqualified; this check does not bypass
+their concrete runtime denial. The final two deterministic transport regressions
+also passed after integration in 8.25 seconds (the other 19 were deselected).
+The training source lock remained CURRENT at 97 members and the offline SFT
+closure at 66 members / 679,487 payload bytes. Skill mirrors were verified in
+sync, and both maintenance scripts now trigger PR conformance. No push, merge,
+cloud operation or live response is claimed by this record.
+
 ## Remaining live path
 
 Correction (2026-09-11, SDK integration): the explicit-client transport now
