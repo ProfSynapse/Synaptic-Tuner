@@ -253,6 +253,30 @@ verifier or a GPU chat session will pass. No inference pins have been invented.
 
 ## Remaining live path
 
+Update (2026-09-11, physical collision): source `e531329` executed once as
+approved. Sandbox `sb-8wENkdwVnbrNrEKJRMD6hU` exited 125 and exact cleanup was
+confirmed. Its stopped read reports `DISTRIBUTION_PHYSICAL_DUPLICATE`; the two
+closed records are in `evidence/modal-inference-cpu-{probe,read}-e531329.json`.
+This proves distinct metadata objects collide, not which package is affected.
+The user then authorized continued small diagnostics without per-probe approval,
+with a stop before spend over $10. Track the sequence cumulatively, preserve
+cleanup and ambiguity checks, and do not treat this as authorization to merge
+main, rotate keys, delete persistent data or touch another project.
+
+The existing capture/inspection command now has explicit diagnostic-only mode
+(`--diagnose-distributions`). Its bounded structured package name/version/path
+inventory can describe conflicting installs, but is not a candidate manifest or
+runtime admission. Normal strict capture remains unchanged. This avoids guessing
+the image fix from a failure class or weakening production inventory validation.
+The remote process remains credential-free; no raw exceptions or environment
+values are emitted. The selected image is unchanged.
+
+Cost planning: on 2026-09-11, https://modal.com/pricing lists Sandbox CPU at
+$0.00003942 per physical-core second and memory at $0.00000667 per GiB-second.
+At one core and 2 GiB for 300 seconds, nominal compute is $0.015828, excluding
+image preparation, bursting and other usage. This estimate is not an actual
+account charge or a hard provider billing cap.
+
 Correction (2026-09-11, SDK integration): the explicit-client transport now
 implements SDK-free STAGE and one SUBMIT attempt behind the existing Foundation
 executor. It authenticates the actual retained STAGE record/assessment before

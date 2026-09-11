@@ -330,6 +330,16 @@ name/version). These codes do not disclose package metadata or permit accepting
 any rejected inventory. Historical `DISTRIBUTION_IDENTITY_DUPLICATE` output
 cannot be retrospectively assigned one of these more precise causes.
 
+When closed collision codes establish an image-packaging problem, the same
+maintenance command supports explicit `--diagnose-distributions` to inspect a
+bounded structured inventory. Its distinct `DIAGNOSTIC_ONLY` report contains
+validated package names, versions and resolved metadata paths from the
+credential-free image, including conflicting installations. It is not a
+candidate runtime report and must never become a lock or serving admission.
+It exposes no environment values or raw exceptions. Keep normal candidate
+validation strict; fix the image's packaging rather than dropping conflicting
+entries. Use the same flag for exact stopped-instance readback of that mode.
+
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's
 `assert_current(source)` to recheck current workflow/Foundation/native metadata

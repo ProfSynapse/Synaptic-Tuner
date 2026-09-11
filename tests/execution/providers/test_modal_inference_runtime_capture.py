@@ -48,6 +48,100 @@ def _candidate() -> bytes:
     )
 
 
+def _diagnostic() -> bytes:
+    return (
+        json.dumps(
+            {
+                "distributions": [
+                    {
+                        "name": "demo",
+                        "version": "1.0",
+                        "metadata_path": "/opt/site/demo-1.dist-info",
+                    },
+                    {
+                        "name": "demo",
+                        "version": "2.0",
+                        "metadata_path": "/usr/site/demo-2.dist-info",
+                    },
+                ],
+                "operator_selection": {"image": IMAGE, "source_commit": COMMIT},
+                "schema_version": "synaptic-modal-inference-distribution-diagnostic/v1",
+                "status": "DIAGNOSTIC_ONLY",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        + b"\n"
+    )
+
+
+def test_diagnostic_capture_is_opt_in_and_never_candidate_admission():
+    sdk, sandbox, calls = _sdk(raw=_diagnostic())
+    result = capture.capture_modal_inference_runtime(
+        sdk=sdk,
+        client=object(),
+        app_name="existing-app",
+        environment_name="isolated",
+        image=IMAGE,
+        source_commit=COMMIT,
+        diagnose_distributions=True,
+    )
+    value = json.loads(result.canonical_bytes)
+    assert "candidate" not in value
+    assert value["diagnostic"]["status"] == "DIAGNOSTIC_ONLY"
+    assert (
+        value["schema_version"]
+        == "synaptic-modal-inference-distribution-diagnostic-capture/v1"
+    )
+    create = next(call for call in calls if call[0] == "create")
+    assert create[1][-1] == "--diagnose-distributions"
+    assert create[2]["block_network"] is True
+    assert sandbox.terminate_calls == [False]
+    assert sandbox.poll_calls == 1
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture._parse_candidate(_diagnostic(), image=IMAGE, source_commit=COMMIT)
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture._parse_diagnostic(_candidate(), image=IMAGE, source_commit=COMMIT)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("name", "private/name"),
+        ("version", "private\nversion"),
+        ("metadata_path", "relative/private"),
+        ("metadata_path", "/opt/../private"),
+        ("metadata_path", "/opt/private\npath"),
+    ],
+)
+def test_diagnostic_parser_rejects_unvalidated_metadata(field, value):
+    body = json.loads(_diagnostic())
+    body["distributions"][0][field] = value
+    raw = (
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode("ascii") + b"\n"
+    )
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError) as caught:
+        capture._parse_diagnostic(raw, image=IMAGE, source_commit=COMMIT)
+    assert value not in str(caught.value)
+
+
+def test_stopped_diagnostic_read_never_admits_candidate():
+    sandbox = _ReadSandbox(returncode=0, stdout=_diagnostic(), stderr=b"")
+    sdk, calls = _read_sdk(sandbox)
+    raw = capture.read_modal_inference_runtime_sandbox(
+        sdk=sdk,
+        client=object(),
+        sandbox_id="sb-exact",
+        image=IMAGE,
+        source_commit=COMMIT,
+        diagnose_distributions=True,
+    )
+    report = json.loads(raw)
+    assert report["status"] == "DIAGNOSTIC_ONLY"
+    assert "candidate" not in report
+    assert report["diagnostic"] == json.loads(_diagnostic())
+
+
 class Image:
     def __init__(self, calls):
         self.calls = calls

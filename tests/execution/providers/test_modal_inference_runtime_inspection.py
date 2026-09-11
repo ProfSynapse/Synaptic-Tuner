@@ -263,6 +263,137 @@ def test_distribution_occurrence_count_is_separately_bounded(monkeypatch):
         inspection._distributions()
 
 
+def test_distribution_diagnostic_reports_distinct_physical_installs(
+    monkeypatch, tmp_path
+):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _dist_info(first, "demo-1.dist-info", "Demo_Name", "1+cpu")
+    _dist_info(second, "demo-1.dist-info", "demo-name", "1+cpu")
+    values = inspection.importlib.metadata.distributions(path=[first, second, first])
+    _metadata(monkeypatch, values)
+    result = inspection.diagnose_distributions(image=IMAGE, source_commit=COMMIT)
+    assert result == {
+        "distributions": [
+            {
+                "metadata_path": (first / "demo-1.dist-info").as_posix(),
+                "name": "demo-name",
+                "version": "1+cpu",
+            },
+            {
+                "metadata_path": (second / "demo-1.dist-info").as_posix(),
+                "name": "demo-name",
+                "version": "1+cpu",
+            },
+        ],
+        "operator_selection": {"image": IMAGE, "source_commit": COMMIT},
+        "schema_version": inspection._DIAGNOSTIC_SCHEMA,
+        "status": "DIAGNOSTIC_ONLY",
+    }
+
+
+def test_distribution_diagnostic_does_not_relax_normal_inspection(
+    monkeypatch, tmp_path
+):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _dist_info(first, "demo-1.dist-info", "demo", "1")
+    _dist_info(second, "demo-1.dist-info", "demo", "1")
+    values = list(inspection.importlib.metadata.distributions(path=[first, second]))
+    _metadata(monkeypatch, values)
+    with pytest.raises(
+        inspection._InspectionFailure, match="DISTRIBUTION_PHYSICAL_DUPLICATE"
+    ):
+        inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
+
+
+@pytest.mark.parametrize(
+    "name,version,reason",
+    (
+        ("bad name", "1", "DISTRIBUTION_NAME_INVALID"),
+        ("demo", "https://private.invalid", "DISTRIBUTION_VERSION_INVALID"),
+    ),
+)
+def test_distribution_diagnostic_rejects_unsafe_metadata(
+    monkeypatch, name, version, reason
+):
+    _metadata(monkeypatch, (Distribution(name, version),))
+    with pytest.raises(inspection._InspectionFailure, match=reason):
+        inspection.diagnose_distributions(image=IMAGE, source_commit=COMMIT)
+
+
+def test_distribution_diagnostic_rejects_unbounded_path(monkeypatch, tmp_path):
+    _dist_info(tmp_path, "demo-1.dist-info", "demo", "1")
+    values = inspection.importlib.metadata.distributions(path=[tmp_path])
+    _metadata(monkeypatch, values)
+    original = inspection._bounded_text
+
+    def bounded(value, *, maximum):
+        if maximum == 4096:
+            raise inspection._InspectionFailure("METADATA_INVALID")
+        return original(value, maximum=maximum)
+
+    monkeypatch.setattr(inspection, "_bounded_text", bounded)
+    with pytest.raises(inspection._InspectionFailure, match="METADATA_INVALID"):
+        inspection.diagnose_distributions(image=IMAGE, source_commit=COMMIT)
+
+
+def test_distribution_diagnostic_reports_null_for_unproven_path(monkeypatch):
+    _metadata(monkeypatch, (Distribution("demo", "1"),))
+    result = inspection.diagnose_distributions(image=IMAGE, source_commit=COMMIT)
+    assert result["distributions"] == [
+        {"metadata_path": None, "name": "demo", "version": "1"}
+    ]
+
+
+def test_distribution_diagnostic_unique_name_count_is_bounded(monkeypatch):
+    values = [
+        Distribution(f"package-{index}", "1")
+        for index in range(inspection._MAX_DISTRIBUTIONS + 1)
+    ]
+    _metadata(monkeypatch, values)
+    with pytest.raises(inspection._InspectionFailure, match="DISTRIBUTION_COUNT_LIMIT"):
+        inspection.diagnose_distributions(image=IMAGE, source_commit=COMMIT)
+
+
+def test_distribution_diagnostic_occurrence_count_is_bounded(monkeypatch):
+    value = Distribution("demo", "1")
+    _metadata(
+        monkeypatch,
+        (value for _ in range(inspection._MAX_DISTRIBUTION_OCCURRENCES + 1)),
+    )
+    with pytest.raises(inspection._InspectionFailure, match="DISTRIBUTION_COUNT_LIMIT"):
+        inspection.diagnose_distributions(image=IMAGE, source_commit=COMMIT)
+
+
+def test_distribution_diagnostic_main_is_closed_on_private_failure(monkeypatch, capsys):
+    monkeypatch.setattr(
+        inspection,
+        "diagnose_distributions",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("private-token-value")),
+    )
+    assert (
+        inspection.main(
+            [
+                "--image",
+                IMAGE,
+                "--source-commit",
+                COMMIT,
+                "--diagnose-distributions",
+            ]
+        )
+        == 125
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "reason_code": "INSPECTION_FAILED",
+        "schema_version": inspection._ERROR_SCHEMA,
+        "status": "FAILED",
+    }
+    assert "private-token-value" not in captured.err
+
+
 @pytest.mark.parametrize(
     "values,reason",
     (

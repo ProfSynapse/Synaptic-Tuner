@@ -15,10 +15,13 @@ import sys
 
 _SCHEMA = "synaptic-modal-inference-runtime-inspection-candidate/v1"
 _ERROR_SCHEMA = "synaptic-modal-inference-runtime-inspection-error/v1"
+_DIAGNOSTIC_SCHEMA = "synaptic-modal-inference-distribution-diagnostic/v1"
 _IMAGE = re.compile(r"docker\.io/vllm/vllm-openai@sha256:[0-9a-f]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _VERSION = re.compile(r"[1-9][0-9]{0,2}\.(?:0|[1-9][0-9]{0,2})\.(?:0|[1-9][0-9]{0,2})")
 _DIST_SEPARATORS = re.compile(r"[-_.]+")
+_DIST_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_DIST_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9.!+_-]{0,255}")
 _MAX_DISTRIBUTIONS = 512
 _MAX_DISTRIBUTION_OCCURRENCES = 4096
 _MAX_EXECUTABLE_BYTES = 64 * 1024 * 1024
@@ -182,6 +185,27 @@ def _metadata_identity(distribution: object) -> tuple[int, ...] | None:
     )
 
 
+def _metadata_path(distribution: object) -> str | None:
+    if type(distribution) is not importlib.metadata.PathDistribution:
+        return None
+    path = getattr(distribution, "_path", None)
+    if type(path) is not type(Path()):
+        return None
+    try:
+        resolved = path.resolve(strict=True)
+        if (
+            not resolved.is_absolute()
+            or resolved != Path(os.path.normpath(resolved))
+            or not os.path.samefile(path, resolved)
+        ):
+            raise _InspectionFailure("DISTRIBUTION_METADATA_READ_FAILED")
+        return _bounded_text(resolved.as_posix(), maximum=4096)
+    except _InspectionFailure:
+        raise
+    except (OSError, OverflowError, ValueError):
+        raise _InspectionFailure("DISTRIBUTION_METADATA_READ_FAILED") from None
+
+
 def _distributions() -> dict[str, str]:
     result: dict[str, str] = {}
     identities: dict[str, tuple[tuple[int, ...], str]] = {}
@@ -292,17 +316,107 @@ def inspect_runtime(*, image: str, source_commit: str) -> dict[str, object]:
     return candidate
 
 
+def diagnose_distributions(*, image: str, source_commit: str) -> dict[str, object]:
+    if type(image) is not str or _IMAGE.fullmatch(image) is None:
+        raise _InspectionFailure("IMAGE_INVALID")
+    if type(source_commit) is not str or _COMMIT.fullmatch(source_commit) is None:
+        raise _InspectionFailure("SOURCE_INVALID")
+    entries: list[dict[str, str | None]] = []
+    names: set[str] = set()
+    physical: dict[tuple[int, ...], tuple[str, str]] = {}
+    try:
+        iterator = iter(importlib.metadata.distributions())
+    except Exception:
+        raise _InspectionFailure("DISTRIBUTION_ENUMERATION_FAILED") from None
+    for occurrence in range(1, _MAX_DISTRIBUTION_OCCURRENCES + 2):
+        try:
+            distribution = next(iterator)
+        except StopIteration:
+            break
+        except Exception:
+            raise _InspectionFailure("DISTRIBUTION_ENUMERATION_FAILED") from None
+        if occurrence > _MAX_DISTRIBUTION_OCCURRENCES:
+            raise _InspectionFailure("DISTRIBUTION_COUNT_LIMIT")
+        identity_before = _metadata_identity(distribution)
+        try:
+            raw_name = distribution.metadata.get("Name")
+            raw_version = distribution.version
+        except Exception:
+            raise _InspectionFailure("DISTRIBUTION_METADATA_READ_FAILED") from None
+        try:
+            name = _DIST_SEPARATORS.sub(
+                "-", _bounded_text(raw_name, maximum=128)
+            ).lower()
+        except Exception:
+            raise _InspectionFailure("DISTRIBUTION_NAME_INVALID") from None
+        if _DIST_NAME.fullmatch(name) is None:
+            raise _InspectionFailure("DISTRIBUTION_NAME_INVALID")
+        try:
+            version = _bounded_text(raw_version, maximum=256)
+        except Exception:
+            raise _InspectionFailure("DISTRIBUTION_VERSION_INVALID") from None
+        if _DIST_VERSION.fullmatch(version) is None:
+            raise _InspectionFailure("DISTRIBUTION_VERSION_INVALID")
+        identity_after = _metadata_identity(distribution)
+        if identity_before != identity_after and (
+            identity_before is not None or identity_after is not None
+        ):
+            raise _InspectionFailure("DISTRIBUTION_METADATA_READ_FAILED")
+        stable_identity = (
+            identity_before
+            if identity_before is not None and identity_before == identity_after
+            else None
+        )
+        metadata_path = (
+            _metadata_path(distribution) if stable_identity is not None else None
+        )
+        if stable_identity is not None:
+            previous = physical.get(stable_identity)
+            if previous is not None:
+                if previous != (name, version):
+                    raise _InspectionFailure("DISTRIBUTION_PHYSICAL_METADATA_MISMATCH")
+                continue
+            physical[stable_identity] = (name, version)
+        names.add(name)
+        if len(names) > _MAX_DISTRIBUTIONS:
+            raise _InspectionFailure("DISTRIBUTION_COUNT_LIMIT")
+        entries.append(
+            {"metadata_path": metadata_path, "name": name, "version": version}
+        )
+    diagnostic = {
+        "distributions": sorted(
+            entries,
+            key=lambda item: (
+                item["name"] or "",
+                item["version"] or "",
+                item["metadata_path"] or "",
+            ),
+        ),
+        "operator_selection": {"image": image, "source_commit": source_commit},
+        "schema_version": _DIAGNOSTIC_SCHEMA,
+        "status": "DIAGNOSTIC_ONLY",
+    }
+    if len(_line(diagnostic)) > _MAX_OUTPUT_BYTES:
+        raise _InspectionFailure("OUTPUT_INVALID")
+    return diagnostic
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _ClosedParser(description=__doc__)
     parser.add_argument("--image", required=True)
     parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--diagnose-distributions", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     try:
         args = build_parser().parse_args(argv)
-        candidate = inspect_runtime(image=args.image, source_commit=args.source_commit)
+        candidate = (
+            diagnose_distributions(image=args.image, source_commit=args.source_commit)
+            if args.diagnose_distributions
+            else inspect_runtime(image=args.image, source_commit=args.source_commit)
+        )
         sys.stdout.buffer.write(_line(candidate))
         return 0
     except (KeyboardInterrupt, SystemExit):

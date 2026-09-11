@@ -446,7 +446,13 @@ def _remote_reason(payload: bytes) -> str:
 
 
 def read_modal_inference_runtime_sandbox(
-    *, sdk: object, client: object, sandbox_id: str, image: str, source_commit: str
+    *,
+    sdk: object,
+    client: object,
+    sandbox_id: str,
+    image: str,
+    source_commit: str,
+    diagnose_distributions: bool = False,
 ) -> bytes:
     """Read one exact stopped inspection Sandbox without mutation or discovery."""
     sandbox_id = _exact_text(sandbox_id, _SANDBOX_ID)
@@ -486,13 +492,15 @@ def read_modal_inference_runtime_sandbox(
         try:
             if stderr:
                 raise ValueError
-            candidate = _parse_candidate(
-                stdout, image=image, source_commit=source_commit
-            )
+            parser = _parse_diagnostic if diagnose_distributions else _parse_candidate
+            candidate = parser(stdout, image=image, source_commit=source_commit)
         except Exception:
             report.update(status="REMOTE_FAILED", reason_code="OUTPUT_INVALID")
         else:
-            report.update(status="CANDIDATE_ONLY", candidate=candidate)
+            if diagnose_distributions:
+                report.update(status="DIAGNOSTIC_ONLY", diagnostic=candidate)
+            else:
+                report.update(status="CANDIDATE_ONLY", candidate=candidate)
     else:
         try:
             if stdout:
@@ -590,6 +598,75 @@ def _parse_candidate(
     return candidate
 
 
+def _parse_diagnostic(
+    raw: bytes, *, image: str, source_commit: str
+) -> dict[str, object]:
+    """Validate non-admitting package inventory, never arbitrary remote output."""
+    try:
+        if len(raw) > _MAX_CAPTURE_BYTES:
+            raise ValueError
+        value = json.loads(raw)
+        if (
+            type(value) is not dict
+            or set(value)
+            != {"distributions", "operator_selection", "schema_version", "status"}
+            or value["schema_version"]
+            != "synaptic-modal-inference-distribution-diagnostic/v1"
+            or value["status"] != "DIAGNOSTIC_ONLY"
+            or value["operator_selection"]
+            != {"image": image, "source_commit": source_commit}
+            or json.dumps(
+                value,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("ascii")
+            + b"\n"
+            != raw
+        ):
+            raise ValueError
+        entries = value["distributions"]
+        if type(entries) is not list or len(entries) > 4096:
+            raise ValueError
+        names = set()
+        for entry in entries:
+            if type(entry) is not dict or set(entry) != {
+                "name",
+                "version",
+                "metadata_path",
+            }:
+                raise ValueError
+            name, version, path = (
+                entry["name"],
+                entry["version"],
+                entry["metadata_path"],
+            )
+            if (
+                type(name) is not str
+                or len(name) > 128
+                or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None
+                or type(version) is not str
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]{0,255}", version) is None
+            ):
+                raise ValueError
+            if path is not None and (
+                type(path) is not str
+                or len(path.encode("utf-8")) > 4096
+                or not path.startswith("/")
+                or path.startswith("//")
+                or path != os.path.normpath(path)
+                or any(ord(c) < 32 or ord(c) == 127 for c in path)
+            ):
+                raise ValueError
+            names.add(name)
+        if len(names) > 512:
+            raise ValueError
+        return value
+    except Exception:
+        raise ModalInferenceRuntimeCaptureError("capture_output_invalid") from None
+
+
 def capture_modal_inference_runtime(
     *,
     sdk: object,
@@ -598,6 +675,7 @@ def capture_modal_inference_runtime(
     environment_name: str,
     image: str,
     source_commit: str,
+    diagnose_distributions: bool = False,
 ) -> ModalInferenceRuntimeCapture:
     """Run the inspector once, with a finite local and remote lifetime."""
 
@@ -660,6 +738,7 @@ def capture_modal_inference_runtime(
                     image,
                     "--source-commit",
                     source_commit,
+                    *(("--diagnose-distributions",) if diagnose_distributions else ()),
                     app=app,
                     image=image_value,
                     cpu=1.0,
@@ -689,13 +768,18 @@ def capture_modal_inference_runtime(
         )
         if _script_source(script)[1] != script_digest:
             raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
-        candidate = _parse_candidate(raw, image=image, source_commit=source_commit)
+        parser = _parse_diagnostic if diagnose_distributions else _parse_candidate
+        candidate = parser(raw, image=image, source_commit=source_commit)
         envelope = {
-            "candidate": candidate,
+            ("diagnostic" if diagnose_distributions else "candidate"): candidate,
             "inspection_script_sha256": script_digest,
             "operator_selection_only": True,
             "sandbox_id": sandbox_id,
-            "schema_version": "synaptic-modal-inference-runtime-capture/v1",
+            "schema_version": (
+                "synaptic-modal-inference-distribution-diagnostic-capture/v1"
+                if diagnose_distributions
+                else "synaptic-modal-inference-runtime-capture/v1"
+            ),
         }
         encoded = json.dumps(
             envelope,
@@ -777,6 +861,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--environment", required=True)
     parser.add_argument("--image", required=True)
     parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--diagnose-distributions", action="store_true")
     parser.add_argument(
         "--modal-profile",
         type=lambda value: _exact_text(value, _NAME),
@@ -838,6 +923,7 @@ def main(argv: list[str] | None = None) -> int:
                         environment_name=arguments.environment,
                         image=arguments.image,
                         source_commit=arguments.source_commit,
+                        diagnose_distributions=arguments.diagnose_distributions,
                     )
                     output, success = capture.canonical_bytes, True
                 else:
@@ -847,6 +933,7 @@ def main(argv: list[str] | None = None) -> int:
                         sandbox_id=arguments.read_sandbox,
                         image=arguments.image,
                         source_commit=arguments.source_commit,
+                        diagnose_distributions=arguments.diagnose_distributions,
                     )
                     success = True
         sys.stdout.buffer.write(output + b"\n")
