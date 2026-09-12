@@ -1,0 +1,4 @@
+[submodule "synaptic-tuner"]
+	path = synaptic-tuner
+	url = https://github.com/ProfSynapse/Synaptic-Tuner.git
+	branch = smoke/modal-chat-engine
