@@ -1,0 +1,57 @@
+{
+  "schema_version": "synaptic-modal-consumer-publication-observation/v1",
+  "observed_at": "2026-09-12T00:08:52Z",
+  "qualification": "SOURCE_PUBLICATION_ONLY",
+  "repository_url": "https://github.com/ProfSynapse/Synaptic-Tuner.git",
+  "consumer": {
+    "branch": "smoke/modal-chat-consumer",
+    "commit": "97121408a772458d167764cfc2238755f26545b3",
+    "committed_entry_count": 7
+  },
+  "engine": {
+    "branch": "smoke/modal-chat-engine",
+    "commit": "b3d916b16a110f884ae394fe3a25a138aac7c863",
+    "submodule_path": "synaptic-tuner"
+  },
+  "publication": {
+    "atomic": true,
+    "explicit_refspecs": true,
+    "creation_only_leases": true,
+    "remote_shas_matched": true,
+    "existing_integration_ref": "refs/heads/feat/submodule-cloud-api-v1",
+    "existing_integration_commit": "68f3bea9ca210d8f507645d6048da2127852ad49",
+    "existing_integration_unchanged": true
+  },
+  "independent_review": {
+    "consumer_tree": "PASS",
+    "engine_branch_publication_safety": "PASS",
+    "engine_unpublished_commit_count": 64,
+    "engine_changed_file_count": 280,
+    "live_serving_qualification": false
+  },
+  "fresh_remote_checkout": {
+    "credentials_used": false,
+    "consumer_commit_matched": true,
+    "gitlink_matched": true,
+    "engine_commit_matched": true,
+    "consumer_clean": true,
+    "engine_clean": true,
+    "production_local_source_inspector": "PASS",
+    "unittest_passed": 4,
+    "unittest_seconds": 1.712
+  },
+  "effects": {
+    "modal_calls": false,
+    "gpu_jobs": false,
+    "ehr_changes": false,
+    "main_updates": false,
+    "merges": false
+  },
+  "remaining": [
+    "Authenticated consumer composition and training configuration/data",
+    "Reviewed final inference runtime, dependency and source resources",
+    "Rebuilt inference image and in-image runtime verification",
+    "Actual authenticated training artifacts, chat response and exact-instance cleanup evidence"
+  ],
+  "note": "Observed Git publication and provider-free source tests only; this unsigned record is not runtime admission, source/deployment attestation, an execution grant, or live smoke evidence."
+}
