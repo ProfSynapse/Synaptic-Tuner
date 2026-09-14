@@ -90,3 +90,42 @@ distinguished before any Sandbox create attempt. The original attempt's cleanup
 uncertainty remains recorded. The four-file preparation/capture regression
 passed 101 tests in 0.49 seconds; the late-create interrupt injection was moved
 to the third operation (lookup, build, create), preserving its cleanup assertion.
+
+## Successful concrete CPU qualification
+
+The corrected source `d6e29ed03e026bd0653967c109dffe69625e2b46` built wheel
+SHA-256 `d139289e777c6921491660a8584b5a5640ef1fdca7f4e97e936282d93579b1c2`
+(2,129,612 bytes). All 120 locked members and 729 shared archive/package files
+passed byte comparison against the completed 2,447-file Git archive.
+
+The bounded CPU capture succeeded in Sandbox `sb-0zoIiXBJs78ViKq11C54xf`, using
+hydrated provider Image `im-rwqrQYtujjHal3RpL3RYW5`. It verified the actual
+CPython 3.12.13 executable and exact 230-distribution environment with the
+production packaged-runtime core. Its private-directory probe verified UID 0,
+mode 0700 and actual read/write access at all four fixed paths. The unchanged
+strict production duplicate-distribution check passed; no deduplication bypass
+or guessed dependency pins were needed.
+
+Runtime manifest digest:
+`c9258e079d32e9623567abefe9ea1c33ba7696ab97773dd8de04d719f1f39ec8`.
+Source-inventory digest:
+`53c0cb8978d987597e0858c241d1a63fce5eb147348fd2be5a9e0c3092cbf237`.
+Worker-closure digest:
+`7957046e870eca1a8ccd53cd9d611f3a6838abc2accbff78f990d38a4f1fbd22`.
+
+Capture exit 0 requires confirmed exact-instance cleanup. Separate read-only
+recovery of that same Sandbox returned exit code 0 and identical candidate
+runtime/directory facts, independently establishing it was stopped. A mistyped
+image digest on the first readback command was rejected locally before the
+Sandbox lookup; the corrected command used the capture's exact selection.
+The complete closed capture and readback records are retained in
+`evidence/modal-inference-qualified-d6e29ed.json` and
+`evidence/modal-inference-qualified-d6e29ed-readback.json`.
+
+This is a real CPU package qualification, not a GPU/model/chat result. No
+Volumes, Secrets, GPU, model download, or external endpoint were attached.
+The five-minute Sandbox timeout and network block were unchanged. The outer
+candidate label remains intentional: fresh training, authenticated native read
+qualification, consumer composition, GPU startup, one chat turn and that
+session's cleanup still remain. The earlier no-ID failure is retained separately
+and is not retrospectively rewritten as a confirmed cleanup.

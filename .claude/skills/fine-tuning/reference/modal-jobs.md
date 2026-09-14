@@ -429,6 +429,17 @@ environment; emit only allowlisted closed preparation codes, never arbitrary
 build stdout, exception text, credentials, or logs from another environment.
 An app-scoped log result is not an exact Sandbox ownership receipt.
 
+Measured CPU qualification (2026-09-14): source
+`d6e29ed03e026bd0653967c109dffe69625e2b46` passed the concrete packaged-runtime
+check in Image `im-rwqrQYtujjHal3RpL3RYW5`; exact stopped-Sandbox readback
+confirmed the result. The 230-distribution map, interpreter hash, 118-source
+closure and all four private-directory probes passed without weakening runtime
+checks. See `docs/review/modal-inference-image-qualification.md` and its exact
+capture/readback records. This qualifies that installed CPU package only;
+GPU/model loading, real consumer authority, mounted artifacts and chat remain
+separate. Do not reuse the image after a change to any locked source or runtime
+pin, or cite its successful CPU check as an end-to-end chat smoke.
+
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's
 `assert_current(source)` to recheck current workflow/Foundation/native metadata
