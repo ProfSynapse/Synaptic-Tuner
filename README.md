@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`94edfd7aeb011387b28fcffe908351e1e4736c2c`, advertised by
+`c95d5405b1666b9a775aecc850e2251992482648`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -113,8 +113,14 @@ layout, without claiming version-pinned invocation. Attempt
 call. That exact call terminated with failure; its Modal logs identified an
 integer-only workload reparse before source preparation. The corrected engine
 uses the bounded finite-number workload parser throughout worker and inference
-admission, preserving strict command/evidence checks. The current configuration
-selects a separate `modal-chat-20260914-e` attempt with new resource/function
+admission, preserving strict command/evidence checks. Attempt
+`modal-chat-20260914-e` reached source preparation and returned a terminal
+worker failure (code 124). Its saved operation log identifies model preparation;
+the runner incorrectly required the cache's run ID to start with `run-`.
+The next engine binds the cache to the exact authenticated source run ID.
+It also hydrates lazy Modal call handles before checking their IDs, so the
+launcher can wait for remote work rather than prematurely reading evidence.
+The current configuration selects a separate `modal-chat-20260914-f` attempt with new resource/function
 names. Earlier attempts' claims or resources may not be adopted or erased.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.
