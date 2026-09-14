@@ -104,6 +104,123 @@ def test_bad_arguments_never_echo_supplied_values(capsys):
     assert json.loads(output.out)["retry_authorized"] is False
 
 
+def test_main_reports_closed_chat_phase_and_suppressed_context(monkeypatch, capsys):
+    monkeypatch.setattr(launch, "check_inputs", lambda *args, **kwargs: (1, 2, 3, 4))
+
+    def fail(*args, emit, **kwargs):
+        emit("CHAT_OPEN")
+        try:
+            raise ValueError("private-inner-value")
+        except ValueError:
+            raise launch.ModalChatLauncherError("private-outer-value") from None
+
+    monkeypatch.setattr(launch, "execute", fail)
+    assert (
+        launch.main(
+            [
+                "--project-root",
+                "/consumer",
+                "--configuration",
+                "configuration/smoke.json",
+                "--mode",
+                "train-chat",
+                "--modal-profile",
+                "selected",
+            ]
+        )
+        == 1
+    )
+    output = capsys.readouterr()
+    failure = json.loads(output.out.splitlines()[-1])
+    assert failure["phase"] == "CHAT_OPEN"
+    assert failure["authorizing"] is False
+    assert failure["retry_authorized"] is False
+    assert [item["exception_class"] for item in failure["exception_chain"]] == [
+        "OTHER",
+        "ValueError",
+    ]
+    assert "private-" not in output.out + output.err
+
+
+@pytest.mark.parametrize("primary_type", [ValueError, KeyboardInterrupt, SystemExit])
+def test_cleanup_guard_preserves_primary_and_records_secondary(
+    monkeypatch, primary_type
+):
+    primary = primary_type("private-primary")
+    cleanup_calls, saved, emitted = [], [], []
+
+    def fail_cleanup(*args):
+        cleanup_calls.append(args)
+        raise RuntimeError("private-cleanup")
+
+    monkeypatch.setattr(launch, "_confirm_chat_cleanup", fail_cleanup)
+    monkeypatch.setattr(launch, "_record", lambda *args: saved.append(args))
+    with pytest.raises(primary_type) as caught:
+        with launch._chat_cleanup_guard(
+            "graph", "storage", "session", emit=emitted.append
+        ):
+            raise primary
+    assert caught.value is primary
+    assert cleanup_calls == [("graph", "storage", "session")]
+    assert len(saved) == 1
+    assert saved[0][1:3] == ("launch-chat-cleanup-failures", "session")
+    assert saved[0][3]["phase"] == "CHAT_CLEANUP"
+    assert saved[0][3]["authorizing"] is False
+    assert "private-" not in json.dumps(saved[0][3])
+    assert emitted == []
+
+
+def test_cleanup_guard_propagates_primary_cleanup_failure(monkeypatch):
+    error = RuntimeError("private-cleanup")
+    emitted = []
+
+    def fail_cleanup(*args):
+        raise error
+
+    monkeypatch.setattr(launch, "_confirm_chat_cleanup", fail_cleanup)
+    with pytest.raises(RuntimeError) as caught:
+        with launch._chat_cleanup_guard(None, None, "session", emit=emitted.append):
+            pass
+    assert caught.value is error
+    assert emitted == ["CHAT_CLEANUP"]
+
+
+def test_cleanup_storage_failure_cannot_replace_original_error(monkeypatch):
+    primary = ValueError("private-primary")
+
+    def fail(*args):
+        raise RuntimeError("private-secondary")
+
+    monkeypatch.setattr(launch, "_confirm_chat_cleanup", fail)
+    monkeypatch.setattr(launch, "_record", fail)
+    with pytest.raises(ValueError) as caught:
+        with launch._chat_cleanup_guard(None, None, "session", emit=lambda value: None):
+            raise primary
+    assert caught.value is primary
+
+
+def test_verified_snapshot_preserves_immutable_queued_ownership(monkeypatch, tmp_path):
+    from tests.examples.test_modal_chat_qualification import _fixture
+    from examples.modal_chat.qualification import qualify_modal_chat_run
+    from tuner.execution.coordinator_v1.model import WorkflowPhaseV1
+
+    host, store, reader, storage, run = _fixture(monkeypatch, tmp_path)
+    with storage:
+        queued = launch._snapshot_training(host, storage, run)
+        ownership = storage.catalog("launch-run-ownership", encode=bytes, decode=bytes)
+        original = ownership.resolve(run.run_id)
+        qualify_modal_chat_run(host=host, storage=storage, run=run)
+        verified = launch._snapshot_workflow(host, storage, run)
+        assert verified.phase is WorkflowPhaseV1.VERIFIED
+        assert verified.record_digest != queued.record_digest
+        assert ownership.resolve(run.run_id) == original
+        workflows = storage.catalog("launch-workflows", encode=bytes, decode=bytes)
+        assert json.loads(workflows.resolve(queued.record_digest)) == queued.to_dict()
+        assert (
+            json.loads(workflows.resolve(verified.record_digest)) == verified.to_dict()
+        )
+
+
 def test_selected_modal_profile_disables_environment_override(monkeypatch):
     pytest.importorskip("modal")
     from modal.config import config

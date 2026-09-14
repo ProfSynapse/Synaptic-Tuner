@@ -35,6 +35,7 @@ from examples.modal_chat.configuration import (
 )
 from examples.modal_chat.consumer import chat_once, submit_training_once
 from examples.modal_chat.deployment import ModalChatOwnedDeployment, ModalChatScope
+from examples.modal_chat.diagnostics import modal_chat_failure_diagnostic
 from examples.modal_chat.provisioning import ModalChatProvisioner
 from examples.modal_chat.replay import ModalChatEvidenceReplay
 from examples.modal_chat.resolution import _regular_digest
@@ -227,11 +228,18 @@ def check_inputs(project_root, configuration, *, mode="check"):
     return manifest, context, settings, source
 
 
-def _snapshot_training(host, storage, run):
+def _snapshot_workflow(host, storage, run):
     workflow = host.stores.workflow_store.get(run)
     if workflow is None:
         return None
     _record(storage, "launch-workflows", workflow.record_digest, workflow.to_dict())
+    return workflow
+
+
+def _snapshot_training(host, storage, run):
+    workflow = _snapshot_workflow(host, storage, run)
+    if workflow is None:
+        return None
     snapshots = storage.catalog("launch-foundation", encode=bytes, decode=bytes)
     for intent in (workflow.stage, workflow.submit):
         if intent is None:
@@ -339,12 +347,15 @@ def _confirm_chat_cleanup(graph, storage, attempt_ref):
         raise ModalChatLauncherError("modal_chat_cleanup_unconfirmed")
 
 
-def _chat(training, deployment, scope, storage, settings, ids, auth, clock, run):
+def _chat(
+    training, deployment, scope, storage, settings, ids, auth, clock, run, *, emit
+):
     from examples.modal_chat.chat import compose_modal_run_chat
 
     now = clock.now_iso()
     session = settings.attempt_ref + "-chat"
     reviewed = settings.reviewed_runtime
+    emit("CHAT_CONFIGURATION")
     configuration, trust = build_authenticated_inference_configuration(
         scope=scope,
         reviewed_capture_path=ENGINE / reviewed["capture"]["path"],
@@ -380,6 +391,7 @@ def _chat(training, deployment, scope, storage, settings, ids, auth, clock, run)
     )
     _, execution, _ = training.preparation._snapshot()
     now = clock.now_iso()
+    emit("CHAT_QUOTE")
     quote, quote_trust, calculation, calculation_tag = issue_authenticated_modal_quote(
         scope=scope,
         configuration=configuration,
@@ -410,6 +422,7 @@ def _chat(training, deployment, scope, storage, settings, ids, auth, clock, run)
         },
     )
     document = json.loads(configuration.body_bytes)
+    emit("CHAT_COMPOSITION")
     graph = compose_modal_run_chat(
         host=training.host,
         deployment=deployment,
@@ -447,7 +460,8 @@ def _chat(training, deployment, scope, storage, settings, ids, auth, clock, run)
         namespace_ref=execution.scope.namespace_ref,
         prequalified_image_id=document["image"]["provider_image_id"],
     )
-    try:
+    with _chat_cleanup_guard(graph, storage, session, emit=emit):
+        emit("CHAT_OPEN")
         return chat_once(
             training.host.api.runs,
             storage,
@@ -456,7 +470,34 @@ def _chat(training, deployment, scope, storage, settings, ids, auth, clock, run)
             runtime=graph.runtime,
             prompt=settings.prompt,
         )
-    finally:
+
+
+@contextlib.contextmanager
+def _chat_cleanup_guard(graph, storage, session, *, emit):
+    try:
+        yield
+    except BaseException:
+        # Always attempt exact cleanup without replacing the original failure.
+        try:
+            _confirm_chat_cleanup(graph, storage, session)
+        except BaseException as cleanup_error:
+            try:
+                payload = modal_chat_failure_diagnostic(
+                    phase="CHAT_CLEANUP", error=cleanup_error
+                )
+                _record(
+                    storage,
+                    "launch-chat-cleanup-failures",
+                    session,
+                    json.loads(payload),
+                )
+            except BaseException:
+                # An unavailable evidence store cannot justify replay or erase
+                # the original exception. Its diagnostic remains primary.
+                pass
+        raise
+    else:
+        emit("CHAT_CLEANUP")
         _confirm_chat_cleanup(graph, storage, session)
 
 
@@ -628,6 +669,10 @@ def execute(
         verified = training.host.api.runs.verify(submitted.start.run)
         if verified.run != submitted.start.run or verified.verified is not True:
             raise ModalChatLauncherError("modal_chat_training_not_verified")
+        # Ownership is immutable and was recorded at submit. Retain the later
+        # workflow by its own digest without rewriting that queued ownership row.
+        if _snapshot_workflow(training.host, storage, submitted.start.run) is None:
+            raise ModalChatLauncherError("modal_chat_training_not_verified")
         emit("CHATTING")
         _chat(
             training,
@@ -639,6 +684,7 @@ def execute(
             auth,
             clock,
             submitted.start.run,
+            emit=emit,
         )
         emit("CHAT_SAVED_AND_STOPPED")
 
@@ -692,9 +738,9 @@ def main(argv=None):
             + "\n"
         )
         return 130
-    except Exception:
+    except Exception as error:
         stream.write(
-            json.dumps({"status": "FAILED", "phase": phase, "retry_authorized": False})
+            modal_chat_failure_diagnostic(phase=phase, error=error).decode("ascii")
             + "\n"
         )
         return 1

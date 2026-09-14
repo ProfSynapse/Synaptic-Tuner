@@ -48,6 +48,11 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Use the consumer launcher's fixed phase/class/location diagnostics for host-side
+  failures, including suppressed exception context; never print exception messages,
+  locals or full traceback text. Retain later workflow snapshots by their digest,
+  without rewriting immutable submit ownership or authorizing a retry.
+
 - Native training qualification H supports only public observe and artifact
   streaming. Keep logs/cancel/reconcile/cost-quote disabled; separately qualify
   the updated inference image and bounded chat. See the exact evidence and

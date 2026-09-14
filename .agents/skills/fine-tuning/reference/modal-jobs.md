@@ -594,6 +594,15 @@ image construction.
 
 ## Failure diagnostics
 
+The minimal consumer launcher emits fixed host chat phases and a bounded,
+non-authorizing failure record containing only allowlisted exception classes
+and relative source locations. Suppressed exception context is inspected without
+printing messages, locals, credential-derived data or raw tracebacks. Preserve
+the original failure if exact cleanup also fails; inspect its separate closed
+cleanup record. Save post-verification workflows by digest without rewriting the
+immutable submission-ownership row. Neither diagnostics nor a saved workflow
+authorize replay of a consumed attempt.
+
 Raw trainer stdout/stderr, tokens, provider responses, and exception text do not
 cross the remote contract. Persist closed status codes and redacted structured
 records. For a failed live smoke, collect the provider call status, Modal logs,

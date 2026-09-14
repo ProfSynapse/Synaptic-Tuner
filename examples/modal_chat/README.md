@@ -241,6 +241,19 @@ The original runtime retains any known cleanup lease while its process lives.
 
 ## Verification status
 
+Correction (2026-09-14): attempt I passed public training outcome and artifact
+verification but failed during chat before a SUBMIT binding or Sandbox ownership
+was retained. No reply/context was saved, and the empty cleanup record is not
+provider shutdown proof. Its original exception location was not retained, so
+no specific root cause is claimed. The launcher now emits fixed chat phases and
+closed, bounded exception-class/source-location diagnostics, including suppressed
+context but no messages, locals or raw traceback text. It retains a verified
+workflow separately from immutable queued ownership and preserves an original
+chat failure when cleanup also fails. The joined public verify/reverify/native
+source-admission regression uses the actual example artifact verifier with a
+simulated provider; it passes but does not reproduce I's live failure. These
+consumer-only changes do not alter the qualified inference runtime closure.
+
 Provider-free tests cover actual public training start through the consumer
 composition, one simulated spawn and convergent repeated start, real HMAC
 verification, `open_run_chat` with simulated execution, permanent claims,
