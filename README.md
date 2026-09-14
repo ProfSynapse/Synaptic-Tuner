@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`32840a3313f7127b254a717ee723eeed3f4f7af1`, advertised by
+`9e0194546cac18440cad9e76d39b926114a61f9c`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -103,8 +103,13 @@ also failed before training submission. Its closed diagnostic records an
 it does not prove a published deployment or provider shutdown. Image metadata
 reported CPython 3.11.14 while the launcher used 3.12.9, a documented serialized
 function incompatibility. The exact server rejection reason was not retained.
-The current configuration selects a separate `modal-chat-20260914-c` attempt
-with new resource/function names and the corrected launcher. Neither earlier
-attempt's claims or resources may be adopted or erased.
+Attempt `modal-chat-20260914-c` used CPython 3.11.14 and successfully returned
+from deployment at app version 7, then failed the local identity readback
+before training submission. Ordinary named-function and layout metadata omit
+the immutable definition ID; the version-pinned lookup was unavailable.
+The corrected consumer verifies the current app generation and exact private
+layout, without claiming version-pinned invocation. The current configuration
+selects a separate `modal-chat-20260914-d` attempt with new resource/function
+names. Earlier attempts' claims or resources may not be adopted or erased.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.
