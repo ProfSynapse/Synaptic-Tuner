@@ -28,7 +28,7 @@ from tuner.runtime.offline_sft_worker import (
     load_packaged_offline_sft_worker_manifest,
     parse_offline_sft_worker_manifest,
 )
-from tuner.training.recipes import CompiledWorkload
+from tuner.training.recipes import CompiledWorkload, MAX_WORKLOAD_BYTES
 from tuner.training.coordinator_material import CoordinatorResolvedMaterial
 from tuner.training.recipes import RecipeRegistry
 
@@ -130,8 +130,10 @@ def _object(value: bytes, name: str) -> dict[str, object]:
     return document
 
 
-def _workload_object(value: bytes) -> dict[str, object]:
+def parse_workload_object(value: bytes) -> dict[str, object]:
     """Parse the typed workload's canonical JSON, which legitimately has floats."""
+    if type(value) is not bytes or not value or len(value) > MAX_WORKLOAD_BYTES:
+        raise ValueError("workload must be bounded nonempty bytes")
     document = _large_object(value)
     _reject_secrets(document)
     return document
@@ -471,7 +473,7 @@ def _validate(bundle: "ModalCoordinatorBundle") -> None:
     ):
         raise ValueError("execution source differs from stage runtime identity")
 
-    workload_document = _workload_object(members["workload.json"].content)
+    workload_document = parse_workload_object(members["workload.json"].content)
     workload = CompiledWorkload(
         workload_document.get("method"),
         workload_document.get("schema_version"),
@@ -597,7 +599,7 @@ class ModalCoordinatorBundle:
         source = ExecutionSourceV1.from_dict(
             _object(members["execution-source.json"].content, "execution source")
         )
-        workload_doc = _workload_object(members["workload.json"].content)
+        workload_doc = parse_workload_object(members["workload.json"].content)
         workload = CompiledWorkload(
             workload_doc.get("method"),
             workload_doc.get("schema_version"),

@@ -214,7 +214,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_bundle_py": {
       "path": "tuner/execution/providers/modal/coordinator_bundle.py",
-      "sha256": "1e8c1d8390e89f7a1897b151bc747fc4290fa02c37ce868cb6f96c011c308d67"
+      "sha256": "604b6ad3e954a7c9ee9696569ed405f8009dbf8a6b94b72987c0787520a28897"
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_dispatch_py": {
       "path": "tuner/execution/providers/modal/coordinator_dispatch.py",
@@ -234,7 +234,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_worker_py": {
       "path": "tuner/execution/providers/modal/coordinator_worker.py",
-      "sha256": "9032a99455c6fbc8eaa1c050268bdc32f1ac53d3fda03fade95c4786a7f095f7"
+      "sha256": "0600448a08a622f42f17e00176cdafc506bc14826b893ac9213c83ab1d8cfc6a"
     },
     "bootstrap__tuner__execution__providers__modal__deployment_identity_py": {
       "path": "tuner/execution/providers/modal/deployment_identity.py",

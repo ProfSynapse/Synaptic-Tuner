@@ -50,6 +50,7 @@ from tuner.execution.foundation_v2.references import (
 )
 from tuner.training.recipes import CompiledWorkload
 
+from .coordinator_bundle import parse_workload_object
 from .coordinator_preflight import (
     AuthenticatedModalQuote,
     ModalQuoteBody,
@@ -1055,9 +1056,7 @@ def _prepare(
     workload_snapshot = _workload_snapshot(workload)
     source_projection = _source_projection(source)
     workload_projection = _workload_projection(workload)
-    workload_document = parse_canonical_object(
-        workload.workload_bytes, name="inference workload"
-    )
+    workload_document = parse_workload_object(workload.workload_bytes)
     compiled = CompiledWorkload(
         workload_document.get("method"),
         workload_document.get("schema_version"),

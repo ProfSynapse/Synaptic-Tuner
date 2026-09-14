@@ -20,12 +20,11 @@ from tuner.training.recipes import CompiledWorkload, RecipeRegistry
 
 from .contracts import ArtifactRole, BoundsPolicyV1, sha
 from .coordinator_binding import ModalCommandBinding
-from .coordinator_bundle import ModalCoordinatorBundle
+from .coordinator_bundle import ModalCoordinatorBundle, parse_workload_object
 from .coordinator_launch import ModalLaunchEnvelope
 from .coordinator_staging import ModalStageMaterial
 from .coordinator_submit_preparation import prepare_modal_submit_dispatch
 from .inference_binding import ModalInferenceSourceBinding
-
 
 _REVISION = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 _TOKEN = object()
@@ -377,7 +376,7 @@ def _bind(
         item for item in bundle.members if item.name == "workload.json"
     )
     workload_bytes = bytes(workload_member.content)
-    workload_document = parse_canonical_object(workload_bytes, name="Modal workload")
+    workload_document = parse_workload_object(workload_bytes)
     workload = CompiledWorkload(
         workload_document.get("method"),
         workload_document.get("schema_version"),

@@ -48,6 +48,11 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Parse compiled workload bytes with the shared workload-specific finite-number
+  parser throughout worker admission, revalidation and inference preparation.
+  Fractional learning rates and dropout are valid; Foundation command/evidence
+  JSON remains integer-only. Test numeric configuration, not only string rates.
+
 - Do not assume a floating Modal Function lookup returns an immutable definition
   ID. The minimal consumer must verify current scoped app generation and exact
   private layout, including the deployment's single-generation increment;

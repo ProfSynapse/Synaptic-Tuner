@@ -659,6 +659,16 @@ Source-lock refresh after this correction invalidates prior inference-image
 admission for the updated source; rebuild and requalify before chat. The
 historical CPU capture does not qualify changed locked source.
 
+Correction (2026-09-14, attempt D): deployment verification passed and the
+single submitted call reached the remote worker, then terminated with failure
+before source preparation. Exact-call Modal logs identified the worker's
+integer-only workload reparse. Use the same bounded finite-number workload
+parser in bundle admission, worker derivation/revalidation and inference
+workload/preparation reads. Keep all command and evidence parsers integer-only.
+Regression configuration must contain numeric learning rates and dropout;
+the earlier shared fixture's string rate did not exercise this boundary.
+This correction does not establish a successful training or chat run.
+
 Use the checked-in `examples/modal_chat/requests.py` bridge around an actual
 configured rich `TrainingService`; do not replace source resolution or recipe
 compilation with a planning test fixture. Allocate the run before resolving and

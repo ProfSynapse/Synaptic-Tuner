@@ -19,7 +19,7 @@ from tuner.training.recipes import RecipeRegistry
 
 from .contracts import BoundsPolicyV1, operation_path, sha, strict_int
 from .coordinator_binding import ModalCommandBinding
-from .coordinator_bundle import ModalCoordinatorBundle
+from .coordinator_bundle import ModalCoordinatorBundle, parse_workload_object
 from .coordinator_dispatch import parse_modal_worker_dispatch
 from .coordinator_wire import ModalWorkerLaunchExpectation, admit_modal_launch_wire
 from .mounted_io import read_regular
@@ -216,7 +216,7 @@ def _validate_invocation(value: ModalWorkerInvocation) -> None:
     source = value.source
     if source.canonical_bytes != value.execution_source_bytes:
         raise ValueError("invocation source does not round-trip")
-    workload = parse_canonical_object(value.workload, name="invocation workload")
+    workload = parse_workload_object(value.workload)
     if canonical_bytes(workload.get("execution_source")) != source.canonical_bytes:
         raise ValueError("invocation workload differs from source")
     if source.run_id != submit.preparation.run_id:
@@ -334,7 +334,7 @@ def _derive_invocation(
         raise ValueError("worker PYTHONPATH does not bind engine root")
     if {"PYTHONHOME", "PYTHONUSERBASE", "HF_TOKEN"} & set(environment):
         raise ValueError("worker environment contains forbidden ambient authority")
-    workload_document = parse_canonical_object(workload, name="worker workload")
+    workload_document = parse_workload_object(workload)
     model = workload_document["configuration"]["document"]["model"]
     environment.update({
         "SYNAPTIC_WORKLOAD_FINGERPRINT": hashlib.sha256(
