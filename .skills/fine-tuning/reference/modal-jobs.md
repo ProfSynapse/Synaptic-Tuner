@@ -702,6 +702,17 @@ A local credential-free compiler probe reproduced the missing-linker failure
 without PATH and succeeded with that exact PATH. This diagnoses the recorded
 failure, not a successful training run or verification of every remote tool.
 
+Correction (2026-09-14, attempt G): `/usr/bin:/bin` is insufficient for the
+image as a whole. The same authenticated environment is applied to Image.env;
+G failed during FunctionCreate before submitting training. Scoped app readback
+matched the predeployment generation/layout, with G's function absent. Exact-ID
+metadata readback reported Python 3.11.14 for F's image but no Python version
+for G's image. Use `/opt/conda/bin:/usr/bin:/bin` for this pinned profile so both
+the configured interpreter and system linker are discoverable. This is a
+configuration correction, not permission to change Python/image pins or adopt
+G's resources. Modal requires Python and pip on the image PATH; see
+[existing-image requirements](https://modal.com/docs/guide/existing-images).
+
 Attempt F also exposed a delayed-read evidence defect: issuing a new timestamped
 Foundation assessment changes the binding retained at submission. Read paths
 must authenticate and reuse the exact retained assessment while freshly checking

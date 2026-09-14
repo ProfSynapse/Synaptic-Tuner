@@ -51,6 +51,8 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - Configure required executable search paths explicitly in the authenticated
   runtime environment. Offline trainer children replace inherited environments;
   a missing PATH can let GCC start but prevent its linker from being found.
+  The same environment configures the image: preserve the locked Python's
+  directory as well as system tool directories for Modal Python/pip discovery.
 - Provider reads must reuse and authenticate the exact assessment retained in
   the submit binding while revalidating the current Foundation record. Issuing
   a newly timestamped assessment breaks that binding after time passes; do not
