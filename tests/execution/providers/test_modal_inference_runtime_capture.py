@@ -272,6 +272,34 @@ class Image:
         self.calls.append(("build_commands", commands))
         return self
 
+    def build(self, app):
+        self.calls.append(("build", app))
+        return self
+
+
+def test_failed_image_build_never_attempts_sandbox_creation():
+    sdk, sandbox, calls = _sdk()
+    instance = Image(calls)
+
+    def fail(app):
+        raise RuntimeError("private-image-build-detail")
+
+    instance.build = fail
+    sdk.Image.from_registry = lambda value: instance
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError) as error:
+        capture.capture_modal_inference_runtime(
+            sdk=sdk,
+            client=object(),
+            app_name="existing",
+            environment_name="isolated",
+            image=IMAGE,
+            source_commit=COMMIT,
+        )
+    assert error.value.reason_code == "image_build_failed"
+    assert not any(call[0] == "create" for call in calls)
+    assert sandbox.terminate_calls == []
+    assert "private-image-build-detail" not in str(error.value)
+
 
 class Sandbox:
     object_id = "sb-123"
@@ -947,7 +975,8 @@ def test_control_interrupt_after_create_worker_start_abandons_for_late_cleanup(
         result = original_start(self)
         if self.name == "modal-runtime-capture":
             starts += 1
-            if starts == 2:
+            # Exact app lookup, explicit image build, then Sandbox create.
+            if starts == 3:
                 raise KeyboardInterrupt()
         return result
 

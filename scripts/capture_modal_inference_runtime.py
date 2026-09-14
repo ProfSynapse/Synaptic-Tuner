@@ -940,6 +940,26 @@ def capture_modal_inference_runtime(
         if wheel is not None and _wheel_source(engine_wheel)[1:] != wheel[1:]:
             raise ModalInferenceRuntimeCaptureError("engine_wheel_changed")
 
+        # Modal's create also builds unhydrated images. Build explicitly first
+        # so a failed image layer cannot be mistaken for an ambiguous Sandbox
+        # submission. The initialized app retains the selected explicit client
+        # and environment; no separate ambient build context is introduced.
+        def build_image() -> object:
+            try:
+                return image_value.build(app)
+            finally:
+                # All local inputs use copy=True. Once this build completes
+                # (including late completion), the copied source is no longer
+                # needed. Keep it alive while a timed-out build is still using it.
+                temporary.cleanup()
+
+        _bounded_call(
+            build_image,
+            deadline=deadline,
+            timeout_code="image_build_incomplete",
+            failure_code="image_build_failed",
+        )
+
         def create_sandbox() -> object:
             try:
                 return sdk.Sandbox.create(
@@ -1257,6 +1277,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             if error.reason_code == "sandbox_create_ambiguous":
                 payload["create_ambiguous"] = True
+            elif error.reason_code in {"image_build_failed", "image_build_incomplete"}:
+                payload["reason_code"] = error.reason_code
+                payload["create_attempted"] = False
         sys.stderr.write(
             json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
         )

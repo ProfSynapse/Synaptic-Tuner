@@ -86,7 +86,23 @@ def _private_directories(root: Path) -> None:
     paths = [root, *(root / name for name in _PRIVATE_CHILDREN)]
     try:
         parent = root.parent
-        parent_info = parent.lstat()
+        if not root.is_absolute() or root != Path(os.path.normpath(root)):
+            raise _PreparationFailure("PRIVATE_DIRECTORY_INVALID")
+        try:
+            parent_info = parent.lstat()
+        except FileNotFoundError:
+            # The pinned base need not provide /workspace. Create only this
+            # immediate parent after checking its existing canonical ancestor;
+            # never follow a link or recursively manufacture a path chain.
+            ancestor = parent.parent
+            ancestor_info = ancestor.lstat()
+            if (
+                not stat.S_ISDIR(ancestor_info.st_mode)
+                or ancestor.resolve(strict=True) != ancestor
+            ):
+                raise _PreparationFailure("PRIVATE_DIRECTORY_INVALID")
+            parent.mkdir(mode=0o755)
+            parent_info = parent.lstat()
         if (
             not root.is_absolute()
             or root != Path(os.path.normpath(root))

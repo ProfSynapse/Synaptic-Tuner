@@ -65,3 +65,28 @@ attribute. The runtime hash correctly rejected it. The additive installer lock
 had the same export risk. Both exact paths now declare `text eol=lf`; source
 and runtime pins were not changed. The rejected wheel was not deployed or used
 as qualification evidence. A fresh archive/wheel must pass byte comparison.
+
+The corrected `e03cdd78b8ca8826f3f7c3eb3ec6949001d468db` wheel is 2,129,612
+bytes with SHA-256
+`7636d88f6f219bbbea1f1f051dddb3df04d2e0d583e0ae73d83c485720515f2c`.
+All 120 locked members passed; 729 packaged files matched the completed
+2,446-file Git archive byte-for-byte. The new LF regression passed in a
+21-test initializer selection (0.76 seconds).
+
+The first launch was blocked before process creation by the approval layer.
+After explicit user confirmation, the CPU capture ran and failed with no
+Sandbox ID, unknown ownership, and unconfirmed cleanup. Its original result
+is retained in `evidence/modal-inference-e03cdd7-failed.json`; it is not rewritten
+as proof of no allocation. Bounded, read-only logs for only the selected app in
+`synaptic-smoke-v1` returned `PRIVATE_DIRECTORY_INVALID` through an allowlisted
+output filter. This is app/time-window evidence, not an exact Sandbox receipt.
+
+The image helper had required an existing workspace parent. The correction
+creates only that immediate parent after a canonical ancestor check, retaining
+symlink/collision rejection. The capture now uses the installed SDK's public
+`Image.build(app)` before `Sandbox.create`; the selected initialized app supplies
+the explicit client/environment. A build failure or incomplete build is now
+distinguished before any Sandbox create attempt. The original attempt's cleanup
+uncertainty remains recorded. The four-file preparation/capture regression
+passed 101 tests in 0.49 seconds; the late-create interrupt injection was moved
+to the third operation (lookup, build, create), preserving its cleanup assertion.

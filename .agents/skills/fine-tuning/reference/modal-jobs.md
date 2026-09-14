@@ -375,6 +375,10 @@ This changes the helper digest: earlier candidate evidence does not prove the
 new directories or runtime-user access. Rebuild and measure those properties
 before using the candidate for chat; do not infer access from build success.
 
+Correction (2026-09-14): the helper also creates a missing immediate workspace
+parent after verifying its existing canonical ancestor. It does not recursively
+create a path chain, follow a symlink, or reuse an existing private chat root.
+
 Use `--check-private-directories` with `--isolated-python` on the existing
 capture command to measure that access. The actual Sandbox user must own all
 four canonical directories with mode 0700; a temporary write/fsync/read probe
@@ -412,6 +416,18 @@ startup, chat, or provider shutdown. The outer report remains candidate-only.
 Pass the same digest for exact stopped-Sandbox readback. Missing, unsolicited,
 or mismatched verification fields fail closed. No automatic allocation retry
 is authorized by a failed or ambiguous qualification attempt.
+
+The capture now eagerly builds its image with the selected initialized app
+before attempting Sandbox creation. `image_build_failed` and
+`image_build_incomplete` report `create_attempted: false`; neither means the
+remote image-build object was deleted or its billing independently verified.
+Unknown failures after entering Sandbox creation remain ambiguous and retain
+the existing exact-handle cleanup rules. Image-build diagnostics and a Sandbox
+submission must not be conflated. For a build failure, the existing Modal CLI
+can read bounded recent logs from only the explicitly selected app and
+environment; emit only allowlisted closed preparation codes, never arbitrary
+build stdout, exception text, credentials, or logs from another environment.
+An app-scoped log result is not an exact Sandbox ownership receipt.
 
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's

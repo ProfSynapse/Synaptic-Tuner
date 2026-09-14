@@ -87,6 +87,26 @@ def test_private_directory_root_collision_is_rejected(tmp_path):
         preparation._private_directories(root)
 
 
+def test_missing_immediate_workspace_is_created_with_private_children(tmp_path):
+    root = tmp_path / "workspace/modal-chat"
+    preparation._private_directories(root)
+    assert root.parent.is_dir() and not root.parent.is_symlink()
+    for path in (root, *(root / name for name in preparation._PRIVATE_CHILDREN)):
+        assert path.is_dir() and path.stat().st_mode & 0o077 == 0
+
+
+def test_missing_parent_below_symlinked_ancestor_does_not_write_external(tmp_path):
+    external = tmp_path / "external"
+    external.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(external, target_is_directory=True)
+    with pytest.raises(
+        preparation._PreparationFailure, match="PRIVATE_DIRECTORY_INVALID"
+    ):
+        preparation._private_directories(alias / "workspace/modal-chat")
+    assert list(external.iterdir()) == []
+
+
 def test_private_directory_symlink_collision_is_rejected(tmp_path):
     workspace = tmp_path / "workspace"
     target = tmp_path / "target"
