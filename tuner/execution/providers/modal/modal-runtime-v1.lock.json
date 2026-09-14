@@ -206,7 +206,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_adapter_py": {
       "path": "tuner/execution/providers/modal/coordinator_adapter.py",
-      "sha256": "04d25a0456071350d2cf248aa3fb9f70d5c858662e45f0b68ef6b21fe1ff9b73"
+      "sha256": "619ba5e4e10f1a26ad4c154490da9328f9863581df02bf768e48e045ba46e413"
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_binding_py": {
       "path": "tuner/execution/providers/modal/coordinator_binding.py",

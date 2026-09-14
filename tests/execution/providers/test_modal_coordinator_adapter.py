@@ -180,7 +180,14 @@ def test_quote_and_resources_are_bound_without_claiming_live_authority():
     assert not report.ready and report.binds(plan)
     assert report.authorization == ()
     assert report.diagnostic_codes == ("modal_coordinator_execution_unavailable",)
-    assert not any(adapter.describe(context.provider).capabilities.to_dict().values())
+    assert adapter.describe(context.provider).capabilities.to_dict() == {
+        "observe": True,
+        "logs": False,
+        "cancel": False,
+        "reconcile": False,
+        "artifact_streaming": True,
+        "cost_quote": False,
+    }
 
 
 def coordinator_harness(monkeypatch):

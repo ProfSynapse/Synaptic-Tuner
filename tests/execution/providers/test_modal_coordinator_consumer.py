@@ -213,4 +213,11 @@ def test_inactive_consumer_composes_fresh_stage_and_spawn_once(monkeypatch):
     registration = modal_coordinator_registration(preparation,executor,lookup,reader)
     registry=LazyProviderRegistryV2(); registry.register(registration)
     assert registry.list() == (registration.provider,)
-    assert not any(registration.provider.capabilities.to_dict().values())
+    assert registration.provider.capabilities.to_dict() == {
+        "observe": True,
+        "logs": False,
+        "cancel": False,
+        "reconcile": False,
+        "artifact_streaming": True,
+        "cost_quote": False,
+    }

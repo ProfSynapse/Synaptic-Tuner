@@ -54,7 +54,7 @@ def configured():
     return registry, registration, request, reader, dependencies, execution_request
 
 
-def test_registration_and_listing_are_zero_invocation_and_keep_false_capabilities():
+def test_registration_and_listing_are_zero_invocation_with_exact_read_capabilities():
     registry, registration, request, _, dependencies, _ = configured()
     assert registry.list() == (registration.provider,)
     assert registry.registration(request.provider) is registration
@@ -62,7 +62,14 @@ def test_registration_and_listing_are_zero_invocation_and_keep_false_capabilitie
     assert registry.adapter_factory(request.provider) is registration.adapter_factory_ref
     assert registry.reader_factory(request.provider) is registration.reader_factory_ref
     assert all(item.calls == 0 for item in dependencies)
-    assert not any(registration.provider.capabilities.to_dict().values())
+    assert registration.provider.capabilities.to_dict() == {
+        "observe": True,
+        "logs": False,
+        "cancel": False,
+        "reconcile": False,
+        "artifact_streaming": True,
+        "cost_quote": False,
+    }
 
 
 def test_reader_factory_returns_registry_native_exact_binding():

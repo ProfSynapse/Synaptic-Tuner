@@ -1,6 +1,8 @@
 """Focused denial-order audit for the standalone launcher."""
 
 from types import SimpleNamespace
+from pathlib import Path
+import sys
 
 import pytest
 
@@ -8,8 +10,12 @@ from examples.modal_chat import launch
 from tuner.execution.providers.modal import coordinator_adapter
 
 
+@pytest.mark.parametrize(
+    ("observe", "artifact_streaming"),
+    ((False, False), (False, True), (True, False)),
+)
 def test_public_chat_capability_denial_precedes_credentials_storage_and_cloud(
-    monkeypatch,
+    monkeypatch, observe, artifact_streaming
 ):
     # Interpreter denial is covered separately; isolate the next admission gate.
     monkeypatch.setattr(launch, "_check_launcher_python", lambda: None)
@@ -17,7 +23,9 @@ def test_public_chat_capability_denial_precedes_credentials_storage_and_cloud(
         coordinator_adapter,
         "_descriptor",
         lambda: SimpleNamespace(
-            capabilities=SimpleNamespace(observe=False, artifact_streaming=False)
+            capabilities=SimpleNamespace(
+                observe=observe, artifact_streaming=artifact_streaming
+            )
         ),
     )
 
@@ -40,6 +48,46 @@ def test_public_chat_capability_denial_precedes_credentials_storage_and_cloud(
             profile="selected",
             hf_token_env_file=None,
             emit=forbidden,
+        )
+
+
+def test_public_chat_exact_read_capabilities_pass_the_precloud_gate(
+    monkeypatch,
+):
+    monkeypatch.setattr(launch, "_check_launcher_python", lambda: None)
+    monkeypatch.setattr(
+        coordinator_adapter,
+        "_descriptor",
+        lambda: SimpleNamespace(
+            capabilities=SimpleNamespace(observe=True, artifact_streaming=True)
+        ),
+    )
+
+    class GatePassed(RuntimeError):
+        pass
+
+    def reached_local_storage(*args, **kwargs):
+        raise GatePassed
+
+    monkeypatch.setattr(launch, "_private_directory", reached_local_storage)
+    monkeypatch.setitem(
+        sys.modules,
+        "examples.modal_chat.training",
+        SimpleNamespace(
+            ModalChatRunIdentity=object,
+            compose_modal_training_host=lambda **kwargs: None,
+        ),
+    )
+    with pytest.raises(GatePassed):
+        launch.execute(
+            SimpleNamespace(),
+            SimpleNamespace(state_root=Path("/unused")),
+            SimpleNamespace(attempt_ref="fixture"),
+            SimpleNamespace(),
+            mode="train-chat",
+            profile="selected",
+            hf_token_env_file=None,
+            emit=lambda value: None,
         )
 
 

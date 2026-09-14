@@ -170,7 +170,14 @@ def test_factory_is_provider_io_free_then_stages_and_spawns_once(monkeypatch):
     with pytest.raises(RunOperationError): host.runs.artifacts(RunArtifactRequest(first.run,"final_model",1))
     registry=LazyProviderRegistryV2(); registry.register(composed.registration)
     assert registry.list()==(composed.registration.provider,)
-    assert not any(composed.registration.provider.capabilities.to_dict().values())
+    assert composed.registration.provider.capabilities.to_dict() == {
+        "observe": True,
+        "logs": False,
+        "cancel": False,
+        "reconcile": False,
+        "artifact_streaming": True,
+        "cost_quote": False,
+    }
     reader_request=ProviderReaderFactoryRequestV1(
         context.provider, composed.registration.provider.descriptor_digest,
         binding.profile_digest, binding.scope.account_ref, binding.scope.namespace_ref,

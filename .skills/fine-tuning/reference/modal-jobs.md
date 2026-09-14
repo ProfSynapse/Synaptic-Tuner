@@ -9,6 +9,15 @@ broker, and the fixed remote worker.
 
 ## Product flow
 
+Current qualification (2026-09-14): native attempt `modal-chat-20260914-h`
+completed and verified all five artifacts. Only `observe` and
+`artifact_streaming` are now advertised; logs, cancel, reconcile and cost-quote
+remain disabled. Earlier all-false statements below describe prior stages.
+See `docs/review/modal-native-training-qualification.md` for exact source,
+provider identities, retained evidence and independent-review limits. This is
+not chat qualification: rebuild and CPU-qualify the updated inference image,
+then run the separately bounded public train-and-chat path.
+
 1. The host calls `TrainingAPI.load(canonical_json)` through its configured
    loader, retaining the exact request and project identity.
 2. `TrainingAPI.resolve(request)` obtains the exact source, model, dataset,

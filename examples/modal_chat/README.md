@@ -52,12 +52,14 @@ python -B synaptic-tuner/examples/modal_chat/launch.py \
 The explicitly selected `--mode qualify-training --modal-profile NAME` creates
 fresh named resources, deploys, submits once through the public TrainingAPI,
 waits for the exact provider call, and retains native authenticated terminal and
-five-artifact verification evidence. It stops before chat and does not claim
-public RunsAPI qualification. This training-only mode does not depend on an
-inference image. `--mode train-chat` refuses before credentials or cloud mutation
-while the public observation/artifact capability flags remain disabled. Once
-qualified, it requires successful public outcome/verification before one chat
-turn and exact owned-Sandbox stopped readback.
+five-artifact verification evidence. This training-only mode does not depend
+on an inference image. Native attempt H passed; see
+`docs/review/modal-native-training-qualification.md` for the exact evidence and
+review limits. Only public observation and artifact streaming are now enabled.
+`--mode train-chat` requires both capabilities, current qualified inference-image
+evidence, successful public outcome/verification, and separate bounded chat
+authority before one turn and exact owned-Sandbox stopped readback. Native
+training qualification alone does not qualify chat or the other capabilities.
 
 Modal credentials come only from the explicitly named SDK 1.5.4 profile, with
 environment overrides disabled. `HF_TOKEN` is inherited, or read from the one

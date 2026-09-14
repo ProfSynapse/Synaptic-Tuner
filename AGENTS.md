@@ -48,6 +48,11 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Native training qualification H supports only public observe and artifact
+  streaming. Keep logs/cancel/reconcile/cost-quote disabled; separately qualify
+  the updated inference image and bounded chat. See the exact evidence and
+  limits in `docs/review/modal-native-training-qualification.md`.
+
 - Configure required executable search paths explicitly in the authenticated
   runtime environment. Offline trainer children replace inherited environments;
   a missing PATH can let GCC start but prevent its linker from being found.

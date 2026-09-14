@@ -47,7 +47,7 @@ def _descriptor() -> ProviderDescriptor:
     # These describe this adapter, not the capabilities of the older Modal path.
     return ProviderDescriptor(
         "synaptic-provider-descriptor/v1", "modal", "Modal preparation", "0.1.0",
-        ProviderCapabilities(False, False, False, False, False, False),
+        ProviderCapabilities(True, False, False, False, True, False),
     )
 
 
