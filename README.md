@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`0cd7884855988b5c0f380392fc1de640564179a1`, advertised by
+`9dca62b2a2faf18d9164fa820cf0348f83e663c3`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -90,5 +90,12 @@ The example is single-process: reopening its database refuses automatic replay
 but does not reconstruct all Foundation/coordinator state.
 
 This branch is executable smoke preparation, not a claim of a successful GPU smoke.
+Attempt `modal-chat-20260914-a` created its three Volumes and runtime Secret,
+then exited during deployment without reaching training submission. Scoped
+readback found the prior app deployment unchanged and the exact new function
+absent; app logs recorded an image build but did not establish the failure cause.
+Its private journal and resources are preserved. The current configuration
+selects a separate `modal-chat-20260914-b` attempt with new resource/function
+names and closed deployment diagnostics; it must not adopt or erase attempt A.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.
