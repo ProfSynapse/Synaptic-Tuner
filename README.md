@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`ff8b51b62812e61c69a81df8a768fdbf967e19c1`, advertised by
+`6ab0e7262c8f97b38aaca7143bf05273832af70f`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -143,8 +143,14 @@ training_lineage, training_metrics and workload_record. Its aggregate report
 SHA-256 is `a4f3e19b17a89e20010c5cfa495ebfe8adc2c64a14cf73e71e69b0ba2612d30b`;
 the engine retains its bounded summary in
 `docs/review/evidence/modal-training-qualified-20260914h.json`. H did not run chat.
-The current configuration selects a separate `modal-chat-20260914-i` train-chat
-attempt with new resource/function names. Earlier attempts' claims or resources
+Attempt I passed public training outcome and artifact verification, then failed
+during chat before a serving SUBMIT binding or Sandbox ownership was retained.
+No reply/context was saved; its empty cleanup record is not shutdown proof.
+The original failure location was not retained. This engine pin adds bounded,
+closed host diagnostics and a verified workflow snapshot without changing the
+qualified runtime closure or its CPU image evidence. No root cause is claimed yet.
+The current configuration selects a separate `modal-chat-20260914-j` instrumented
+train-chat attempt with new resource/function names. Earlier attempts' claims or resources
 may not be adopted or erased.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.
