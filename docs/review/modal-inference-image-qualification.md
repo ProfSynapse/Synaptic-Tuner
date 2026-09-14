@@ -129,3 +129,40 @@ candidate label remains intentional: fresh training, authenticated native read
 qualification, consumer composition, GPU startup, one chat turn and that
 session's cleanup still remain. The earlier no-ID failure is retained separately
 and is not retrospectively rewritten as a confirmed cleanup.
+
+## Correction and refreshed qualification after native training (2026-09-14)
+
+The disabled-capability description above records the earlier state. Native
+training H subsequently passed authenticated verification of all five artifacts;
+`modal-native-training-qualification.md` records that result and its limitations.
+Source `ea66c4c739d991e57605fa4609a581f4177d91ea` now enables only public
+observation and artifact streaming. Logs, cancel, reconcile, and cost quote remain
+disabled. This is not yet proof of a successful GPU chat.
+
+A fresh offline wheel of that exact published source has SHA-256
+`1f50d33bc7d21f8a27a308f6ff0f5127b3d47970a1f9fd55df7db3520beb5feb`
+and size 2,130,668 bytes. Independent inspection verified every wheel RECORD,
+all 120 source-inventory members, all 118 closure members, and the four packaged
+runtime resources against the reviewed source. No credential or environment
+file was included.
+
+The bounded CPU capture returned Image `im-Rt8MB4C7ZNMbrM6HZzGNMw` and Sandbox
+`sb-0KrCNGo9gfj0MuL8DRqyCv`. The production verifier accepted the exact physical
+CPython 3.12.13 executable, all 230 distributions, and the packaged runtime.
+The four fixed private directories passed ownership, mode 0700 and read/write
+checks. Runtime manifest digest is
+`37f6e19d5e9ca1ffea42876f4f74eaf9cc79507ebf745bad3546d00aea38dbf6`;
+source-inventory digest is
+`f498f37bceff2a3e7aaadafe4c035d7d05938d4d324a40a4563dd7882a914457`;
+worker-closure digest is
+`5a591812fd4646ab77b2dea19eba2208a77d6f4ae232b33a87cd05200a184dd1`.
+
+Capture exited 0 after exact-instance cleanup. Separate read-only recovery of
+that same Sandbox returned code 0 with identical candidate facts, confirming
+it stopped. Complete reports are retained in
+`evidence/modal-inference-qualified-ea66c4c.json` and
+`evidence/modal-inference-qualified-ea66c4c-readback.json`. They retain the
+intentional candidate-only classification; no GPU, model weights, Volumes,
+Secrets or public endpoint were involved. The earlier d6e29ed image is historical
+and must not qualify the updated source. A fresh consumer attempt still must
+verify its own training run, save a real chat reply, and confirm bounded cleanup.
