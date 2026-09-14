@@ -599,6 +599,24 @@ smoke into runtime code.
 
 ## Minimal consumer request and replay adapters
 
+Launcher compatibility correction (2026-09-14): the fixed deployment uses
+`serialized=True`. The failed attempts used host CPython 3.12.9 while the exact
+image metadata reported 3.11.14. These violate Modal's documented serialized
+Python compatibility requirement; they do not alone prove the server's precise
+rejection reason. Effectful `examples/modal_chat/launch.py` modes now require
+the packaged training lock's CPython implementation and exact version before
+credentials, private attempt storage or provisioning. Keep the image and trainer
+pins unchanged. Use a separate CPython 3.11.14 venv and install only
+`examples/modal_chat/requirements.lock` with `--no-deps --require-hashes
+--only-binary :all:`; the existing Python/uv setup commands are in the example
+README. This is host setup, not local training or Docker. Provider-free `check`
+mode remains available on other supported project interpreters. The consumer
+lock includes the 37-package remote launcher lock plus Requests and its two
+otherwise absent dependencies, needed by host chat imports. It leaves remote
+dependency/runtime pins unchanged. Source/runtime
+and live qualification gates still apply; version agreement is not proof of a
+successful deployment. See [Modal's serialized-function guidance](https://modal.com/docs/guide/jupyter-notebooks#known-issues).
+
 Candidate launcher update (2026-09-14): the reusable consuming-layer
 `examples/modal_chat/launch.py` now composes explicit profile credentials,
 fresh resource provisioning and exact deployment ownership, real source

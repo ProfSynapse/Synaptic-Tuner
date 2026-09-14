@@ -11,6 +11,8 @@ from tuner.execution.providers.modal import coordinator_adapter
 def test_public_chat_capability_denial_precedes_credentials_storage_and_cloud(
     monkeypatch,
 ):
+    # Interpreter denial is covered separately; isolate the next admission gate.
+    monkeypatch.setattr(launch, "_check_launcher_python", lambda: None)
     monkeypatch.setattr(
         coordinator_adapter,
         "_descriptor",

@@ -11,6 +11,34 @@ outputs, or arbitrary model directories may replace its inputs.
 
 ## Launcher
 
+Effectful modes require CPython **3.11.14**, matching the packaged training
+runtime pin, and the existing hash-pinned launcher dependencies. The deployment
+uses a serialized function; a local Python 3.12 launcher is incompatible with
+the measured Python 3.11.14 image. The launcher rejects a mismatch before
+credentials, attempt storage or cloud resources. This checks host compatibility,
+not the remote executable hash or successful deployment. `--mode check` remains
+provider-free and usable on other supported project Python versions.
+
+For Linux x86_64, prepare a separate launcher environment using the existing
+Python/uv commands (never install over the training environment). Supply an
+already installed CPython 3.11.14 executable and an absent private venv path:
+
+```bash
+/absolute/python3.11 -I -m venv --without-pip /absolute/new-launcher-venv
+uv --no-config --no-cache pip install \
+  --python /absolute/new-launcher-venv/bin/python \
+  --no-deps --require-hashes --only-binary :all: \
+  -r /absolute/consumer/synaptic-tuner/examples/modal_chat/requirements.lock
+```
+
+Use that venv's Python for the commands below. This installs the lightweight
+launcher only, not model weights, a local GPU runtime or Docker. The consumer
+lock includes the existing 37-package remote launcher lock and adds Requests'
+three missing host dependencies; it does not change the remote runtime lock.
+Do not use a
+newer CLI/Python as a substitute for the reviewed pins. Modal documents the
+serialized-function constraint in its [Python compatibility guidance](https://modal.com/docs/guide/jupyter-notebooks#known-issues).
+
 Run the file from a clean, published consumer's exact engine submodule. The
 default `--mode check` validates local source/configuration and the reviewed
 inference image without credentials or cloud calls:

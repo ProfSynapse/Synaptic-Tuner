@@ -1,6 +1,7 @@
 """Provider-free launcher ordering, confidentiality, polling and cleanup tests."""
 
 from types import SimpleNamespace
+from collections import namedtuple
 import json
 from pathlib import Path
 
@@ -10,6 +11,67 @@ from examples.modal_chat import launch
 from examples.modal_chat.storage import ModalChatStorage
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from tuner.execution.providers.modal.facade import ModalFunctionCallState
+
+
+@pytest.mark.parametrize(
+    "implementation,version,release,accepted",
+    [
+        ("cpython", (3, 11, 14), "final", True),
+        ("cpython", (3, 12, 9), "final", False),
+        ("cpython", (3, 11, 13), "final", False),
+        ("pypy", (3, 11, 14), "final", False),
+        ("cpython", (3, 11, 14), "candidate", False),
+    ],
+)
+def test_launcher_python_matches_packaged_training_pin(
+    monkeypatch, implementation, version, release, accepted
+):
+    Version = namedtuple("Version", "major minor micro releaselevel serial")
+    monkeypatch.setattr(
+        launch,
+        "sys",
+        SimpleNamespace(
+            implementation=SimpleNamespace(name=implementation),
+            version_info=Version(*version, release, 0),
+        ),
+    )
+    if accepted:
+        launch._check_launcher_python()
+    else:
+        with pytest.raises(launch.ModalChatLauncherError, match="python_mismatch"):
+            launch._check_launcher_python()
+
+
+@pytest.mark.parametrize("mode", ["qualify-training", "train-chat"])
+def test_python_rejection_precedes_credentials_state_and_provisioning(
+    monkeypatch, mode
+):
+    def reject():
+        raise launch.ModalChatLauncherError("modal_chat_launcher_python_mismatch")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("incompatible interpreter reached credentials or state")
+
+    monkeypatch.setattr(launch, "_check_launcher_python", reject)
+    for name in (
+        "_model_token",
+        "_client",
+        "_private_directory",
+        "ModalChatStorage",
+        "ModalChatProvisioner",
+    ):
+        monkeypatch.setattr(launch, name, forbidden)
+    with pytest.raises(launch.ModalChatLauncherError, match="python_mismatch"):
+        launch.execute(
+            None,
+            None,
+            None,
+            None,
+            mode=mode,
+            profile="selected",
+            hf_token_env_file=None,
+            emit=forbidden,
+        )
 
 
 def test_check_is_default_and_never_constructs_credentials_or_executes(

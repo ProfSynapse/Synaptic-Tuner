@@ -48,6 +48,12 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- The minimal consumer's effectful launcher must use the packaged training
+  lock's CPython version (currently 3.11.14) and the hash-pinned launcher closure.
+  Its serialized deployment cannot cross Python minor versions. Check host
+  compatibility before credentials, attempt claims or provisioning; do not
+  change the remote image pins to accommodate an arbitrary operator Python.
+
 - Initialize inference commitments only with `scripts/initialize_modal_inference_lock.py`
   from explicitly reviewed candidate and additive-lock hashes; never overwrite
   existing resources or silently normalize their bytes. Qualify the fresh wheel

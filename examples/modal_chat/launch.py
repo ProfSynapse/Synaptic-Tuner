@@ -44,6 +44,7 @@ from synaptic_tuner.api.v1.providers import ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef, TrainingRunState
 from tuner.execution.foundation_v2.canonical import canonical_bytes, safe_ref
 from tuner.execution.providers.modal.composition import ModalVerificationPolicyV1
+from tuner.execution.providers.modal.config import ModalRuntimeLockV1
 from tuner.execution.providers.modal.facade import ModalFunctionCallState
 from tuner.execution.providers.modal.inference_preparation import (
     CONFIG_EVIDENCE_PURPOSE,
@@ -157,6 +158,20 @@ def _client(sdk, profile):
     ):
         raise ModalChatLauncherError("modal_chat_credentials_missing")
     return sdk.Client.from_credentials(token_id, token_secret)
+
+
+def _check_launcher_python():
+    """Reject incompatible serialized-worker Python before credentials or state."""
+    locked = ModalRuntimeLockV1.packaged()
+    # The pinned image runs this interpreter. Serialized code cannot cross
+    # Python minor versions; require the reviewed patch version as well.
+    if (
+        sys.implementation.name != locked.python_implementation.lower()
+        or tuple(sys.version_info[:3])
+        != tuple(int(part) for part in locked.python_version.split("."))
+        or sys.version_info.releaselevel != "final"
+    ):
+        raise ModalChatLauncherError("modal_chat_launcher_python_mismatch")
 
 
 def _model_token(selected_env_file):
@@ -450,6 +465,7 @@ def execute(
 ):
     if type(mode) is not str or mode not in {"qualify-training", "train-chat"}:
         raise ModalChatLauncherError("modal_chat_arguments_invalid")
+    _check_launcher_python()
     from tuner.execution.providers.modal.coordinator_adapter import _descriptor
 
     if mode == "train-chat":
