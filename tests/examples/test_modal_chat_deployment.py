@@ -262,6 +262,17 @@ def test_failed_durable_ack_cannot_authorize_observer_or_facade(
     with pytest.raises(error):
         owner.deploy_once(attempt_ref="failed-ack")
     assert owner.candidate_receipt is not None
+    diagnostic = parse_canonical_object(owner.failure_diagnostic, name="diagnostic")
+    assert (
+        diagnostic["exception_class"]
+        == {
+            "publish": "OTHER",
+            "readback": "ValueError",
+            "interrupt": "KeyboardInterrupt",
+        }[failure]
+    )
+    assert diagnostic["phase"] == "DEPLOY_RETURNED"
+    assert diagnostic["provider_shutdown_proof"] is False
     assert storage.attempts.resolve("failed-ack") is not None
     with pytest.raises(deployment.ModalChatDeploymentError, match="not_owned"):
         owner.facade()
@@ -333,6 +344,174 @@ def test_provider_readback_failure_keeps_durable_ack_but_no_success(case, monkey
         is None
     )
     assert len(sdk.deploy_calls) == 1
+
+
+def _diagnostic(owner):
+    return parse_canonical_object(owner.failure_diagnostic, name="diagnostic")
+
+
+def test_failure_before_deploy_retains_closed_diagnostic_without_provider_ids(
+    case, monkeypatch
+):
+    _, _, storage, _, owner = case
+    monkeypatch.setattr(
+        deployment,
+        "build_modal_coordinator_deployment",
+        lambda **kwargs: (_ for _ in ()).throw(TypeError("private credential text")),
+    )
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="before")
+    value = _diagnostic(owner)
+    assert value["schema_version"] == "synaptic-modal-chat-deployment-diagnostic/v1"
+    assert value["attempt_ref"] == "before"
+    assert value["phase"] == "BEFORE_INVOKE"
+    assert value["exception_class"] == "TypeError"
+    assert value["known_provider_ids"] == {}
+    assert value["provider_shutdown_proof"] is False
+    assert value["authorizing"] is False
+    assert len(value["exception_chain"]) <= 3
+    assert b"private credential text" not in owner.failure_diagnostic
+    assert (
+        storage.catalog("deployment-diagnostics", encode=bytes, decode=bytes).resolve(
+            "before"
+        )
+        == owner.failure_diagnostic
+    )
+
+
+def test_failure_during_deploy_retains_only_safe_known_ids(case, monkeypatch):
+    sdk, _, _, _, owner = case
+
+    def fail(self, **kwargs):
+        sdk.deploy_calls.append(kwargs)
+        raise RuntimeError("private provider response")
+
+    monkeypatch.setattr(_App, "deploy", fail)
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="during")
+    value = _diagnostic(owner)
+    assert value["phase"] == "DISPATCH"
+    assert value["exception_class"] == "RuntimeError"
+    assert value["known_provider_ids"] == {
+        "app_id": "ap-1",
+        "function_id": "fu-1",
+        "image_id": "im-1",
+    }
+    assert value["provider_shutdown_proof"] is False
+    assert b"private provider response" not in owner.failure_diagnostic
+
+
+def test_failure_after_deploy_return_retains_post_dispatch_phase(case):
+    sdk, _, _, _, owner = case
+    sdk.web_url = "https://public.invalid"
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="after")
+    value = _diagnostic(owner)
+    assert value["phase"] == "DEPLOY_RETURNED"
+    assert value["exception_class"] == "ValueError"
+    assert value["provider_shutdown_proof"] is False
+
+
+def test_diagnostic_persistence_failure_does_not_mask_primary_or_interrupt(
+    case, monkeypatch
+):
+    sdk, _, storage, _, owner = case
+    original = storage.catalog
+
+    class Broken:
+        def publish_if_absent(self, *args):
+            raise KeyboardInterrupt
+
+    def catalog(self, name, **kwargs):
+        return (
+            Broken() if name == "deployment-diagnostics" else original(name, **kwargs)
+        )
+
+    monkeypatch.setattr(ModalChatStorage, "catalog", catalog)
+    sdk.web_url = "https://public.invalid"
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="local-store-failed")
+    assert _diagnostic(owner)["phase"] == "DEPLOY_RETURNED"
+
+
+def test_diagnostic_rejects_credential_shaped_and_wrong_prefix_known_ids(
+    case, monkeypatch
+):
+    sdk, _, _, _, owner = case
+    sdk.app_id = "hf_privatecredentialvalue"
+
+    def fail(self, **kwargs):
+        self._sdk.built_function.object_id = "im-wrongrole"
+        raise RuntimeError("HF_TOKEN=private")
+
+    monkeypatch.setattr(_App, "deploy", fail)
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="bad-identities")
+    value = _diagnostic(owner)
+    assert value["known_provider_ids"] == {"image_id": "im-1"}
+    assert b"private" not in owner.failure_diagnostic
+
+
+def test_diagnostic_property_failure_cannot_mask_original_interrupt(case):
+    _, _, _, _, owner = case
+
+    class Hostile:
+        def __getattribute__(self, name):
+            raise KeyboardInterrupt
+
+    objects = SimpleNamespace(app=Hostile(), image=Hostile(), function=Hostile())
+    owner._retain_failure_diagnostic(
+        "interrupt", "DISPATCH", KeyboardInterrupt(), objects
+    )
+    assert _diagnostic(owner)["exception_class"] == "KeyboardInterrupt"
+    assert _diagnostic(owner)["known_provider_ids"] == {}
+
+
+def test_closed_exception_chain_caps_contexts_and_frames_and_redacts_paths():
+    namespace = {}
+    exec(
+        compile(
+            "def deep(n):\n    if n: return deep(n-1)\n    raise TypeError('credential')",
+            "/private/deployment.py",
+            "exec",
+        ),
+        namespace,
+    )
+    try:
+        try:
+            try:
+                namespace["deep"](30)
+            except Exception as error:
+                raise RuntimeError("token") from error
+        except Exception:
+            raise ValueError("secret")
+    except Exception as error:
+        chain = deployment.ModalChatOwnedDeployment._closed_exception_chain(error)
+    assert len(chain) == 3
+    assert sum(len(item["locations"]) for item in chain) <= 16
+    assert all(
+        set(location) == {"filename", "line"}
+        and location["filename"] in {"deployment.py"}
+        and type(location["line"]) is int
+        and location["line"] > 0
+        for item in chain
+        for location in item["locations"]
+    )
+    assert "private" not in repr(chain)
+
+
+def test_closed_exception_chain_omits_unlisted_malicious_filename():
+    try:
+        exec(
+            compile("raise AttributeError('credential')", "/stolen/HF_TOKEN.py", "exec")
+        )
+    except Exception as error:
+        chain = deployment.ModalChatOwnedDeployment._closed_exception_chain(error)
+    assert all(
+        location["filename"] != "HF_TOKEN.py"
+        for item in chain
+        for location in item["locations"]
+    )
 
 
 @pytest.mark.parametrize(

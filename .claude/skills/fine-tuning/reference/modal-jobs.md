@@ -610,6 +610,13 @@ refuses before cloud activity until observation/artifact capabilities are
 qualified. Keep one-shot claims, owned cleanup and source/quote checks intact.
 The consumer owns all example settings, identities, authorities and state.
 
+Consumer deployment diagnostics retain only closed local phases and exception
+categories, bounded allowlisted traceback file/line locations, and known object
+IDs in the existing private catalog. Do not save raw exception messages, source
+lines, locals or credential material. Diagnostic records are non-authorizing:
+they neither grant a retry nor prove publication or provider shutdown. Preserve
+failed attempt claims and use exact scoped provider metadata to reconcile them.
+
 The workload bundle boundary accepts canonical finite JSON numbers because
 real SFT learning rates and dropout values are fractional. Only the typed
 workload member uses that parser; command/evidence parsers remain integer-only.

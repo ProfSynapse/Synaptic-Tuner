@@ -9,6 +9,7 @@ an unrelated deployment by supplying an expected configuration.
 from __future__ import annotations
 
 import hashlib
+import re
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes, safe_ref
 from tuner.execution.providers.modal.binding import ModalClientBinding
@@ -129,6 +130,7 @@ class ModalChatOwnedDeployment:
         )
         self._receipt = None
         self._candidate_receipt = None
+        self._diagnostic = None
         self._attempted = False
 
     @property
@@ -137,6 +139,127 @@ class ModalChatOwnedDeployment:
         return (
             None if self._candidate_receipt is None else bytes(self._candidate_receipt)
         )
+
+    @property
+    def failure_diagnostic(self) -> bytes | None:
+        """Non-authorizing closed metadata from the latest failed attempt."""
+        return None if self._diagnostic is None else bytes(self._diagnostic)
+
+    @staticmethod
+    def _known_id(value, attribute, label):
+        try:
+            identity = safe_ref(getattr(value, attribute), label)
+            prefix = {"app_id": "ap-", "image_id": "im-", "function_id": "fu-"}[label]
+            if re.fullmatch(re.escape(prefix) + r"[A-Za-z0-9]{1,64}", identity) is None:
+                return None
+            return identity
+        except BaseException:
+            return None
+
+    @staticmethod
+    def _exception_class(error):
+        builtins = {
+            TypeError: "TypeError",
+            ValueError: "ValueError",
+            RuntimeError: "RuntimeError",
+            TimeoutError: "TimeoutError",
+            KeyboardInterrupt: "KeyboardInterrupt",
+            SystemExit: "SystemExit",
+            ModuleNotFoundError: "ModuleNotFoundError",
+            ImportError: "ImportError",
+            PermissionError: "PermissionError",
+            AttributeError: "AttributeError",
+        }
+        kind = type(error)
+        if kind in builtins:
+            return builtins[kind]
+        module, name = getattr(kind, "__module__", ""), getattr(kind, "__name__", "")
+        if module.startswith("modal.") and name in {
+            "InvalidError",
+            "ExecutionError",
+            "SerializationError",
+            "NotFoundError",
+        }:
+            return name
+        if module.startswith("grpclib.") and name == "GRPCError":
+            return name
+        return "OTHER"
+
+    @classmethod
+    def _closed_exception_chain(cls, error):
+        filenames = {
+            "deployment.py",
+            "coordinator_deployment.py",
+            "app.py",
+            "runner.py",
+            "_functions.py",
+            "_serialization.py",
+            "image.py",
+            "mount.py",
+            "_resolver.py",
+            "client.py",
+            "_object.py",
+        }
+        result, seen, remaining, inspected = [], set(), 16, 0
+        current = error
+        while current is not None and len(result) < 3 and id(current) not in seen:
+            seen.add(id(current))
+            frames = []
+            trace = getattr(current, "__traceback__", None)
+            while trace is not None and remaining and inspected < 128:
+                inspected += 1
+                raw = trace.tb_frame.f_code.co_filename
+                filename = raw.replace("\\", "/").rsplit("/", 1)[-1]
+                line = trace.tb_lineno
+                if filename in filenames and type(line) is int and line > 0:
+                    frames.append({"filename": filename, "line": line})
+                    remaining -= 1
+                trace = trace.tb_next
+            result.append(
+                {
+                    "exception_class": cls._exception_class(current),
+                    "locations": frames,
+                }
+            )
+            current = getattr(current, "__cause__", None) or getattr(
+                current, "__context__", None
+            )
+        return result
+
+    def _retain_failure_diagnostic(self, attempt_ref, phase, error, objects):
+        try:
+            known = {}
+            if objects is not None:
+                for name, value, attribute, label in (
+                    ("app_id", objects.app, "app_id", "app_id"),
+                    ("image_id", objects.image, "object_id", "image_id"),
+                    ("function_id", objects.function, "object_id", "function_id"),
+                ):
+                    if (
+                        identity := self._known_id(value, attribute, label)
+                    ) is not None:
+                        known[name] = identity
+            payload = canonical_bytes(
+                {
+                    "schema_version": "synaptic-modal-chat-deployment-diagnostic/v1",
+                    "attempt_ref": attempt_ref,
+                    "phase": phase,
+                    "exception_class": self._exception_class(error),
+                    "exception_chain": self._closed_exception_chain(error),
+                    "known_provider_ids": known,
+                    "provider_shutdown_proof": False,
+                    "authorizing": False,
+                }
+            )
+            self._diagnostic = payload
+            catalog = self._storage.catalog(
+                "deployment-diagnostics", encode=bytes, decode=bytes
+            )
+            catalog.publish_if_absent(attempt_ref, payload)
+            if catalog.resolve(attempt_ref) != payload:
+                raise ValueError
+        except BaseException:
+            pass
 
     @property
     def selection(self):
@@ -175,6 +298,8 @@ class ModalChatOwnedDeployment:
             }
         )
         self._attempted = True
+        phase = "BEFORE_INVOKE"
+        objects = None
         # App.deploy replaces the app definition, not merely one function.
         # A new attempt or function name must not evade an unresolved app claim.
         self._storage.attempts.claim(
@@ -225,9 +350,11 @@ class ModalChatOwnedDeployment:
                 artifact_volume_id=volumes[1],
                 **self._keys,
             )
+            phase = "DISPATCH"
             objects.app.deploy(
                 client=scope.client, environment_name=scope.environment_name
             )
+            phase = "DEPLOY_RETURNED"
             dispatch_ack = canonical_bytes(
                 {
                     "schema_version": "synaptic-modal-chat-deployment-return/v1",
@@ -283,9 +410,11 @@ class ModalChatOwnedDeployment:
             if catalog.resolve(attempt_ref) != payload:
                 raise ValueError
             return payload
-        except (KeyboardInterrupt, SystemExit):
+        except (KeyboardInterrupt, SystemExit) as error:
+            self._retain_failure_diagnostic(attempt_ref, phase, error, objects)
             raise
-        except Exception:
+        except Exception as error:
+            self._retain_failure_diagnostic(attempt_ref, phase, error, objects)
             raise ModalChatDeploymentError("modal_chat_deployment_failed") from None
 
     def observe(self, *, client, app_name, function_name, environment_name):

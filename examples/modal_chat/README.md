@@ -46,6 +46,14 @@ responses. Responses and immutable evidence go under the manifest's private
 state root. After failure, inspect the retained exact identities and evidence;
 do not rename the attempt or delete its claims to resubmit.
 
+Deployment failures retain non-authorizing phase, closed exception categories,
+bounded allowlisted traceback locations, and known provider object IDs in the
+existing private catalog. They never retain exception messages, source lines,
+locals or credentials. A diagnostic is not deployment acceptance, permission to
+retry, or proof that a provider object stopped. If diagnostic persistence fails,
+the original error remains primary and any captured record remains available in
+the owning process only.
+
 ## Saved state and ownership
 
 The example owns its private SQLite file and immutable catalogs. A durable
