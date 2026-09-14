@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`b5794518f427521cdc4bfcf474fd0ad791b57445`, advertised by
+`ff8b51b62812e61c69a81df8a768fdbf967e19c1`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -68,20 +68,22 @@ Otherwise `HF_TOKEN` is inherited. Never put credential values in arguments.
 python -B synaptic-tuner/examples/modal_chat/launch.py \
   --project-root /absolute/path/to/modal-chat-consumer \
   --configuration configuration/smoke.json \
-  --mode qualify-training --modal-profile synaptic-labs
+  --mode train-chat --modal-profile synaptic-labs
 ```
 
 This provisions the configured fresh Volumes and runtime Secret, deploys the
-fixed worker, submits once and saves authenticated native training/artifact
-evidence. A launch claim is permanent, including after failure. Do not rerun an
+fixed worker, submits once, verifies the same run through the public outcome,
+verification and artifact paths, then saves one chat reply and confirms the exact
+owned Sandbox stopped. A launch claim is permanent, including after failure. Do not rerun an
 ambiguous attempt or rename it to evade reconciliation. After a known terminal
 failure, review its evidence and deliberately commit a new isolated attempt.
 
 The default `--mode check` makes no cloud calls. `--mode train-chat` requires
 current inference-image evidence and qualified public observe/artifact
 capabilities, then verifies that same run, saves one reply and confirms the exact
-owned Sandbox stopped. The current configuration's historical CPU capture is
-not qualification of updated runtime source; refresh it before chat. Operator
+owned Sandbox stopped. The current configuration selects the refreshed ea66c4c
+CPU capture and stopped-Sandbox readback, reviewed against this pin's unchanged
+runtime closure. That check is not proof of GPU serving or a chat reply. Operator
 budgets and timeouts do not guarantee a provider-side billing cap.
 
 ## Boundaries
@@ -92,7 +94,7 @@ and the consumer keeps its one-shot claims and result records in `.synaptic/stat
 The example is single-process: reopening its database refuses automatic replay
 but does not reconstruct all Foundation/coordinator state.
 
-This branch is executable smoke preparation, not a claim of a successful GPU smoke.
+This branch is a dedicated smoke fixture, not general release qualification.
 Attempt `modal-chat-20260914-a` created its three Volumes and runtime Secret,
 then exited during deployment without reaching training submission. Scoped
 readback found the prior app deployment unchanged and the exact new function
@@ -135,8 +137,14 @@ the pinned interpreter directory. The dedicated app's generation/layout remained
 unchanged and G's selected function was absent. The configured PATH is now
 `/opt/conda/bin:/usr/bin:/bin`, retaining Python/pip discovery and system tools.
 This is a configuration correction, not a runtime/image pin change or success
-claim. The current configuration selects a separate
-`modal-chat-20260914-h` attempt with new resource/function names. Earlier attempts'
-claims or resources may not be adopted or erased.
+claim. Attempt `modal-chat-20260914-h` subsequently passed native authenticated
+training qualification and verified all five roles: final_model, tokenizer,
+training_lineage, training_metrics and workload_record. Its aggregate report
+SHA-256 is `a4f3e19b17a89e20010c5cfa495ebfe8adc2c64a14cf73e71e69b0ba2612d30b`;
+the engine retains its bounded summary in
+`docs/review/evidence/modal-training-qualified-20260914h.json`. H did not run chat.
+The current configuration selects a separate `modal-chat-20260914-i` train-chat
+attempt with new resource/function names. Earlier attempts' claims or resources
+may not be adopted or erased.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.
