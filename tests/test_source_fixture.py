@@ -8,7 +8,7 @@ import json
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "synaptic-tuner"
-PIN = "c95d5405b1666b9a775aecc850e2251992482648"
+PIN = "8e4c3941eff044c8a5824bae56c22e9f2311ecb7"
 ORIGIN = "https://github.com/ProfSynapse/Synaptic-Tuner.git"
 
 if ENGINE.resolve(strict=True) != ENGINE:
@@ -93,6 +93,7 @@ class ConsumerSourceTests(unittest.TestCase):
         raw = (ROOT / "configuration/smoke.json").read_bytes()
         settings = ModalChatSettings.parse(raw[:-1] if raw.endswith(b"\n") else raw)
         self.assertEqual(settings.environment_name, "synaptic-smoke-v1")
+        self.assertEqual(settings.runtime_environment["PATH"], "/usr/bin:/bin")
         self.assertEqual(settings.training_input.hyperparameters.duration.max_steps, 2)
         rows = [
             json.loads(line)

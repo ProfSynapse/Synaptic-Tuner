@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`c95d5405b1666b9a775aecc850e2251992482648`, advertised by
+`8e4c3941eff044c8a5824bae56c22e9f2311ecb7`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -120,7 +120,17 @@ the runner incorrectly required the cache's run ID to start with `run-`.
 The next engine binds the cache to the exact authenticated source run ID.
 It also hydrates lazy Modal call handles before checking their IDs, so the
 launcher can wait for remote work rather than prematurely reading evidence.
-The current configuration selects a separate `modal-chat-20260914-f` attempt with new resource/function
-names. Earlier attempts' claims or resources may not be adopted or erased.
+Attempt `modal-chat-20260914-f` loaded the model, then failed in Triton's C
+helper compilation: GCC could not find its linker. The offline child intentionally
+does not inherit its parent environment; the consumer now explicitly configures
+`PATH=/usr/bin:/bin`. A credential-free local compiler probe reproduced the
+failure without PATH and succeeded with that value. F also exposed a delayed-read
+bug: generating a new timestamped Foundation assessment mismatched the retained
+submit binding. The engine now authenticates and reuses the exact retained
+assessment for qualification, public reads and chat artifact admission.
+F's diagnostic readback does not replace authenticated qualification, which its
+launcher did not retain. The current configuration selects a separate
+`modal-chat-20260914-g` attempt with new resource/function names. Earlier attempts'
+claims or resources may not be adopted or erased.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.
