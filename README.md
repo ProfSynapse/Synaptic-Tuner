@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`b3d916b16a110f884ae394fe3a25a138aac7c863`, advertised by
+`0cd7884855988b5c0f380392fc1de640564179a1`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -30,14 +30,17 @@ gitlink selects the reviewed bytes.
 
 `synaptic.yaml` is a strict host manifest with private consumer output roots,
 HTTPS/GitHub-only source policy, and no source or engine writes. No deployment
-IDs, credentials, signed grants, placeholder runtime hashes, model weights, or
-fabricated training evidence are checked in.
+credentials, signed grants, model weights, or fabricated training evidence are
+checked in. `configuration/smoke.json` selects dedicated object names and a
+two-step, pinned SmolLM2 LoRA workload; `data/smoke.jsonl` contains eight tiny
+training examples. Fractional training values belong in this configuration.
 
 Use the engine's [minimal consumer example](synaptic-tuner/examples/modal_chat/README.md)
 for `submit_training_once`, `chat_once`, and the private attempt/result store.
-This source fixture is not yet a standalone live launcher: authenticated host
-composition, training configuration/data, final inference image commitments,
-a verified trained run, and actual chat/cleanup evidence remain required.
+The checked-in consumer launcher composes the actual public training API and
+authenticated provider collaborators. Its native qualification mode exists to
+measure training/artifact evidence before enabling public read capabilities.
+It does not claim to have completed public chat.
 Importing the example or cloning this branch starts no cloud job.
 
 From the checkout, run the provider-free source checks in an existing compatible
@@ -50,6 +53,34 @@ python -B -m unittest discover -s tests -v
 These tests use the real local source inspector. They deliberately do not attest
 remote publication, contact Modal, load credentials, or authorize a job.
 
+## Run the bounded smoke
+
+Use an existing compatible Python environment with Modal 1.5.4 and the engine's
+host dependencies. No local Docker or model-weight download is involved.
+The explicit named Modal profile supplies credentials internally; an optional
+`--hf-token-env-file /absolute/path/to/existing/.env` reads only its `HF_TOKEN`.
+Otherwise `HF_TOKEN` is inherited. Never put credential values in arguments.
+
+```bash
+python -B synaptic-tuner/examples/modal_chat/launch.py \
+  --project-root /absolute/path/to/modal-chat-consumer \
+  --configuration configuration/smoke.json \
+  --mode qualify-training --modal-profile synaptic-labs
+```
+
+This provisions the configured fresh Volumes and runtime Secret, deploys the
+fixed worker, submits once and saves authenticated native training/artifact
+evidence. A launch claim is permanent, including after failure. Do not rerun an
+ambiguous attempt or rename it to evade reconciliation. After a known terminal
+failure, review its evidence and deliberately commit a new isolated attempt.
+
+The default `--mode check` makes no cloud calls. `--mode train-chat` requires
+current inference-image evidence and qualified public observe/artifact
+capabilities, then verifies that same run, saves one reply and confirms the exact
+owned Sandbox stopped. The current configuration's historical CPU capture is
+not qualification of updated runtime source; refresh it before chat. Operator
+budgets and timeouts do not guarantee a provider-side billing cap.
+
 ## Boundaries
 
 Use only `synaptic-smoke-v1`. Model preparation happens on Modal; operators
@@ -58,6 +89,6 @@ and the consumer keeps its one-shot claims and result records in `.synaptic/stat
 The example is single-process: reopening its database refuses automatic replay
 but does not reconstruct all Foundation/coordinator state.
 
-This branch is source preparation, not a claim of a successful GPU smoke.
+This branch is executable smoke preparation, not a claim of a successful GPU smoke.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.

@@ -4,10 +4,11 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+import json
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "synaptic-tuner"
-PIN = "b3d916b16a110f884ae394fe3a25a138aac7c863"
+PIN = "0cd7884855988b5c0f380392fc1de640564179a1"
 ORIGIN = "https://github.com/ProfSynapse/Synaptic-Tuner.git"
 
 if ENGINE.resolve(strict=True) != ENGINE:
@@ -66,13 +67,39 @@ class ConsumerSourceTests(unittest.TestCase):
     def test_committed_tree_is_only_the_reviewed_fixture(self):
         result = subprocess.run(
             ["git", "-C", str(ROOT), "ls-tree", "-r", "--name-only", "HEAD"],
-            check=True, capture_output=True, text=True, timeout=10,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(
             result.stdout.splitlines(),
-            [".gitignore", ".gitmodules", "AGENTS.md", "README.md",
-             "synaptic-tuner", "synaptic.yaml", "tests/test_source_fixture.py"],
+            [
+                ".gitignore",
+                ".gitmodules",
+                "AGENTS.md",
+                "README.md",
+                "configuration/smoke.json",
+                "data/smoke.jsonl",
+                "synaptic-tuner",
+                "synaptic.yaml",
+                "tests/test_source_fixture.py",
+            ],
         )
+
+    def test_committed_smoke_uses_real_typed_configuration(self):
+        from examples.modal_chat.settings import ModalChatSettings
+
+        raw = (ROOT / "configuration/smoke.json").read_bytes()
+        settings = ModalChatSettings.parse(raw[:-1] if raw.endswith(b"\n") else raw)
+        self.assertEqual(settings.environment_name, "synaptic-smoke-v1")
+        self.assertEqual(settings.training_input.hyperparameters.duration.max_steps, 2)
+        rows = [
+            json.loads(line)
+            for line in (ROOT / settings.dataset_project_path).read_text().splitlines()
+        ]
+        self.assertEqual(len(rows), 8)
+        self.assertTrue(all(row["messages"] for row in rows))
 
 
 if __name__ == "__main__":
