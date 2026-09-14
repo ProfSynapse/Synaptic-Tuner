@@ -48,6 +48,13 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Initialize inference commitments only with `scripts/initialize_modal_inference_lock.py`
+  from explicitly reviewed candidate and additive-lock hashes; never overwrite
+  existing resources or silently normalize their bytes. Qualify the fresh wheel
+  using the existing CPU capture's `--check-private-directories` and
+  `--verify-runtime-lock-digest` before GPU/chat use. A CPU package result is not
+  serving authority or live model qualification; see the canonical Modal reference.
+
 - Keep the minimal train/chat consumer under `examples/modal_chat`, not in
   engine runtime modules. Its private attempt journal prevents automatic replay;
   it is not durable recovery of all coordinator/Foundation state. Live training

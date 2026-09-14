@@ -67,6 +67,14 @@ positive qualification of an inference image or an always-successful test hook.
 Package-data declarations reserve the exact three resource names for their
 eventual reviewed addition; no synthetic production lock is shipped.
 
+Correction (2026-09-14): the three resources have now been initialized from the
+measured engine-installed CPU candidate, with the exact accepted additive
+installer bytes and the separately reviewed 118-member source closure. They
+are starting pins, not a qualified live inference image. The concrete image
+check must verify a fresh wheel against those commitments; the old candidate
+image contains neither this current source nor these resources. See
+`modal-inference-image-qualification.md` for the current qualification record.
+
 The verifier assumes a trusted immutable image/package tree. Image selection
 equality does not attest which image Modal actually mounted. Distribution
 metadata is not a hash check of every installed dependency file. The dependency

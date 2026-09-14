@@ -75,6 +75,119 @@ def _diagnostic() -> bytes:
     )
 
 
+def _private_candidate():
+    body = json.loads(_candidate())
+    body["python"]["executable"] = capture._ISOLATED_PYTHON
+    body["private_directories"] = {
+        "effective_uid": 0,
+        "paths": [
+            "/workspace/modal-chat",
+            "/workspace/modal-chat/model",
+            "/workspace/modal-chat/base",
+            "/workspace/modal-chat/scratch",
+        ],
+        "mode": "0700",
+        "read_write_verified": True,
+    }
+    return body
+
+
+def _encode(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+
+def test_private_directory_check_is_explicit_and_keeps_candidate_status():
+    sdk, sandbox, calls = _sdk(raw=_encode(_private_candidate()))
+    result = capture.capture_modal_inference_runtime(
+        sdk=sdk,
+        client=object(),
+        app_name="existing-app",
+        environment_name="isolated",
+        image=IMAGE,
+        source_commit=COMMIT,
+        isolated_python=True,
+        check_private_directories=True,
+    )
+    body = json.loads(result.canonical_bytes)
+    assert body["candidate"]["status"] == "CANDIDATE_ONLY"
+    assert body["candidate"]["private_directories"]["read_write_verified"] is True
+    create = next(call for call in calls if call[0] == "create")
+    assert create[1][-1] == "--check-private-directories"
+    assert sandbox.terminate_calls == [False]
+    assert sandbox.poll_calls == 1
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("effective_uid", True),
+        ("effective_uid", -1),
+        ("effective_uid", 2**32),
+        ("mode", "0755"),
+        ("read_write_verified", False),
+        ("read_write_verified", 1),
+        ("paths", ["/other"]),
+    ],
+)
+def test_private_directory_report_rejects_invalid_claims(field, value):
+    body = _private_candidate()
+    body["private_directories"][field] = value
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture._parse_candidate(
+            _encode(body),
+            image=IMAGE,
+            source_commit=COMMIT,
+            check_private_directories=True,
+        )
+
+
+def test_private_directory_report_cannot_be_missing_or_unrequested():
+    for raw, enabled in ((_candidate(), True), (_encode(_private_candidate()), False)):
+        with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+            capture._parse_candidate(
+                raw,
+                image=IMAGE,
+                source_commit=COMMIT,
+                check_private_directories=enabled,
+            )
+
+
+@pytest.mark.parametrize("isolated,diagnostic", [(False, False), (True, True)])
+def test_private_check_invalid_combination_fails_before_sdk(isolated, diagnostic):
+    with pytest.raises(
+        capture.ModalInferenceRuntimeCaptureError, match="capture_input_invalid"
+    ):
+        capture.capture_modal_inference_runtime(
+            sdk=object(),
+            client=object(),
+            app_name="existing-app",
+            environment_name="isolated",
+            image=IMAGE,
+            source_commit=COMMIT,
+            isolated_python=isolated,
+            diagnose_distributions=diagnostic,
+            check_private_directories=True,
+        )
+
+
+def test_private_check_exact_stopped_readback_needs_no_allocation():
+    sandbox = _ReadSandbox(
+        returncode=0, stdout=_encode(_private_candidate()), stderr=b""
+    )
+    sdk, calls = _read_sdk(sandbox)
+    raw = capture.read_modal_inference_runtime_sandbox(
+        sdk=sdk,
+        client=object(),
+        sandbox_id="sb-exact",
+        image=IMAGE,
+        source_commit=COMMIT,
+        check_private_directories=True,
+    )
+    report = json.loads(raw)
+    assert report["status"] == "CANDIDATE_ONLY"
+    assert report["candidate"]["private_directories"]["read_write_verified"] is True
+
+
 def test_diagnostic_capture_is_opt_in_and_never_candidate_admission():
     sdk, sandbox, calls = _sdk(raw=_diagnostic())
     result = capture.capture_modal_inference_runtime(
@@ -348,6 +461,136 @@ def _engine_wheel(tmp_path: Path) -> tuple[Path, str]:
     wheel = tmp_path / "synaptic_tuner-1.1.0-py3-none-any.whl"
     wheel.write_bytes(b"exact-engine-wheel")
     return wheel, capture.hashlib.sha256(wheel.read_bytes()).hexdigest()
+
+
+def _verified_candidate():
+    body = _private_candidate()
+    body["distributions"].update({"modal": "1.5.4", "synaptic-tuner": "1.1.0"})
+    body["requirements"]["modal"] = {"present": True, "version": "1.5.4"}
+    body["packaged_runtime"] = {
+        "status": "PACKAGED_RUNTIME_VERIFIED",
+        **{
+            key: "d" * 64
+            for key in (
+                "runtime_lock_digest",
+                "source_lock_digest",
+                "dependency_lock_digest",
+                "worker_closure_digest",
+            )
+        },
+    }
+    return body
+
+
+def test_capture_runs_concrete_runtime_probe_only_with_exact_wheel_and_lock(tmp_path):
+    wheel, digest = _engine_wheel(tmp_path)
+    sdk, sandbox, calls = _sdk(raw=_encode(_verified_candidate()))
+    result = capture.capture_modal_inference_runtime(
+        sdk=sdk,
+        client=object(),
+        app_name="existing",
+        environment_name="isolated",
+        image=IMAGE,
+        source_commit=COMMIT,
+        isolated_python=True,
+        modal_additions=True,
+        engine_wheel=wheel,
+        engine_wheel_sha256=digest,
+        check_private_directories=True,
+        verify_runtime_lock_digest="d" * 64,
+    )
+    body = json.loads(result.canonical_bytes)
+    assert body["candidate"]["status"] == "CANDIDATE_ONLY"
+    assert body["candidate"]["packaged_runtime"]["runtime_lock_digest"] == "d" * 64
+    create = next(call for call in calls if call[0] == "create")
+    assert create[1][-2:] == ("--verify-runtime-lock-digest", "d" * 64)
+    assert create[2]["block_network"] is True
+    assert sandbox.terminate_calls == [False]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("runtime_lock_digest", "a" * 64),
+        ("source_lock_digest", "invalid"),
+        ("status", "LIVE_QUALIFIED"),
+    ],
+)
+def test_capture_refuses_unbound_runtime_report(field, value):
+    body = _verified_candidate()
+    body["packaged_runtime"][field] = value
+    with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+        capture._parse_candidate(
+            _encode(body),
+            image=IMAGE,
+            source_commit=COMMIT,
+            check_private_directories=True,
+            verify_runtime_lock_digest="d" * 64,
+        )
+
+
+def test_packaged_runtime_report_cannot_be_omitted_or_unrequested():
+    for body, expected in (
+        (_private_candidate(), "d" * 64),
+        (_verified_candidate(), None),
+    ):
+        with pytest.raises(capture.ModalInferenceRuntimeCaptureError):
+            capture._parse_candidate(
+                _encode(body),
+                image=IMAGE,
+                source_commit=COMMIT,
+                check_private_directories=True,
+                verify_runtime_lock_digest=expected,
+            )
+
+
+def test_runtime_verification_requires_engine_and_directory_probe_before_sdk():
+    with pytest.raises(
+        capture.ModalInferenceRuntimeCaptureError, match="capture_input_invalid"
+    ):
+        capture.capture_modal_inference_runtime(
+            sdk=object(),
+            client=object(),
+            app_name="existing",
+            environment_name="isolated",
+            image=IMAGE,
+            source_commit=COMMIT,
+            isolated_python=True,
+            verify_runtime_lock_digest="d" * 64,
+        )
+
+
+def test_exact_readback_keeps_packaged_runtime_commitment():
+    sandbox = _ReadSandbox(
+        returncode=0, stdout=_encode(_verified_candidate()), stderr=b""
+    )
+    sdk, _ = _read_sdk(sandbox)
+    value = json.loads(
+        capture.read_modal_inference_runtime_sandbox(
+            sdk=sdk,
+            client=object(),
+            sandbox_id="sb-exact",
+            image=IMAGE,
+            source_commit=COMMIT,
+            check_private_directories=True,
+            verify_runtime_lock_digest="d" * 64,
+        )
+    )
+    assert value["candidate"]["packaged_runtime"]["runtime_lock_digest"] == "d" * 64
+
+
+def test_runtime_readback_requires_private_check_before_provider_access():
+    with pytest.raises(
+        capture.ModalInferenceRuntimeCaptureError, match="capture_input_invalid"
+    ):
+        capture.read_modal_inference_runtime_sandbox(
+            sdk=object(),
+            client=object(),
+            sandbox_id="sb-exact",
+            image=IMAGE,
+            source_commit=COMMIT,
+            verify_runtime_lock_digest="d" * 64,
+        )
 
 
 def test_real_tmp_path_engine_wheel_is_read_and_hashed(tmp_path):

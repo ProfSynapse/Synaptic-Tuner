@@ -207,6 +207,53 @@ def test_packaged_runtime_verifies_complete_exact_environment(tmp_path, monkeypa
     runtime.verify_modal_inference_runtime(_configuration(values))
 
 
+def test_packaged_runtime_helper_returns_measured_commitments(tmp_path, monkeypatch):
+    _, manifest, values = _case(tmp_path, monkeypatch)
+    expected = {
+        "base_registry_reference": manifest["base_registry_reference"],
+        "sdk_version": manifest["sdk_version"],
+        "distributions": dict(manifest["distributions"]),
+        **values,
+    }
+    measured = runtime.verify_packaged_modal_inference_runtime(
+        expected_runtime_lock_digest=values["runtime_lock_digest"]
+    )
+    assert measured == expected
+    measured["distributions"]["modal"] = "changed"
+    assert (
+        runtime.verify_packaged_modal_inference_runtime(
+            expected_runtime_lock_digest=values["runtime_lock_digest"]
+        )
+        == expected
+    )
+
+
+def test_packaged_runtime_helper_rejects_wrong_hash_before_physical_checks(
+    tmp_path, monkeypatch
+):
+    _case(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        runtime,
+        "hash_regular",
+        lambda *args: (_ for _ in ()).throw(AssertionError("source check")),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_hash_executable",
+        lambda *args: (_ for _ in ()).throw(AssertionError("Python check")),
+    )
+    monkeypatch.setattr(
+        runtime.importlib.metadata,
+        "distributions",
+        lambda: (_ for _ in ()).throw(AssertionError("distribution check")),
+    )
+    with pytest.raises(runtime.ModalInferenceRuntimeError) as raised:
+        runtime.verify_packaged_modal_inference_runtime(
+            expected_runtime_lock_digest="f" * 64
+        )
+    assert str(raised.value) == "modal_inference_runtime_invalid"
+
+
 def test_embedded_base_registry_must_match_signed_base_selection(tmp_path, monkeypatch):
     root, manifest, values = _case(tmp_path, monkeypatch)
     manifest["base_registry_reference"] = (

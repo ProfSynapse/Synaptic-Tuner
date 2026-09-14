@@ -12,12 +12,14 @@ import platform
 import re
 import stat
 import sys
+import tempfile
 
 _SCHEMA = "synaptic-modal-inference-runtime-inspection-candidate/v1"
 _ERROR_SCHEMA = "synaptic-modal-inference-runtime-inspection-error/v1"
 _DIAGNOSTIC_SCHEMA = "synaptic-modal-inference-distribution-diagnostic/v1"
 _IMAGE = re.compile(r"docker\.io/vllm/vllm-openai@sha256:[0-9a-f]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 _VERSION = re.compile(r"[1-9][0-9]{0,2}\.(?:0|[1-9][0-9]{0,2})\.(?:0|[1-9][0-9]{0,2})")
 _DIST_SEPARATORS = re.compile(r"[-_.]+")
 _DIST_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -26,6 +28,8 @@ _MAX_DISTRIBUTIONS = 512
 _MAX_DISTRIBUTION_OCCURRENCES = 4096
 _MAX_EXECUTABLE_BYTES = 64 * 1024 * 1024
 _MAX_OUTPUT_BYTES = 1024 * 1024
+_PRIVATE_ROOT = Path("/workspace/modal-chat")
+_PRIVATE_CHILDREN = ("model", "base", "scratch")
 
 
 class _InspectionFailure(RuntimeError):
@@ -316,6 +320,103 @@ def inspect_runtime(*, image: str, source_commit: str) -> dict[str, object]:
     return candidate
 
 
+def inspect_private_directories() -> dict[str, object]:
+    """Measure private-directory access as this Sandbox's actual effective user.
+
+    The image is trusted and immutable; this is a build qualification probe,
+    not a hostile-volume traversal primitive. Temporary probe files are owned
+    by this call and closed/removed before returning.
+    """
+    paths = (_PRIVATE_ROOT, *(_PRIVATE_ROOT / name for name in _PRIVATE_CHILDREN))
+    identities = set()
+    try:
+        for path in paths:
+            before = path.lstat()
+            identity = (before.st_dev, before.st_ino)
+            if (
+                not stat.S_ISDIR(before.st_mode)
+                or stat.S_IMODE(before.st_mode) != 0o700
+                or before.st_uid != os.geteuid()
+                or path.resolve(strict=True) != path
+                or identity in identities
+            ):
+                raise _InspectionFailure("PRIVATE_DIRECTORY_INVALID")
+            identities.add(identity)
+            with tempfile.TemporaryFile(dir=path) as probe:
+                if probe.write(b"probe") != 5:
+                    raise _InspectionFailure("PRIVATE_DIRECTORY_ACCESS_FAILED")
+                probe.flush()
+                os.fsync(probe.fileno())
+                probe.seek(0)
+                if probe.read(6) != b"probe":
+                    raise _InspectionFailure("PRIVATE_DIRECTORY_ACCESS_FAILED")
+            after = path.lstat()
+            if (after.st_dev, after.st_ino, after.st_mode, after.st_uid) != (
+                before.st_dev,
+                before.st_ino,
+                before.st_mode,
+                before.st_uid,
+            ):
+                raise _InspectionFailure("PRIVATE_DIRECTORY_CHANGED")
+    except _InspectionFailure:
+        raise
+    except Exception:
+        raise _InspectionFailure("PRIVATE_DIRECTORY_ACCESS_FAILED") from None
+    return {
+        "effective_uid": os.geteuid(),
+        "paths": [str(path) for path in paths],
+        "mode": "0700",
+        "read_write_verified": True,
+    }
+
+
+def verify_packaged_runtime(
+    candidate: dict[str, object], expected_digest: str
+) -> dict[str, str]:
+    """Run the concrete installed verifier, never a synthetic serving config."""
+    if type(expected_digest) is not str or _SHA256.fullmatch(expected_digest) is None:
+        raise _InspectionFailure("ARGUMENT_INVALID")
+    try:
+        from tuner.execution.providers.modal.inference_runtime import (
+            verify_packaged_modal_inference_runtime,
+        )
+
+        verified = verify_packaged_modal_inference_runtime(
+            expected_runtime_lock_digest=expected_digest
+        )
+        if (
+            verified["base_registry_reference"]
+            != candidate["operator_selection"]["image"]
+            or verified["distributions"] != candidate["distributions"]
+            or verified["python_version"] != candidate["python"]["version"]
+            or verified["python_executable"] != candidate["python"]["executable"]
+            or verified["python_executable_digest"]
+            != candidate["python"]["executable_sha256"]
+            or verified["sdk_version"] != candidate["requirements"]["modal"]["version"]
+            or verified["runtime_lock_digest"] != expected_digest
+        ):
+            raise _InspectionFailure("PACKAGED_RUNTIME_VERIFICATION_FAILED")
+        result = {
+            key: verified[key]
+            for key in (
+                "runtime_lock_digest",
+                "source_lock_digest",
+                "dependency_lock_digest",
+                "worker_closure_digest",
+            )
+        }
+        if any(
+            type(value) is not str or _SHA256.fullmatch(value) is None
+            for value in result.values()
+        ):
+            raise _InspectionFailure("PACKAGED_RUNTIME_VERIFICATION_FAILED")
+        return {"status": "PACKAGED_RUNTIME_VERIFIED", **result}
+    except _InspectionFailure:
+        raise
+    except Exception:
+        raise _InspectionFailure("PACKAGED_RUNTIME_VERIFICATION_FAILED") from None
+
+
 def diagnose_distributions(*, image: str, source_commit: str) -> dict[str, object]:
     if type(image) is not str or _IMAGE.fullmatch(image) is None:
         raise _InspectionFailure("IMAGE_INVALID")
@@ -406,17 +507,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--image", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--diagnose-distributions", action="store_true")
+    parser.add_argument("--check-private-directories", action="store_true")
+    parser.add_argument("--verify-runtime-lock-digest")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     try:
         args = build_parser().parse_args(argv)
+        if (
+            args.verify_runtime_lock_digest is not None
+            and not args.check_private_directories
+        ):
+            raise _InspectionFailure("ARGUMENT_INVALID")
+        if args.diagnose_distributions and (
+            args.check_private_directories
+            or args.verify_runtime_lock_digest is not None
+        ):
+            raise _InspectionFailure("ARGUMENT_INVALID")
         candidate = (
             diagnose_distributions(image=args.image, source_commit=args.source_commit)
             if args.diagnose_distributions
             else inspect_runtime(image=args.image, source_commit=args.source_commit)
         )
+        if args.check_private_directories:
+            candidate["private_directories"] = inspect_private_directories()
+        if args.verify_runtime_lock_digest is not None:
+            candidate["packaged_runtime"] = verify_packaged_runtime(
+                candidate, args.verify_runtime_lock_digest
+            )
+        if len(_line(candidate)) > _MAX_OUTPUT_BYTES:
+            raise _InspectionFailure("OUTPUT_INVALID")
         sys.stdout.buffer.write(_line(candidate))
         return 0
     except (KeyboardInterrupt, SystemExit):

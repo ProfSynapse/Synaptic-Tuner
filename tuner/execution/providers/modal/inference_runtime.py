@@ -352,6 +352,100 @@ def _hash_executable(path: Path) -> str:
                 raise
 
 
+def _verify_packaged_runtime(
+    *,
+    payload: bytes,
+    manifest: dict[str, object],
+    expected_runtime_lock_digest: str,
+) -> dict[str, object]:
+    runtime_lock_digest = hashlib.sha256(payload).hexdigest()
+    if (
+        _digest(expected_runtime_lock_digest, "expected runtime lock digest")
+        != runtime_lock_digest
+    ):
+        raise ValueError("packaged runtime lock differs")
+    root = _runtime_root()
+    inventory = manifest["source_inventory"]
+    by_path = {item["path"]: item for item in inventory}
+    for item in inventory:
+        size, digest = hash_regular(
+            root, root / item["path"], min(item["size_bytes"], _MAX_MEMBER_BYTES)
+        )
+        if size != item["size_bytes"] or digest != item["sha256"]:
+            raise ValueError("runtime source member differs")
+    source_lock_digest = _source_digest(inventory)
+    dependency = by_path[manifest["dependency_lock_path"]]
+    closure_path = manifest["worker_closure_manifest_path"]
+    closure_member = by_path[closure_path]
+    closure_bytes = read_regular(
+        root,
+        root / closure_path,
+        min(closure_member["size_bytes"], _MAX_MANIFEST_BYTES),
+    )
+    if (
+        len(closure_bytes) != closure_member["size_bytes"]
+        or hashlib.sha256(closure_bytes).hexdigest() != closure_member["sha256"]
+    ):
+        raise ValueError("runtime worker closure differs")
+    worker_closure_digest = _worker_closure(
+        closure_bytes,
+        inventory,
+        closure_path,
+        manifest["dependency_lock_path"],
+    )
+    python = manifest["python"]
+    executable = Path(python["executable"])
+    if (
+        python["implementation"] != "cpython"
+        or sys.implementation.name != "cpython"
+        or _actual_version() != python["version"]
+        or not executable.is_absolute()
+        or not os.path.samefile(sys.executable, executable)
+        or _hash_executable(executable) != python["executable_sha256"]
+    ):
+        raise ValueError("physical Python runtime differs")
+    actual_distributions: dict[str, str] = {}
+    for distribution in importlib.metadata.distributions():
+        name = distribution.metadata.get("Name")
+        if type(name) is not str:
+            raise ValueError("installed distribution identity is absent")
+        normalized = _DIST_SEPARATORS.sub("-", name).lower()
+        if normalized in actual_distributions:
+            raise ValueError("installed distribution identity is ambiguous")
+        actual_distributions[normalized] = distribution.version
+    if actual_distributions != manifest["distributions"]:
+        raise ValueError("installed inference distributions differ")
+    return {
+        "base_registry_reference": manifest["base_registry_reference"],
+        "sdk_version": manifest["sdk_version"],
+        "distributions": dict(manifest["distributions"]),
+        "dependency_lock_digest": dependency["sha256"],
+        "runtime_lock_digest": runtime_lock_digest,
+        "source_lock_digest": source_lock_digest,
+        "worker_closure_digest": worker_closure_digest,
+        "python_version": python["version"],
+        "python_executable": python["executable"],
+        "python_executable_digest": python["executable_sha256"],
+    }
+
+
+def verify_packaged_modal_inference_runtime(
+    *, expected_runtime_lock_digest: str
+) -> dict[str, object]:
+    """Verify the fixed packaged runtime without granting serving authority."""
+    try:
+        payload, manifest = _manifest()
+        return _verify_packaged_runtime(
+            payload=payload,
+            manifest=manifest,
+            expected_runtime_lock_digest=expected_runtime_lock_digest,
+        )
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise ModalInferenceRuntimeError("modal_inference_runtime_invalid") from None
+
+
 def verify_modal_inference_runtime(
     configuration: ModalInferencePreparationConfig,
 ) -> None:
@@ -376,60 +470,24 @@ def verify_modal_inference_runtime(
             or python["executable_sha256"] != runtime["python_executable_digest"]
         ):
             raise ValueError("configuration differs from inference runtime")
-        root = _runtime_root()
-        inventory = manifest["source_inventory"]
-        by_path = {item["path"]: item for item in inventory}
-        for item in inventory:
-            size, digest = hash_regular(
-                root, root / item["path"], min(item["size_bytes"], _MAX_MEMBER_BYTES)
-            )
-            if size != item["size_bytes"] or digest != item["sha256"]:
-                raise ValueError("runtime source member differs")
-        if _source_digest(inventory) != runtime["source_lock_digest"]:
-            raise ValueError("runtime source commitment differs")
-        dependency = by_path[manifest["dependency_lock_path"]]
-        if dependency["sha256"] != runtime["dependency_lock_digest"]:
-            raise ValueError("runtime dependency commitment differs")
-        closure_path = manifest["worker_closure_manifest_path"]
-        closure_member = by_path[closure_path]
-        closure_bytes = read_regular(
-            root,
-            root / closure_path,
-            min(closure_member["size_bytes"], _MAX_MANIFEST_BYTES),
+        measured = _verify_packaged_runtime(
+            payload=payload,
+            manifest=manifest,
+            expected_runtime_lock_digest=runtime["runtime_lock_digest"],
         )
-        if (
-            len(closure_bytes) != closure_member["size_bytes"]
-            or hashlib.sha256(closure_bytes).hexdigest() != closure_member["sha256"]
-            or _worker_closure(
-                closure_bytes,
-                inventory,
-                closure_path,
-                manifest["dependency_lock_path"],
+        if any(
+            measured[key] != runtime[key]
+            for key in (
+                "dependency_lock_digest",
+                "runtime_lock_digest",
+                "source_lock_digest",
+                "worker_closure_digest",
+                "python_version",
+                "python_executable",
+                "python_executable_digest",
             )
-            != runtime["worker_closure_digest"]
         ):
-            raise ValueError("runtime worker closure differs")
-        executable = Path(python["executable"])
-        if (
-            python["implementation"] != "cpython"
-            or sys.implementation.name != "cpython"
-            or _actual_version() != python["version"]
-            or not executable.is_absolute()
-            or not os.path.samefile(sys.executable, executable)
-            or _hash_executable(executable) != python["executable_sha256"]
-        ):
-            raise ValueError("physical Python runtime differs")
-        actual_distributions: dict[str, str] = {}
-        for distribution in importlib.metadata.distributions():
-            name = distribution.metadata.get("Name")
-            if type(name) is not str:
-                raise ValueError("installed distribution identity is absent")
-            normalized = _DIST_SEPARATORS.sub("-", name).lower()
-            if normalized in actual_distributions:
-                raise ValueError("installed distribution identity is ambiguous")
-            actual_distributions[normalized] = distribution.version
-        if actual_distributions != manifest["distributions"]:
-            raise ValueError("installed inference distributions differ")
+            raise ValueError("configuration differs from packaged runtime")
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception:

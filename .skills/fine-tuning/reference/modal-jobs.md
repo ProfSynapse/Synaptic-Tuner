@@ -242,6 +242,13 @@ Sandbox cleanup adapter. Runtime-file checks assume the trusted immutable image
 and packaged source tree; they do not establish the provider's image identity
 or prevent arbitrary mutation of already imported Python code.
 
+Correction (2026-09-14): the separate runtime manifest, dependency provenance
+and 118-member worker closure now exist, initialized from the measured
+engine-installed candidate with exact reviewed additive bytes. Missing-resource
+statements above describe the earlier bootstrap stage. These starting pins
+still require the fresh-wheel CPU check and subsequent bounded GPU/chat smoke;
+the old candidate image is not a qualified image containing the new resources.
+
 Correction (2026-09-11, private chat connection): the executable worker reads one
 bounded startup frame from the authenticated SDK stdin of its newly created
 Sandbox, then serves bounded canonical chat frames on stdout. Use
@@ -368,6 +375,15 @@ This changes the helper digest: earlier candidate evidence does not prove the
 new directories or runtime-user access. Rebuild and measure those properties
 before using the candidate for chat; do not infer access from build success.
 
+Use `--check-private-directories` with `--isolated-python` on the existing
+capture command to measure that access. The actual Sandbox user must own all
+four canonical directories with mode 0700; a temporary write/fsync/read probe
+must succeed in each and leave no probe files. The strict report records the
+effective UID and exact paths. It remains candidate-only, not serving approval.
+The flag is incompatible with distribution-diagnostic mode. For read-only
+recovery of that same stopped probe, pass it with `--read-sandbox ID` too;
+otherwise the extra report fields are rejected rather than silently ignored.
+
 After isolated candidate inspection, `--modal-additions` (requires
 `--isolated-python`) installs only `requirements/modal-inference-additions.lock`
 into the venv with `--no-deps --require-hashes --only-binary=:all:` and runs
@@ -383,6 +399,19 @@ regular wheel bytes and installs without index access or dependency resolution,
 then runs `pip check`. Its report records the wheel digest/name and the exact
 hydrated provider Image ID; these are candidate provenance, not serving approval.
 An image without packaged inference commitments must still fail admission.
+
+To qualify the installed package on CPU, additionally pass
+`--check-private-directories --verify-runtime-lock-digest SHA256` with the
+engine-wheel options. Use the independently reviewed canonical manifest's
+digest. The inspector invokes the same concrete packaged-source, closure,
+physical-Python and exact-distribution checks used by serving; it does not
+fabricate a serving configuration or accept a verifier callback. The report
+must match the requested lock and its candidate metadata. This verifies the
+installed package, not grants, authenticated launch, mounted model bytes, GPU
+startup, chat, or provider shutdown. The outer report remains candidate-only.
+Pass the same digest for exact stopped-Sandbox readback. Missing, unsolicited,
+or mismatched verification fields fail closed. No automatic allocation retry
+is authorized by a failed or ambiguous qualification attempt.
 
 Correction (2026-09-11, source freshness): bind the source once when opening a
 session. Before requesting its SUBMIT grant, use the existing binder's
@@ -542,6 +571,26 @@ and training choices stay in host configuration; do not hardcode the current
 smoke into runtime code.
 
 ## Runtime-lock maintenance
+
+For first-time inference commitment creation, use the checked-in offline
+`scripts/initialize_modal_inference_lock.py` with explicit `--accepted-evidence`,
+`--accepted-evidence-sha256`, `--base-registry-reference`, and
+`--additive-lock-sha256`. Paths are repository-relative. Default invocation
+only proposes resource digests; `--write` exclusively creates the three absent
+resources and refuses to overwrite any existing target. The accepted candidate,
+reviewed additive bytes, and source inventory must be reviewed before writing.
+The dependency resource is canonical build-provenance JSON, not a pip installer
+lock for packages already fixed by the base image digest. It records the exact
+additive installer bytes and full measured distribution map. Candidate and
+current additive hashes must agree; CRLF conversion is not permission to accept
+different bytes. This initializer targets the reviewed isolated CPython 3.12.13
+and Modal 1.5.4 profile and preserves the existing fixed 118-source inventory.
+It grants no runtime qualification: build a fresh wheel containing the resources,
+then run the concrete CPU image check and the separately authorized GPU/chat
+smoke. Do not run this standalone maintenance tool concurrently with serving;
+its parser validation temporarily redirects local module state and restores it.
+An interrupted exclusive write can leave a partial set; inspect that exact
+local set before recovery, never overwrite targets or automatically delete it.
 
 For the separate inference image, use `python3 scripts/regenerate_modal_inference_lock.py`
 to check already-reviewed inference locks, or add `--write` for an intentional

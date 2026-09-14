@@ -60,6 +60,10 @@ _INSPECTOR_REASONS = frozenset(
         "INSPECTION_FAILED",
         "METADATA_INVALID",
         "OUTPUT_INVALID",
+        "PRIVATE_DIRECTORY_INVALID",
+        "PRIVATE_DIRECTORY_ACCESS_FAILED",
+        "PRIVATE_DIRECTORY_CHANGED",
+        "PACKAGED_RUNTIME_VERIFICATION_FAILED",
         "PYTHON_INVALID",
         "SOURCE_INVALID",
     }
@@ -530,11 +534,21 @@ def read_modal_inference_runtime_sandbox(
     image: str,
     source_commit: str,
     diagnose_distributions: bool = False,
+    check_private_directories: bool = False,
+    verify_runtime_lock_digest: str | None = None,
 ) -> bytes:
     """Read one exact stopped inspection Sandbox without mutation or discovery."""
+    if verify_runtime_lock_digest is not None and not check_private_directories:
+        raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
     sandbox_id = _exact_text(sandbox_id, _SANDBOX_ID)
     image = _exact_text(image, _IMAGE)
     source_commit = _exact_text(source_commit, _COMMIT)
+    if diagnose_distributions and (
+        check_private_directories or verify_runtime_lock_digest is not None
+    ):
+        raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
+    if verify_runtime_lock_digest is not None:
+        verify_runtime_lock_digest = _exact_text(verify_runtime_lock_digest, _SHA256)
     if client is None or getattr(sdk, "__version__", None) != _SDK_VERSION:
         raise ModalInferenceRuntimeCaptureError("modal_sdk_invalid")
     deadline = time.monotonic() + _READ_TIMEOUT_SECONDS
@@ -569,8 +583,17 @@ def read_modal_inference_runtime_sandbox(
         try:
             if stderr:
                 raise ValueError
-            parser = _parse_diagnostic if diagnose_distributions else _parse_candidate
-            candidate = parser(stdout, image=image, source_commit=source_commit)
+            candidate = (
+                _parse_diagnostic(stdout, image=image, source_commit=source_commit)
+                if diagnose_distributions
+                else _parse_candidate(
+                    stdout,
+                    image=image,
+                    source_commit=source_commit,
+                    check_private_directories=check_private_directories,
+                    verify_runtime_lock_digest=verify_runtime_lock_digest,
+                )
+            )
         except Exception:
             report.update(status="REMOTE_FAILED", reason_code="OUTPUT_INVALID")
         else:
@@ -590,7 +613,12 @@ def read_modal_inference_runtime_sandbox(
 
 
 def _parse_candidate(
-    raw: bytes, *, image: str, source_commit: str
+    raw: bytes,
+    *,
+    image: str,
+    source_commit: str,
+    check_private_directories: bool = False,
+    verify_runtime_lock_digest: str | None = None,
 ) -> dict[str, object]:
     if not raw.endswith(b"\n") or raw.endswith(b"\n\n"):
         raise ModalInferenceRuntimeCaptureError("capture_output_invalid")
@@ -608,15 +636,60 @@ def _parse_candidate(
         candidate = json.loads(document, object_pairs_hook=pairs)
     except (UnicodeError, json.JSONDecodeError):
         raise ModalInferenceRuntimeCaptureError("capture_output_invalid") from None
-    if type(candidate) is not dict or set(candidate) != {
+    expected_fields = {
         "distributions",
         "operator_selection",
         "python",
         "requirements",
         "schema_version",
         "status",
-    }:
+    }
+    if check_private_directories:
+        expected_fields.add("private_directories")
+    if verify_runtime_lock_digest is not None:
+        expected_fields.add("packaged_runtime")
+    if type(candidate) is not dict or set(candidate) != expected_fields:
         raise ModalInferenceRuntimeCaptureError("capture_output_invalid")
+    if verify_runtime_lock_digest is not None:
+        verified = candidate["packaged_runtime"]
+        if (
+            type(verified) is not dict
+            or set(verified)
+            != {
+                "status",
+                "runtime_lock_digest",
+                "source_lock_digest",
+                "dependency_lock_digest",
+                "worker_closure_digest",
+            }
+            or verified["status"] != "PACKAGED_RUNTIME_VERIFIED"
+            or verified["runtime_lock_digest"]
+            != _exact_text(verify_runtime_lock_digest, _SHA256)
+            or any(
+                type(value) is not str or _SHA256.fullmatch(value) is None
+                for key, value in verified.items()
+                if key != "status"
+            )
+        ):
+            raise ModalInferenceRuntimeCaptureError("capture_output_invalid")
+    if check_private_directories:
+        private = candidate["private_directories"]
+        if (
+            type(private) is not dict
+            or set(private) != {"effective_uid", "paths", "mode", "read_write_verified"}
+            or type(private["effective_uid"]) is not int
+            or not 0 <= private["effective_uid"] < 2**32
+            or private["mode"] != "0700"
+            or private["read_write_verified"] is not True
+            or private["paths"]
+            != [
+                "/workspace/modal-chat",
+                "/workspace/modal-chat/model",
+                "/workspace/modal-chat/base",
+                "/workspace/modal-chat/scratch",
+            ]
+        ):
+            raise ModalInferenceRuntimeCaptureError("capture_output_invalid")
     requirements = candidate["requirements"]
     if type(requirements) is not dict or set(requirements) != {"modal", "vllm"}:
         raise ModalInferenceRuntimeCaptureError("capture_output_invalid")
@@ -757,16 +830,24 @@ def capture_modal_inference_runtime(
     modal_additions: bool = False,
     engine_wheel: Path | None = None,
     engine_wheel_sha256: str | None = None,
+    check_private_directories: bool = False,
+    verify_runtime_lock_digest: str | None = None,
 ) -> ModalInferenceRuntimeCapture:
     """Run the inspector once, with a finite local and remote lifetime."""
 
-    if modal_additions and not isolated_python:
+    if (modal_additions and not isolated_python) or (
+        check_private_directories and (not isolated_python or diagnose_distributions)
+    ):
         raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
     if (engine_wheel is None) != (engine_wheel_sha256 is None) or (
         engine_wheel is not None
         and (not isolated_python or not modal_additions or diagnose_distributions)
     ):
         raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
+    if verify_runtime_lock_digest is not None:
+        verify_runtime_lock_digest = _exact_text(verify_runtime_lock_digest, _SHA256)
+        if engine_wheel is None or not check_private_directories:
+            raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
     app_name = _exact_text(app_name, _NAME)
     environment_name = _exact_text(environment_name, _NAME)
     image = _exact_text(image, _IMAGE)
@@ -869,6 +950,16 @@ def capture_modal_inference_runtime(
                     "--source-commit",
                     source_commit,
                     *(("--diagnose-distributions",) if diagnose_distributions else ()),
+                    *(
+                        ("--check-private-directories",)
+                        if check_private_directories
+                        else ()
+                    ),
+                    *(
+                        ("--verify-runtime-lock-digest", verify_runtime_lock_digest)
+                        if verify_runtime_lock_digest is not None
+                        else ()
+                    ),
                     app=app,
                     image=image_value,
                     cpu=1.0,
@@ -910,8 +1001,17 @@ def capture_modal_inference_runtime(
             raise ModalInferenceRuntimeCaptureError("inspection_source_changed")
         if wheel is not None and _wheel_source(engine_wheel)[1:] != wheel[1:]:
             raise ModalInferenceRuntimeCaptureError("engine_wheel_changed")
-        parser = _parse_diagnostic if diagnose_distributions else _parse_candidate
-        candidate = parser(raw, image=image, source_commit=source_commit)
+        candidate = (
+            _parse_diagnostic(raw, image=image, source_commit=source_commit)
+            if diagnose_distributions
+            else _parse_candidate(
+                raw,
+                image=image,
+                source_commit=source_commit,
+                check_private_directories=check_private_directories,
+                verify_runtime_lock_digest=verify_runtime_lock_digest,
+            )
+        )
         envelope = {
             ("diagnostic" if diagnose_distributions else "candidate"): candidate,
             "inspection_script_sha256": script_digest,
@@ -1035,6 +1135,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--modal-additions", action="store_true")
     parser.add_argument("--engine-wheel", type=Path)
     parser.add_argument("--engine-wheel-sha256")
+    parser.add_argument("--check-private-directories", action="store_true")
+    parser.add_argument("--verify-runtime-lock-digest")
     parser.add_argument(
         "--modal-profile",
         type=lambda value: _exact_text(value, _NAME),
@@ -1101,6 +1203,8 @@ def main(argv: list[str] | None = None) -> int:
                         modal_additions=arguments.modal_additions,
                         engine_wheel=arguments.engine_wheel,
                         engine_wheel_sha256=arguments.engine_wheel_sha256,
+                        check_private_directories=arguments.check_private_directories,
+                        verify_runtime_lock_digest=arguments.verify_runtime_lock_digest,
                     )
                     output, success = capture.canonical_bytes, True
                 else:
@@ -1111,6 +1215,8 @@ def main(argv: list[str] | None = None) -> int:
                         image=arguments.image,
                         source_commit=arguments.source_commit,
                         diagnose_distributions=arguments.diagnose_distributions,
+                        check_private_directories=arguments.check_private_directories,
+                        verify_runtime_lock_digest=arguments.verify_runtime_lock_digest,
                     )
                     success = True
         sys.stdout.buffer.write(output + b"\n")

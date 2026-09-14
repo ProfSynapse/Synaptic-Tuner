@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +17,170 @@ SPEC.loader.exec_module(inspection)
 
 IMAGE = "docker.io/vllm/vllm-openai@sha256:" + "a" * 64
 COMMIT = "b" * 40
+
+
+def _private_tree(monkeypatch, tmp_path):
+    root = tmp_path / "private"
+    root.mkdir(mode=0o700)
+    for name in ("model", "base", "scratch"):
+        (root / name).mkdir(mode=0o700)
+    monkeypatch.setattr(inspection, "_PRIVATE_ROOT", root)
+    return root
+
+
+def test_private_access_is_measured_and_leaves_no_probe_files(monkeypatch, tmp_path):
+    root = _private_tree(monkeypatch, tmp_path)
+    result = inspection.inspect_private_directories()
+    assert result == {
+        "effective_uid": os.geteuid(),
+        "paths": [
+            str(root),
+            *(str(root / name) for name in ("model", "base", "scratch")),
+        ],
+        "mode": "0700",
+        "read_write_verified": True,
+    }
+    assert sorted(p.name for p in root.iterdir()) == ["base", "model", "scratch"]
+    assert all(
+        not list((root / name).iterdir()) for name in ("model", "base", "scratch")
+    )
+
+
+@pytest.mark.parametrize("mutation", ["missing", "mode", "symlink", "owner"])
+def test_private_access_rejects_invalid_directory(monkeypatch, tmp_path, mutation):
+    root = _private_tree(monkeypatch, tmp_path)
+    target = root / "model"
+    if mutation == "missing":
+        target.rmdir()
+    elif mutation == "mode":
+        target.chmod(0o755)
+    elif mutation == "symlink":
+        target.rmdir()
+        target.symlink_to(root / "base", target_is_directory=True)
+    else:
+        current = os.geteuid()
+        monkeypatch.setattr(inspection.os, "geteuid", lambda: current + 1)
+    with pytest.raises(inspection._InspectionFailure, match="PRIVATE_DIRECTORY_"):
+        inspection.inspect_private_directories()
+
+
+def test_private_write_failure_is_closed(monkeypatch, tmp_path):
+    _private_tree(monkeypatch, tmp_path)
+
+    def deny(**kwargs):
+        raise OSError("private-sensitive-error")
+
+    monkeypatch.setattr(inspection.tempfile, "TemporaryFile", deny)
+    with pytest.raises(inspection._InspectionFailure) as error:
+        inspection.inspect_private_directories()
+    assert str(error.value) == "PRIVATE_DIRECTORY_ACCESS_FAILED"
+
+
+def _runtime_report(candidate):
+    return {
+        "base_registry_reference": IMAGE,
+        "sdk_version": "1.5.4",
+        "distributions": candidate["distributions"],
+        "python_version": candidate["python"]["version"],
+        "python_executable": candidate["python"]["executable"],
+        "python_executable_digest": candidate["python"]["executable_sha256"],
+        **{
+            key: "d" * 64
+            for key in (
+                "runtime_lock_digest",
+                "source_lock_digest",
+                "dependency_lock_digest",
+                "worker_closure_digest",
+            )
+        },
+    }
+
+
+def test_installed_verifier_is_called_with_independent_digest(monkeypatch):
+    from tuner.execution.providers.modal import inference_runtime
+
+    _metadata(monkeypatch)
+    candidate = inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
+    calls = []
+
+    def verify(*, expected_runtime_lock_digest):
+        calls.append(expected_runtime_lock_digest)
+        return _runtime_report(candidate)
+
+    monkeypatch.setattr(
+        inference_runtime, "verify_packaged_modal_inference_runtime", verify
+    )
+    report = inspection.verify_packaged_runtime(candidate, "d" * 64)
+    assert calls == ["d" * 64]
+    assert report["status"] == "PACKAGED_RUNTIME_VERIFIED"
+    assert report["runtime_lock_digest"] == "d" * 64
+    assert candidate["status"] == "CANDIDATE_ONLY"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("base_registry_reference", "other"),
+        ("sdk_version", "other"),
+        ("distributions", {}),
+        ("python_version", "other"),
+        ("python_executable", "/other"),
+        ("python_executable_digest", "a" * 64),
+        ("runtime_lock_digest", "a" * 64),
+        ("source_lock_digest", "other"),
+    ],
+)
+def test_packaged_verification_must_match_observed_candidate(monkeypatch, field, value):
+    from tuner.execution.providers.modal import inference_runtime
+
+    _metadata(monkeypatch)
+    candidate = inspection.inspect_runtime(image=IMAGE, source_commit=COMMIT)
+    report = _runtime_report(candidate)
+    report[field] = value
+    monkeypatch.setattr(
+        inference_runtime,
+        "verify_packaged_modal_inference_runtime",
+        lambda **kwargs: report,
+    )
+    with pytest.raises(
+        inspection._InspectionFailure, match="PACKAGED_RUNTIME_VERIFICATION_FAILED"
+    ):
+        inspection.verify_packaged_runtime(candidate, "d" * 64)
+
+
+def test_packaged_verifier_exception_is_closed(monkeypatch):
+    from tuner.execution.providers.modal import inference_runtime
+
+    def fail(**kwargs):
+        raise ValueError("private-sensitive-diagnostic")
+
+    monkeypatch.setattr(
+        inference_runtime, "verify_packaged_modal_inference_runtime", fail
+    )
+    with pytest.raises(inspection._InspectionFailure) as error:
+        inspection.verify_packaged_runtime({}, "d" * 64)
+    assert str(error.value) == "PACKAGED_RUNTIME_VERIFICATION_FAILED"
+
+
+def test_cli_requires_private_check_for_runtime_verification(monkeypatch, capsys):
+    def unexpected(**kwargs):
+        raise AssertionError("inspection must not start")
+
+    monkeypatch.setattr(inspection, "inspect_runtime", unexpected)
+    assert (
+        inspection.main(
+            [
+                "--image",
+                IMAGE,
+                "--source-commit",
+                COMMIT,
+                "--verify-runtime-lock-digest",
+                "d" * 64,
+            ]
+        )
+        == 125
+    )
+    assert "ARGUMENT_INVALID" in capsys.readouterr().err
 
 
 class Distribution:
