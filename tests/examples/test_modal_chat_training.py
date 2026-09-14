@@ -276,6 +276,39 @@ def test_full_training_composer_starts_real_public_graph_once(
         evidence_key_ref="evidence-key",
         model_token_key="MODEL_TOKEN",
     )
+    from examples.modal_chat import deployment as deployment_module
+    from examples.modal_chat.deployment_readback import (
+        CurrentModalDeployment,
+        CurrentModalFunction,
+    )
+
+    def current_deployment(**kwargs):
+        assert kwargs["client"] is client and kwargs["sdk"] is sdk
+        assert kwargs["environment_name"] == "environment-a"
+        assert kwargs["app_name"] == profile.app_name
+        assert kwargs["function_name"] == profile.function_name
+        if sdk.current_function is None:
+            return None
+        return CurrentModalDeployment(
+            sdk.app_id,
+            1,
+            True,
+            ((profile.function_name, sdk.current_function.object_id),),
+            (),
+            (
+                CurrentModalFunction(
+                    sdk.current_function.object_id,
+                    profile.function_name,
+                    sdk.app_id,
+                    "",
+                    sdk.definition_id,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        deployment_module, "read_current_deployment", current_deployment
+    )
     owner.deploy_once(attempt_ref="deploy-a")
     spawn_calls = []
 

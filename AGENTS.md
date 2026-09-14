@@ -48,6 +48,12 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Do not assume a floating Modal Function lookup returns an immutable definition
+  ID. The minimal consumer must verify current scoped app generation and exact
+  private layout, including the deployment's single-generation increment;
+  an omitted definition ID is not identity evidence. Current-state verification
+  is not version-pinned invocation and cannot eliminate an external-admin race.
+
 - The minimal consumer's effectful launcher must use the packaged training
   lock's CPython version (currently 3.11.14) and the hash-pinned launcher closure.
   Its serialized deployment cannot cross Python minor versions. Check host

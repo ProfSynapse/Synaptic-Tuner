@@ -28,6 +28,11 @@ from tuner.execution.providers.modal.facade import (
 from tuner.execution.providers.modal.resolution import ModalDeploymentSelectionV1
 
 from .storage import ModalChatStorage
+from .deployment_readback import (
+    CurrentModalDeployment,
+    CurrentModalFunction,
+    read_current_deployment,
+)
 
 
 class ModalChatDeploymentError(RuntimeError):
@@ -278,6 +283,39 @@ class ModalChatOwnedDeployment:
             "app_id": safe_ref(metadata.app_id, "app_id"),
         }
 
+    def _read_current(self):
+        return read_current_deployment(
+            sdk=self._scope.sdk,
+            client=self._scope.client,
+            app_name=self._selection.app_name,
+            environment_name=self._scope.environment_name,
+            function_name=self._selection.function_name,
+        )
+
+    def _validate_current(
+        self, value, *, app_id, function_id, definition_id, generation
+    ):
+        if (
+            type(value) is not CurrentModalDeployment
+            or value.app_id != app_id
+            or type(value.generation) is not int
+            or value.generation != generation
+            or value.deployed is not True
+            or value.function_ids != ((self._selection.function_name, function_id),)
+            or value.class_ids != ()
+            or len(value.functions) != 1
+        ):
+            raise ValueError
+        function = value.functions[0]
+        if (
+            type(function) is not CurrentModalFunction
+            or (function.function_id, function.name, function.app_id, function.web_url)
+            != (function_id, self._selection.function_name, app_id, "")
+            or (function.definition_id and function.definition_id != definition_id)
+        ):
+            raise ValueError
+        return function.definition_id != ""
+
     def deploy_once(self, *, attempt_ref: str) -> bytes:
         """Deploy the fixed engine builder after a permanent local attempt claim.
 
@@ -317,6 +355,41 @@ class ModalChatOwnedDeployment:
         try:
             scope = self._scope
             scope.observe(scope.client)
+            prior = self._read_current()
+            if prior is not None:
+                if (
+                    type(prior) is not CurrentModalDeployment
+                    or prior.deployed is not True
+                    or type(prior.generation) is not int
+                    or prior.generation <= 0
+                    or any(
+                        name == self._selection.function_name
+                        for name, _ in prior.function_ids
+                    )
+                ):
+                    raise ValueError
+            prestate = canonical_bytes(
+                {
+                    "schema_version": "synaptic-modal-chat-deployment-prestate/v1",
+                    "app_absent": prior is None,
+                    "app_id": (
+                        None if prior is None else safe_ref(prior.app_id, "app_id")
+                    ),
+                    "deployment_generation": (
+                        None if prior is None else prior.generation
+                    ),
+                    "function_ids": [] if prior is None else list(prior.function_ids),
+                    "class_ids": [] if prior is None else list(prior.class_ids),
+                    "selected_function_absent": True,
+                    "authorizing": False,
+                }
+            )
+            prestates = self._storage.catalog(
+                "deployment-prestates", encode=bytes, decode=bytes
+            )
+            prestates.publish_if_absent(attempt_ref, prestate)
+            if prestates.resolve(attempt_ref) != prestate:
+                raise ValueError
             volumes = []
             for name in (
                 self._profile.control_volume_ref,
@@ -373,13 +446,16 @@ class ModalChatOwnedDeployment:
             identity = self._function_identity(objects.function)
             if objects.app.app_id != identity["app_id"]:
                 raise ValueError
+            if prior is not None and prior.app_id != identity["app_id"]:
+                raise ValueError
             if [
                 objects.control_volume.object_id,
                 objects.artifact_volume.object_id,
             ] != volumes:
                 raise ValueError
-            receipt = {
+            candidate = {
                 "schema_version": "synaptic-modal-chat-owned-deployment/v1",
+                "prestate_sha256": hashlib.sha256(prestate).hexdigest(),
                 "selection": self._selection.to_dict(),
                 **identity,
                 "image_id": safe_ref(objects.image.object_id, "image_id"),
@@ -388,27 +464,38 @@ class ModalChatOwnedDeployment:
             }
             # Preserve acknowledged ownership before provider readback can fail.
             # This receipt alone does not claim a successful readback or cleanup.
-            payload = canonical_bytes(receipt)
-            self._candidate_receipt = payload
+            candidate_payload = canonical_bytes(candidate)
+            self._candidate_receipt = candidate_payload
             acknowledgements = self._storage.catalog(
                 "deployment-acknowledgements", encode=bytes, decode=bytes
             )
-            acknowledgements.publish_if_absent(attempt_ref, payload)
-            if acknowledgements.resolve(attempt_ref) != payload:
+            acknowledgements.publish_if_absent(attempt_ref, candidate_payload)
+            if acknowledgements.resolve(attempt_ref) != candidate_payload:
                 raise ValueError
-            self._receipt = receipt
-            self.observe(
-                client=scope.client,
-                app_name=self._selection.app_name,
-                function_name=self._selection.function_name,
-                environment_name=scope.environment_name,
+            scope.observe(scope.client)
+            current = self._read_current()
+            expected_generation = 1 if prior is None else prior.generation + 1
+            definition_available = self._validate_current(
+                current,
+                app_id=identity["app_id"],
+                function_id=identity["function_id"],
+                definition_id=identity["definition_id"],
+                generation=expected_generation,
             )
+            scope.observe(scope.client)
+            receipt = {
+                **candidate,
+                "deployment_generation": expected_generation,
+                "definition_id_available": definition_available,
+            }
+            payload = canonical_bytes(receipt)
             catalog = self._storage.catalog(
                 "deployment-results", encode=bytes, decode=bytes
             )
             catalog.publish_if_absent(attempt_ref, payload)
             if catalog.resolve(attempt_ref) != payload:
                 raise ValueError
+            self._receipt = receipt
             return payload
         except (KeyboardInterrupt, SystemExit) as error:
             self._retain_failure_diagnostic(attempt_ref, phase, error, objects)
@@ -430,16 +517,17 @@ class ModalChatOwnedDeployment:
             ):
                 raise ValueError
             scope.observe(client)
-            function = scope.sdk.Function.from_name(
-                app_name,
-                function_name,
-                environment_name=environment_name,
-                client=client,
+            current = self._read_current()
+            available = self._validate_current(
+                current,
+                app_id=self._receipt["app_id"],
+                function_id=self._receipt["function_id"],
+                definition_id=self._receipt["definition_id"],
+                generation=self._receipt["deployment_generation"],
             )
-            function.hydrate(client)
-            identity = self._function_identity(function)
-            if any(self._receipt[name] != value for name, value in identity.items()):
+            if available != self._receipt["definition_id_available"]:
                 raise ValueError
+            scope.observe(client)
             return self.selection
         except Exception:
             raise ModalChatDeploymentError("modal_chat_deployment_changed") from None

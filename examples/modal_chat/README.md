@@ -134,9 +134,9 @@ lookup establish scope without listing other environments. A permanent claim
 precedes deployment; a separate deterministic whole-app claim blocks a renamed
 attempt or function from redeploying it. A returned deployment is recorded even
 if subsequent definition metadata cannot be verified. Its acknowledged app,
-function, immutable definition,
-image, and Volume identifiers are saved before named-function readback. Each
-later observation requires the same definition identity; it cannot adopt an
+function, locally acknowledged definition,
+image, and Volume identifiers are saved before current-deployment readback. Each
+later observation requires the same observed deployment generation; it cannot adopt an
 unrelated deployment or infer shutdown after an ambiguous failure. This is
 provider-observed ownership of the consumer's submitted static configuration,
 not an independent server-side attestation of every function option.
@@ -145,6 +145,21 @@ API. After an interrupted process, reconcile that exact deployment manually;
 do not choose a new attempt identifier and deploy again. Failure to persist an
 acknowledgement leaves only a non-authorizing `candidate_receipt` in memory,
 and both the observer and facade remain unavailable.
+
+Correction (2026-09-14): ordinary Modal name lookups and current app layouts
+omit the immutable definition ID. This was measured after the Python-aligned
+attempt successfully returned from deployment; the subsequent identity check
+failed before training submission. Do not treat an omitted ID as verified, or
+require a subscription upgrade just to obtain version-pinned invocation.
+The consumer instead observes the exact app/environment generation before
+deployment, requires exactly one generation increment afterward, and checks
+the exact private single-function layout. Each later observation brackets its
+layout read with the same deployed app/generation. Replacement, redeployment,
+rollback or extra functions/classes fail closed. A locally returned definition
+ID remains acknowledged evidence, not a claim that floating lookup returned it.
+These current-state checks do not make later invocation version-pinned or
+eliminate an external administrator's race after the last observation.
+See [Modal's lookup semantics and plan constraints](https://modal.com/docs/guide/trigger-deployed-functions#version-pinned-lookups).
 
 Training acceptance is not completion. Observe the exact returned run through
 `RunsAPI`; successful verification and its authenticated five-artifact inventory

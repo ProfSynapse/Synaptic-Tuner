@@ -599,6 +599,23 @@ smoke into runtime code.
 
 ## Minimal consumer request and replay adapters
 
+Deployment identity correction (2026-09-14): the Python-aligned attempt
+returned successfully from `App.deploy` and retained its acknowledgement, then
+failed the local definition-ID readback before any training submission. Both
+ordinary `Function.from_name` and current app layout omit that ID. The tested
+version-pinned lookup was unavailable; Modal documents it as a Team/Enterprise
+feature. Do not upgrade an account or accept an empty ID as verified identity.
+The consumer now uses bounded read-only exact-name/environment app metadata
+and exact-app layout, bracketing the layout with an unchanged deployed
+generation. Before/after deployment must advance exactly one generation;
+subsequent reads must preserve it, the app ID and the exact single private
+function without classes. Keep locally returned definition metadata distinct
+from these observed current-state facts. No list, history, source download,
+provider mutation or new client belongs in the read adapter. An ambiguous
+read cannot grant a retry or prove shutdown. Current-state verification is
+not version-pinned invocation and cannot remove an external administrator's
+race after the last check. See [Modal's version-pinned lookup guidance](https://modal.com/docs/guide/trigger-deployed-functions#version-pinned-lookups).
+
 Launcher compatibility correction (2026-09-14): the fixed deployment uses
 `serialized=True`. The failed attempts used host CPython 3.12.9 while the exact
 image metadata reported 3.11.14. These violate Modal's documented serialized

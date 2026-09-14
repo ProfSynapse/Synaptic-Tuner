@@ -8,6 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from examples.modal_chat import deployment
+from examples.modal_chat.deployment_readback import (
+    CurrentModalFunction,
+    CurrentModalDeployment,
+)
 from examples.modal_chat.storage import ModalChatStorage
 from tuner.execution.foundation_v2.canonical import parse_canonical_object
 from tuner.execution.providers.modal.config import (
@@ -154,13 +158,43 @@ def _profile() -> ModalProviderProfileV1:
 
 
 @pytest.fixture
-def case(tmp_path: Path):
+def case(tmp_path: Path, monkeypatch):
     os.chmod(tmp_path, 0o700)
     sdk, client = _SDK(), object()
     storage = ModalChatStorage(tmp_path / "consumer.sqlite3", "namespace-a")
     scope = deployment.ModalChatScope(
         sdk=sdk, client=client, environment_name="environment-a", client_ref="host-a"
     )
+
+    def read_current_deployment(**kwargs):
+        assert kwargs == {
+            "sdk": sdk,
+            "client": client,
+            "app_name": "synaptic-training-v1",
+            "environment_name": "environment-a",
+            "function_name": "run_sft_v1_" + "1" * 32,
+        }
+        if sdk.current_function is None:
+            return None
+        function_id = sdk.current_function.object_id
+        return CurrentModalDeployment(
+            sdk.app_id,
+            1,
+            True,
+            ((sdk.remote_function_name, function_id),),
+            (),
+            (
+                CurrentModalFunction(
+                    function_id,
+                    sdk.remote_function_name,
+                    sdk.app_id,
+                    sdk.web_url or "",
+                    sdk.definition_id,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(deployment, "read_current_deployment", read_current_deployment)
     owner = deployment.ModalChatOwnedDeployment(
         scope=scope,
         storage=storage,
@@ -231,8 +265,11 @@ def test_attempt_is_permanent_and_failure_has_no_result_or_cleanup(case) -> None
 
 
 @pytest.mark.parametrize("failure", ["publish", "readback", "interrupt"])
+@pytest.mark.parametrize(
+    "catalog_name", ["deployment-acknowledgements", "deployment-results"]
+)
 def test_failed_durable_ack_cannot_authorize_observer_or_facade(
-    case, monkeypatch, failure
+    case, monkeypatch, failure, catalog_name
 ):
     _, client, storage, _, owner = case
     original = storage.catalog
@@ -249,7 +286,7 @@ def test_failed_durable_ack_cannot_authorize_observer_or_facade(
             return b"{}"
 
     def catalog(self, name, **kwargs):
-        if name == "deployment-acknowledgements":
+        if name == catalog_name:
             return FailedAcknowledgement()
         return original(name, **kwargs)
 
@@ -329,7 +366,13 @@ def test_provider_readback_failure_keeps_durable_ack_but_no_success(case, monkey
     def unavailable(*args, **kwargs):
         raise OSError("provider read unavailable")
 
-    monkeypatch.setattr(sdk.Function, "from_name", unavailable)
+    values = iter((None, unavailable))
+
+    def readback(**kwargs):
+        value = next(values)
+        return value(**kwargs) if callable(value) else value
+
+    monkeypatch.setattr(deployment, "read_current_deployment", readback)
     with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
         owner.deploy_once(attempt_ref="failed-readback")
     acknowledged = storage.catalog(
@@ -570,4 +613,132 @@ def test_installed_modal_154_api_accepts_every_direct_sdk_call_shape() -> None:
     )
     inspect.signature(modal.Function.from_name).bind(
         "app-a", "function-a", environment_name="environment-a", client=object()
+    )
+
+
+def _current(
+    *,
+    generation=1,
+    app_id="ap-1",
+    function_id="fu-1",
+    name="run_sft_v1_" + "1" * 32,
+    web_url="",
+    definition_id="df-1",
+    function_ids=None,
+    class_ids=(),
+):
+    return CurrentModalDeployment(
+        app_id,
+        generation,
+        True,
+        ((name, function_id),) if function_ids is None else function_ids,
+        class_ids,
+        (CurrentModalFunction(function_id, name, app_id, web_url, definition_id),),
+    )
+
+
+def test_existing_generation_advances_exactly_once_without_name_collision(
+    case, monkeypatch
+):
+    _, client, _, _, owner = case
+    prior = CurrentModalDeployment(
+        "ap-1",
+        6,
+        True,
+        (("other-function", "fu-old"),),
+        (),
+        (CurrentModalFunction("fu-old", "other-function", "ap-1", "", "df-old"),),
+    )
+    values = iter((prior, _current(generation=7), _current(generation=7)))
+    monkeypatch.setattr(
+        deployment, "read_current_deployment", lambda **kwargs: next(values)
+    )
+    receipt = parse_canonical_object(
+        owner.deploy_once(attempt_ref="generation"), name="receipt"
+    )
+    assert receipt["deployment_generation"] == 7
+    assert receipt["definition_id_available"] is True
+    owner.observe(
+        client=client,
+        app_name="synaptic-training-v1",
+        function_name="run_sft_v1_" + "1" * 32,
+        environment_name="environment-a",
+    )
+
+
+def test_prior_function_name_collision_fails_before_dispatch(case, monkeypatch):
+    sdk, _, _, _, owner = case
+    monkeypatch.setattr(
+        deployment,
+        "read_current_deployment",
+        lambda **kwargs: _current(generation=6, function_id="fu-old"),
+    )
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="collision")
+    assert sdk.deploy_calls == []
+
+
+def test_existing_generation_cannot_switch_app_identity(case, monkeypatch):
+    _, _, _, _, owner = case
+    prior = CurrentModalDeployment(
+        "ap-other",
+        6,
+        True,
+        (("other", "fu-old"),),
+        (),
+        (CurrentModalFunction("fu-old", "other", "ap-other", "", "df-old"),),
+    )
+    monkeypatch.setattr(deployment, "read_current_deployment", lambda **kwargs: prior)
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="changed-app")
+
+
+@pytest.mark.parametrize(
+    "current",
+    [
+        _current(generation=0),
+        _current(generation=2),
+        _current(app_id="ap-other"),
+        _current(function_id="fu-other"),
+        _current(function_ids=(("run_sft_v1_" + "1" * 32, "fu-1"), ("extra", "fu-2"))),
+        _current(class_ids=(("Unexpected", "cs-1"),)),
+        _current(web_url="https://public.invalid"),
+        _current(definition_id="df-other"),
+    ],
+)
+def test_hostile_current_generation_or_layout_never_authorizes(
+    case, monkeypatch, current
+):
+    _, _, storage, _, owner = case
+    values = iter((None, current))
+    monkeypatch.setattr(
+        deployment, "read_current_deployment", lambda **kwargs: next(values)
+    )
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="hostile")
+    assert owner.candidate_receipt is not None
+    assert (
+        storage.catalog("deployment-results", encode=bytes, decode=bytes).resolve(
+            "hostile"
+        )
+        is None
+    )
+
+
+def test_blank_current_definition_is_unavailable_not_identity(case, monkeypatch):
+    _, client, _, _, owner = case
+    values = iter((None, _current(definition_id=""), _current(definition_id="")))
+    monkeypatch.setattr(
+        deployment, "read_current_deployment", lambda **kwargs: next(values)
+    )
+    receipt = parse_canonical_object(
+        owner.deploy_once(attempt_ref="blank-definition"), name="receipt"
+    )
+    assert receipt["definition_id"] == "df-1"
+    assert receipt["definition_id_available"] is False
+    owner.observe(
+        client=client,
+        app_name="synaptic-training-v1",
+        function_name="run_sft_v1_" + "1" * 32,
+        environment_name="environment-a",
     )
