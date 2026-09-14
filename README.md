@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`9e0194546cac18440cad9e76d39b926114a61f9c`, advertised by
+`94edfd7aeb011387b28fcffe908351e1e4736c2c`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -108,8 +108,13 @@ from deployment at app version 7, then failed the local identity readback
 before training submission. Ordinary named-function and layout metadata omit
 the immutable definition ID; the version-pinned lookup was unavailable.
 The corrected consumer verifies the current app generation and exact private
-layout, without claiming version-pinned invocation. The current configuration
-selects a separate `modal-chat-20260914-d` attempt with new resource/function
+layout, without claiming version-pinned invocation. Attempt
+`modal-chat-20260914-d` passed deployment verification and submitted one training
+call. That exact call terminated with failure; its Modal logs identified an
+integer-only workload reparse before source preparation. The corrected engine
+uses the bounded finite-number workload parser throughout worker and inference
+admission, preserving strict command/evidence checks. The current configuration
+selects a separate `modal-chat-20260914-e` attempt with new resource/function
 names. Earlier attempts' claims or resources may not be adopted or erased.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.
