@@ -10,7 +10,11 @@ from tuner.execution.coordinator_v1.coordinator import (
     ApplyArtifactVerificationTransitionV1,
     ApplyProviderObservationTransitionV1,
 )
-from tuner.execution.coordinator_v1.model import ProviderReadPurposeV1, WorkflowPhaseV1
+from tuner.execution.coordinator_v1.model import (
+    AuthenticatedFoundationRecordAssessmentV1,
+    ProviderReadPurposeV1,
+    WorkflowPhaseV1,
+)
 from tuner.execution.coordinator_v1.state_machine import (
     apply_artifact_verification,
     apply_provider_observation,
@@ -95,7 +99,20 @@ def qualify_modal_chat_run(
         ):
             raise ValueError
         record = host.composition.foundation.get(before.submit.effect_id)
-        assessment = host.composition.foundation.assess(record)
+        if not before.submit.foundation_bindings:
+            raise ValueError
+        retained_binding = before.submit.foundation_bindings[-1]
+        assessment = AuthenticatedFoundationRecordAssessmentV1.parse(
+            retained_binding.canonical_assessment_bytes
+        )
+        if (
+            assessment.canonical_bytes != retained_binding.canonical_assessment_bytes
+            or assessment.authenticated_assessment_digest
+            != retained_binding.assessment_digest
+            or host.foundation_ports.assessment_authority.authenticate(assessment)
+            is not True
+        ):
+            raise ValueError
         request = provider_run_read_request(
             before,
             record,

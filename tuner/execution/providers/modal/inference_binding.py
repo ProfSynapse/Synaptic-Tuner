@@ -14,6 +14,7 @@ from synaptic_tuner.api.v1.runs_facade import RunOutcome, RunsAPI
 
 from tuner.execution.coordinator_v1.model import (
     ArtifactManifestV1,
+    AuthenticatedFoundationRecordAssessmentV1,
     ProviderReadPurposeV1,
     ProviderRunReadRequestV1,
     WorkflowPhaseV1,
@@ -566,7 +567,9 @@ class ModalInferenceSourceBinder:
         record = self._foundation.get(submit.effect_id)
         if record is None:
             raise ValueError("retained Foundation record is unavailable")
-        assessment = self._foundation.assess(record)
+        assessment = AuthenticatedFoundationRecordAssessmentV1.parse(
+            submit.foundation_bindings[-1].canonical_assessment_bytes
+        )
         request = provider_run_read_request(
             workflow,
             record,

@@ -69,6 +69,11 @@ are saved with operator authorization, not represented as a provider billing
 cap. Training estimation is GPU-only and explicitly excludes CPU/memory/builds
 and storage. All resources retain explicit timeouts and retries remain zero.
 
+Set the training configuration's `runtime_environment.PATH` explicitly to
+`/usr/bin:/bin` for this pinned Linux profile. Offline trainer children do not
+inherit PATH: Triton's C compiler needs it to find the linker. Keep this value
+in authenticated consumer configuration, not an ambient-environment fallback.
+
 The CLI prints closed progress codes, not raw SDK/worker exceptions or model
 responses. Responses and immutable evidence go under the manifest's private
 state root. After failure, inspect the retained exact identities and evidence;

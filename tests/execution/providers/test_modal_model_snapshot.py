@@ -15,8 +15,29 @@ REVISION = "a" * 40
 MODEL = "fixture/tiny"
 
 
+def test_authenticated_deployment_path_is_retained_in_execution_source(tmp_path):
+    from tests.execution.providers.test_modal_source_resolution import (
+        _context,
+        _deployment,
+        _finalizer,
+        _source,
+    )
+    from tuner.execution.providers.modal.resolution import ModalDeploymentSelectionV1
+
+    locked = _source()
+    document = _deployment().to_dict()
+    document["runtime_environment"]["PATH"] = "/usr/bin:/bin"
+    resolved = _finalizer(locked).finalize(
+        locked,
+        context=_context(tmp_path),
+        deployment=ModalDeploymentSelectionV1.from_dict(document),
+        audience_ref="project/run-1",
+    )
+    assert resolved.execution_source.environment["PATH"] == "/usr/bin:/bin"
+
+
 def _source_for_run(
-    run_id: str, *, cache_run_id: str | None = None
+    run_id: str, *, cache_run_id: str | None = None, path: str | None = None
 ) -> ExecutionSourceV1:
     document = _execution_source("vendor/engine").to_dict()
     document["run_id"] = run_id
@@ -27,6 +48,8 @@ def _source_for_run(
     variables = document["runtime"]["environment"]["variables"]
     for name, value in variables.items():
         variables[name] = value.replace("run-service", selected)
+    if path is not None:
+        variables["PATH"] = path
     return ExecutionSourceV1.from_dict(document)
 
 
@@ -269,6 +292,7 @@ def test_real_runner_prepares_before_credential_free_offline_child(
     monkeypatch.setattr(runtime, "Path", mapped_path)
     monkeypatch.setenv("MODEL_CREDENTIAL", "fixture-credential")
     monkeypatch.setenv("EVIDENCE_CREDENTIAL", "fixture-evidence")
+    monkeypatch.setenv("PATH", "/hostile/ambient/path")
     snapshot = cache / "model" / "models--fixture--tiny" / "snapshots" / REVISION
     child_calls = []
 
@@ -280,19 +304,23 @@ def test_real_runner_prepares_before_credential_free_offline_child(
         assert "EVIDENCE_CREDENTIAL" not in kwargs["env"]
         assert kwargs["env"]["HF_HUB_OFFLINE"] == "1"
         assert kwargs["env"]["TRANSFORMERS_OFFLINE"] == "1"
+        assert kwargs["env"]["PATH"] == "/usr/bin:/bin"
         child_calls.append(kwargs)
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(runtime.subprocess, "run", child)
-    environment = {
-        "SYNAPTIC_CACHE_ROOT": "/workspace/run/modal-chat-20260914-e/cache",
-        "SYNAPTIC_MODEL_SNAPSHOT": "/workspace/run/modal-chat-20260914-e/cache/model/models--fixture--tiny/snapshots/"
-        + REVISION,
-        "HF_HUB_OFFLINE": "1",
-        "TRANSFORMERS_OFFLINE": "1",
-        "EVIDENCE_CREDENTIAL": "must-be-removed",
-    }
-    source = _source_for_run("modal-chat-20260914-e")
+    source = _source_for_run("modal-chat-20260914-e", path="/usr/bin:/bin")
+    assert source.environment["PATH"] == "/usr/bin:/bin"
+    environment = dict(source.environment)
+    environment.update(
+        {
+            "SYNAPTIC_MODEL_SNAPSHOT": "/workspace/run/modal-chat-20260914-e/cache/model/models--fixture--tiny/snapshots/"
+            + REVISION,
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "EVIDENCE_CREDENTIAL": "must-be-removed",
+        }
+    )
     workload = json.dumps(
         {
             "configuration": {

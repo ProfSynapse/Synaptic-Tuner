@@ -692,6 +692,25 @@ before and after capture. The old close-and-reopen check could miss inode
 reuse after directory replacement. These fixes require updated source locks
 and fresh CPU image qualification; they do not establish live chat success.
 
+Correction (2026-09-14, attempt F): the pinned model loaded, but the first
+training forward pass failed in Triton's C helper compilation. Exact saved
+trainer diagnostics identified `collect2` failing to find `ld`. The consumer
+configured only `LANG`, while the offline child intentionally replaces its
+environment. Configure `PATH=/usr/bin:/bin` explicitly in the authenticated
+`runtime_environment`; do not inherit the operator or remote parent environment.
+A local credential-free compiler probe reproduced the missing-linker failure
+without PATH and succeeded with that exact PATH. This diagnoses the recorded
+failure, not a successful training run or verification of every remote tool.
+
+Attempt F also exposed a delayed-read evidence defect: issuing a new timestamped
+Foundation assessment changes the binding retained at submission. Read paths
+must authenticate and reuse the exact retained assessment while freshly checking
+the actual Foundation record and provider evidence. Never relax binding equality
+or invent fresh submission authority to make a read succeed. The saved F
+diagnostics are non-authorizing; its launcher exited before qualification was
+retained, and later read-only diagnostics cannot replace its lost in-memory MAC
+authority. Preserve the attempt claim and the known failed call.
+
 Use the checked-in `examples/modal_chat/requests.py` bridge around an actual
 configured rich `TrainingService`; do not replace source resolution or recipe
 compilation with a planning test fixture. Allocate the run before resolving and

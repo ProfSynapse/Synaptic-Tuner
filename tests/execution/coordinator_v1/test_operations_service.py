@@ -235,6 +235,19 @@ def test_list_show_outcome_and_authenticated_logs_use_b1_projections() -> None:
     assert reader.log_calls == 1
 
 
+def test_provider_reads_reuse_retained_submit_assessment() -> None:
+    store, queued, foundation_record = _queued_store()
+    service, reader = operations(store, queued, foundation_record)
+    service._foundation.assess = lambda record: pytest.fail(
+        "provider read reassessed retained submit"
+    )
+
+    refreshed = service.outcome(queued.run)
+
+    assert refreshed.state is TrainingRunState.RUNNING
+    assert reader.observe_calls == 1
+
+
 def test_invalid_cursor_and_nonboolean_log_authentication_close_before_output() -> None:
     store, queued, foundation_record = _queued_store()
     service, _ = operations(

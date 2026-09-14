@@ -188,10 +188,23 @@ def test_real_verified_workflow_binds_native_metadata_without_weight_reads(monke
         sorted(result.native_members, key=lambda x: x.role.value)
     )
     assert runs_ops.calls == ["reverify", "outcome"]
-    assert foundation.calls == ["get", "assess"]
+    assert foundation.calls == ["get"]
     assert workflows.calls == 2
     assert transport.calls == ["inventory"]
     assert "bytes" not in transport.calls
+
+
+def test_native_artifact_read_reuses_retained_submit_assessment(monkeypatch):
+    binder, runs, _, _, foundation, _, transport, workflow = _case(monkeypatch)
+    foundation.assess = lambda record: pytest.fail(
+        "native artifact read reassessed retained submit"
+    )
+
+    result = binder.bind(runs, workflow.run)
+
+    assert result.run == workflow.run
+    assert foundation.calls == ["get"]
+    assert transport.calls == ["inventory"]
 
 
 def test_alternate_runs_identity_fails_before_any_collaborator_call(monkeypatch):

@@ -29,13 +29,14 @@ from tests.execution.providers.test_modal_coordinator_reader import _reader
 class Foundation:
     def __init__(self, request):
         self.request = request
+        self.assess_calls = 0
 
     def get(self, effect_id):
         return self.request.foundation_record
 
     def assess(self, record):
-        assert record == self.request.foundation_record
-        return self.request.assessment
+        self.assess_calls += 1
+        pytest.fail("artifact read reassessed retained submit")
 
 
 class Clock:
@@ -98,6 +99,17 @@ def test_verify_streams_every_artifact_and_authenticates_receipt(monkeypatch):
     assert receipt.content.run == workflow.run
     assert receipt.content.manifest_artifacts == manifest.artifacts
     assert receipt.content.verified_artifacts == manifest.artifacts
+    assert transport.calls.count("bytes") == len(ArtifactRole)
+
+
+def test_artifact_read_reuses_retained_submit_assessment(monkeypatch):
+    verifier, reader, request, transport = _case(monkeypatch)
+    workflow = _workflow(request)
+
+    receipt = verifier.verify(workflow, reader.artifacts(request))
+
+    assert verifier.authenticate(receipt) is True
+    assert verifier._foundation.assess_calls == 0
     assert transport.calls.count("bytes") == len(ArtifactRole)
 
 

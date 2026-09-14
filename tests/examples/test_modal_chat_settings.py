@@ -69,7 +69,7 @@ def _document():
                 }
             ],
         },
-        "runtime_environment": {"LANG": "C.UTF-8"},
+        "runtime_environment": {"LANG": "C.UTF-8", "PATH": "/usr/bin:/bin"},
         "training_timeout_seconds": 3600,
         "maximum_training_cost_minor_units": 1000,
         "maximum_chat_cost_minor_units": 1000,

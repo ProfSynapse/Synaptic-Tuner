@@ -9,6 +9,7 @@ from tuner.execution.coordinator_v1.model import (
     ArtifactManifestV1,
     ArtifactVerificationContentV1,
     AuthenticatedArtifactVerificationReceiptV1,
+    AuthenticatedFoundationRecordAssessmentV1,
     ProviderReadPurposeV1,
     VerificationVerdictV1,
     WorkflowPhaseV1,
@@ -104,7 +105,9 @@ class ModalChatArtifactVerifier:
         record = self._foundation.get(workflow.submit.effect_id)
         if record is None:
             raise ValueError("retained Foundation record is unavailable")
-        assessment = self._foundation.assess(record)
+        assessment = AuthenticatedFoundationRecordAssessmentV1.parse(
+            workflow.submit.foundation_bindings[-1].canonical_assessment_bytes
+        )
         return provider_run_read_request(
             workflow,
             record,

@@ -38,6 +38,7 @@ from .cursors import (
 )
 from .model import (
     ArtifactManifestV1,
+    AuthenticatedFoundationRecordAssessmentV1,
     AuthenticatedProviderLogPageV1,
     ProviderLogQueryV1,
     ProviderReadPurposeV1,
@@ -312,7 +313,9 @@ class TrainingOperationsV1:
         if record is None:
             raise _closed(RunOperationCode.PROVIDER_READ_INVALID)
         assessment = _invoke(
-            lambda: self._foundation.assess(record),
+            lambda: AuthenticatedFoundationRecordAssessmentV1.parse(
+                workflow.submit.foundation_bindings[-1].canonical_assessment_bytes
+            ),
             RunOperationCode.PROVIDER_READ_INVALID,
         )
         return _invoke(

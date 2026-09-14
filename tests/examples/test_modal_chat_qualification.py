@@ -15,12 +15,25 @@ from examples.modal_chat.qualification import (
 )
 from examples.modal_chat.storage import ModalChatStorage
 from examples.modal_chat.storage import ModalChatStorageError
-from tuner.execution.coordinator_v1.model import ProviderRunPhaseV1
+from tuner.execution.coordinator_v1.foundation import (
+    FoundationRecordAssessmentAuthorityV1,
+)
+from tuner.execution.coordinator_v1.model import (
+    ProviderReadPurposeV1,
+    ProviderRunPhaseV1,
+)
 from tuner.execution.coordinator_v1.state_machine import (
+    WorkflowTransitionError,
     apply_artifact_verification,
     apply_provider_observation,
+    provider_run_read_request,
 )
 from tuner.execution.foundation_v2.canonical import canonical_bytes
+from tuner.execution.foundation_v2.authority import GrantAuthorityV2
+from tuner.execution.foundation_v2.receipts import (
+    InvalidEvidenceAuthorityV2,
+    ReceiptAuthorityV2,
+)
 
 import tests.execution.coordinator_v1.test_state_machine as state_cases
 from tests.examples.test_modal_chat_artifacts import Foundation, _case as artifact_case
@@ -152,6 +165,93 @@ def test_one_shot_qualification_retains_terminal_observation_and_five_artifacts(
         with pytest.raises(ModalChatQualificationError):
             qualify_modal_chat_run(host=host, storage=storage, run=run)
     assert reader.observe_calls == 1
+
+
+def test_delayed_qualification_reuses_retained_assessment_without_reissuing(
+    monkeypatch, tmp_path
+):
+    class AdvancedClock:
+        value = "2026-08-26T00:00:00Z"
+
+        def now_iso(self):
+            return self.value
+
+    clock = AdvancedClock()
+    issuer = FoundationRecordAssessmentAuthorityV1(
+        "delayed-assessments",
+        "delayed-assessment-key",
+        b"a" * 32,
+        assessor_ref="delayed-assessor",
+        assessor_version="1.0.0",
+        clock=clock,
+        receipt_authority=ReceiptAuthorityV2("receipt-authority", b"r" * 32),
+        invalid_evidence_authority=InvalidEvidenceAuthorityV2(
+            "invalid-authority", b"i" * 32
+        ),
+        grant_authority=GrantAuthorityV2("grant-authority", b"g" * 32),
+    )
+    monkeypatch.setattr(state_cases, "assessment", issuer.assess)
+    host, store, reader, storage, run = _fixture(monkeypatch, tmp_path)
+    foundation = host.composition.foundation
+    retained_at = store.value.submit.foundation_bindings[-1]
+    original = issuer.assess(foundation.request.foundation_record)
+    assert original.canonical_bytes == retained_at.canonical_assessment_bytes
+    host.foundation_ports.assessment_authority = issuer
+    clock.value = "2026-08-26T00:00:01Z"
+    fresh = issuer.assess(foundation.request.foundation_record)
+    assert (
+        replace(fresh.content, assessed_at=original.content.assessed_at)
+        == original.content
+    )
+    assert fresh.content.assessed_at == "2026-08-26T00:00:01Z"
+    with pytest.raises(WorkflowTransitionError):
+        provider_run_read_request(
+            store.value,
+            foundation.request.foundation_record,
+            fresh,
+            host.foundation_ports.foundation_authenticator,
+            host.foundation_ports.assessment_authority,
+            purpose=ProviderReadPurposeV1.OBSERVE,
+        )
+    foundation.assess = issuer.assess
+    with storage:
+        result = qualify_modal_chat_run(host=host, storage=storage, run=run)
+    assert result.workflow == store.value
+    assert result.workflow.phase.value == "verified"
+    assert reader.observe_calls == 1
+
+
+def test_retained_assessment_authentication_denial_fails_before_claim_or_read(
+    monkeypatch, tmp_path
+):
+    host, _, reader, storage, run = _fixture(monkeypatch, tmp_path)
+    host.foundation_ports.assessment_authority.allowed = False
+    attempt_ref = (
+        "qualify-" + hashlib.sha256(canonical_bytes(run.to_dict())).hexdigest()
+    )
+
+    with storage:
+        with pytest.raises(ModalChatQualificationError):
+            qualify_modal_chat_run(host=host, storage=storage, run=run)
+        assert storage.attempts.resolve(attempt_ref) is None
+    assert reader.observe_calls == 0
+
+
+def test_tampered_retained_assessment_fails_before_claim_or_provider_read(
+    monkeypatch, tmp_path
+):
+    host, _, reader, storage, run = _fixture(monkeypatch, tmp_path)
+    binding = host.stores.workflow_store.value.submit.foundation_bindings[-1]
+    object.__setattr__(binding, "canonical_assessment_bytes", b"{}")
+
+    attempt_ref = (
+        "qualify-" + hashlib.sha256(canonical_bytes(run.to_dict())).hexdigest()
+    )
+    with storage:
+        with pytest.raises(ModalChatQualificationError):
+            qualify_modal_chat_run(host=host, storage=storage, run=run)
+        assert storage.attempts.resolve(attempt_ref) is None
+    assert reader.observe_calls == 0
 
 
 def test_nonterminal_observation_is_closed_without_running_fiction(

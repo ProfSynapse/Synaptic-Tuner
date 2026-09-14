@@ -48,6 +48,14 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Configure required executable search paths explicitly in the authenticated
+  runtime environment. Offline trainer children replace inherited environments;
+  a missing PATH can let GCC start but prevent its linker from being found.
+- Provider reads must reuse and authenticate the exact assessment retained in
+  the submit binding while revalidating the current Foundation record. Issuing
+  a newly timestamped assessment breaks that binding after time passes; do not
+  weaken evidence equality or renew submission authority to compensate.
+
 - Bind model-cache paths to the authenticated execution source's exact run ID;
   do not require a consumer naming prefix. Initialize lazy SDK call handles
   with the explicit client before checking identity or polling. Existing-image
