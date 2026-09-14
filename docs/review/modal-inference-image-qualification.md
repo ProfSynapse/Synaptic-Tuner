@@ -55,3 +55,13 @@ The production verifier intentionally still rejects all duplicate distribution
 enumeration, even when the metadata-only inspector could prove a physical alias.
 The isolated final image must pass that stricter check; inspection success alone
 does not establish it. No runtime check was weakened to accommodate a candidate.
+
+The broader initializer/runtime/inspector/capture/private-directory/bootstrap
+selection passed 246 tests in 122.27 seconds. The initial exact-source wheel
+from `c5fdffa1ec5de9e9185658e4f84665d88c5faddb` then failed the local packaged
+inventory check before any cloud allocation: Windows Git archive converted
+`inference-dependencies.lock` to CRLF because it lacked an explicit LF
+attribute. The runtime hash correctly rejected it. The additive installer lock
+had the same export risk. Both exact paths now declare `text eol=lf`; source
+and runtime pins were not changed. The rejected wheel was not deployed or used
+as qualification evidence. A fresh archive/wheel must pass byte comparison.

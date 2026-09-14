@@ -17,6 +17,12 @@ EVIDENCE = "docs/review/evidence/modal-inference-engine-42da029.json"
 BASE = "docker.io/vllm/vllm-openai@sha256:116aa00ee0b68855616a56e1d7e1ae937e591a8bd6969ee45cbcedb246ddf355"
 
 
+def test_hash_bound_inference_locks_declare_lf_git_exports():
+    lines = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    for relative in (tool._ADDITIVE_RELATIVE, tool.DEPENDENCY_RELATIVE):
+        assert f"{relative} text eol=lf" in lines
+
+
 def _copy(root: Path, relative: str) -> None:
     target = root / relative
     target.parent.mkdir(parents=True, exist_ok=True)

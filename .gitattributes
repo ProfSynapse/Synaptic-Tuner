@@ -1,6 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# These exact installer/provenance bytes are hashed into inference evidence.
+requirements/modal-inference-additions.lock text eol=lf
+tuner/execution/providers/modal/inference-dependencies.lock text eol=lf
+
 # Shell scripts must use LF
 *.sh text eol=lf
 *.bash text eol=lf
