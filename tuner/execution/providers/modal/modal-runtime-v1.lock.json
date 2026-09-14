@@ -214,7 +214,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_bundle_py": {
       "path": "tuner/execution/providers/modal/coordinator_bundle.py",
-      "sha256": "e5dc9aed3f8baaceaca946e8fe321486a2c7f2046dbf3bf20e09953c14e05735"
+      "sha256": "1e8c1d8390e89f7a1897b151bc747fc4290fa02c37ce868cb6f96c011c308d67"
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_dispatch_py": {
       "path": "tuner/execution/providers/modal/coordinator_dispatch.py",

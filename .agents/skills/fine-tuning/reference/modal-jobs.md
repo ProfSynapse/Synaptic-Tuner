@@ -597,6 +597,41 @@ deployment wrapper, or reusable engine contract. Model, dataset, tool schema,
 and training choices stay in host configuration; do not hardcode the current
 smoke into runtime code.
 
+## Minimal consumer request and replay adapters
+
+Candidate launcher update (2026-09-14): the reusable consuming-layer
+`examples/modal_chat/launch.py` now composes explicit profile credentials,
+fresh resource provisioning and exact deployment ownership, real source
+resolution, public training start, and separately authorized chat. Its default
+mode is credential-free local checking. Explicit `qualify-training` records
+native authenticated training/artifact evidence while public capabilities are
+disabled; it does not invoke chat or require an inference image. `train-chat`
+refuses before cloud activity until observation/artifact capabilities are
+qualified. Keep one-shot claims, owned cleanup and source/quote checks intact.
+The consumer owns all example settings, identities, authorities and state.
+
+The workload bundle boundary accepts canonical finite JSON numbers because
+real SFT learning rates and dropout values are fractional. Only the typed
+workload member uses that parser; command/evidence parsers remain integer-only.
+Source-lock refresh after this correction invalidates prior inference-image
+admission for the updated source; rebuild and requalify before chat. The
+historical CPU capture does not qualify changed locked source.
+
+Use the checked-in `examples/modal_chat/requests.py` bridge around an actual
+configured rich `TrainingService`; do not replace source resolution or recipe
+compilation with a planning test fixture. Allocate the run before resolving and
+retain the original request plus compiled coordinator material. Cached material
+must match the exact request, project, and allocated run, including when it is
+used to construct the request-scoped Modal preparation adapter.
+
+`examples/modal_chat/replay.py` supplies the source/deployment replay port using
+the consumer's existing private SQLite catalogs. It retains each purpose and
+challenge forever and accepts repeat admission only for identical evidence.
+Authentication and freshness remain the production source finalizer's job.
+These consumer adapters do not activate provider capabilities or prove that a
+training job or chat session ran. Keep the composed host alive; the permanent
+attempt claim is not full coordinator restart recovery.
+
 ## Runtime-lock maintenance
 
 For first-time inference commitment creation, use the checked-in offline

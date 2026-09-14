@@ -4,9 +4,47 @@ This example belongs to the consuming-project layer, not the engine runtime.
 It uses `APIHost.training`, `APIHost.runs`, and `open_run_chat` without changing
 EHR, adding a provider-specific engine CLI, or staging model weights locally.
 
-It is **not yet a standalone live Modal launcher**. The caller must compose the
-real authenticated host and selected chat runtime. No test fixtures, invented
-training outputs, or arbitrary model directories may replace those inputs.
+`launch.py` is the checked-in candidate launcher for the dedicated minimal
+consumer. It composes the actual authenticated host and selected chat runtime;
+its cloud path is not yet live qualified. No test fixtures, invented training
+outputs, or arbitrary model directories may replace its inputs.
+
+## Launcher
+
+Run the file from a clean, published consumer's exact engine submodule. The
+default `--mode check` validates local source/configuration and the reviewed
+inference image without credentials or cloud calls:
+
+```bash
+python -B synaptic-tuner/examples/modal_chat/launch.py \
+  --project-root /absolute/consumer \
+  --configuration configuration/smoke.json
+```
+
+The explicitly selected `--mode qualify-training --modal-profile NAME` creates
+fresh named resources, deploys, submits once through the public TrainingAPI,
+waits for the exact provider call, and retains native authenticated terminal and
+five-artifact verification evidence. It stops before chat and does not claim
+public RunsAPI qualification. This training-only mode does not depend on an
+inference image. `--mode train-chat` refuses before credentials or cloud mutation
+while the public observation/artifact capability flags remain disabled. Once
+qualified, it requires successful public outcome/verification before one chat
+turn and exact owned-Sandbox stopped readback.
+
+Modal credentials come only from the explicitly named SDK 1.5.4 profile, with
+environment overrides disabled. `HF_TOKEN` is inherited, or read from the one
+existing file explicitly selected by `--hf-token-env-file /absolute/file`.
+No credential value is accepted in argv or saved in state. The runtime Secret
+contains only the model token and a newly generated in-process evidence key;
+the model-serving child remains credential-free. Fresh workspace billing rates
+are saved with operator authorization, not represented as a provider billing
+cap. Training estimation is GPU-only and explicitly excludes CPU/memory/builds
+and storage. All resources retain explicit timeouts and retries remain zero.
+
+The CLI prints closed progress codes, not raw SDK/worker exceptions or model
+responses. Responses and immutable evidence go under the manifest's private
+state root. After failure, inspect the retained exact identities and evidence;
+do not rename the attempt or delete its claims to resubmit.
 
 ## Saved state and ownership
 
@@ -36,6 +74,41 @@ chat, compose the existing `ModalRunChatRuntime` with its source/workload binder
 authenticated inference configuration and fresh quote, separate grants,
 Foundation broker, SDK transport, and ready-lease handoff. The example supplies
 neither fake authorities nor ambient provider fallback.
+
+`ModalChatTrainingRequests` in `requests.py` bridges a configured rich
+`TrainingService` into the coordinator's loader, resolver, and run-identity
+ports. It uses the real input parser and recipe compiler, allocates identities
+at load, and retains canonical request and resolved-material bytes in the
+consumer catalogs. Cached resolution checks the original request, project,
+and run bindings without resolving source provenance again. This permits
+preparing the exact resolved request before constructing the request-scoped
+Modal adapter. The host still supplies the actual source resolver and identity
+allocator; the bridge does not manufacture provenance or authorize a job.
+
+`ModalChatEvidenceReplay` in `replay.py` implements the source finalizer's
+durable replay port using the same SQLite catalogs, without another table or
+database. Each purpose/challenge pair admits only the identical issuer,
+evidence reference, audience, payload digest, and expiry thereafter. The
+existing finalizer remains responsible for authenticating and checking the
+freshness of evidence before replay admission.
+
+`deployment.py` owns a deployment made with the fixed engine builder and an
+explicit Modal 1.5.4 client. Workspace lookup and exact existing-environment
+lookup establish scope without listing other environments. A permanent claim
+precedes deployment; a separate deterministic whole-app claim blocks a renamed
+attempt or function from redeploying it. A returned deployment is recorded even
+if subsequent definition metadata cannot be verified. Its acknowledged app,
+function, immutable definition,
+image, and Volume identifiers are saved before named-function readback. Each
+later observation requires the same definition identity; it cannot adopt an
+unrelated deployment or infer shutdown after an ambiguous failure. This is
+provider-observed ownership of the consumer's submitted static configuration,
+not an independent server-side attestation of every function option.
+Persisted deployment acknowledgements are audit evidence, not a restart/adoption
+API. After an interrupted process, reconcile that exact deployment manually;
+do not choose a new attempt identifier and deploy again. Failure to persist an
+acknowledgement leaves only a non-authorizing `candidate_receipt` in memory,
+and both the observer and facade remain unavailable.
 
 Training acceptance is not completion. Observe the exact returned run through
 `RunsAPI`; successful verification and its authenticated five-artifact inventory
@@ -108,9 +181,15 @@ The original runtime retains any known cleanup lease while its process lives.
 
 ## Verification status
 
-The integrated example has 22 passing provider-free tests, including actual
-`open_run_chat` and `ChatSession` composition with a simulated backend, permanent
-claims across reopening, cleanup failures, and oversized ASCII/Unicode replies.
-Independent consumer/storage review passed. Separately, 27 existing run-chat
-tests and 114 inference capture/inspection/preparation tests passed. These tests
-do not establish a real GPU response or qualify the new image preparation.
+Provider-free tests cover actual public training start through the consumer
+composition, one simulated spawn and convergent repeated start, real HMAC
+verification, `open_run_chat` with simulated execution, permanent claims,
+cleanup failures, canonical fractional SFT parameters, bounded replies, and
+request/material identity substitution. Independent consumer/launcher and bundle
+parser review passed. These tests do not establish a real GPU response.
+
+Correction (2026-09-14): the bundle parser now accepts finite fractional values
+only in the typed workload member; generic Foundation commands remain
+integer-only. This changes locked source and invalidates the earlier inference
+image for the updated source. Requalify the final image before chat. Historical
+CPU records remain historical evidence, not current serving admission.
