@@ -76,7 +76,12 @@ class SDK:
             objects = Objects("secret")
 
             @staticmethod
-            def from_name(name, **kwargs):
+            def from_name(name, *, environment_name, required_keys, client):
+                kwargs = dict(
+                    environment_name=environment_name,
+                    required_keys=required_keys,
+                    client=client,
+                )
                 sdk.calls.append(("read", "secret", name, kwargs))
                 return Object("st-" + name, fail=sdk.fail_hydrate == name)
 
@@ -144,6 +149,12 @@ def test_creates_three_fresh_volumes_and_one_secret_with_exact_arguments(tmp_pat
         "artifacts",
         "model_cache",
         "runtime_secret",
+    }
+    secret_read = [call for call in sdk.calls if call[:2] == ("read", "secret")]
+    assert secret_read[0][3] == {
+        "environment_name": "environment-a",
+        "required_keys": ["EVIDENCE_KEY", "MODEL_TOKEN"],
+        "client": scope.client,
     }
 
 

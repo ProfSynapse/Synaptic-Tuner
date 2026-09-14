@@ -101,11 +101,16 @@ class ModalChatProvisioner:
         self._acks.publish_if_absent(item_ref, payload)
 
     def _hydrate(self, kind, name):
+        options = (
+            {"create_if_missing": False}
+            if kind == "Volume"
+            else {"required_keys": sorted(self._secret_values)}
+        )
         resource = getattr(self._scope.sdk, kind).from_name(
             name,
-            create_if_missing=False,
             environment_name=self._scope.environment_name,
             client=self._scope.client,
+            **options,
         )
         resource.hydrate(self._scope.client)
         if resource.is_hydrated is not True:
