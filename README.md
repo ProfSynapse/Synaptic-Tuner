@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`8e4c3941eff044c8a5824bae56c22e9f2311ecb7`, advertised by
+`b5794518f427521cdc4bfcf474fd0ad791b57445`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -129,8 +129,14 @@ bug: generating a new timestamped Foundation assessment mismatched the retained
 submit binding. The engine now authenticates and reuses the exact retained
 assessment for qualification, public reads and chat artifact admission.
 F's diagnostic readback does not replace authenticated qualification, which its
-launcher did not retain. The current configuration selects a separate
-`modal-chat-20260914-g` attempt with new resource/function names. Earlier attempts'
+launcher did not retain. Attempt G failed at FunctionCreate before training:
+its image metadata reported no Python version after the PATH override omitted
+the pinned interpreter directory. The dedicated app's generation/layout remained
+unchanged and G's selected function was absent. The configured PATH is now
+`/opt/conda/bin:/usr/bin:/bin`, retaining Python/pip discovery and system tools.
+This is a configuration correction, not a runtime/image pin change or success
+claim. The current configuration selects a separate
+`modal-chat-20260914-h` attempt with new resource/function names. Earlier attempts'
 claims or resources may not be adopted or erased.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.
