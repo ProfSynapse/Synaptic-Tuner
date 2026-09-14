@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`9dca62b2a2faf18d9164fa820cf0348f83e663c3`, advertised by
+`32840a3313f7127b254a717ee723eeed3f4f7af1`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -55,8 +55,11 @@ remote publication, contact Modal, load credentials, or authorize a job.
 
 ## Run the bounded smoke
 
-Use an existing compatible Python environment with Modal 1.5.4 and the engine's
-host dependencies. No local Docker or model-weight download is involved.
+Use an isolated CPython 3.11.14 environment with Modal 1.5.4 and the engine's
+`examples/modal_chat/requirements.lock` installed with hash verification and
+no dependency resolution, as documented in the engine example README. A Python
+3.12 launcher cannot serialize this worker for the pinned Python 3.11 image.
+No local Docker or model-weight download is involved.
 The explicit named Modal profile supplies credentials internally; an optional
 `--hf-token-env-file /absolute/path/to/existing/.env` reads only its `HF_TOKEN`.
 Otherwise `HF_TOKEN` is inherited. Never put credential values in arguments.
@@ -94,8 +97,14 @@ Attempt `modal-chat-20260914-a` created its three Volumes and runtime Secret,
 then exited during deployment without reaching training submission. Scoped
 readback found the prior app deployment unchanged and the exact new function
 absent; app logs recorded an image build but did not establish the failure cause.
-Its private journal and resources are preserved. The current configuration
-selects a separate `modal-chat-20260914-b` attempt with new resource/function
-names and closed deployment diagnostics; it must not adopt or erase attempt A.
+Its private journal and resources are preserved. Attempt `modal-chat-20260914-b`
+also failed before training submission. Its closed diagnostic records an
+`InvalidError` at FunctionCreate, a precreated function ID and the built image;
+it does not prove a published deployment or provider shutdown. Image metadata
+reported CPython 3.11.14 while the launcher used 3.12.9, a documented serialized
+function incompatibility. The exact server rejection reason was not retained.
+The current configuration selects a separate `modal-chat-20260914-c` attempt
+with new resource/function names and the corrected launcher. Neither earlier
+attempt's claims or resources may be adopted or erased.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.
