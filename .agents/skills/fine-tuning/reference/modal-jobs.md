@@ -669,6 +669,29 @@ Regression configuration must contain numeric learning rates and dropout;
 the earlier shared fixture's string rate did not exercise this boundary.
 This correction does not establish a successful training or chat run.
 
+Correction (2026-09-14, attempt E): the worker passed workload admission and
+returned a terminal failed result with code 124. Its exact operation log
+recorded `model_preparation_failed`; retained source binds the cache to
+`/workspace/run/modal-chat-20260914-e/cache`, which the old runner incorrectly
+rejected for lacking a `run-` prefix. Bind this path to the authenticated
+execution source's exact run ID instead. This is not a Hub download error.
+The SDK's `FunctionCall.from_id` is also lazy: initialize it using the same
+explicit client before identity validation and polling. A missing identity
+before hydration must not make the host skip its wait and read unfinished
+terminal evidence. Only the exact SDK polling timeout establishes pending;
+errors or unknown state never authorize resubmission.
+
+Inference corrections (2026-09-14): for the pinned SDK, resolve the exact
+`Image.from_id` handle using `image.build(existing_app)`, then verify the
+returned handle, hydrated state and actual image ID before Sandbox creation.
+This particular loader performs only `ImageFromId`; it has no image build
+steps and does not call `ImageGetOrCreate`. The preset ID alone is not a
+provider observation. Keep private model-root descriptors open throughout
+preparation and inventory capture, rechecking their current path identities
+before and after capture. The old close-and-reopen check could miss inode
+reuse after directory replacement. These fixes require updated source locks
+and fresh CPU image qualification; they do not establish live chat success.
+
 Use the checked-in `examples/modal_chat/requests.py` bridge around an actual
 configured rich `TrainingService`; do not replace source resolution or recipe
 compilation with a planning test fixture. Allocate the run before resolving and

@@ -1,4 +1,5 @@
 """Concrete remote-only dual-clone and process ports for Modal v1."""
+
 from __future__ import annotations
 
 import hashlib
@@ -25,9 +26,14 @@ class EnvironmentHmacAuthenticator:
     __slots__ = ("_environment_key", "_key_ref")
 
     def __init__(self, *, environment_key: str, key_ref: str) -> None:
-        if not isinstance(environment_key, str) or not environment_key or not environment_key.isupper():
+        if (
+            not isinstance(environment_key, str)
+            or not environment_key
+            or not environment_key.isupper()
+        ):
             raise ValueError("evidence environment key must be explicit")
         from ...contracts import safe_ref
+
         self._environment_key = environment_key
         self._key_ref = safe_ref(key_ref, "key_ref")
 
@@ -46,9 +52,17 @@ class EnvironmentHmacAuthenticator:
         return decoded
 
     def sign(self, purpose: str, payload: bytes, key_ref: str) -> bytes:
-        if not isinstance(purpose, str) or not purpose or not isinstance(payload, bytes):
+        if (
+            not isinstance(purpose, str)
+            or not purpose
+            or not isinstance(payload, bytes)
+        ):
             raise TypeError("evidence purpose and payload are required")
-        return hmac.new(self._key(key_ref), purpose.encode("ascii") + b"\0" + payload, hashlib.sha256).digest()
+        return hmac.new(
+            self._key(key_ref),
+            purpose.encode("ascii") + b"\0" + payload,
+            hashlib.sha256,
+        ).digest()
 
     def verify(self, purpose: str, payload: bytes, tag: bytes, key_ref: str) -> bool:
         if not isinstance(tag, bytes):
@@ -123,13 +137,20 @@ class GitDualCloneMaterializer:
             raise ValueError("remote source verification failed") from None
 
     def _clone(self, url: str, commit: str, destination: Path) -> None:
-        self._git("clone", "--no-checkout", "--filter=blob:none", "--", url, str(destination))
+        self._git(
+            "clone", "--no-checkout", "--filter=blob:none", "--", url, str(destination)
+        )
         self._git("-C", str(destination), "checkout", "--detach", commit)
-        if self._git("-C", str(destination), "rev-parse", "HEAD").lower() != commit.lower():
+        if (
+            self._git("-C", str(destination), "rev-parse", "HEAD").lower()
+            != commit.lower()
+        ):
             raise ValueError("remote source commit mismatch")
         if self._git("-C", str(destination), "remote", "get-url", "origin") != url:
             raise ValueError("remote source origin mismatch")
-        if self._git("-C", str(destination), "status", "--porcelain=v1", "--untracked-files=all"):
+        if self._git(
+            "-C", str(destination), "status", "--porcelain=v1", "--untracked-files=all"
+        ):
             raise ValueError("remote source checkout is not clean")
 
     def prepare_and_verify(
@@ -137,18 +158,25 @@ class GitDualCloneMaterializer:
         source: ExecutionSourceV1,
         deployment: ModalDeploymentSelectionV1,
     ) -> None:
-        if type(source) is not ExecutionSourceV1 or type(deployment) is not ModalDeploymentSelectionV1:
+        if (
+            type(source) is not ExecutionSourceV1
+            or type(deployment) is not ModalDeploymentSelectionV1
+        ):
             raise TypeError("canonical source and deployment are required")
         project = Path(source.roots["project"])
         engine = Path(source.roots["engine"])
         expected_run_root = Path("/workspace/run") / source.run_id
-        writable = {name: Path(source.roots[name]) for name in ("artifacts", "state", "tracking", "cache", "tmp")}
+        writable = {
+            name: Path(source.roots[name])
+            for name in ("artifacts", "state", "tracking", "cache", "tmp")
+        }
         if (
             project != Path("/workspace/project")
             or engine != Path("/workspace/engine")
             or project == engine
             or any(path.parent != expected_run_root for path in writable.values())
-            or set(path.name for path in writable.values()) != {"artifacts", "state", "tracking", "cache", "tmp"}
+            or set(path.name for path in writable.values())
+            != {"artifacts", "state", "tracking", "cache", "tmp"}
         ):
             raise ModalRemotePhaseError(124, "source_topology_invalid")
         if project.exists() or engine.exists() or expected_run_root.exists():
@@ -158,7 +186,8 @@ class GitDualCloneMaterializer:
             sys.implementation.name != "cpython"
             or actual_version != source.python_version
             or not _same_executable(sys.executable, source.python_executable)
-            or _file_digest(Path(source.python_executable)) != source.python_executable_digest
+            or _file_digest(Path(source.python_executable))
+            != source.python_executable_digest
         ):
             raise ModalRemotePhaseError(121, "runtime_identity_mismatch")
         try:
@@ -180,7 +209,12 @@ class GitDualCloneMaterializer:
         gitlink = self._git(
             "-C", str(project), "ls-tree", "HEAD", "--", source.engine_submodule_path
         ).split()
-        if len(gitlink) < 3 or gitlink[0] != "160000" or gitlink[1] != "commit" or gitlink[2].lower() != source.engine_source.commit.lower():
+        if (
+            len(gitlink) < 3
+            or gitlink[0] != "160000"
+            or gitlink[1] != "commit"
+            or gitlink[2].lower() != source.engine_source.commit.lower()
+        ):
             raise ModalRemotePhaseError(124, "engine_gitlink_mismatch")
         try:
             runtime_lock = ModalRuntimeLockV1.packaged()
@@ -191,7 +225,10 @@ class GitDualCloneMaterializer:
             engine / member["path"]: member["sha256"]
             for member in runtime_lock.document["locked_files"].values()
         }
-        if any(not path.is_file() or _file_digest(path) != expected for path, expected in checks.items()):
+        if any(
+            not path.is_file() or _file_digest(path) != expected
+            for path, expected in checks.items()
+        ):
             raise ModalRemotePhaseError(124, "locked_source_mismatch")
         try:
             expected_run_root.mkdir(parents=True, exist_ok=False)
@@ -206,7 +243,13 @@ class SubprocessSftRunner:
 
     __slots__ = ("_secret_keys", "_model_token_key", "_timeout")
 
-    def __init__(self, *, secret_keys: tuple[str, ...], model_token_key: str, timeout_seconds: int) -> None:
+    def __init__(
+        self,
+        *,
+        secret_keys: tuple[str, ...],
+        model_token_key: str,
+        timeout_seconds: int,
+    ) -> None:
         if not secret_keys or len(secret_keys) != len(set(secret_keys)):
             raise ValueError("exact runtime secret keys are required")
         self._secret_keys = tuple(secret_keys)
@@ -221,14 +264,35 @@ class SubprocessSftRunner:
         from .model_snapshot import prepare_model_snapshot
 
         try:
-            model = json.loads(stdin)["configuration"]["document"]["model"]
+            workload = json.loads(stdin)
+            model = workload["configuration"]["document"]["model"]
+            source = ExecutionSourceV1.from_dict(workload["execution_source"])
+            expected_cache_text = f"/workspace/run/{source.run_id}/cache"
+            if (
+                environment["SYNAPTIC_CACHE_ROOT"] != expected_cache_text
+                or source.roots["cache"] != expected_cache_text
+            ):
+                raise ValueError("model cache binding differs")
             lexical_root = Path("/workspace/run")
             lexical_cache = Path(environment["SYNAPTIC_CACHE_ROOT"])
+            expected_cache = lexical_root / source.run_id / "cache"
             relative = lexical_cache.relative_to(lexical_root)
-            if len(relative.parts) != 2 or relative.parts[1] != "cache" or not relative.parts[0].startswith("run-"):
+            if (
+                lexical_cache != expected_cache
+                or len(relative.parts) != 2
+                or relative.parts != (source.run_id, "cache")
+            ):
                 raise ValueError("model cache binding differs")
-            expected = lexical_cache / "model" / ("models--" + model["ref"].replace("/", "--")) / "snapshots" / model["revision"]
-            if environment["SYNAPTIC_MODEL_SNAPSHOT"] != str(expected):
+            snapshot_suffix = (
+                "/model/models--"
+                + model["ref"].replace("/", "--")
+                + "/snapshots/"
+                + model["revision"]
+            )
+            if (
+                environment["SYNAPTIC_MODEL_SNAPSHOT"]
+                != expected_cache_text + snapshot_suffix
+            ):
                 raise ValueError("model snapshot binding differs")
             # Only the authenticated mount boundary may resolve elsewhere.
             physical_root = lexical_root.resolve(strict=True)
@@ -238,9 +302,11 @@ class SubprocessSftRunner:
             scratch = Path("/workspace/model-preparation")
             scratch.mkdir(exist_ok=True)
             prepare_model_snapshot(
-                model_ref=model["ref"], revision=model["revision"],
+                model_ref=model["ref"],
+                revision=model["revision"],
                 token=os.environ[self._model_token_key],
-                persistent_root=persistent, destination_root=cache,
+                persistent_root=persistent,
+                destination_root=cache,
                 scratch_root=scratch,
             )
         except Exception:
@@ -302,4 +368,8 @@ class SubprocessSftRunner:
         return ModalProcessResult(returncode, diagnostic_code=diagnostic_code)
 
 
-__all__ = ["EnvironmentHmacAuthenticator", "GitDualCloneMaterializer", "SubprocessSftRunner"]
+__all__ = [
+    "EnvironmentHmacAuthenticator",
+    "GitDualCloneMaterializer",
+    "SubprocessSftRunner",
+]

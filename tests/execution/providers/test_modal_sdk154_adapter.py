@@ -78,8 +78,44 @@ class FakeFunction:
 
 class FakeFunctionCall:
     calls=[]
+    handles=[]
+    hydrate_error = None
+    hydrated_id = None
+    hydrate_result_other = False
+    remain_unhydrated = False
+
+    class LazyCall:
+        def __init__(self, value):
+            self.value = value
+            self.is_hydrated = False
+            self.hydrate_calls = []
+            self.get_calls = []
+
+        @property
+        def object_id(self):
+            if not self.is_hydrated:
+                raise RuntimeError("lazy call identity unavailable")
+            return FakeFunctionCall.hydrated_id or self.value
+
+        def hydrate(self, client):
+            self.hydrate_calls.append(client)
+            if FakeFunctionCall.hydrate_error is not None:
+                raise FakeFunctionCall.hydrate_error
+            self.is_hydrated = not FakeFunctionCall.remain_unhydrated
+            return object() if FakeFunctionCall.hydrate_result_other else self
+
+        def get(self, timeout=None):
+            self.get_calls.append(timeout)
+            if isinstance(FakeCall.result, BaseException):
+                raise FakeCall.result
+            return FakeCall.result
+
     @classmethod
-    def from_id(cls,value,client=None):cls.calls.append((value,client));return FakeCall(value)
+    def from_id(cls,value,client=None):
+        cls.calls.append((value,client))
+        call = cls.LazyCall(value)
+        cls.handles.append(call)
+        return call
 
 
 class FakeNotFound(Exception):pass
@@ -95,6 +131,7 @@ class Auth:
 
 def make_facade(*,sdk=SDK,selection=None):
     FakeVolume.calls=[];FakeFunction.calls=[];FakeFunction.spawn_calls=[];FakeFunction.fail=False;FakeCall.result=TimeoutError()
+    FakeFunctionCall.calls=[];FakeFunctionCall.handles=[];FakeFunctionCall.hydrate_error=None;FakeFunctionCall.hydrated_id=None;FakeFunctionCall.hydrate_result_other=False;FakeFunctionCall.remain_unhydrated=False
     FakeVolume.registry={"control-name":FakeVolume("cv"),"artifact-name":FakeVolume("av")}
     client=object();binding=ModalClientBinding("acct","workspace","env","client","1.5.4")
     selected=selection or _deployment()
@@ -126,9 +163,10 @@ def test_exact_sdk_version_is_mandatory(version):
 
 def test_known_call_pending_hint_uses_exact_client_and_no_result_schema():
     facade, _ = make_facade()
-    FakeFunctionCall.calls = []
     assert facade.observe_known_call_pending("fc-known") is ModalFunctionCallState.PENDING
     assert FakeFunctionCall.calls == [("fc-known", facade.client)]
+    assert FakeFunctionCall.handles[0].hydrate_calls == [facade.client]
+    assert FakeFunctionCall.handles[0].get_calls == [0]
     FakeCall.result = {
         "schema_version": "synaptic-modal-worker-result/v2", "effect_id": "effect",
         "returncode": 0, "status_code": "completed",
@@ -147,7 +185,12 @@ def test_known_call_wrong_handle_is_not_polled(monkeypatch):
     facade, _ = make_facade()
     calls = []
     class Wrong:
-        object_id = "fc-other"
+        is_hydrated = False
+        def hydrate(self, client):
+            assert client is facade.client
+            self.is_hydrated = True
+            self.object_id = "fc-other"
+            return self
         def get(self, **kwargs): calls.append(kwargs)
     monkeypatch.setattr(FakeFunctionCall, "from_id", lambda *a, **kw: Wrong())
     assert facade.observe_known_call_pending("fc-known") is ModalFunctionCallState.UNKNOWN
@@ -159,6 +202,30 @@ def test_known_call_resolution_timeout_does_not_establish_pending(monkeypatch):
     def unavailable(*args, **kwargs): raise TimeoutError()
     monkeypatch.setattr(FakeFunctionCall, "from_id", unavailable)
     assert facade.observe_known_call_pending("fc-known") is ModalFunctionCallState.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ("no_hydrate", "hydrate_error", "wrong_id", "returned_handle", "unhydrated"),
+)
+def test_known_call_hydration_must_prove_exact_same_handle_before_poll(
+    monkeypatch, failure
+):
+    facade, _ = make_facade()
+    if failure == "no_hydrate":
+        monkeypatch.setattr(FakeFunctionCall, "from_id", lambda *args, **kwargs: object())
+    elif failure == "hydrate_error":
+        FakeFunctionCall.hydrate_error = RuntimeError("provider detail")
+    elif failure == "wrong_id":
+        FakeFunctionCall.hydrated_id = "fc-other"
+    elif failure == "returned_handle":
+        FakeFunctionCall.hydrate_result_other = True
+    else:
+        FakeFunctionCall.remain_unhydrated = True
+    FakeCall.result = AssertionError("get must not run")
+
+    assert facade.observe_known_call_pending("fc-known") is ModalFunctionCallState.UNKNOWN
+    assert all(handle.get_calls == [] for handle in FakeFunctionCall.handles)
 
 
 def test_read_list_and_deployment_use_only_explicit_client_environment_and_v1():
@@ -233,6 +300,7 @@ def test_mutator_spawns_once_never_remote_and_returns_indeterminate_after_bounda
     assert observation.disposition is EffectDisposition.INDETERMINATE
     assert FakeFunction.spawn_calls==[(raw,),(raw,)]
     handle=mutator.lookup_handle("fc-1")
+    assert handle.hydrate(facade.client) is handle
     assert handle.object_id=="fc-1" and FakeFunctionCall.calls[-1]==("fc-1",facade.client)
 
 

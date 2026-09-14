@@ -48,6 +48,14 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Bind model-cache paths to the authenticated execution source's exact run ID;
+  do not require a consumer naming prefix. Initialize lazy SDK call handles
+  with the explicit client before checking identity or polling. Existing-image
+  admission must check the provider-returned ID before Sandbox creation.
+- Hold private chat model-root directory descriptors across preparation and
+  inventory capture. Reopening paths alone permits inode reuse to conceal a
+  replaced directory; validate the retained identities before returning.
+
 - Parse compiled workload bytes with the shared workload-specific finite-number
   parser throughout worker admission, revalidation and inference preparation.
   Fractional learning rates and dropout are valid; Foundation command/evidence

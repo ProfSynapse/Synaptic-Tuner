@@ -8,23 +8,51 @@ from types import SimpleNamespace
 import pytest
 
 from tuner.execution.providers.modal.model_snapshot import prepare_model_snapshot
-
+from tuner.project.execution_source import ExecutionSourceV1
+from tests.training.test_training_service import _execution_source
 
 REVISION = "a" * 40
 MODEL = "fixture/tiny"
 
 
+def _source_for_run(
+    run_id: str, *, cache_run_id: str | None = None
+) -> ExecutionSourceV1:
+    document = _execution_source("vendor/engine").to_dict()
+    document["run_id"] = run_id
+    selected = cache_run_id or run_id
+    roots = document["runtime"]["roots"]
+    for name, value in roots.items():
+        roots[name] = value.replace("run-service", selected)
+    variables = document["runtime"]["environment"]["variables"]
+    for name, value in variables.items():
+        variables[name] = value.replace("run-service", selected)
+    return ExecutionSourceV1.from_dict(document)
+
+
 @pytest.fixture
 def fixture(tmp_path, monkeypatch):
-    files = {"config.json": b'{"model_type":"fixture"}', "model.safetensors": b"fixture weights"}
+    files = {
+        "config.json": b'{"model_type":"fixture"}',
+        "model.safetensors": b"fixture weights",
+    }
     siblings = []
     for name, content in files.items():
         lfs = name.endswith("safetensors")
-        siblings.append(SimpleNamespace(
-            rfilename=name, size=len(content),
-            blob_id=hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest(),
-            lfs=SimpleNamespace(sha256=hashlib.sha256(content).hexdigest()) if lfs else None,
-        ))
+        siblings.append(
+            SimpleNamespace(
+                rfilename=name,
+                size=len(content),
+                blob_id=hashlib.sha1(
+                    f"blob {len(content)}\0".encode() + content
+                ).hexdigest(),
+                lfs=(
+                    SimpleNamespace(sha256=hashlib.sha256(content).hexdigest())
+                    if lfs
+                    else None
+                ),
+            )
+        )
     info = SimpleNamespace(sha=REVISION, siblings=siblings)
     calls = []
 
@@ -44,15 +72,27 @@ def fixture(tmp_path, monkeypatch):
             destination.write_bytes(files[name])
         return str(kwargs["local_dir"])
 
-    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(HfApi=API, snapshot_download=download))
-    roots = {name: tmp_path / name for name in ("persistent_root", "destination_root", "scratch_root")}
+    monkeypatch.setitem(
+        sys.modules,
+        "huggingface_hub",
+        SimpleNamespace(HfApi=API, snapshot_download=download),
+    )
+    roots = {
+        name: tmp_path / name
+        for name in ("persistent_root", "destination_root", "scratch_root")
+    }
     for path in roots.values():
         path.mkdir()
     return SimpleNamespace(files=files, info=info, calls=calls, roots=roots)
 
 
 def prepare(fixture, **overrides):
-    return prepare_model_snapshot(model_ref=MODEL, revision=REVISION, token="fixture-credential", **(fixture.roots | overrides))
+    return prepare_model_snapshot(
+        model_ref=MODEL,
+        revision=REVISION,
+        token="fixture-credential",
+        **(fixture.roots | overrides),
+    )
 
 
 def test_cache_miss_downloads_privately_then_reuses_verified_files(fixture, tmp_path):
@@ -74,19 +114,30 @@ def test_cache_miss_downloads_privately_then_reuses_verified_files(fixture, tmp_
 
 
 def test_partial_cache_downloads_only_missing_members(fixture):
-    cached = fixture.roots["persistent_root"] / "models--fixture--tiny" / "snapshots" / REVISION
+    cached = (
+        fixture.roots["persistent_root"]
+        / "models--fixture--tiny"
+        / "snapshots"
+        / REVISION
+    )
     cached.mkdir(parents=True)
     (cached / "config.json").write_bytes(fixture.files["config.json"])
     prepare(fixture)
-    assert [args["allow_patterns"] for name, args in fixture.calls if name == "download"] == [["model.safetensors"]]
+    assert [
+        args["allow_patterns"] for name, args in fixture.calls if name == "download"
+    ] == [["model.safetensors"]]
 
 
 def test_zero_byte_repository_member_is_verified_and_reused(fixture, tmp_path):
     fixture.files["empty.txt"] = b""
-    fixture.info.siblings.append(SimpleNamespace(
-        rfilename="empty.txt", size=0, lfs=None,
-        blob_id=hashlib.sha1(b"blob 0\0").hexdigest(),
-    ))
+    fixture.info.siblings.append(
+        SimpleNamespace(
+            rfilename="empty.txt",
+            size=0,
+            lfs=None,
+            blob_id=hashlib.sha1(b"blob 0\0").hexdigest(),
+        )
+    )
     assert (prepare(fixture) / "empty.txt").read_bytes() == b""
     second = tmp_path / "second"
     second.mkdir()
@@ -94,7 +145,9 @@ def test_zero_byte_repository_member_is_verified_and_reused(fixture, tmp_path):
     assert sum(name == "download" for name, _ in fixture.calls) == 1
 
 
-@pytest.mark.parametrize("mutation", ["revision", "digest", "size", "path", "duplicate", "missing_digest"])
+@pytest.mark.parametrize(
+    "mutation", ["revision", "digest", "size", "path", "duplicate", "missing_digest"]
+)
 def test_metadata_and_download_must_match_exactly(fixture, mutation):
     if mutation == "revision":
         fixture.info.sha = "b" * 40
@@ -114,20 +167,31 @@ def test_metadata_and_download_must_match_exactly(fixture, mutation):
 
 
 @pytest.mark.parametrize("mutation", ["symlink", "ancestor", "corruption"])
-def test_hostile_persistent_cache_never_reaches_sdk_or_trainer(fixture, tmp_path, mutation):
-    cached = fixture.roots["persistent_root"] / "models--fixture--tiny" / "snapshots" / REVISION
+def test_hostile_persistent_cache_never_reaches_sdk_or_trainer(
+    fixture, tmp_path, mutation
+):
+    cached = (
+        fixture.roots["persistent_root"]
+        / "models--fixture--tiny"
+        / "snapshots"
+        / REVISION
+    )
     outside = tmp_path / "outside"
     outside.mkdir()
     target = outside / "config.json"
     target.write_bytes(fixture.files["config.json"])
     if mutation == "ancestor":
-        (fixture.roots["persistent_root"] / "models--fixture--tiny").symlink_to(outside, target_is_directory=True)
+        (fixture.roots["persistent_root"] / "models--fixture--tiny").symlink_to(
+            outside, target_is_directory=True
+        )
     else:
         cached.mkdir(parents=True)
         if mutation == "symlink":
             (cached / "config.json").symlink_to(target)
         else:
-            (cached / "config.json").write_bytes(b"x" * len(fixture.files["config.json"]))
+            (cached / "config.json").write_bytes(
+                b"x" * len(fixture.files["config.json"])
+            )
     with pytest.raises(ValueError, match="^model preparation failed$"):
         prepare(fixture)
     assert not any(name == "download" for name, _ in fixture.calls)
@@ -140,6 +204,7 @@ def test_sdk_exception_and_output_are_closed(fixture, monkeypatch, capsys):
         print("fixture credential diagnostic")
         print("fixture provider response", file=sys.stderr)
         raise RuntimeError("fixture raw provider failure")
+
     monkeypatch.setattr(sys.modules["huggingface_hub"], "snapshot_download", fail)
     with pytest.raises(ValueError, match="^model preparation failed$") as failure:
         prepare(fixture)
@@ -148,12 +213,15 @@ def test_sdk_exception_and_output_are_closed(fixture, monkeypatch, capsys):
 
 
 def test_blank_token_disables_implicit_credential_lookup(fixture):
-    prepare_model_snapshot(model_ref=MODEL, revision=REVISION, token="  ", **fixture.roots)
+    prepare_model_snapshot(
+        model_ref=MODEL, revision=REVISION, token="  ", **fixture.roots
+    )
     assert all(kwargs["token"] is False for _, kwargs in fixture.calls)
 
 
 def test_download_symlink_is_rejected(fixture, monkeypatch, tmp_path):
     original = sys.modules["huggingface_hub"].snapshot_download
+
     def download(**kwargs):
         result = original(**kwargs)
         target = Path(result) / "config.json"
@@ -162,6 +230,7 @@ def test_download_symlink_is_rejected(fixture, monkeypatch, tmp_path):
         outside.write_bytes(fixture.files["config.json"])
         target.symlink_to(outside)
         return result
+
     monkeypatch.setattr(sys.modules["huggingface_hub"], "snapshot_download", download)
     with pytest.raises(ValueError, match="^model preparation failed$"):
         prepare(fixture)
@@ -175,46 +244,145 @@ def test_existing_destination_is_never_overwritten(fixture):
     assert (result / "config.json").read_bytes() == original
 
 
-def test_real_runner_prepares_before_credential_free_offline_child(fixture, tmp_path, monkeypatch):
+def test_real_runner_prepares_before_credential_free_offline_child(
+    fixture, tmp_path, monkeypatch
+):
     import json
     from tuner.execution.providers.modal import runtime
 
     mount = tmp_path / "volume"
-    cache = mount / "run-fixture" / "cache"
+    cache = mount / "modal-chat-20260914-e" / "cache"
     cache.mkdir(parents=True)
     scratch = tmp_path / "worker-private"
     path_type = Path
-    monkeypatch.setattr(runtime, "Path", lambda value: {
-        "/workspace/run": mount, "/workspace/model-preparation": scratch,
-    }.get(str(value), path_type(value)))
+
+    def mapped_path(value):
+        text = str(value)
+        if text == "/workspace/model-preparation":
+            return scratch
+        if text == "/workspace/run":
+            return mount
+        if text.startswith("/workspace/run/"):
+            return mount / text.removeprefix("/workspace/run/")
+        return path_type(value)
+
+    monkeypatch.setattr(runtime, "Path", mapped_path)
     monkeypatch.setenv("MODEL_CREDENTIAL", "fixture-credential")
     monkeypatch.setenv("EVIDENCE_CREDENTIAL", "fixture-evidence")
     snapshot = cache / "model" / "models--fixture--tiny" / "snapshots" / REVISION
     child_calls = []
+
     def child(argv, **kwargs):
-        assert (snapshot / "model.safetensors").read_bytes() == fixture.files["model.safetensors"]
+        assert (snapshot / "model.safetensors").read_bytes() == fixture.files[
+            "model.safetensors"
+        ]
         assert "MODEL_CREDENTIAL" not in kwargs["env"]
         assert "EVIDENCE_CREDENTIAL" not in kwargs["env"]
         assert kwargs["env"]["HF_HUB_OFFLINE"] == "1"
         assert kwargs["env"]["TRANSFORMERS_OFFLINE"] == "1"
         child_calls.append(kwargs)
         return SimpleNamespace(returncode=0)
+
     monkeypatch.setattr(runtime.subprocess, "run", child)
     environment = {
-        "SYNAPTIC_CACHE_ROOT": str(cache),
-        "SYNAPTIC_MODEL_SNAPSHOT": str(snapshot),
-        "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+        "SYNAPTIC_CACHE_ROOT": "/workspace/run/modal-chat-20260914-e/cache",
+        "SYNAPTIC_MODEL_SNAPSHOT": "/workspace/run/modal-chat-20260914-e/cache/model/models--fixture--tiny/snapshots/"
+        + REVISION,
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
         "EVIDENCE_CREDENTIAL": "must-be-removed",
     }
-    workload = json.dumps({"configuration": {"document": {"model": {"ref": MODEL, "revision": REVISION}}}}).encode()
+    source = _source_for_run("modal-chat-20260914-e")
+    workload = json.dumps(
+        {
+            "configuration": {
+                "document": {"model": {"ref": MODEL, "revision": REVISION}}
+            },
+            "execution_source": source.to_dict(),
+        }
+    ).encode()
     runner = runtime.SubprocessSftRunner(
         secret_keys=("MODEL_CREDENTIAL", "EVIDENCE_CREDENTIAL"),
-        model_token_key="MODEL_CREDENTIAL", timeout_seconds=10,
+        model_token_key="MODEL_CREDENTIAL",
+        timeout_seconds=10,
     )
-    result = runner.run(("/python", "/runtime.py", "--canonical-workload-stdin"), cwd=str(tmp_path), environment=environment, stdin=workload, commit_prepared=lambda: child_calls.append("committed"))
+    result = runner.run(
+        ("/python", "/runtime.py", "--canonical-workload-stdin"),
+        cwd=str(tmp_path),
+        environment=environment,
+        stdin=workload,
+        commit_prepared=lambda: child_calls.append("committed"),
+    )
     assert result.returncode == 0 and len(child_calls) == 2
     assert child_calls[0] == "committed"
     assert any(name == "download" for name, _ in fixture.calls)
+
+
+@pytest.mark.parametrize("changed", ("run", "cache", "source_cache"))
+def test_runner_denies_changed_run_cache_binding_before_download_or_child(
+    fixture, tmp_path, monkeypatch, changed
+):
+    import json
+    from tuner.execution.providers.modal import runtime
+    from tuner.execution.providers.modal.worker_ports import ModalRemotePhaseError
+
+    mount = tmp_path / "volume"
+    cache = mount / "modal-chat-20260914-e" / "cache"
+    cache.mkdir(parents=True)
+    path_type = Path
+    monkeypatch.setattr(
+        runtime,
+        "Path",
+        lambda value: (
+            mount / str(value).removeprefix("/workspace/run/")
+            if str(value).startswith("/workspace/run/")
+            else mount if str(value) == "/workspace/run" else path_type(value)
+        ),
+    )
+    monkeypatch.setenv("MODEL_CREDENTIAL", "fixture-credential")
+    source = _source_for_run(
+        "different-run" if changed == "run" else "modal-chat-20260914-e",
+        cache_run_id="other-run" if changed == "source_cache" else None,
+    )
+    selected_cache = (
+        "/workspace/run/other-run/cache"
+        if changed == "cache"
+        else "/workspace/run/modal-chat-20260914-e/cache"
+    )
+    environment = {
+        "SYNAPTIC_CACHE_ROOT": selected_cache,
+        "SYNAPTIC_MODEL_SNAPSHOT": selected_cache
+        + "/model/models--fixture--tiny/snapshots/"
+        + REVISION,
+    }
+    workload = json.dumps(
+        {
+            "configuration": {
+                "document": {"model": {"ref": MODEL, "revision": REVISION}}
+            },
+            "execution_source": source.to_dict(),
+        }
+    ).encode()
+    children = []
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *args, **kwargs: children.append(args)
+    )
+    runner = runtime.SubprocessSftRunner(
+        secret_keys=("MODEL_CREDENTIAL",),
+        model_token_key="MODEL_CREDENTIAL",
+        timeout_seconds=10,
+    )
+    with pytest.raises(ModalRemotePhaseError) as failure:
+        runner.run(
+            ("/python", "/runtime.py", "--canonical-workload-stdin"),
+            cwd=str(tmp_path),
+            environment=environment,
+            stdin=workload,
+            commit_prepared=lambda: None,
+        )
+    assert failure.value.diagnostic_code == "model_preparation_failed"
+    assert not any(name == "download" for name, _ in fixture.calls)
+    assert children == []
 
 
 def test_runner_preparation_failure_never_launches_child(monkeypatch):
@@ -223,10 +391,22 @@ def test_runner_preparation_failure_never_launches_child(monkeypatch):
 
     monkeypatch.setenv("MODEL_CREDENTIAL", "fixture")
     calls = []
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *args, **kwargs: calls.append(args))
-    runner = runtime.SubprocessSftRunner(secret_keys=("MODEL_CREDENTIAL",), model_token_key="MODEL_CREDENTIAL", timeout_seconds=10)
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *args, **kwargs: calls.append(args)
+    )
+    runner = runtime.SubprocessSftRunner(
+        secret_keys=("MODEL_CREDENTIAL",),
+        model_token_key="MODEL_CREDENTIAL",
+        timeout_seconds=10,
+    )
     with pytest.raises(ModalRemotePhaseError) as failure:
-        runner.run(("/python", "/runtime.py", "--canonical-workload-stdin"), cwd="/tmp", environment={}, stdin=b"malformed", commit_prepared=lambda: None)
+        runner.run(
+            ("/python", "/runtime.py", "--canonical-workload-stdin"),
+            cwd="/tmp",
+            environment={},
+            stdin=b"malformed",
+            commit_prepared=lambda: None,
+        )
     assert failure.value.diagnostic_code == "model_preparation_failed"
     assert calls == []
 
@@ -237,12 +417,28 @@ def test_cache_commit_failure_never_launches_child(monkeypatch):
 
     monkeypatch.setenv("MODEL_CREDENTIAL", "fixture")
     calls = []
-    monkeypatch.setattr(runtime.SubprocessSftRunner, "_prepare_model", lambda *args: None)
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(
+        runtime.SubprocessSftRunner, "_prepare_model", lambda *args: None
+    )
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *args, **kwargs: calls.append(args)
+    )
+
     def commit():
         raise RuntimeError("fixture private provider response")
-    runner = runtime.SubprocessSftRunner(secret_keys=("MODEL_CREDENTIAL",), model_token_key="MODEL_CREDENTIAL", timeout_seconds=10)
+
+    runner = runtime.SubprocessSftRunner(
+        secret_keys=("MODEL_CREDENTIAL",),
+        model_token_key="MODEL_CREDENTIAL",
+        timeout_seconds=10,
+    )
     with pytest.raises(ModalRemotePhaseError) as failure:
-        runner.run(("/python", "/runtime.py", "--canonical-workload-stdin"), cwd="/tmp", environment={}, stdin=b"fixture", commit_prepared=commit)
+        runner.run(
+            ("/python", "/runtime.py", "--canonical-workload-stdin"),
+            cwd="/tmp",
+            environment={},
+            stdin=b"fixture",
+            commit_prepared=commit,
+        )
     assert failure.value.diagnostic_code == "model_cache_commit_failed"
     assert calls == []

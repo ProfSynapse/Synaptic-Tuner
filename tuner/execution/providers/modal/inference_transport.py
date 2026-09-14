@@ -577,9 +577,16 @@ class ModalInferenceSdkTransport:
                 lambda: sdk.Image.from_id(image_id, client=client),
                 deadline=deadline,
             )
-            _bounded(lambda: image.hydrate(client), deadline=deadline)
+            if getattr(image, "object_id", None) != image_id:
+                raise ValueError
+            # In Modal 1.5.4, Image.from_id presets object_id before provider
+            # readback and cannot hydrate on demand. Building this exact-ID
+            # handle in the already resolved App drives only its ImageFromId
+            # loader (it has no image build steps or ImageGetOrCreate call).
+            resolved_image = _bounded(lambda: image.build(app), deadline=deadline)
             if (
-                getattr(image, "is_hydrated", False) is not True
+                resolved_image is not image
+                or getattr(image, "is_hydrated", False) is not True
                 or getattr(image, "object_id", None) != image_id
             ):
                 raise ValueError

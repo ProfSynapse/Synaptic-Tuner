@@ -258,10 +258,23 @@ class _ImageValue:
     def __init__(self):
         self.is_hydrated = False
         self.hydrate_calls = []
+        self.build_calls = []
+        self.build_error = False
+        self.return_other = False
+        self.response_id = self.object_id
+        self.response_hydrated = True
 
     def hydrate(self, client):
         self.hydrate_calls.append(client)
-        self.is_hydrated = True
+        raise AssertionError("lazy existing Image must not be hydrated")
+
+    def build(self, app):
+        self.build_calls.append(app)
+        if self.build_error:
+            raise RuntimeError("test ImageFromId failure")
+        self.object_id = self.response_id
+        self.is_hydrated = self.response_hydrated
+        return _ImageValue() if self.return_other else self
 
 
 def _submit_transport(
@@ -277,6 +290,12 @@ def _submit_transport(
     real_channel=False,
     ready_eof=False,
     termination_gate=None,
+    image_error=False,
+    create_error=False,
+    image_build_error=False,
+    image_response_mismatch=False,
+    image_return_other=False,
+    image_unhydrated=False,
 ):
     launch = _launch_case(monkeypatch)
     snapshot = _validate_preparation_snapshot(
@@ -311,9 +330,17 @@ def _submit_transport(
         @staticmethod
         def from_id(image_id, **kwargs):
             assert image_id == "im-chat"
+            if image_error:
+                raise RuntimeError("test image lookup failure")
             value = _ImageValue()
             if mismatch == "image":
                 value.object_id = "im-wrong"
+            value.build_error = image_build_error
+            value.response_id = (
+                "im-provider-substitute" if image_response_mismatch else value.object_id
+            )
+            value.return_other = image_return_other
+            value.response_hydrated = not image_unhydrated
             state.image = value
             return value
 
@@ -327,6 +354,8 @@ def _submit_transport(
         @staticmethod
         def create(*args, **kwargs):
             state.creates.append((args, kwargs))
+            if create_error:
+                raise RuntimeError("test sandbox create failure")
             if delayed_create is not None:
                 delayed_create.wait()
             value = _Sandbox(
@@ -493,8 +522,11 @@ def test_submit_creates_one_exact_sandbox_and_publishes_ready_lease(monkeypatch)
     assert kwargs["encrypted_ports"] == kwargs["h2_ports"] == []
     assert kwargs["unencrypted_ports"] == []
     assert kwargs["workdir"] == "/workspace/modal-chat"
+    assert kwargs["image"] is state.image
+    assert state.image.object_id == "im-chat"
     assert state.image.is_hydrated is True
-    assert len(state.image.hydrate_calls) == 1
+    assert state.image.hydrate_calls == []
+    assert state.image.build_calls == [kwargs["app"]]
     lease = handoff.take(submit_command_digest=launch.submit.digest)
     assert lease.sandbox is state.sandbox
     assert handoff.peek(submit_command_digest=launch.submit.digest) is lease
@@ -530,6 +562,44 @@ def test_exact_provider_read_mismatch_is_denied_before_create(monkeypatch, misma
     )
     with pytest.raises(ModalInferenceTransportError):
         transport.execute_once(launch.submit_binding, launch.submit)
+    assert state.creates == []
+    assert handoff.peek(submit_command_digest=launch.submit.digest) is None
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_creates"),
+    (("image", 0), ("image_build", 0), ("create", 1)),
+)
+def test_image_resolution_or_sandbox_create_failure_publishes_no_lease(
+    monkeypatch, failure, expected_creates
+):
+    launch, transport, handoff, state, _ = _submit_transport(
+        monkeypatch,
+        image_error=failure == "image",
+        image_build_error=failure == "image_build",
+        create_error=failure == "create",
+    )
+    with pytest.raises(ModalInferenceTransportError):
+        transport.execute_once(launch.submit_binding, launch.submit)
+    assert len(state.creates) == expected_creates
+    assert handoff.peek(submit_command_digest=launch.submit.digest) is None
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ("response_id", "returned_handle", "unhydrated"),
+)
+def test_image_readback_mismatch_is_denied_before_sandbox_create(monkeypatch, failure):
+    launch, transport, handoff, state, _ = _submit_transport(
+        monkeypatch,
+        image_response_mismatch=failure == "response_id",
+        image_return_other=failure == "returned_handle",
+        image_unhydrated=failure == "unhydrated",
+    )
+    with pytest.raises(ModalInferenceTransportError):
+        transport.execute_once(launch.submit_binding, launch.submit)
+    assert len(state.image.build_calls) == 1
+    assert state.image.hydrate_calls == []
     assert state.creates == []
     assert handoff.peek(submit_command_digest=launch.submit.digest) is None
 

@@ -255,7 +255,12 @@ class ExplicitModal154ReadFacade:
         provider_job_ref = safe_ref(provider_job_ref, "provider_job_ref")
         try:
             call = self.sdk.FunctionCall.from_id(provider_job_ref, client=self.client)
-            if getattr(call, "object_id", None) != provider_job_ref:
+            hydrated = call.hydrate(self.client)
+            if (
+                hydrated is not call
+                or getattr(call, "is_hydrated", False) is not True
+                or getattr(call, "object_id", None) != provider_job_ref
+            ):
                 return ModalFunctionCallState.UNKNOWN
         except Exception:
             return ModalFunctionCallState.UNKNOWN

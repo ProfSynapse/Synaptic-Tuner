@@ -246,7 +246,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__facade_py": {
       "path": "tuner/execution/providers/modal/facade.py",
-      "sha256": "9855caa9950e1b54fb097b3bb11d206da2a6a4e33fc1cda988bace76c5e39955"
+      "sha256": "2c30a3c86f8ce32da569b8472f3816141baf5c555b38f490f68a9f730f0032f6"
     },
     "bootstrap__tuner__execution__providers__modal__manifest_py": {
       "path": "tuner/execution/providers/modal/manifest.py",
@@ -370,7 +370,7 @@
     },
     "modal_runtime": {
       "path": "tuner/execution/providers/modal/runtime.py",
-      "sha256": "11da9868d5fa0778dfe0082bad1cd00aabe4a0ab0caeae6cafc0b655ae91fdb8"
+      "sha256": "ada13733021a6dab19331da80076df630055abc5bddc192a34a5cda65ac718c4"
     },
     "modal_worker_ports": {
       "path": "tuner/execution/providers/modal/worker_ports.py",
