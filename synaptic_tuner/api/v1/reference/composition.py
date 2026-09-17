@@ -22,9 +22,12 @@ family exists::
         family=family, ports=ports, requests=requests, authority=authority)
     api = composition.api()
 
-The effect repository and the publication store are process-local in this
-version; the five coordinator stores are durable through the host record
-store (``repositories.py``).
+The five coordinator stores, the foundation effect ledger and the host
+authorization commitments are all durable through the host record and stream
+stores (``repositories.py``, ``training.py``), so a second host composed over
+the same stores after ``start`` drives ``outcome``, ``cancel`` and
+``reconcile`` for a run the first host began. Only the publication store is
+process-local in this version.
 """
 
 from __future__ import annotations
@@ -32,7 +35,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from synaptic_tuner.api.v1.host import APIHost, HostPorts
-from tuner.execution.foundation_v2.repository import InMemoryEffectRepositoryV2
 
 from .artifacts import compose_reference_artifacts
 from .authority import (
@@ -51,6 +53,7 @@ from .provider_family import (
     require_methods,
 )
 from .repositories import (
+    DurableEffectRepositoryV1,
     DurableExecutionGrantStoreV1,
     DurablePlanningStoreV1,
     DurablePreparationStoreV1,
@@ -97,13 +100,15 @@ def compose_reference_stores(
     authority: ReferenceAuthorityV1,
     family: ProviderFamilyV1,
 ) -> CoordinatorStoresV1:
-    """The five coordinator store ports over the host record store."""
+    """The five coordinator store ports over the host record and stream stores."""
     records = ports.records
     require_methods(records, "create", "read", "compare_and_swap", "put_if_absent", "list_page")
+    require_methods(ports.streams, "append", "read_page")
     return CoordinatorStoresV1(
         DurablePlanningStoreV1(records),
         DurableWorkflowStoreV1(
             records,
+            ports.streams,
             foundation_authenticator=authority.foundation_authenticator,
             assessment_authenticator=authority.assessment_authority,
             observation_authenticator=family.observation_authenticator,
@@ -139,12 +144,13 @@ def compose_reference_host(
     quiescence = family.quiescence_evidence
     if quiescence is None:
         quiescence = UnavailableQuiescenceEvidenceV1()
-    repository = InMemoryEffectRepositoryV2(
-        authority.receipt_authority,
-        authority.invalid_evidence_authority,
-        recovery,
-        recovery,
-        authority.grant_authority,
+    repository = DurableEffectRepositoryV1(
+        ports.records,
+        receipt_authority=authority.receipt_authority,
+        invalid_evidence_authority=authority.invalid_evidence_authority,
+        recovery_verifier=recovery,
+        finality_verifier=recovery,
+        grant_authority=authority.grant_authority,
     )
     foundation_ports = FoundationPortsV1(
         repository,
@@ -157,6 +163,7 @@ def compose_reference_host(
     )
     stores = compose_reference_stores(ports=ports, authority=authority, family=family)
     authorization = ReferenceAuthorizationV1(
+        records=ports.records,
         grants=ports.grants,
         authority=authority.grant_authority,
         clock=authority.clock,

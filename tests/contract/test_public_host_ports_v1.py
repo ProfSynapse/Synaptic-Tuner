@@ -30,7 +30,7 @@ STREAM = "observation"
 EXPECTED_PARTITIONS = frozenset({
     "workflow", "plan", "plan_context", "preparation", "execution_grant",
     "reconciliation_grant", "publication", "evaluation", "data", "pipeline",
-    "chat_session", "observation",
+    "chat_session", "observation", "effects", "authorization",
 })
 PORT_NAMES = (
     "ClockPort", "SecretResolverPort", "GrantAuthorityPort",
@@ -51,7 +51,7 @@ def _methods(protocol: type) -> frozenset[str]:
 def test_partition_vocabulary_is_closed() -> None:
     assert frozenset(member.value for member in StoragePartition) == EXPECTED_PARTITIONS
     assert STORAGE_PARTITIONS == EXPECTED_PARTITIONS
-    assert len(StoragePartition) == 12
+    assert len(StoragePartition) == 14
     for value in EXPECTED_PARTITIONS:
         assert require_partition(value) == value
     for unknown in ("lifecycle", "Workflow", " workflow", "", "observation\n"):

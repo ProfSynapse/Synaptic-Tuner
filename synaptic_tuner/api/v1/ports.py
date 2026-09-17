@@ -17,6 +17,14 @@ record already sits at revision 1, and fails when the key holds anything
 else. Neither verb ever rewrites. ``DurableStreamStorePort`` is append-only
 with a strictly increasing per-stream sequence and never rewrites either.
 
+The partition vocabulary is shared by both ports. Three partitions carry
+authority and must be retained by the host for as long as the entity lives:
+``workflow`` (the run head record on the record port and the run's
+transition history on the stream port), ``effects`` (the foundation effect
+ledger, one record per effect) and ``authorization`` (the host grant
+commitments behind every effect grant). ``observation`` carries no authority
+and a host may truncate it.
+
 Pages reuse the paging discipline of ``runs_facade.py``: ``next_cursor`` and
 ``truncated`` agree, a truncated page carries at least one item, and the
 cursor is the last item's key or sequence.
@@ -59,6 +67,8 @@ class StoragePartition(str, Enum):
     PIPELINE = "pipeline"
     CHAT_SESSION = "chat_session"
     OBSERVATION = "observation"
+    EFFECTS = "effects"
+    AUTHORIZATION = "authorization"
 
 
 STORAGE_PARTITIONS = frozenset(member.value for member in StoragePartition)

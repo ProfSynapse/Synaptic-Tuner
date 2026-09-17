@@ -19,7 +19,8 @@ Modules:
 - ``stores.py``: in-memory ``DurableRecordStorePort`` and ``DurableStreamStorePort``.
 - ``provider_family.py``: ``ProviderFamilyV1`` and the provider-neutral
   ``compose_family_coordinator`` extracted from the Modal composition.
-- ``repositories.py``: the five coordinator store ports over ``DurableRecordStorePort``.
+- ``repositories.py``: the five coordinator store ports over the host record
+  and stream stores, plus the durable foundation effect ledger.
 - ``authority.py``: engine authorities derived from one named secret.
 - ``training.py``, ``runs.py``, ``artifacts.py``: the three facade
   implementations and the host authorization bridge.

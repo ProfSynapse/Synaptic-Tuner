@@ -323,15 +323,25 @@ def _revalidate_effect_record_v2_canonical(record,receipt_authority,invalid_evid
     return record
 
 
-class InMemoryEffectRepositoryV2:
-    def __init__(self, receipt_authority, invalid_evidence_authority, recovery_verifier, finality_verifier, grant_authority):
+class EffectRepositoryV2:
+    """The effect ledger over a ``records`` mapping of ``effect_id -> EffectRecordV2``.
+
+    Every verb reads and writes the mapping under one re-entrant lock, always
+    reading a record before replacing it, so a mapping backed by a durable
+    compare-and-swap store can bind each write to the revision it last read
+    and refuse a lost update. The mapping needs ``get``, ``__getitem__``
+    (``KeyError`` when absent) and ``__setitem__``; nothing else is touched.
+    ``InMemoryEffectRepositoryV2`` is this class over a plain ``dict``.
+    """
+
+    def __init__(self, receipt_authority, invalid_evidence_authority, recovery_verifier, finality_verifier, grant_authority, records):
         self._receipt = receipt_authority
         self._invalid_evidence = invalid_evidence_authority
         self._recovery = recovery_verifier
         self._finality = finality_verifier
         self._grants = grant_authority
         self._lock = RLock()
-        self._records = {}
+        self._records = records
 
     def _revalidate_stored_record(self,record):
         valid=False
@@ -767,9 +777,9 @@ class InMemoryEffectRepositoryV2:
                 self._records[effect_id]=replacement
                 return replacement
             reduced = self._reduce_receipt_locked(record, receipt, proof, now_epoch=now_epoch)
-            if source_claim is record.reconciliation and source_claim.active:
+            if source_claim == record.reconciliation and source_claim.active:
                 completed=replace(source_claim,active=False,completed=True)
-                claims=tuple(completed if value is source_claim else value for value in reduced.reconciliation_claims)
+                claims=tuple(completed if value == source_claim else value for value in reduced.reconciliation_claims)
                 replacement=replace(reduced,reconciliation=completed,reconciliation_claims=claims)
             else:replacement=reduced
             self._records[effect_id] = replacement
@@ -778,3 +788,10 @@ class InMemoryEffectRepositoryV2:
     def get(self, effect_id):
         with self._lock:
             return self._records.get(effect_id)
+
+
+class InMemoryEffectRepositoryV2(EffectRepositoryV2):
+    """``EffectRepositoryV2`` over a process-local ``dict``; nothing survives the process."""
+
+    def __init__(self, receipt_authority, invalid_evidence_authority, recovery_verifier, finality_verifier, grant_authority):
+        super().__init__(receipt_authority, invalid_evidence_authority, recovery_verifier, finality_verifier, grant_authority, {})

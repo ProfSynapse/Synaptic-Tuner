@@ -13,6 +13,16 @@ def test_observation_replay_is_identity_and_revision_only_tracks_new_evidence():
  assert running.revision==current.revision+1
  assert apply_provider_observation(running,request,envelope,ObservationAuth()) is running
 
+def test_unchanged_phase_observation_is_identity_but_still_authenticated():
+ current,foundation=queued_evidence();request,envelope=observation(current,foundation,ProviderRunPhaseV1.RUNNING,{"phase":"running"})
+ running=apply_provider_observation(current,request,envelope,ObservationAuth())
+ request,again=observation(running,foundation,ProviderRunPhaseV1.RUNNING,{"phase":"still-running"})
+ assert again.authenticated_observation_digest not in running.run_observation_digests
+ assert apply_provider_observation(running,request,again,ObservationAuth()) is running
+ with pytest.raises(WorkflowTransitionError,match="authentication"): apply_provider_observation(running,request,again,ObservationAuth(False))
+ request,failed=observation(running,foundation,ProviderRunPhaseV1.FAILED,{"phase":"failed"},"provider_failed")
+ assert apply_provider_observation(running,request,failed,ObservationAuth()).revision==running.revision+1
+
 def test_running_to_queued_regression_is_closed():
  current,foundation=queued_evidence();request,envelope=observation(current,foundation,ProviderRunPhaseV1.RUNNING,{"phase":"running"});running=apply_provider_observation(current,request,envelope,ObservationAuth())
  request,queued_observation=observation(running,foundation,ProviderRunPhaseV1.QUEUED,{"phase":"queued"})

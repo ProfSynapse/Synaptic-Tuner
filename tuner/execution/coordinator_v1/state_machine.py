@@ -314,6 +314,11 @@ def apply_provider_observation(c,request,o,authenticator):
  if actual!=expected:raise WorkflowTransitionError("observation request/workflow/scope mismatch")
  target=_OBS.get(c.phase,{}).get(x.phase)
  if target is None:raise WorkflowTransitionError("new observation illegal")
+ # A poll that observes no phase change and carries no diagnostic changes
+ # nothing the record projects, so it is identity: no revision, no retained
+ # observation. Every authentication and binding check above still ran, so a
+ # forged or stale no-change observation is refused before reaching here.
+ if target is c.phase and x.diagnostic_code is None:return c
  codes=c.diagnostic_codes+(() if x.diagnostic_code is None else (x.diagnostic_code,))
  return WorkflowRecordV1(c.schema_version,c.run,c.plan_fingerprint,c.preflight_digest,c.provider,c.provider_context_digest,c.provider_descriptor_digest,target,c.revision+1,c.preparation_digest,c.stage,c.submit,c.cancel,c.provider_stage_ref,c.provider_run_ref,c.bound_cancellation,c.pre_cancel_phase,c.run_observation_digests+(digest,),None,None,(),(),(),codes,c.provider_run_observations+(parsed,))
 
