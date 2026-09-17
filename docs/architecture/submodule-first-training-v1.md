@@ -82,9 +82,11 @@ No historical lifecycle record is implicitly converted into new authority.
 This checkpoint is `IMPLEMENTED_FAKE_TESTED`, not `LIVE_PROVEN`: 2,043 tests
 passed in the clean SDK-free selection, with a separate installed-wheel check.
 It does not meet the live local-Docker Phase 2 gate below merely because
-provider-free Docker adapter tests are included. The Modal descriptor's six
-advertised read, lifecycle, artifact-streaming, and cost-quote flags remain
-false; they are not a master switch for authenticated start. The earlier live
+provider-free Docker adapter tests are included. The Modal descriptor
+advertises `observe` and `artifact_streaming` as true
+(`ProviderCapabilities(True, False, False, False, True, False)`); its logs,
+cancel, reconcile, and cost-quote flags remain false, and none of them is a
+master switch for authenticated start. The earlier live
 run and publication receipts qualify only their recorded implementation, not
 this replacement. Verified local model loading
 and bounded chat are still separate work, and no main-branch release is implied.

@@ -29,7 +29,7 @@ from tuner.execution.coordinator_v1.state_machine import (
     project_run_outcome,
     provider_run_read_request,
 )
-from tuner.execution.coordinator_v1.stores import _revalidate_workflow
+from tuner.execution.coordinator_v1.stores import revalidate_workflow
 from tuner.execution.foundation_v2.canonical import (
     canonical_bytes,
     domain_digest,
@@ -504,7 +504,7 @@ class ModalInferenceSourceBinder:
         value = self._workflows.get(_run(run))
         if type(value) is not WorkflowRecordV1 or value.run != run:
             raise ValueError("retained workflow is unavailable")
-        return _revalidate_workflow(value)
+        return revalidate_workflow(value)
 
     def bind(self, runs: RunsAPI, run: TrainingRunRef) -> ModalInferenceSourceBinding:
         try:

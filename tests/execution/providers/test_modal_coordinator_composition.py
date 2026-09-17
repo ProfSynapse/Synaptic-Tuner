@@ -211,14 +211,14 @@ def test_factory_rejects_preflight_from_another_preparation_before_provider_io(m
 
 
 def test_static_port_validation_does_not_invoke_hostile_properties():
-    from tuner.execution.providers.modal.coordinator_composition import _methods
+    from synaptic_tuner.api.v1.reference.provider_family import require_methods
     import pytest
     touched=[]
     class Hostile:
         @property
         def get(self): touched.append(True); raise AssertionError
     with pytest.raises(TypeError, match="incomplete"):
-        _methods(Hostile(), "get")
+        require_methods(Hostile(), "get")
     assert touched == []
 
 

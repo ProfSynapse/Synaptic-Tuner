@@ -136,4 +136,4 @@ class CoordinatorTrainingService:
         return TrainingStart(workflow.run, True)
 
 
-__all__: list[str] = []
+__all__ = ["CoordinatorTrainingService"]

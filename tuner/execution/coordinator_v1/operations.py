@@ -202,7 +202,7 @@ class _ArtifactStreamV1:
             raise _closed(RunOperationCode.ARTIFACT_CONTENT_INVALID)
 
 
-class TrainingOperationsV1:
+class RunOperationsV1:
     _ACTIVE_OBSERVATION = frozenset(
         {
             WorkflowPhaseV1.QUEUED,
@@ -621,4 +621,4 @@ class TrainingOperationsV1:
         )
 
 
-__all__: list[str] = []
+__all__ = ["RunOperationsV1"]

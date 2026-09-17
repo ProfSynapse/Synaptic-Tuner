@@ -93,9 +93,10 @@ import compose_reference_host`. A contract test pins the exclusion — `"referen
 not in _LAZY_MODULE_ATTRIBUTES`, no `compose_*` in `_FORMAL_EXPORTS` — so nobody can
 quietly add it and break the package gate.
 
-**Naming (open question 2).** `TrainingOperationsV1`
-(`coordinator_v1/operations.py:205`) implements `RunsOperations`, not
-`TrainingOperations`. It is renamed `RunOperationsV1` in the slice that exports it,
+**Naming (open question 2).** The operations class in
+`coordinator_v1/operations.py:205` implements `RunsOperations`, not
+`TrainingOperations`, and its former `Training…OperationsV1` name was misleading.
+It is renamed `RunOperationsV1` in the slice that exports it,
 propagated in the same commit to `coordinator_composition.py:61,254`, the Docker
 composition tests and the conformance suite. Exporting a misleadingly named class
 is worse than a rename.
@@ -683,7 +684,7 @@ same commit as the change that breaks it.
 | `import synaptic_tuner.host.v1` in the module gate | `test_provider_neutral_foundation_v1.py:457` | §5.1 deletion |
 | `host/v1/ports.py` in the AST source gate path list | `test_provider_neutral_foundation_v1.py:468` | §5.1 deletion |
 | `test_secondary_host_v1_publication_protocols_are_absent` | `test_public_publication_v1.py:421-429` | §5.1 deletion |
-| `TrainingOperationsV1` name | `coordinator_composition.py:61,254`; Docker composition tests; conformance suite `:506` | §3.2 rename |
+| former `Training…OperationsV1` name (now `RunOperationsV1`) | `coordinator_composition.py:61,254`; Docker composition tests; conformance suite `:506` | §3.2 rename |
 | Module and AST gate file lists | `test_provider_neutral_foundation_v1.py:450-473` | every new contract module must be added to both |
 
 The last row is the one most likely to be missed: adding a contract file without

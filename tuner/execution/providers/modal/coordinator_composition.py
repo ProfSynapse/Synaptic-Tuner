@@ -1,16 +1,32 @@
-"""Provider-I/O-free composition of the inactive Modal coordinator."""
+"""Provider-I/O-free composition of the inactive Modal coordinator.
+
+Location: ``tuner/execution/providers/modal/coordinator_composition.py``.
+
+``compose_modal_coordinator`` builds the Modal ``ProviderFamilyV1`` (transport,
+executor, reconciliation adapter, read transport, reader, retention delegate)
+and hands it to the provider-neutral ``compose_family_coordinator`` in
+``synaptic_tuner/api/v1/reference/provider_family.py``. The Modal exact-type
+and retained-binding checks stay here: they are load-bearing Modal invariants
+(one retained preparation, one clock, one deployment, one quote), not
+composition boilerplate. Its return type ``ModalCoordinatorComposition`` is
+unchanged for ``examples/modal_chat/host.py`` and the composition tests.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-from inspect import getattr_static
 
+from synaptic_tuner.api.v1.reference.provider_family import (
+    CoordinatorRequestPortsV1,
+    CoordinatorStoresV1,
+    FoundationPortsV1,
+    ProviderFamilyV1,
+    compose_family_coordinator,
+    require_methods,
+)
 from tuner.execution.coordinator_v1.coordinator import TrainingCoordinatorV1
-from tuner.execution.coordinator_v1.foundation import ComposedEffectFoundationV1
-from tuner.execution.coordinator_v1.operations import TrainingOperationsV1
-from tuner.execution.foundation_v2.broker import EffectBrokerV2
+from tuner.execution.coordinator_v1.operations import RunOperationsV1
 from tuner.execution.foundation_v2.canonical import canonical_bytes, parse_canonical_object
-from tuner.execution.foundation_v2.reconciliation import ReconciliationServiceV1
 from tuner.training.coordinator_service import CoordinatorTrainingService
 from tuner.training.recipes import RecipeRegistry
 from tuner.project.execution_source import ExecutionSourceV1
@@ -58,17 +74,31 @@ class ModalCoordinatorStorePorts:
 @dataclass(frozen=True, slots=True)
 class ModalCoordinatorComposition:
     training: CoordinatorTrainingService
-    runs: TrainingOperationsV1
+    runs: RunOperationsV1
     registration: object
     foundation: ModalFoundationRetentionDelegate
     coordinator: TrainingCoordinatorV1
 
 
-def _methods(value: object, *names: str) -> None:
-    missing = object()
-    if any((member := getattr_static(type(value), name, missing)) is missing
-           or not callable(member) for name in names):
-        raise TypeError("Modal coordinator composition port is incomplete")
+class _ModalFoundationRetention:
+    """``ProviderFamilyV1.foundation_retention``: wrap the core in the Modal delegate."""
+
+    def __init__(self, ports: ModalFoundationCompositionPorts) -> None:
+        self._ports = ports
+
+    def retain(self, core) -> ModalFoundationRetentionDelegate:
+        ports = self._ports
+        return ModalFoundationRetentionDelegate(
+            core, foundation_authenticator=ports.foundation_authenticator,
+            assessment_authority=ports.assessment_authority,
+            binding_authority=ports.binding_authority,
+            stage_authority=ports.stage_authority,
+            launch_authority=ports.launch_authority,
+            binding_catalog=ports.binding_catalog,
+            stage_catalog=ports.stage_catalog,
+            launch_catalog=ports.launch_catalog,
+            retained_inputs=ports.retained_inputs,
+        )
 
 
 def compose_modal_coordinator(
@@ -134,23 +164,8 @@ def compose_modal_coordinator(
         or operational_preflight._quote.body.quote_digest != binding.quote_digest
     ):
         raise ValueError("operational source or quote differs")
+    # Modal-only ports; the neutral composition sweeps the shared ones.
     for value, names in (
-        (loader, ("load",)), (resolver, ("resolve",)),
-        (authorization, ("commit_preflight", "issue_effect_grant", "issue_reconciliation_grant")),
-        (clock, ("now", "now_iso", "now_epoch")), (run_identity, ("for_plan",)),
-        (foundation_ports.effect_repository, (
-            "get", "begin_dispatch", "consume_attempt", "complete_dispatch",
-            "complete_invalid_dispatch", "relinquish", "orphan",
-            "acquire_reconciliation", "complete_reconciliation",
-            "interrupt_reconciliation", "interrupt_invalid_reconciliation",
-            "prove_quiescence",
-        )),
-        (foundation_ports.grant_authority, ("authenticate", "verify", "verify_reconciliation")),
-        (foundation_ports.receipt_authority, ("issue", "verify")),
-        (foundation_ports.invalid_evidence_authority, ("issue", "verify")),
-        (foundation_ports.assessment_authority, ("assess", "authenticate")),
-        (foundation_ports.foundation_authenticator, ("authenticate_grant",)),
-        (foundation_ports.trusted_quiescence_evidence, ("obtain",)),
         (foundation_ports.binding_authority, ("authenticate",)),
         (foundation_ports.stage_authority, ("sign", "verify")),
         (foundation_ports.launch_authority, ("sign", "verify")),
@@ -160,17 +175,8 @@ def compose_modal_coordinator(
         (foundation_ports.retained_inputs, ("resolve",)),
         (evidence_authority, ("observation", "log_page")),
         (evidence_verifier, ("verify",)),
-        (observation_authenticator, ("authenticate",)),
-        (log_authenticator, ("authenticate",)),
-        (artifact_verifier, ("verify", "replay", "authenticate")),
-        (cursor_authority, ("issue", "verify")),
-        (stores.planning_store, ("put_plan_if_absent", "get_plan", "put_context_if_absent", "get_context")),
-        (stores.workflow_store, ("create", "get", "get_by_plan", "list_page", "is_descendant", "compare_and_swap")),
-        (stores.preparation_store, ("put_if_absent", "get")),
-        (stores.execution_grant_store, ("put_if_absent", "get")),
-        (stores.reconciliation_grant_store, ("put_if_absent", "get")),
     ):
-        _methods(value, *names)
+        require_methods(value, *names)
     transport = ModalFoundationHostTransport(
         facade=facade, deployment=deployment,
         stage_source=foundation_ports.stage_catalog,
@@ -193,35 +199,6 @@ def compose_modal_coordinator(
         catalog=foundation_ports.binding_catalog,
         authority=foundation_ports.binding_authority, transport=transport,
     )
-    broker = EffectBrokerV2(
-        foundation_ports.effect_repository, ModalFoundationExecutorResolver(executor),
-        foundation_ports.grant_authority, foundation_ports.receipt_authority,
-        foundation_ports.invalid_evidence_authority,
-    )
-    reconciliation = ReconciliationServiceV1(
-        foundation_ports.effect_repository, foundation_ports.grant_authority,
-        ModalFoundationReconciliationResolver(reconciliation_adapter),
-        foundation_ports.receipt_authority, foundation_ports.invalid_evidence_authority,
-    )
-    core = ComposedEffectFoundationV1(
-        foundation_ports.effect_repository, broker, reconciliation,
-        grant_authority=foundation_ports.grant_authority,
-        receipt_authority=foundation_ports.receipt_authority,
-        invalid_evidence_authority=foundation_ports.invalid_evidence_authority,
-        assessment_authority=foundation_ports.assessment_authority,
-        trusted_quiescence_evidence=foundation_ports.trusted_quiescence_evidence,
-    )
-    retained = ModalFoundationRetentionDelegate(
-        core, foundation_authenticator=foundation_ports.foundation_authenticator,
-        assessment_authority=foundation_ports.assessment_authority,
-        binding_authority=foundation_ports.binding_authority,
-        stage_authority=foundation_ports.stage_authority,
-        launch_authority=foundation_ports.launch_authority,
-        binding_catalog=foundation_ports.binding_catalog,
-        stage_catalog=foundation_ports.stage_catalog,
-        launch_catalog=foundation_ports.launch_catalog,
-        retained_inputs=foundation_ports.retained_inputs,
-    )
     read_transport = ModalFoundationReadTransport(
         facade=facade, deployment=deployment,
         launch_source=foundation_ports.launch_catalog,
@@ -240,28 +217,43 @@ def compose_modal_coordinator(
         evidence_authority=evidence_authority, transport=read_transport,
         observed_at=observed_at,
     )
-    coordinator = TrainingCoordinatorV1(
-        operational_preflight, stores.planning_store, stores.workflow_store,
-        stores.preparation_store, stores.execution_grant_store,
-        stores.reconciliation_grant_store, preparation, preparation,
-        authorization, retained, foundation_ports.foundation_authenticator,
-        clock, run_identity,
+    family = ProviderFamilyV1(
+        descriptor=preparation.describe(context.provider),
+        planning=operational_preflight,
+        preparation=preparation,
+        reader=reader,
+        executor_resolver=ModalFoundationExecutorResolver(executor),
+        reconciliation_resolver=ModalFoundationReconciliationResolver(reconciliation_adapter),
+        evidence_authority=evidence_authority,
+        artifact_verifier=artifact_verifier,
+        observation_authenticator=observation_authenticator,
+        log_authenticator=log_authenticator,
+        foundation_retention=_ModalFoundationRetention(foundation_ports),
     )
-    training = CoordinatorTrainingService(
-        loader=loader, resolver=resolver, planning=operational_preflight,
-        planning_store=stores.planning_store, coordinator=coordinator, clock=clock,
+    composed = compose_family_coordinator(
+        family=family,
+        stores=CoordinatorStoresV1(
+            stores.planning_store, stores.workflow_store, stores.preparation_store,
+            stores.execution_grant_store, stores.reconciliation_grant_store,
+        ),
+        foundation=FoundationPortsV1(
+            foundation_ports.effect_repository, foundation_ports.grant_authority,
+            foundation_ports.receipt_authority, foundation_ports.invalid_evidence_authority,
+            foundation_ports.assessment_authority, foundation_ports.foundation_authenticator,
+            foundation_ports.trusted_quiescence_evidence,
+        ),
+        requests=CoordinatorRequestPortsV1(
+            loader, resolver, run_identity, authorization, cursor_authority, clock,
+        ),
     )
-    runs = TrainingOperationsV1(
-        operational_preflight, stores.planning_store, stores.workflow_store,
-        coordinator, retained, foundation_ports.foundation_authenticator,
-        foundation_ports.assessment_authority, reader,
-        observation_authenticator, log_authenticator, artifact_verifier,
-        cursor_authority, clock,
-    )
+    if type(composed.foundation) is not ModalFoundationRetentionDelegate:
+        raise TypeError("Modal composition must retain through the Modal delegate")
     registration = modal_coordinator_registration(
         preparation, executor, reconciliation_adapter, reader,
     )
-    return ModalCoordinatorComposition(training, runs, registration, retained, coordinator)
+    return ModalCoordinatorComposition(
+        composed.training, composed.runs, registration, composed.foundation, composed.coordinator,
+    )
 
 
 __all__: list[str] = []

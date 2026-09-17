@@ -1,4 +1,12 @@
-"""Thread-safe in-memory stores with coordinator-owned transition validation."""
+"""Thread-safe in-memory stores with coordinator-owned transition validation.
+
+The module-level validators (``revalidate_workflow``, ``revalidate_transition``,
+``replay_transition``, ``validate_preparation``, ``validate_execution_grant``,
+``validate_reconciliation_grant``, ``workflow_run_key``) are the single source of
+the coordinator's persistence invariants. The in-memory stores below and the
+provider-neutral record-store adapters in ``synaptic_tuner.api.v1.reference``
+both delegate to them so a durable store cannot drift from the in-memory one.
+"""
 
 from __future__ import annotations
 
@@ -85,7 +93,14 @@ def _workflow_key(run: TrainingRunRef) -> tuple[str, str]:
     return run.project_ref, run.run_id
 
 
-def _revalidate_workflow(record: WorkflowRecordV1) -> WorkflowRecordV1:
+def workflow_run_key(run: TrainingRunRef) -> str:
+    """Stable, opaque list-ordering key for a run (hex digest)."""
+    if type(run) is not TrainingRunRef:
+        raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
+    return domain_digest("synaptic-coordinator-run-key/v1", canonical_bytes(run.to_dict()))
+
+
+def revalidate_workflow(record: WorkflowRecordV1) -> WorkflowRecordV1:
     if type(record) is not WorkflowRecordV1:
         raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
     try:
@@ -202,7 +217,7 @@ def _transition_document(transition):
     raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
 
 
-def _revalidate_transition(transition):
+def revalidate_transition(transition):
     if type(transition) not in _TRANSITION_TYPES:
         raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
     try:
@@ -223,6 +238,84 @@ def _revalidate_transition(transition):
     if rebuilt != transition:
         raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
     return rebuilt, fingerprint
+
+
+def replay_transition(
+    current: WorkflowRecordV1,
+    transition: CoordinatorTransitionV1,
+    *,
+    foundation_authenticator,
+    assessment_authenticator,
+    observation_authenticator,
+    artifact_verifier,
+) -> WorkflowRecordV1:
+    """Re-derive the successor record for ``transition`` applied to ``current``.
+
+    Every store must call this before accepting a replacement so that a stored
+    successor is always the deterministic result of the recorded transition.
+    """
+    failed = False
+    try:
+        if type(transition) is BeginPreparationTransitionV1:
+            return begin_preparation(current)
+        if type(transition) is RecordStageIntentTransitionV1:
+            return record_stage_intent(
+                current, transition.preparation, transition.intent
+            )
+        if type(transition) is ApplyStageEffectTransitionV1:
+            return apply_stage_effect_record(
+                current,
+                transition.record,
+                transition.assessment,
+                foundation_authenticator,
+                assessment_authenticator,
+            )
+        if type(transition) is RecordSubmitIntentTransitionV1:
+            return record_submit_intent(current, transition.intent)
+        if type(transition) is ApplySubmitEffectTransitionV1:
+            return apply_submit_effect_record(
+                current,
+                transition.record,
+                transition.assessment,
+                foundation_authenticator,
+                assessment_authenticator,
+            )
+        if type(transition) is RecordCancelIntentTransitionV1:
+            return record_cancel_intent(current, transition.intent)
+        if type(transition) is ApplyCancelEffectTransitionV1:
+            return apply_cancel_effect_record(
+                current,
+                transition.record,
+                transition.assessment,
+                foundation_authenticator,
+                assessment_authenticator,
+            )
+        if type(transition) is ApplyProviderObservationTransitionV1:
+            return apply_provider_observation(
+                current,
+                transition.request,
+                transition.observation,
+                observation_authenticator,
+            )
+        if type(transition) is ApplyArtifactVerificationTransitionV1:
+            return apply_artifact_verification(
+                current,
+                transition.manifest,
+                transition.receipt,
+                artifact_verifier,
+            )
+        if type(transition) is ApplyReverificationTransitionV1:
+            return apply_reverification(
+                current,
+                transition.manifest,
+                transition.receipt,
+                artifact_verifier,
+            )
+    except Exception:
+        failed = True
+    if failed:
+        raise _closed(CoordinatorStoreCode.TRANSITION_INVALID)
+    raise _closed(CoordinatorStoreCode.TRANSITION_INVALID)
 
 
 class InMemoryWorkflowStoreV1:
@@ -265,7 +358,7 @@ class InMemoryWorkflowStoreV1:
         ):
             raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
         try:
-            genesis = _revalidate_workflow(history[0])
+            genesis = revalidate_workflow(history[0])
             if (
                 genesis.phase is not WorkflowPhaseV1.PLANNED
                 or genesis.revision != 0
@@ -276,10 +369,10 @@ class InMemoryWorkflowStoreV1:
             if history_digests[0] != genesis.record_digest:
                 raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
             for index, transition in enumerate(transitions):
-                transition, fingerprint = _revalidate_transition(transition)
+                transition, fingerprint = revalidate_transition(transition)
                 if transition_digests[index] != fingerprint:
                     raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
-                following = _revalidate_workflow(history[index + 1])
+                following = revalidate_workflow(history[index + 1])
                 if (
                     following.revision != previous.revision + 1
                     or following.run != genesis.run
@@ -301,7 +394,7 @@ class InMemoryWorkflowStoreV1:
 
     def _retained(self, key: tuple[str, str]) -> WorkflowRecordV1:
         try:
-            retained = _revalidate_workflow(self._records[key])
+            retained = revalidate_workflow(self._records[key])
         except (KeyError, CoordinatorStoreError):
             raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR) from None
         index = (retained.run.project_ref, retained.plan_fingerprint)
@@ -315,7 +408,7 @@ class InMemoryWorkflowStoreV1:
         return retained
 
     def create(self, record: WorkflowRecordV1) -> bool:
-        candidate = _revalidate_workflow(record)
+        candidate = revalidate_workflow(record)
         if candidate.phase is not WorkflowPhaseV1.PLANNED or candidate.revision != 0:
             raise _closed(CoordinatorStoreCode.TRANSITION_INVALID)
         key = _workflow_key(candidate.run)
@@ -406,10 +499,7 @@ class InMemoryWorkflowStoreV1:
             seen: dict[str, TrainingRunRef] = {}
             for key in tuple(self._records):
                 retained = self._retained(key)
-                run_key = domain_digest(
-                    "synaptic-coordinator-run-key/v1",
-                    canonical_bytes(retained.run.to_dict()),
-                )
+                run_key = workflow_run_key(retained.run)
                 prior = seen.get(run_key)
                 if prior is not None and prior != retained.run:
                     raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
@@ -432,8 +522,8 @@ class InMemoryWorkflowStoreV1:
     def is_descendant(
         self, ancestor: WorkflowRecordV1, descendant: WorkflowRecordV1
     ) -> bool:
-        ancestor = _revalidate_workflow(ancestor)
-        descendant = _revalidate_workflow(descendant)
+        ancestor = revalidate_workflow(ancestor)
+        descendant = revalidate_workflow(descendant)
         ancestor_key = _workflow_key(ancestor.run)
         if _workflow_key(descendant.run) != ancestor_key:
             return False
@@ -459,68 +549,14 @@ class InMemoryWorkflowStoreV1:
     def _replay(
         self, current: WorkflowRecordV1, transition: CoordinatorTransitionV1
     ) -> WorkflowRecordV1:
-        failed = False
-        try:
-            if type(transition) is BeginPreparationTransitionV1:
-                return begin_preparation(current)
-            if type(transition) is RecordStageIntentTransitionV1:
-                return record_stage_intent(
-                    current, transition.preparation, transition.intent
-                )
-            if type(transition) is ApplyStageEffectTransitionV1:
-                return apply_stage_effect_record(
-                    current,
-                    transition.record,
-                    transition.assessment,
-                    self._foundation_authenticator,
-                    self._assessment_authenticator,
-                )
-            if type(transition) is RecordSubmitIntentTransitionV1:
-                return record_submit_intent(current, transition.intent)
-            if type(transition) is ApplySubmitEffectTransitionV1:
-                return apply_submit_effect_record(
-                    current,
-                    transition.record,
-                    transition.assessment,
-                    self._foundation_authenticator,
-                    self._assessment_authenticator,
-                )
-            if type(transition) is RecordCancelIntentTransitionV1:
-                return record_cancel_intent(current, transition.intent)
-            if type(transition) is ApplyCancelEffectTransitionV1:
-                return apply_cancel_effect_record(
-                    current,
-                    transition.record,
-                    transition.assessment,
-                    self._foundation_authenticator,
-                    self._assessment_authenticator,
-                )
-            if type(transition) is ApplyProviderObservationTransitionV1:
-                return apply_provider_observation(
-                    current,
-                    transition.request,
-                    transition.observation,
-                    self._observation_authenticator,
-                )
-            if type(transition) is ApplyArtifactVerificationTransitionV1:
-                return apply_artifact_verification(
-                    current,
-                    transition.manifest,
-                    transition.receipt,
-                    self._artifact_verifier,
-                )
-            if type(transition) is ApplyReverificationTransitionV1:
-                return apply_reverification(
-                    current,
-                    transition.manifest,
-                    transition.receipt,
-                    self._artifact_verifier,
-                )
-        except Exception:
-            failed = True
-        if failed:
-            raise _closed(CoordinatorStoreCode.TRANSITION_INVALID)
-        raise _closed(CoordinatorStoreCode.TRANSITION_INVALID)
+        return replay_transition(
+            current,
+            transition,
+            foundation_authenticator=self._foundation_authenticator,
+            assessment_authenticator=self._assessment_authenticator,
+            observation_authenticator=self._observation_authenticator,
+            artifact_verifier=self._artifact_verifier,
+        )
 
     def compare_and_swap(
         self,
@@ -529,8 +565,8 @@ class InMemoryWorkflowStoreV1:
         *,
         transition: CoordinatorTransitionV1,
     ) -> bool:
-        expected = _revalidate_workflow(expected)
-        replacement = _revalidate_workflow(replacement)
+        expected = revalidate_workflow(expected)
+        replacement = revalidate_workflow(replacement)
         key = _workflow_key(expected.run)
         if _workflow_key(replacement.run) != key:
             raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
@@ -548,7 +584,7 @@ class InMemoryWorkflowStoreV1:
             replayed = self._replay(retained, transition)
             if replayed.revision != retained.revision + 1 or replayed != replacement:
                 raise _closed(CoordinatorStoreCode.TRANSITION_INVALID)
-            transition, transition_digest = _revalidate_transition(transition)
+            transition, transition_digest = revalidate_transition(transition)
             history = self._history[key]
             history_digests = self._history_digests[key]
             transitions = self._transitions[key]
@@ -562,6 +598,19 @@ class InMemoryWorkflowStoreV1:
             return True
 
 
+def validate_preparation(value: CanonicalPreparationV2) -> CanonicalPreparationV2:
+    """Round-trip a preparation through its canonical codec before trusting it."""
+    if type(value) is not CanonicalPreparationV2:
+        raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+    try:
+        parsed = CanonicalPreparationV2.parse(value.canonical_bytes)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR) from None
+    if parsed != value:
+        raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
+    return parsed
+
+
 class InMemoryPreparationStoreV1:
     def __init__(self):
         self._values: dict[str, CanonicalPreparationV2] = {}
@@ -569,15 +618,7 @@ class InMemoryPreparationStoreV1:
 
     @staticmethod
     def _validate(value: CanonicalPreparationV2) -> CanonicalPreparationV2:
-        if type(value) is not CanonicalPreparationV2:
-            raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
-        try:
-            parsed = CanonicalPreparationV2.parse(value.canonical_bytes)
-        except (TypeError, ValueError, KeyError, AttributeError):
-            raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR) from None
-        if parsed != value:
-            raise _closed(CoordinatorStoreCode.INTEGRITY_ERROR)
-        return parsed
+        return validate_preparation(value)
 
     def put_if_absent(self, preparation: CanonicalPreparationV2) -> bool:
         candidate = self._validate(preparation)
@@ -641,6 +682,36 @@ def _revalidate_record(record: EffectRecordV2) -> EffectRecordV2:
     return rebuilt
 
 
+def validate_execution_grant(authenticator, slot, grant, command_bytes):
+    """Bind an execution grant to its slot and command, then authenticate it."""
+    if type(slot) is not ExecutionGrantSlotV1 or type(grant) is not AuthenticatedGrantV2:
+        raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
+    try:
+        command = parse_exact_command(command_bytes)
+        content = grant.content
+        expected = ExecutionGrantSlotV1(
+            command.operation.effect.effect_id,
+            command.digest,
+            _command_bytes_digest(command_bytes),
+        )
+        if slot != expected or (
+            content.effect_id,
+            content.command_digest,
+            content.preparation_digest,
+        ) != (
+            expected.effect_id,
+            expected.command_digest,
+            command.preparation.preparation_digest,
+        ):
+            raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
+    except CoordinatorStoreError:
+        raise
+    except Exception:
+        raise _closed(CoordinatorStoreCode.BINDING_MISMATCH) from None
+    _authenticate(authenticator, "authenticate", grant, command_bytes)
+    return grant
+
+
 class InMemoryExecutionGrantStoreV1:
     def __init__(self, authenticator):
         self._authenticator = authenticator
@@ -649,32 +720,7 @@ class InMemoryExecutionGrantStoreV1:
         self._lock = RLock()
 
     def _validate(self, slot, grant, command_bytes):
-        if type(slot) is not ExecutionGrantSlotV1 or type(grant) is not AuthenticatedGrantV2:
-            raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
-        try:
-            command = parse_exact_command(command_bytes)
-            content = grant.content
-            expected = ExecutionGrantSlotV1(
-                command.operation.effect.effect_id,
-                command.digest,
-                _command_bytes_digest(command_bytes),
-            )
-            if slot != expected or (
-                content.effect_id,
-                content.command_digest,
-                content.preparation_digest,
-            ) != (
-                expected.effect_id,
-                expected.command_digest,
-                command.preparation.preparation_digest,
-            ):
-                raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
-        except CoordinatorStoreError:
-            raise
-        except Exception:
-            raise _closed(CoordinatorStoreCode.BINDING_MISMATCH) from None
-        _authenticate(self._authenticator, "authenticate", grant, command_bytes)
-        return grant
+        return validate_execution_grant(self._authenticator, slot, grant, command_bytes)
 
     def put_if_absent(self, slot, grant, command_bytes) -> bool:
         candidate = self._validate(slot, grant, command_bytes)
@@ -847,6 +893,19 @@ def _derive_reconciliation_slot(record, grant, command_bytes):
     )
 
 
+def validate_reconciliation_grant(authenticator, slot, grant, command_bytes, record):
+    """Authenticate a reconciliation grant and re-derive its slot from the record."""
+    if (
+        type(slot) is not ReconciliationGrantSlotV1
+        or type(grant) is not AuthenticatedReconciliationGrantV1
+    ):
+        raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
+    _authenticate(authenticator, "authenticate_reconciliation", grant, command_bytes)
+    if slot != _derive_reconciliation_slot(record, grant, command_bytes):
+        raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
+    return grant
+
+
 class InMemoryReconciliationGrantStoreV1:
     def __init__(self, authenticator):
         self._authenticator = authenticator
@@ -857,17 +916,9 @@ class InMemoryReconciliationGrantStoreV1:
         self._lock = RLock()
 
     def _validate(self, slot, grant, command_bytes, record):
-        if (
-            type(slot) is not ReconciliationGrantSlotV1
-            or type(grant) is not AuthenticatedReconciliationGrantV1
-        ):
-            raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
-        _authenticate(
-            self._authenticator, "authenticate_reconciliation", grant, command_bytes
+        return validate_reconciliation_grant(
+            self._authenticator, slot, grant, command_bytes, record
         )
-        if slot != _derive_reconciliation_slot(record, grant, command_bytes):
-            raise _closed(CoordinatorStoreCode.BINDING_MISMATCH)
-        return grant
 
     def put_if_absent(self, slot, grant, command_bytes, record) -> bool:
         candidate = self._validate(slot, grant, command_bytes, record)
@@ -904,4 +955,11 @@ __all__ = [
     "InMemoryPreparationStoreV1",
     "InMemoryReconciliationGrantStoreV1",
     "InMemoryWorkflowStoreV1",
+    "replay_transition",
+    "revalidate_transition",
+    "revalidate_workflow",
+    "validate_execution_grant",
+    "validate_preparation",
+    "validate_reconciliation_grant",
+    "workflow_run_key",
 ]

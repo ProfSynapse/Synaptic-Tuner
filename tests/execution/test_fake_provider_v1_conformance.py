@@ -76,7 +76,7 @@ from tuner.execution.coordinator_v1.foundation import (
     FoundationRecordAssessmentAuthorityV1,
 )
 from tuner.execution.coordinator_v1.model import ProviderExecutionBindingV1
-from tuner.execution.coordinator_v1.operations import TrainingOperationsV1
+from tuner.execution.coordinator_v1.operations import RunOperationsV1
 from tuner.execution.coordinator_v1.stores import (
     InMemoryExecutionGrantStoreV1,
     InMemoryPreparationStoreV1,
@@ -503,7 +503,7 @@ class ProfileStack:
                 self.scope.namespace_ref,
             )
         ).reader
-        self.operations = TrainingOperationsV1(
+        self.operations = RunOperationsV1(
             planning,
             plans,
             self.workflows,

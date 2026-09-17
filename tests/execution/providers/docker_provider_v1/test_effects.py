@@ -16,7 +16,7 @@ from tuner.execution.coordinator_v1.stores import (
     InMemoryExecutionGrantStoreV1, InMemoryPreparationStoreV1,
     InMemoryReconciliationGrantStoreV1, InMemoryWorkflowStoreV1,
 )
-from tuner.execution.coordinator_v1.operations import TrainingOperationsV1
+from tuner.execution.coordinator_v1.operations import RunOperationsV1
 from tuner.execution.foundation_v2.authority import GrantAuthorityV2, ReconciliationGrantContentV1
 from tuner.execution.foundation_v2.broker import EffectBrokerV2
 from tuner.execution.foundation_v2.commands import (
@@ -871,7 +871,7 @@ def test_both_opaque_profiles_run_unchanged_coordinator_foundation_and_operation
         AllowRead(), read_authority, read_port,
         observed_at="2026-08-27T12:00:00Z",
     )
-    operations = TrainingOperationsV1(
+    operations = RunOperationsV1(
         Planning(), Plans(), workflows, coordinator, foundation,
         foundation_auth, assessments, reader, read_authority, read_authority,
         artifact_verifier,

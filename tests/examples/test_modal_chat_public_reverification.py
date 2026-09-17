@@ -6,7 +6,7 @@ from examples.modal_chat.artifacts import ModalChatArtifactVerifier
 from synaptic_tuner.api.v1.runs_facade import RunsAPI
 from tests.examples.test_modal_chat_artifacts import _case, _workflow
 import tests.execution.coordinator_v1.test_state_machine as foundation_cases
-from tuner.execution.coordinator_v1.operations import TrainingOperationsV1
+from tuner.execution.coordinator_v1.operations import RunOperationsV1
 from tuner.execution.providers.modal.coordinator_adapter import _descriptor
 from tuner.execution.providers.modal.contracts import (
     ArtifactMemberV1,
@@ -53,7 +53,7 @@ def test_public_verify_reverify_then_native_source_bind_uses_real_artifact_autho
     )
     store = _Store(_workflow(request))
     initial_revision = store.value.revision
-    operations = TrainingOperationsV1(
+    operations = RunOperationsV1(
         planning=None,
         planning_store=None,
         workflow_store=store,

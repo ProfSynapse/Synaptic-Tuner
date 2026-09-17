@@ -113,8 +113,8 @@ Whitelisted method runtimes
 
 #### Public APIs
 
-- `TrainingAPI`: load, resolve, plan, preflight, start, outcome, verify/reverify.
-- `RunsAPI`: list, show, logs, cancel, reconcile, artifacts.
+- `TrainingAPI`: load, resolve, plan, preflight, start.
+- `RunsAPI`: list, show, outcome, logs, cancel, reconcile, verify/reverify, artifacts.
 - `ArtifactsAPI`: destinations, publications, publish, verify publication.
 - `EvaluationAPI`: explicit evaluation semantics sharing lifecycle machinery.
 - `PipelinesAPI`: persisted train/evaluate/loss/analyze/publish DAGs and resume.

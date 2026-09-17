@@ -25,7 +25,7 @@ from tuner.execution.coordinator_v1.model import (
     VerificationVerdictV1,
     WorkflowPhaseV1,
 )
-from tuner.execution.coordinator_v1.operations import TrainingOperationsV1
+from tuner.execution.coordinator_v1.operations import RunOperationsV1
 from tuner.execution.coordinator_v1.cursors import (
     HMACCursorAuthorityV1, decode_cursor,
 )
@@ -196,7 +196,7 @@ def operations(
 ):
     reader = reader or Reader()
     verifier = verifier or ArtifactVerifier()
-    return TrainingOperationsV1(
+    return RunOperationsV1(
         Planning(),
         PlanningStore(),
         store,
