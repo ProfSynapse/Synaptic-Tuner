@@ -102,6 +102,45 @@ execution, no paid backend. Evidence is fake-provider plus the conformance ladde
   unchanged in substance.
 - **Depends on.** Slice 3. **This is the reference composition landing first.**
 
+## Slice 4b — Workflow head-document growth and effect durability
+
+Follow-up from the slice 4 audit (YELLOW, 2026-09-17). Required before any
+reference implementation that persists through the durable stores (6, 8, 9, 10).
+
+- **Scope.** (a) `api/v1/reference/repositories.py` re-embeds the whole
+  transition history in the workflow head document on every compare-and-swap,
+  and the coordinator state machine appends a revision for every distinct
+  observation even in an unchanged phase, so a host polling `outcome` on a
+  running run grows the head by roughly 110 KB per poll and reaches
+  `MAX_DOCUMENT_BYTES` (16 MiB) after about 140 polls, after which `_dump`
+  raises `INTEGRITY_ERROR` and the run cannot advance. Split history from the
+  head: the head record carries the current state, revision and the digest of
+  the validated transition chain; transitions append to
+  `DurableStreamStorePort` keyed by the workflow run; reads validate
+  incrementally from a stored cursor instead of replaying and HMAC-checking the
+  whole history on every `get`, `list_page` and `is_descendant`. An `outcome`
+  poll that observes no phase change must not create a revision.
+  (b) The effect repository and the authorization commitments are process-local
+  (`composition.py`, `training.py`): re-composing over the same record store
+  keeps `show`/`list` but `outcome` raises `PROVIDER_READ_INVALID` and `cancel`
+  raises `STATE_CONFLICT`. Add an `effects` partition to the closed partition
+  vocabulary (`api/v1/ports.py`) and durable adapters for both, so a host that
+  restarts its process keeps every verb working.
+- **Files.** `api/v1/reference/repositories.py`, `api/v1/reference/composition.py`,
+  `api/v1/reference/training.py`, `api/v1/ports.py` (partition vocabulary),
+  `tuner/execution/coordinator_v1/state_machine.py` (observation revisions),
+  `tests/contract/test_public_host_ports_v1.py` (partition pin),
+  `tests/contract/test_reference_composition_v1.py`.
+- **Tests.** Growth bound: 1000 `outcome` polls in the running phase keep the
+  head document under a fixed byte bound and the run still advances to a
+  terminal state; no revision is created by a poll that observes no change.
+  Recomposition: compose a second host over the same stores after start and
+  drive `outcome`, `cancel` and `reconcile` successfully. The existing ladder,
+  lazy-exclusion and import sweeps unchanged.
+- **Gate.** Head-document size is independent of poll count; every ladder verb
+  survives recomposition over the same stores; both import gates green.
+- **Depends on.** Slice 4. Blocks 6, 8, 9, 10.
+
 ## Slice 5 — EvaluationAPI contract
 
 - **Scope.** `api/v1/evaluation_facade.py`: `EvaluationRunRef`, request/plan/
@@ -232,8 +271,8 @@ execution, no paid backend. Evidence is fake-provider plus the conformance ladde
 
 ## Order and parallelism
 
-Strictly sequential: 1 → 2 → 3 → 4. After slice 4, slices 5 and 7 may run in
-parallel; 6 follows 5; 8 follows 6 and 7; 9 follows 5; 10 follows 6 and 9; 11 is
+Strictly sequential: 1 → 2 → 3 → 4. After slice 4, slices 4b, 5 and 7 may run in
+parallel; 6 follows 4b and 5; 8 follows 6 and 7; 9 follows 5; 10 follows 6 and 9; 11 is
 last. Slices 1–4 deliver the reference composition of Training, Runs and Artifacts
 before any new family starts, as required.
 
