@@ -594,6 +594,22 @@ image construction.
 
 ## Failure diagnostics
 
+Model-first correction: training and chat are independent processes. For chat
+development, start from `examples/model_chat/README.md` and the checked-in
+`scripts/chat_model.py` command; do not rerun training to rebuild ephemeral host
+authority. Its current `--check` is provider-free and execution is model-first
+on an already available GPU runtime. A standalone Modal adapter remains to be
+wired and must add exact-instance cleanup plus provider timeout. This is not a
+claim of a live standalone chat result or verified training provenance.
+
+Before any Modal chat attempt, prove the command locally with the checked-in
+`scripts/chat_model_local_docker.sh <attempt-name>`. It runs `scripts/chat_model.py`
+on a local GPU inside the exact `base_registry_reference` digest from the
+inference runtime lock, keeping results in a named Docker volume; see "Local
+proof on the reviewed inference image" in `examples/model_chat/README.md`. A
+local `CHAT_SAVED_AND_CLOSED` is not provider shutdown proof and does not
+qualify the Modal path.
+
 The minimal consumer launcher emits fixed host chat phases and a bounded,
 non-authorizing failure record containing only allowlisted exception classes
 and relative source locations. Suppressed exception context is inspected without

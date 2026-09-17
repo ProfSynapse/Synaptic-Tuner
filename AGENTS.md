@@ -48,6 +48,12 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Training and model chat are independent processes. Use the model-first
+  `scripts/chat_model.py` / `tuner.inference.model_chat.open_model_chat` boundary
+  when testing serving. Do not submit training to obtain in-memory chat authority.
+  The existing verified-run workflow is optional integration, not a prerequisite
+  for model serving. Provider adapters still own explicit bounded GPU cleanup.
+
 - Use the consumer launcher's fixed phase/class/location diagnostics for host-side
   failures, including suppressed exception context; never print exception messages,
   locals or full traceback text. Retain later workflow snapshots by their digest,
