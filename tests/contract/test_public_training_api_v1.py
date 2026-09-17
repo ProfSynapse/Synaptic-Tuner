@@ -119,6 +119,7 @@ def test_api_host_delegates_generic_training_without_provider_fields():
 
 def test_api_host_exposes_one_property_per_family_and_raises_on_uncomposed() -> None:
     from synaptic_tuner.api.v1.artifacts_facade import ArtifactsAPI
+    from synaptic_tuner.api.v1.data_facade import DataAPI
     from synaptic_tuner.api.v1.evaluation_facade import EvaluationAPI
     from synaptic_tuner.api.v1.runs_facade import RunsAPI
 
@@ -133,10 +134,11 @@ def test_api_host_exposes_one_property_per_family_and_raises_on_uncomposed() -> 
         with pytest.raises(RuntimeError, match=f"did not compose the {name!r} family"):
             getattr(host, name)
 
-    composed = APIHost(_ports(artifacts=object(), evaluation=object()))
+    composed = APIHost(_ports(artifacts=object(), evaluation=object(), data=object()))
     assert type(composed.artifacts) is ArtifactsAPI
     assert type(composed.evaluation) is EvaluationAPI
-    for name in ("chat", "data", "pipelines"):
+    assert type(composed.data) is DataAPI
+    for name in ("chat", "pipelines"):
         with pytest.raises(RuntimeError):
             getattr(composed, name)
 
@@ -145,7 +147,7 @@ def test_api_host_never_wraps_none_and_rejects_unlanded_families() -> None:
     for name in ("training", "runs", "clock"):
         with pytest.raises(TypeError, match=f"HostPorts.{name} is required"):
             APIHost(_ports(**{name: None}))
-    for name in ("chat", "data", "pipelines"):
+    for name in ("chat", "pipelines"):
         with pytest.raises(TypeError, match=f"HostPorts.{name} has no public facade"):
             APIHost(_ports(**{name: object()}))
     with pytest.raises(TypeError, match="exact HostPorts"):

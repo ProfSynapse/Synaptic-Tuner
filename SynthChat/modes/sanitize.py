@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from ..config.privacy import load_privacy_profiles, resolve_privacy_settings
+from ..result_writer import metadata_path, write_metadata
 from ..services.privacy_preprocess import PrivacyPreprocessor
 
 
@@ -113,6 +114,18 @@ def _sanitize_text_file(input_file: Path, output_file: Path, preprocessor: Priva
     }
 
 
+def _carry_metadata_sidecar(input_file: Path, output_file: Path, preprocessor: PrivacyPreprocessor) -> Path | None:
+    """Copy the dataset's ``.meta.json`` sidecar, if any, annotated with the privacy profile applied."""
+    source = metadata_path(input_file)
+    if not source.is_file():
+        return None
+    metadata = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(metadata, dict):
+        metadata = {"source_metadata": metadata}
+    metadata["privacy_preprocess"] = {"profile": preprocessor.profile_name}
+    return write_metadata(output_file, metadata)
+
+
 def _sanitize_jsonl(input_file: Path, output_file: Path, preprocessor: PrivacyPreprocessor) -> Dict[str, Any]:
     output_file.parent.mkdir(parents=True, exist_ok=True)
     records_processed = 0
@@ -125,12 +138,6 @@ def _sanitize_jsonl(input_file: Path, output_file: Path, preprocessor: PrivacyPr
             if not line:
                 continue
             payload = json.loads(line)
-            if isinstance(payload, dict) and "_meta" in payload:
-                payload.setdefault("_meta", {})
-                payload["_meta"]["privacy_preprocess"] = {"profile": preprocessor.profile_name}
-                dst.write(json.dumps(payload) + "\n")
-                continue
-
             sanitized_payload, reports = preprocessor.sanitize_payload(payload, scope_key=f"{input_file}:{line_number}")
             if isinstance(sanitized_payload, dict):
                 metadata = sanitized_payload.setdefault("metadata", {})
@@ -153,11 +160,14 @@ def _sanitize_jsonl(input_file: Path, output_file: Path, preprocessor: PrivacyPr
                 }
             )
 
+    metadata_file = _carry_metadata_sidecar(input_file, output_file, preprocessor)
+
     return {
         "mode": "jsonl",
         "profile": preprocessor.profile_name,
         "input": str(input_file),
         "output": str(output_file),
+        "metadata_output": None if metadata_file is None else str(metadata_file),
         "records_processed": records_processed,
         "changed_records": changed_records,
         "records": record_reports,

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-dataset-plan-v1.schema.json",
+  "title": "Synaptic Dataset Plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request", "scenarios", "rows_requested", "source_digest"],
+  "$defs": {
+    "text": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "scenario_target": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scenario_ref", "rows"],
+      "properties": {
+        "scenario_ref": {"$ref": "#/$defs/text"},
+        "rows": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {"const": "synaptic-dataset-plan/v1"},
+    "request": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "request_id", "project_ref", "mode", "backend", "model", "output_ref", "scenarios",
+        "input_dataset_ref", "rubric_refs", "max_iterations", "tags"
+      ],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/text"},
+        "project_ref": {"$ref": "#/$defs/text"},
+        "mode": {"enum": ["generate", "improve"]},
+        "backend": {"$ref": "#/$defs/text"},
+        "model": {"$ref": "#/$defs/text"},
+        "output_ref": {"$ref": "#/$defs/text"},
+        "scenarios": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/scenario_target"}},
+        "input_dataset_ref": {"type": ["string", "null"], "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+        "rubric_refs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
+        "max_iterations": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+        "tags": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/text"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"mode": {"const": "generate"}}},
+          "then": {
+            "properties": {
+              "scenarios": {"minItems": 1},
+              "input_dataset_ref": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"mode": {"const": "improve"}}},
+          "then": {
+            "properties": {
+              "scenarios": {"maxItems": 0},
+              "input_dataset_ref": {"type": "string"},
+              "rubric_refs": {"minItems": 1}
+            }
+          }
+        }
+      ]
+    },
+    "scenarios": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/scenario_target"}},
+    "rows_requested": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+    "source_digest": {"$ref": "#/$defs/digest"}
+  }
+}

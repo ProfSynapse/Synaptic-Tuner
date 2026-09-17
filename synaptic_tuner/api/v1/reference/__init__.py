@@ -26,6 +26,8 @@ Modules:
   implementations and the host authorization bridge.
 - ``evaluation.py``: the ``EvaluationOperations`` implementation over
   ``Evaluator/`` (local backends only) and its host ports.
+- ``data.py``: the Data family over SynthChat generation and improvement,
+  composed when the host supplies ``ReferenceDataPortsV1``.
 - ``composition.py``: ``compose_reference_host`` and ``ReferenceComposition``.
 """
 
@@ -47,6 +49,8 @@ _LAZY_ATTRIBUTES = {
     "UnmeteredPaidBackendV1": "evaluation",
     "DirectoryEvaluationArtifactSinkV1": "evaluation",
     "compose_reference_evaluation": "evaluation",
+    "ReferenceDataPortsV1": "data",
+    "build_data_operations": "data",
     "ReferenceComposition": "composition",
     "compose_reference_host": "composition",
     "compose_reference_stores": "composition",

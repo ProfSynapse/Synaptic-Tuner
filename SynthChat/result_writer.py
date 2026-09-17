@@ -4,7 +4,16 @@ Location: SynthChat/result_writer.py
 Purpose: Provides StreamingResultWriter for incremental JSONL output during
          generation, plus helpers for output path generation, batch saving,
          and summary printing.
-Usage: Used by SynthChat.modes.generate (generate_mode) and parallel workers.
+
+The data file is homogeneous JSONL: every line is one example. Run metadata
+(version, timestamps, row count, privacy profile) never enters the data file;
+it lives in a sidecar next to it, ``<output>.meta.json`` (see
+``metadata_path``). The data file is opened for append so a writer never
+truncates rows an earlier writer produced.
+
+Usage: Used by SynthChat.modes.generate (generate_mode), parallel workers and
+       the ``synaptic_tuner.api.v1.reference.data`` Data family, which
+       reports the sidecar as the ``dataset_metadata`` artifact.
 """
 
 import json
@@ -14,6 +23,38 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+SYNTHCHAT_VERSION = "1.0.0"
+METADATA_SUFFIX = ".meta.json"
+
+
+def metadata_path(output_file: Path) -> Path:
+    """The sidecar that holds a dataset's run metadata: ``<output>.meta.json``."""
+    output_file = Path(output_file)
+    return output_file.with_name(output_file.name + METADATA_SUFFIX)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _privacy_metadata(settings: Dict) -> Optional[Dict[str, Any]]:
+    privacy_settings = settings.get("privacy_preprocess") or {}
+    if privacy_settings.get("enabled") and privacy_settings.get("profile"):
+        return {
+            "profile": privacy_settings.get("profile"),
+            "apply_to": dict(privacy_settings.get("apply_to") or {}),
+        }
+    return None
+
+
+def write_metadata(output_file: Path, metadata: Dict[str, Any]) -> Path:
+    """Write ``metadata`` to the sidecar of ``output_file`` and return the sidecar path."""
+    sidecar = metadata_path(output_file)
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return sidecar
+
+
 class StreamingResultWriter:
     """Writes generation results to JSONL incrementally as they complete.
 
@@ -21,46 +62,61 @@ class StreamingResultWriter:
     result to disk immediately instead of accumulating in memory.
     Thread-safe for use with parallel workers via threading.Lock.
 
+    When ``settings["output"]["include_metadata"]`` is true the sidecar is
+    written on enter (``started_at``, ``streaming``) and rewritten on exit with
+    ``rows_written`` and ``finished_at``.
+
     Usage:
         with StreamingResultWriter(output_file, settings) as writer:
             writer.write(result)  # Called after each example completes
+        writer.metadata_file     # the sidecar, when metadata is enabled
     """
 
     def __init__(self, output_file: Path, settings: Dict):
-        self._output_file = output_file
+        self._output_file = Path(output_file)
         self._settings = settings
         self._lock = threading.Lock()
         self._file = None
         self._count = 0
+        self._started_at: Optional[str] = None
+
+    @property
+    def metadata_enabled(self) -> bool:
+        return bool(self._settings["output"]["include_metadata"])
+
+    @property
+    def metadata_file(self) -> Optional[Path]:
+        """The metadata sidecar path, or None when metadata is disabled."""
+        return metadata_path(self._output_file) if self.metadata_enabled else None
+
+    def _metadata(self, *, finished: bool) -> Dict[str, Any]:
+        metadata: Dict[str, Any] = {
+            "synthchat_version": SYNTHCHAT_VERSION,
+            "started_at": self._started_at,
+            "streaming": True,
+            "rows_written": self._count,
+        }
+        if finished:
+            metadata["finished_at"] = _now()
+        privacy = _privacy_metadata(self._settings)
+        if privacy is not None:
+            metadata["privacy_preprocess"] = privacy
+        return metadata
 
     def __enter__(self):
         self._output_file.parent.mkdir(parents=True, exist_ok=True)
-        self._file = open(self._output_file, "w")
-
-        # Write metadata header as placeholder (will be updated at close)
-        if self._settings["output"]["include_metadata"]:
-            metadata = {
-                "_meta": {
-                    "synthchat_version": "1.0.0",
-                    "started_at": datetime.now(timezone.utc).isoformat(),
-                    "streaming": True
-                }
-            }
-            privacy_settings = self._settings.get("privacy_preprocess") or {}
-            if privacy_settings.get("enabled") and privacy_settings.get("profile"):
-                metadata["_meta"]["privacy_preprocess"] = {
-                    "profile": privacy_settings.get("profile"),
-                    "apply_to": dict(privacy_settings.get("apply_to") or {}),
-                }
-            self._file.write(json.dumps(metadata) + "\n")
-            self._file.flush()
-
+        self._file = open(self._output_file, "a", encoding="utf-8")
+        self._started_at = _now()
+        if self.metadata_enabled:
+            write_metadata(self._output_file, self._metadata(finished=False))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self._file and not self._file.closed:
             self._file.flush()
             self._file.close()
+        if self.metadata_enabled:
+            write_metadata(self._output_file, self._metadata(finished=True))
         return False
 
     def write(self, result) -> bool:
@@ -116,35 +172,31 @@ def generate_output_path(settings: Dict, input_path: Optional[Path] = None) -> P
 
 
 def save_results(results: List, output_file: Path, settings: Dict):
-    """Save generation results to JSONL with metadata."""
+    """Save generation results to JSONL, with run metadata in the sidecar."""
+    output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_file, "w") as f:
-        # Write metadata header if enabled
-        if settings["output"]["include_metadata"]:
-            metadata = {
-                "_meta": {
-                    "synthchat_version": "1.0.0",
-                    "generated_at": datetime.utcnow().isoformat(),
-                    "stats": {
-                        "total": len(results),
-                        "passed": sum(1 for r in results if r.success),
-                        "failed": sum(1 for r in results if not r.success),
-                        "avg_iterations": sum(r.iterations for r in results) / len(results) if results else 0
-                    }
-                }
-            }
-            privacy_settings = settings.get("privacy_preprocess") or {}
-            if privacy_settings.get("enabled") and privacy_settings.get("profile"):
-                metadata["_meta"]["privacy_preprocess"] = {
-                    "profile": privacy_settings.get("profile"),
-                    "apply_to": dict(privacy_settings.get("apply_to") or {}),
-                }
-            f.write(json.dumps(metadata) + "\n")
-
-        # Write examples
+    with open(output_file, "w", encoding="utf-8") as f:
         for result in results:
             f.write(json.dumps(result.example) + "\n")
+
+    if settings["output"]["include_metadata"]:
+        metadata: Dict[str, Any] = {
+            "synthchat_version": SYNTHCHAT_VERSION,
+            "generated_at": _now(),
+            "streaming": False,
+            "rows_written": len(results),
+            "stats": {
+                "total": len(results),
+                "passed": sum(1 for r in results if r.success),
+                "failed": sum(1 for r in results if not r.success),
+                "avg_iterations": sum(r.iterations for r in results) / len(results) if results else 0,
+            },
+        }
+        privacy = _privacy_metadata(settings)
+        if privacy is not None:
+            metadata["privacy_preprocess"] = privacy
+        write_metadata(output_file, metadata)
 
 
 def print_summary(results: List, output_file: Path):

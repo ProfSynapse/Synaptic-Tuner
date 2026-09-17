@@ -8,10 +8,11 @@ in its public facade and exposes one property per family. A family whose
 operations are ``None`` is *uncomposed*: its property raises rather than
 returning a facade over nothing. ``training``, ``runs`` and ``clock`` are
 always required. ``evaluation`` accepts ``EvaluationOperations`` and is
-wrapped in ``EvaluationAPI``. The three families whose contracts have not
-landed yet (``chat``, ``data``, ``pipelines``) accept only ``None`` here; each
-family's slice replaces its ``object | None`` annotation with its operations
-Protocol and adds the facade construction.
+wrapped in ``EvaluationAPI``; ``data`` accepts ``DataOperations`` and is
+wrapped in ``DataAPI``. The two families whose contracts have not landed yet
+(``chat``, ``pipelines``) accept only ``None`` here; each family's slice
+replaces its ``object | None`` annotation with its operations Protocol and
+adds the facade construction.
 
 Construction sites: ``examples/modal_chat/host.py`` and the contract,
 composition and inference tests that build an ``APIHost``.
@@ -23,6 +24,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from .artifacts_facade import ArtifactsAPI, ArtifactsOperations
+from .data_facade import DataAPI, DataOperations
 from .evaluation_facade import EvaluationAPI, EvaluationOperations
 from .execution import AuthorizationRequirement, ExecutionGrant
 from .persistence import EvidenceReplayRepository, LifecycleRepository
@@ -84,13 +86,13 @@ class HostPorts:
     artifacts: ArtifactsOperations | None
     evaluation: EvaluationOperations | None
     chat: object | None  # ChatOperations once its contract lands
-    data: object | None  # DataOperations once its contract lands
+    data: DataOperations | None
     pipelines: object | None  # PipelinesOperations once its contract lands
     clock: Clock
 
 
 _REQUIRED_PORTS = ("training", "runs", "clock")
-_PENDING_FAMILIES = ("chat", "data", "pipelines")
+_PENDING_FAMILIES = ("chat", "pipelines")
 
 
 class APIHost:
@@ -100,7 +102,7 @@ class APIHost:
     raises ``RuntimeError`` so a host never hands out a facade over ``None``.
     """
 
-    __slots__ = ("ports", "_training", "_runs", "_artifacts", "_evaluation")
+    __slots__ = ("ports", "_training", "_runs", "_artifacts", "_evaluation", "_data")
 
     def __init__(self, ports: HostPorts) -> None:
         if type(ports) is not HostPorts:
@@ -122,6 +124,7 @@ class APIHost:
         self._evaluation = (
             None if ports.evaluation is None else EvaluationAPI(ports.evaluation)
         )
+        self._data = None if ports.data is None else DataAPI(ports.data)
 
     @staticmethod
     def _composed(name: str, facade: object | None) -> object:
@@ -150,8 +153,8 @@ class APIHost:
         return self._composed("chat", None)
 
     @property
-    def data(self) -> object:
-        return self._composed("data", None)
+    def data(self) -> DataAPI:
+        return self._composed("data", self._data)
 
     @property
     def pipelines(self) -> object:

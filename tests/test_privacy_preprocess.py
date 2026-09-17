@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from SynthChat.generator import SynthChatGenerator
 from SynthChat.modes.sanitize import _sanitize_jsonl
+from SynthChat.result_writer import metadata_path
 from SynthChat.services.privacy_filter import PrivacyDetectionResult, PrivacySpan
 from SynthChat.services.privacy_preprocess import (
     PrivacyPreprocessResult,
@@ -257,29 +258,29 @@ def test_sanitize_jsonl_adds_privacy_metadata():
         input_path = tmp_path / "input.jsonl"
         output_path = tmp_path / "output.jsonl"
         input_path.write_text(
-            '\n'.join(
-                [
-                    json.dumps({"_meta": {"version": 1}}),
-                    json.dumps(
-                        {
-                            "conversations": [
-                                {"role": "user", "content": "Contact Jane Roe at jane.roe@example.com"}
-                            ]
-                        }
-                    ),
-                ]
+            json.dumps(
+                {
+                    "conversations": [
+                        {"role": "user", "content": "Contact Jane Roe at jane.roe@example.com"}
+                    ]
+                }
             )
             + "\n",
             encoding="utf-8",
         )
+        metadata_path(input_path).write_text(json.dumps({"version": 1}) + "\n", encoding="utf-8")
 
         summary = _sanitize_jsonl(input_path, output_path, _FakeSanitizePreprocessor())
         lines = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        sidecar = json.loads(metadata_path(output_path).read_text(encoding="utf-8"))
 
         assert summary["records_processed"] == 1
-        assert lines[0]["_meta"]["privacy_preprocess"]["profile"] == "mask_only"
-        assert lines[1]["metadata"]["privacy_preprocess"]["changed"] is True
-        assert "[PRIVATE_PERSON]" in lines[1]["conversations"][0]["content"]
+        assert summary["metadata_output"] == str(metadata_path(output_path))
+        assert len(lines) == 1
+        assert sidecar["version"] == 1
+        assert sidecar["privacy_preprocess"]["profile"] == "mask_only"
+        assert lines[0]["metadata"]["privacy_preprocess"]["changed"] is True
+        assert "[PRIVATE_PERSON]" in lines[0]["conversations"][0]["content"]
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
 

@@ -22,6 +22,10 @@ family exists::
         family=family, ports=ports, requests=requests, authority=authority)
     api = composition.api()
 
+Passing ``data=ReferenceDataPortsV1(...)`` (SynthChat config, scenario and
+rubric directories plus an LLM client factory the host owns) also composes the
+Data family (``data.py``) over the same record and stream stores.
+
 The five coordinator stores, the foundation effect ledger and the host
 authorization commitments are all durable through the host record and stream
 stores (``repositories.py``, ``training.py``), so a second host composed over
@@ -66,6 +70,7 @@ from .repositories import (
     DurableReconciliationGrantStoreV1,
     DurableWorkflowStoreV1,
 )
+from .data import ReferenceDataPortsV1, build_data_operations
 from .training import ReferenceAuthorizationV1, ReferenceRequestPortsV1
 
 
@@ -78,7 +83,7 @@ class ReferenceComposition:
     artifacts: object
     evaluation: object | None
     chat: None
-    data: None
+    data: object | None
     pipelines: None
     coordinator: object
     foundation: object
@@ -134,8 +139,15 @@ def compose_reference_host(
     authority: ReferenceAuthorityV1,
     maximum_grant_seconds: int = 900,
     evaluation: object | None = None,
+    data: ReferenceDataPortsV1 | None = None,
 ) -> ReferenceComposition:
-    """Compose the Training, Runs, Artifacts and (optionally) Evaluation families over the public host ports."""
+    """Compose the Training, Runs, Artifacts and, when given, Evaluation and Data families.
+
+    The evaluation family is composed when the host supplies its ports; the
+    data family needs SynthChat locations and an LLM client factory the host
+    owns (``ReferenceDataPortsV1``). Without them the slot stays pending on
+    the composed host.
+    """
     if (
         type(family) is not ProviderFamilyV1
         or type(ports) is not ReferenceHostPortsV1
@@ -143,6 +155,8 @@ def compose_reference_host(
         or type(authority) is not ReferenceAuthorityV1
     ):
         raise TypeError("exact reference composition inputs are required")
+    if data is not None and type(data) is not ReferenceDataPortsV1:
+        raise TypeError("data must be exact ReferenceDataPortsV1 or None")
     require_methods(ports.streams, "append", "read_page")
     require_methods(ports.grants, "authorize", "bind")
     evaluation_operations = None
@@ -205,7 +219,9 @@ def compose_reference_host(
         artifacts=compose_reference_artifacts(authority=authority),
         evaluation=evaluation_operations,
         chat=None,
-        data=None,
+        data=None if data is None else build_data_operations(
+            records=ports.records, streams=ports.streams, clock=authority.clock, ports=data,
+        ),
         pipelines=None,
         coordinator=composed.coordinator,
         foundation=composed.foundation,
