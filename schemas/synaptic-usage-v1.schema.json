@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-usage-v1.schema.json",
+  "title": "Synaptic Usage Record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "availability", "input_tokens", "output_tokens", "cost_minor_units", "currency", "spend"],
+  "properties": {
+    "schema_version": {"const": "synaptic-usage/v1"},
+    "availability": {"enum": ["measured", "unavailable"]},
+    "input_tokens": {"type": ["integer", "null"], "minimum": 0},
+    "output_tokens": {"type": ["integer", "null"], "minimum": 0},
+    "cost_minor_units": {"type": ["integer", "null"], "minimum": 0},
+    "currency": {"type": ["string", "null"], "pattern": "^[A-Z]{3}$"},
+    "spend": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["provider", "account_ref", "spend_id"],
+          "properties": {
+            "provider": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+            "account_ref": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+            "spend_id": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"}
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"availability": {"const": "measured"}}},
+      "then": {
+        "properties": {
+          "input_tokens": {"type": "integer"},
+          "output_tokens": {"type": "integer"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"availability": {"const": "unavailable"}}},
+      "then": {
+        "properties": {
+          "input_tokens": {"type": "null"},
+          "output_tokens": {"type": "null"},
+          "cost_minor_units": {"type": "null"},
+          "currency": {"type": "null"},
+          "spend": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"cost_minor_units": {"type": "integer"}}},
+      "then": {"properties": {"currency": {"type": "string"}}}
+    },
+    {
+      "if": {"properties": {"currency": {"type": "string"}}},
+      "then": {"properties": {"cost_minor_units": {"type": "integer"}}}
+    }
+  ]
+}

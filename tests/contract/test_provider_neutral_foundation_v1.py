@@ -454,6 +454,7 @@ sys.path.insert(0, {str(ROOT)!r})
 import synaptic_tuner.api.v1.providers, synaptic_tuner.api.v1.planning
 import synaptic_tuner.api.v1.results, synaptic_tuner.api.v1.training_facade
 import synaptic_tuner.api.v1.runs_facade, synaptic_tuner.api.v1.artifacts_facade
+import synaptic_tuner.api.v1.observations, synaptic_tuner.api.v1.usage
 import synaptic_tuner.host.v1
 print(json.dumps(sorted(n for n in sys.modules if n == 'tuner' or n.startswith(('tuner.', 'modal', 'sqlite3')))))
 """
@@ -464,7 +465,7 @@ print(json.dumps(sorted(n for n in sys.modules if n == 'tuner' or n.startswith((
 def test_foundation_source_has_no_forbidden_imports() -> None:
     paths = [
         ROOT / "synaptic_tuner/api/v1" / name
-        for name in ("_contract.py", "providers.py", "planning.py", "results.py", "training_facade.py", "runs_facade.py", "artifacts_facade.py")
+        for name in ("_contract.py", "providers.py", "planning.py", "results.py", "training_facade.py", "runs_facade.py", "artifacts_facade.py", "observations.py", "usage.py")
     ] + [ROOT / "synaptic_tuner/host/v1/ports.py"]
     for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

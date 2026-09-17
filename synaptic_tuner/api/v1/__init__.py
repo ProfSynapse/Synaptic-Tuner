@@ -31,6 +31,15 @@ _LAZY_MODULE_ATTRIBUTES = {
         "GitRemoteReader", "GrantProvider", "HostPorts", "LifecycleRepository",
         "SecretProvider",
     },
+    "observations": {
+        "ChatTokenPayloadV1", "ChatTurnCompletedPayloadV1", "ChatTurnStartedPayloadV1",
+        "DataRowWrittenPayloadV1", "DataScenarioCompletedPayloadV1",
+        "DataStageGateEvaluatedPayloadV1", "EvaluationCaseScoredPayloadV1",
+        "EvaluationCaseStartedPayloadV1", "EvaluationStageCompletedPayloadV1",
+        "ObservationFamily", "ObservationKind", "ObservationPage", "ObservationRecordV1",
+        "ObservationStreamRef", "ObservationsRequest", "PipelineStageCompletedPayloadV1",
+        "PipelineStageStartedPayloadV1", "TrainingPhaseObservedPayloadV1",
+    },
     "persistence": {
         "AttemptAdmission", "AttemptDisposition", "AuthorizationMismatch",
         "EffectCollision", "EffectDisposition", "EffectIdentity", "EffectKind",
@@ -88,6 +97,7 @@ _LAZY_MODULE_ATTRIBUTES = {
         "TrainingInputContractErrorV1", "TrainingInputContractIdentityV1",
         "load_training_input_contract_v1",
     },
+    "usage": {"SpendRef", "UsageAvailability", "UsageRecordV1"},
 }
 
 _LAZY_ATTRIBUTES = {
@@ -145,6 +155,15 @@ _FORMAL_EXPORTS = (
     "LoadedTrainingInputContractV1", "TrainingInputContractCodeV1",
     "TrainingInputContractErrorV1", "TrainingInputContractIdentityV1",
     "load_training_input_contract_v1",
+    "ObservationFamily", "ObservationKind", "ObservationStreamRef",
+    "ObservationRecordV1", "ObservationsRequest", "ObservationPage",
+    "TrainingPhaseObservedPayloadV1", "EvaluationCaseStartedPayloadV1",
+    "EvaluationCaseScoredPayloadV1", "EvaluationStageCompletedPayloadV1",
+    "ChatTurnStartedPayloadV1", "ChatTurnCompletedPayloadV1", "ChatTokenPayloadV1",
+    "DataRowWrittenPayloadV1", "DataStageGateEvaluatedPayloadV1",
+    "DataScenarioCompletedPayloadV1", "PipelineStageStartedPayloadV1",
+    "PipelineStageCompletedPayloadV1",
+    "UsageAvailability", "SpendRef", "UsageRecordV1",
 )
 
 if not set(_FORMAL_EXPORTS).issubset(_LAZY_ATTRIBUTES):  # pragma: no cover - module invariant

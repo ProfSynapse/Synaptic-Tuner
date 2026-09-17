@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-observation-v1.schema.json",
+  "title": "Synaptic Observation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "stream", "sequence", "occurred_at", "kind", "payload"],
+  "$defs": {
+    "text": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "count": {"type": "integer", "minimum": 0}
+  },
+  "properties": {
+    "schema_version": {"const": "synaptic-observation/v1"},
+    "stream": {
+      "type": "object", "additionalProperties": false,
+      "required": ["family", "project_ref", "entity_id"],
+      "properties": {
+        "family": {"enum": ["training", "evaluation", "chat", "data", "pipeline"]},
+        "project_ref": {"$ref": "#/$defs/text"},
+        "entity_id": {"$ref": "#/$defs/text"}
+      }
+    },
+    "sequence": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "kind": {
+      "enum": [
+        "training_phase_observed",
+        "evaluation_case_started", "evaluation_case_scored", "evaluation_stage_completed",
+        "chat_turn_started", "chat_turn_completed", "chat_token",
+        "data_row_written", "data_stage_gate_evaluated", "data_scenario_completed",
+        "pipeline_stage_started", "pipeline_stage_completed"
+      ]
+    },
+    "payload": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"kind": {"const": "training_phase_observed"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "training"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false, "required": ["phase"],
+            "properties": {"phase": {"$ref": "#/$defs/text"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "evaluation_case_started"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "evaluation"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false, "required": ["case_ref"],
+            "properties": {"case_ref": {"$ref": "#/$defs/text"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "evaluation_case_scored"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "evaluation"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false,
+            "required": ["case_ref", "verdict", "score"],
+            "properties": {
+              "case_ref": {"$ref": "#/$defs/text"},
+              "verdict": {"enum": ["passed", "failed", "inconclusive"]},
+              "score": {"type": "number"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "evaluation_stage_completed"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "evaluation"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false,
+            "required": ["stage", "cases_scored"],
+            "properties": {
+              "stage": {"$ref": "#/$defs/text"},
+              "cases_scored": {"$ref": "#/$defs/count"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "chat_turn_started"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "chat"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false, "required": ["request_id"],
+            "properties": {"request_id": {"$ref": "#/$defs/count"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "chat_turn_completed"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "chat"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false,
+            "required": ["request_id", "content_digest", "content_bytes"],
+            "properties": {
+              "request_id": {"$ref": "#/$defs/count"},
+              "content_digest": {"$ref": "#/$defs/digest"},
+              "content_bytes": {"$ref": "#/$defs/count"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "chat_token"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "chat"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false,
+            "required": ["request_id", "token_index", "text"],
+            "properties": {
+              "request_id": {"$ref": "#/$defs/count"},
+              "token_index": {"$ref": "#/$defs/count"},
+              "text": {"type": "string", "maxLength": 4096}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "data_row_written"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "data"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false,
+            "required": ["scenario_ref", "rows_written"],
+            "properties": {
+              "scenario_ref": {"$ref": "#/$defs/text"},
+              "rows_written": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "data_stage_gate_evaluated"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "data"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false,
+            "required": ["scenario_ref", "gate", "passed"],
+            "properties": {
+              "scenario_ref": {"$ref": "#/$defs/text"},
+              "gate": {"$ref": "#/$defs/text"},
+              "passed": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "data_scenario_completed"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "data"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false,
+            "required": ["scenario_ref", "rows_written"],
+            "properties": {
+              "scenario_ref": {"$ref": "#/$defs/text"},
+              "rows_written": {"$ref": "#/$defs/count"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "pipeline_stage_started"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "pipeline"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false,
+            "required": ["stage", "attempt_key"],
+            "properties": {
+              "stage": {"$ref": "#/$defs/text"},
+              "attempt_key": {"$ref": "#/$defs/digest"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "pipeline_stage_completed"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "pipeline"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false,
+            "required": ["stage", "attempt_key", "outcome"],
+            "properties": {
+              "stage": {"$ref": "#/$defs/text"},
+              "attempt_key": {"$ref": "#/$defs/digest"},
+              "outcome": {"enum": ["succeeded", "failed", "skipped", "cancelled"]}
+            }
+          }
+        }
+      }
+    }
+  ]
+}
