@@ -270,9 +270,10 @@ def test_api_host_uses_the_canonical_runs_facade() -> None:
             return "2026-08-30T12:00:00Z"
 
     ports = HostPorts(
-        runs=object(), clock=Clock(),
+        training=object(), runs=object(), artifacts=None, evaluation=None,
+        chat=None, data=None, pipelines=None, clock=Clock(),
     )
-    host = APIHost(object(), ports)
+    host = APIHost(ports)
     assert type(host.runs) is RunsAPI
 
 

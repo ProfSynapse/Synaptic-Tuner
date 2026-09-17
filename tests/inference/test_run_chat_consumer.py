@@ -136,7 +136,10 @@ class RemoteRuntime:
 
 
 def _host(operations) -> APIHost:
-    return APIHost(Training(), HostPorts(runs=operations, clock=Clock()))
+    return APIHost(HostPorts(
+        training=Training(), runs=operations, artifacts=None, evaluation=None,
+        chat=None, data=None, pipelines=None, clock=Clock(),
+    ))
 
 
 def test_local_runtime_retains_paths_without_hidden_prompt(tmp_path: Path) -> None:

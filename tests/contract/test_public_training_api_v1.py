@@ -38,6 +38,15 @@ def _case():
     return request, resolved, plan, preflight
 
 
+def _ports(**overrides) -> HostPorts:
+    fields = dict(
+        training=object(), runs=object(), artifacts=None, evaluation=None,
+        chat=None, data=None, pipelines=None, clock=Clock(),
+    )
+    fields.update(overrides)
+    return HostPorts(**fields)
+
+
 def test_root_training_exports_have_only_canonical_contract_identities():
     for name in ("TrainingAPI", "TrainingOperations", "TrainingRequest",
                  "TrainingPreflight", "TrainingStart", "AuthorizationRequirement"):
@@ -62,7 +71,10 @@ def test_public_training_verbs_and_start_signature_are_exact():
     assert tuple(inspect.signature(v1.TrainingAPI.start).parameters) == (
         "self", "plan", "preflight",
     )
-    assert tuple(HostPorts.__dataclass_fields__) == ("runs", "clock")
+    assert tuple(HostPorts.__dataclass_fields__) == (
+        "training", "runs", "artifacts", "evaluation", "chat", "data",
+        "pipelines", "clock",
+    )
 
 
 def test_api_host_delegates_generic_training_without_provider_fields():
@@ -97,12 +109,47 @@ def test_api_host_delegates_generic_training_without_provider_fields():
             calls.append("start")
             return started
 
-    host = APIHost(Operations(), HostPorts(runs=object(), clock=Clock()))
+    host = APIHost(_ports(training=Operations(), runs=object(), clock=Clock()))
     assert type(host.training) is training_facade.TrainingAPI
     loaded = host.training.load("{}")
     compiled = host.training.plan(host.training.resolve(loaded), provider)
     assert host.training.start(compiled, host.training.preflight(compiled)) == started
     assert calls == ["load", "resolve", "plan", "preflight", "start"]
+
+
+def test_api_host_exposes_one_property_per_family_and_raises_on_uncomposed() -> None:
+    from synaptic_tuner.api.v1.artifacts_facade import ArtifactsAPI
+    from synaptic_tuner.api.v1.runs_facade import RunsAPI
+
+    families = ("training", "runs", "artifacts", "evaluation", "chat", "data", "pipelines")
+    for name in families:
+        assert isinstance(inspect.getattr_static(APIHost, name), property), name
+
+    host = APIHost(_ports())
+    assert type(host.training) is training_facade.TrainingAPI
+    assert type(host.runs) is RunsAPI
+    for name in ("artifacts", "evaluation", "chat", "data", "pipelines"):
+        with pytest.raises(RuntimeError, match=f"did not compose the {name!r} family"):
+            getattr(host, name)
+
+    composed = APIHost(_ports(artifacts=object()))
+    assert type(composed.artifacts) is ArtifactsAPI
+    for name in ("evaluation", "chat", "data", "pipelines"):
+        with pytest.raises(RuntimeError):
+            getattr(composed, name)
+
+
+def test_api_host_never_wraps_none_and_rejects_unlanded_families() -> None:
+    for name in ("training", "runs", "clock"):
+        with pytest.raises(TypeError, match=f"HostPorts.{name} is required"):
+            APIHost(_ports(**{name: None}))
+    for name in ("evaluation", "chat", "data", "pipelines"):
+        with pytest.raises(TypeError, match=f"HostPorts.{name} has no public facade"):
+            APIHost(_ports(**{name: object()}))
+    with pytest.raises(TypeError, match="exact HostPorts"):
+        APIHost(object())
+    with pytest.raises(TypeError):
+        APIHost(object(), _ports())
 
 
 @pytest.mark.parametrize("mode", ["wrong_plan", "expired", "not_ready"])

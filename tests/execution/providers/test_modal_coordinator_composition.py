@@ -161,7 +161,8 @@ def test_factory_is_provider_io_free_then_stages_and_spawns_once(monkeypatch):
     assert first.accepted is True and len(Function.spawns)==1
     assert sum(len(volume.files) for volume in Volume.registry.values()) == 3
     assert composed.training.start(planned,ready) == first and len(Function.spawns)==1
-    host=APIHost(composed.training,HostPorts(composed.runs,clock))
+    host=APIHost(HostPorts(training=composed.training,runs=composed.runs,artifacts=None,
+        evaluation=None,chat=None,data=None,pipelines=None,clock=clock))
     assert host.runs.show(first.run).run == first.run
     page=host.runs.list(RunListRequest(first.run.project_ref))
     assert tuple(item.run for item in page.outcomes) == (first.run,)

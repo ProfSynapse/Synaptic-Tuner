@@ -326,7 +326,16 @@ def compose_modal_chat_host(
     )
     reader = composed.registration.reader_factory_ref.create(reader_request).reader
     artifact_verifier.bind(reader=reader, foundation=composed.foundation)
-    api = APIHost(composed.training, HostPorts(composed.runs, clock))
+    api = APIHost(HostPorts(
+        training=composed.training,
+        runs=composed.runs,
+        artifacts=None,
+        evaluation=None,
+        chat=None,
+        data=None,
+        pipelines=None,
+        clock=clock,
+    ))
     return ModalChatHost(
         api,
         composed,

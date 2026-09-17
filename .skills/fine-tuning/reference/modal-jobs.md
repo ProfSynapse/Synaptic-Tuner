@@ -47,7 +47,8 @@ qualified live path.
 `synaptic_tuner.api.v1.modal.compose_modal_coordinator` takes explicit
 `ModalCoordinatorStorePorts` and `ModalFoundationCompositionPorts`, plus the
 existing read-evidence collaborators. Its result supplies `training` and `runs`
-for `APIHost(composed.training, HostPorts(runs=composed.runs, clock=clock))`.
+for `APIHost(HostPorts(training=composed.training, runs=composed.runs, artifacts=None,
+evaluation=None, chat=None, data=None, pipelines=None, clock=clock))`.
 Use the same clock object throughout composition. The factory performs no
 provider I/O; it does not choose storage, mint credentials, or activate the
 registration. Provider-free list/show proof does not enable live outcome, log,
