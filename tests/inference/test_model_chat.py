@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from Evaluator.chat_session import ChatSessionPolicy
+from tuner.inference.chat_session import ChatSessionPolicy
 from Evaluator.protocols import BackendResponse
-from Evaluator.vllm_runtime import (
+from tuner.inference.vllm_runtime import (
     ExplicitNetworkLoRA,
     ExplicitNetworkVLLMSource,
     VLLMRuntimeLease,

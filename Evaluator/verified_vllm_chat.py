@@ -8,10 +8,10 @@ import time
 from pathlib import Path
 from typing import Iterator
 
-from .chat_session import ChatSession, ChatSessionPolicy, _finite_deadline
+from tuner.inference.chat_session import ChatSession, ChatSessionPolicy, _finite_deadline
 from .config import VLLMSettings
 from .vllm_client import VLLMClient
-from .vllm_runtime import (
+from tuner.inference.vllm_runtime import (
     VerifiedLocalVLLMSource,
     VLLMStartupSpec,
     start_vllm_runtime,

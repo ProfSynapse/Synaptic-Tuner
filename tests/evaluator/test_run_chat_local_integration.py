@@ -5,8 +5,9 @@ import threading
 
 import pytest
 
-from Evaluator import base_client, vllm_runtime
-from Evaluator.chat_session import ChatSessionError, ChatSessionPolicy
+from Evaluator import base_client
+from tuner.inference import vllm_runtime
+from tuner.inference.chat_session import ChatSessionError, ChatSessionPolicy
 from Evaluator.local_run_chat import LocalVLLMRunChatRuntime
 from tuner.inference.run_chat import open_run_chat
 from tests.inference.test_run_chat import _case

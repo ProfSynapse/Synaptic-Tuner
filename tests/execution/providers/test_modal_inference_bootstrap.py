@@ -16,7 +16,7 @@ from tuner.execution.providers.modal.inference_bootstrap import (
     ModalInferenceBootstrapError,
     open_modal_chat_worker,
 )
-from Evaluator.vllm_runtime import VLLMRuntimeLease
+from tuner.inference.vllm_runtime import VLLMRuntimeLease
 
 
 class _Session:

@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from Evaluator import chat_session as chat_session_module
-from Evaluator.chat_session import (
+from tuner.inference import chat_session as chat_session_module
+from tuner.inference.chat_session import (
     ChatSession,
     ChatSessionError,
     ChatSessionPolicy,

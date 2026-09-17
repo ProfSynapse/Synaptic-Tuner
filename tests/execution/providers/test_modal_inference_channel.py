@@ -8,7 +8,7 @@ import threading
 
 import pytest
 
-from Evaluator.chat_session import ChatSession, ChatSessionPolicy
+from tuner.inference.chat_session import ChatSession, ChatSessionPolicy
 from Evaluator.protocols import BackendResponse
 from tuner.inference.run_chat import PreparedModelIdentity
 from tuner.execution.providers.modal import inference_channel as channel

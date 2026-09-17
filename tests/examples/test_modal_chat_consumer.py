@@ -5,7 +5,7 @@ import threading
 import pytest
 
 from Evaluator.protocols import BackendResponse
-from Evaluator.chat_session import ChatSession, ChatSessionPolicy
+from tuner.inference.chat_session import ChatSession, ChatSessionPolicy
 from examples.modal_chat.consumer import (
     ModalChatConsumerError,
     chat_once,

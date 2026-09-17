@@ -30,18 +30,18 @@ _REQUIRED_DISTRIBUTIONS = frozenset(
 )
 _REQUIRED_SOURCES = frozenset(
     {
-        "Evaluator/chat_session.py",
         "Evaluator/verified_vllm_chat.py",
-        "Evaluator/vllm_runtime.py",
         "tuner/execution/providers/modal/inference_bootstrap.py",
         "tuner/execution/providers/modal/inference_entrypoint.py",
         "tuner/execution/providers/modal/inference_channel.py",
         "tuner/execution/providers/modal/inference_runtime.py",
         "tuner/execution/providers/modal/inference_wire.py",
         "tuner/execution/providers/modal/inference_worker.py",
+        "tuner/inference/chat_session.py",
         "tuner/inference/retrieved_model.py",
         "tuner/inference/run_chat.py",
         "tuner/inference/serving_target.py",
+        "tuner/inference/vllm_runtime.py",
     }
 )
 

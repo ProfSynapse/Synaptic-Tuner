@@ -1,6 +1,6 @@
 # Owned POSIX process-family slice
 
-`Evaluator.owned_process.OwnedProcessLease` is an internal Linux lease for an exact
+`tuner.inference.owned_process.OwnedProcessLease` is an internal Linux lease for an exact
 `subprocess.Popen` started with an explicit argument vector, working directory,
 environment, `shell=False`, and a new POSIX session. Linux procfs identity and
 the unreaped group leader anchor the numeric process group against reuse. Cleanup uses

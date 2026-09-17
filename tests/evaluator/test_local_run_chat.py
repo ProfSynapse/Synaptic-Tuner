@@ -5,8 +5,9 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from Evaluator import local_run_chat, vllm_runtime
-from Evaluator.chat_session import ChatSession, ChatSessionPolicy
+from Evaluator import local_run_chat
+from tuner.inference import vllm_runtime
+from tuner.inference.chat_session import ChatSession, ChatSessionPolicy
 from Evaluator.local_run_chat import LocalVLLMRunChatRuntime
 from Evaluator.protocols import BackendResponse
 from synaptic_tuner.api.v1.runs_facade import RunsAPI

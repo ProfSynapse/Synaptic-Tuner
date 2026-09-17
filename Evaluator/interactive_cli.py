@@ -31,7 +31,7 @@ from .config import (
 from .enums import BackendType
 from .client_factory import create_client
 from .vllm_client import VLLMClient
-from .vllm_runtime import (
+from tuner.inference.vllm_runtime import (
     ExplicitNetworkLoRA,
     ExplicitNetworkVLLMSource,
     VLLMStartupSpec,

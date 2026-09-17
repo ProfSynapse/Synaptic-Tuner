@@ -15,9 +15,9 @@ from pathlib import Path
 import time
 from typing import Iterator
 
-from Evaluator.chat_session import ChatSession, ChatSessionPolicy
+from tuner.inference.chat_session import ChatSession, ChatSessionPolicy
 from Evaluator.verified_vllm_chat import verified_vllm_chat
-from Evaluator.vllm_runtime import (
+from tuner.inference.vllm_runtime import (
     VerifiedLocalVLLMSource,
     VLLMRuntimeLease,
     VLLMStartupSpec,

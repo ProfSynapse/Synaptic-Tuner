@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from Evaluator.owned_process import OwnedProcessError, OwnedProcessLease
+from tuner.inference.owned_process import OwnedProcessError, OwnedProcessLease
 
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX process groups only")
@@ -201,7 +201,7 @@ def test_direct_construction_cannot_adopt_a_group() -> None:
 
 
 def test_changed_leader_identity_is_never_signaled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import Evaluator.owned_process as owned
+    import tuner.inference.owned_process as owned
 
     lease, _ = _family(tmp_path)
     monkeypatch.setattr(owned, "_identity", lambda pid: ("S", lease.pid, -1))
@@ -227,7 +227,7 @@ def test_cleanup_exception_does_not_mask_keyboard_interrupt(tmp_path: Path, monk
 def test_unknown_member_identity_retains_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import Evaluator.owned_process as owned
+    import tuner.inference.owned_process as owned
 
     lease, grandchild = _family(tmp_path, ignore_term=True)
     real_identity = owned._identity
@@ -247,7 +247,7 @@ def test_unknown_member_identity_retains_cleanup(
 @pytest.mark.parametrize("mode", ["malformed", "oserror"])
 def test_identity_read_failures_are_unknown(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     import builtins
-    import Evaluator.owned_process as owned
+    import tuner.inference.owned_process as owned
 
     if mode == "malformed":
         monkeypatch.setattr(builtins, "open", lambda *args, **kwargs: io.BytesIO(b"bad"))
@@ -259,7 +259,7 @@ def test_identity_read_failures_are_unknown(monkeypatch: pytest.MonkeyPatch, mod
 
 
 def test_missing_identity_is_absent() -> None:
-    import Evaluator.owned_process as owned
+    import tuner.inference.owned_process as owned
 
     assert owned._identity(2**30) is None
 
@@ -267,7 +267,7 @@ def test_missing_identity_is_absent() -> None:
 def test_spawn_identity_failure_retains_family_lease(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import Evaluator.owned_process as owned
+    import tuner.inference.owned_process as owned
 
     real_identity = owned._identity
     calls = 0
@@ -298,7 +298,7 @@ def test_spawn_identity_failure_retains_family_lease(
 
 
 def test_census_entry_budget_is_retryable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import Evaluator.owned_process as owned
+    import tuner.inference.owned_process as owned
 
     lease, _ = _family(tmp_path)
     monkeypatch.setattr(owned, "_MAX_PROC_ENTRIES", 0)
@@ -320,7 +320,7 @@ def test_census_expired_deadline_is_unknown(tmp_path: Path) -> None:
 def test_spawn_identity_keyboard_interrupt_keeps_cleanup_lease(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import Evaluator.owned_process as owned
+    import tuner.inference.owned_process as owned
 
     real_identity = owned._identity
     monkeypatch.setattr(
@@ -341,7 +341,7 @@ def test_spawn_identity_keyboard_interrupt_keeps_cleanup_lease(
 
 
 def test_unsupported_platform_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import Evaluator.owned_process as owned
+    import tuner.inference.owned_process as owned
 
     monkeypatch.setattr(owned.os, "name", "nt")
     with pytest.raises(OwnedProcessError, match="POSIX"):

@@ -12,7 +12,7 @@ import copy
 import threading
 from typing import Iterator, Literal, Protocol
 
-from Evaluator.chat_session import ChatSession, ChatSessionPolicy
+from tuner.inference.chat_session import ChatSession, ChatSessionPolicy
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from synaptic_tuner.api.v1.runs_facade import RunsAPI
 from tuner.execution.coordinator_v1.model import (

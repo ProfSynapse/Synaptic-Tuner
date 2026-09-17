@@ -56,7 +56,7 @@ from tuner.execution.providers.modal.inference_transport import (
     ModalChatLeaseHandoff,
     ModalChatSandboxLease,
 )
-from Evaluator.chat_session import ChatSessionError
+from tuner.inference.chat_session import ChatSessionError
 from tuner.inference.run_chat import PreparedModelIdentity, open_run_chat
 
 

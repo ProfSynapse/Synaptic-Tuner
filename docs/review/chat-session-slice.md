@@ -1,6 +1,6 @@
 # Bounded chat-session slice
 
-`Evaluator.chat_session.ChatSession` controls one in-memory conversation with an
+`tuner.inference.chat_session.ChatSession` controls one in-memory conversation with an
 already-ready generic `BackendClient` and an exclusively owned runtime lease.
 It does not load models, construct backend clients, contact a provider, or prove
 that a runtime contains a particular verified model; trusted composition remains

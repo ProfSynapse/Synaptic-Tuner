@@ -16,7 +16,7 @@ import re
 
 from synaptic_tuner.api.v1.providers import ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
-from Evaluator.chat_session import ChatSessionPolicy
+from tuner.inference.chat_session import ChatSessionPolicy
 from tuner.execution.coordinator_v1.ports import CoordinatorClockPortV1
 from tuner.execution.evidence import (
     DEPLOYMENT_EVIDENCE_POLICY,

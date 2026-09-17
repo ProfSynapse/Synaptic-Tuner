@@ -13,8 +13,8 @@ from pathlib import Path
 import stat
 import sys
 
-from Evaluator.chat_session import ChatSessionPolicy
-from Evaluator.vllm_runtime import VerifiedLocalVLLMSource, VLLMStartupSpec
+from tuner.inference.chat_session import ChatSessionPolicy
+from tuner.inference.vllm_runtime import VerifiedLocalVLLMSource, VLLMStartupSpec
 from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
 from tuner.execution.evidence import (
     DEPLOYMENT_EVIDENCE_POLICY,

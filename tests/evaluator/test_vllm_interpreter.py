@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from Evaluator import vllm_runtime as runtime
+from tuner.inference import vllm_runtime as runtime
 
 
 def _network(**changes) -> runtime.VLLMStartupSpec:

@@ -4,7 +4,7 @@ from dataclasses import replace
 import hashlib
 from pathlib import Path
 import pytest
-from Evaluator.chat_session import ChatSession, ChatSessionPolicy
+from tuner.inference.chat_session import ChatSession, ChatSessionPolicy
 from Evaluator.protocols import BackendResponse
 from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
 from synaptic_tuner.api.v1.runs_facade import RunsAPI

@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from Evaluator import vllm_runtime, vllm_setup
+from Evaluator import vllm_setup
+from tuner.inference import vllm_runtime
 
 
 class _Process:

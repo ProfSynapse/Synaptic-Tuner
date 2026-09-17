@@ -5,7 +5,8 @@ import json
 
 import pytest
 
-from Evaluator import base_client, vllm_runtime
+from Evaluator import base_client
+from tuner.inference import vllm_runtime
 from Evaluator.verified_vllm_chat import verified_vllm_chat
 from tests.evaluator.test_run_chat_local_integration import _Process
 from tests.execution.providers import test_modal_inference_preparation as config_cases

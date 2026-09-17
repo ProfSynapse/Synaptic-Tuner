@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from Evaluator import vllm_runtime as runtime
+from tuner.inference import vllm_runtime as runtime
 
 
 @pytest.fixture(autouse=True)

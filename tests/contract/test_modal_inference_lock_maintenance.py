@@ -102,7 +102,7 @@ def test_reviewed_source_inventory_is_exact_and_fixed() -> None:
         hashlib.sha256(
             ("\n".join(maintenance.SOURCE_MEMBERS) + "\n").encode()
         ).hexdigest()
-        == "c113bcc42600748060033f51b688aac6d9c4d6305f49aa030e3541a1c63aa879"
+        == "e89ba78b2dfe012724dfb887c518d656d7e806c42522830c47ecaa3d0ab28dff"
     )
 
 

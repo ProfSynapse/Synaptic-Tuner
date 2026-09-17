@@ -19,7 +19,7 @@ For Linux/WSL local vLLM, the checked-in adapter is
 host that already supplies the named values, not a standalone script to execute:
 
 ```python
-from Evaluator.chat_session import ChatSessionPolicy
+from tuner.inference.chat_session import ChatSessionPolicy
 from Evaluator.local_run_chat import LocalVLLMRunChatRuntime
 from tuner.inference.run_chat import open_run_chat
 

@@ -10,7 +10,7 @@ import time
 from types import MappingProxyType
 from typing import Callable, Mapping, Protocol, cast, runtime_checkable
 
-from .protocols import BackendClient, BackendResponse
+from Evaluator.protocols import BackendClient, BackendResponse
 
 _MAX_TIMEOUT_SECONDS = 24 * 60 * 60
 _MAX_TURNS = 10_000

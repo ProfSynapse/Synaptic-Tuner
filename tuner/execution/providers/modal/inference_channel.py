@@ -10,7 +10,7 @@ import sys
 import threading
 from typing import BinaryIO
 
-from Evaluator.chat_session import ChatSession
+from tuner.inference.chat_session import ChatSession
 from tuner.inference.run_chat import PreparedModelIdentity
 
 _SCHEMA = "synaptic-modal-chat-channel/v1"

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from inspect import getattr_static
 from typing import Iterator, Protocol, runtime_checkable
 
-from Evaluator.chat_session import ChatSession
+from tuner.inference.chat_session import ChatSession
 from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
 from synaptic_tuner.api.v1.runs_facade import RunsAPI
 from tuner.inference.retrieved_model import ROLES, RetrievedSFTModel

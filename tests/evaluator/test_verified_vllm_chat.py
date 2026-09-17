@@ -9,9 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 from Evaluator import verified_vllm_chat as composition
-from Evaluator.chat_session import ChatSessionError, ChatSessionPolicy
+from tuner.inference.chat_session import ChatSessionError, ChatSessionPolicy
 from Evaluator.protocols import BackendResponse
-from Evaluator.vllm_runtime import (
+from tuner.inference.vllm_runtime import (
     ExplicitNetworkVLLMSource,
     VerifiedLocalVLLMSource,
     VLLMRuntimeLease,
@@ -254,7 +254,7 @@ def test_request_limit_reaches_real_client_and_closes_owned_runtime(
     setup, tmp_path, monkeypatch
 ):
     from Evaluator import base_client
-    from Evaluator.chat_session import ChatSessionError
+    from tuner.inference.chat_session import ChatSessionError
     from Evaluator.vllm_client import VLLMClient
 
     spec, policy, process, runtime, captured = setup
@@ -320,8 +320,9 @@ def _real_target(tmp_path, kind):
 def test_real_target_runtime_client_session_chain_with_fake_effects(
     tmp_path, monkeypatch, kind, outcome, with_deadline
 ):
-    from Evaluator import base_client, vllm_runtime
-    from Evaluator.chat_session import ChatSessionError
+    from Evaluator import base_client
+    from tuner.inference import vllm_runtime
+    from tuner.inference.chat_session import ChatSessionError
 
     target = _real_target(tmp_path, kind)
     stopped = threading.Event()

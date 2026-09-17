@@ -14,9 +14,9 @@ from tuner.inference.retrieved_model import materialize_verified_sft_model
 from tuner.inference.run_chat import PreparedModelIdentity, PreparedRunChat
 from tuner.inference.serving_target import PinnedModelPreparer, prepare_serving_target
 
-from .chat_session import ChatSessionPolicy
+from tuner.inference.chat_session import ChatSessionPolicy
 from .verified_vllm_chat import verified_vllm_chat
-from .vllm_runtime import (
+from tuner.inference.vllm_runtime import (
     VLLMStartupSpec,
     VerifiedLocalVLLMSource,
     _environment,

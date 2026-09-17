@@ -20,8 +20,8 @@ import time
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from Evaluator.chat_session import ChatSessionPolicy
-from Evaluator.vllm_runtime import (
+from tuner.inference.chat_session import ChatSessionPolicy
+from tuner.inference.vllm_runtime import (
     ExplicitNetworkLoRA,
     ExplicitNetworkVLLMSource,
     VLLMStartupSpec,

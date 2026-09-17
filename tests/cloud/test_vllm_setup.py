@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from Evaluator import vllm_setup
-from Evaluator.vllm_runtime import (
+from tuner.inference.vllm_runtime import (
     ExplicitNetworkVLLMSource,
     VLLMStartupSpec,
     _projection,

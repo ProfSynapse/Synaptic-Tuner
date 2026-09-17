@@ -13,15 +13,12 @@ on:
       - "tuner/runtime/**"
       - "tuner/inference/**"
       - "tests/inference/**"
-      - "Evaluator/owned_process.py"
-      - "Evaluator/vllm_runtime.py"
       - "Evaluator/vllm_setup.py"
       - "Evaluator/interactive_cli.py"
       - "Evaluator/cloud_hf_job_vllm.py"
       - "Evaluator/cli.py"
       - "Evaluator/base_client.py"
       - "Evaluator/openai_compat_client.py"
-      - "Evaluator/chat_session.py"
       - "Evaluator/verified_vllm_chat.py"
       - "Evaluator/local_run_chat.py"
       - "tests/evaluator/test_owned_process.py"
@@ -181,9 +178,9 @@ jobs:
           import tuner.training.coordinator_material
           import tuner.training.coordinator_service
           import tuner.training.contracts
-          import Evaluator.owned_process
-          import Evaluator.vllm_runtime
-          import Evaluator.chat_session
+          import tuner.inference.owned_process
+          import tuner.inference.vllm_runtime
+          import tuner.inference.chat_session
           import Evaluator.verified_vllm_chat
           import Evaluator.local_run_chat
           import tuner.inference.retrieved_model

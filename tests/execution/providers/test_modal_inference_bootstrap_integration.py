@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from Evaluator import base_client, vllm_runtime
+from Evaluator import base_client
+from tuner.inference import vllm_runtime
 from tests.evaluator.test_run_chat_local_integration import _Process
 from tests.execution.providers.modal_inference_worker_fixtures import (
     mounted_launch_case,
@@ -72,7 +73,7 @@ def test_signed_launch_reaches_real_chat_and_retains_model(
         assert prepared.model.model_kind == kind
         assert requests == []
         if failure:
-            from Evaluator.chat_session import ChatSessionError
+            from tuner.inference.chat_session import ChatSessionError
 
             with pytest.raises(ChatSessionError):
                 session.chat("Hi")

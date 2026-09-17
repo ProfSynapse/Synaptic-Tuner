@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Mapping
 
-from Evaluator.owned_process import OwnedProcessLease, _UNKNOWN, _identity
+from tuner.inference.owned_process import OwnedProcessLease, _UNKNOWN, _identity
 from tuner.inference.serving_target import ServingTarget
 
 __all__: list[str] = []

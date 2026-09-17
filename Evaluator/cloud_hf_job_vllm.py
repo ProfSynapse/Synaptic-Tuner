@@ -26,7 +26,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from Evaluator.cli import main as evaluator_main
 from Evaluator import vllm_setup
-from Evaluator.vllm_runtime import (
+from tuner.inference.vllm_runtime import (
     ExplicitNetworkLoRA,
     ExplicitNetworkVLLMSource,
     VLLMStartupSpec,

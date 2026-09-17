@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Evaluator.chat_session import ChatSession, ChatSessionPolicy
+from tuner.inference.chat_session import ChatSession, ChatSessionPolicy
 from Evaluator.protocols import BackendResponse
 from tuner.inference.run_chat import PreparedModelIdentity
 from tuner.execution.providers.modal.inference_bootstrap import ModalChatWorkerSession

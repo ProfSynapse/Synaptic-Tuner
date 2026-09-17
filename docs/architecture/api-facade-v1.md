@@ -461,7 +461,7 @@ artifacts (`dataset_jsonl`, `dataset_metadata`) and `diagnostic_code`.
 
 **Q1 — a session is not a run.** `ChatSessionRef{session_id, project_ref}` is a
 first-class entity outside the lifecycle model, because `LifecycleRecord` demands
-one event per revision and a 10,000-turn session (`Evaluator/chat_session.py:37-61`
+one event per revision and a 10,000-turn session (`tuner/inference/chat_session.py:37-61`
 bounds `max_turns` at 10000) is quadratic, and because a session has no paid
 provider submission to reconcile. The code already made this choice —
 `PreparedRunChat` binds a `TrainingRunRef` with no lifecycle record
@@ -481,7 +481,7 @@ class ChatOperations(Protocol):
 cleanup_unresolved`.
 
 **Q5 — `cleanup_unresolved` is the public shape of** `OwnedProcessError("owned
-process family cleanup remains unresolved")` (`Evaluator/owned_process.py:202`). It
+process family cleanup remains unresolved")` (`tuner/inference/owned_process.py:202`). It
 is the chat analogue of `reconcile_required` and gets its own code, not a
 `RunOperationCode`. A session in that state is terminal-uncertain: it serves no
 further turn, and the host is told a process family may still hold a GPU.
@@ -505,7 +505,7 @@ runtime (Modal) carries no such restriction. A Windows process-group owner is ou
 of scope and would be the weaker of the two implementations.
 
 **Q6 — three modules move out of `Evaluator/`, and it is in scope.**
-`tuner/inference/run_chat.py:10` imports `Evaluator.chat_session`, which would drag
+`tuner/inference/run_chat.py:10` imported the chat session module from `Evaluator/`, which would drag
 15,630 lines including Rich UI, argparse CLIs and eight backend clients into any
 reference chat implementation. `chat_session.py`, `vllm_runtime.py` and
 `owned_process.py` move to `tuner/inference/`, imports updated directly, no
