@@ -166,8 +166,14 @@ class OwnedProcessLease:
         while True:
             members = self._members(deadline)
             if members == ():
+                # An empty census with an unreapable leader is a multithreaded
+                # exit still in progress: the thread-group leader reads as Z
+                # while sibling threads tear down, and waitpid does not report
+                # it until the whole group is gone. Keep polling until the
+                # deadline; only a foreign reap marks the lease uncertain.
                 self._finish()
-                return not self._pending
+                if not self._pending:
+                    return True
             if members is None or self._uncertain or time.monotonic() >= deadline:
                 return False
             time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
@@ -175,7 +181,9 @@ class OwnedProcessLease:
     def _finish(self) -> None:
         try:
             self._process.wait(timeout=0)
-        except (subprocess.TimeoutExpired, ChildProcessError):
+        except subprocess.TimeoutExpired:
+            return
+        except ChildProcessError:
             self._uncertain = True
             return
         self._pending = False

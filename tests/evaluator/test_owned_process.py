@@ -346,3 +346,47 @@ def test_unsupported_platform_fails_closed(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(owned.os, "name", "nt")
     with pytest.raises(OwnedProcessError, match="POSIX"):
         OwnedProcessLease.spawn(("ignored",), cwd=tmp_path, environment={})
+
+
+def test_zombie_leader_reap_is_retried_until_reapable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A multithreaded leader reads as Z (excluded from the census) before
+    # waitpid can reap it. The first empty-census reap therefore times out;
+    # the lease must keep polling instead of marking itself uncertain.
+    lease, grandchild = _family(tmp_path)
+    real_wait = lease._process.wait
+    attempts = 0
+
+    def unreapable_once(timeout: float | None = None) -> int:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise subprocess.TimeoutExpired(cmd="leader", timeout=0)
+        return real_wait(timeout=timeout)
+
+    monkeypatch.setattr(lease._process, "wait", unreapable_once)
+    assert lease.close(term_timeout=1, kill_timeout=1)
+    assert not lease.cleanup_pending
+    assert not lease._uncertain
+    assert attempts >= 2
+    assert not _alive(grandchild)
+
+
+def test_unreapable_leader_past_deadline_is_retryable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lease, grandchild = _family(tmp_path)
+    real_wait = lease._process.wait
+
+    def never_reapable(timeout: float | None = None) -> int:
+        raise subprocess.TimeoutExpired(cmd="leader", timeout=0)
+
+    monkeypatch.setattr(lease._process, "wait", never_reapable)
+    assert not lease.close(term_timeout=0.1, kill_timeout=0.1)
+    assert lease.cleanup_pending
+    assert not lease._uncertain
+    monkeypatch.setattr(lease._process, "wait", real_wait)
+    assert lease.close(term_timeout=1, kill_timeout=1)
+    assert not lease.cleanup_pending
+    assert not _alive(grandchild)
