@@ -33,8 +33,15 @@
   },
   "result": {
     "returncode": 0,
-    "command_statuses": ["CHAT_INPUTS_CHECKED", "CHAT_SAVED_AND_CLOSED"],
-    "record_statuses": ["CLAIMED", "REPLY_SAVED", "CHAT_CONTEXT_CLOSED"],
+    "command_statuses": [
+      "CHAT_INPUTS_CHECKED",
+      "CHAT_SAVED_AND_CLOSED"
+    ],
+    "record_statuses": [
+      "CLAIMED",
+      "REPLY_SAVED",
+      "CHAT_CONTEXT_CLOSED"
+    ],
     "model": "HuggingFaceTB/SmolLM2-135M-Instruct",
     "revision": "12fd25f77366fa6b3b4b768ec3050bf629380bac",
     "training_required": false,
@@ -46,7 +53,10 @@
     "poll_exception_class": null,
     "poll_result": 0,
     "provider_shutdown_proof": true,
-    "post_run_app_task_counts": {"synaptic-model-chat-v1": 0, "synaptic-training-v1": 0}
+    "post_run_app_task_counts": {
+      "synaptic-model-chat-v1": 0,
+      "synaptic-training-v1": 0
+    }
   },
   "effects": {
     "modal_calls": true,
@@ -62,5 +72,21 @@
     "Cost: rates were not re-read at issuance; the worst case in README stands as an estimate only",
     "Any qualification of the coupled train-then-chat path or of the ea66c4c inference-image capture"
   ],
-  "note": "Operator-run, unsigned observation of one finite Sandbox attempt; the private attempt directory under the consumer checkout's .synaptic/state holds the five retained records."
+  "note": "Operator-run, unsigned observation of one finite Sandbox attempt; the private attempt directory under the consumer checkout's .synaptic/state holds the five retained records.",
+  "cleanup": {
+    "executed_at": "2026-09-17T14:10:00Z",
+    "environment": "synaptic-smoke-v1",
+    "chat_attempt_volumes_deleted": 30,
+    "chat_attempt_secrets_deleted": 10,
+    "training_smoke_app_stopped": "synaptic-training-v1",
+    "training_smoke_volumes_deleted": 2,
+    "training_smoke_secrets_deleted": 1,
+    "remaining_volumes": 0,
+    "remaining_secrets": 0,
+    "main_environment_touched": false,
+    "local_docker_containers_removed": 15,
+    "local_docker_volumes_removed": [
+      "synaptic-local-chat-results"
+    ]
+  }
 }

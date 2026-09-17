@@ -28,3 +28,20 @@ the Modal skill note previously listed as not claimed. It does not touch the
 coupled train-then-chat path, adapter provenance, cost at issuance, or the
 older `ea66c4c` inference-image capture, which no longer matches the closure
 of the current engine pin and needs a fresh capture before any coupled attempt.
+
+## Closeout (2026-09-17, operator decisions)
+
+Cleanup executed after the live attempt, each item chosen by the operator:
+
+- `synaptic-smoke-v1`: the 30 Volumes and 10 Secrets of the 2026-09-14
+  coupled attempts a..j deleted by exact name (40/40); the 2026-09-07 training
+  smoke App `synaptic-training-v1` stopped and its two Volumes and one Secret
+  deleted. The environment now holds no Volumes and no Secrets; Apps are
+  `synaptic-model-chat-v1` (deployed, 0 tasks, reused by the launcher) and
+  `synaptic-training-v1` (stopped).
+- Nothing in the Modal `main` environment was touched.
+- Local Docker Desktop: 15 exited `synaptic-modal-submit:34d6623d` containers
+  and the `synaptic-local-chat-results` volume removed;
+  `synaptic-local-hf-cache` kept for the next local proof.
+- The private attempt directory under the consumer checkout's
+  `.synaptic/state/model-chat/` is retained as the only copy of the reply.
