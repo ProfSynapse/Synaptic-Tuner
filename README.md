@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`d8aff7cef6734d16346c501650d76cbf81d626b2`, advertised by
+`d7c490ab12e66c56a23a4391388e2b7ac0badd4a`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
