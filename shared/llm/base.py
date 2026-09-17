@@ -1,7 +1,19 @@
-"""Base LLM client interface."""
+"""Base LLM client interface.
+
+Location: ``shared/llm/base.py``.
+
+Every provider adapter under ``shared/llm/providers/`` implements
+``BaseLLMClient``. ``chat`` returns ``LLMCompletionV1`` and
+``structured_output`` returns ``LLMStructuredV1`` (``shared/llm/usage.py``):
+the answer plus the provider-reported token usage, or ``usage=None`` when the
+provider reported none. Callers read ``.text`` / ``.value`` and never treat
+the return value as a bare ``str`` or ``dict``.
+"""
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
+
+from .usage import LLMCompletionV1, LLMStructuredV1
 
 
 class BaseLLMClient(ABC):
@@ -19,9 +31,9 @@ class BaseLLMClient(ABC):
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs
-    ) -> str:
+    ) -> LLMCompletionV1:
         """
-        Send chat completion request and return text response.
+        Send chat completion request and return the completion.
 
         Args:
             messages: List of message dicts with 'role' and 'content'
@@ -30,7 +42,8 @@ class BaseLLMClient(ABC):
             **kwargs: Provider-specific parameters
 
         Returns:
-            Generated text response
+            ``LLMCompletionV1`` with the generated text and, when the provider
+            reported prompt/completion token counts, a ``measured`` usage record
 
         Raises:
             LLMError: If request fails
@@ -45,9 +58,9 @@ class BaseLLMClient(ABC):
         temperature: float = 0.3,
         max_tokens: Optional[int] = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> LLMStructuredV1:
         """
-        Send request and return structured JSON matching schema.
+        Send request and return the parsed structured JSON matching schema.
 
         Args:
             messages: List of message dicts with 'role' and 'content'
@@ -57,7 +70,8 @@ class BaseLLMClient(ABC):
             **kwargs: Provider-specific parameters
 
         Returns:
-            Parsed JSON object matching schema
+            ``LLMStructuredV1`` with the parsed JSON object and, when the
+            provider reported token counts, a ``measured`` usage record
 
         Raises:
             LLMError: If request fails or response doesn't match schema

@@ -6,6 +6,7 @@ from shared.llm.config import LLMConfig
 from shared.llm.exceptions import LLMResponseError
 from shared.llm.factory import create_client, list_providers
 from shared.llm.providers.openai_responses import OpenAIResponsesClient
+from shared.llm.usage import LLMCompletionV1
 
 
 class _FakeResponse:
@@ -43,7 +44,7 @@ def test_openai_responses_chat_sends_responses_payload(monkeypatch):
         max_tokens=77,
     )
 
-    assert result == "hello"
+    assert result.text == "hello"
     assert captured["url"] == "https://example.test/v1/responses"
     assert captured["headers"]["Authorization"] == "Bearer test-key"
     assert captured["timeout"] == 12
@@ -67,7 +68,7 @@ def test_openai_responses_chat_omits_default_temperature(monkeypatch):
 
     client = OpenAIResponsesClient(api_key="test-key", model="gpt-test")
 
-    assert client.chat([{"role": "user", "content": "Hello"}]) == "hello"
+    assert client.chat([{"role": "user", "content": "Hello"}]).text == "hello"
     assert "temperature" not in captured["json"]
 
 
@@ -86,7 +87,7 @@ def test_openai_responses_chat_sends_reasoning_effort(monkeypatch):
         thinking_effort="HIGH",
     )
 
-    assert client.chat([{"role": "user", "content": "Hello"}]) == "hello"
+    assert client.chat([{"role": "user", "content": "Hello"}]).text == "hello"
     assert captured["json"]["reasoning"] == {"effort": "high"}
 
 
@@ -110,7 +111,7 @@ def test_openai_responses_chat_extracts_typed_output(monkeypatch):
 
     client = OpenAIResponsesClient(api_key="test-key", model="gpt-test")
 
-    assert client.chat([{"role": "user", "content": "Hello"}]) == "part one part two"
+    assert client.chat([{"role": "user", "content": "Hello"}]).text == "part one part two"
 
 
 def test_openai_responses_structured_output_uses_text_format(monkeypatch):
@@ -136,7 +137,7 @@ def test_openai_responses_structured_output_uses_text_format(monkeypatch):
         max_tokens=123,
     )
 
-    assert result == {"answer": "yes"}
+    assert result.value == {"answer": "yes"}
     assert captured["json"]["store"] is False
     assert "temperature" not in captured["json"]
     assert captured["json"]["max_output_tokens"] == 123
@@ -165,7 +166,7 @@ def test_openai_responses_structured_output_sends_explicit_temperature(monkeypat
         temperature=0.2,
     )
 
-    assert result == {"answer": "yes"}
+    assert result.value == {"answer": "yes"}
     assert captured["json"]["temperature"] == 0.2
 
 
@@ -220,7 +221,7 @@ def test_openai_responses_structured_output_sends_reasoning_effort(monkeypatch):
         schema={"name": "response", "type": "object"},
     )
 
-    assert result == {"answer": "yes"}
+    assert result.value == {"answer": "yes"}
     assert captured["json"]["reasoning"] == {"effort": "minimal"}
 
 
@@ -332,7 +333,7 @@ def test_evaluator_openai_responses_adapter_passes_timeout_to_shared_client(monk
         provider_name = "openai_responses"
 
         def chat(self, messages, temperature=0.7, max_tokens=1024):
-            return "ok"
+            return LLMCompletionV1("ok")
 
         def test_connection(self):
             return True

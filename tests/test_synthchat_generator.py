@@ -10,6 +10,7 @@ from SynthChat.schemas.tool_response_schema import build_tool_generation_prompt,
 from SynthChat.config.format_resolver import get_default_tool_call_format
 from shared.agentic_judge import AgenticTurnJudge
 from shared.environments import EnvironmentValidator
+from shared.llm.usage import LLMCompletionV1, LLMStructuredV1
 
 
 def _tool_calls_array_schema(schema: dict) -> dict:
@@ -44,7 +45,7 @@ class _FakeLLMClient:
         self.messages.append({"messages": messages, "temperature": temperature, "max_tokens": max_tokens})
         if not self._responses:
             raise AssertionError("No more fake responses available")
-        return self._responses.pop(0)
+        return LLMCompletionV1(self._responses.pop(0))
 
     def structured_output(self, messages, schema, temperature=0.3, max_tokens=2048):
         self.structured_messages.append(
@@ -57,7 +58,7 @@ class _FakeLLMClient:
         )
         if not self._structured_responses:
             raise AssertionError("No more fake structured responses available")
-        return self._structured_responses.pop(0)
+        return LLMStructuredV1(self._structured_responses.pop(0))
 
 
 class _FakeLogger:
@@ -84,13 +85,13 @@ class _RetryJudgeClient:
         self.calls += 1
         if self.calls < 3:
             raise RuntimeError("transient judge failure")
-        return {
+        return LLMStructuredV1({
             "passed": True,
             "hard_failure": False,
             "should_stop": False,
             "feedback_to_model": "Looks good.",
             "feedback_for_trace": "Recovered after retries.",
-        }
+        })
 
 
 class _AlwaysFailStructuredClient(_FakeLLMClient):

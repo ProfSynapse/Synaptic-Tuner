@@ -9,6 +9,7 @@ import requests
 
 from ..base import BaseLLMClient
 from ..exceptions import LLMConnectionError, LLMResponseError
+from ..usage import LLMCompletionV1, LLMStructuredV1, usage_from_openai_block
 
 
 class OpenAIResponsesClient(BaseLLMClient):
@@ -32,12 +33,6 @@ class OpenAIResponsesClient(BaseLLMClient):
         self.store = bool(store)
         self.structured_output_strict = bool(structured_output_strict)
         self.thinking_effort = _normalize_thinking_effort(thinking_effort)
-        # Token-usage from the most recent request, for cost instrumentation.
-        # The Responses API returns a ``usage`` block on every response; we cache
-        # it here (additively, no return-signature change) so callers that care
-        # about cost can read ``client.last_usage`` after a chat/structured_output
-        # call. None until the first request; None again if a response omits usage.
-        self.last_usage: Dict[str, Any] | None = None
 
     @property
     def provider_name(self) -> str:
@@ -65,8 +60,11 @@ class OpenAIResponsesClient(BaseLLMClient):
         max_tokens: int = 1024,
         reasoning_effort: str | None = None,
         **kwargs,
-    ) -> str:
-        """Send a stateless Responses request and return text.
+    ) -> LLMCompletionV1:
+        """Send a stateless Responses request and return the completion.
+
+        Usage is measured from the response ``usage`` block (``input_tokens`` /
+        ``output_tokens``); ``None`` when the API omits it.
 
         Reasoning effort resolves as a per-call override over the instance
         default: the explicit ``reasoning_effort`` argument wins; otherwise the
@@ -97,7 +95,7 @@ class OpenAIResponsesClient(BaseLLMClient):
             content = _extract_output_text(data)
             if not content.strip():
                 raise LLMResponseError("Empty response from OpenAI Responses API")
-            return content
+            return LLMCompletionV1(content, usage_from_openai_block(data.get("usage")))
         except LLMResponseError:
             raise
         except Exception as e:
@@ -111,7 +109,7 @@ class OpenAIResponsesClient(BaseLLMClient):
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> LLMStructuredV1:
         """Send request with Responses API JSON Schema structured output.
 
         Reasoning effort resolves identically to chat(): the per-call
@@ -149,7 +147,10 @@ class OpenAIResponsesClient(BaseLLMClient):
             content = _extract_output_text(data)
             if not content.strip():
                 raise LLMResponseError("Empty response from OpenAI Responses API")
-            return json.loads(content)
+            value = json.loads(content)
+            if not isinstance(value, dict):
+                raise LLMResponseError("Structured output from OpenAI Responses API is not a JSON object")
+            return LLMStructuredV1(value, usage_from_openai_block(data.get("usage")))
         except json.JSONDecodeError as e:
             raise LLMResponseError(
                 f"Failed to parse structured output: {e}\nResponse excerpt: {_truncate_response(content)}",
@@ -192,11 +193,7 @@ class OpenAIResponsesClient(BaseLLMClient):
                 timeout=self.timeout_seconds,
             )
             response.raise_for_status()
-            data = response.json()
-            # Cache token usage for cost instrumentation (additive; never raises).
-            usage = data.get("usage") if isinstance(data, dict) else None
-            self.last_usage = usage if isinstance(usage, dict) else None
-            return data
+            return response.json()
         except requests.exceptions.ConnectionError as e:
             raise LLMConnectionError(f"Cannot connect to OpenAI Responses API: {e}")
         except requests.exceptions.Timeout as e:

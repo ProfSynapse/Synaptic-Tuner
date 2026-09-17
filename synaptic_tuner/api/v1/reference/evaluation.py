@@ -34,11 +34,24 @@ to ``cancel_requested`` and the runner, which re-reads the head after every
 scenario, stops before the next one and finishes as ``cancelled`` with the
 partial ``evaluation_results`` artifact listed. Results and traces are written
 only to the injected ``EvaluationArtifactSinkPort``; the engine tree is never
-touched. A local backend claims no spend effect, so a run has zero effects and
-zero grants; a backend whose requirement carries ``paid_effect`` is refused
-with ``backend_unmetered`` before any client is opened (§9, metering lands in
-slice 11), and a backend the registry does not know is refused with
-``backend_unavailable``.
+touched.
+
+Spend (slice 11, §4.4): a paid backend (one whose requirement carries
+``paid_effect``) is admitted only when it also exposes ``spend_scope``, the
+provider account its usage is metered against; ``MeteredPaidBackendV1`` is the
+reference. Such a run claims exactly ONE ``spend`` effect in the ``effects``
+partition (``reference/spend.py``) before its first call and closes it once,
+however many cases it scores: ``found`` with the usage summed over every call
+when every call reported measured usage (the result then carries that one
+``usage`` record, whose ``spend`` names the effect), ``definitely_absent``
+when no call was made, ``indeterminate`` when any call reported no usage, in
+which case the run finishes ``failed`` / ``spend_indeterminate`` and no found
+spend is claimed. A paid backend without a spend scope, and a paid judge, are
+still refused with ``backend_unmetered`` before any client is opened
+(``UnmeteredPaidBackendV1`` declares such a backend). A local backend claims
+no spend effect, so a run against it has zero effects and zero grants; its
+result carries ``usage`` only when every call reported measured usage. A
+backend the registry does not know is refused with ``backend_unavailable``.
 
 Consumed by ``synaptic_tuner/api/v1/reference/composition.py`` and exported
 lazily through ``synaptic_tuner/api/v1/reference/__init__.py``.
@@ -100,6 +113,7 @@ from synaptic_tuner.api.v1.ports import (
 from synaptic_tuner.api.v1.results import VerifiedArtifact
 from synaptic_tuner.api.v1.secrets import SecretRef
 from synaptic_tuner.api.v1.training_facade import AuthorizationRequirement
+from synaptic_tuner.api.v1.usage import UsageAvailability, UsageRecordV1
 from Evaluator.config_loader import ConfigLoader
 from Evaluator.reporting import (
     RUN_TRACE_SCHEMA_VERSION,
@@ -111,8 +125,17 @@ from Evaluator.reporting import (
 from Evaluator.runner import EvaluationRecord, evaluate_cases
 from tuner.execution.foundation_v2.canonical import digest_text, domain_digest
 from tuner.execution.redaction import redact
+from shared.llm.usage import UsageAccumulator
 
 from .provider_family import require_methods
+from .spend import (
+    SpendAuthorizationV1,
+    SpendEffectRecordV1,
+    SpendEffectState,
+    SpendEntityV1,
+    SpendLedgerV1,
+    SpendScopeV1,
+)
 
 
 # --- constants ---------------------------------------------------------------------
@@ -132,6 +155,7 @@ EVALUATION_RESULTS_ROLE = "evaluation_results"
 EVALUATION_TRACE_ROLE = "evaluation_trace"
 EVALUATION_START_OPERATION = "evaluation.start"
 EVALUATION_JUDGE_OPERATION = "evaluation.judge"
+EVALUATION_SPEND_FAMILY = "evaluation"
 HISTORY_PAGE_LIMIT = 200
 APPEND_ATTEMPTS = 4
 LOCAL_HTTP_BACKENDS = frozenset({"ollama", "lmstudio", "vllm"})
@@ -149,7 +173,7 @@ _EVENT_KINDS = frozenset({"created", "started", "cancel_requested", "finished"})
 _HEAD_KEYS = frozenset({"schema_version", "revision", "sequence", "chain_digest", "record_digest", "record"})
 _RECORD_KEYS = frozenset({
     "schema_version", "run", "plan", "state", "cases_scored", "artifacts",
-    "diagnostic_code", "scores", "verdicts",
+    "diagnostic_code", "scores", "verdicts", "usage",
 })
 _ENTRY_KEYS = frozenset({
     "schema_version", "revision", "previous_sequence", "previous_chain_digest",
@@ -178,9 +202,12 @@ class EvaluationBackendPort(Protocol):
     """One evaluation backend a host offers under a name.
 
     ``requirement`` describes the authorization a start would need; a
-    requirement with ``paid_effect`` marks the backend as metered and is
-    refused until spend metering lands (slice 11). ``open`` returns an
-    ``Evaluator`` ``BackendClient`` bound to the requested model.
+    requirement with ``paid_effect`` marks the backend as paid. A paid backend
+    is admitted only when it also exposes ``spend_scope() -> SpendScopeV1``,
+    the provider account every run's single ``spend`` effect is claimed
+    against; a paid backend without it is refused with ``backend_unmetered``.
+    ``open`` returns an ``Evaluator`` ``BackendClient`` bound to the requested
+    model; the reference meters its ``BackendResponse.usage``.
     """
 
     def requirement(self) -> AuthorizationRequirement: ...
@@ -315,10 +342,12 @@ class LocalHttpEvaluatorBackendV1:
 
 
 class UnmeteredPaidBackendV1:
-    """A paid backend (openrouter, openai_responses) declared but not yet metered.
+    """A paid backend (openrouter, openai_responses) a host declares without a spend scope.
 
-    Its requirement carries ``paid_effect`` so every start is refused with
-    ``backend_unmetered`` before a client is opened; ``open`` refuses too.
+    Its requirement carries ``paid_effect`` and it exposes no ``spend_scope``,
+    so every start is refused with ``backend_unmetered`` before a client is
+    opened; ``open`` refuses too. Hosts that can meter use
+    ``MeteredPaidBackendV1`` instead.
     """
 
     __slots__ = ("_backend",)
@@ -333,6 +362,110 @@ class UnmeteredPaidBackendV1:
 
     def open(self, model: EvaluationModelRef):
         raise _error(EvaluationOperationCode.BACKEND_UNMETERED)
+
+
+class MeteredPaidBackendV1:
+    """A paid backend (openrouter, openai_responses) metered against one provider account.
+
+    The host names the account (``account_ref``, ``namespace_ref``) and the
+    API key as a ``SecretRef`` that is resolved through its
+    ``SecretResolverPort`` at ``open`` time only; nothing is read from the
+    process environment and the resolved value never leaves the client. The
+    optional cap is carried on the requirement and in the spend authorization.
+    Both bundled providers report token counts on every completion, so a run
+    against this backend meters every call; a response without counts closes
+    the run's spend effect ``indeterminate``.
+    """
+
+    __slots__ = (
+        "_backend", "_api_key", "_secrets", "_account_ref", "_namespace_ref",
+        "_timeout", "_retries", "_maximum_cost_minor_units", "_currency",
+    )
+
+    def __init__(
+        self,
+        backend: str,
+        *,
+        api_key: SecretRef,
+        secrets: SecretResolverPort,
+        account_ref: str,
+        namespace_ref: str,
+        timeout: float = 60.0,
+        retries: int = 2,
+        maximum_cost_minor_units: int | None = None,
+        currency: str | None = None,
+    ) -> None:
+        if backend not in PAID_BACKENDS:
+            raise ValueError("backend must be one of the paid backends")
+        if type(api_key) is not SecretRef:
+            raise TypeError("api_key must be a SecretRef")
+        require_methods(secrets, "resolve")
+        # Validates the refs and the cap pairing before any run can start.
+        SpendScopeV1(backend, account_ref, namespace_ref)
+        AuthorizationRequirement(EVALUATION_START_OPERATION, True, maximum_cost_minor_units, currency)
+        self._backend = backend
+        self._api_key = api_key
+        self._secrets = secrets
+        self._account_ref = account_ref
+        self._namespace_ref = namespace_ref
+        self._timeout = float(timeout)
+        self._retries = int(retries)
+        self._maximum_cost_minor_units = maximum_cost_minor_units
+        self._currency = currency
+
+    def requirement(self) -> AuthorizationRequirement:
+        return AuthorizationRequirement(
+            EVALUATION_START_OPERATION, True, self._maximum_cost_minor_units, self._currency
+        )
+
+    def spend_scope(self) -> SpendScopeV1:
+        return SpendScopeV1(self._backend, self._account_ref, self._namespace_ref)
+
+    def open(self, model: EvaluationModelRef):
+        # Imported here so composing a host never loads the HTTP client stack.
+        from Evaluator.config import OpenAIResponsesSettings, OpenRouterSettings
+        from Evaluator.shared_llm_adapters import SharedOpenAIResponsesAdapter, SharedOpenRouterAdapter
+        from shared.llm.providers.openai_responses import OpenAIResponsesClient
+        from shared.llm.providers.openrouter import OpenRouterClient
+
+        api_key = self._secrets.resolve(self._api_key)
+        if self._backend == "openrouter":
+            client = OpenRouterClient(api_key, model.model_ref, timeout_seconds=self._timeout)
+            return SharedOpenRouterAdapter(
+                OpenRouterSettings(model=model.model_ref), timeout=self._timeout, retries=self._retries, client=client,
+            )
+        client = OpenAIResponsesClient(api_key, model.model_ref, timeout_seconds=self._timeout)
+        return SharedOpenAIResponsesAdapter(
+            OpenAIResponsesSettings(model=model.model_ref), timeout=self._timeout, retries=self._retries, client=client,
+        )
+
+
+class _MeteredBackendClient:
+    """Wraps an ``Evaluator`` ``BackendClient`` so every ``chat`` feeds the run's meter.
+
+    Only ``BackendResponse.usage`` counts: a response without it, or a call
+    that raises, is an unmeasured call. Every other attribute
+    (``structured_chat``, ``is_server_running``, ...) passes through unchanged.
+    """
+
+    __slots__ = ("_inner", "_meter")
+
+    def __init__(self, inner, meter: UsageAccumulator) -> None:
+        self._inner = inner
+        self._meter = meter
+
+    def chat(self, messages):
+        try:
+            response = self._inner.chat(messages)
+        except BaseException:
+            # The request may have reached the provider: an unmeasured call.
+            self._meter.add(None)
+            raise
+        self._meter.add(getattr(response, "usage", None))
+        return response
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
 
 
 class _FileSink:
@@ -472,6 +605,7 @@ class _RunRecord:
     diagnostic_code: str | None
     scores: tuple[ScoreV1, ...]
     verdicts: EvaluationVerdictCounts
+    usage: UsageRecordV1 | None = None
 
     def encode(self) -> dict[str, object]:
         return {
@@ -484,6 +618,7 @@ class _RunRecord:
             "diagnostic_code": self.diagnostic_code,
             "scores": [item.to_dict() for item in self.scores],
             "verdicts": self.verdicts.to_dict(),
+            "usage": None if self.usage is None else self.usage.to_dict(),
         }
 
     def digest(self) -> str:
@@ -500,7 +635,7 @@ class _RunRecord:
             "run": self.run, "plan": self.plan, "state": self.state,
             "cases_scored": self.cases_scored, "artifacts": self.artifacts,
             "diagnostic_code": self.diagnostic_code, "scores": self.scores,
-            "verdicts": self.verdicts,
+            "verdicts": self.verdicts, "usage": self.usage,
         }
         values.update(changes)
         return _RunRecord(**values)  # type: ignore[arg-type]
@@ -519,12 +654,18 @@ class _RunRecord:
             scores = value["scores"]
             if type(artifacts) is not list or type(scores) is not list:
                 raise ValueError
+            usage = value["usage"]
+            if usage is not None:
+                usage = UsageRecordV1.from_dict(usage)  # type: ignore[arg-type]
+                if usage.availability is not UsageAvailability.MEASURED:
+                    raise ValueError
             record = cls(
                 run, plan, state, value["cases_scored"],  # type: ignore[arg-type]
                 tuple(VerifiedArtifact.from_dict(item) for item in artifacts),
                 value["diagnostic_code"],  # type: ignore[arg-type]
                 tuple(ScoreV1.from_dict(item) for item in scores),
                 EvaluationVerdictCounts.from_dict(value["verdicts"]),  # type: ignore[arg-type]
+                usage,
             )
             record.outcome()
         except EvaluationOperationError:
@@ -1001,6 +1142,41 @@ class ReferenceEvaluationOperationsV1:
             raise TypeError("backend requirement must be exact AuthorizationRequirement")
         return tuple(items)
 
+    def _spend_scope(self, backend: EvaluationBackendPort) -> SpendScopeV1 | None:
+        """The paid backend's spend scope, or ``None`` when it cannot be metered.
+
+        A backend whose requirement is not paid has no scope. A paid backend is
+        metered only when it exposes ``spend_scope`` returning an exact
+        ``SpendScopeV1``; anything else is unmetered. A paid judge is not
+        metered in this slice, so it leaves the run unmetered too.
+        """
+        requirement = backend.requirement()
+        if type(requirement) is not AuthorizationRequirement or not requirement.paid_effect:
+            return None
+        if self._ports.judge is not None and self._ports.judge.requirement().paid_effect:
+            return None
+        scope_method = getattr(backend, "spend_scope", None)
+        if not callable(scope_method):
+            return None
+        scope = scope_method()
+        return scope if type(scope) is SpendScopeV1 else None
+
+    def _unmetered(self, backend: EvaluationBackendPort) -> bool:
+        """True when some requirement is paid and the run cannot claim a spend effect."""
+        if not any(item.paid_effect for item in self._requirements(backend)):
+            return False
+        return self._spend_scope(backend) is None
+
+    def _spend_authorization(
+        self, backend: EvaluationBackendPort, scope: SpendScopeV1, request: EvaluationRequest
+    ) -> SpendAuthorizationV1:
+        requirement = backend.requirement()
+        return SpendAuthorizationV1(
+            scope.provider, scope.account_ref, (request.model.model_ref,),
+            None if requirement.maximum_cost_minor_units is None else int(requirement.maximum_cost_minor_units),
+            requirement.currency,
+        )
+
     # -- verbs -----------------------------------------------------------------------
 
     def plan(self, request: EvaluationRequest) -> EvaluationPlan:
@@ -1019,10 +1195,9 @@ class ReferenceEvaluationOperationsV1:
             codes.append(error.code.value)
         else:
             requirements = self._requirements(backend)
-            paid = tuple(item for item in requirements if item.paid_effect)
-            if paid:
+            authorization = tuple(item for item in requirements if item.paid_effect)
+            if authorization and self._unmetered(backend):
                 codes.append(EvaluationOperationCode.BACKEND_UNMETERED.value)
-                authorization = paid
             try:
                 current = self._resolver.resolve(plan.request)
             except EvaluationOperationError as error:
@@ -1039,7 +1214,7 @@ class ReferenceEvaluationOperationsV1:
         if self._head(run) is not None:
             return EvaluationStart(run, True)
         backend = self._backend(plan.request.backend)
-        if any(item.paid_effect for item in self._requirements(backend)):
+        if self._unmetered(backend):
             raise _error(EvaluationOperationCode.BACKEND_UNMETERED)
         resolved = self._resolver.resolve(plan.request)
         if resolved.scenario_digest != plan.scenario_digest or resolved.cases_total != plan.cases_total:
@@ -1062,9 +1237,20 @@ class ReferenceEvaluationOperationsV1:
         verdicts: list[tuple[JudgeVerdict, float]] = []
         cancelled = False
         failure: str | None = None
+        meter = UsageAccumulator()
+        spend: SpendEffectRecordV1 | None = None
+        ledger = SpendLedgerV1(self._records, self._clock)
         try:
+            scope = self._spend_scope(backend)
+            if scope is not None:
+                # One spend effect per run, claimed before the first call (§4.4).
+                spend = ledger.claim(
+                    SpendEntityV1(EVALUATION_SPEND_FAMILY, _project_digest(run.project_ref), run.run_id),
+                    scope,
+                    self._spend_authorization(backend, scope, request),
+                )
             try:
-                client = backend.open(request.model)
+                client = _MeteredBackendClient(backend.open(request.model), meter)
             except Exception:
                 raise _error(EvaluationOperationCode.BACKEND_UNAVAILABLE) from None
             judge = None
@@ -1125,6 +1311,21 @@ class ReferenceEvaluationOperationsV1:
             if isinstance(gated, (int, float)):
                 scores.append(ScoreV1("quality_gated", float(gated)))
 
+        usage: UsageRecordV1 | None = None
+        if spend is not None:
+            # Close the single effect once with the run's whole usage.
+            if meter.indeterminate:
+                ledger.close(spend.effect_id, SpendEffectState.INDETERMINATE)
+                if failure is None:
+                    failure = EvaluationOperationCode.SPEND_INDETERMINATE.value
+            elif meter.calls == 0:
+                ledger.close(spend.effect_id, SpendEffectState.DEFINITELY_ABSENT)
+            else:
+                usage = meter.record(spend.spend_ref)
+                ledger.close(spend.effect_id, SpendEffectState.FOUND, usage=usage)
+        elif meter.measured:
+            usage = meter.record()
+
         if failure is not None:
             state, diagnostic = EvaluationRunState.FAILED, failure
         elif cancelled:
@@ -1142,7 +1343,7 @@ class ReferenceEvaluationOperationsV1:
                 return
             final = head.record.replace(
                 state=state, cases_scored=len(records), artifacts=artifacts,
-                diagnostic_code=diagnostic, scores=tuple(scores), verdicts=counts,
+                diagnostic_code=diagnostic, scores=tuple(scores), verdicts=counts, usage=usage,
             )
             try:
                 self._transition(head, final, "finished")
@@ -1260,7 +1461,7 @@ class ReferenceEvaluationOperationsV1:
         return EvaluationResult(
             EVALUATION_RESULT_SCHEMA_VERSION, record.run, record.state, record.plan.request.backend,
             record.plan.request.model, record.plan.cases_total, record.cases_scored, record.scores,
-            record.verdicts, record.artifacts, record.diagnostic_code, None,
+            record.verdicts, record.artifacts, record.diagnostic_code, record.usage,
         )
 
     def observations(self, request: ObservationsRequest) -> ObservationPage:
@@ -1304,6 +1505,7 @@ __all__ = [
     "EvaluationBackendRegistryV1",
     "EvaluationJudgePort",
     "LocalHttpEvaluatorBackendV1",
+    "MeteredPaidBackendV1",
     "ReferenceEvaluationOperationsV1",
     "ReferenceEvaluationPortsV1",
     "UnmeteredPaidBackendV1",

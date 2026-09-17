@@ -34,11 +34,26 @@ every row and scenario boundary, finishing as ``cancelled`` with the artifact
 produced so far. A backend failure after some rows were written finishes as
 ``partially_succeeded``, also with the artifact.
 
-Local backends only in this slice: an unknown backend is refused with
-``backend_unavailable`` and a metered one (openrouter, openai, ...) with
-``backend_unmetered`` until the usage-metering slice lands. A local run claims
-no ``spend`` effect, so nothing is written to the ``effects`` partition; the
-dataset write itself is evidenced by the artifact digests, not ledgered.
+Backends and spend (slice 11, §4.4): an unknown backend is refused with
+``backend_unavailable``. A paid backend (``METERED_BACKENDS``: openrouter,
+openai, openai_responses, anthropic) is admitted only when the host's client
+factory exposes ``spend_scope(backend=...)`` naming the provider account it
+spends against; otherwise it is refused with ``backend_unmetered``. A paid
+run wraps the host's client in ``shared.llm.metering.MeteredLLMClient`` so
+every ``chat`` / ``structured_output`` feeds one ``UsageAccumulator``, and
+claims exactly ONE ``spend`` effect in the ``effects`` partition
+(``reference/spend.py``) before its first call, closing it once however many
+rows it writes: ``found`` with the summed usage when every call was measured
+(the result then carries that one ``usage``, whose ``spend`` names the
+effect), ``definitely_absent`` when no call was made, ``indeterminate`` when
+any call reported no usage, in which case the run finishes ``failed`` /
+``spend_indeterminate`` and no found spend is claimed. A local run
+(``LOCAL_BACKENDS``) claims no ``spend`` effect, so nothing is written to the
+``effects`` partition, and carries ``usage`` only when every call was
+measured; the dataset write itself is evidenced by the artifact digests, not
+ledgered. Extra clients SynthChat builds for itself (``SynthChat/engine.py``
+fallback, ``LLMClientPool``) bypass the meter; hosts admit a paid backend
+only with clients that do not do so.
 
 The host supplies the SynthChat config, scenario and rubric directories and an
 LLM client factory through ``ReferenceDataPortsV1``; no path is derived from a
@@ -114,6 +129,15 @@ from synaptic_tuner.api.v1.training_facade import AuthorizationRequirement
 from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest, parse_canonical_object, safe_ref
 from tuner.execution.redaction import redact
 
+from .spend import (
+    SpendAuthorizationV1,
+    SpendEffectRecordV1,
+    SpendEffectState,
+    SpendEntityV1,
+    SpendLedgerV1,
+    SpendScopeV1,
+)
+
 
 DATA_HEAD_SCHEMA = "synaptic-reference-data-head/v1"
 DATA_EVENT_SCHEMA = "synaptic-reference-data-event/v1"
@@ -129,6 +153,8 @@ DIAGNOSTIC_BACKEND_UNAVAILABLE = "backend_unavailable"
 DIAGNOSTIC_GENERATION_FAILED = "generation_failed"
 DIAGNOSTIC_OUTPUT_FAILED = "output_failed"
 DIAGNOSTIC_CANCELLED = "cancelled"
+DIAGNOSTIC_SPEND_INDETERMINATE = DataOperationCode.SPEND_INDETERMINATE.value
+DATA_SPEND_FAMILY = "data"
 
 _DATA = StoragePartition.DATA.value
 _OBSERVATION = StoragePartition.OBSERVATION.value
@@ -137,10 +163,14 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class LLMClientFactoryPort(Protocol):
-    """Host-supplied construction of a ``shared.llm`` style client for a local backend.
+    """Host-supplied construction of a ``shared.llm`` ``BaseLLMClient`` for a backend.
 
     The reference never reads hosts, ports or keys from the environment; the
-    host builds the client from configuration it owns.
+    host builds the client from configuration it owns. A factory that can
+    meter a paid backend also exposes ``spend_scope(backend=...)`` returning
+    the ``SpendScopeV1`` (provider account) that backend spends against, or
+    ``None``; a paid backend without a scope is refused ``backend_unmetered``.
+    ``spend_scope`` is optional: a local-only factory needs only ``create``.
     """
 
     def create(self, *, backend: str, model: str) -> object: ...
@@ -278,11 +308,27 @@ def _read(records: DurableRecordStorePort, partition: str, key: str) -> StoredRe
     return stored
 
 
-def _check_backend(backend: str) -> None:
+def _spend_scope(factory: LLMClientFactoryPort, backend: str) -> SpendScopeV1 | None:
+    """The paid backend's spend scope from the host factory, or ``None`` when it cannot be metered."""
+    if backend not in METERED_BACKENDS:
+        return None
+    scope_method = getattr(factory, "spend_scope", None)
+    if not callable(scope_method):
+        return None
+    scope = scope_method(backend=backend)
+    return scope if type(scope) is SpendScopeV1 else None
+
+
+def _check_backend(factory: LLMClientFactoryPort, backend: str) -> SpendScopeV1 | None:
+    """Admit the backend, returning its spend scope for a paid one and ``None`` for a local one."""
     if backend in METERED_BACKENDS:
-        raise _closed(DataOperationCode.BACKEND_UNMETERED)
+        scope = _spend_scope(factory, backend)
+        if scope is None:
+            raise _closed(DataOperationCode.BACKEND_UNMETERED)
+        return scope
     if backend not in LOCAL_BACKENDS:
         raise _closed(DataOperationCode.BACKEND_UNAVAILABLE)
+    return None
 
 
 def _read_dataset_rows(path: Path) -> list[dict]:
@@ -423,10 +469,10 @@ class ReferenceDataOperationsV1:
         expires_at = _plus_seconds(checked_at, DATA_PREFLIGHT_SECONDS)
         codes: list[str] = []
         backend = plan.request.backend
-        if backend in METERED_BACKENDS:
-            codes.append(DataOperationCode.BACKEND_UNMETERED.value)
-        elif backend not in LOCAL_BACKENDS:
-            codes.append(DataOperationCode.BACKEND_UNAVAILABLE.value)
+        try:
+            _check_backend(self._ports.llm_clients, backend)
+        except DataOperationError as error:
+            codes.append(error.code.value)
         if self._existing_run(plan) is None and self._output_occupied(plan):
             codes.append(DataOperationCode.OUTPUT_CONFLICT.value)
         return DataPreflight(
@@ -434,7 +480,7 @@ class ReferenceDataOperationsV1:
             not codes,
             checked_at,
             expires_at,
-            (AuthorizationRequirement(DATA_START_OPERATION, False),),
+            (AuthorizationRequirement(DATA_START_OPERATION, backend in METERED_BACKENDS),),
             tuple(codes),
         )
 
@@ -630,22 +676,37 @@ class ReferenceDataOperationsV1:
 
     def start(self, plan: DataPlan) -> DataStart:
         self._verify_plan(plan)
-        _check_backend(plan.request.backend)
+        scope = _check_backend(self._ports.llm_clients, plan.request.backend)
         existing = self._existing_run(plan)
         if existing is not None:
             self._require_head(existing)
             return DataStart(existing, True)
         if self._output_occupied(plan):
             raise _closed(DataOperationCode.OUTPUT_CONFLICT)
+        # Imported here so composing a host never loads the provider client stack.
+        from shared.llm.metering import MeteredLLMClient
+        from shared.llm.usage import UsageAccumulator
+
+        meter = UsageAccumulator()
         try:
-            client = self._ports.llm_clients.create(backend=plan.request.backend, model=plan.request.model)
+            client = MeteredLLMClient(
+                self._ports.llm_clients.create(backend=plan.request.backend, model=plan.request.model), meter
+            )
         except Exception:
             raise _closed(DataOperationCode.BACKEND_UNAVAILABLE) from None
         run = data_run_ref(plan)
         self._genesis(plan, self._initial_result(plan, run, DataRunState.PLANNED))
         self._transition(run, lambda result: _with_state(result, DataRunState.RUNNING))
-        self._execute(plan, run, client)
+        self._execute(plan, run, client, meter, scope)
         return DataStart(run, True)
+
+    def _claim_spend(self, plan: DataPlan, run: DataRunRef, scope: SpendScopeV1) -> SpendEffectRecordV1:
+        """Claim the run's single spend effect before its first call (§4.4)."""
+        return SpendLedgerV1(self._records, self._clock).claim(
+            SpendEntityV1(DATA_SPEND_FAMILY, _project_digest(run.project_ref), run.run_id),
+            scope,
+            SpendAuthorizationV1(scope.provider, scope.account_ref, (plan.request.model,)),
+        )
 
     def _cancel_requested(self, run: DataRunRef) -> bool:
         with self._lock:
@@ -653,7 +714,7 @@ class ReferenceDataOperationsV1:
                 return True
         return self._require_head(run).result.state is DataRunState.CANCEL_REQUESTED
 
-    def _execute(self, plan: DataPlan, run: DataRunRef, client) -> None:
+    def _execute(self, plan: DataPlan, run: DataRunRef, client, meter, scope: SpendScopeV1 | None) -> None:
         from SynthChat.result_writer import StreamingResultWriter
 
         request = plan.request
@@ -663,6 +724,9 @@ class ReferenceDataOperationsV1:
         sequence = 0
         diagnostic: str | None = None
         cancelled = False
+        spend: SpendEffectRecordV1 | None = None
+        if scope is not None:
+            spend = self._claim_spend(plan, run, scope)
 
         def observe(kind: ObservationKind, payload) -> None:
             nonlocal sequence
@@ -710,7 +774,22 @@ class ReferenceDataOperationsV1:
             except OSError:
                 artifacts = ()
                 diagnostic = DIAGNOSTIC_OUTPUT_FAILED
-        if cancelled or self._cancel_requested(run):
+        usage = None
+        if spend is not None:
+            # Close the single effect once with the run's whole usage.
+            ledger = SpendLedgerV1(self._records, self._clock)
+            if meter.indeterminate:
+                ledger.close(spend.effect_id, SpendEffectState.INDETERMINATE)
+            elif meter.calls == 0:
+                ledger.close(spend.effect_id, SpendEffectState.DEFINITELY_ABSENT)
+            else:
+                usage = meter.record(spend.spend_ref)
+                ledger.close(spend.effect_id, SpendEffectState.FOUND, usage=usage)
+        elif meter.measured:
+            usage = meter.record()
+        if spend is not None and meter.indeterminate:
+            state, diagnostic = DataRunState.FAILED, DIAGNOSTIC_SPEND_INDETERMINATE
+        elif cancelled or self._cancel_requested(run):
             state, diagnostic = DataRunState.CANCELLED, DIAGNOSTIC_CANCELLED
         elif diagnostic is not None:
             state = DataRunState.PARTIALLY_SUCCEEDED if rows_written > 0 else DataRunState.FAILED
@@ -725,7 +804,7 @@ class ReferenceDataOperationsV1:
         def finalize(result: DataResult) -> DataResult:
             return DataResult(
                 result.schema_version, result.run, state, result.mode, result.backend, result.model,
-                result.rows_requested, rows_written, scenarios, artifacts, diagnostic,
+                result.rows_requested, rows_written, scenarios, artifacts, diagnostic, usage,
             )
 
         self._transition(run, finalize)

@@ -75,7 +75,7 @@ class OpenAICompatiblePolisher:
             messages,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
-        )
+        ).text
 
 
 class PrivacyPreprocessor:

@@ -6,6 +6,7 @@ from typing import Dict, Any, List
 
 from ..base import BaseLLMClient
 from ..exceptions import LLMConnectionError, LLMResponseError
+from ..usage import LLMCompletionV1, LLMStructuredV1, usage_from_openai_block
 
 
 class OpenRouterClient(BaseLLMClient):
@@ -72,8 +73,12 @@ class OpenRouterClient(BaseLLMClient):
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs
-    ) -> str:
-        """Send chat completion request to OpenRouter."""
+    ) -> LLMCompletionV1:
+        """Send chat completion request to OpenRouter.
+
+        Usage is measured from the response ``usage`` block
+        (``prompt_tokens`` / ``completion_tokens``); ``None`` when absent.
+        """
         payload = {
             "model": self.model,
             "messages": messages,
@@ -89,13 +94,14 @@ class OpenRouterClient(BaseLLMClient):
 
         try:
             data = self._make_request(payload)
+            usage = usage_from_openai_block(data.get("usage"))
             message = data["choices"][0]["message"]
             content = message.get("content")
 
             if content is None:
                 tool_calls = message.get("tool_calls")
                 if tool_calls:
-                    return json.dumps({"content": None, "tool_calls": tool_calls})
+                    return LLMCompletionV1(json.dumps({"content": None, "tool_calls": tool_calls}), usage)
                 raise LLMResponseError("Empty response from OpenRouter")
 
             if not isinstance(content, str):
@@ -103,10 +109,10 @@ class OpenRouterClient(BaseLLMClient):
             if not content.strip():
                 tool_calls = message.get("tool_calls")
                 if tool_calls:
-                    return json.dumps({"content": None, "tool_calls": tool_calls})
+                    return LLMCompletionV1(json.dumps({"content": None, "tool_calls": tool_calls}), usage)
                 raise LLMResponseError("Empty response from OpenRouter")
 
-            return content
+            return LLMCompletionV1(content, usage)
 
         except Exception as e:
             raise LLMResponseError(f"OpenRouter chat request failed: {e}")
@@ -118,7 +124,7 @@ class OpenRouterClient(BaseLLMClient):
         temperature: float = 0.3,
         max_tokens: int | None = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> LLMStructuredV1:
         """Send request with JSON schema for structured output."""
         payload = {
             "model": self.model,
@@ -142,15 +148,20 @@ class OpenRouterClient(BaseLLMClient):
         if self.thinking_effort:
             payload["reasoning"] = {"effort": self.thinking_effort}
 
+        content = ""
         try:
             data = self._make_request(payload)
+            usage = usage_from_openai_block(data.get("usage"))
             content = data["choices"][0]["message"]["content"]
 
             # Parse JSON response
             if not content or not content.strip():
                 raise LLMResponseError("Empty response from OpenRouter")
 
-            return json.loads(content)
+            value = json.loads(content)
+            if not isinstance(value, dict):
+                raise LLMResponseError("Structured output from OpenRouter is not a JSON object")
+            return LLMStructuredV1(value, usage)
 
         except json.JSONDecodeError as e:
             raise LLMResponseError(

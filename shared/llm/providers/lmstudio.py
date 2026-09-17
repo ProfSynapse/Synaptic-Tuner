@@ -6,6 +6,7 @@ from typing import Dict, Any, List
 
 from ..base import BaseLLMClient
 from ..exceptions import LLMConnectionError, LLMResponseError
+from ..usage import LLMCompletionV1, LLMStructuredV1, usage_from_openai_block
 
 
 # WSL troubleshooting message
@@ -73,8 +74,12 @@ class LMStudioClient(BaseLLMClient):
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs
-    ) -> str:
-        """Send chat completion request to LM Studio."""
+    ) -> LLMCompletionV1:
+        """Send chat completion request to LM Studio.
+
+        Usage is measured from the OpenAI-compatible ``usage`` block when the
+        server reports one; ``None`` otherwise.
+        """
         payload = {
             "model": self.model,
             "messages": messages,
@@ -85,7 +90,10 @@ class LMStudioClient(BaseLLMClient):
 
         try:
             data = self._make_request(payload)
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
+            if not isinstance(content, str):
+                content = "" if content is None else str(content)
+            return LLMCompletionV1(content, usage_from_openai_block(data.get("usage")))
 
         except Exception as e:
             raise LLMResponseError(f"LM Studio chat request failed: {e}")
@@ -97,7 +105,7 @@ class LMStudioClient(BaseLLMClient):
         temperature: float = 0.3,
         max_tokens: int = 2048,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> LLMStructuredV1:
         """
         Request structured JSON output from LM Studio.
 
@@ -133,8 +141,10 @@ class LMStudioClient(BaseLLMClient):
             "stream": False
         }
 
+        content = ""
         try:
             data = self._make_request(payload)
+            usage = usage_from_openai_block(data.get("usage"))
             content = data["choices"][0]["message"]["content"]
 
             # Parse JSON response
@@ -165,7 +175,10 @@ class LMStudioClient(BaseLLMClient):
                 content = content[:-3]  # Remove trailing ```
             content = content.strip()
 
-            return json.loads(content)
+            value = json.loads(content)
+            if not isinstance(value, dict):
+                raise LLMResponseError("Structured output from LM Studio is not a JSON object")
+            return LLMStructuredV1(value, usage)
 
         except json.JSONDecodeError as e:
             raise LLMResponseError(f"Failed to parse JSON from LM Studio: {e}\nResponse: {content[:200]}")

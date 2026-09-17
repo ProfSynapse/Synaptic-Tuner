@@ -17,10 +17,14 @@ class BackendResponse:
         message: The response content - can be str (ChatML/Mistral) or Dict (OpenAI format)
         raw: The complete raw API response
         latency_s: Response time in seconds
+        usage: Provider-reported token usage as a ``synaptic_tuner.api.v1.usage``
+            ``UsageRecordV1`` (``measured``), or None when the backend reported
+            none. Typed loosely so this module keeps its stdlib-only imports.
     """
     message: Any  # str or Dict with tool_calls
     raw: Dict[str, Any]
     latency_s: float
+    usage: Any = None
 
 
 @runtime_checkable

@@ -6,6 +6,7 @@ from typing import Dict, Any, List
 
 from ..base import BaseLLMClient
 from ..exceptions import LLMConnectionError, LLMResponseError
+from ..usage import LLMCompletionV1, LLMStructuredV1, usage_from_counts
 
 
 class OllamaClient(BaseLLMClient):
@@ -56,8 +57,12 @@ class OllamaClient(BaseLLMClient):
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs
-    ) -> str:
-        """Send chat completion request to Ollama."""
+    ) -> LLMCompletionV1:
+        """Send chat completion request to Ollama.
+
+        Usage is measured from the native ``prompt_eval_count`` /
+        ``eval_count`` counters when Ollama reports both; ``None`` otherwise.
+        """
         payload = {
             "model": self.model,
             "messages": messages,
@@ -70,7 +75,10 @@ class OllamaClient(BaseLLMClient):
 
         try:
             data = self._make_request(payload)
-            return data["message"]["content"]
+            content = data["message"]["content"]
+            if not isinstance(content, str):
+                content = "" if content is None else str(content)
+            return LLMCompletionV1(content, _ollama_usage(data))
 
         except Exception as e:
             raise LLMResponseError(f"Ollama chat request failed: {e}")
@@ -82,7 +90,7 @@ class OllamaClient(BaseLLMClient):
         temperature: float = 0.3,
         max_tokens: int = 2048,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> LLMStructuredV1:
         """
         Request structured JSON output from Ollama.
 
@@ -120,8 +128,10 @@ class OllamaClient(BaseLLMClient):
             }
         }
 
+        content = ""
         try:
             data = self._make_request(payload)
+            usage = _ollama_usage(data)
             content = data["message"]["content"]
 
             # Parse JSON response
@@ -138,7 +148,10 @@ class OllamaClient(BaseLLMClient):
                 content = content[:-3]
             content = content.strip()
 
-            return json.loads(content)
+            value = json.loads(content)
+            if not isinstance(value, dict):
+                raise LLMResponseError("Structured output from Ollama is not a JSON object")
+            return LLMStructuredV1(value, usage)
 
         except json.JSONDecodeError as e:
             raise LLMResponseError(f"Failed to parse JSON from Ollama: {e}\nResponse: {content[:200]}")
@@ -180,3 +193,10 @@ class OllamaClient(BaseLLMClient):
             return response.status_code == 200
         except Exception:
             return False
+
+
+def _ollama_usage(data: Dict[str, Any]):
+    """Ollama reports token counts at the top level of the ``/api/chat`` response."""
+    if not isinstance(data, dict):
+        return None
+    return usage_from_counts(data.get("prompt_eval_count"), data.get("eval_count"))

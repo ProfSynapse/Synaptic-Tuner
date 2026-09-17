@@ -19,12 +19,14 @@ from shared.llm import create_client
 # Auto-detect from environment variables
 client = create_client()
 
-# Simple chat
-response = client.chat([
+# Simple chat -> LLMCompletionV1 (never a bare str)
+completion = client.chat([
     {"role": "user", "content": "Hello!"}
 ])
+print(completion.text)
+print(completion.usage)   # UsageRecordV1 (measured) or None
 
-# Structured output with JSON schema
+# Structured output with JSON schema -> LLMStructuredV1 (never a bare dict)
 schema = {
     "type": "object",
     "properties": {
@@ -34,7 +36,28 @@ schema = {
     "required": ["answer", "confidence"]
 }
 result = client.structured_output(messages, schema)
+print(result.value["answer"], result.usage)
 ```
+
+### **Usage metering**
+
+Every adapter fills `usage` from the provider response when it reports prompt
+and completion token counts (`shared/llm/usage.py`):
+
+| Provider | Source of the counts |
+|---|---|
+| OpenRouter | `usage.prompt_tokens` / `usage.completion_tokens` |
+| OpenAI Responses | `usage.input_tokens` / `usage.output_tokens` |
+| LM Studio | OpenAI-compatible `usage` block when the server sends one |
+| Ollama | top-level `prompt_eval_count` / `eval_count` |
+| Unsloth | exact prompt and generated token tensor lengths |
+
+When the provider reports nothing, `usage` is `None` (the `unavailable` case).
+No adapter estimates tokens or invents a cost; `cost_minor_units` stays `None`
+because none of these providers returns an exact minor-unit amount.
+`UsageAccumulator` sums per-call usage into one per-run record and flags a run
+as indeterminate when any call went unmeasured; `MeteredLLMClient`
+(`shared/llm/metering.py`) wraps a client so every call is counted.
 
 ### **Configuration**
 
@@ -161,6 +184,7 @@ Super easy! Just implement the `BaseLLMClient` interface:
 # shared/llm/providers/new_provider.py
 from ..base import BaseLLMClient
 from ..exceptions import LLMConnectionError, LLMResponseError
+from ..usage import LLMCompletionV1, LLMStructuredV1, usage_from_counts
 
 class NewProviderClient(BaseLLMClient):
     @property
@@ -171,12 +195,12 @@ class NewProviderClient(BaseLLMClient):
     def model_name(self) -> str:
         return self.model
 
-    def chat(self, messages, temperature=0.7, max_tokens=1024, **kwargs) -> str:
-        # Implement chat logic
+    def chat(self, messages, temperature=0.7, max_tokens=1024, **kwargs) -> LLMCompletionV1:
+        # Implement chat logic; return LLMCompletionV1(text, usage_or_None)
         pass
 
-    def structured_output(self, messages, schema, temperature=0.3, max_tokens=2048, **kwargs) -> dict:
-        # Implement structured output logic
+    def structured_output(self, messages, schema, temperature=0.3, max_tokens=2048, **kwargs) -> LLMStructuredV1:
+        # Implement structured output logic; return LLMStructuredV1(value, usage_or_None)
         pass
 
     def test_connection(self) -> bool:
@@ -229,7 +253,7 @@ Create an LLM client based on configuration.
 
 ```python
 # Simple chat
-response: str = client.chat(
+completion: LLMCompletionV1 = client.chat(   # .text: str, .usage: UsageRecordV1 | None
     messages: List[Dict[str, str]],
     temperature: float = 0.7,
     max_tokens: int = 1024,
@@ -237,7 +261,7 @@ response: str = client.chat(
 )
 
 # Structured output
-result: Dict = client.structured_output(
+result: LLMStructuredV1 = client.structured_output(   # .value: dict, .usage
     messages: List[Dict[str, str]],
     schema: Dict[str, Any],
     temperature: float = 0.3,

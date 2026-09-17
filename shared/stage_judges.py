@@ -85,7 +85,7 @@ class ConfigurableStageJudge:
                     }
                     if self.max_tokens is not None:
                         kwargs["max_tokens"] = self.max_tokens
-                    raw_output = client.structured_output(**kwargs)
+                    raw_output = client.structured_output(**kwargs).value
                     latency = round(time.perf_counter() - started_at, 3)
                     score = raw_output.get("score")
                     try:

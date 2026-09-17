@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from shared.prompt_optimization import PromptOptimizationService
+from shared.llm.usage import LLMCompletionV1
 
 
 def test_prompt_optimization_writes_deterministic_artifacts(tmp_path):
@@ -198,7 +199,7 @@ prompt_optimization:
                     "max_tokens": max_tokens,
                 }
             )
-            return "Return exactly one JSON object."
+            return LLMCompletionV1("Return exactly one JSON object.")
 
     def fake_create_client(**kwargs):
         calls.append({"create_client": kwargs})

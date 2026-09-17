@@ -9,7 +9,8 @@ Usage:
         provider="unsloth",
         model="/path/to/lora_adapter",  # LoRA adapter directory
     )
-    response = client.chat([{"role": "user", "content": "Hello!"}])
+    completion = client.chat([{"role": "user", "content": "Hello!"}])
+    print(completion.text)
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from typing import Dict, Any, List, Optional
 
 from ..base import BaseLLMClient
 from ..exceptions import LLMError, LLMConnectionError
+from ..usage import LLMCompletionV1, LLMStructuredV1, usage_from_counts
 
 
 class UnslothClient(BaseLLMClient):
@@ -39,10 +41,11 @@ class UnslothClient(BaseLLMClient):
             max_seq_length=4096,
             load_in_4bit=True,
         )
-        response = client.chat([
+        completion = client.chat([
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hello!"}
         ])
+        print(completion.text)
     """
 
     def __init__(
@@ -135,7 +138,7 @@ class UnslothClient(BaseLLMClient):
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs
-    ) -> str:
+    ) -> LLMCompletionV1:
         """Send a chat conversation to the model.
 
         Args:
@@ -145,7 +148,8 @@ class UnslothClient(BaseLLMClient):
             **kwargs: Additional parameters (ignored)
 
         Returns:
-            Generated text response
+            ``LLMCompletionV1``; usage is measured exactly from the prompt and
+            generated token tensors (local inference, never a spend)
 
         Raises:
             LLMError: If inference fails
@@ -194,7 +198,10 @@ class UnslothClient(BaseLLMClient):
             response_tokens = outputs[0][input_length:]
             response_text = actual_tokenizer.decode(response_tokens, skip_special_tokens=True)
 
-            return response_text.strip()
+            return LLMCompletionV1(
+                response_text.strip(),
+                usage_from_counts(int(input_length), int(len(response_tokens))),
+            )
 
         except Exception as e:
             raise LLMError(f"Inference failed: {e}")
@@ -206,7 +213,7 @@ class UnslothClient(BaseLLMClient):
         temperature: float = 0.3,
         max_tokens: int = 2048,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> LLMStructuredV1:
         """Generate structured JSON output.
 
         For Unsloth (direct inference), we add JSON instructions to the prompt
@@ -220,7 +227,7 @@ class UnslothClient(BaseLLMClient):
             **kwargs: Additional parameters
 
         Returns:
-            Parsed JSON object
+            ``LLMStructuredV1`` with the parsed JSON object and the chat usage
 
         Raises:
             LLMError: If generation or parsing fails
@@ -245,12 +252,13 @@ class UnslothClient(BaseLLMClient):
             })
 
         # Generate response
-        response = self.chat(
+        completion = self.chat(
             modified_messages,
             temperature=temperature,
             max_tokens=max_tokens,
             **kwargs
         )
+        response = completion.text
 
         # Parse JSON from response
         try:
@@ -267,7 +275,10 @@ class UnslothClient(BaseLLMClient):
                 else:
                     json_str = response
 
-            return json.loads(json_str)
+            value = json.loads(json_str)
+            if not isinstance(value, dict):
+                raise LLMError("Structured output is not a JSON object")
+            return LLMStructuredV1(value, completion.usage)
 
         except json.JSONDecodeError as e:
             raise LLMError(f"Failed to parse JSON from response: {e}\nResponse: {response[:500]}")

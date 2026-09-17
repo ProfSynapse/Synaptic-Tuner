@@ -54,6 +54,7 @@ from synaptic_tuner.api.v1.reference.data import (
     data_run_ref,
 )
 from synaptic_tuner.api.v1.reference.stores import InMemoryDurableRecordStoreV1, InMemoryDurableStreamStoreV1
+from shared.llm.usage import LLMCompletionV1, LLMStructuredV1
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -110,10 +111,10 @@ class FakeLocalClient:
             if self.failure is not None:
                 raise self.failure
             raise AssertionError("scripted responses exhausted")
-        return self.responses.pop(0)
+        return LLMCompletionV1(self.responses.pop(0))
 
     def structured_output(self, messages, schema, temperature=0.3, max_tokens=2048):
-        return self.structured.pop(0)
+        return LLMStructuredV1(self.structured.pop(0))
 
 
 class Factory:

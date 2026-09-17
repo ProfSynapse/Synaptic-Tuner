@@ -46,9 +46,10 @@ def create_client(
         cfg = LLMConfig.from_env(env_prefix="EVAL")
         client = create_client(config=cfg)
 
-        # Use the client
-        response = client.chat([{"role": "user", "content": "Hello"}])
-        structured = client.structured_output(messages, schema)
+        # Use the client: chat -> LLMCompletionV1, structured_output -> LLMStructuredV1
+        completion = client.chat([{"role": "user", "content": "Hello"}])
+        text, usage = completion.text, completion.usage
+        structured = client.structured_output(messages, schema).value
     """
     # Load config if not provided
     if config is None:

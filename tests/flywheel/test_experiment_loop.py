@@ -21,6 +21,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
+from shared.llm.usage import LLMCompletionV1
+
 from shared.flywheel.experiment_config import (
     ExperimentConfig,
     load_experiment_config,
@@ -292,7 +294,7 @@ class TestLLMAdvisor:
             llm_backend="openrouter",
         )
         mock_client = MagicMock()
-        mock_client.chat.return_value = (
+        mock_client.chat.return_value = LLMCompletionV1(
             "```yaml\nlearning_rate: 0.0002\nr: 16\nlora_alpha: 32\n```"
         )
         advisor._client = mock_client
@@ -331,7 +333,7 @@ class TestLLMAdvisor:
         def mock_chat(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            return f"```yaml\nlearning_rate: {call_count}e-4\nr: 16\nlora_alpha: 32\n```"
+            return LLMCompletionV1(f"```yaml\nlearning_rate: {call_count}e-4\nr: 16\nlora_alpha: 32\n```")
 
         mock_client.chat.side_effect = mock_chat
         advisor._client = mock_client

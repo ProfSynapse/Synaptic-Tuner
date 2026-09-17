@@ -3,7 +3,7 @@ from enum import Enum
 from .canonical import canonical_bytes,domain_digest,parse_canonical_object
 from .preparation import CanonicalPreparationV2
 from .references import ProviderRunRefV1
-class EffectKind(str,Enum):STAGE="stage";SUBMIT="submit";CANCEL="cancel"
+class EffectKind(str,Enum):STAGE="stage";SUBMIT="submit";CANCEL="cancel";SPEND="spend"
 _ISSUER=object()
 class EffectIdentityV2:
     __slots__=("_raw","_sealed")

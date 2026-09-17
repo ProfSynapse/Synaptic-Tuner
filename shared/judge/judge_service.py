@@ -82,7 +82,7 @@ class JudgeService:
                 temperature=self.judge_config.temperature,
                 max_tokens=self.judge_config.max_tokens,
                 reasoning_effort=self.judge_config.reasoning_effort,
-            )
+            ).value
             latency = time.perf_counter() - start
 
             # Parse raw output into per-rubric scores

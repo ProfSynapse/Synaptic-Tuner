@@ -48,7 +48,7 @@ def test_openrouter_chat_sends_reasoning_effort_object():
 
     client._make_request = fake_make_request  # type: ignore[method-assign]
 
-    assert client.chat([{"role": "user", "content": "Hello"}]) == "ok"
+    assert client.chat([{"role": "user", "content": "Hello"}]).text == "ok"
     assert captured["payload"]["reasoning"] == {"effort": "high"}
     assert "reasoning_effort" not in captured["payload"]
 
@@ -70,6 +70,6 @@ def test_openrouter_structured_output_sends_reasoning_effort_object():
     assert client.structured_output(
         messages=[{"role": "user", "content": "Generate JSON"}],
         schema={"name": "response", "type": "object"},
-    ) == {"ok": True}
+    ).value == {"ok": True}
     assert captured["payload"]["reasoning"] == {"effort": "minimal"}
     assert "reasoning_effort" not in captured["payload"]

@@ -616,7 +616,7 @@ class PromptOptimizationService:
             source_path=subject.source_path,
         )
         client = self._get_llm_client(llm_config, provider, model, env_prefix)
-        response = client.chat(
+        completion = client.chat(
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
@@ -625,7 +625,7 @@ class PromptOptimizationService:
             max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
         )
-        rewritten = _clean_llm_prompt_response(response)
+        rewritten = _clean_llm_prompt_response(completion.text)
         if not rewritten:
             raise PromptOptimizationError("llm_rewrite returned an empty prompt.")
         metadata: dict[str, Any] = {

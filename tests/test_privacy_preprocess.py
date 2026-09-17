@@ -17,6 +17,7 @@ from SynthChat.services.privacy_preprocess import (
 )
 from SynthChat.services.pseudonymizer import Pseudonymizer
 from SynthChat.utils.docs_loader import DocFile
+from shared.llm.usage import LLMCompletionV1, LLMStructuredV1
 
 
 class _FakeLLMClient:
@@ -40,7 +41,7 @@ class _FakeLLMClient:
         self.messages.append({"messages": messages, "temperature": temperature, "max_tokens": max_tokens})
         if not self._responses:
             raise AssertionError("No more fake responses available")
-        return self._responses.pop(0)
+        return LLMCompletionV1(self._responses.pop(0))
 
     def structured_output(self, messages, schema, temperature=0.3, max_tokens=2048):
         self.structured_messages.append(

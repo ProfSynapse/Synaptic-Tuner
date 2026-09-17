@@ -9,6 +9,7 @@ from shared.flywheel.catalog import InferenceLogRecord, LogFilter
 from shared.flywheel.config import FlywheelConfig
 from shared.flywheel.judge import FlywheelJudgeOutcome
 from shared.flywheel.tagger import AutoTagger, TaggedExample, TaggingResult
+from shared.llm.usage import LLMStructuredV1
 
 
 def _make_record(
@@ -53,10 +54,10 @@ class FakeRawLLMClient:
 
     def structured_output(self, **kwargs):
         self.calls.append(kwargs)
-        return {
+        return LLMStructuredV1({
             "flywheel_quality_score": self.score,
             "overall_feedback": "Structured raw client feedback.",
-        }
+        })
 
 
 class TestTaggedExample:

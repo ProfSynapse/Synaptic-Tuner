@@ -97,7 +97,8 @@ class GenerateHandler(BaseHandler):
 
             # Test connection with a simple request
             try:
-                test_response = client.chat(
+                # The completion itself is not needed; a successful call proves connectivity.
+                client.chat(
                     messages=[{"role": "user", "content": "test"}],
                     max_tokens=5
                 )

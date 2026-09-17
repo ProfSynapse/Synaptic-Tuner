@@ -124,12 +124,12 @@ class LLMAdvisor:
         try:
             prompt = self._build_prompt(results_history)
             client = self._get_client()
-            response = client.chat(
+            completion = client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.7,
                 max_tokens=512,
             )
-            return self._extract_yaml(response)
+            return self._extract_yaml(completion.text)
         except Exception:
             logger.warning(
                 "LLM advisor failed; falling back to random sampling",
