@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-evaluation-result-v1.schema.json",
+  "title": "Synaptic Evaluation Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "run", "state", "backend", "model", "cases_total", "cases_scored",
+    "scores", "verdicts", "artifacts", "diagnostic_code"
+  ],
+  "$defs": {
+    "text": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "count": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807}
+  },
+  "properties": {
+    "schema_version": {"const": "synaptic-evaluation-result/v1"},
+    "run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_id", "project_ref"],
+      "properties": {
+        "run_id": {"$ref": "#/$defs/text"},
+        "project_ref": {"$ref": "#/$defs/text"}
+      }
+    },
+    "state": {
+      "enum": ["planned", "running", "succeeded", "partially_succeeded", "failed", "cancel_requested", "cancelled"]
+    },
+    "backend": {"$ref": "#/$defs/text"},
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model_ref", "model_revision"],
+      "properties": {
+        "model_ref": {"$ref": "#/$defs/text"},
+        "model_revision": {"$ref": "#/$defs/text"}
+      }
+    },
+    "cases_total": {"$ref": "#/$defs/count"},
+    "cases_scored": {"$ref": "#/$defs/count"},
+    "scores": {
+      "type": "array", "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "value"],
+        "properties": {
+          "name": {"$ref": "#/$defs/text"},
+          "value": {"type": "number"}
+        }
+      }
+    },
+    "verdicts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["passed", "failed", "inconclusive"],
+      "properties": {
+        "passed": {"$ref": "#/$defs/count"},
+        "failed": {"$ref": "#/$defs/count"},
+        "inconclusive": {"$ref": "#/$defs/count"}
+      }
+    },
+    "usage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "availability", "input_tokens", "output_tokens", "cost_minor_units", "currency", "spend"],
+      "properties": {
+        "schema_version": {"const": "synaptic-usage/v1"},
+        "availability": {"const": "measured"},
+        "input_tokens": {"$ref": "#/$defs/count"},
+        "output_tokens": {"$ref": "#/$defs/count"},
+        "cost_minor_units": {"type": ["integer", "null"], "minimum": 0},
+        "currency": {"type": ["string", "null"], "pattern": "^[A-Z]{3}$"},
+        "spend": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["provider", "account_ref", "spend_id"],
+              "properties": {
+                "provider": {"$ref": "#/$defs/text"},
+                "account_ref": {"$ref": "#/$defs/text"},
+                "spend_id": {"$ref": "#/$defs/text"}
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"cost_minor_units": {"type": "integer"}}},
+          "then": {"properties": {"currency": {"type": "string"}}}
+        },
+        {
+          "if": {"properties": {"currency": {"type": "string"}}},
+          "then": {"properties": {"cost_minor_units": {"type": "integer"}}}
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "array", "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["role", "sha256", "size_bytes"],
+        "properties": {
+          "role": {"$ref": "#/$defs/text"},
+          "sha256": {"$ref": "#/$defs/digest"},
+          "size_bytes": {"$ref": "#/$defs/count"}
+        }
+      }
+    },
+    "diagnostic_code": {"type": ["string", "null"], "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"}
+  }
+}

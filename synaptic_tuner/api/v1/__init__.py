@@ -21,6 +21,14 @@ _LAZY_MODULE_ATTRIBUTES = {
     },
     "capabilities": {"CapabilityDescriptor"},
     "context": {"PathRef", "ProjectContext"},
+    "evaluation_facade": {
+        "EvaluationAPI", "EvaluationListRequest", "EvaluationModelRef",
+        "EvaluationOperationCode", "EvaluationOperationError", "EvaluationOperations",
+        "EvaluationOutcome", "EvaluationPage", "EvaluationPlan", "EvaluationPreflight",
+        "EvaluationRequest", "EvaluationResult", "EvaluationResultRequest",
+        "EvaluationRunRef", "EvaluationRunState", "EvaluationStart",
+        "EvaluationVerdictCounts", "JudgeVerdict", "ScoreV1",
+    },
     "events": {"EventEnvelope", "ResultEnvelope"},
     "execution": {
         "ArtifactRef", "ArtifactState", "ErrorCode",
@@ -172,6 +180,12 @@ _FORMAL_EXPORTS = (
     "ClockPort", "SecretResolverPort", "GrantAuthorityPort",
     "DurableRecordStorePort", "DurableStreamStorePort", "StoragePartition",
     "StoredRecordV1", "StoredPageV1", "StoredStreamEntryV1", "StoredStreamPageV1",
+    "EvaluationAPI", "EvaluationListRequest", "EvaluationModelRef",
+    "EvaluationOperationCode", "EvaluationOperationError", "EvaluationOperations",
+    "EvaluationOutcome", "EvaluationPage", "EvaluationPlan", "EvaluationPreflight",
+    "EvaluationRequest", "EvaluationResult", "EvaluationResultRequest",
+    "EvaluationRunRef", "EvaluationRunState", "EvaluationStart",
+    "EvaluationVerdictCounts", "JudgeVerdict", "ScoreV1",
 )
 
 if not set(_FORMAL_EXPORTS).issubset(_LAZY_ATTRIBUTES):  # pragma: no cover - module invariant
