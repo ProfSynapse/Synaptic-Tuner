@@ -52,6 +52,11 @@ _LAZY_MODULE_ATTRIBUTES = {
     },
     "plugins": {"PluginBinding", "PluginContext"},
     "planning": {"ResolvedTrainingRequest", "TrainingPlan"},
+    "ports": {
+        "ClockPort", "DurableRecordStorePort", "DurableStreamStorePort",
+        "GrantAuthorityPort", "SecretResolverPort", "StoragePartition", "StoredPageV1",
+        "StoredRecordV1", "StoredStreamEntryV1", "StoredStreamPageV1",
+    },
     "providers": {"ProviderCapabilities", "ProviderDescriptor", "ProviderRef"},
     "publication": {
         "ArtifactDestinationRegistryPortV1", "ArtifactSpoolPortV1",
@@ -164,6 +169,9 @@ _FORMAL_EXPORTS = (
     "DataScenarioCompletedPayloadV1", "PipelineStageStartedPayloadV1",
     "PipelineStageCompletedPayloadV1",
     "UsageAvailability", "SpendRef", "UsageRecordV1",
+    "ClockPort", "SecretResolverPort", "GrantAuthorityPort",
+    "DurableRecordStorePort", "DurableStreamStorePort", "StoragePartition",
+    "StoredRecordV1", "StoredPageV1", "StoredStreamEntryV1", "StoredStreamPageV1",
 )
 
 if not set(_FORMAL_EXPORTS).issubset(_LAZY_ATTRIBUTES):  # pragma: no cover - module invariant

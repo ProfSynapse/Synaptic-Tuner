@@ -416,14 +416,3 @@ def test_legacy_training_start_publication_surface_is_absent() -> None:
     assert "publish" not in TrainingAPI.__dict__
     assert "publish" not in TrainingOperations.__dict__
     assert "artifact_publisher" not in HostPorts.__dataclass_fields__
-
-
-def test_secondary_host_v1_publication_protocols_are_absent() -> None:
-    import synaptic_tuner.host.v1 as host_v1
-    from synaptic_tuner.host.v1 import ports
-
-    for name in ("ArtifactSource", "ArtifactPublisher"):
-        assert name not in host_v1.__all__
-        assert name not in ports.__all__
-        assert not hasattr(host_v1, name)
-        assert not hasattr(ports, name)

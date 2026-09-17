@@ -162,5 +162,15 @@
   "PipelineStageCompletedPayloadV1",
   "UsageAvailability",
   "SpendRef",
-  "UsageRecordV1"
+  "UsageRecordV1",
+  "ClockPort",
+  "SecretResolverPort",
+  "GrantAuthorityPort",
+  "DurableRecordStorePort",
+  "DurableStreamStorePort",
+  "StoragePartition",
+  "StoredRecordV1",
+  "StoredPageV1",
+  "StoredStreamEntryV1",
+  "StoredStreamPageV1"
 ]
