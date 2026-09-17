@@ -598,9 +598,11 @@ Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in
 `scripts/chat_model.py` command; do not rerun training to rebuild ephemeral host
 authority. Its current `--check` is provider-free and execution is model-first
-on an already available GPU runtime. A standalone Modal adapter remains to be
-wired and must add exact-instance cleanup plus provider timeout. This is not a
-claim of a live standalone chat result or verified training provenance.
+on an already available GPU runtime. The standalone Modal adapter is wired
+(`examples/model_chat/modal_launch.py`, below) with exact-instance cleanup and a
+provider timeout, and has one live success recorded in
+`docs/review/modal-chat-standalone-live.md`. This is not a claim of verified
+training provenance.
 
 Before any Modal chat attempt, prove the command locally with the checked-in
 `scripts/chat_model_local_docker.sh <attempt-name>`. It runs `scripts/chat_model.py`

@@ -147,6 +147,12 @@ margin is 20 minutes, about 0.37 USD of GPU time; the Sandbox CPU and memory
 rates add about 0.32 USD at 4 cores and 16 GiB, so about 0.69 USD in total.
 Not a quote; rates must be read again at issuance.
 
+Live evidence: one attempt on 2026-09-17 (Sandbox
+`sb-ZqwyONml2vQ3rP1nnr94kn`, A10, 68 s end to end) exited 0 with the three
+records and `provider_shutdown_proof: true`; see
+`docs/review/modal-chat-standalone-live.md` and
+`docs/review/evidence/modal-chat-standalone-live-20260917.json`. The tests
+remain provider-free with a fake SDK.
+
 Not claimed: adapter provenance (an `adapter_path` is an operator input),
-any coupling to a training run, a persistent endpoint, or a live standalone
-Modal chat success; the tests are provider-free with a fake SDK.
+any coupling to a training run, a persistent endpoint, or cost at issuance.

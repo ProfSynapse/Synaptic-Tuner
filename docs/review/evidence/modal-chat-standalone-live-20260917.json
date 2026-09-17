@@ -1,0 +1,66 @@
+{
+  "schema_version": "synaptic-modal-chat-standalone-live-observation/v1",
+  "observed_at": "2026-09-17T13:41:51Z",
+  "qualification": "STANDALONE_CHAT_LIVE_SMOKE",
+  "engine": {
+    "branch": "feat/modal-coordinator-adapter",
+    "launcher_commit": "00ea56310905b0b2238986aa2fa712e701e4cb4d",
+    "launcher": "examples/model_chat/modal_launch.py",
+    "command": "scripts/chat_model.py",
+    "configuration": "examples/model_chat/smoke.json",
+    "configuration_sha256": "de684e1f6df191e4300f330247e5cb78d448746d6ee640d0219caedcb649f53b",
+    "provider_file": "examples/model_chat/modal-smoke-provider.json"
+  },
+  "provider": {
+    "environment_name": "synaptic-smoke-v1",
+    "app_name": "synaptic-model-chat-v1",
+    "gpu": "A10",
+    "cpu_millicores": 4000,
+    "memory_mb": 16384,
+    "image_reference": "docker.io/vllm/vllm-openai@sha256:116aa00ee0b68855616a56e1d7e1ae937e591a8bd6969ee45cbcedb246ddf355",
+    "secrets_mounted": false,
+    "volumes_mounted": false
+  },
+  "attempt": {
+    "name": "modal-chat-standalone-20260917-a",
+    "sandbox_id": "sb-ZqwyONml2vQ3rP1nnr94kn",
+    "created_at_utc": "2026-09-17T13:40:43Z",
+    "stopped_at_utc": "2026-09-17T13:41:51Z",
+    "wall_clock_seconds": 68,
+    "lifetime_seconds": 900,
+    "timeout_seconds": 1200,
+    "idle_timeout_seconds": 1200
+  },
+  "result": {
+    "returncode": 0,
+    "command_statuses": ["CHAT_INPUTS_CHECKED", "CHAT_SAVED_AND_CLOSED"],
+    "record_statuses": ["CLAIMED", "REPLY_SAVED", "CHAT_CONTEXT_CLOSED"],
+    "model": "HuggingFaceTB/SmolLM2-135M-Instruct",
+    "revision": "12fd25f77366fa6b3b4b768ec3050bf629380bac",
+    "training_required": false,
+    "reply_retained_in_private_file_only": true,
+    "sandbox_stderr_bytes": 0
+  },
+  "shutdown": {
+    "terminate_exception_class": null,
+    "poll_exception_class": null,
+    "poll_result": 0,
+    "provider_shutdown_proof": true,
+    "post_run_app_task_counts": {"synaptic-model-chat-v1": 0, "synaptic-training-v1": 0}
+  },
+  "effects": {
+    "modal_calls": true,
+    "gpu_sandboxes": 1,
+    "app_created": "synaptic-model-chat-v1",
+    "ehr_changes": false,
+    "main_updates": false,
+    "merges": false
+  },
+  "not_claimed": [
+    "Adapter provenance or any coupling to a training run",
+    "A persistent endpoint",
+    "Cost: rates were not re-read at issuance; the worst case in README stands as an estimate only",
+    "Any qualification of the coupled train-then-chat path or of the ea66c4c inference-image capture"
+  ],
+  "note": "Operator-run, unsigned observation of one finite Sandbox attempt; the private attempt directory under the consumer checkout's .synaptic/state holds the five retained records."
+}
