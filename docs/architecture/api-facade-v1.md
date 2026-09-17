@@ -232,7 +232,13 @@ evaluation and pipeline records to canonical bytes and hands them over opaquely.
 
 Partitions are a closed engine-owned vocabulary: `workflow`, `plan`,
 `plan_context`, `preparation`, `execution_grant`, `reconciliation_grant`,
-`publication`, `evaluation`, `data`, `pipeline`, `chat_session`, `observation`.
+`publication`, `evaluation`, `data`, `pipeline`, `chat_session`, `observation`,
+`effects`, `authorization`. The last two were added by slice 4b so that the
+effect repository and the authorization commitments are durable and a host
+recomposed over the same stores keeps every verb working. Workflow transition
+history lives in the stream store under `workflow`, keyed by the run; the head
+record carries only the current state, revision, stream sequence and a rolling
+chain digest, so its size is independent of how often a host polls.
 
 ### 5.3 The provider-neutral composition function
 
