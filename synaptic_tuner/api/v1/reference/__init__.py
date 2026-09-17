@@ -24,6 +24,8 @@ Modules:
 - ``authority.py``: engine authorities derived from one named secret.
 - ``training.py``, ``runs.py``, ``artifacts.py``: the three facade
   implementations and the host authorization bridge.
+- ``evaluation.py``: the ``EvaluationOperations`` implementation over
+  ``Evaluator/`` (local backends only) and its host ports.
 - ``composition.py``: ``compose_reference_host`` and ``ReferenceComposition``.
 """
 
@@ -39,6 +41,12 @@ _LAZY_ATTRIBUTES = {
     "ReferenceAuthorityV1": "authority",
     "compose_reference_authority": "authority",
     "ReferenceRequestPortsV1": "training",
+    "ReferenceEvaluationPortsV1": "evaluation",
+    "EvaluationBackendRegistryV1": "evaluation",
+    "LocalHttpEvaluatorBackendV1": "evaluation",
+    "UnmeteredPaidBackendV1": "evaluation",
+    "DirectoryEvaluationArtifactSinkV1": "evaluation",
+    "compose_reference_evaluation": "evaluation",
     "ReferenceComposition": "composition",
     "compose_reference_host": "composition",
     "compose_reference_stores": "composition",

@@ -28,6 +28,12 @@ stores (``repositories.py``, ``training.py``), so a second host composed over
 the same stores after ``start`` drives ``outcome``, ``cancel`` and
 ``reconcile`` for a run the first host began. Only the publication store is
 process-local in this version.
+
+The evaluation family (``evaluation.py``) is composed only when the host
+passes ``evaluation=ReferenceEvaluationPortsV1(...)``: it needs a scenario
+root, a backend registry and an artifact sink the engine cannot invent. Without
+it ``APIHost.evaluation`` stays ``None`` and the ``Evaluator`` stack is never
+imported.
 """
 
 from __future__ import annotations
@@ -70,7 +76,7 @@ class ReferenceComposition:
     training: object
     runs: object
     artifacts: object
-    evaluation: None
+    evaluation: object | None
     chat: None
     data: None
     pipelines: None
@@ -127,8 +133,9 @@ def compose_reference_host(
     requests: ReferenceRequestPortsV1,
     authority: ReferenceAuthorityV1,
     maximum_grant_seconds: int = 900,
+    evaluation: object | None = None,
 ) -> ReferenceComposition:
-    """Compose the Training, Runs and Artifacts families over the public host ports."""
+    """Compose the Training, Runs, Artifacts and (optionally) Evaluation families over the public host ports."""
     if (
         type(family) is not ProviderFamilyV1
         or type(ports) is not ReferenceHostPortsV1
@@ -138,6 +145,16 @@ def compose_reference_host(
         raise TypeError("exact reference composition inputs are required")
     require_methods(ports.streams, "append", "read_page")
     require_methods(ports.grants, "authorize", "bind")
+    evaluation_operations = None
+    if evaluation is not None:
+        # Imported here so a host without an evaluation family never loads ``Evaluator``.
+        from .evaluation import ReferenceEvaluationPortsV1, compose_reference_evaluation
+
+        if type(evaluation) is not ReferenceEvaluationPortsV1:
+            raise TypeError("evaluation must be exact ReferenceEvaluationPortsV1")
+        evaluation_operations = compose_reference_evaluation(
+            records=ports.records, streams=ports.streams, clock=authority.clock, evaluation=evaluation,
+        )
     recovery = family.recovery_verifier
     if recovery is None:
         recovery = UnavailableRecoveryVerifierV1()
@@ -186,7 +203,7 @@ def compose_reference_host(
         training=composed.training,
         runs=composed.runs,
         artifacts=compose_reference_artifacts(authority=authority),
-        evaluation=None,
+        evaluation=evaluation_operations,
         chat=None,
         data=None,
         pipelines=None,

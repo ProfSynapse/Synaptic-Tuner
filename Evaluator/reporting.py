@@ -1,4 +1,15 @@
-"""Reporting helpers for evaluation runs."""
+"""Reporting helpers for evaluation runs.
+
+Location: ``Evaluator/reporting.py``.
+
+``build_run_payload`` / ``record_to_dict`` form the *public* projection of a
+run: it carries ``schema_version`` and never the model's ``raw_response`` or
+``conversation_trace``, which are attacker-influenced text. Those two fields
+live only in the private trace projection (``record_trace_to_dict``), which
+the reference ``EvaluationAPI`` writes as a separate digest-verified artifact.
+Consumers that need the raw provider body (``shared/prompt_optimization``)
+take it from ``EvaluationRecord.raw_response`` directly.
+"""
 from __future__ import annotations
 
 import json
@@ -8,6 +19,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from .runner import EvaluationRecord
+
+
+RUN_PAYLOAD_SCHEMA_VERSION = "synaptic-evaluation-run-payload/v1"
+RUN_TRACE_SCHEMA_VERSION = "synaptic-evaluation-run-trace/v1"
 
 
 def _judge_case_composite(record: EvaluationRecord) -> Optional[float]:
@@ -443,11 +458,19 @@ def console_summary(records: Sequence[EvaluationRecord]) -> str:
 def build_run_payload(
     records: Sequence[EvaluationRecord],
     metadata: Dict[str, Any],
+    *,
+    generated_at: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """The public run document: ``schema_version``, metadata, summary and records.
+
+    ``generated_at`` lets a caller with its own clock (the reference
+    ``EvaluationAPI``) stamp the document; the CLI leaves it to wall time.
+    """
     return {
+        "schema_version": RUN_PAYLOAD_SCHEMA_VERSION,
         "metadata": {
             **metadata,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         },
         "summary": aggregate_stats(records),
         "records": [record_to_dict(record) for record in records],
@@ -455,6 +478,7 @@ def build_run_payload(
 
 
 def record_to_dict(record: EvaluationRecord) -> Dict[str, Any]:
+    """Public per-case projection; ``raw_response`` and ``conversation_trace`` are excluded."""
     validator = record.validator.to_dict() if record.validator else None
     behavior = record.behavior.to_dict() if record.behavior else None
     environment = record.environment.to_dict() if record.environment else None
@@ -480,6 +504,17 @@ def record_to_dict(record: EvaluationRecord) -> Dict[str, Any]:
         "environment": environment,
         "judge": judge,
         "scoring": record.scoring.to_dict() if record.scoring else None,
+    }
+
+
+def record_trace_to_dict(record: EvaluationRecord) -> Dict[str, Any]:
+    """Private per-case trace: the raw provider body and the conversation trace.
+
+    Never merged into the public projection; written only to a host-owned
+    trace artifact that is fetched by digest.
+    """
+    return {
+        "case_id": record.case.case_id,
         "raw_response": record.raw_response,
         "conversation_trace": record.conversation_trace,
     }

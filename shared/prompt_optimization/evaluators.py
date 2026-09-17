@@ -260,6 +260,7 @@ class EvaluatorScoringAdapter:
             metrics["case_records"] = [
                 _case_record_for_persistence(
                     record_to_dict(record),
+                    raw_response=record.raw_response,
                     include_raw_response=self.persist_raw_response,
                 )
                 for record in records
@@ -600,21 +601,21 @@ def _usage_summary(raw_response: Any) -> dict[str, Any] | None:
 
 
 def _case_record_for_persistence(
-    record_dict: dict[str, Any], *, include_raw_response: bool
+    record_dict: dict[str, Any], *, raw_response: Any, include_raw_response: bool
 ) -> dict[str, Any]:
-    """Reduce a full record_to_dict() payload for candidate-stream persistence.
+    """Extend a public record_to_dict() payload for candidate-stream persistence.
 
-    By default drops the heavy ``raw_response`` blob (it can be large and is not
-    needed for score analysis) and replaces it with a compact ``usage`` summary so
-    per-case token cost stays parseable. When ``include_raw_response`` is set, the
-    full blob is preserved verbatim instead. All other fields (judge dimensions,
-    correctness verdict, response_text, tags, ...) pass through unchanged.
+    The public projection carries no ``raw_response`` (it is attacker-influenced
+    provider text), so the raw body is taken from ``EvaluationRecord.raw_response``
+    directly. By default only a compact ``usage`` summary lifted from it is
+    attached so per-case token cost stays parseable; when ``include_raw_response``
+    is set, the full blob is attached verbatim as well. All other fields (judge
+    dimensions, correctness verdict, response_text, tags, ...) pass through unchanged.
     """
     out = dict(record_dict)
-    raw_response = out.get("raw_response")
     usage = _usage_summary(raw_response)
-    if not include_raw_response:
-        out.pop("raw_response", None)
+    if include_raw_response:
+        out["raw_response"] = raw_response
     if usage is not None:
         out["usage"] = usage
     return out
