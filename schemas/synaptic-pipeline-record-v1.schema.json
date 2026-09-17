@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-pipeline-record-v1.schema.json",
+  "title": "Synaptic Pipeline Record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pipeline", "spec_digest", "state", "revision", "stages"],
+  "$defs": {
+    "text": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "count": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+    "run_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_id", "project_ref"],
+      "properties": {
+        "run_id": {"$ref": "#/$defs/text"},
+        "project_ref": {"$ref": "#/$defs/text"}
+      }
+    },
+    "artifacts": {
+      "type": "array", "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["role", "sha256", "size_bytes"],
+        "properties": {
+          "role": {"$ref": "#/$defs/text"},
+          "sha256": {"$ref": "#/$defs/digest"},
+          "size_bytes": {"$ref": "#/$defs/count"}
+        }
+      }
+    },
+    "stage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "state", "attempt_key", "run", "inputs", "outputs"],
+      "properties": {
+        "name": {"enum": ["train", "evaluate", "loss", "analysis", "recommendation"]},
+        "state": {
+          "enum": ["planned", "running", "succeeded", "failed", "skipped", "cancelled", "reconcile_required"]
+        },
+        "attempt_key": {"$ref": "#/$defs/digest"},
+        "run": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/run_ref"}]},
+        "inputs": {"$ref": "#/$defs/artifacts"},
+        "outputs": {"$ref": "#/$defs/artifacts"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"state": {"enum": ["planned", "skipped"]}}},
+          "then": {"properties": {"run": {"type": "null"}, "outputs": {"maxItems": 0}}}
+        },
+        {
+          "if": {"properties": {"name": {"enum": ["loss", "analysis", "recommendation"]}}},
+          "then": {"properties": {"run": {"type": "null"}}}
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {"const": "synaptic-pipeline-record/v1"},
+    "pipeline": {
+      "type": "object", "additionalProperties": false,
+      "required": ["pipeline_id", "project_ref"],
+      "properties": {
+        "pipeline_id": {"$ref": "#/$defs/text"},
+        "project_ref": {"$ref": "#/$defs/text"}
+      }
+    },
+    "spec_digest": {"$ref": "#/$defs/digest"},
+    "state": {
+      "enum": [
+        "planned", "running", "succeeded", "partially_succeeded", "failed",
+        "reconcile_required", "cancel_requested", "cancelled"
+      ]
+    },
+    "revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+    "stages": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/stage"}}
+  }
+}

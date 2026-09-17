@@ -84,7 +84,7 @@ class ReferenceComposition:
     evaluation: object | None
     chat: None
     data: object | None
-    pipelines: None
+    pipelines: object | None
     coordinator: object
     foundation: object
     stores: CoordinatorStoresV1
@@ -140,6 +140,7 @@ def compose_reference_host(
     maximum_grant_seconds: int = 900,
     evaluation: object | None = None,
     data: ReferenceDataPortsV1 | None = None,
+    pipelines: object | None = None,
 ) -> ReferenceComposition:
     """Compose the Training, Runs, Artifacts and, when given, Evaluation and Data families.
 
@@ -169,6 +170,12 @@ def compose_reference_host(
         evaluation_operations = compose_reference_evaluation(
             records=ports.records, streams=ports.streams, clock=authority.clock, evaluation=evaluation,
         )
+    if pipelines is not None:
+        # Imported here so a host without a pipelines family never loads its driver.
+        from .pipelines import ReferencePipelinePortsV1
+
+        if type(pipelines) is not ReferencePipelinePortsV1:
+            raise TypeError("pipelines must be exact ReferencePipelinePortsV1")
     recovery = family.recovery_verifier
     if recovery is None:
         recovery = UnavailableRecoveryVerifierV1()
@@ -213,6 +220,15 @@ def compose_reference_host(
             authority.clock,
         ),
     )
+    pipeline_operations = None
+    if pipelines is not None:
+        from .pipelines import compose_reference_pipelines
+
+        pipeline_operations = compose_reference_pipelines(
+            records=ports.records, streams=ports.streams, clock=authority.clock,
+            training=composed.training, runs=composed.runs, evaluation=evaluation_operations,
+            pipelines=pipelines,
+        )
     return ReferenceComposition(
         training=composed.training,
         runs=composed.runs,
@@ -222,7 +238,7 @@ def compose_reference_host(
         data=None if data is None else build_data_operations(
             records=ports.records, streams=ports.streams, clock=authority.clock, ports=data,
         ),
-        pipelines=None,
+        pipelines=pipeline_operations,
         coordinator=composed.coordinator,
         foundation=composed.foundation,
         stores=stores,

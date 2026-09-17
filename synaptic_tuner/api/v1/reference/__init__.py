@@ -28,6 +28,8 @@ Modules:
   ``Evaluator/`` (local backends only) and its host ports.
 - ``data.py``: the Data family over SynthChat generation and improvement,
   composed when the host supplies ``ReferenceDataPortsV1``.
+- ``pipelines.py``: the ``PipelinesOperations`` implementation that drives
+  the train and evaluate families as referenced child runs.
 - ``composition.py``: ``compose_reference_host`` and ``ReferenceComposition``.
 """
 
@@ -51,6 +53,8 @@ _LAZY_ATTRIBUTES = {
     "compose_reference_evaluation": "evaluation",
     "ReferenceDataPortsV1": "data",
     "build_data_operations": "data",
+    "ReferencePipelinePortsV1": "pipelines",
+    "compose_reference_pipelines": "pipelines",
     "ReferenceComposition": "composition",
     "compose_reference_host": "composition",
     "compose_reference_stores": "composition",

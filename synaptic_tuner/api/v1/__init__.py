@@ -37,6 +37,13 @@ _LAZY_MODULE_ATTRIBUTES = {
         "DatasetPage", "DatasetValidateRequest", "ValidationFinding", "ValidationFindingCode",
         "ValidationReport",
     },
+    "pipelines_facade": {
+        "ADMITTED_STAGES", "PipelineEvaluateSpec", "PipelineListRequest", "PipelineOperationCode",
+        "PipelineOperationError", "PipelinePage", "PipelinePlan", "PipelineRecord", "PipelineRef",
+        "PipelineRequest", "PipelineStage", "PipelineStageName", "PipelineStart", "PipelineState",
+        "PipelineTrainSpec", "PipelinesAPI", "PipelinesOperations", "StageState",
+        "stage_attempt_key", "stage_input_digest",
+    },
     "events": {"EventEnvelope", "ResultEnvelope"},
     "execution": {
         "ArtifactRef", "ArtifactState", "ErrorCode",
@@ -218,6 +225,11 @@ _FORMAL_EXPORTS = (
     "ValidationFinding",
     "ValidationFindingCode",
     "ValidationReport",
+    "ADMITTED_STAGES", "PipelineEvaluateSpec", "PipelineListRequest", "PipelineOperationCode",
+    "PipelineOperationError", "PipelinePage", "PipelinePlan", "PipelineRecord", "PipelineRef",
+    "PipelineRequest", "PipelineStage", "PipelineStageName", "PipelineStart", "PipelineState",
+    "PipelineTrainSpec", "PipelinesAPI", "PipelinesOperations", "StageState",
+    "stage_attempt_key", "stage_input_digest",
 )
 
 if not set(_FORMAL_EXPORTS).issubset(_LAZY_ATTRIBUTES):  # pragma: no cover - module invariant
