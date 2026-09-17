@@ -93,3 +93,60 @@ step, not part of this command.
 A local success shows that the checked-in command runs in the reviewed image
 on this GPU with this configuration. It is not provider shutdown proof, does
 not qualify the Modal path, and does not verify adapter provenance.
+
+## Modal proof in a finite-lifetime Sandbox
+
+`examples/model_chat/modal_launch.py` runs the same command once inside a
+Modal GPU Sandbox built from the `base_registry_reference` digest in the
+inference runtime lock, with `Evaluator`, `tuner`, `synaptic_tuner`,
+`scripts/chat_model.py` and the chat configuration mounted under `/engine`
+(never the whole checkout; `__pycache__`, `tests` and `Datasets` are excluded).
+The Sandbox runs the container script of the local proof: `mkdir -m 700`,
+`--check`, the chat run, then `cat chat-result.jsonl`. Nothing else is
+mounted: no Secrets, no Volumes, no persistent endpoint.
+
+Two inputs. `--configuration` is the unchanged six-key chat file above,
+validated by `scripts/chat_model.load_configuration` and shipped as
+`/engine/chat.json`. `--provider` is a small file such as
+`modal-smoke-provider.json` (`environment_name`, `app_name`, `gpu`,
+`cpu_millicores`, `memory_mb`, `startup_margin_seconds` 1..600). Provider-free
+validation of both, including the lock digest, without importing Modal:
+
+```bash
+python -B examples/model_chat/modal_launch.py --configuration examples/model_chat/smoke.json --provider examples/model_chat/modal-smoke-provider.json --check
+```
+
+An attempt needs `--attempt <name>`, `--modal-profile <name>` and
+`--output-directory <private dir>` (same checks as the command: absolute,
+canonical, owned by the caller, mode 0700). Credentials are read from the named
+profile only, never from the environment. The attempt name is the Sandbox name
+inside the App; a name still in use is refused (`MODAL_CHAT_ATTEMPT_EXISTS`)
+and an output directory that already holds `attempt.json` is refused before
+any cloud call.
+
+Lifetime chain: the command's own lifetime is at most 900 seconds; the Sandbox
+`timeout` is that lifetime plus `startup_margin_seconds`, and `idle_timeout`
+is set to the same value, so the provider stops the Sandbox even if the
+launcher dies. After the entrypoint exits the launcher calls
+`terminate(wait=True)` and then `Sandbox.from_id(<id>).poll()` on a fresh
+handle; an integer from that readback is the only provider shutdown proof and
+is recorded in `shutdown.json`. The launcher exits 0 only when the container
+exit code is 0, the three records were parsed, and that proof is present.
+
+Retained files in the output directory (all mode 0600): `attempt.json`
+(written before waiting, with the Sandbox id), `sandbox-stdout.log`,
+`sandbox-stderr.log` (each at most 1 MiB), `chat-result.jsonl` (the records
+parsed after the `--- chat-result.jsonl` marker) and `shutdown.json`. Because
+a finished Sandbox exposes only its log streams, the container prints the
+result file, so the raw reply lands in Modal's log stream as well as in the
+private file; the launcher's own stdout carries closed status lines only.
+
+Worst case cost, from `docs/review/evidence/modal-chat-rates-20260914.json`
+(read 2026-09-14, A10 at 1.10 USD/h): the smoke's 900 s lifetime plus 300 s
+margin is 20 minutes, about 0.37 USD of GPU time; the Sandbox CPU and memory
+rates add about 0.32 USD at 4 cores and 16 GiB, so about 0.69 USD in total.
+Not a quote; rates must be read again at issuance.
+
+Not claimed: adapter provenance (an `adapter_path` is an operator input),
+any coupling to a training run, a persistent endpoint, or a live standalone
+Modal chat success; the tests are provider-free with a fake SDK.

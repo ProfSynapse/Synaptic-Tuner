@@ -610,6 +610,14 @@ proof on the reviewed inference image" in `examples/model_chat/README.md`. A
 local `CHAT_SAVED_AND_CLOSED` is not provider shutdown proof and does not
 qualify the Modal path.
 
+The checked-in Modal path for that command is `examples/model_chat/modal_launch.py`:
+one finite GPU Sandbox on the lock's image digest with the engine source mounted,
+`timeout = lifetime + startup_margin_seconds` and an equal `idle_timeout`, then
+`terminate` plus `Sandbox.from_id(...).poll()` as the only shutdown proof. Inputs are
+the unchanged chat JSON plus `examples/model_chat/modal-smoke-provider.json`; run
+`--check` first (provider-free). See "Modal proof in a finite-lifetime Sandbox" in
+`examples/model_chat/README.md`; the raw reply lands in Modal's log stream.
+
 The minimal consumer launcher emits fixed host chat phases and a bounded,
 non-authorizing failure record containing only allowlisted exception classes
 and relative source locations. Suppressed exception context is inspected without
