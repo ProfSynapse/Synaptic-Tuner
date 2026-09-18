@@ -57,6 +57,7 @@ OTHER_PROTOCOL_CALLERS = frozenset({
     "examples/modal_chat/consumer.py",
     "scripts/chat_model.py",
     "synaptic_tuner/api/v1/reference/evaluation.py",
+    "synaptic_tuner/api/v1/reference/chat.py",
     "tuner/execution/providers/modal/inference_channel.py",
     "tuner/inference/chat_session.py",
 })
