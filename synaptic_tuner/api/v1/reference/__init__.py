@@ -30,6 +30,8 @@ Modules:
   composed when the host supplies ``ReferenceDataPortsV1``.
 - ``pipelines.py``: the ``PipelinesOperations`` implementation that drives
   the train and evaluate families as referenced child runs.
+- ``chat.py``: the ``ChatOperations`` implementation over
+  ``tuner/inference/`` (local vLLM arm, host-injected runtimes) and its host ports.
 - ``composition.py``: ``compose_reference_host`` and ``ReferenceComposition``.
 """
 
@@ -55,6 +57,11 @@ _LAZY_ATTRIBUTES = {
     "build_data_operations": "data",
     "ReferencePipelinePortsV1": "pipelines",
     "compose_reference_pipelines": "pipelines",
+    "ReferenceChatPortsV1": "chat",
+    "ChatRuntimeRegistryV1": "chat",
+    "LocalHostInfoV1": "chat",
+    "LocalVLLMChatRuntimeV1": "chat",
+    "compose_reference_chat": "chat",
     "ReferenceComposition": "composition",
     "compose_reference_host": "composition",
     "compose_reference_stores": "composition",

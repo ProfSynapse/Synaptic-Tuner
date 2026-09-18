@@ -44,6 +44,12 @@ _LAZY_MODULE_ATTRIBUTES = {
         "PipelineTrainSpec", "PipelinesAPI", "PipelinesOperations", "StageState",
         "stage_attempt_key", "stage_input_digest",
     },
+    "chat_facade": {
+        "ChatAPI", "ChatListRequest", "ChatModelIdentity", "ChatModelKind", "ChatModelSource",
+        "ChatOpenRequest", "ChatOperationCode", "ChatOperationError", "ChatOperations",
+        "ChatSession", "ChatSessionPage", "ChatSessionPolicyV1", "ChatSessionRef",
+        "ChatSessionState", "ChatTurn", "ChatTurnRef", "ChatTurnRequest",
+    },
     "events": {"EventEnvelope", "ResultEnvelope"},
     "execution": {
         "ArtifactRef", "ArtifactState", "ErrorCode",
@@ -230,6 +236,10 @@ _FORMAL_EXPORTS = (
     "PipelineRequest", "PipelineStage", "PipelineStageName", "PipelineStart", "PipelineState",
     "PipelineTrainSpec", "PipelinesAPI", "PipelinesOperations", "StageState",
     "stage_attempt_key", "stage_input_digest",
+    "ChatAPI", "ChatListRequest", "ChatModelIdentity", "ChatModelKind", "ChatModelSource",
+    "ChatOpenRequest", "ChatOperationCode", "ChatOperationError", "ChatOperations",
+    "ChatSession", "ChatSessionPage", "ChatSessionPolicyV1", "ChatSessionRef",
+    "ChatSessionState", "ChatTurn", "ChatTurnRef", "ChatTurnRequest",
 )
 
 if not set(_FORMAL_EXPORTS).issubset(_LAZY_ATTRIBUTES):  # pragma: no cover - module invariant

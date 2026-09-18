@@ -235,5 +235,22 @@
   "PipelinesOperations",
   "StageState",
   "stage_attempt_key",
-  "stage_input_digest"
+  "stage_input_digest",
+  "ChatAPI",
+  "ChatListRequest",
+  "ChatModelIdentity",
+  "ChatModelKind",
+  "ChatModelSource",
+  "ChatOpenRequest",
+  "ChatOperationCode",
+  "ChatOperationError",
+  "ChatOperations",
+  "ChatSession",
+  "ChatSessionPage",
+  "ChatSessionPolicyV1",
+  "ChatSessionRef",
+  "ChatSessionState",
+  "ChatTurn",
+  "ChatTurnRef",
+  "ChatTurnRequest"
 ]

@@ -144,7 +144,10 @@ def test_unresolved_cleanup_retains_exact_lease(case, tmp_path):
             case.startup, case.policy, cwd=tmp_path, environment={}
         ):
             raise ValueError("private")
-    assert caught.value.cleanup_lease is case.runtime
+    assert caught.value.failure == model_chat.ModelChatFailure(
+        model_chat.ModelChatFailureCode.FAILED, case.runtime
+    )
+    assert caught.value.failure.cleanup_lease is case.runtime
     assert case.runtime.cleanup_pending
 
 
@@ -193,6 +196,8 @@ def test_adapter_is_canonical_and_bound_before_start(case, tmp_path, invalid):
 
 def test_immutable_interrupt_is_preserved_when_cleanup_unresolved(case, tmp_path):
     class ImmutableInterrupt(KeyboardInterrupt):
+        __slots__ = ()
+
         def __setattr__(self, name, value):
             if name == "cleanup_lease":
                 raise AttributeError("read only")
@@ -206,7 +211,61 @@ def test_immutable_interrupt_is_preserved_when_cleanup_unresolved(case, tmp_path
         ):
             raise primary
     assert caught.value is primary
+    assert not hasattr(primary, "cleanup_lease")
+    pending = primary.__context__
+    assert type(pending) is model_chat.ModelChatError
+    assert pending.failure == model_chat.ModelChatFailure(
+        model_chat.ModelChatFailureCode.INTERRUPTED, case.runtime
+    )
     assert case.runtime.cleanup_pending
+
+
+def test_interrupt_with_resolved_cleanup_keeps_its_context_untouched(case, tmp_path):
+    primary = KeyboardInterrupt()
+    with pytest.raises(KeyboardInterrupt) as caught:
+        with model_chat.open_model_chat(
+            case.startup, case.policy, cwd=tmp_path, environment={}
+        ):
+            raise primary
+    assert caught.value is primary
+    assert primary.__context__ is None
+    assert not case.runtime.cleanup_pending
+
+
+def test_deadline_code_survives_the_typed_failure(case, tmp_path, monkeypatch):
+    now = [100.0]
+    start = model_chat.start_vllm_runtime
+
+    def slow(*args, **kwargs):
+        now[0] = 102.0
+        return start(*args, **kwargs)
+
+    monkeypatch.setattr(model_chat.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(model_chat, "start_vllm_runtime", slow)
+    with pytest.raises(model_chat.ModelChatError) as caught:
+        with model_chat.open_model_chat(
+            case.startup, case.policy, cwd=tmp_path, environment={}, deadline=101.0
+        ):
+            pytest.fail("expired startup yielded")
+    assert caught.value.failure == model_chat.ModelChatFailure(
+        model_chat.ModelChatFailureCode.DEADLINE_EXPIRED, None
+    )
+    assert str(caught.value) == "model_chat_deadline_expired"
+
+
+def test_failure_is_frozen_and_closed():
+    failure = model_chat.ModelChatFailure(model_chat.ModelChatFailureCode.FAILED)
+    with pytest.raises(AttributeError):
+        failure.cleanup_lease = object()
+    with pytest.raises(TypeError):
+        model_chat.ModelChatFailure("model_chat_failed")
+    with pytest.raises(TypeError):
+        model_chat.ModelChatError("model_chat_failed")
+    assert [code.value for code in model_chat.ModelChatFailureCode] == [
+        "model_chat_failed",
+        "model_chat_deadline_expired",
+        "model_chat_interrupted",
+    ]
 
 
 def test_startup_failure_preserves_lower_level_cleanup_lease(
@@ -225,7 +284,8 @@ def test_startup_failure_preserves_lower_level_cleanup_lease(
             case.startup, case.policy, cwd=tmp_path, environment={}
         ):
             pytest.fail("startup failure yielded")
-    assert caught.value.cleanup_lease is owner
+    assert caught.value.failure.cleanup_lease is owner
+    assert caught.value.failure.code is model_chat.ModelChatFailureCode.FAILED
 
 
 @pytest.mark.parametrize(

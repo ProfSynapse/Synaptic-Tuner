@@ -9,6 +9,9 @@ This API does not attest training provenance or provision a cloud resource.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
+from enum import Enum
+from inspect import getattr_static
 import math
 from pathlib import Path
 import re
@@ -36,15 +39,63 @@ _ENVIRONMENT_NAMES = _LOCAL_ENV_EXACT | {
 }
 
 
+class ModelChatFailureCode(str, Enum):
+    """Closed vocabulary of model-serving failures, independent of training state."""
+
+    FAILED = "model_chat_failed"
+    DEADLINE_EXPIRED = "model_chat_deadline_expired"
+    INTERRUPTED = "model_chat_interrupted"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelChatFailure:
+    """The typed failure signal: a closed code plus the lease still pending, if any.
+
+    ``cleanup_lease`` is the exact runtime (or lower-level owned-process) lease
+    whose teardown did not converge; ``None`` means every owned process family
+    is known to be released. Consumers read this field instead of probing an
+    attribute attached to an arbitrary exception.
+    """
+
+    code: ModelChatFailureCode
+    cleanup_lease: object | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.code) is not ModelChatFailureCode:
+            raise TypeError("code must be an exact ModelChatFailureCode")
+
+
 class ModelChatError(RuntimeError):
-    """Closed model-serving failure, independent of training state."""
+    """Closed model-serving failure carrying an explicit ``ModelChatFailure``.
+
+    ``str(error)`` is the closed code value only; no backend or process detail
+    ever reaches the message.
+    """
+
+    def __init__(self, failure: ModelChatFailure) -> None:
+        if type(failure) is not ModelChatFailure:
+            raise TypeError("failure must be an exact ModelChatFailure")
+        self.failure = failure
+        super().__init__(failure.code.value)
+
+
+def _pending_lease(error: BaseException, runtime: object | None) -> object | None:
+    """The lease still pending after ``error``: our runtime first, then a lower level's."""
+    if runtime is not None and runtime.cleanup_pending:
+        return runtime
+    if isinstance(error, ModelChatError):
+        return error.failure.cleanup_lease
+    # Lower-level owners (owned_process, vllm_runtime) still signal through an
+    # attribute on their own exception; read it statically, never via a property.
+    lease = getattr_static(error, "cleanup_lease", None)
+    return lease
 
 
 def _check_deadline(deadline: float | None) -> None:
     if deadline is not None:
         now = time.monotonic()
         if not math.isfinite(now) or now >= deadline:
-            raise ModelChatError("model_chat_deadline_expired")
+            raise ModelChatError(ModelChatFailure(ModelChatFailureCode.DEADLINE_EXPIRED))
 
 
 def _generation(value: object, *, maximum: float, positive: bool = False) -> float:
@@ -184,19 +235,24 @@ def open_model_chat(
                 _check_deadline(deadline)
                 yield session
     except BaseException as error:
-        cleanup = (
-            runtime
-            if runtime is not None and runtime.cleanup_pending
-            else getattr(error, "cleanup_lease", None)
-        )
+        cleanup = _pending_lease(error, runtime)
         if isinstance(error, (KeyboardInterrupt, SystemExit)):
+            # The interrupt itself is re-raised unchanged. A pending lease is
+            # signalled by splicing a typed ModelChatError into its context
+            # chain, never by attaching an attribute to the interrupt.
             if cleanup is not None:
+                pending = ModelChatError(
+                    ModelChatFailure(ModelChatFailureCode.INTERRUPTED, cleanup)
+                )
                 try:
-                    error.cleanup_lease = cleanup
+                    pending.__context__ = error.__context__
+                    error.__context__ = pending
                 except Exception:
                     pass
             raise
-        closed = ModelChatError("model_chat_failed")
-        if cleanup is not None:
-            closed.cleanup_lease = cleanup
-        raise closed from None
+        code = (
+            error.failure.code
+            if isinstance(error, ModelChatError)
+            else ModelChatFailureCode.FAILED
+        )
+        raise ModelChatError(ModelChatFailure(code, cleanup)) from None

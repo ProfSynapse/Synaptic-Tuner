@@ -82,7 +82,7 @@ class ReferenceComposition:
     runs: object
     artifacts: object
     evaluation: object | None
-    chat: None
+    chat: object | None
     data: object | None
     pipelines: object | None
     coordinator: object
@@ -141,13 +141,13 @@ def compose_reference_host(
     evaluation: object | None = None,
     data: ReferenceDataPortsV1 | None = None,
     pipelines: object | None = None,
+    chat: object | None = None,
 ) -> ReferenceComposition:
-    """Compose the Training, Runs, Artifacts and, when given, Evaluation and Data families.
+    """Compose Training, Runs and Artifacts and, when given, the Evaluation, Data, Pipelines and Chat families.
 
-    The evaluation family is composed when the host supplies its ports; the
-    data family needs SynthChat locations and an LLM client factory the host
-    owns (``ReferenceDataPortsV1``). Without them the slot stays pending on
-    the composed host.
+    Each optional family is composed only when the host supplies its ports;
+    otherwise the slot stays ``None`` on the composed host and the family's
+    implementation module is never imported.
     """
     if (
         type(family) is not ProviderFamilyV1
@@ -229,12 +229,25 @@ def compose_reference_host(
             training=composed.training, runs=composed.runs, evaluation=evaluation_operations,
             pipelines=pipelines,
         )
+    chat_operations = None
+    if chat is not None:
+        # Imported here so a host without a chat family never loads ``tuner.inference``.
+        from synaptic_tuner.api.v1.runs_facade import RunsAPI
+
+        from .chat import ReferenceChatPortsV1, compose_reference_chat
+
+        if type(chat) is not ReferenceChatPortsV1:
+            raise TypeError("chat must be exact ReferenceChatPortsV1")
+        chat_operations = compose_reference_chat(
+            records=ports.records, streams=ports.streams, clock=authority.clock,
+            runs=RunsAPI(composed.runs), chat=chat,
+        )
     return ReferenceComposition(
         training=composed.training,
         runs=composed.runs,
         artifacts=compose_reference_artifacts(authority=authority),
         evaluation=evaluation_operations,
-        chat=None,
+        chat=chat_operations,
         data=None if data is None else build_data_operations(
             records=ports.records, streams=ports.streams, clock=authority.clock, ports=data,
         ),
