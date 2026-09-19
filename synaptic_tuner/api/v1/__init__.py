@@ -37,6 +37,17 @@ _LAZY_MODULE_ATTRIBUTES = {
         "DatasetPage", "DatasetValidateRequest", "ValidationFinding", "ValidationFindingCode",
         "ValidationReport",
     },
+    "ingestion_facade": {
+        "AuthorizedSourceRef", "BindingPreview", "FieldMapping", "FieldSelector", "FieldSelectorKind", "FieldValueKind",
+        "FrontmatterMode", "INGESTION_PLAN_SCHEMA_VERSION", "INGESTION_RESULT_SCHEMA_VERSION", "IngestionAPI", "IngestionDiagnosticCode", "IngestionListRequest", "IngestionObservation",
+        "IngestionObservationKind", "IngestionObservationPage", "IngestionObservationsRequest", "IngestionOperationCode",
+        "IngestionOperationError", "IngestionOperations", "IngestionOutcome", "IngestionPage", "IngestionPlan", "IngestionPreflight",
+        "IngestionPreview", "IngestionRequest", "IngestionResult", "IngestionRunRef", "IngestionRunState", "IngestionStart",
+        "IngestionVerification", "MarkdownProfileV1", "MetadataDeclaration", "MetadataPolicyRef", "NormalizedBundleRef",
+        "ParsingProfile", "ProposalEvidenceCode", "RelationshipDeclaration", "SchemaRef", "SourceAdmissionKind", "SourceAdmissionRequest",
+        "SourceMatcher", "SourceSnapshotRef", "StructureBinding", "StructureDefinition", "StructureProposal", "StructureProposalRequest",
+        "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest",
+    },
     "pipelines_facade": {
         "ADMITTED_STAGES", "PipelineEvaluateSpec", "PipelineListRequest", "PipelineOperationCode",
         "PipelineOperationError", "PipelinePage", "PipelinePlan", "PipelineRecord", "PipelineRef",
@@ -240,6 +251,15 @@ _FORMAL_EXPORTS = (
     "ChatOpenRequest", "ChatOperationCode", "ChatOperationError", "ChatOperations",
     "ChatSession", "ChatSessionPage", "ChatSessionPolicyV1", "ChatSessionRef",
     "ChatSessionState", "ChatTurn", "ChatTurnRef", "ChatTurnRequest",
+    "AuthorizedSourceRef", "BindingPreview", "FieldMapping", "FieldSelector", "FieldSelectorKind", "FieldValueKind",
+    "FrontmatterMode", "INGESTION_PLAN_SCHEMA_VERSION", "INGESTION_RESULT_SCHEMA_VERSION", "IngestionAPI", "IngestionDiagnosticCode", "IngestionListRequest", "IngestionObservation",
+    "IngestionObservationKind", "IngestionObservationPage", "IngestionObservationsRequest", "IngestionOperationCode",
+    "IngestionOperationError", "IngestionOperations", "IngestionOutcome", "IngestionPage", "IngestionPlan", "IngestionPreflight",
+    "IngestionPreview", "IngestionRequest", "IngestionResult", "IngestionRunRef", "IngestionRunState", "IngestionStart",
+    "IngestionVerification", "MarkdownProfileV1", "MetadataDeclaration", "MetadataPolicyRef", "NormalizedBundleRef",
+    "ParsingProfile", "ProposalEvidenceCode", "RelationshipDeclaration", "SchemaRef", "SourceAdmissionKind", "SourceAdmissionRequest",
+    "SourceMatcher", "SourceSnapshotRef", "StructureBinding", "StructureDefinition", "StructureProposal", "StructureProposalRequest",
+    "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest",
 )
 
 if not set(_FORMAL_EXPORTS).issubset(_LAZY_ATTRIBUTES):  # pragma: no cover - module invariant
