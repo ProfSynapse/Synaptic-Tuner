@@ -6,7 +6,7 @@ engine, but has an independent root history. It must not be merged into main
 or an engine feature branch.
 
 The `synaptic-tuner` gitlink selects engine commit
-`3abfadccc9ac53553d6bc37cfa59ab7b12388609`, advertised by
+`c685ce34227444f8a3a51876bdce3a5dc417ce1a`, advertised by
 `smoke/modal-chat-engine`. Both origins are
 `https://github.com/ProfSynapse/Synaptic-Tuner.git`.
 Different commits and an explicit gitlink keep host and engine provenance
@@ -154,3 +154,12 @@ train-chat attempt with new resource/function names. Earlier attempts' claims or
 may not be adopted or erased.
 EHR is not used or changed. No publication, live endpoint, or teardown of an
 older app is implicit in this fixture.
+
+`configuration/synthchat-sft-20260919.json` is a separate training-only attempt,
+`modal-synthchat-20260919a`, with its own deployment, Secret and Volume names.
+Its dataset is `data/synthchat_sft_20260919.jsonl`: 42 environment-backed
+multi-turn SFT rows projected from the engine's SynthChat vault pilot
+(`targets_workspace_multistep_grpo_v1_pilot.json`, 69 rollouts, 42 passing),
+trained for 30 steps at a 4096-token sequence length on the same pinned
+SmolLM2 LoRA workload. Run it with `--mode qualify-training`; it does not select
+the chat path.

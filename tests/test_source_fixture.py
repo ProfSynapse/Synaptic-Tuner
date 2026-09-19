@@ -8,7 +8,7 @@ import json
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "synaptic-tuner"
-PIN = "3abfadccc9ac53553d6bc37cfa59ab7b12388609"
+PIN = "c685ce34227444f8a3a51876bdce3a5dc417ce1a"
 ORIGIN = "https://github.com/ProfSynapse/Synaptic-Tuner.git"
 
 if ENGINE.resolve(strict=True) != ENGINE:
@@ -80,7 +80,9 @@ class ConsumerSourceTests(unittest.TestCase):
                 "AGENTS.md",
                 "README.md",
                 "configuration/smoke.json",
+                "configuration/synthchat-sft-20260919.json",
                 "data/smoke.jsonl",
+                "data/synthchat_sft_20260919.jsonl",
                 "synaptic-tuner",
                 "synaptic.yaml",
                 "tests/test_source_fixture.py",
