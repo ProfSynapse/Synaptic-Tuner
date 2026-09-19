@@ -47,6 +47,7 @@ class AgenticEpisodeResult:
     environment_result: Any = None
     final_text_required: bool = False
     final_text_satisfied: bool = False
+    validation_retries: int = 0
 
 
 def run_environment_episode(
@@ -71,9 +72,21 @@ def run_environment_episode(
     judge_stop_on_hard_failure: bool = False,
     require_final_text_after_pass: bool = False,
     final_text_prompt: Optional[str] = None,
+    continue_on_validation_error: bool = False,
+    max_validation_retries: int = 2,
+    validation_feedback_prompt: Optional[str] = None,
 ) -> AgenticEpisodeResult:
-    """Run a multi-turn environment episode with shared loop semantics."""
+    """Run a multi-turn environment episode with shared loop semantics.
+
+    When ``continue_on_validation_error`` is set, an assistant turn that fails
+    response validation is answered with a validation-feedback user message
+    instead of ending the episode, up to ``max_validation_retries`` times per
+    episode. The rejected turn and the feedback stay in the conversation so the
+    model can correct its own message; the feedback is traced as
+    ``validation_feedback``.
+    """
     messages = [dict(message) for message in initial_messages]
+    validation_retries = 0
     conversation_trace = _messages_to_trace(messages)
     turns: List[AgenticEpisodeTurn] = []
     final_response: Any = None
@@ -104,6 +117,20 @@ def run_environment_episode(
         validation = validate(response.message)
         turns.append(AgenticEpisodeTurn(turn_index=turn_index, response=response, validation=validation))
         if not _validation_passed(validation):
+            if continue_on_validation_error and validation_retries < max_validation_retries:
+                validation_retries += 1
+                feedback = format_validation_feedback_message(validation, validation_feedback_prompt)
+                messages.append({"role": "assistant", "content": stringify(response.message)})
+                messages.append({"role": "user", "content": feedback})
+                conversation_trace.append(
+                    {
+                        "role": "user",
+                        "kind": "validation_feedback",
+                        "content": feedback,
+                        "turn_index": turn_index,
+                    }
+                )
+                continue
             stop_reason = "schema_validation_failed"
             break
 
@@ -256,7 +283,37 @@ def run_environment_episode(
         environment_result=environment_result,
         final_text_required=require_final_text_after_pass,
         final_text_satisfied=final_text_satisfied,
+        validation_retries=validation_retries,
     )
+
+
+DEFAULT_VALIDATION_FEEDBACK_PROMPT = (
+    "Your previous assistant message failed response validation and was not executed. "
+    "Return a corrected assistant message in the configured tool-call format. "
+    "function.arguments must be a valid JSON object string with double-quoted keys and values."
+)
+
+
+def format_validation_feedback_message(validation: Any, prompt: Optional[str] = None) -> str:
+    """Render response-validation issues as a user message the model can act on."""
+    lines = [str(prompt or DEFAULT_VALIDATION_FEEDBACK_PROMPT).strip(), "", "Validation issues:"]
+    issues = getattr(validation, "issues", None)
+    if issues is None and isinstance(validation, dict):
+        issues = validation.get("issues")
+    rendered = 0
+    for issue in issues or []:
+        level = getattr(issue, "level", None)
+        message = getattr(issue, "message", None)
+        if isinstance(issue, dict):
+            level = issue.get("level", level)
+            message = issue.get("message", message)
+        if message is None:
+            message = str(issue)
+        lines.append(f"- {str(level or 'ERROR').upper()}: {message}")
+        rendered += 1
+    if not rendered:
+        lines.append("- ERROR: response did not pass validation")
+    return "\n".join(lines)
 
 
 def _validation_passed(validation: Any) -> bool:

@@ -427,11 +427,10 @@ def test_use_tools_response_schema_allows_text_only_responses():
     tool_calls_schema = schema["properties"]["tool_calls"]
     assert "anyOf" in tool_calls_schema
     assert {"type": "null"} in tool_calls_schema["anyOf"]
-    assert any(
-        isinstance(option, dict)
-        and option.get("type") == "array"
-        and option.get("maxItems") == 0
+    assert all(
+        "items" in option
         for option in tool_calls_schema["anyOf"]
+        if isinstance(option, dict) and option.get("type") == "array"
     )
 
 

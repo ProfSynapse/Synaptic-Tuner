@@ -112,11 +112,24 @@ environment:
     max_tool_steps: 8
     continue_on_execution_error: true
     continue_on_validation_error: true
+    max_validation_retries: 2
+    # validation_feedback_prompt: optional override of the repair instruction
     stop_on_text_response: true
     stop_on_environment_pass: true
     tool_result_name_format: command
   require_expected_tools: true
 ```
+
+`continue_on_validation_error` turns a response-validation failure (for
+example single-quoted pseudo-JSON in `function.arguments`) into a repair turn:
+the rejected assistant message and a validation-feedback user message are
+appended and the model answers again, up to `max_validation_retries` times per
+episode (default 2). Without it the episode stops at
+`schema_validation_failed` before any environment step. The feedback lists the
+validator's issues under a generic instruction; set
+`validation_feedback_prompt` to replace that instruction. Repair turns are
+traced as `validation_feedback` and counted in
+`metadata.environment.validation_retries`, so projections can filter them.
 
 Use `tool_result_name_format` when the model-facing feedback should display
 configured command/tool names rather than internal executor identifiers. This

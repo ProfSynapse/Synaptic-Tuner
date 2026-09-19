@@ -221,6 +221,9 @@ def generate_agentic_episode(
         loop_cfg.get("require_final_text_after_pass", loop_cfg.get("require_final_text", False))
     )
     final_text_prompt = loop_cfg.get("final_text_prompt")
+    continue_on_validation_error = bool(loop_cfg.get("continue_on_validation_error", False))
+    max_validation_retries = int(loop_cfg.get("max_validation_retries", 2) or 0)
+    validation_feedback_prompt = loop_cfg.get("validation_feedback_prompt")
     continue_on_execution_error = bool(
         loop_cfg.get("continue_on_execution_error", str(loop_cfg.get("mode", "strict")).strip().lower() == "agentic")
     )
@@ -290,6 +293,9 @@ def generate_agentic_episode(
             judge_stop_on_hard_failure=judge_stop_on_hard_failure,
             require_final_text_after_pass=require_final_text_after_pass,
             final_text_prompt=final_text_prompt,
+            continue_on_validation_error=continue_on_validation_error,
+            max_validation_retries=max_validation_retries,
+            validation_feedback_prompt=validation_feedback_prompt,
         )
     finally:
         session.close()
@@ -318,6 +324,7 @@ def generate_agentic_episode(
     environment_trace = episode.environment_result.to_dict()
     environment_trace["final_text_required"] = episode.final_text_required
     environment_trace["final_text_satisfied"] = episode.final_text_satisfied
+    environment_trace["validation_retries"] = episode.validation_retries
     return final_response, example, {
         **environment_trace,
         "judge_trace": list(episode.judge_trace),

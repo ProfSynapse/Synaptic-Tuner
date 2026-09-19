@@ -6,6 +6,11 @@ Purpose: Build the JSON schema and generation prompt used when the LLM generates
          dict loaded from tool_call_formats.yaml rather than hardcoded.
 Usage: Called by generator.py during assistant response generation stage.
        Imported by tests for schema validation.
+
+The ``tool_calls`` property is ``null`` or a non-empty array. There is no
+separate empty-array option: providers that enforce strict JSON schemas
+(OpenAI, Azure) reject an array schema without ``items``, and ``null`` already
+expresses a text-only response.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -71,10 +76,6 @@ def _build_wrapper_schema(
                     {"type": "null"},
                     {
                         "type": "array",
-                        "maxItems": 0,
-                    },
-                    {
-                        "type": "array",
                         "minItems": 1,
                         "maxItems": 1,
                         "items": {
@@ -122,10 +123,6 @@ def _build_native_schema(allowed_tools: List[str]) -> Dict[str, Any]:
             "tool_calls": {
                 "anyOf": [
                     {"type": "null"},
-                    {
-                        "type": "array",
-                        "maxItems": 0,
-                    },
                     {
                         "type": "array",
                         "minItems": 1,

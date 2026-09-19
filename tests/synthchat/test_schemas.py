@@ -151,11 +151,16 @@ class TestBuildToolResponseSchema:
         null_option = [opt for opt in options if opt.get("type") == "null"]
         assert len(null_option) == 1
 
-    def test_tool_calls_allows_empty_array(self):
-        schema = build_tool_response_schema(format_config=_default_fmt())
-        options = schema["properties"]["tool_calls"]["anyOf"]
-        empty_arr = [opt for opt in options if opt.get("type") == "array" and opt.get("maxItems") == 0]
-        assert len(empty_arr) == 1
+    def test_tool_calls_every_array_option_has_items(self):
+        # Strict-schema providers (OpenAI, Azure) reject an array schema without items,
+        # so a text-only response is expressed by the null option alone.
+        for fmt in (_default_fmt(), _default_fmt(wrapper_name="myWrapper")):
+            schema = build_tool_response_schema(format_config=fmt)
+            options = schema["properties"]["tool_calls"]["anyOf"]
+            array_options = [opt for opt in options if opt.get("type") == "array"]
+            assert array_options
+            assert all("items" in opt for opt in array_options)
+            assert not any(opt.get("maxItems") == 0 for opt in array_options)
 
 
 # ---- build_tool_generation_prompt ----
