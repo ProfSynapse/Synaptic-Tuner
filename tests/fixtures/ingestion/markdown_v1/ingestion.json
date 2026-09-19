@@ -1,0 +1,112 @@
+{
+  "schema_version": "synaptic-ingestion-config/v1",
+  "project_ref": "fixture_project",
+  "request_id": "markdown_fixture_request",
+  "output_ref": "fixture_output",
+  "selection": {
+    "roots": [
+      {
+        "alias": "notes",
+        "path": "."
+      }
+    ],
+    "include": [
+      "**/*.md"
+    ],
+    "exclude": [],
+    "include_hidden": false
+  },
+  "structures": [
+    {
+      "name": "MarkdownNote",
+      "version": "1",
+      "markdown": {
+        "frontmatter_mode": "optional"
+      },
+      "fields": [
+        {
+          "name": "body",
+          "selector": {
+            "kind": "document_body",
+            "key": null
+          },
+          "value_kind": "string",
+          "required": true
+        },
+        {
+          "name": "path",
+          "selector": {
+            "kind": "logical_path",
+            "key": null
+          },
+          "value_kind": "string",
+          "required": true
+        },
+        {
+          "name": "published",
+          "selector": {
+            "kind": "frontmatter_field",
+            "key": "published"
+          },
+          "value_kind": "boolean",
+          "required": false
+        },
+        {
+          "name": "rank",
+          "selector": {
+            "kind": "frontmatter_field",
+            "key": "rank"
+          },
+          "value_kind": "int64",
+          "required": false
+        },
+        {
+          "name": "tags",
+          "selector": {
+            "kind": "frontmatter_field",
+            "key": "tags"
+          },
+          "value_kind": "array",
+          "required": false
+        },
+        {
+          "name": "title",
+          "selector": {
+            "kind": "frontmatter_field",
+            "key": "title"
+          },
+          "value_kind": "string",
+          "required": false
+        }
+      ],
+      "text_projections": [
+        {
+          "name": "text",
+          "field_ref": "body"
+        }
+      ],
+      "metadata": [
+        {
+          "name": "path",
+          "field_ref": "path"
+        },
+        {
+          "name": "tags",
+          "field_ref": "tags"
+        }
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "binding_id": "markdown",
+      "matcher": {
+        "pattern": "notes/**/*.md"
+      },
+      "structure": {
+        "name": "MarkdownNote",
+        "version": "1"
+      }
+    }
+  ]
+}
