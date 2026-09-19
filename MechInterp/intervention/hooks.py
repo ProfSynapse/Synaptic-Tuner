@@ -396,7 +396,9 @@ class InterventionHook:
         pre_proj = None
         if self.measure_readback:
             pre_proj = self._projections(
-                hidden, self.direction.detach().to(torch.float64), per_row, final_pos, columns
+                hidden,
+                self.direction.detach().to(device=hidden.device, dtype=torch.float64),
+                per_row, final_pos, columns,
             )
 
         if self.law == "additive":

@@ -166,6 +166,66 @@ class TestIterPendingStability:
         log.close()
 
 
+class TestRequiredFields:
+    def test_record_with_all_required_fields_present_succeeds(self, tmp_path: Path):
+        log = RunLog(tmp_path / "rows.jsonl", CONFIG_A, required_fields=("out_text",))
+        log.record("row-1", {"out_text": "synthetic output text", "score": 1})
+        assert log.done_keys() == {"row-1"}
+        log.close()
+
+    def test_record_missing_required_field_raises_naming_it(self, tmp_path: Path):
+        log = RunLog(tmp_path / "rows.jsonl", CONFIG_A, required_fields=("out_text",))
+        with pytest.raises(RunLogError, match="out_text"):
+            log.record("row-1", {"score": 1})
+        log.close()
+
+    def test_record_empty_string_required_field_raises(self, tmp_path: Path):
+        log = RunLog(tmp_path / "rows.jsonl", CONFIG_A, required_fields=("out_text",))
+        with pytest.raises(RunLogError, match="out_text"):
+            log.record("row-1", {"out_text": "", "score": 1})
+        log.close()
+
+    def test_record_non_string_required_field_raises(self, tmp_path: Path):
+        log = RunLog(tmp_path / "rows.jsonl", CONFIG_A, required_fields=("out_text",))
+        with pytest.raises(RunLogError, match="out_text"):
+            log.record("row-1", {"out_text": 12345})
+        log.close()
+
+    def test_missing_record_never_reaches_disk(self, tmp_path: Path):
+        log_path = tmp_path / "rows.jsonl"
+        log = RunLog(log_path, CONFIG_A, required_fields=("out_text",))
+        with pytest.raises(RunLogError):
+            log.record("row-1", {"score": 1})
+        log.close()
+        assert RunLog.peek_done_keys(log_path) == set()
+
+    def test_default_required_fields_empty_allows_arbitrary_payload(self, tmp_path: Path):
+        # Backward compat: a caller that never declares required_fields sees
+        # no change in behavior.
+        log = RunLog(tmp_path / "rows.jsonl", CONFIG_A)
+        log.record("row-1", {"anything": "goes"})
+        log.close()
+
+    def test_required_fields_is_part_of_the_fingerprint(self, tmp_path: Path):
+        log_path = tmp_path / "rows.jsonl"
+        log = RunLog(log_path, CONFIG_A, required_fields=("out_text",))
+        log.record("row-1", {"out_text": "synthetic output text"})
+        log.close()
+
+        # Same run_config, different required_fields declaration: treated as
+        # a config change, not a silent resume.
+        with pytest.raises(RunLogError):
+            RunLog(log_path, CONFIG_A, required_fields=())
+
+    def test_multiple_required_fields_all_checked(self, tmp_path: Path):
+        log = RunLog(
+            tmp_path / "rows.jsonl", CONFIG_A, required_fields=("out_text", "sub_grade")
+        )
+        with pytest.raises(RunLogError, match="sub_grade"):
+            log.record("row-1", {"out_text": "synthetic output text"})
+        log.close()
+
+
 class TestLiveReadWhileWriting:
     def test_peek_done_keys_sees_flushed_records_without_disturbing_writer(
         self, tmp_path: Path

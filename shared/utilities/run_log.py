@@ -25,6 +25,13 @@ cadence typical of a generate-then-grade loop, the fsync cost (single-digit
 milliseconds) is immaterial next to the item cost, and it is what makes the
 log survive a hard kill: once record() returns, that item is durable on
 disk even if the process dies on the very next line.
+
+Callers may declare fields every record must carry by passing
+``required_fields`` to the constructor; ``record()`` then raises
+``RunLogError`` naming any missing or empty field instead of silently
+writing an incomplete record. ``required_fields`` is folded into the run's
+fingerprint, so reopening the same path with a different declaration is
+treated as a config change, not a silent resume.
 """
 
 from __future__ import annotations
@@ -48,8 +55,16 @@ def _canonical_json(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
 
 
-def _fingerprint(run_config: dict, schema_version: int) -> str:
-    payload = _canonical_json({"schema_version": schema_version, "run_config": run_config})
+def _fingerprint(
+    run_config: dict, schema_version: int, required_fields: tuple[str, ...] = ()
+) -> str:
+    payload = _canonical_json(
+        {
+            "schema_version": schema_version,
+            "run_config": run_config,
+            "required_fields": list(required_fields),
+        }
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -117,12 +132,14 @@ class RunLog:
         *,
         fresh: bool = False,
         key_field: str = "key",
+        required_fields: tuple[str, ...] = (),
     ) -> None:
         self.path = Path(path)
         self.meta_path = self.path.with_name(self.path.name + ".meta.json")
         self.summary_path = self.path.with_name(self.path.name + ".summary.json")
         self.key_field = key_field
-        self._fingerprint = _fingerprint(run_config, SCHEMA_VERSION)
+        self.required_fields = tuple(required_fields)
+        self._fingerprint = _fingerprint(run_config, SCHEMA_VERSION, self.required_fields)
 
         if fresh:
             for candidate in (self.path, self.meta_path, self.summary_path):
@@ -203,7 +220,28 @@ class RunLog:
     # -- writing ---------------------------------------------------------
 
     def record(self, key: str, payload: dict) -> None:
-        """Append one item's result. Durable on disk when this returns."""
+        """Append one item's result. Durable on disk when this returns.
+
+        Raises ``RunLogError`` if ``required_fields`` was declared at
+        construction and ``payload`` lacks any of those fields as a
+        non-empty string. Callers use this to declare fields every record
+        must carry (e.g. generation text) so a build defect that silently
+        drops a field is caught at write time, not discovered later from an
+        unusable log.
+        """
+        if self.required_fields:
+            missing = [
+                field
+                for field in self.required_fields
+                if not isinstance(payload.get(field), str) or not payload.get(field)
+            ]
+            if missing:
+                raise RunLogError(
+                    f"record for key {key!r} in {self.path} is missing "
+                    f"required field(s) {missing}: this log declared "
+                    f"required_fields={self.required_fields!r}, and every "
+                    "record must carry a non-empty string for each"
+                )
         rec = dict(payload)
         rec[self.key_field] = key
         line = json.dumps(rec, default=str) + "\n"
