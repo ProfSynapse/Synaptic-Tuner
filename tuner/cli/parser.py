@@ -224,6 +224,7 @@ Commands:
   hf-source   Prepare or provision one exact immutable HF Profile-C source transport
   hf-smoke    Approve, execute, or observe one fixed bootstrap-only HF smoke
   hf-training-smoke  Preflight, approve, execute, recover, observe, or verify the protected A10G smoke
+  ingest      Ingest one explicit local Markdown selection to a private bundle
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
 
@@ -267,6 +268,7 @@ Examples:
   python tuner.py analyze-experiment --experiment-id latest
   synaptic capabilities list --json
   synaptic capabilities describe mechinterp.steer --json
+  python tuner.py ingest --config <config.json> --select notes=./notes --json
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
   python tuner.py list datasets    # List datasets
@@ -280,7 +282,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "ingest", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -378,7 +380,18 @@ Examples:
     parser.add_argument(
         "--config",
         dest="ml_config",
-        help="Path to config YAML (ml train or mechinterp run)."
+        help=(
+            "Command config file: YAML for ml/mechinterp, or strict JSON "
+            "for ingest."
+        ),
+    )
+    parser.add_argument(
+        "--select",
+        action="append",
+        default=None,
+        dest="ingestion_selections",
+        metavar="ALIAS=PATH",
+        help="One local ingestion selection; repeat for additional roots.",
     )
 
     # Flywheel-specific flags

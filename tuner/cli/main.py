@@ -159,6 +159,14 @@ def _print_project_error(error: ProjectError, *, json_mode: bool) -> None:
         print(f"Error [{error.code}]: {error}", file=sys.stderr)
 
 
+def _print_ingestion_bootstrap_error() -> None:
+    print(json.dumps({
+        "success": False,
+        "status": "failed",
+        "error_code": "bootstrap_failed",
+    }, sort_keys=True, separators=(",", ":")))
+
+
 def main(argv=None):
     """
     Main CLI entry point.
@@ -217,11 +225,17 @@ def main(argv=None):
         sys.exit(130)
 
     except ProjectError as e:
+        if getattr(args, "command", None) == "ingest":
+            _print_ingestion_bootstrap_error()
+            sys.exit(1)
         _print_project_error(e, json_mode=bool(getattr(args, "json", False)))
         sys.exit(1)
 
     except Exception as e:
         # Catch-all for unexpected errors
+        if getattr(args, "command", None) == "ingest":
+            _print_ingestion_bootstrap_error()
+            sys.exit(1)
         if bool(getattr(args, "json", False)):
             print(json.dumps({
                 "success": False,
