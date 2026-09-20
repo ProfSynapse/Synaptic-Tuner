@@ -1675,9 +1675,6 @@ def _load_batch_judge_rows(
 ) -> tuple[dict[str, Any], dict[str, Any], bytes, list[dict[str, Any]]]:
     """Load and reconcile a completed collection against the current config."""
     config, plans, _ = _build_batch_plan(config_path)
-    judge = config.get("judge")
-    if not isinstance(judge, dict):
-        raise ValueError("batch-judge requires a judge configuration")
     output_dir = _output_dir(config, config_path)
     manifest_path = output_dir / "batch-manifest.json"
     manifest, manifest_bytes = _read_canonical_json_object(manifest_path, "batch collection manifest")
@@ -1798,13 +1795,114 @@ def _load_batch_judge_rows(
                 "document": document["text"],
                 "document_id": expected_item["document_id"],
                 "model": expected_item["model"],
+                "source_path": expected_item["source_path"],
+                "source_metadata": document["metadata"],
+                "source_sha256": _sha256_bytes(document["text"].encode("utf-8")),
                 "result_path": result_path,
                 "result_bytes": result_bytes,
+                "result": record,
+                "generation_result_sha256": _sha256_bytes(result_bytes),
                 "payload": generation.get("payload"),
                 "eligible": successful,
             }
         )
     return config, manifest, manifest_bytes, rows
+
+
+def load_validated_batch_artifacts(
+    config_path: Path,
+    *,
+    judgment_manifest_path: Path | None = None,
+) -> dict[str, Any]:
+    """Load fully reconciled batch artifacts for a read-only downstream consumer.
+
+    The collection is re-bound to the current bakeoff config and source bytes.
+    When a judgment manifest is supplied, every eligible row is additionally
+    bound to its immutable judgment artifact and the current judge config.
+    """
+    config_path = config_path.resolve()
+    config, _, collection_bytes, rows = _load_batch_judge_rows(config_path)
+    output_dir = _output_dir(config, config_path)
+    collection_path = output_dir / "batch-manifest.json"
+    loaded: dict[str, Any] = {
+        "config_path": config_path,
+        "config": config,
+        "collection_manifest_path": collection_path,
+        "collection_manifest_sha256": _sha256_bytes(collection_bytes),
+        "rows": rows,
+    }
+    if judgment_manifest_path is None:
+        return loaded
+
+    judge = config.get("judge")
+    if not isinstance(judge, dict):
+        raise ValueError("judgment artifacts require a judge configuration")
+    manifest_path = judgment_manifest_path.resolve()
+    manifest, manifest_bytes = _read_canonical_json_object(
+        manifest_path, "batch judge manifest"
+    )
+    required = {
+        "kind", "batch_manifest_path", "batch_manifest_sha256", "judge_model",
+        "judge_config_sha256", "eligible", "skipped_generation_failure", "judgments",
+    }
+    if set(manifest) != required or manifest.get("kind") != _BATCH_JUDGE_MANIFEST_KIND:
+        raise ValueError("batch judge manifest fields are invalid")
+    eligible_rows = [row for row in rows if row["eligible"]]
+    if (
+        manifest.get("batch_manifest_path") != str(collection_path)
+        or manifest.get("batch_manifest_sha256") != _sha256_bytes(collection_bytes)
+        or manifest.get("judge_model") != judge["model"]
+        or manifest.get("judge_config_sha256") != _digest(judge)
+        or manifest.get("eligible") != len(eligible_rows)
+        or manifest.get("skipped_generation_failure") != len(rows) - len(eligible_rows)
+        or not isinstance(manifest.get("judgments"), list)
+    ):
+        raise ValueError("batch judge manifest binding is invalid")
+
+    row_index = {(row["document_id"], row["model"]): row for row in eligible_rows}
+    judgment_index: dict[tuple[str, str], tuple[dict[str, Any], bytes, Path]] = {}
+    for index, raw in enumerate(manifest["judgments"]):
+        item = _mapping(raw, f"batch judge manifest judgments[{index}]")
+        if set(item) != {
+            "document_id", "model", "generation_result_sha256",
+            "judgment_path", "judgment_sha256",
+        }:
+            raise ValueError("batch judge manifest judgment fields are invalid")
+        key = (item.get("document_id"), item.get("model"))
+        if key not in row_index or key in judgment_index:
+            raise ValueError("batch judge manifest judgment identity is invalid")
+        row = row_index[key]
+        path_value = item.get("judgment_path")
+        if not isinstance(path_value, str) or not path_value:
+            raise ValueError("batch judge manifest judgment path is invalid")
+        judgment_path = Path(path_value)
+        binding = _batch_judge_binding(
+            document_id=row["document_id"],
+            generation_model=row["model"],
+            generation_result_bytes=row["result_bytes"],
+            document=row["document"],
+            judge=judge,
+        )
+        artifact, encoded = _load_existing_batch_judgment(
+            judgment_path, binding=binding, judge=judge
+        )
+        if (
+            item.get("generation_result_sha256") != row["generation_result_sha256"]
+            or item.get("judgment_sha256") != _sha256_bytes(encoded)
+        ):
+            raise ValueError("batch judge manifest judgment digest is invalid")
+        judgment_index[key] = (artifact, encoded, judgment_path)
+    if set(judgment_index) != set(row_index):
+        raise ValueError("batch judge manifest does not cover every eligible result")
+    for key, row in row_index.items():
+        artifact, encoded, path = judgment_index[key]
+        row["judgment"] = artifact
+        row["judgment_path"] = path
+        row["judgment_bytes"] = encoded
+        row["judgment_sha256"] = _sha256_bytes(encoded)
+    loaded["judgment_manifest_path"] = manifest_path
+    loaded["judgment_manifest_sha256"] = _sha256_bytes(manifest_bytes)
+    return loaded
 
 
 def judge_collected_batch(
