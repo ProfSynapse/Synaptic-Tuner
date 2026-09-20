@@ -42,6 +42,7 @@ request list and use the three durable batch verbs::
         source_path: private/document.md
         strip_yaml_frontmatter: true
         metadata: {kind: optional-caller-data}
+        expected_output: {metadata: {document_id: stable-document-id}}
     batch: {max_requests: 5}
 
     python -m SynthChat.scripts.structured_document_bakeoff --config batch.yaml --batch-submit
@@ -52,6 +53,13 @@ request list and use the three durable batch verbs::
 ``{metadata}`` is available to the prompt as canonical JSON.  Batch mode uses
 the base model id and the real OpenRouter asynchronous Batch API; it does not
 send a ``:batch`` model through synchronous chat completions.
+
+When present, ``expected_output`` is a local admission contract.  The decoded
+generation must contain every configured mapping key/value after passing the
+shared JSON Schema.  Mappings match recursively; arrays and scalars match
+exactly.  Booleans remain distinct from numbers, while integer and floating
+representations compare as the same JSON number.  The contract is never sent
+to the provider unless the caller also includes it in the prompt metadata.
 """
 
 from __future__ import annotations
@@ -110,7 +118,9 @@ def _positive_int(value: object, name: str) -> int:
 def load_config(path: Path) -> dict[str, Any]:
     """Load and validate a bakeoff YAML configuration without making calls."""
     try:
-        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        source = path.read_text(encoding="utf-8")
+        _reject_expected_output_yaml_duplicates(source)
+        loaded = yaml.safe_load(source)
     except FileNotFoundError:
         raise FileNotFoundError(f"Bakeoff config not found: {path}") from None
     config = _mapping(loaded, "bakeoff config")
@@ -175,6 +185,56 @@ def _schema(value: object, name: str) -> dict[str, Any]:
     return schema
 
 
+def _reject_expected_output_yaml_duplicates(source: str) -> None:
+    """Reject duplicate keys within configured expected_output YAML mappings."""
+    root = yaml.compose(source, Loader=yaml.SafeLoader)
+    if not isinstance(root, yaml.MappingNode):
+        return
+
+    def scalar_key(node: yaml.Node) -> str | None:
+        return node.value if isinstance(node, yaml.ScalarNode) else None
+
+    visiting: set[int] = set()
+    nodes_seen = 0
+
+    def validate_contract(node: yaml.Node, depth: int = 0) -> None:
+        nonlocal nodes_seen
+        nodes_seen += 1
+        identity = id(node)
+        if nodes_seen > 10_000 or depth > 128 or identity in visiting:
+            raise ValueError("expected_output YAML structure is cyclic or too large")
+        visiting.add(identity)
+        if isinstance(node, yaml.MappingNode):
+            seen: set[tuple[str, str]] = set()
+            for key_node, value_node in node.value:
+                identity = (key_node.tag, key_node.value) if isinstance(key_node, yaml.ScalarNode) else None
+                if identity is None or identity in seen:
+                    raise ValueError("expected_output contains duplicate or non-scalar YAML keys")
+                seen.add(identity)
+                validate_contract(value_node, depth + 1)
+        elif isinstance(node, yaml.SequenceNode):
+            for child in node.value:
+                validate_contract(child, depth + 1)
+        visiting.remove(id(node))
+
+    documents_node = next(
+        (value for key, value in root.value if scalar_key(key) == "documents"),
+        None,
+    )
+    if not isinstance(documents_node, yaml.SequenceNode):
+        return
+    for document_node in documents_node.value:
+        if not isinstance(document_node, yaml.MappingNode):
+            continue
+        expected_nodes = [
+            value for key, value in document_node.value if scalar_key(key) == "expected_output"
+        ]
+        if len(expected_nodes) > 1:
+            raise ValueError("documents entry contains duplicate expected_output fields")
+        if expected_nodes:
+            validate_contract(expected_nodes[0])
+
+
 def _instance_path(parts: Any) -> str:
     path = "$"
     for part in parts:
@@ -195,6 +255,76 @@ def _validate_payload(value: object, schema: Mapping[str, Any], name: str) -> No
         raise ValueError(f"{name} failed JSON Schema validation at {location}: {exc.message}") from None
 
 
+def _json_exact_equal(actual: object, expected: object) -> bool:
+    """Compare JSON values exactly, including scalar types and mapping keys."""
+    if (
+        type(actual) in (int, float)
+        and type(expected) in (int, float)
+    ):
+        return actual == expected
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return (
+            actual.keys() == expected.keys()
+            and all(_json_exact_equal(actual[key], value) for key, value in expected.items())
+        )
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            _json_exact_equal(actual_item, expected_item)
+            for actual_item, expected_item in zip(actual, expected)
+        )
+    return actual == expected
+
+
+def _safe_expected_path(parts: list[object]) -> str:
+    """Render a diagnostic path without echoing provider/config-controlled data."""
+    path = "$"
+    for part in parts:
+        if isinstance(part, int):
+            path += f"[{part}]"
+        elif (
+            isinstance(part, str)
+            and len(part) <= 64
+            and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part)
+        ):
+            path += f".{part}"
+        else:
+            path += "[*]"
+    return path
+
+
+def _expected_output_mismatch_path(
+    actual: object,
+    expected: Mapping[str, Any],
+    path: list[object] | None = None,
+) -> list[object] | None:
+    """Return the first path that violates partial deep equality."""
+    current = [] if path is None else path
+    if not isinstance(actual, dict):
+        return current
+    for key in sorted(expected):
+        expected_value = expected[key]
+        child_path = [*current, key]
+        if key not in actual:
+            return child_path
+        actual_value = actual[key]
+        if isinstance(expected_value, dict):
+            mismatch = _expected_output_mismatch_path(actual_value, expected_value, child_path)
+            if mismatch is not None:
+                return mismatch
+        elif not _json_exact_equal(actual_value, expected_value):
+            return child_path
+    return None
+
+
+def _validate_expected_output(payload: object, expected: Mapping[str, Any]) -> None:
+    mismatch = _expected_output_mismatch_path(payload, expected)
+    if mismatch is not None:
+        location = _safe_expected_path(mismatch)
+        raise ValueError(f"generation payload failed expected-output admission at {location}")
+
+
 def _model_spec(value: object, index: int) -> dict[str, Any]:
     if isinstance(value, str):
         return {"id": _text(value, f"models[{index}]")}
@@ -211,7 +341,7 @@ def _model_spec(value: object, index: int) -> dict[str, Any]:
 
 def _document_spec(value: object, index: int) -> dict[str, Any]:
     document = _mapping(value, f"documents[{index}]")
-    allowed = {"id", "source_path", "strip_yaml_frontmatter", "metadata"}
+    allowed = {"id", "source_path", "strip_yaml_frontmatter", "metadata", "expected_output"}
     unknown = set(document) - allowed
     if unknown:
         raise ValueError(f"documents[{index}] has unsupported fields: {', '.join(sorted(unknown))}")
@@ -227,6 +357,15 @@ def _document_spec(value: object, index: int) -> dict[str, Any]:
         json.dumps(document["metadata"], ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError):
         raise ValueError(f"documents[{index}].metadata must be finite JSON data") from None
+    if "expected_output" in document:
+        document["expected_output"] = _mapping(
+            document["expected_output"],
+            f"documents[{index}].expected_output",
+        )
+        _require_expected_output_object(
+            document["expected_output"],
+            f"documents[{index}].expected_output",
+        )
     return document
 
 
@@ -288,6 +427,11 @@ def read_documents(config: Mapping[str, Any], config_path: Path) -> list[dict[st
                 "text": text,
                 "metadata": dict(spec.get("metadata", {})),
                 "frontmatter_stripped": bool(spec.get("strip_yaml_frontmatter", False)),
+                **(
+                    {"expected_output": dict(spec["expected_output"])}
+                    if "expected_output" in spec
+                    else {}
+                ),
             }
         )
     return documents
@@ -414,7 +558,19 @@ def _strict_json_loads(text: str, *, name: str) -> Any:
     def reject_constant(value: str) -> None:
         raise ValueError(f"{name} contains non-finite JSON number: {value}")
 
-    return json.loads(text, parse_constant=reject_constant)
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"{name} contains duplicate object keys")
+            value[key] = item
+        return value
+
+    return json.loads(
+        text,
+        parse_constant=reject_constant,
+        object_pairs_hook=reject_duplicate_keys,
+    )
 
 
 def _require_finite_json(value: object, name: str) -> None:
@@ -422,6 +578,60 @@ def _require_finite_json(value: object, name: str) -> None:
         json.dumps(value, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError):
         raise ValueError(f"{name} must contain only finite JSON data") from None
+
+
+def _require_expected_output_object(value: object, name: str) -> None:
+    """Require strict JSON data rather than merely json.dumps-compatible data."""
+    visiting: set[int] = set()
+    nodes_seen = 0
+
+    def is_json_data(item: object, depth: int = 0) -> bool:
+        nonlocal nodes_seen
+        nodes_seen += 1
+        if nodes_seen > 10_000 or depth > 128:
+            return False
+        if item is None or isinstance(item, (str, bool)):
+            return True
+        if type(item) is int:
+            return True
+        if type(item) is float:
+            try:
+                json.dumps(item, allow_nan=False)
+            except ValueError:
+                return False
+            return True
+        if isinstance(item, list):
+            identity = id(item)
+            if identity in visiting:
+                return False
+            visiting.add(identity)
+            valid = all(is_json_data(child, depth + 1) for child in item)
+            visiting.remove(identity)
+            return valid
+        if isinstance(item, dict):
+            identity = id(item)
+            if identity in visiting:
+                return False
+            visiting.add(identity)
+            valid = all(
+                isinstance(key, str) and is_json_data(child, depth + 1)
+                for key, child in item.items()
+            )
+            visiting.remove(identity)
+            return valid
+        return False
+
+    if not isinstance(value, dict) or not is_json_data(value):
+        raise ValueError(f"{name} must be a finite JSON object")
+
+
+def _expected_output_digest(expected_output: Mapping[str, Any]) -> str:
+    return _digest(
+        {
+            "kind": "structured_document_bakeoff/expected_output/v1",
+            "expected_output": dict(expected_output),
+        }
+    )
 
 
 def _is_digest(value: object) -> bool:
@@ -597,6 +807,7 @@ def _build_batch_plan(config_path: Path) -> tuple[dict[str, Any], list[dict[str,
             )
         provider_items: list[dict[str, Any]] = []
         mappings: dict[str, dict[str, Any]] = {}
+        expected_outputs: dict[str, dict[str, Any]] = {}
         for document in documents:
             custom_id = _batch_custom_id(document["id"], model)
             if custom_id in custom_ids:
@@ -621,20 +832,44 @@ def _build_batch_plan(config_path: Path) -> tuple[dict[str, Any], list[dict[str,
                 "metadata": document["metadata"],
                 "result_path": str(result_path),
                 "request_digest": _digest(body),
+                **(
+                    {
+                        "expected_output_digest": _expected_output_digest(
+                            document["expected_output"]
+                        )
+                    }
+                    if "expected_output" in document
+                    else {}
+                ),
             }
+            if "expected_output" in document:
+                expected_outputs[custom_id] = document["expected_output"]
         provider_spec = {"endpoint": _BATCH_ENDPOINT, "model": model, "requests": provider_items}
+        digest_spec = provider_spec
+        expected_output_digests = {
+            custom_id: mapping["expected_output_digest"]
+            for custom_id, mapping in mappings.items()
+            if "expected_output_digest" in mapping
+        }
+        if expected_output_digests:
+            digest_spec = {
+                **provider_spec,
+                "expected_output_digests": expected_output_digests,
+            }
         batches.append(
             {
                 "model": model,
                 "provider_routing": model_spec.get("provider_routing"),
                 "provider_spec": provider_spec,
-                "spec_digest": _digest(provider_spec),
+                "digest_spec": digest_spec,
+                "spec_digest": _digest(digest_spec),
                 "custom_ids": mappings,
+                "expected_outputs": expected_outputs,
             }
         )
     overall_spec = {
         "endpoint": _BATCH_ENDPOINT,
-        "batches": [batch["provider_spec"] for batch in batches],
+        "batches": [batch["digest_spec"] for batch in batches],
     }
     return config, batches, _digest(overall_spec)
 
@@ -821,9 +1056,10 @@ def _validate_batch_state(state: Mapping[str, Any]) -> None:
             mapping = _mapping(raw_mapping, f"batch state custom_id {custom_id}")
             allowed_mapping = {
                 "document_id", "model", "source_path", "source_frontmatter_stripped",
-                "metadata", "result_path", "request_digest",
+                "metadata", "result_path", "request_digest", "expected_output_digest",
             }
-            if set(mapping) != allowed_mapping:
+            required_mapping = allowed_mapping - {"expected_output_digest"}
+            if set(mapping) - allowed_mapping or not required_mapping.issubset(mapping):
                 raise ValueError(f"batch state custom_id {custom_id} mapping fields are invalid")
             for field in ("document_id", "model", "source_path", "result_path"):
                 if not isinstance(mapping.get(field), str) or not mapping[field]:
@@ -835,6 +1071,12 @@ def _validate_batch_state(state: Mapping[str, Any]) -> None:
             if not isinstance(mapping.get("metadata"), dict):
                 raise ValueError(f"batch state custom_id {custom_id} metadata is invalid")
             _require_finite_json(mapping["metadata"], f"batch state custom_id {custom_id} metadata")
+            if "expected_output_digest" in mapping and not _is_digest(
+                mapping["expected_output_digest"]
+            ):
+                raise ValueError(
+                    f"batch state custom_id {custom_id} expected_output_digest is invalid"
+                )
             if not _is_digest(mapping.get("request_digest")):
                 raise ValueError(f"batch state custom_id {custom_id} request_digest is invalid")
         if counts is not None and counts.get("total") is not None and counts["total"] != len(mappings):
@@ -1142,6 +1384,7 @@ def _batch_generation_record(
     item: Mapping[str, Any],
     *,
     response_schema: Mapping[str, Any],
+    expected_output: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     _require_finite_json(item, "OpenRouter batch result item")
     provider_error = item.get("error")
@@ -1180,6 +1423,8 @@ def _batch_generation_record(
         if not isinstance(payload, dict):
             raise ValueError("structured response content must decode to an object")
         _validate_payload(payload, response_schema, "generation payload")
+        if expected_output is not None:
+            _validate_expected_output(payload, expected_output)
     except (KeyError, json.JSONDecodeError, ValueError) as exc:
         return {
             "usage": _usage_payload(usage),
@@ -1257,6 +1502,7 @@ def collect_openrouter_batch(
             generation = _batch_generation_record(
                 reconciled[custom_id],
                 response_schema=config["response_schema"],
+                expected_output=plan["expected_outputs"].get(custom_id),
             )
             record = {
                 "model": mapping["model"],
@@ -1268,6 +1514,11 @@ def collect_openrouter_batch(
                 "custom_id": custom_id,
                 "request_digest": mapping["request_digest"],
                 "generation": generation,
+                **(
+                    {"expected_output_digest": mapping["expected_output_digest"]}
+                    if "expected_output_digest" in mapping
+                    else {}
+                ),
             }
             result_path = Path(mapping["result_path"])
             artifacts.append((result_path, record))
@@ -1442,10 +1693,13 @@ def _load_batch_judge_rows(
     documents = {item["id"]: item for item in read_documents(config, config_path)}
     model_specs = {item["id"]: item for item in config["models"]}
     expected: dict[tuple[str, str], dict[str, Any]] = {}
+    expected_contracts: dict[tuple[str, str], dict[str, Any]] = {}
     for plan in plans:
         for custom_id, mapping in plan["custom_ids"].items():
             key = (mapping["document_id"], mapping["model"])
             expected[key] = {"custom_id": custom_id, **mapping}
+            if custom_id in plan["expected_outputs"]:
+                expected_contracts[key] = plan["expected_outputs"][custom_id]
 
     indexed: dict[tuple[str, str], dict[str, Any]] = {}
     for index, raw in enumerate(manifest_results):
@@ -1495,8 +1749,19 @@ def _load_batch_judge_rows(
             "model", "document_id", "source_path", "source_frontmatter_stripped",
             "document_metadata", "provider_batch_id", "custom_id", "request_digest", "generation",
         }
-        if set(record) != required_record:
+        allowed_record = required_record | {"expected_output_digest"}
+        if set(record) - allowed_record or not required_record.issubset(record):
             raise ValueError(f"batch generation result fields are invalid: {result_path}")
+        expected_contract_present = "expected_output_digest" in expected_item
+        if (
+            ("expected_output_digest" in record) is not expected_contract_present
+            or (
+                expected_contract_present
+                and record.get("expected_output_digest")
+                != expected_item["expected_output_digest"]
+            )
+        ):
+            raise ValueError(f"batch generation result expected-output binding is invalid: {result_path}")
         if (
             record.get("model") != expected_item["model"]
             or record.get("document_id") != expected_item["document_id"]
@@ -1517,9 +1782,14 @@ def _load_batch_judge_rows(
             _require_finite_json(generation["payload"], "generation payload")
             try:
                 _validate_payload(generation["payload"], config["response_schema"], "generation payload")
+                if expected_contract_present:
+                    _validate_expected_output(
+                        generation["payload"],
+                        expected_contracts[key],
+                    )
             except ValueError:
                 raise ValueError(
-                    f"batch generation payload does not pass the configured schema: {result_path}"
+                    f"batch generation payload does not pass configured admission: {result_path}"
                 ) from None
         elif generation.get("payload") is not None or generation.get("error") is None:
             raise ValueError(f"failed batch generation result is inconsistent: {result_path}")

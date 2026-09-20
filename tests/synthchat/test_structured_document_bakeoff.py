@@ -340,6 +340,51 @@ def test_config_rejects_invalid_response_schemas(tmp_path):
         load_config(path)
 
 
+@pytest.mark.parametrize(
+    "expected_output,error",
+    [
+        (["not", "an", "object"], "must be a mapping"),
+        ({"score": float("nan")}, "must be a finite JSON object"),
+        ({1: "JSON object keys must be strings"}, "must be a finite JSON object"),
+    ],
+)
+def test_config_rejects_invalid_expected_output(tmp_path, expected_output, error):
+    path = _batch_config(
+        tmp_path,
+        document_count=1,
+        expected_outputs=[expected_output],
+    )
+
+    with pytest.raises(ValueError, match=error):
+        load_config(path)
+
+
+def test_config_rejects_duplicate_expected_output_yaml_keys(tmp_path):
+    config_path = _batch_config(tmp_path, document_count=1)
+    source = config_path.read_text(encoding="utf-8")
+    source = source.replace(
+        "- id: doc-0",
+        "- expected_output:\n    metadata:\n      id: first\n      id: second\n  id: doc-0",
+    )
+    config_path.write_text(source, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="duplicate or non-scalar YAML keys"):
+        load_config(config_path)
+
+
+def test_config_rejects_cyclic_expected_output_yaml(tmp_path):
+    config_path = _batch_config(tmp_path, document_count=1)
+    source = config_path.read_text(encoding="utf-8")
+    source = source.replace(
+        "- id: doc-0",
+        "- expected_output: &contract\n    self: *contract\n  id: doc-0",
+    )
+    config_path.write_text(source, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="cyclic or too large"):
+        load_config(config_path)
+
+
 class FakeBatchClient:
     def __init__(self, model, submit_calls, observations):
         self.model = model
@@ -354,19 +399,31 @@ class FakeBatchClient:
         return self.observations[batch_id]
 
 
-def _batch_config(tmp_path, *, model_ids=None, document_count=2, schema=None, max_requests=20, judge=False):
+def _batch_config(
+    tmp_path,
+    *,
+    model_ids=None,
+    document_count=2,
+    schema=None,
+    max_requests=20,
+    judge=False,
+    expected_outputs=None,
+):
     documents = []
     for index in range(document_count):
         path = tmp_path / f"doc-{index}.md"
         path.write_text(f"---\ntitle: Hidden {index}\n---\nDocument {index} body.", encoding="utf-8")
-        documents.append(
-            {
-                "id": f"doc-{index}",
-                "source_path": path.name,
-                "strip_yaml_frontmatter": True,
-                "metadata": {"sequence": index},
-            }
-        )
+        document = {
+            "id": f"doc-{index}",
+            "source_path": path.name,
+            "strip_yaml_frontmatter": True,
+            "metadata": {"sequence": index},
+        }
+        if expected_outputs is not None and index < len(expected_outputs):
+            expected_output = expected_outputs[index]
+            if expected_output is not None:
+                document["expected_output"] = expected_output
+        documents.append(document)
     config = {
         "documents": documents,
         "prompt_template": "Metadata={metadata}\nText={document}",
@@ -701,6 +758,97 @@ def test_batch_judge_rejects_changed_source_or_judge_config_bindings(tmp_path):
         judge_collected_batch(judge_config, client_factory=lambda **_: None)
 
 
+def test_batch_judge_rejects_changed_expected_output_before_client(tmp_path):
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        judge=True,
+        schema={"type": "object"},
+        expected_outputs=[{"metadata": {"document_id": "doc-0"}}],
+    )
+    _collect_batch_fixture(
+        config_path,
+        [{"metadata": {"document_id": "doc-0"}, "outline": "accepted"}],
+    )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["documents"][0]["expected_output"]["metadata"]["document_id"] = "changed"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    factory_calls = []
+
+    with pytest.raises(ValueError, match="expected-output binding"):
+        judge_collected_batch(
+            config_path,
+            client_factory=lambda **_: factory_calls.append(True),
+        )
+    assert factory_calls == []
+
+
+@pytest.mark.parametrize("mutation", ["missing", "wrong"])
+def test_batch_judge_rejects_missing_or_wrong_expected_output_digest_before_client(
+    tmp_path,
+    mutation,
+):
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        judge=True,
+        schema={"type": "object"},
+        expected_outputs=[{"metadata": {"document_id": "doc-0"}}],
+    )
+    _collect_batch_fixture(
+        config_path,
+        [{"metadata": {"document_id": "doc-0"}, "outline": "accepted"}],
+    )
+    result_path = next((tmp_path / "batch-results").glob("doc-*.json"))
+    record = json.loads(result_path.read_text(encoding="utf-8"))
+    if mutation == "missing":
+        record.pop("expected_output_digest")
+    else:
+        record["expected_output_digest"] = "0" * 64
+    result_path.write_bytes(batch_module._json_bytes(record))
+    factory_calls = []
+
+    with pytest.raises(ValueError, match="expected-output binding"):
+        judge_collected_batch(
+            config_path,
+            client_factory=lambda **_: factory_calls.append(True),
+        )
+    assert factory_calls == []
+
+
+def test_batch_judge_never_calls_judge_for_expected_output_mismatch(tmp_path):
+    expected_secret = "expected-secret-canary"
+    actual_secret = "actual-secret-canary"
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        judge=True,
+        schema={"type": "object"},
+        expected_outputs=[{"metadata": {"document_id": expected_secret}}],
+    )
+    _collect_batch_fixture(
+        config_path,
+        [{"metadata": {"document_id": actual_secret}, "outline": "rejected"}],
+    )
+    factory_calls = []
+
+    summary = judge_collected_batch(
+        config_path,
+        client_factory=lambda **_: factory_calls.append(True),
+    )
+
+    assert summary["eligible"] == 0
+    assert summary["attempted"] == 0
+    assert summary["skipped_generation_failure"] == 1
+    assert factory_calls == []
+    generation_record = json.loads(
+        next((tmp_path / "batch-results").glob("doc-*.json")).read_text(encoding="utf-8")
+    )
+    error_message = generation_record["generation"]["error"]["message"]
+    assert expected_secret not in error_message
+    assert actual_secret not in error_message
+
+
 def test_batch_judge_cli_exit_behavior(monkeypatch, tmp_path, capsys):
     config_path = _batch_config(tmp_path, document_count=1, judge=True)
     monkeypatch.setattr(batch_module, "judge_collected_batch", lambda path: {"ready": False, "judge_failed": 1})
@@ -743,6 +891,66 @@ def test_batch_submit_persists_rendered_request_mapping_and_resumes_without_resu
 
     submit_openrouter_batch(config_path, client_factory=factory, now=_fixed_now)
     assert len(submit_calls) == 2
+
+
+def test_batch_plan_omitted_expected_output_preserves_legacy_digest_inputs(tmp_path):
+    config_path = _batch_config(tmp_path, document_count=1)
+
+    _, plans, overall_digest = batch_module._build_batch_plan(config_path)
+
+    provider_spec = plans[0]["provider_spec"]
+    mapping = next(iter(plans[0]["custom_ids"].values()))
+    assert "expected_output_digest" not in mapping
+    assert plans[0]["spec_digest"] == batch_module._digest(provider_spec)
+    assert overall_digest == batch_module._digest(
+        {"endpoint": "/v1/chat/completions", "batches": [provider_spec]}
+    )
+
+
+def test_expected_output_config_change_rejects_old_batch_before_client_construction(tmp_path):
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        expected_outputs=[{"metadata": {"document_id": "doc-0"}}],
+    )
+    factory_calls = []
+
+    def factory(*, config_defaults):
+        factory_calls.append(config_defaults["model"])
+        return FakeBatchClient(config_defaults["model"], [], {})
+
+    submit_openrouter_batch(config_path, client_factory=factory, now=_fixed_now)
+    factory_calls.clear()
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["documents"][0]["expected_output"]["metadata"]["document_id"] = "changed"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="spec digest does not match"):
+        observe_openrouter_batch(config_path, client_factory=factory, now=_fixed_now)
+    assert factory_calls == []
+
+
+def test_batch_state_persists_only_expected_output_digest(tmp_path):
+    canary = "EXPECTED-CONTRACT-CANARY-MUST-NOT-PERSIST"
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        expected_outputs=[{"private_contract": canary}],
+    )
+
+    state = submit_openrouter_batch(
+        config_path,
+        client_factory=lambda config_defaults: FakeBatchClient(
+            config_defaults["model"], [], {}
+        ),
+        now=_fixed_now,
+    )
+
+    mapping = next(iter(state["batches"][0]["custom_ids"].values()))
+    assert set(mapping) >= {"expected_output_digest"}
+    assert "expected_output" not in mapping
+    state_bytes = (tmp_path / "batch-results" / "openrouter-batch-state.json").read_text(encoding="utf-8")
+    assert canary not in state_bytes
 
 
 def test_batch_submit_changed_rendered_input_rejects_existing_state(tmp_path):
@@ -1116,6 +1324,125 @@ def test_batch_collect_reconciles_ids_and_locally_admits_schema_before_success(t
     assert "message" not in provider_failed["generation"]["provider_error"]
 
 
+def test_batch_collect_admits_partial_recursive_expected_output(tmp_path):
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        schema={"type": "object"},
+        expected_outputs=[
+            {
+                "metadata": {"document_id": "doc-0", "flags": [True, 1]},
+                "version": 2,
+            }
+        ],
+    )
+
+    summary = _collect_batch_fixture(
+        config_path,
+        [
+            {
+                "metadata": {
+                    "document_id": "doc-0",
+                    "flags": [True, 1],
+                    "unspecified": "allowed",
+                },
+                "version": 2,
+                "outline": "also allowed",
+            }
+        ],
+    )
+
+    assert summary["succeeded"] == 1
+    record = json.loads(next((tmp_path / "batch-results").glob("doc-*.json")).read_text(encoding="utf-8"))
+    assert record["generation"]["error"] is None
+    assert "expected_output_digest" in record
+    assert "expected_output" not in record
+
+
+def test_expected_output_numeric_semantics_treat_json_numbers_equally_but_not_booleans(tmp_path):
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        schema={"type": "object"},
+        expected_outputs=[{"integer_form": 1, "float_form": 1.0}],
+    )
+
+    summary = _collect_batch_fixture(
+        config_path,
+        [{"integer_form": 1.0, "float_form": 1}],
+    )
+
+    assert summary["succeeded"] == 1
+
+
+@pytest.mark.parametrize(
+    "expected_output,payload,path",
+    [
+        ({"metadata": {"document_id": "doc-0"}}, {"metadata": {}}, "$.metadata.document_id"),
+        ({"version": 2}, {"version": 3}, "$.version"),
+        ({"flags": [True, 1]}, {"flags": [True, 2]}, "$.flags"),
+        ({"enabled": True}, {"enabled": 1}, "$.enabled"),
+        ({"flags": [1]}, {"flags": [True]}, "$.flags"),
+    ],
+)
+def test_batch_collect_rejects_expected_output_mismatch(tmp_path, expected_output, payload, path):
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        schema={"type": "object"},
+        expected_outputs=[expected_output],
+    )
+
+    summary = _collect_batch_fixture(config_path, [payload])
+
+    assert summary["succeeded"] == 0
+    assert summary["item_failed"] == 1
+    record = json.loads(next((tmp_path / "batch-results").glob("doc-*.json")).read_text(encoding="utf-8"))
+    error = record["generation"]["error"]
+    assert error == {
+        "type": "ValueError",
+        "message": f"generation payload failed expected-output admission at {path}",
+    }
+
+
+def test_expected_output_diagnostic_redacts_unsafe_path_and_values(tmp_path):
+    private_key = "private prose as a key"
+    expected_secret = "expected private prose"
+    actual_secret = "actual private prose"
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        schema={"type": "object"},
+        expected_outputs=[{"metadata": {private_key: expected_secret}}],
+    )
+
+    _collect_batch_fixture(config_path, [{"metadata": {private_key: actual_secret}}])
+
+    record = json.loads(next((tmp_path / "batch-results").glob("doc-*.json")).read_text(encoding="utf-8"))
+    message = record["generation"]["error"]["message"]
+    assert message == "generation payload failed expected-output admission at $.metadata[*]"
+    assert private_key not in message
+    assert expected_secret not in message
+    assert actual_secret not in message
+
+
+def test_expected_output_mismatch_traversal_is_deterministically_sorted(tmp_path):
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        schema={"type": "object"},
+        expected_outputs=[{"z_last": "expected-z", "a_first": "expected-a"}],
+    )
+
+    _collect_batch_fixture(
+        config_path,
+        [{"z_last": "actual-z", "a_first": "actual-a"}],
+    )
+
+    record = json.loads(next((tmp_path / "batch-results").glob("doc-*.json")).read_text(encoding="utf-8"))
+    assert record["generation"]["error"]["message"].endswith("at $.a_first")
+
+
 def test_batch_collect_in_progress_reserves_no_final_artifacts_then_completed_succeeds(tmp_path):
     config_path = _batch_config(tmp_path, document_count=1)
     submit_calls = []
@@ -1258,6 +1585,44 @@ def test_batch_collect_rejects_non_finite_structured_content_and_provider_errors
     assert list((other_dir / "batch-results").glob("doc-*.json")) == []
 
 
+def test_batch_collect_rejects_duplicate_provider_json_keys(tmp_path):
+    config_path = _batch_config(tmp_path, document_count=1)
+    submit_calls = []
+    observations = {}
+
+    def factory(*, config_defaults):
+        return FakeBatchClient(config_defaults["model"], submit_calls, observations)
+
+    state = submit_openrouter_batch(config_path, client_factory=factory, now=_fixed_now)
+    custom_id = next(iter(state["batches"][0]["custom_ids"]))
+    observations["batch-luna"] = {
+        "id": "batch-luna",
+        "status": "completed",
+        "results": [
+            {
+                "custom_id": custom_id,
+                "response": {
+                    "status_code": 200,
+                    "body": {
+                        "choices": [
+                            {"message": {"content": '{"outline":"first","outline":"second"}'}}
+                        ]
+                    },
+                },
+                "error": None,
+            }
+        ],
+    }
+
+    summary = collect_openrouter_batch(config_path, client_factory=factory, now=_fixed_now)
+
+    assert summary["succeeded"] == 0
+    record = json.loads(next((tmp_path / "batch-results").glob("doc-*.json")).read_text(encoding="utf-8"))
+    assert record["generation"]["error"]["message"] == (
+        "structured response content contains duplicate object keys"
+    )
+
+
 def test_batch_item_error_omits_non_identifier_provider_code():
     private_code = "PRIVATE PROMPT / inject into artifact"
 
@@ -1368,6 +1733,39 @@ def test_batch_state_non_finite_json_fails_closed_before_client_construction(tmp
     state_path.write_text(json.dumps(state), encoding="utf-8")
 
     with pytest.raises(ValueError, match="non-finite JSON number"):
+        observe_openrouter_batch(config_path, client_factory=factory, now=_fixed_now)
+    assert factory_calls == []
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda mapping: mapping.pop("expected_output_digest"),
+        lambda mapping: mapping.update({"expected_output_digest": "not-a-digest"}),
+        lambda mapping: mapping.update({"unexpected_contract": {}}),
+    ],
+)
+def test_expected_output_state_corruption_fails_before_client_construction(tmp_path, mutate):
+    config_path = _batch_config(
+        tmp_path,
+        document_count=1,
+        expected_outputs=[{"metadata": {"document_id": "doc-0"}}],
+    )
+    factory_calls = []
+
+    def factory(*, config_defaults):
+        factory_calls.append(config_defaults["model"])
+        return FakeBatchClient(config_defaults["model"], [], {})
+
+    submit_openrouter_batch(config_path, client_factory=factory, now=_fixed_now)
+    factory_calls.clear()
+    state_path = tmp_path / "batch-results" / "openrouter-batch-state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    mapping = next(iter(state["batches"][0]["custom_ids"].values()))
+    mutate(mapping)
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(ValueError):
         observe_openrouter_batch(config_path, client_factory=factory, now=_fixed_now)
     assert factory_calls == []
 
