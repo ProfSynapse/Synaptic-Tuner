@@ -94,19 +94,17 @@ class LLMConfig:
         max_tokens = int(cfg.get("max_tokens", 2048))
         thinking_effort = _config_thinking_effort(cfg, provider)
 
-        # Build provider routing config for OpenRouter
+        # Transport the documented OpenRouter provider-routing object without
+        # narrowing it to a stale local allowlist. Provider routing is a
+        # declarative request payload (not executable configuration), and
+        # OpenRouter adds routing controls independently of this client.  A
+        # shallow copy prevents later callers from mutating the source config.
         provider_routing = None
         if "provider_routing" in cfg:
             pr = cfg["provider_routing"]
-            provider_routing = {}
-            if "order" in pr:
-                provider_routing["order"] = pr["order"]
-            if "allow_fallbacks" in pr:
-                provider_routing["allow_fallbacks"] = pr["allow_fallbacks"]
-            if "require_parameters" in pr:
-                provider_routing["require_parameters"] = pr["require_parameters"]
-            if "data_collection" in pr:
-                provider_routing["data_collection"] = pr["data_collection"]
+            if not isinstance(pr, dict):
+                raise ValueError("provider_routing must be a mapping")
+            provider_routing = dict(pr)
 
         return cls(
             provider=provider.lower(),
