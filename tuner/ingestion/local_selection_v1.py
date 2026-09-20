@@ -4,8 +4,15 @@ The snapshotter deliberately keeps host paths and source bytes out of the public
 ingestion facade.  Directory traversal is not descriptor-anchored on every
 supported Python platform.  It therefore fails closed on symlinks/reparse
 points and on identity changes observed before and after traversal/read.  On
-Windows, portable Python cannot eliminate a privileged replace-and-restore
-between those checks; no observed substitution is accepted.
+Windows, portable Python cannot eliminate ancestor replace-and-restore between
+those checks by any actor with directory write access, including a process
+running under the same account. This is an observational snapshot, not an atomic
+filesystem transaction; no observed substitution is accepted.
+
+Directory identity is structural: ordinary child activity does not replace its
+parent. Two bounded discovery passes and stable content reads bind the admitted
+file paths, versions and content digests, while retained relevant ancestors bind
+the paths used for reading those files.
 """
 
 from __future__ import annotations
@@ -75,6 +82,12 @@ def _identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
         value.st_size,
         value.st_mtime_ns,
     )
+
+
+def _directory_identity(value: os.stat_result) -> tuple[int, int, int]:
+    # Directory size/mtime describe child namespace activity, not replacement.
+    # The admitted file inventory is compared separately after all reads.
+    return (value.st_dev, value.st_ino, value.st_mode)
 
 
 def _safe_kind(value: os.stat_result) -> str:
@@ -281,7 +294,7 @@ class _AuthorizedSelectionV1:
 @dataclass(frozen=True, slots=True)
 class _RetainedPathV1:
     path: Path
-    identity: tuple[int, int, int, int, int]
+    identity: tuple[int, int, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -439,7 +452,7 @@ def _revalidate_retained(paths: tuple[_RetainedPathV1, ...]) -> None:
             current = retained.path.lstat()
             if (
                 _safe_kind(current) != "directory"
-                or _identity(current) != retained.identity
+                or _directory_identity(current) != retained.identity
                 or retained.path.resolve(strict=True) != retained.path.absolute()
             ):
                 _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
@@ -449,10 +462,10 @@ def _revalidate_retained(paths: tuple[_RetainedPathV1, ...]) -> None:
         _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
 
 
-def _inventory(selection: _AuthorizedSelectionV1) -> ImmutableLocalSnapshotV1:
+def _discover(selection: _AuthorizedSelectionV1) -> tuple[_CandidateV1, ...]:
+    """One bounded discovery pass; retain no bytes from nonmatching files."""
     candidates: list[_CandidateV1] = []
     seen: set[str] = set()
-    retained_directories: dict[Path, _RetainedPathV1] = {}
     observed_entries = 0
 
     def add_candidate(
@@ -471,19 +484,18 @@ def _inventory(selection: _AuthorizedSelectionV1) -> ImmutableLocalSnapshotV1:
         path: Path,
         logical_prefix: tuple[str, ...],
         ancestors: tuple[_RetainedPathV1, ...],
-        expected_identity: tuple[int, int, int, int, int],
+        expected_identity: tuple[int, int, int],
     ) -> None:
         nonlocal observed_entries
         try:
             before = path.lstat()
             if (
                 _safe_kind(before) != "directory"
-                or _identity(before) != expected_identity
+                or _directory_identity(before) != expected_identity
                 or path.resolve(strict=True) != path.absolute()
             ):
                 _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
-            retained = _RetainedPathV1(path, _identity(before))
-            retained_directories[path] = retained
+            retained = _RetainedPathV1(path, _directory_identity(before))
             chain = ancestors + (retained,)
             children: list[
                 tuple[str, str, Path, str, tuple[int, int, int, int, int]]
@@ -521,7 +533,7 @@ def _inventory(selection: _AuthorizedSelectionV1) -> ImmutableLocalSnapshotV1:
                 if not selection.policy.include_hidden and _is_hidden(relative[1:]):
                     continue
                 if kind == "directory":
-                    walk(child_path, relative, chain, child_identity)
+                    walk(child_path, relative, chain, child_identity[:3])
                 else:
                     add_candidate(child_path, relative, child_identity, chain)
             after = path.lstat()
@@ -529,7 +541,10 @@ def _inventory(selection: _AuthorizedSelectionV1) -> ImmutableLocalSnapshotV1:
             raise
         except BaseException:
             _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
-        if _identity(before) != _identity(after):
+        if (
+            _safe_kind(after) != "directory"
+            or _directory_identity(before) != _directory_identity(after)
+        ):
             _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
 
     for root in selection.roots:
@@ -537,7 +552,11 @@ def _inventory(selection: _AuthorizedSelectionV1) -> ImmutableLocalSnapshotV1:
             current = root.path.lstat()
         except BaseException:
             _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
-        if _identity(current) != root.identity or _safe_kind(current) != root.kind:
+        current_identity = (
+            _identity(current) if root.kind == "file" else _directory_identity(current)
+        )
+        expected_identity = root.identity if root.kind == "file" else root.identity[:3]
+        if current_identity != expected_identity or _safe_kind(current) != root.kind:
             _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
         if root.kind == "file":
             observed_entries += 1
@@ -545,25 +564,44 @@ def _inventory(selection: _AuthorizedSelectionV1) -> ImmutableLocalSnapshotV1:
                 _raise(LocalSelectionCodeV1.LIMIT_EXCEEDED)
             add_candidate(root.path, (root.alias,), root.identity, ())
         else:
-            walk(root.path, (root.alias,), (), root.identity)
+            walk(root.path, (root.alias,), (), root.identity[:3])
 
     candidates.sort(key=lambda item: item.logical_path)
-    entries: list[SnapshotEntryV1] = []
-    excluded = 0
-    total = 0
+    return tuple(candidates)
+
+
+def _admitted_candidates(
+    candidates: tuple[_CandidateV1, ...], policy: LocalDiscoveryPolicyV1
+) -> tuple[_CandidateV1, ...]:
+    admitted: list[_CandidateV1] = []
     for candidate in candidates:
-        logical_path = candidate.logical_path
         included = any(
-            glob_matches_v1(item, logical_path) for item in selection.policy.include
+            glob_matches_v1(item, candidate.logical_path) for item in policy.include
         )
         denied = any(
-            glob_matches_v1(item, logical_path) for item in selection.policy.exclude
+            glob_matches_v1(item, candidate.logical_path) for item in policy.exclude
         )
-        if not included or denied:
-            excluded += 1
-            continue
-        if len(entries) >= MAX_ADMITTED_FILES:
-            _raise(LocalSelectionCodeV1.LIMIT_EXCEEDED)
+        if included and not denied:
+            if len(admitted) >= MAX_ADMITTED_FILES:
+                _raise(LocalSelectionCodeV1.LIMIT_EXCEEDED)
+            admitted.append(candidate)
+    return tuple(admitted)
+
+
+def _inventory(selection: _AuthorizedSelectionV1) -> ImmutableLocalSnapshotV1:
+    candidates = _discover(selection)
+    admitted = _admitted_candidates(candidates, selection.policy)
+    # Only ancestors of admitted files need to remain stable across the entire
+    # snapshot. Every traversed entry is still checked for unsafe path types.
+    retained_directories = {
+        ancestor.path: ancestor
+        for candidate in admitted
+        for ancestor in candidate.ancestors
+    }
+    entries: list[SnapshotEntryV1] = []
+    total = 0
+    for candidate in admitted:
+        logical_path = candidate.logical_path
         _revalidate_retained(candidate.ancestors)
         payload = _stable_regular_read(candidate.path, candidate.identity)
         _revalidate_retained(candidate.ancestors)
@@ -578,12 +616,41 @@ def _inventory(selection: _AuthorizedSelectionV1) -> ImmutableLocalSnapshotV1:
                 hashlib.sha256(payload).hexdigest(),
             )
         )
+    # A structural directory identity cannot detect matching children added or
+    # removed. Rediscover under the same budgets and compare the exact admitted
+    # logical-path -> file-version inventory, including earlier-read files.
+    final_admitted = _admitted_candidates(_discover(selection), selection.policy)
+    if tuple((item.logical_path, item.identity) for item in admitted) != tuple(
+        (item.logical_path, item.identity) for item in final_admitted
+    ):
+        _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
+    # Size/mtime can be restored after an in-place rewrite. Bind the second
+    # observation to captured content as well as metadata, using the same
+    # bounded, link-rejecting descriptor read and ancestor checks. Inventory
+    # equality above also binds the file count and declared aggregate size.
+    verified_total = 0
+    for candidate, captured in zip(final_admitted, entries, strict=True):
+        _revalidate_retained(candidate.ancestors)
+        payload = _stable_regular_read(candidate.path, candidate.identity)
+        _revalidate_retained(candidate.ancestors)
+        verified_total += len(payload)
+        if verified_total > MAX_TOTAL_BYTES:
+            _raise(LocalSelectionCodeV1.LIMIT_EXCEEDED)
+        if (
+            len(payload) != captured.size_bytes
+            or hashlib.sha256(payload).hexdigest() != captured.sha256
+        ):
+            _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
     _revalidate_retained(tuple(retained_directories.values()))
     if not entries:
         _raise(LocalSelectionCodeV1.INVALID_SELECTION)
     frozen_entries = tuple(entries)
     report = AdmissionReportV1(
-        len(selection.roots), len(candidates), len(entries), excluded, total
+        len(selection.roots),
+        len(candidates),
+        len(entries),
+        len(candidates) - len(admitted),
+        total,
     )
     return ImmutableLocalSnapshotV1(
         selection.project_ref,
