@@ -47,6 +47,7 @@ request list and use the three durable batch verbs::
     python -m SynthChat.scripts.structured_document_bakeoff --config batch.yaml --batch-submit
     python -m SynthChat.scripts.structured_document_bakeoff --config batch.yaml --batch-observe
     python -m SynthChat.scripts.structured_document_bakeoff --config batch.yaml --batch-collect
+    python -m SynthChat.scripts.structured_document_bakeoff --config batch.yaml --batch-judge
 
 ``{metadata}`` is available to the prompt as canonical JSON.  Batch mode uses
 the base model id and the real OpenRouter asynchronous Batch API; it does not
@@ -400,6 +401,8 @@ _BATCH_PROVIDER_STATUSES = {
     "cancelling", "cancelled", "expired",
 }
 _BATCH_SUBMISSION_STATUSES = {"pending", "submitting", "submitted", "rejected"}
+_BATCH_JUDGMENT_KIND = "structured_document_bakeoff/batch_judgment/v1"
+_BATCH_JUDGE_MANIFEST_KIND = "structured_document_bakeoff/batch_judge_manifest/v1"
 _BATCH_TIMESTAMP_FIELDS = {
     "created_at", "in_progress_at", "finalizing_at", "completed_at",
     "failed_at", "cancelled_at", "expired_at",
@@ -443,6 +446,38 @@ def _exclusive_batch_claim(state_path: Path, spec_digest: str):
                 "kind": "structured_document_bakeoff/openrouter_batch_claim/v1",
                 "pid": os.getpid(),
                 "spec_digest": spec_digest,
+            }
+        )
+        os.write(descriptor, claim)
+        os.fsync(descriptor)
+        yield claim_path
+    finally:
+        os.close(descriptor)
+        try:
+            current = claim_path.stat()
+        except FileNotFoundError:
+            current = None
+        if current is not None and (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
+            claim_path.unlink()
+
+
+@contextmanager
+def _exclusive_batch_judge_claim(claim_path: Path, binding_digest: str):
+    """Hold a judge-wide O_EXCL claim; existing claims require manual recovery."""
+    claim_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(claim_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        raise RuntimeError(
+            f"batch judging is exclusively claimed; inspect the lock before manual recovery: {claim_path}"
+        ) from None
+    identity = os.fstat(descriptor)
+    try:
+        claim = _json_bytes(
+            {
+                "kind": "structured_document_bakeoff/batch_judge_claim/v1",
+                "pid": os.getpid(),
+                "binding_digest": binding_digest,
             }
         )
         os.write(descriptor, claim)
@@ -1263,6 +1298,426 @@ def collect_openrouter_batch(
     return summary
 
 
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _read_canonical_json_object(path: Path, name: str) -> tuple[dict[str, Any], bytes]:
+    try:
+        encoded = path.read_bytes()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"{name} not found: {path}") from None
+    try:
+        value = _strict_json_loads(encoded.decode("utf-8"), name=name)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        raise ValueError(f"{name} is not canonical finite JSON: {path}") from None
+    payload = _mapping(value, name)
+    _require_finite_json(payload, name)
+    if encoded != _json_bytes(payload):
+        raise ValueError(f"{name} does not use canonical JSON bytes: {path}")
+    return payload, encoded
+
+
+def _batch_judgment_path(output_dir: Path, result_path: Path) -> Path:
+    return output_dir / "judgments" / f"{result_path.stem}.judgment.json"
+
+
+def _batch_judge_binding(
+    *,
+    document_id: str,
+    generation_model: str,
+    generation_result_bytes: bytes,
+    document: str,
+    judge: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "document_id": document_id,
+        "generation_model": generation_model,
+        "generation_result_sha256": _sha256_bytes(generation_result_bytes),
+        "source_sha256": _sha256_bytes(document.encode("utf-8")),
+        "judge_model": judge["model"],
+        "judge_config_sha256": _digest(dict(judge)),
+        "judge_prompt_template_sha256": _sha256_bytes(judge["prompt_template"].encode("utf-8")),
+        "judge_response_schema_sha256": _digest(judge["response_schema"]),
+    }
+
+
+def _closed_judge_failure(exc: Exception, *, stage: str) -> dict[str, str]:
+    error_type = type(exc).__name__
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error_type) is None:
+        error_type = "Exception"
+    return {"stage": stage, "type": error_type}
+
+
+def _load_existing_batch_judgment(
+    path: Path,
+    *,
+    binding: Mapping[str, Any],
+    judge: Mapping[str, Any],
+) -> tuple[dict[str, Any], bytes]:
+    artifact, encoded = _read_canonical_json_object(path, "batch judgment artifact")
+    if set(artifact) != {"kind", "binding", "judgment"} or artifact.get("kind") != _BATCH_JUDGMENT_KIND:
+        raise ValueError(f"batch judgment artifact fields are invalid: {path}")
+    if artifact.get("binding") != dict(binding):
+        raise ValueError(
+            f"batch judgment binding conflicts with the current generation, source, or judge config: {path}"
+        )
+    judgment = _mapping(artifact.get("judgment"), "batch judgment")
+    if set(judgment) != {"model", "usage", "payload"} or judgment.get("model") != judge["model"]:
+        raise ValueError(f"batch judgment payload fields are invalid: {path}")
+    _require_finite_json(judgment, "batch judgment")
+    try:
+        _validate_payload(judgment.get("payload"), judge["response_schema"], "judge payload")
+    except ValueError:
+        raise ValueError(f"batch judgment payload does not pass the configured schema: {path}") from None
+    return artifact, encoded
+
+
+def _validate_batch_collection_manifest(manifest: Mapping[str, Any]) -> None:
+    required = {
+        "kind", "state_path", "ready", "pending_batches", "terminal_failures",
+        "written", "succeeded", "item_failed", "results", "manifest_path",
+    }
+    if set(manifest) != required:
+        raise ValueError("batch collection manifest top-level fields are invalid")
+    if manifest.get("kind") != "structured_document_bakeoff/openrouter_batch_manifest/v1":
+        raise ValueError("batch collection manifest kind is unsupported")
+    for field in ("state_path", "manifest_path"):
+        if not isinstance(manifest.get(field), str) or not manifest[field]:
+            raise ValueError(f"batch collection manifest {field} is invalid")
+    if type(manifest.get("ready")) is not bool:
+        raise ValueError("batch collection manifest ready must be a boolean")
+    for field in ("pending_batches", "terminal_failures", "results"):
+        if not isinstance(manifest.get(field), list):
+            raise ValueError(f"batch collection manifest {field} must be a list")
+    for field in ("written", "succeeded", "item_failed"):
+        if type(manifest.get(field)) is not int or manifest[field] < 0:
+            raise ValueError(f"batch collection manifest {field} must be a nonnegative integer")
+
+    result_fields = {"custom_id", "document_id", "model", "result_path", "success"}
+    succeeded = 0
+    failed = 0
+    for index, raw in enumerate(manifest["results"]):
+        item = _mapping(raw, f"batch collection manifest results[{index}]")
+        if set(item) != result_fields:
+            raise ValueError("batch collection manifest result fields are invalid")
+        for field in ("custom_id", "document_id", "model", "result_path"):
+            if not isinstance(item.get(field), str) or not item[field]:
+                raise ValueError(f"batch collection manifest result {field} is invalid")
+        if type(item.get("success")) is not bool:
+            raise ValueError("batch collection manifest result success must be a boolean")
+        if item["success"]:
+            succeeded += 1
+        else:
+            failed += 1
+    if (
+        manifest["written"] != len(manifest["results"])
+        or manifest["succeeded"] != succeeded
+        or manifest["item_failed"] != failed
+        or manifest["succeeded"] + manifest["item_failed"] != manifest["written"]
+    ):
+        raise ValueError("batch collection manifest counts are inconsistent")
+
+
+def _load_batch_judge_rows(
+    config_path: Path,
+) -> tuple[dict[str, Any], dict[str, Any], bytes, list[dict[str, Any]]]:
+    """Load and reconcile a completed collection against the current config."""
+    config, plans, _ = _build_batch_plan(config_path)
+    judge = config.get("judge")
+    if not isinstance(judge, dict):
+        raise ValueError("batch-judge requires a judge configuration")
+    output_dir = _output_dir(config, config_path)
+    manifest_path = output_dir / "batch-manifest.json"
+    manifest, manifest_bytes = _read_canonical_json_object(manifest_path, "batch collection manifest")
+    _validate_batch_collection_manifest(manifest)
+    if (
+        manifest.get("ready") is not True
+        or manifest.get("pending_batches") != []
+        or manifest.get("terminal_failures") != []
+    ):
+        raise ValueError("batch collection manifest is not complete")
+    manifest_results = manifest["results"]
+
+    documents = {item["id"]: item for item in read_documents(config, config_path)}
+    model_specs = {item["id"]: item for item in config["models"]}
+    expected: dict[tuple[str, str], dict[str, Any]] = {}
+    for plan in plans:
+        for custom_id, mapping in plan["custom_ids"].items():
+            key = (mapping["document_id"], mapping["model"])
+            expected[key] = {"custom_id": custom_id, **mapping}
+
+    indexed: dict[tuple[str, str], dict[str, Any]] = {}
+    for index, raw in enumerate(manifest_results):
+        item = _mapping(raw, f"batch collection manifest results[{index}]")
+        document_id = item.get("document_id")
+        model = item.get("model")
+        if not isinstance(document_id, str) or not isinstance(model, str):
+            raise ValueError("batch collection manifest result identity is invalid")
+        key = (document_id, model)
+        if key in indexed:
+            raise ValueError("batch collection manifest contains a duplicate result identity")
+        indexed[key] = item
+    if set(indexed) != set(expected):
+        raise ValueError("batch collection manifest does not match the configured document/model set")
+    if manifest.get("manifest_path") != str(manifest_path):
+        raise ValueError("batch collection manifest path binding is invalid")
+
+    rows: list[dict[str, Any]] = []
+    for key, expected_item in expected.items():
+        item = indexed[key]
+        result_path = Path(expected_item["result_path"])
+        document = documents[expected_item["document_id"]]
+        current_prompt = _render(
+            config["prompt_template"],
+            document=document["text"],
+            metadata=json.dumps(document["metadata"], ensure_ascii=False, sort_keys=True),
+        )
+        current_request_digest = _digest(
+            _batch_request_body(
+                model_spec=model_specs[expected_item["model"]],
+                prompt=current_prompt,
+                response_schema=config["response_schema"],
+                temperature=config["temperature"],
+                max_tokens=config["max_tokens"],
+            )
+        )
+        if current_request_digest != expected_item["request_digest"]:
+            raise ValueError("configured batch source changed while reconciling the collection")
+        if (
+            item.get("custom_id") != expected_item["custom_id"]
+            or item.get("result_path") != str(result_path)
+            or type(item.get("success")) is not bool
+        ):
+            raise ValueError("batch collection manifest result binding is invalid")
+        record, result_bytes = _read_canonical_json_object(result_path, "batch generation result")
+        required_record = {
+            "model", "document_id", "source_path", "source_frontmatter_stripped",
+            "document_metadata", "provider_batch_id", "custom_id", "request_digest", "generation",
+        }
+        if set(record) != required_record:
+            raise ValueError(f"batch generation result fields are invalid: {result_path}")
+        if (
+            record.get("model") != expected_item["model"]
+            or record.get("document_id") != expected_item["document_id"]
+            or record.get("source_path") != expected_item["source_path"]
+            or record.get("source_frontmatter_stripped") != expected_item["source_frontmatter_stripped"]
+            or record.get("document_metadata") != expected_item["metadata"]
+            or record.get("custom_id") != expected_item["custom_id"]
+            or record.get("request_digest") != expected_item["request_digest"]
+        ):
+            raise ValueError(f"batch generation result binding is invalid: {result_path}")
+        generation = _mapping(record.get("generation"), "batch generation result generation")
+        if set(generation) != {"usage", "payload", "error", "provider_error"}:
+            raise ValueError(f"batch generation result generation fields are invalid: {result_path}")
+        successful = generation.get("payload") is not None and generation.get("error") is None
+        if successful != item["success"]:
+            raise ValueError(f"batch generation result success binding is invalid: {result_path}")
+        if successful:
+            _require_finite_json(generation["payload"], "generation payload")
+            try:
+                _validate_payload(generation["payload"], config["response_schema"], "generation payload")
+            except ValueError:
+                raise ValueError(
+                    f"batch generation payload does not pass the configured schema: {result_path}"
+                ) from None
+        elif generation.get("payload") is not None or generation.get("error") is None:
+            raise ValueError(f"failed batch generation result is inconsistent: {result_path}")
+        rows.append(
+            {
+                "document": document["text"],
+                "document_id": expected_item["document_id"],
+                "model": expected_item["model"],
+                "result_path": result_path,
+                "result_bytes": result_bytes,
+                "payload": generation.get("payload"),
+                "eligible": successful,
+            }
+        )
+    return config, manifest, manifest_bytes, rows
+
+
+def judge_collected_batch(
+    config_path: Path,
+    *,
+    client_factory: ClientFactory = create_client,
+) -> dict[str, Any]:
+    """Judge locally admitted batch results without mutating generation artifacts."""
+    config_path = config_path.resolve()
+    config, _, batch_manifest_bytes, rows = _load_batch_judge_rows(config_path)
+    judge = _mapping(config.get("judge"), "judge")
+    output_dir = _output_dir(config, config_path)
+    judgments_dir = output_dir / "judgments"
+    final_manifest_path = judgments_dir / "manifest.json"
+    claim_path = judgments_dir / "batch-judge.lock"
+    claim_binding = _digest(
+        {
+            "batch_manifest_sha256": _sha256_bytes(batch_manifest_bytes),
+            "judge_config_sha256": _digest(judge),
+        }
+    )
+    with _exclusive_batch_judge_claim(claim_path, claim_binding):
+        return _judge_collected_batch_claimed(
+            rows=rows,
+            batch_manifest_bytes=batch_manifest_bytes,
+            judge=judge,
+            output_dir=output_dir,
+            judgments_dir=judgments_dir,
+            final_manifest_path=final_manifest_path,
+            client_factory=client_factory,
+        )
+
+
+def _judge_collected_batch_claimed(
+    *,
+    rows: list[dict[str, Any]],
+    batch_manifest_bytes: bytes,
+    judge: Mapping[str, Any],
+    output_dir: Path,
+    judgments_dir: Path,
+    final_manifest_path: Path,
+    client_factory: ClientFactory,
+) -> dict[str, Any]:
+    """Discover, call, and persist judgments while the caller holds the claim."""
+    summary: dict[str, Any] = {
+        "ready": False,
+        "batch_manifest_path": str(output_dir / "batch-manifest.json"),
+        "judgments_dir": str(judgments_dir),
+        "manifest_path": str(final_manifest_path),
+        "judge_model": judge["model"],
+        "eligible": sum(row["eligible"] for row in rows),
+        "attempted": 0,
+        "judged": 0,
+        "judge_failed": 0,
+        "skipped_generation_failure": sum(not row["eligible"] for row in rows),
+        "skipped_existing_judgment": 0,
+        "failures": [],
+        "judgments": [],
+    }
+
+    pending: list[tuple[dict[str, Any], Path, dict[str, Any]]] = []
+    for row in rows:
+        if not row["eligible"]:
+            continue
+        judgment_path = _batch_judgment_path(output_dir, row["result_path"])
+        binding = _batch_judge_binding(
+            document_id=row["document_id"],
+            generation_model=row["model"],
+            generation_result_bytes=row["result_bytes"],
+            document=row["document"],
+            judge=judge,
+        )
+        if judgment_path.exists():
+            _, judgment_bytes = _load_existing_batch_judgment(
+                judgment_path,
+                binding=binding,
+                judge=judge,
+            )
+            summary["skipped_existing_judgment"] += 1
+            summary["judgments"].append(
+                {
+                    "document_id": row["document_id"],
+                    "model": row["model"],
+                    "generation_result_sha256": binding["generation_result_sha256"],
+                    "judgment_path": str(judgment_path),
+                    "judgment_sha256": _sha256_bytes(judgment_bytes),
+                }
+            )
+        else:
+            pending.append((row, judgment_path, binding))
+
+    if final_manifest_path.exists() and pending:
+        raise ValueError("final batch judge manifest exists but a bound judgment artifact is missing")
+
+    judge_client = None
+    for row, judgment_path, binding in pending:
+        summary["attempted"] += 1
+        if judge_client is None:
+            try:
+                judge_client = _client(client_factory, judge["model"], judge.get("provider_routing"))
+            except Exception as exc:
+                summary["judge_failed"] += 1
+                summary["failures"].append(
+                    {
+                        "document_id": row["document_id"],
+                        "model": row["model"],
+                        "error": _closed_judge_failure(exc, stage="client_construction"),
+                    }
+                )
+                continue
+        candidate = json.dumps(row["payload"], ensure_ascii=False, allow_nan=False, indent=2, sort_keys=True)
+        judge_prompt = _render(judge["prompt_template"], document=row["document"], candidate=candidate)
+        try:
+            response = judge_client.structured_output(
+                [{"role": "user", "content": judge_prompt}],
+                judge["response_schema"],
+                temperature=judge["temperature"],
+                max_tokens=judge["max_tokens"],
+            )
+        except Exception as exc:
+            summary["judge_failed"] += 1
+            summary["failures"].append(
+                {
+                    "document_id": row["document_id"],
+                    "model": row["model"],
+                    "error": _closed_judge_failure(exc, stage="judge_call"),
+                }
+            )
+            continue
+        try:
+            _require_finite_json(response.value, "judge payload")
+            _validate_payload(response.value, judge["response_schema"], "judge payload")
+            usage = _usage_payload(response.usage)
+            _require_finite_json(usage, "judge usage")
+        except Exception as exc:
+            summary["judge_failed"] += 1
+            summary["failures"].append(
+                {
+                    "document_id": row["document_id"],
+                    "model": row["model"],
+                    "error": _closed_judge_failure(exc, stage="judge_validation"),
+                }
+            )
+            continue
+        artifact = {
+            "kind": _BATCH_JUDGMENT_KIND,
+            "binding": binding,
+            "judgment": {"model": judge["model"], "usage": usage, "payload": response.value},
+        }
+        _write_json_immutable(judgment_path, artifact)
+        judgment_bytes = _json_bytes(artifact)
+        summary["judged"] += 1
+        summary["judgments"].append(
+            {
+                "document_id": row["document_id"],
+                "model": row["model"],
+                "generation_result_sha256": binding["generation_result_sha256"],
+                "judgment_path": str(judgment_path),
+                "judgment_sha256": _sha256_bytes(judgment_bytes),
+            }
+        )
+
+    summary["judgments"].sort(key=lambda item: (item["model"], item["document_id"]))
+    if summary["judge_failed"]:
+        return summary
+    if len(summary["judgments"]) != summary["eligible"]:
+        raise ValueError("batch judgment reconciliation is incomplete")
+    final_manifest = {
+        "kind": _BATCH_JUDGE_MANIFEST_KIND,
+        "batch_manifest_path": summary["batch_manifest_path"],
+        "batch_manifest_sha256": _sha256_bytes(batch_manifest_bytes),
+        "judge_model": judge["model"],
+        "judge_config_sha256": _digest(judge),
+        "eligible": summary["eligible"],
+        "skipped_generation_failure": summary["skipped_generation_failure"],
+        "judgments": summary["judgments"],
+    }
+    _verify_immutable_compatible(final_manifest_path, final_manifest)
+    _write_json_immutable(final_manifest_path, final_manifest)
+    summary["ready"] = True
+    return summary
+
+
 def _judge_record(
     record: dict[str, Any],
     *,
@@ -1454,6 +1909,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     mode_group.add_argument("--batch-submit", action="store_true", help="Submit configured documents through the OpenRouter Batch API")
     mode_group.add_argument("--batch-observe", action="store_true", help="Refresh durable OpenRouter batch state")
     mode_group.add_argument("--batch-collect", action="store_true", help="Collect and locally validate completed OpenRouter batch results")
+    mode_group.add_argument("--batch-judge", action="store_true", help="Judge completed locally admitted batch results")
     parser.add_argument("--batch-state", type=Path, help="Optional durable batch-state path (defaults under output_dir)")
     return parser.parse_args(argv)
 
@@ -1493,6 +1949,10 @@ def main(argv: list[str] | None = None) -> int:
             summary = collect_openrouter_batch(args.config, state_path=args.batch_state)
             print(json.dumps(summary, indent=2))
             return 0 if summary["ready"] and not summary["terminal_failures"] and summary["item_failed"] == 0 else 3
+        if args.batch_judge:
+            summary = judge_collected_batch(args.config)
+            print(json.dumps(summary, indent=2))
+            return 0 if summary["ready"] else 3
         if args.judge_existing is not None:
             print(json.dumps(judge_existing(args.config, args.judge_existing), indent=2))
             return 0
@@ -1500,7 +1960,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(manifest, indent=2))
         return 0
     except Exception as exc:
-        if args.batch_submit or args.batch_observe or args.batch_collect:
+        if args.batch_submit or args.batch_observe or args.batch_collect or args.batch_judge:
             print(
                 json.dumps(
                     {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}},

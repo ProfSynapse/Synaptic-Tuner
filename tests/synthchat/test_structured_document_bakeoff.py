@@ -10,6 +10,7 @@ import yaml
 import SynthChat.scripts.structured_document_bakeoff as batch_module
 from SynthChat.scripts.structured_document_bakeoff import (
     collect_openrouter_batch,
+    judge_collected_batch,
     judge_existing,
     load_config,
     observe_openrouter_batch,
@@ -353,7 +354,7 @@ class FakeBatchClient:
         return self.observations[batch_id]
 
 
-def _batch_config(tmp_path, *, model_ids=None, document_count=2, schema=None, max_requests=20):
+def _batch_config(tmp_path, *, model_ids=None, document_count=2, schema=None, max_requests=20, judge=False):
     documents = []
     for index in range(document_count):
         path = tmp_path / f"doc-{index}.md"
@@ -382,6 +383,19 @@ def _batch_config(tmp_path, *, model_ids=None, document_count=2, schema=None, ma
         "output_dir": "batch-results",
         "batch": {"max_requests": max_requests},
     }
+    if judge:
+        config["judge"] = {
+            "model": "openai/terra",
+            "prompt_template": "SOURCE={document}\nCANDIDATE={candidate}",
+            "response_schema": {
+                "type": "object",
+                "properties": {"score": {"type": "number"}},
+                "required": ["score"],
+                "additionalProperties": False,
+            },
+            "temperature": 0,
+            "max_tokens": 200,
+        }
     path = tmp_path / "batch.yaml"
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
     return path
@@ -389,6 +403,313 @@ def _batch_config(tmp_path, *, model_ids=None, document_count=2, schema=None, ma
 
 def _fixed_now():
     return datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
+
+
+def _collect_batch_fixture(config_path, payloads):
+    submit_calls = []
+    observations = {}
+
+    def factory(*, config_defaults):
+        return FakeBatchClient(config_defaults["model"], submit_calls, observations)
+
+    state = submit_openrouter_batch(config_path, client_factory=factory, now=_fixed_now)
+    custom_ids = list(state["batches"][0]["custom_ids"])
+    results = []
+    for custom_id, payload in zip(custom_ids, payloads):
+        if payload is None:
+            results.append(
+                {
+                    "custom_id": custom_id,
+                    "response": None,
+                    "error": {"code": "provider_error", "message": "private provider detail"},
+                }
+            )
+        else:
+            results.append(
+                {
+                    "custom_id": custom_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {"choices": [{"message": {"content": json.dumps(payload)}}]},
+                    },
+                    "error": None,
+                }
+            )
+    observations["batch-luna"] = {
+        "id": "batch-luna",
+        "status": "completed",
+        "request_counts": {
+            "total": len(results),
+            "completed": sum(payload is not None for payload in payloads),
+            "failed": sum(payload is None for payload in payloads),
+        },
+        "results": results,
+    }
+    return collect_openrouter_batch(config_path, client_factory=factory, now=_fixed_now)
+
+
+def test_batch_judge_writes_separate_bound_artifacts_maps_sources_and_skips_failed_generation(tmp_path):
+    config_path = _batch_config(tmp_path, document_count=4, judge=True)
+    _collect_batch_fixture(
+        config_path,
+        [{"outline": "outline zero"}, None, {"outline": 42}, {"outline": "outline three"}],
+    )
+    generation_paths = sorted((tmp_path / "batch-results").glob("doc-*.json"))
+    generation_bytes = {path: path.read_bytes() for path in generation_paths}
+    calls = []
+
+    def factory(*, config_defaults):
+        assert config_defaults == {"provider": "openrouter", "model": "openai/terra"}
+        return FakeClient(config_defaults["model"], calls, LLMStructuredV1({"score": 8}))
+
+    summary = judge_collected_batch(config_path, client_factory=factory)
+
+    assert summary["ready"] is True
+    assert summary["eligible"] == 2
+    assert summary["judged"] == 2
+    assert summary["skipped_generation_failure"] == 2
+    assert len(calls) == 2
+    assert "Document 0 body." in calls[0]["messages"][0]["content"]
+    assert "outline zero" in calls[0]["messages"][0]["content"]
+    assert "Document 3 body." in calls[1]["messages"][0]["content"]
+    assert "outline three" in calls[1]["messages"][0]["content"]
+    assert all("title: Hidden" not in call["messages"][0]["content"] for call in calls)
+    assert {path: path.read_bytes() for path in generation_paths} == generation_bytes
+    judgment_paths = sorted((tmp_path / "batch-results" / "judgments").glob("*.judgment.json"))
+    assert len(judgment_paths) == 2
+    artifact = json.loads(judgment_paths[0].read_text(encoding="utf-8"))
+    assert artifact["kind"] == "structured_document_bakeoff/batch_judgment/v1"
+    assert len(artifact["binding"]["generation_result_sha256"]) == 64
+    assert len(artifact["binding"]["source_sha256"]) == 64
+    final_manifest = json.loads(
+        (tmp_path / "batch-results" / "judgments" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert final_manifest["eligible"] == 2
+    assert final_manifest["skipped_generation_failure"] == 2
+
+
+def test_batch_judge_failure_is_closed_retryable_and_partial_run_has_no_final_manifest(tmp_path):
+    config_path = _batch_config(tmp_path, document_count=2, judge=True)
+    _collect_batch_fixture(config_path, [{"outline": "a"}, {"outline": "b"}])
+    calls = []
+
+    class SequenceClient:
+        def structured_output(self, messages, schema, temperature, max_tokens):
+            calls.append(messages)
+            if len(calls) == 2:
+                raise RuntimeError("PRIVATE source and candidate must not escape")
+            return LLMStructuredV1({"score": 7})
+
+    first = judge_collected_batch(config_path, client_factory=lambda **_: SequenceClient())
+
+    assert first["ready"] is False
+    assert first["attempted"] == 2
+    assert first["judged"] == 1
+    assert first["judge_failed"] == 1
+    assert first["failures"] == [
+        {
+            "document_id": "doc-1",
+            "model": "openai/luna",
+            "error": {"stage": "judge_call", "type": "RuntimeError"},
+        }
+    ]
+    assert "PRIVATE" not in json.dumps(first)
+    final_manifest = tmp_path / "batch-results" / "judgments" / "manifest.json"
+    assert not final_manifest.exists()
+
+    retry_calls = []
+    retry = judge_collected_batch(
+        config_path,
+        client_factory=lambda **defaults: FakeClient(
+            defaults["config_defaults"]["model"] if "config_defaults" in defaults else "openai/terra",
+            retry_calls,
+            LLMStructuredV1({"score": 9}),
+        ),
+    )
+
+    assert retry["ready"] is True
+    assert retry["attempted"] == 1
+    assert retry["judged"] == 1
+    assert retry["skipped_existing_judgment"] == 1
+    assert len(retry_calls) == 1
+    assert final_manifest.exists()
+
+
+def test_batch_judge_schema_failure_is_machine_readable_and_retryable(tmp_path):
+    config_path = _batch_config(tmp_path, document_count=1, judge=True)
+    _collect_batch_fixture(config_path, [{"outline": "a"}])
+
+    failed = judge_collected_batch(
+        config_path,
+        client_factory=lambda **_: FakeClient(
+            "openai/terra",
+            [],
+            LLMStructuredV1({"private_verdict": "source prose must not escape"}),
+        ),
+    )
+
+    assert failed["ready"] is False
+    assert failed["failures"] == [
+        {
+            "document_id": "doc-0",
+            "model": "openai/luna",
+            "error": {"stage": "judge_validation", "type": "ValueError"},
+        }
+    ]
+    assert "private_verdict" not in json.dumps(failed)
+    assert list((tmp_path / "batch-results" / "judgments").glob("*.judgment.json")) == []
+
+    retried = judge_collected_batch(
+        config_path,
+        client_factory=lambda **_: FakeClient("openai/terra", [], LLMStructuredV1({"score": 9})),
+    )
+    assert retried["ready"] is True
+    assert retried["judged"] == 1
+
+
+def test_batch_judge_exclusive_claim_blocks_concurrent_and_stale_callers(tmp_path):
+    config_path = _batch_config(tmp_path, document_count=1, judge=True)
+    _collect_batch_fixture(config_path, [{"outline": "a"}])
+    entered = threading.Event()
+    release = threading.Event()
+    judge_calls = []
+    first_errors = []
+
+    class BlockingJudgeClient:
+        def structured_output(self, messages, schema, temperature, max_tokens):
+            judge_calls.append(messages)
+            entered.set()
+            assert release.wait(timeout=5)
+            return LLMStructuredV1({"score": 8})
+
+    def first_caller():
+        try:
+            judge_collected_batch(config_path, client_factory=lambda **_: BlockingJudgeClient())
+        except Exception as exc:  # pragma: no cover - assertion reports captured failure
+            first_errors.append(exc)
+
+    thread = threading.Thread(target=first_caller)
+    thread.start()
+    assert entered.wait(timeout=5)
+    competing_factory_calls = []
+    try:
+        with pytest.raises(RuntimeError, match="exclusively claimed"):
+            judge_collected_batch(
+                config_path,
+                client_factory=lambda **_: competing_factory_calls.append(True),
+            )
+    finally:
+        release.set()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert first_errors == []
+    assert len(judge_calls) == 1
+    assert competing_factory_calls == []
+
+    claim_path = tmp_path / "batch-results" / "judgments" / "batch-judge.lock"
+    claim_path.write_bytes(b"stale claim requiring manual recovery\n")
+    stale_factory_calls = []
+    with pytest.raises(RuntimeError, match="exclusively claimed"):
+        judge_collected_batch(
+            config_path,
+            client_factory=lambda **_: stale_factory_calls.append(True),
+        )
+    assert claim_path.read_bytes() == b"stale claim requiring manual recovery\n"
+    assert stale_factory_calls == []
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda manifest: manifest.update({"unexpected": True}),
+        lambda manifest: manifest.pop("state_path"),
+        lambda manifest: manifest["results"][0].update({"unexpected": True}),
+        lambda manifest: manifest["results"][0].pop("custom_id"),
+        lambda manifest: manifest.update({"written": True}),
+        lambda manifest: manifest.update({"succeeded": 0}),
+    ],
+)
+def test_batch_judge_rejects_noncanonical_collection_manifest_before_client(tmp_path, mutate):
+    config_path = _batch_config(tmp_path, document_count=1, judge=True)
+    _collect_batch_fixture(config_path, [{"outline": "a"}])
+    manifest_path = tmp_path / "batch-results" / "batch-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    mutate(manifest)
+    manifest_path.write_bytes(batch_module._json_bytes(manifest))
+    factory_calls = []
+
+    with pytest.raises(ValueError, match="batch collection manifest"):
+        judge_collected_batch(
+            config_path,
+            client_factory=lambda **_: factory_calls.append(True),
+        )
+
+    assert factory_calls == []
+    assert not (tmp_path / "batch-results" / "judgments" / "batch-judge.lock").exists()
+
+
+def test_batch_judge_exact_repeat_is_no_call_and_conflicting_artifact_fails_closed(tmp_path):
+    config_path = _batch_config(tmp_path, document_count=1, judge=True)
+    _collect_batch_fixture(config_path, [{"outline": "a"}])
+    first_calls = []
+    first = judge_collected_batch(
+        config_path,
+        client_factory=lambda **_: FakeClient("openai/terra", first_calls, LLMStructuredV1({"score": 8})),
+    )
+    judgment_path = next((tmp_path / "batch-results" / "judgments").glob("*.judgment.json"))
+    first_bytes = judgment_path.read_bytes()
+
+    repeated = judge_collected_batch(
+        config_path,
+        client_factory=lambda **_: (_ for _ in ()).throw(AssertionError("client must not be constructed")),
+    )
+    assert repeated["ready"] is True
+    assert repeated["attempted"] == 0
+    assert repeated["skipped_existing_judgment"] == 1
+    assert judgment_path.read_bytes() == first_bytes
+    assert first["judgments"] == repeated["judgments"]
+
+    artifact = json.loads(first_bytes)
+    artifact["binding"]["source_sha256"] = "0" * 64
+    judgment_path.write_bytes(batch_module._json_bytes(artifact))
+    with pytest.raises(ValueError, match="binding conflicts"):
+        judge_collected_batch(config_path, client_factory=lambda **_: None)
+
+
+def test_batch_judge_rejects_changed_source_or_judge_config_bindings(tmp_path):
+    source_case = tmp_path / "source-change"
+    source_case.mkdir()
+    source_config = _batch_config(source_case, document_count=1, judge=True)
+    _collect_batch_fixture(source_config, [{"outline": "a"}])
+    (source_case / "doc-0.md").write_text("Changed preprocessed source.", encoding="utf-8")
+    with pytest.raises(ValueError, match="generation result binding"):
+        judge_collected_batch(source_config, client_factory=lambda **_: None)
+
+    judge_case = tmp_path / "judge-change"
+    judge_case.mkdir()
+    judge_config = _batch_config(judge_case, document_count=1, judge=True)
+    _collect_batch_fixture(judge_config, [{"outline": "a"}])
+    judge_collected_batch(
+        judge_config,
+        client_factory=lambda **_: FakeClient("openai/terra", [], LLMStructuredV1({"score": 8})),
+    )
+    loaded = yaml.safe_load(judge_config.read_text(encoding="utf-8"))
+    loaded["judge"]["temperature"] = 0.5
+    judge_config.write_text(yaml.safe_dump(loaded), encoding="utf-8")
+    with pytest.raises(ValueError, match="binding conflicts"):
+        judge_collected_batch(judge_config, client_factory=lambda **_: None)
+
+
+def test_batch_judge_cli_exit_behavior(monkeypatch, tmp_path, capsys):
+    config_path = _batch_config(tmp_path, document_count=1, judge=True)
+    monkeypatch.setattr(batch_module, "judge_collected_batch", lambda path: {"ready": False, "judge_failed": 1})
+    assert batch_module.main(["--config", str(config_path), "--batch-judge"]) == 3
+    assert json.loads(capsys.readouterr().out)["ready"] is False
+
+    monkeypatch.setattr(batch_module, "judge_collected_batch", lambda path: {"ready": True, "judge_failed": 0})
+    assert batch_module.main(["--config", str(config_path), "--batch-judge"]) == 0
+    assert json.loads(capsys.readouterr().out)["ready"] is True
 
 
 def test_batch_submit_persists_rendered_request_mapping_and_resumes_without_resubmission(tmp_path):
