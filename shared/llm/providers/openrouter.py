@@ -1,12 +1,28 @@
 """OpenRouter provider implementation."""
 
 import json
+import re
 import requests
 from typing import Dict, Any, List
 
 from ..base import BaseLLMClient
 from ..exceptions import LLMConnectionError, LLMResponseError
 from ..usage import LLMCompletionV1, LLMStructuredV1, usage_from_openai_block
+
+
+class OpenRouterBatchRejectedError(LLMResponseError):
+    """A provider-confirmed 4xx rejection proving no batch was accepted."""
+
+    def __init__(self, status_code: int, code: str | None = None):
+        safe_code = _safe_error_code(code)
+        detail = f", code={safe_code}" if safe_code else ""
+        super().__init__(f"OpenRouter batch submission rejected: HTTP {status_code}{detail}")
+        self.status_code = status_code
+        self.code = safe_code
+
+
+class OpenRouterBatchSubmissionAmbiguousError(LLMResponseError):
+    """A POST outcome that cannot safely be retried without reconciliation."""
 
 
 class OpenRouterClient(BaseLLMClient):
@@ -36,6 +52,7 @@ class OpenRouterClient(BaseLLMClient):
         self.model = model
         self.provider = provider
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.batch_api_url = "https://openrouter.ai/api/beta/batches"
         self.timeout_seconds = float(timeout_seconds)
         self.thinking_effort = _normalize_thinking_effort(thinking_effort)
 
@@ -204,6 +221,145 @@ class OpenRouterClient(BaseLLMClient):
         except Exception as e:
             raise LLMConnectionError(f"OpenRouter request failed: {e}")
 
+    def submit_batch(
+        self,
+        items: List[Dict[str, Any]],
+        *,
+        endpoint: str = "/v1/chat/completions",
+    ) -> Dict[str, Any]:
+        """Submit an asynchronous OpenRouter batch without polling it.
+
+        This is intentionally OpenRouter-specific rather than part of the
+        provider-neutral ``BaseLLMClient`` contract.  Callers own durable
+        idempotency state around this effectful operation.
+        """
+        if endpoint != "/v1/chat/completions":
+            raise ValueError("OpenRouter batch endpoint must be /v1/chat/completions")
+        if not isinstance(items, list) or not items:
+            raise ValueError("OpenRouter batch items must be a non-empty list")
+
+        seen: set[str] = set()
+        normalized: list[dict[str, Any]] = []
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise ValueError(f"OpenRouter batch item {index} must be a mapping")
+            custom_id = item.get("custom_id")
+            body = item.get("body")
+            if not isinstance(custom_id, str) or not custom_id.strip():
+                raise ValueError(f"OpenRouter batch item {index} requires a non-empty custom_id")
+            if custom_id in seen:
+                raise ValueError(f"duplicate OpenRouter batch custom_id: {custom_id}")
+            if not isinstance(body, dict):
+                raise ValueError(f"OpenRouter batch item {custom_id} body must be a mapping")
+            if body.get("model") != self.model:
+                raise ValueError(f"OpenRouter batch item {custom_id} model must equal outer model")
+            seen.add(custom_id)
+            normalized.append({"custom_id": custom_id, "body": dict(body)})
+
+        payload = {
+            "endpoint": endpoint,
+            "model": self.model,
+            "requests": normalized,
+        }
+        result = self._make_batch_request("post", self.batch_api_url, payload=payload)
+        try:
+            _validate_batch_object(result, operation="submit")
+        except LLMResponseError as exc:
+            raise OpenRouterBatchSubmissionAmbiguousError(
+                "OpenRouter batch submission returned an invalid success object"
+            ) from exc
+        return result
+
+    def observe_batch(self, batch_id: str) -> Dict[str, Any]:
+        """Retrieve one OpenRouter batch object, including inline results."""
+        if not isinstance(batch_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", batch_id):
+            raise ValueError("OpenRouter batch_id contains unsupported characters")
+        result = self._make_batch_request("get", f"{self.batch_api_url}/{batch_id}")
+        _validate_batch_object(result, operation="observe")
+        if result["id"] != batch_id:
+            raise LLMResponseError("OpenRouter batch observation returned a different batch id")
+        return result
+
+    def _make_batch_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        payload: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Make one non-retrying Batch API request and return a JSON object."""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/ProfSynapse/Toolset-Training",
+            "X-Title": "Shared LLM Client",
+        }
+        try:
+            if method == "post":
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=self.timeout_seconds,
+                )
+            elif method == "get":
+                response = requests.get(url, headers=headers, timeout=self.timeout_seconds)
+            else:  # pragma: no cover - private invariant
+                raise ValueError(f"unsupported Batch API method: {method}")
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            # A transport failure can be ambiguous after POST.  Deliberately do
+            # not retry here; the durable caller must stop and reconcile.
+            if method == "post":
+                raise OpenRouterBatchSubmissionAmbiguousError(
+                    f"OpenRouter batch submission transport failed: {type(exc).__name__}"
+                ) from None
+            raise LLMConnectionError(f"OpenRouter batch {method} transport failed: {type(exc).__name__}") from None
+        except requests.exceptions.RequestException as exc:
+            if method == "post":
+                raise OpenRouterBatchSubmissionAmbiguousError(
+                    f"OpenRouter batch submission request failed: {type(exc).__name__}"
+                ) from None
+            raise LLMConnectionError(f"OpenRouter batch {method} request failed: {type(exc).__name__}") from None
+
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError:
+            code = _closed_error_code(response)
+            if method == "post" and 400 <= response.status_code < 500:
+                raise OpenRouterBatchRejectedError(response.status_code, code) from None
+            message = f"OpenRouter batch {method} HTTP {response.status_code}"
+            if code:
+                message += f" (code={code})"
+            if method == "post":
+                raise OpenRouterBatchSubmissionAmbiguousError(message) from None
+            raise LLMResponseError(message) from None
+
+        try:
+            decoded = response.json()
+        except (ValueError, json.JSONDecodeError):
+            if method == "post":
+                raise OpenRouterBatchSubmissionAmbiguousError(
+                    "OpenRouter batch submission returned invalid JSON"
+                ) from None
+            raise LLMResponseError(f"OpenRouter batch {method} returned invalid JSON") from None
+        if not isinstance(decoded, dict):
+            if method == "post":
+                raise OpenRouterBatchSubmissionAmbiguousError(
+                    "OpenRouter batch submission returned a non-object response"
+                )
+            raise LLMResponseError(f"OpenRouter batch {method} returned a non-object response")
+        try:
+            json.dumps(decoded, allow_nan=False)
+        except (TypeError, ValueError):
+            if method == "post":
+                raise OpenRouterBatchSubmissionAmbiguousError(
+                    "OpenRouter batch submission returned non-finite or non-JSON data"
+                ) from None
+            raise LLMResponseError(
+                f"OpenRouter batch {method} returned non-finite or non-JSON data"
+            ) from None
+        return decoded
+
     def test_connection(self) -> bool:
         """Test OpenRouter API connection."""
         try:
@@ -233,3 +389,36 @@ def _normalize_thinking_effort(value: str | None) -> str | None:
         return None
     value = str(value).strip().lower()
     return value or None
+
+
+def _validate_batch_object(value: Dict[str, Any], *, operation: str) -> None:
+    batch_id = value.get("id")
+    status = value.get("status")
+    if not isinstance(batch_id, str) or not batch_id:
+        raise LLMResponseError(f"OpenRouter batch {operation} response omitted id")
+    if not isinstance(status, str) or not status:
+        raise LLMResponseError(f"OpenRouter batch {operation} response omitted status")
+
+
+def _closed_error_code(response: Any) -> str | None:
+    """Return only a bounded provider error code; messages may echo prompts."""
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+    code = error.get("code")
+    return _safe_error_code(code)
+
+
+def _safe_error_code(value: object) -> str | None:
+    if not isinstance(value, (str, int)):
+        return None
+    normalized = str(value)
+    if len(normalized) > 64 or re.fullmatch(r"[A-Za-z0-9._-]+", normalized) is None:
+        return None
+    return normalized

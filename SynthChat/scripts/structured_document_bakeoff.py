@@ -30,18 +30,41 @@ Minimal configuration::
       response_schema: {type: object, properties: {score: {type: number}}, required: [score]}
 
 Prompt templates use literal ``{document}`` and, for a judge, ``{candidate}``.
-No model call is made by ``--dry-run``.  The script is intentionally a small
-consumer of ``shared.llm`` rather than a second provider implementation.
+No model call is made by ``--dry-run``.  Provider transport remains in
+``shared.llm``; this runner owns config compilation, durable state, and local
+schema admission.
+
+For non-urgent asynchronous work, replace ``source`` with an explicit bounded
+request list and use the three durable batch verbs::
+
+    documents:
+      - id: stable-document-id
+        source_path: private/document.md
+        strip_yaml_frontmatter: true
+        metadata: {kind: optional-caller-data}
+    batch: {max_requests: 5}
+
+    python -m SynthChat.scripts.structured_document_bakeoff --config batch.yaml --batch-submit
+    python -m SynthChat.scripts.structured_document_bakeoff --config batch.yaml --batch-observe
+    python -m SynthChat.scripts.structured_document_bakeoff --config batch.yaml --batch-collect
+
+``{metadata}`` is available to the prompt as canonical JSON.  Batch mode uses
+the base model id and the real OpenRouter asynchronous Batch API; it does not
+send a ``:batch`` model through synchronous chat completions.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -49,6 +72,11 @@ import jsonschema
 import yaml
 
 from shared.llm import create_client
+from shared.llm.providers.openrouter import (
+    OpenRouterBatchRejectedError,
+    OpenRouterBatchSubmissionAmbiguousError,
+)
+from shared.llm.usage import usage_from_openai_block
 
 
 ClientFactory = Callable[..., Any]
@@ -86,20 +114,42 @@ def load_config(path: Path) -> dict[str, Any]:
         raise FileNotFoundError(f"Bakeoff config not found: {path}") from None
     config = _mapping(loaded, "bakeoff config")
 
-    source = _mapping(config.get("source"), "source")
-    _text(source.get("path"), "source.path")
-    if "strip_yaml_frontmatter" in source and not isinstance(source["strip_yaml_frontmatter"], bool):
-        raise ValueError("source.strip_yaml_frontmatter must be a boolean")
-    config["source"] = source
+    if "source" in config:
+        source = _mapping(config.get("source"), "source")
+        _text(source.get("path"), "source.path")
+        if "strip_yaml_frontmatter" in source and not isinstance(source["strip_yaml_frontmatter"], bool):
+            raise ValueError("source.strip_yaml_frontmatter must be a boolean")
+        config["source"] = source
+    if "documents" in config:
+        if not isinstance(config["documents"], list) or not config["documents"]:
+            raise ValueError("documents must be a non-empty list")
+        config["documents"] = [_document_spec(item, index) for index, item in enumerate(config["documents"])]
+        document_ids = [item["id"] for item in config["documents"]]
+        if len(document_ids) != len(set(document_ids)):
+            raise ValueError("documents ids must be unique")
+    if "source" not in config and "documents" not in config:
+        raise ValueError("bakeoff config requires source or documents")
 
     _template(config.get("prompt_template"), "prompt_template", "{document}")
     config["response_schema"] = _schema(config.get("response_schema"), "response_schema")
     if not isinstance(config.get("models"), list) or not config["models"]:
         raise ValueError("models must be a non-empty list")
     config["models"] = [_model_spec(item, index) for index, item in enumerate(config["models"])]
+    model_ids = [item["id"] for item in config["models"]]
+    if len(model_ids) != len(set(model_ids)):
+        raise ValueError("models ids must be unique")
     config["temperature"] = _number(config.get("temperature"), "temperature")
     config["max_tokens"] = _positive_int(config.get("max_tokens"), "max_tokens")
     config["output_dir"] = _text(config.get("output_dir"), "output_dir")
+
+    batch = config.get("batch")
+    if batch is not None:
+        batch = _mapping(batch, "batch")
+        unknown = set(batch) - {"max_requests"}
+        if unknown:
+            raise ValueError(f"batch has unsupported fields: {', '.join(sorted(unknown))}")
+        batch["max_requests"] = _positive_int(batch.get("max_requests"), "batch.max_requests")
+        config["batch"] = batch
 
     judge = config.get("judge")
     if judge is not None:
@@ -158,6 +208,27 @@ def _model_spec(value: object, index: int) -> dict[str, Any]:
     return model
 
 
+def _document_spec(value: object, index: int) -> dict[str, Any]:
+    document = _mapping(value, f"documents[{index}]")
+    allowed = {"id", "source_path", "strip_yaml_frontmatter", "metadata"}
+    unknown = set(document) - allowed
+    if unknown:
+        raise ValueError(f"documents[{index}] has unsupported fields: {', '.join(sorted(unknown))}")
+    document["id"] = _text(document.get("id"), f"documents[{index}].id")
+    document["source_path"] = _text(document.get("source_path"), f"documents[{index}].source_path")
+    if "strip_yaml_frontmatter" in document and not isinstance(document["strip_yaml_frontmatter"], bool):
+        raise ValueError(f"documents[{index}].strip_yaml_frontmatter must be a boolean")
+    if "metadata" in document:
+        document["metadata"] = _mapping(document["metadata"], f"documents[{index}].metadata")
+    else:
+        document["metadata"] = {}
+    try:
+        json.dumps(document["metadata"], ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        raise ValueError(f"documents[{index}].metadata must be finite JSON data") from None
+    return document
+
+
 def _judge_spec(value: object, default_temperature: float, default_max_tokens: int) -> dict[str, Any]:
     judge = _mapping(value, "judge")
     allowed = {"model", "prompt_template", "response_schema", "provider_routing", "temperature", "max_tokens"}
@@ -179,6 +250,8 @@ _FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.D
 
 def read_source(config: Mapping[str, Any], config_path: Path) -> tuple[Path, str]:
     """Read the requested document; resolve relative paths from the YAML file."""
+    if "source" not in config:
+        raise ValueError("synchronous bakeoff requires source; documents is for batch mode")
     source = _mapping(config["source"], "source")
     source_path = Path(_text(source["path"], "source.path"))
     if not source_path.is_absolute():
@@ -189,6 +262,34 @@ def read_source(config: Mapping[str, Any], config_path: Path) -> tuple[Path, str
     if not text.strip():
         raise ValueError(f"source document is empty after preprocessing: {source_path}")
     return source_path, text
+
+
+def read_documents(config: Mapping[str, Any], config_path: Path) -> list[dict[str, Any]]:
+    """Read explicitly configured batch documents without discovering files."""
+    specs = config.get("documents")
+    if not isinstance(specs, list) or not specs:
+        raise ValueError("batch mode requires a non-empty documents list")
+    documents: list[dict[str, Any]] = []
+    for index, raw in enumerate(specs):
+        spec = _mapping(raw, f"documents[{index}]")
+        source_path = Path(_text(spec["source_path"], f"documents[{index}].source_path"))
+        if not source_path.is_absolute():
+            source_path = (config_path.parent / source_path).resolve()
+        text = source_path.read_text(encoding="utf-8")
+        if spec.get("strip_yaml_frontmatter", False):
+            text = _FRONTMATTER.sub("", text, count=1)
+        if not text.strip():
+            raise ValueError(f"batch document is empty after preprocessing: {source_path}")
+        documents.append(
+            {
+                "id": spec["id"],
+                "source_path": source_path,
+                "text": text,
+                "metadata": dict(spec.get("metadata", {})),
+                "frontmatter_stripped": bool(spec.get("strip_yaml_frontmatter", False)),
+            }
+        )
+    return documents
 
 
 def _render(template: str, **values: str) -> str:
@@ -229,7 +330,7 @@ def _result_path(output_dir: Path, index: int, model: str) -> Path:
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     """Atomically replace a JSON artifact, leaving the prior result intact on interruption."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False, indent=2, sort_keys=True) + "\n"
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as handle:
         temporary_path = Path(handle.name)
         handle.write(encoded)
@@ -238,6 +339,928 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     finally:
         if temporary_path.exists():
             temporary_path.unlink()
+
+
+def _json_bytes(payload: Mapping[str, Any]) -> bytes:
+    return (
+        json.dumps(payload, ensure_ascii=False, allow_nan=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+
+
+def _write_json_immutable(path: Path, payload: Mapping[str, Any]) -> bool:
+    """Create immutable canonical JSON; identical recollection is a no-op."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = _json_bytes(payload)
+    with tempfile.NamedTemporaryFile(
+        "wb",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        temporary_path = Path(handle.name)
+        handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        try:
+            os.link(temporary_path, path)
+        except FileExistsError:
+            try:
+                existing = path.read_bytes()
+            except OSError as exc:
+                raise ValueError(f"cannot verify immutable artifact: {path}") from exc
+            if existing == encoded:
+                return False
+            raise ValueError(f"immutable artifact already exists with different canonical bytes: {path}")
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+    return True
+
+
+def _verify_immutable_compatible(path: Path, payload: Mapping[str, Any]) -> None:
+    """Fail before collection writes when an existing immutable artifact differs."""
+    encoded = _json_bytes(payload)
+    if not path.exists():
+        return
+    try:
+        existing = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"cannot verify immutable artifact: {path}") from exc
+    if existing != encoded:
+        raise ValueError(f"immutable artifact already exists with different canonical bytes: {path}")
+
+
+_BATCH_STATE_KIND = "structured_document_bakeoff/openrouter_batch_state/v1"
+_BATCH_ENDPOINT = "/v1/chat/completions"
+_BATCH_TERMINAL = {"completed", "failed", "cancelled", "expired"}
+_BATCH_PROVIDER_STATUSES = {
+    "validating", "in_progress", "finalizing", "completed", "failed",
+    "cancelling", "cancelled", "expired",
+}
+_BATCH_SUBMISSION_STATUSES = {"pending", "submitting", "submitted", "rejected"}
+_BATCH_TIMESTAMP_FIELDS = {
+    "created_at", "in_progress_at", "finalizing_at", "completed_at",
+    "failed_at", "cancelled_at", "expired_at",
+}
+_BATCH_COUNT_FIELDS = {"total", "completed", "failed"}
+
+
+def _strict_json_loads(text: str, *, name: str) -> Any:
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"{name} contains non-finite JSON number: {value}")
+
+    return json.loads(text, parse_constant=reject_constant)
+
+
+def _require_finite_json(value: object, name: str) -> None:
+    try:
+        json.dumps(value, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must contain only finite JSON data") from None
+
+
+def _is_digest(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+@contextmanager
+def _exclusive_batch_claim(state_path: Path, spec_digest: str):
+    """Hold an OS-wide O_EXCL claim; stale claims are never auto-stolen."""
+    claim_path = state_path.with_name(f"{state_path.name}.lock")
+    claim_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(claim_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        raise RuntimeError(
+            f"batch state is exclusively claimed; inspect the lock before manual recovery: {claim_path}"
+        ) from None
+    identity = os.fstat(descriptor)
+    try:
+        claim = _json_bytes(
+            {
+                "kind": "structured_document_bakeoff/openrouter_batch_claim/v1",
+                "pid": os.getpid(),
+                "spec_digest": spec_digest,
+            }
+        )
+        os.write(descriptor, claim)
+        os.fsync(descriptor)
+        yield claim_path
+    finally:
+        os.close(descriptor)
+        try:
+            current = claim_path.stat()
+        except FileNotFoundError:
+            current = None
+        if current is not None and (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
+            claim_path.unlink()
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _timestamp(now: Callable[[], datetime]) -> str:
+    value = now()
+    if not isinstance(value, datetime):
+        raise TypeError("batch clock must return datetime")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _digest(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _output_dir(config: Mapping[str, Any], config_path: Path) -> Path:
+    output_dir = Path(_text(config["output_dir"], "output_dir"))
+    if not output_dir.is_absolute():
+        output_dir = (config_path.parent / output_dir).resolve()
+    return output_dir
+
+
+def _batch_state_path(config: Mapping[str, Any], config_path: Path, state_path: Path | None) -> Path:
+    if state_path is not None:
+        if not state_path.is_absolute():
+            state_path = (config_path.parent / state_path).resolve()
+        return state_path
+    return _output_dir(config, config_path) / "openrouter-batch-state.json"
+
+
+def _batch_custom_id(document_id: str, model: str) -> str:
+    readable = re.sub(r"[^A-Za-z0-9._-]+", "-", document_id).strip("._-")[:36] or "document"
+    binding = hashlib.sha256(f"{document_id}\0{model}".encode("utf-8")).hexdigest()[:20]
+    return f"{readable}-{binding}"
+
+
+def _batch_result_path(output_dir: Path, document_id: str, model: str) -> Path:
+    document_slug = re.sub(r"[^A-Za-z0-9._-]+", "_", document_id).strip("._-")[:50] or "document"
+    model_slug = re.sub(r"[^A-Za-z0-9._-]+", "_", model).strip("._-")[:50] or "model"
+    suffix = hashlib.sha256(f"{document_id}\0{model}".encode("utf-8")).hexdigest()[:10]
+    return output_dir / f"{document_slug}--{model_slug}--{suffix}.json"
+
+
+def _batch_request_body(
+    *,
+    model_spec: Mapping[str, Any],
+    prompt: str,
+    response_schema: Mapping[str, Any],
+    temperature: float,
+    max_tokens: int,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "model": model_spec["id"],
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": response_schema.get("name", "response"),
+                "strict": True,
+                "schema": dict(response_schema),
+            },
+        },
+    }
+    provider_routing = model_spec.get("provider_routing")
+    if provider_routing is not None:
+        body["provider"] = dict(provider_routing)
+    return body
+
+
+def _build_batch_plan(config_path: Path) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+    config_path = config_path.resolve()
+    config = load_config(config_path)
+    batch_config = config.get("batch")
+    if not isinstance(batch_config, dict):
+        raise ValueError("batch mode requires batch.max_requests")
+    documents = read_documents(config, config_path)
+    request_count = len(documents) * len(config["models"])
+    if request_count > batch_config["max_requests"]:
+        raise ValueError(
+            f"batch request count {request_count} exceeds configured max_requests {batch_config['max_requests']}"
+        )
+
+    output_dir = _output_dir(config, config_path)
+    batches: list[dict[str, Any]] = []
+    custom_ids: set[str] = set()
+    for model_spec in config["models"]:
+        model = model_spec["id"]
+        if model.endswith(":batch"):
+            raise ValueError(
+                f"batch model must use the base model id, not a synchronous :batch slug: {model}"
+            )
+        provider_items: list[dict[str, Any]] = []
+        mappings: dict[str, dict[str, Any]] = {}
+        for document in documents:
+            custom_id = _batch_custom_id(document["id"], model)
+            if custom_id in custom_ids:
+                raise ValueError(f"generated duplicate batch custom_id: {custom_id}")
+            custom_ids.add(custom_id)
+            metadata_text = json.dumps(document["metadata"], ensure_ascii=False, sort_keys=True)
+            prompt = _render(config["prompt_template"], document=document["text"], metadata=metadata_text)
+            body = _batch_request_body(
+                model_spec=model_spec,
+                prompt=prompt,
+                response_schema=config["response_schema"],
+                temperature=config["temperature"],
+                max_tokens=config["max_tokens"],
+            )
+            result_path = _batch_result_path(output_dir, document["id"], model)
+            provider_items.append({"custom_id": custom_id, "body": body})
+            mappings[custom_id] = {
+                "document_id": document["id"],
+                "model": model,
+                "source_path": str(document["source_path"]),
+                "source_frontmatter_stripped": document["frontmatter_stripped"],
+                "metadata": document["metadata"],
+                "result_path": str(result_path),
+                "request_digest": _digest(body),
+            }
+        provider_spec = {"endpoint": _BATCH_ENDPOINT, "model": model, "requests": provider_items}
+        batches.append(
+            {
+                "model": model,
+                "provider_routing": model_spec.get("provider_routing"),
+                "provider_spec": provider_spec,
+                "spec_digest": _digest(provider_spec),
+                "custom_ids": mappings,
+            }
+        )
+    overall_spec = {
+        "endpoint": _BATCH_ENDPOINT,
+        "batches": [batch["provider_spec"] for batch in batches],
+    }
+    return config, batches, _digest(overall_spec)
+
+
+def _new_batch_state(
+    config_path: Path,
+    batches: list[dict[str, Any]],
+    spec_digest: str,
+    *,
+    now: Callable[[], datetime],
+) -> dict[str, Any]:
+    created_at = _timestamp(now)
+    return {
+        "kind": _BATCH_STATE_KIND,
+        "config_path": str(config_path.resolve()),
+        "endpoint": _BATCH_ENDPOINT,
+        "spec_digest": spec_digest,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "batches": [
+            {
+                "model": batch["model"],
+                "spec_digest": batch["spec_digest"],
+                "submission_status": "pending",
+                "provider_batch_id": None,
+                "provider_status": None,
+                "submitted_at": None,
+                "observed_at": None,
+                "provider_timestamps": {},
+                "request_counts": None,
+                "rejection_history": [],
+                "custom_ids": batch["custom_ids"],
+            }
+            for batch in batches
+        ],
+    }
+
+
+def _validate_batch_state(state: Mapping[str, Any]) -> None:
+    allowed_top = {
+        "kind", "config_path", "endpoint", "spec_digest", "created_at", "updated_at", "batches",
+    }
+    if set(state) != allowed_top:
+        raise ValueError("batch state top-level fields are invalid")
+    if state.get("kind") != _BATCH_STATE_KIND:
+        raise ValueError("batch state kind is unsupported")
+    if not isinstance(state.get("config_path"), str) or not state["config_path"]:
+        raise ValueError("batch state config_path must be a non-empty string")
+    if state.get("endpoint") != _BATCH_ENDPOINT:
+        raise ValueError("batch state endpoint is unsupported")
+    if not _is_digest(state.get("spec_digest")):
+        raise ValueError("batch state spec_digest is invalid")
+    for field in ("created_at", "updated_at"):
+        if not isinstance(state.get(field), str) or not state[field]:
+            raise ValueError(f"batch state {field} must be a non-empty string")
+    batches = state.get("batches")
+    if not isinstance(batches, list) or not batches:
+        raise ValueError("batch state batches must be a non-empty list")
+
+    models: set[str] = set()
+    for index, raw_batch in enumerate(batches):
+        batch = _mapping(raw_batch, f"batch state batches[{index}]")
+        allowed_batch = {
+            "model", "spec_digest", "submission_status", "provider_batch_id", "provider_status",
+            "submitted_at", "observed_at", "provider_timestamps", "request_counts", "custom_ids",
+            "submission_attempted_at", "rejection_history", "ambiguity",
+        }
+        required_batch = {
+            "model", "spec_digest", "submission_status", "provider_batch_id", "provider_status",
+            "submitted_at", "observed_at", "provider_timestamps", "request_counts", "custom_ids",
+            "rejection_history",
+        }
+        unknown_batch = set(batch) - allowed_batch
+        if unknown_batch or not required_batch.issubset(batch):
+            raise ValueError(
+                f"batch state batches[{index}] fields are invalid"
+            )
+        model = batch.get("model")
+        if not isinstance(model, str) or not model or model in models:
+            raise ValueError(f"batch state batches[{index}].model is invalid or duplicated")
+        models.add(model)
+        if not _is_digest(batch.get("spec_digest")):
+            raise ValueError(f"batch state batches[{index}].spec_digest is invalid")
+        submission_status = batch.get("submission_status")
+        if submission_status not in _BATCH_SUBMISSION_STATUSES:
+            raise ValueError(f"batch state batches[{index}].submission_status is invalid")
+        provider_batch_id = batch.get("provider_batch_id")
+        if provider_batch_id is not None and (
+            not isinstance(provider_batch_id, str)
+            or re.fullmatch(r"[A-Za-z0-9._-]+", provider_batch_id) is None
+        ):
+            raise ValueError(f"batch state batches[{index}].provider_batch_id is invalid")
+        submitted_at = batch.get("submitted_at")
+        attempted_at = batch.get("submission_attempted_at")
+        rejection_history = batch.get("rejection_history")
+        if not isinstance(rejection_history, list):
+            raise ValueError(f"batch state batches[{index}].rejection_history is invalid")
+        for history_index, rejection in enumerate(rejection_history):
+            _validate_closed_diagnostic(
+                rejection,
+                f"batch state batches[{index}].rejection_history[{history_index}]",
+                rejected=True,
+            )
+        ambiguity = batch.get("ambiguity")
+        if submission_status == "pending":
+            if {"submission_attempted_at", "ambiguity"} & set(batch) or rejection_history:
+                raise ValueError(f"pending batch state batches[{index}] has invalid optional fields")
+            if provider_batch_id is not None or submitted_at is not None or attempted_at is not None:
+                raise ValueError(f"pending batch state batches[{index}] has submission evidence")
+            if ambiguity is not None:
+                raise ValueError(f"pending batch state batches[{index}] has terminal diagnostics")
+        elif submission_status == "submitting":
+            if "submission_attempted_at" not in batch:
+                raise ValueError(f"submitting batch state batches[{index}] has invalid optional fields")
+            if provider_batch_id is not None or submitted_at is not None:
+                raise ValueError(f"submitting batch state batches[{index}] has provider identity")
+            if not isinstance(attempted_at, str) or not attempted_at:
+                raise ValueError(f"submitting batch state batches[{index}] lacks attempted timestamp")
+            if ambiguity is not None:
+                _validate_closed_diagnostic(ambiguity, f"batch state batches[{index}].ambiguity")
+        elif submission_status == "submitted":
+            if "submission_attempted_at" not in batch or "ambiguity" in batch:
+                raise ValueError(f"submitted batch state batches[{index}] has invalid optional fields")
+            if not isinstance(provider_batch_id, str) or not provider_batch_id:
+                raise ValueError(f"submitted batch state batches[{index}] lacks provider id")
+            if not isinstance(submitted_at, str) or not submitted_at:
+                raise ValueError(f"submitted batch state batches[{index}] lacks submitted timestamp")
+            if not isinstance(attempted_at, str) or not attempted_at:
+                raise ValueError(f"submitted batch state batches[{index}] lacks attempted timestamp")
+            if ambiguity is not None:
+                raise ValueError(f"submitted batch state batches[{index}] has incompatible diagnostics")
+        else:  # rejected
+            if "submission_attempted_at" not in batch or not rejection_history or "ambiguity" in batch:
+                raise ValueError(f"rejected batch state batches[{index}] has invalid optional fields")
+            if provider_batch_id is not None or submitted_at is not None:
+                raise ValueError(f"rejected batch state batches[{index}] has provider identity")
+            if not isinstance(attempted_at, str) or not attempted_at:
+                raise ValueError(f"rejected batch state batches[{index}] lacks attempted timestamp")
+
+        provider_status = batch.get("provider_status")
+        if provider_status is not None and provider_status not in _BATCH_PROVIDER_STATUSES:
+            raise ValueError(f"batch state batches[{index}].provider_status is invalid")
+        if submission_status != "submitted" and provider_status is not None:
+            raise ValueError(f"batch state batches[{index}] has provider status without provider id")
+        observed_at = batch.get("observed_at")
+        if observed_at is not None and (not isinstance(observed_at, str) or not observed_at):
+            raise ValueError(f"batch state batches[{index}].observed_at is invalid")
+        if submission_status != "submitted" and observed_at is not None:
+            raise ValueError(f"batch state batches[{index}] was observed before submission")
+        if observed_at is not None and provider_status is None:
+            raise ValueError(f"batch state batches[{index}] has observation time without provider status")
+
+        timestamps = batch.get("provider_timestamps")
+        if not isinstance(timestamps, dict) or set(timestamps) - _BATCH_TIMESTAMP_FIELDS:
+            raise ValueError(f"batch state batches[{index}].provider_timestamps is invalid")
+        if not all(
+            value is None or type(value) is int or isinstance(value, str)
+            for value in timestamps.values()
+        ):
+            raise ValueError(f"batch state batches[{index}].provider_timestamps values are invalid")
+        _require_finite_json(timestamps, f"batch state batches[{index}].provider_timestamps")
+        counts = batch.get("request_counts")
+        if counts is not None:
+            if (
+                not isinstance(counts, dict)
+                or set(counts) - _BATCH_COUNT_FIELDS
+                or not all(
+                isinstance(key, str) and type(value) is int and value >= 0 for key, value in counts.items()
+                )
+            ):
+                raise ValueError(f"batch state batches[{index}].request_counts is invalid")
+            total = counts.get("total")
+            if total is not None and counts.get("completed", 0) + counts.get("failed", 0) > total:
+                raise ValueError(f"batch state batches[{index}].request_counts is inconsistent")
+        if submission_status != "submitted" and (timestamps or counts is not None):
+            raise ValueError(f"batch state batches[{index}] has provider evidence before submission")
+
+        mappings = batch.get("custom_ids")
+        if not isinstance(mappings, dict) or not mappings:
+            raise ValueError(f"batch state batches[{index}].custom_ids must be a non-empty mapping")
+        for custom_id, raw_mapping in mappings.items():
+            if not isinstance(custom_id, str) or not custom_id:
+                raise ValueError(f"batch state batches[{index}] has invalid custom_id")
+            mapping = _mapping(raw_mapping, f"batch state custom_id {custom_id}")
+            allowed_mapping = {
+                "document_id", "model", "source_path", "source_frontmatter_stripped",
+                "metadata", "result_path", "request_digest",
+            }
+            if set(mapping) != allowed_mapping:
+                raise ValueError(f"batch state custom_id {custom_id} mapping fields are invalid")
+            for field in ("document_id", "model", "source_path", "result_path"):
+                if not isinstance(mapping.get(field), str) or not mapping[field]:
+                    raise ValueError(f"batch state custom_id {custom_id}.{field} is invalid")
+            if mapping["model"] != model or _batch_custom_id(mapping["document_id"], model) != custom_id:
+                raise ValueError(f"batch state custom_id {custom_id} binding is invalid")
+            if not isinstance(mapping.get("source_frontmatter_stripped"), bool):
+                raise ValueError(f"batch state custom_id {custom_id} frontmatter flag is invalid")
+            if not isinstance(mapping.get("metadata"), dict):
+                raise ValueError(f"batch state custom_id {custom_id} metadata is invalid")
+            _require_finite_json(mapping["metadata"], f"batch state custom_id {custom_id} metadata")
+            if not _is_digest(mapping.get("request_digest")):
+                raise ValueError(f"batch state custom_id {custom_id} request_digest is invalid")
+        if counts is not None and counts.get("total") is not None and counts["total"] != len(mappings):
+            raise ValueError(f"batch state batches[{index}].request_counts total is inconsistent")
+    _require_finite_json(state, "batch state")
+
+
+def _validate_closed_diagnostic(value: object, name: str, *, rejected: bool = False) -> None:
+    diagnostic = _mapping(value, name)
+    allowed = {"type", "code", "status_code", "rejected_at"} if rejected else {"type", "code"}
+    if set(diagnostic) - allowed or not isinstance(diagnostic.get("type"), str):
+        raise ValueError(f"{name} is invalid")
+    if "code" in diagnostic and diagnostic["code"] is not None and _safe_provider_identifier(diagnostic["code"]) is None:
+        raise ValueError(f"{name}.code is invalid")
+    if rejected and (type(diagnostic.get("status_code")) is not int or not 400 <= diagnostic["status_code"] < 500):
+        raise ValueError(f"{name}.status_code is invalid")
+    if rejected and (not isinstance(diagnostic.get("rejected_at"), str) or not diagnostic["rejected_at"]):
+        raise ValueError(f"{name}.rejected_at is invalid")
+
+
+def _write_batch_state(path: Path, state: Mapping[str, Any]) -> None:
+    _validate_batch_state(state)
+    _write_json(path, state)
+
+
+def _load_batch_state(path: Path, *, spec_digest: str) -> dict[str, Any]:
+    try:
+        state = _mapping(_strict_json_loads(path.read_text(encoding="utf-8"), name="batch state"), "batch state")
+    except FileNotFoundError:
+        raise FileNotFoundError(f"batch state not found: {path}") from None
+    except json.JSONDecodeError:
+        raise ValueError(f"batch state is not valid JSON: {path}") from None
+    _validate_batch_state(state)
+    if state.get("spec_digest") != spec_digest:
+        raise ValueError("batch state spec digest does not match the current rendered requests")
+    return state
+
+
+def _provider_batch_fields(observation: Mapping[str, Any]) -> dict[str, Any]:
+    _require_finite_json(observation, "OpenRouter batch observation")
+    status = observation.get("status")
+    if status not in _BATCH_PROVIDER_STATUSES:
+        raise ValueError("OpenRouter batch observation status is invalid")
+    timestamps = {
+        key: observation[key]
+        for key in ("created_at", "in_progress_at", "finalizing_at", "completed_at", "failed_at", "cancelled_at", "expired_at")
+        if key in observation
+    }
+    counts = observation.get("request_counts")
+    if counts is not None and (
+        not isinstance(counts, dict)
+        or bool(set(counts) - _BATCH_COUNT_FIELDS)
+        or not all(isinstance(key, str) and type(value) is int and value >= 0 for key, value in counts.items())
+    ):
+        raise ValueError("OpenRouter batch observation request_counts is invalid")
+    return {
+        "provider_status": status,
+        "provider_timestamps": timestamps,
+        "request_counts": counts if isinstance(counts, dict) else None,
+    }
+
+
+def _validate_state_plan(
+    state: Mapping[str, Any],
+    plans: list[dict[str, Any]],
+    *,
+    config_path: Path,
+) -> None:
+    if state["config_path"] != str(config_path.resolve()):
+        raise ValueError("batch state config_path does not match the current config")
+    if len(state["batches"]) != len(plans):
+        raise ValueError("batch state model count does not match the current plan")
+    for batch_state, plan in zip(state["batches"], plans):
+        if batch_state.get("model") != plan["model"] or batch_state.get("spec_digest") != plan["spec_digest"]:
+            raise ValueError("batch state model plan does not match the current plan")
+        if batch_state.get("custom_ids") != plan["custom_ids"]:
+            raise ValueError("batch state request mapping does not match the current plan")
+
+
+def _persist_ambiguity(
+    path: Path,
+    state: dict[str, Any],
+    batch_state: dict[str, Any],
+    exc: Exception,
+    *,
+    now: Callable[[], datetime],
+) -> None:
+    batch_state["ambiguity"] = {"type": type(exc).__name__, "code": None}
+    state["updated_at"] = _timestamp(now)
+    try:
+        _write_batch_state(path, state)
+    except Exception:
+        # The already-durable ``submitting`` marker remains the authority if
+        # annotating it fails.  Never replace the original ambiguous outcome.
+        pass
+
+
+def submit_openrouter_batch(
+    config_path: Path,
+    *,
+    state_path: Path | None = None,
+    client_factory: ClientFactory = create_client,
+    now: Callable[[], datetime] = _utc_now,
+) -> dict[str, Any]:
+    """Durably submit configured document/model requests to OpenRouter batches."""
+    config_path = config_path.resolve()
+    config, plans, spec_digest = _build_batch_plan(config_path)
+    resolved_state_path = _batch_state_path(config, config_path, state_path)
+    with _exclusive_batch_claim(resolved_state_path, spec_digest):
+        if resolved_state_path.exists():
+            state = _load_batch_state(resolved_state_path, spec_digest=spec_digest)
+        else:
+            state = _new_batch_state(config_path, plans, spec_digest, now=now)
+            _write_batch_state(resolved_state_path, state)
+        _validate_state_plan(state, plans, config_path=config_path)
+
+        pending: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for batch_state, plan in zip(state["batches"], plans):
+            status = batch_state["submission_status"]
+            if status == "submitted":
+                continue
+            if status == "submitting":
+                raise RuntimeError(
+                    f"batch submission for {plan['model']} has an ambiguous prior outcome; reconcile it manually before retrying"
+                )
+            # Re-entering this explicit submit command authorizes a retry only
+            # for a provider-confirmed rejection under this exact spec digest.
+            pending.append((batch_state, plan))
+
+        # Construction and capability validation happen before any durable
+        # ``submitting`` transition.  A local setup failure remains retryable.
+        prepared: list[tuple[dict[str, Any], dict[str, Any], Callable[..., Any]]] = []
+        for batch_state, plan in pending:
+            client = _client(client_factory, plan["model"], plan.get("provider_routing"))
+            submit = getattr(client, "submit_batch", None)
+            if not callable(submit):
+                raise TypeError("configured client does not support OpenRouter batch submission")
+            prepared.append((batch_state, plan, submit))
+
+        for batch_state, plan, submit in prepared:
+            attempted_at = _timestamp(now)
+            batch_state["submission_status"] = "submitting"
+            batch_state["submission_attempted_at"] = attempted_at
+            state["updated_at"] = attempted_at
+            _write_batch_state(resolved_state_path, state)
+
+            try:
+                observation = submit(plan["provider_spec"]["requests"], endpoint=_BATCH_ENDPOINT)
+            except OpenRouterBatchRejectedError as exc:
+                batch_state["submission_status"] = "rejected"
+                batch_state["rejection_history"].append(
+                    {
+                        "type": type(exc).__name__,
+                        "status_code": exc.status_code,
+                        "code": exc.code,
+                        "rejected_at": _timestamp(now),
+                    }
+                )
+                state["updated_at"] = _timestamp(now)
+                _write_batch_state(resolved_state_path, state)
+                raise
+            except Exception as exc:
+                _persist_ambiguity(resolved_state_path, state, batch_state, exc, now=now)
+                raise
+
+            try:
+                observation = _mapping(observation, "OpenRouter batch submission response")
+                _require_finite_json(observation, "OpenRouter batch submission response")
+                provider_batch_id = observation.get("id")
+                if not isinstance(provider_batch_id, str) or not provider_batch_id:
+                    raise OpenRouterBatchSubmissionAmbiguousError(
+                        "OpenRouter batch submission returned no provider batch id"
+                    )
+                fields = _provider_batch_fields(observation)
+            except Exception as exc:
+                ambiguous = exc if isinstance(exc, OpenRouterBatchSubmissionAmbiguousError) else OpenRouterBatchSubmissionAmbiguousError(
+                    "OpenRouter batch submission returned an invalid success object"
+                )
+                _persist_ambiguity(resolved_state_path, state, batch_state, ambiguous, now=now)
+                raise ambiguous from exc
+
+            batch_state["provider_batch_id"] = provider_batch_id
+            batch_state["submission_status"] = "submitted"
+            batch_state["submitted_at"] = _timestamp(now)
+            batch_state.update(fields)
+            state["updated_at"] = batch_state["submitted_at"]
+            # If this replace fails after POST, the prior durable marker stays
+            # ``submitting`` and therefore prevents a blind retry.
+            _write_batch_state(resolved_state_path, state)
+    state["state_path"] = str(resolved_state_path)
+    return state
+
+
+def _observe_openrouter_batches(
+    config_path: Path,
+    *,
+    state_path: Path | None,
+    client_factory: ClientFactory,
+    now: Callable[[], datetime],
+) -> tuple[dict[str, Any], Path, list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    config_path = config_path.resolve()
+    config, plans, spec_digest = _build_batch_plan(config_path)
+    resolved_state_path = _batch_state_path(config, config_path, state_path)
+    observations: dict[str, dict[str, Any]] = {}
+    with _exclusive_batch_claim(resolved_state_path, spec_digest):
+        state = _load_batch_state(resolved_state_path, spec_digest=spec_digest)
+        _validate_state_plan(state, plans, config_path=config_path)
+        prepared: list[tuple[dict[str, Any], dict[str, Any], str, Callable[..., Any]]] = []
+        for batch_state, plan in zip(state["batches"], plans):
+            provider_batch_id = batch_state.get("provider_batch_id")
+            if batch_state.get("submission_status") != "submitted" or not isinstance(provider_batch_id, str):
+                raise RuntimeError(f"batch for {plan['model']} has no safely persisted provider id")
+            client = _client(client_factory, plan["model"], plan.get("provider_routing"))
+            observe = getattr(client, "observe_batch", None)
+            if not callable(observe):
+                raise TypeError("configured client does not support OpenRouter batch observation")
+            prepared.append((batch_state, plan, provider_batch_id, observe))
+        for batch_state, plan, provider_batch_id, observe in prepared:
+            observation = _mapping(observe(provider_batch_id), "OpenRouter batch observation")
+            _require_finite_json(observation, "OpenRouter batch observation")
+            if observation.get("id") != provider_batch_id:
+                raise ValueError(f"OpenRouter batch observation id changed for {plan['model']}")
+            observed_at = _timestamp(now)
+            batch_state.update(_provider_batch_fields(observation))
+            batch_state["observed_at"] = observed_at
+            state["updated_at"] = observed_at
+            _write_batch_state(resolved_state_path, state)
+            observations[provider_batch_id] = observation
+    state["state_path"] = str(resolved_state_path)
+    return state, resolved_state_path, plans, observations
+
+
+def observe_openrouter_batch(
+    config_path: Path,
+    *,
+    state_path: Path | None = None,
+    client_factory: ClientFactory = create_client,
+    now: Callable[[], datetime] = _utc_now,
+) -> dict[str, Any]:
+    """Refresh and persist provider status for every submitted model batch."""
+    state, _, _, _ = _observe_openrouter_batches(
+        config_path,
+        state_path=state_path,
+        client_factory=client_factory,
+        now=now,
+    )
+    return state
+
+
+def _reconcile_batch_results(
+    results: object,
+    expected: Mapping[str, Any],
+    *,
+    model: str,
+) -> dict[str, dict[str, Any]]:
+    _require_finite_json(results, f"OpenRouter batch results for {model}")
+    if not isinstance(results, list):
+        raise ValueError(f"completed OpenRouter batch for {model} omitted results")
+    indexed: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(results):
+        if not isinstance(item, dict):
+            raise ValueError(f"OpenRouter batch result {index} for {model} is not a mapping")
+        custom_id = item.get("custom_id")
+        if not isinstance(custom_id, str) or not custom_id:
+            raise ValueError(f"OpenRouter batch result {index} for {model} omitted custom_id")
+        if custom_id in indexed:
+            raise ValueError(f"OpenRouter batch for {model} returned duplicate custom_id: {custom_id}")
+        indexed[custom_id] = item
+    expected_ids = set(expected)
+    actual_ids = set(indexed)
+    missing = sorted(expected_ids - actual_ids)
+    unexpected = sorted(actual_ids - expected_ids)
+    if missing or unexpected:
+        raise ValueError(
+            f"OpenRouter batch result ids did not reconcile for {model}: missing={missing}, unexpected={unexpected}"
+        )
+    return indexed
+
+
+def _closed_provider_error(value: object) -> dict[str, Any]:
+    """Retain machine-actionable fields without provider-controlled messages."""
+    _require_finite_json(value, "OpenRouter provider error")
+    if not isinstance(value, dict):
+        return {"type": "provider_error", "code": None, "status_code": None}
+    code = value.get("code")
+    status_code = value.get("status_code")
+    error_type = value.get("type")
+    return {
+        "type": _safe_provider_identifier(error_type) or "provider_error",
+        "code": _safe_provider_identifier(code),
+        "status_code": status_code if type(status_code) is int else None,
+    }
+
+
+def _safe_provider_identifier(value: object) -> str | None:
+    if not isinstance(value, (str, int)):
+        return None
+    normalized = str(value)
+    if len(normalized) > 64 or re.fullmatch(r"[A-Za-z0-9._-]+", normalized) is None:
+        return None
+    return normalized
+
+
+def _batch_generation_record(
+    item: Mapping[str, Any],
+    *,
+    response_schema: Mapping[str, Any],
+) -> dict[str, Any]:
+    _require_finite_json(item, "OpenRouter batch result item")
+    provider_error = item.get("error")
+    if provider_error is not None:
+        return {
+            "usage": None,
+            "payload": None,
+            "error": {"type": "OpenRouterBatchItemError", "message": "provider returned an item-level error"},
+            "provider_error": _closed_provider_error(provider_error),
+        }
+    response = item.get("response")
+    if not isinstance(response, dict):
+        raise ValueError("OpenRouter batch result has neither response nor error")
+    status_code = response.get("status_code")
+    if type(status_code) is not int or not 200 <= status_code < 300:
+        return {
+            "usage": None,
+            "payload": None,
+            "error": {
+                "type": "OpenRouterBatchItemHTTPError",
+                "message": f"provider item returned HTTP {status_code}",
+            },
+            "provider_error": _closed_provider_error(response.get("body")),
+        }
+    body = _mapping(response.get("body"), "OpenRouter batch response body")
+    usage = usage_from_openai_block(body.get("usage"))
+    try:
+        choices = body["choices"]
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("choices must be a non-empty list")
+        message = _mapping(_mapping(choices[0], "choice").get("message"), "choice.message")
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("structured response content must be a non-empty string")
+        payload = _strict_json_loads(content, name="structured response content")
+        if not isinstance(payload, dict):
+            raise ValueError("structured response content must decode to an object")
+        _validate_payload(payload, response_schema, "generation payload")
+    except (KeyError, json.JSONDecodeError, ValueError) as exc:
+        return {
+            "usage": _usage_payload(usage),
+            "payload": None,
+            "error": _error_payload(exc),
+            "provider_error": None,
+        }
+    return {
+        "usage": _usage_payload(usage),
+        "payload": payload,
+        "error": None,
+        "provider_error": None,
+    }
+
+
+def collect_openrouter_batch(
+    config_path: Path,
+    *,
+    state_path: Path | None = None,
+    client_factory: ClientFactory = create_client,
+    now: Callable[[], datetime] = _utc_now,
+) -> dict[str, Any]:
+    """Collect completed batches, reconcile IDs, and locally admit results."""
+    config_path = config_path.resolve()
+    config = load_config(config_path)
+    state, resolved_state_path, plans, observations = _observe_openrouter_batches(
+        config_path,
+        state_path=state_path,
+        client_factory=client_factory,
+        now=now,
+    )
+    summary: dict[str, Any] = {
+        "state_path": str(resolved_state_path),
+        "ready": True,
+        "pending_batches": [],
+        "terminal_failures": [],
+        "written": 0,
+        "succeeded": 0,
+        "item_failed": 0,
+        "results": [],
+    }
+    for batch_state, plan in zip(state["batches"], plans):
+        provider_batch_id = batch_state["provider_batch_id"]
+        status = observations[provider_batch_id].get("status")
+        if status not in _BATCH_TERMINAL:
+            summary["ready"] = False
+            summary["pending_batches"].append(
+                {"model": plan["model"], "provider_batch_id": provider_batch_id, "status": status}
+            )
+        elif status != "completed":
+            summary["ready"] = False
+            summary["terminal_failures"].append(
+                {"model": plan["model"], "provider_batch_id": provider_batch_id, "status": status}
+            )
+    if summary["pending_batches"]:
+        # A nonterminal poll is observation only.  Reserving any canonical
+        # final path here would make the later completed collection conflict
+        # with immutable-artifact rules.
+        return summary
+
+    output_dir = _output_dir(config, config_path)
+    artifacts: list[tuple[Path, Mapping[str, Any]]] = []
+    for batch_state, plan in zip(state["batches"], plans):
+        provider_batch_id = batch_state["provider_batch_id"]
+        observation = observations[provider_batch_id]
+        status = observation.get("status")
+        if status != "completed":
+            continue
+        reconciled = _reconcile_batch_results(
+            observation.get("results"),
+            batch_state["custom_ids"],
+            model=plan["model"],
+        )
+        for custom_id, mapping in batch_state["custom_ids"].items():
+            generation = _batch_generation_record(
+                reconciled[custom_id],
+                response_schema=config["response_schema"],
+            )
+            record = {
+                "model": mapping["model"],
+                "document_id": mapping["document_id"],
+                "source_path": mapping["source_path"],
+                "source_frontmatter_stripped": mapping["source_frontmatter_stripped"],
+                "document_metadata": mapping["metadata"],
+                "provider_batch_id": provider_batch_id,
+                "custom_id": custom_id,
+                "request_digest": mapping["request_digest"],
+                "generation": generation,
+            }
+            result_path = Path(mapping["result_path"])
+            artifacts.append((result_path, record))
+            success = generation["error"] is None
+            summary["written"] += 1
+            summary["succeeded" if success else "item_failed"] += 1
+            summary["results"].append(
+                {
+                    "custom_id": custom_id,
+                    "document_id": mapping["document_id"],
+                    "model": mapping["model"],
+                    "result_path": str(result_path),
+                    "success": success,
+                }
+            )
+    manifest_path = output_dir / "batch-manifest.json"
+    summary["manifest_path"] = str(manifest_path)
+    artifacts.append(
+        (
+            manifest_path,
+            {"kind": "structured_document_bakeoff/openrouter_batch_manifest/v1", **summary},
+        )
+    )
+    for artifact_path, payload in artifacts:
+        _verify_immutable_compatible(artifact_path, payload)
+    for artifact_path, payload in artifacts:
+        _write_json_immutable(artifact_path, payload)
+    return summary
 
 
 def _judge_record(
@@ -425,8 +1448,13 @@ def judge_existing(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True, type=Path, help="YAML bakeoff configuration")
-    parser.add_argument("--dry-run", action="store_true", help="Validate configuration and source without model calls")
-    parser.add_argument("--judge-existing", type=Path, metavar="RESULTS_DIR", help="Retry failed or missing judge calls from existing result JSON")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--dry-run", action="store_true", help="Validate configuration and source without model calls")
+    mode_group.add_argument("--judge-existing", type=Path, metavar="RESULTS_DIR", help="Retry failed or missing judge calls from existing result JSON")
+    mode_group.add_argument("--batch-submit", action="store_true", help="Submit configured documents through the OpenRouter Batch API")
+    mode_group.add_argument("--batch-observe", action="store_true", help="Refresh durable OpenRouter batch state")
+    mode_group.add_argument("--batch-collect", action="store_true", help="Collect and locally validate completed OpenRouter batch results")
+    parser.add_argument("--batch-state", type=Path, help="Optional durable batch-state path (defaults under output_dir)")
     return parser.parse_args(argv)
 
 
@@ -434,12 +1462,37 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         config = load_config(args.config)
-        source_path, _ = read_source(config, args.config.resolve())
+        if args.batch_state is not None and not (args.batch_submit or args.batch_observe or args.batch_collect):
+            raise ValueError("--batch-state requires a batch execution mode")
         if args.dry_run:
-            if args.judge_existing is not None:
-                raise ValueError("--dry-run cannot be combined with --judge-existing")
-            print(json.dumps({"source_path": str(source_path), "models": [item["id"] for item in config["models"]], "judge": config.get("judge", {}).get("model")}, indent=2))
+            if "documents" in config:
+                _, plans, spec_digest = _build_batch_plan(args.config)
+                payload = {
+                    "documents": [item["id"] for item in config["documents"]],
+                    "models": [item["id"] for item in config["models"]],
+                    "requests": sum(len(item["provider_spec"]["requests"]) for item in plans),
+                    "spec_digest": spec_digest,
+                    "judge": config.get("judge", {}).get("model"),
+                }
+            else:
+                source_path, _ = read_source(config, args.config.resolve())
+                payload = {
+                    "source_path": str(source_path),
+                    "models": [item["id"] for item in config["models"]],
+                    "judge": config.get("judge", {}).get("model"),
+                }
+            print(json.dumps(payload, indent=2))
             return 0
+        if args.batch_submit:
+            print(json.dumps(submit_openrouter_batch(args.config, state_path=args.batch_state), indent=2))
+            return 0
+        if args.batch_observe:
+            print(json.dumps(observe_openrouter_batch(args.config, state_path=args.batch_state), indent=2))
+            return 0
+        if args.batch_collect:
+            summary = collect_openrouter_batch(args.config, state_path=args.batch_state)
+            print(json.dumps(summary, indent=2))
+            return 0 if summary["ready"] and not summary["terminal_failures"] and summary["item_failed"] == 0 else 3
         if args.judge_existing is not None:
             print(json.dumps(judge_existing(args.config, args.judge_existing), indent=2))
             return 0
@@ -447,7 +1500,16 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(manifest, indent=2))
         return 0
     except Exception as exc:
-        print(f"structured document bakeoff failed: {exc}", file=sys.stderr)
+        if args.batch_submit or args.batch_observe or args.batch_collect:
+            print(
+                json.dumps(
+                    {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}},
+                    ensure_ascii=False,
+                ),
+                file=sys.stderr,
+            )
+        else:
+            print(f"structured document bakeoff failed: {exc}", file=sys.stderr)
         return 2
 
 
