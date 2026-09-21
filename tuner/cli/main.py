@@ -8,6 +8,7 @@ Used by: tuner.py wrapper, python -m tuner
 
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -40,6 +41,38 @@ class EnvironmentFileSupportError(ProjectError):
     code = "ENV_FILE_SUPPORT_UNAVAILABLE"
 
 
+class PrivateConfigPathError(ProjectError):
+    """A private data command selected a config through a redirected path."""
+
+    code = "PRIVATE_CONFIG_PATH_INVALID"
+
+
+def _reject_redirected_private_config(path: Path) -> Path:
+    """Reject symlink/junction/reparse components before project discovery."""
+
+    lexical = Path(os.path.abspath(os.fspath(path)))
+    parts = lexical.parts
+    if not parts:
+        raise PrivateConfigPathError("Private config path is invalid")
+    current = Path(parts[0])
+    for index in range(len(parts)):
+        if index:
+            current = current / parts[index]
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            break
+        except OSError as error:
+            raise PrivateConfigPathError("Private config path is unavailable") from error
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or getattr(info, "st_file_attributes", 0) & 0x400
+            or (index < len(parts) - 1 and not stat.S_ISDIR(info.st_mode))
+        ):
+            raise PrivateConfigPathError("Private config path is redirected")
+    return lexical
+
+
 def _primary_config_path(args, invocation_cwd: Path) -> Path | None:
     """Return the first command-specific config useful for project discovery."""
 
@@ -62,6 +95,8 @@ def _primary_config_path(args, invocation_cwd: Path) -> Path | None:
         path = Path(raw)
         if not path.is_absolute():
             path = invocation_cwd / path
+        if getattr(args, "command", None) == "prepare-dataset" and name == "ml_config":
+            path = _reject_redirected_private_config(path)
         path = path.resolve()
         # Discovery walks directories. For a not-yet-created config, begin at
         # its declaring directory rather than treating its filename as a root.
@@ -159,7 +194,7 @@ def _print_project_error(error: ProjectError, *, json_mode: bool) -> None:
         print(f"Error [{error.code}]: {error}", file=sys.stderr)
 
 
-def _print_ingestion_bootstrap_error() -> None:
+def _print_private_data_bootstrap_error() -> None:
     print(json.dumps({
         "success": False,
         "status": "failed",
@@ -225,16 +260,16 @@ def main(argv=None):
         sys.exit(130)
 
     except ProjectError as e:
-        if getattr(args, "command", None) == "ingest":
-            _print_ingestion_bootstrap_error()
+        if getattr(args, "command", None) in {"ingest", "prepare-dataset"}:
+            _print_private_data_bootstrap_error()
             sys.exit(1)
         _print_project_error(e, json_mode=bool(getattr(args, "json", False)))
         sys.exit(1)
 
     except Exception as e:
         # Catch-all for unexpected errors
-        if getattr(args, "command", None) == "ingest":
-            _print_ingestion_bootstrap_error()
+        if getattr(args, "command", None) in {"ingest", "prepare-dataset"}:
+            _print_private_data_bootstrap_error()
             sys.exit(1)
         if bool(getattr(args, "json", False)):
             print(json.dumps({

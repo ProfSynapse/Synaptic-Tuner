@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -22,6 +23,33 @@ from typing import Dict, Any, Optional
 
 
 RUNTIME_V1_PROJECTION_SCHEMA = "synaptic-sft-trainer-projection/v1"
+_SHA256_VALUE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_IMMUTABLE_IMAGE_VALUE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+
+
+def runtime_profile_metadata(args: argparse.Namespace) -> dict[str, str] | None:
+    """Validate the all-or-none runtime profile inputs forwarded by local-run."""
+
+    fields = {
+        "name": getattr(args, "runtime_profile_name", None),
+        "profile_sha256": getattr(args, "runtime_profile_digest", None),
+        "inventory_sha256": getattr(args, "runtime_inventory_digest", None),
+        "image": getattr(args, "runtime_image", None),
+    }
+    present = [value is not None for value in fields.values()]
+    if any(present) and not all(present):
+        raise ValueError("Runtime profile flags must be supplied together")
+    if not all(present):
+        return None
+    if not isinstance(fields["name"], str) or not fields["name"]:
+        raise ValueError("Runtime profile name is invalid")
+    if not _SHA256_VALUE.fullmatch(str(fields["profile_sha256"])):
+        raise ValueError("Runtime profile digest is invalid")
+    if not _SHA256_VALUE.fullmatch(str(fields["inventory_sha256"])):
+        raise ValueError("Runtime inventory digest is invalid")
+    if not _IMMUTABLE_IMAGE_VALUE.fullmatch(str(fields["image"])):
+        raise ValueError("Runtime profile image is not immutable")
+    return {key: str(value) for key, value in fields.items()}
 
 
 def _runtime_v1_projection_requested(args: argparse.Namespace) -> bool:
@@ -33,6 +61,12 @@ def _runtime_v1_projection_requested(args: argparse.Namespace) -> bool:
     present = [getattr(args, name, None) is not None for name in names]
     if any(present) and not all(present):
         raise ValueError("Runtime v1 projection flags must be supplied together")
+    raw_names = ("runtime_v1_dataset_schema", "runtime_v1_dataset_format")
+    raw_present = [getattr(args, name, None) is not None for name in raw_names]
+    if any(raw_present) and not all(raw_present):
+        raise ValueError("Runtime v1 raw dataset projection flags must be supplied together")
+    if any(raw_present) and not all(present):
+        raise ValueError("Runtime v1 raw dataset projection requires the base projection flags")
     return all(present)
 
 
@@ -51,12 +85,18 @@ def build_runtime_v1_projection(
 
     if not _runtime_v1_projection_requested(args):
         return None
-    dataset_path = Path(config.dataset.local_file).resolve(strict=True)
+    supplied_dataset_path = str(config.dataset.local_file)
+    if re.fullmatch(r"/proc/self/fd/[1-9][0-9]*", supplied_dataset_path):
+        dataset_path = Path(supplied_dataset_path)
+        if not dataset_path.is_file():
+            raise ValueError("Runtime v1 retained dataset descriptor is unavailable")
+    else:
+        dataset_path = Path(supplied_dataset_path).resolve(strict=True)
     dataset_digest = _sha256_regular_file(dataset_path)
     if dataset_digest != args.runtime_v1_dataset_digest:
         raise ValueError("Runtime v1 dataset digest does not match the executed input")
     effective_max_steps = getattr(config.training, "max_steps", None) or -1
-    return {
+    projection = {
         "schema_version": RUNTIME_V1_PROJECTION_SCHEMA,
         "workload_fingerprint": args.runtime_v1_workload_fingerprint,
         "configuration_revision": args.runtime_v1_configuration_revision,
@@ -98,6 +138,26 @@ def build_runtime_v1_projection(
         },
         "status": "completed",
     }
+    dataset_format = getattr(args, "runtime_v1_dataset_format", None)
+    if dataset_format is not None:
+        projection["dataset"]["schema_version"] = args.runtime_v1_dataset_schema
+        projection["dataset"]["format"] = dataset_format
+        projection["training"].update(
+            {
+                "completion_only_loss": config.training.completion_only_loss,
+                "assistant_only_loss": config.training.assistant_only_loss,
+                "use_preassigned_splits": config.dataset.use_preassigned_splits,
+            }
+        )
+        if dataset_format == "messages":
+            projection["training"].update(
+                {
+                    "prompt_render": config.training.prompt_render,
+                    "packing": False,
+                    "require_memory_efficient_loss": config.training.require_memory_efficient_loss,
+                }
+            )
+    return projection
 
 
 def write_runtime_v1_projection_atomic(
@@ -398,6 +458,7 @@ def build_training_lineage(
         training_type="SFT",
         model_info={
             "base_model": config.model.model_name,
+            "revision": config.model.model_revision,
             "max_seq_length": config.model.max_seq_length,
             "load_in_4bit": config.model.load_in_4bit,
             "dtype": str(config.model.dtype),
@@ -479,6 +540,10 @@ def build_training_lineage(
             }
         )
 
+    profile_metadata = runtime_profile_metadata(args)
+    if profile_metadata is not None:
+        lineage["runtime_profile"] = profile_metadata
+
     return enrich_training_lineage(lineage, args=args)
 
 
@@ -493,7 +558,9 @@ def _parse_init_lora_weights(value: str) -> bool | str:
 
 def parse_args(argv=None):
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="SFT Training for RTX 3090")
+    parser = argparse.ArgumentParser(
+        description="SFT Training for RTX 3090", allow_abbrev=False
+    )
 
     # Model configuration
     parser.add_argument("--model-size", type=str, choices=["3b", "7b", "13b", "20b"],
@@ -619,7 +686,14 @@ def parse_args(argv=None):
     # mean False. --aux-head-prompt-render is grouped here for user intent but
     # sets config.training.prompt_render — the render mode lives on
     # SFTTrainingConfig, not AuxHeadConfig (it replaces the masking region).
-    parser.set_defaults(aux_head_enabled=None, aux_head_freeze_base=None)
+    parser.set_defaults(
+        aux_head_enabled=None,
+        aux_head_freeze_base=None,
+        completion_only_loss=None,
+        assistant_only_loss=None,
+        use_preassigned_splits=None,
+        require_memory_efficient_loss=None,
+    )
     parser.add_argument("--aux-head-enabled", action="store_true", dest="aux_head_enabled",
                         help="Enable the auxiliary scalar readout head (AuxHeadConfig.enabled=true).")
     parser.add_argument("--no-aux-head-enabled", action="store_false", dest="aux_head_enabled",
@@ -660,6 +734,24 @@ def parse_args(argv=None):
                        help="Path to local dataset file (overrides HF dataset)")
     parser.add_argument("--split-dataset", action="store_true",
                        help="Create train/validation split")
+    parser.add_argument("--completion-only-loss", action="store_true", dest="completion_only_loss")
+    parser.add_argument("--no-completion-only-loss", action="store_false", dest="completion_only_loss")
+    parser.add_argument("--assistant-only-loss", action="store_true", dest="assistant_only_loss")
+    parser.add_argument("--no-assistant-only-loss", action="store_false", dest="assistant_only_loss")
+    parser.add_argument("--use-preassigned-splits", action="store_true", dest="use_preassigned_splits")
+    parser.add_argument("--no-use-preassigned-splits", action="store_false", dest="use_preassigned_splits")
+    parser.add_argument(
+        "--require-memory-efficient-loss",
+        action="store_true",
+        dest="require_memory_efficient_loss",
+        help="Fail closed unless Unsloth's memory-efficient causal-LM loss is active.",
+    )
+    parser.add_argument(
+        "--no-require-memory-efficient-loss",
+        action="store_false",
+        dest="require_memory_efficient_loss",
+        help=argparse.SUPPRESS,
+    )
 
     # W&B tracking
     parser.add_argument("--wandb", action="store_true",
@@ -713,6 +805,18 @@ def parse_args(argv=None):
                        help=argparse.SUPPRESS)
     parser.add_argument("--runtime-v1-dataset-digest", type=str,
                        help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-dataset-schema", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-dataset-format", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-profile-name", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-profile-digest", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-inventory-digest", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-image", type=str,
+                       help=argparse.SUPPRESS)
 
     # UI options
     parser.add_argument("--no-dashboard", action="store_true",
@@ -726,6 +830,7 @@ def parse_args(argv=None):
 def run(args: argparse.Namespace):
     """Execute training with the provided CLI arguments."""
     runtime_v1_requested = _runtime_v1_projection_requested(args)
+    resolved_runtime_profile = runtime_profile_metadata(args)
     if runtime_v1_requested and (
         args.model_snapshot is None
         or args.model_cache_dir is None
@@ -744,6 +849,8 @@ def run(args: argparse.Namespace):
         "logs_dir": None,
         "manifest_path": None,
         "config_path": args.config,
+        "lineage_path": None,
+        "runtime_profile": resolved_runtime_profile,
     }
 
     # Load configuration
@@ -964,6 +1071,14 @@ def run(args: argparse.Namespace):
         config.dataset.dataset_file = args.dataset_file
     if args.local_file:
         config.dataset.local_file = args.local_file
+    if args.completion_only_loss is not None:
+        config.training.completion_only_loss = args.completion_only_loss
+    if args.assistant_only_loss is not None:
+        config.training.assistant_only_loss = args.assistant_only_loss
+    if args.use_preassigned_splits is not None:
+        config.dataset.use_preassigned_splits = args.use_preassigned_splits
+    if args.require_memory_efficient_loss is not None:
+        config.training.require_memory_efficient_loss = args.require_memory_efficient_loss
 
     # W&B setup
     if args.wandb:
@@ -1069,6 +1184,10 @@ def run(args: argparse.Namespace):
         model_snapshot=args.model_snapshot,
         require_local_snapshot=args.model_snapshot is not None,
     )
+    if config.training.require_memory_efficient_loss:
+        from src.model_loader import require_unsloth_memory_efficient_loss
+
+        require_unsloth_memory_efficient_loss(model)
 
     # Prefer the pretrained chat template when available; otherwise, apply a
     # family-specific fallback via Unsloth.
@@ -1106,7 +1225,6 @@ def run(args: argparse.Namespace):
         "chat_template_source": chat_template_name,
         "packing": False,
     }
-
     # aux_head: carry the configured per-row target column through preprocessing
     # only when the feature is enabled; None ⇒ dataset prep is byte-identical.
     aux_head_cfg = getattr(config, "aux_head", None)
@@ -1134,6 +1252,7 @@ def run(args: argparse.Namespace):
 
     # Materialize trainer-ready tokenized rows in-repo so cloud runs do not
     # depend on implicit TRL/Unsloth dataset preparation behavior.
+    dataset_preparation_metadata: dict[str, str] = {}
     train_dataset, eval_dataset = load_and_prepare_tokenized_dataset(
         dataset_name=config.dataset.dataset_name if not config.dataset.local_file else None,
         data_files=config.dataset.dataset_file if not config.dataset.local_file else None,
@@ -1148,7 +1267,34 @@ def run(args: argparse.Namespace):
         chat_template_kwargs=config.training.chat_template_kwargs,
         aux_target_field=aux_target_field,
         prompt_render=config.training.prompt_render,
+        assistant_only_loss_requested=config.training.assistant_only_loss,
+        aux_token_position=aux_head_cfg.token_position if aux_head_enabled else None,
+        use_preassigned_splits=getattr(config.dataset, "use_preassigned_splits", False),
+        preparation_metadata=dataset_preparation_metadata,
     )
+    prepared_dataset_format = dataset_preparation_metadata.get("dataset_format")
+    if prepared_dataset_format in {"raw_text", "messages"}:
+        preprocessing_metadata["dataset_format"] = prepared_dataset_format
+    if prepared_dataset_format == "messages":
+        if (
+            config.training.packing is not False
+            or config.training.completion_only_loss is not True
+            or config.training.assistant_only_loss is not False
+            or config.training.prompt_render != "prompt_completion"
+        ):
+            raise ValueError(
+                "SFT_AUTHORITATIVE_MESSAGES_CONFIG_INVALID: authoritative message "
+                "rows require packing=false, completion_only_loss=true, "
+                "assistant_only_loss=false, and prompt_render='prompt_completion'."
+            )
+        if (
+            config.training.max_seq_length >= 32768
+            and config.training.require_memory_efficient_loss is not True
+        ):
+            raise ValueError(
+                "SFT_LONG_CONTEXT_LOSS_GUARD_REQUIRED: 32K authoritative message "
+                "SFT requires require_memory_efficient_loss=true."
+            )
     run_metadata["train_size"] = len(train_dataset)
     run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None
 
@@ -1280,6 +1426,19 @@ def run(args: argparse.Namespace):
     print("=" * 60 + "\n")
 
     if args.dry_run:
+        if resolved_runtime_profile is not None:
+            lineage = build_training_lineage(
+                config=config,
+                train_dataset=train_dataset,
+                eval_dataset=eval_dataset,
+                trainer=None,
+                run_dir=run_dir,
+                args=args,
+                preprocessing_metadata=preprocessing_metadata,
+            )
+            lineage["dry_run"] = True
+            actual_lineage_path = save_training_lineage(lineage, run_dir)
+            run_metadata["lineage_path"] = str(actual_lineage_path)
         print("[OK] Dry run completed. Exiting without training.")
         return run_metadata
 

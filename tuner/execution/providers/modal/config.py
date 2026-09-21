@@ -110,6 +110,7 @@ MODAL_LOCKED_FILES = MappingProxyType({
     "dependency_lock": "requirements/modal-launcher-v1.lock",
     "deployment_wrapper": "tuner/execution/providers/modal/coordinator_deployment.py",
     "modal_mounted_io": "tuner/execution/providers/modal/mounted_io.py",
+    "modal_prepared_input": "tuner/execution/providers/modal/prepared_input.py",
     "modal_runtime": "tuner/execution/providers/modal/runtime.py",
     "modal_worker_ports": "tuner/execution/providers/modal/worker_ports.py",
     "modal_worker_source": "tuner/execution/providers/modal/worker_source.py",

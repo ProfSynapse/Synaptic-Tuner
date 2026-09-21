@@ -31,6 +31,48 @@ DEFAULT_CHAT_TEMPLATE = """{% for message in messages %}
 {% endfor %}"""
 
 
+MEMORY_EFFICIENT_LOSS_REQUIRED = "SFT_MEMORY_EFFICIENT_LOSS_REQUIRED"
+
+
+def require_unsloth_memory_efficient_loss(model, *, loss_mapping=None) -> None:
+    """Reject stock/fallback causal-LM loss implementations.
+
+    Qwen3.5 historically resolved ``ForConditionalGeneration`` to the stock
+    Transformers loss even when Unsloth had patched ``ForCausalLM``. At long
+    sequence lengths that fallback can materialize the full fp32 logits tensor.
+    The identity check proves that this model resolves to the same reviewed
+    Unsloth loss installed in the runtime mapping; names alone are insufficient.
+    """
+
+    if loss_mapping is None:
+        try:
+            from transformers.loss.loss_utils import LOSS_MAPPING
+        except (ImportError, AttributeError) as exc:
+            raise RuntimeError(
+                f"{MEMORY_EFFICIENT_LOSS_REQUIRED}: loss mapping is unavailable"
+            ) from exc
+        loss_mapping = LOSS_MAPPING
+    try:
+        canonical = loss_mapping.get("ForCausalLM")
+        selected = model.loss_function
+    except (AttributeError, TypeError) as exc:
+        raise RuntimeError(
+            f"{MEMORY_EFFICIENT_LOSS_REQUIRED}: model loss identity is unavailable"
+        ) from exc
+    module = getattr(selected, "__module__", "")
+    name = getattr(selected, "__name__", "")
+    if (
+        canonical is None
+        or selected is not canonical
+        or name != "UnslothForCausalLMLoss"
+        or not isinstance(module, str)
+        or not module.startswith(("unsloth.", "unsloth_zoo."))
+    ):
+        raise RuntimeError(
+            f"{MEMORY_EFFICIENT_LOSS_REQUIRED}: Unsloth causal-LM loss is not active"
+        )
+
+
 def _is_mistral_model(model_name: str) -> bool:
     """Detect if a model is a Mistral model based on name."""
     model_name_lower = model_name.lower()

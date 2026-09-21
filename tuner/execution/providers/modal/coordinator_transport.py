@@ -17,7 +17,7 @@ from .coordinator_effects import ModalEffectOutcome
 from .coordinator_launch import ModalLaunchEnvelope
 from .coordinator_staging import (
     ModalFoundationVolumeWriter, ModalStageMaterial, _claim_document,
-    modal_stage_provider_ref,
+    modal_stage_provider_ref, stage_claim_purpose,
 )
 from .coordinator_submit_preparation import prepare_modal_submit_dispatch
 from .facade import ExplicitModal154ReadFacade
@@ -110,6 +110,7 @@ class ModalFoundationHostTransport:
                 value.binding.deployment_bytes,
             ), value.control_volume_id, value.artifact_volume_id, value.key_ref,
             value.bundle, value.claim, value.claim_tag,
+            value.prepared_input_descriptor, value.prepared_input_source,
         )
         if material != value or material.binding != binding:
             raise ValueError("retained stage material mismatch")
@@ -121,7 +122,7 @@ class ModalFoundationHostTransport:
             raise ValueError("retained stage material is invalid")
         try:
             valid = self._stage_verifier.verify(
-                "modal-stage-claim/v2", material.claim, material.claim_tag,
+                stage_claim_purpose(material), material.claim, material.claim_tag,
                 material.key_ref,
             )
         except Exception:

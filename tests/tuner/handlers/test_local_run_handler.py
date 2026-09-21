@@ -8,6 +8,10 @@ No docker, no network, no filesystem side effects (tmp_path OK).
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import sys
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -20,6 +24,7 @@ from tuner.handlers.local_run_handler import (
     CopyEntry,
     LocalRunError,
     UserSpec,
+    _DEFAULT_COPY_RUNTIME_SUPPORT,
     _build_bash_wrapper,
     _build_persistent_docker_run_args,
     _cache_mount_args,
@@ -62,8 +67,10 @@ def _host_fixture(tmp_path):
     project = tmp_path / "host"
     (engine / "Trainers" / "sft").mkdir(parents=True)
     (engine / "Trainers" / "sft" / "train_sft.py").write_text("", encoding="utf-8")
+    (engine / "Trainers" / "shared").mkdir()
     (engine / "shared").mkdir()
     (engine / "tuner").mkdir()
+    (engine / "synaptic_tuner").mkdir()
     (project / "experiments").mkdir(parents=True)
     (project / "data").mkdir()
     (project / "data" / "input.jsonl").write_text('{"prompt":"x"}\n', encoding="utf-8")
@@ -1074,9 +1081,22 @@ class TestEmbeddedProjectRuntimeLayout:
         commands = [call.args[0] for call in check_mock.call_args_list]
         copy_commands = [command for command in commands if command[:2] == ["docker", "cp"]]
         assert any(command[-1].endswith(":/workspace/engine/Trainers/sft") for command in copy_commands)
+        assert any(command[-1].endswith(":/workspace/engine/Trainers/shared") for command in copy_commands)
+        assert any(command[-1].endswith(":/workspace/engine/synaptic_tuner") for command in copy_commands)
         assert any(command[-1].endswith(":/workspace/project/data/input.jsonl") for command in copy_commands)
         chmod = next(command for command in commands if "chmod" in command)
         assert chmod[-2:] == ["/workspace/engine", "/workspace/project"]
+        writable_roots = [
+            command for command in commands
+            if command[:7] == ["docker", "exec", "-u", "root", "container", "chmod", "-R"]
+            and command[7] == "a+rwX"
+        ]
+        assert writable_roots == [[
+            "docker", "exec", "-u", "root", "container", "chmod", "-R", "a+rwX",
+            "/workspace/artifacts", "/workspace/state", "/workspace/tracking",
+            "/workspace/cache", "/workspace/tmp",
+        ]]
+        assert not any("chown" in command for command in commands)
         assert not any("scratch" in part for command in commands for part in command)
 
     def test_nested_config_canonicalizes_windows_copy_dataset_once(self, tmp_path):
@@ -1086,8 +1106,10 @@ class TestEmbeddedProjectRuntimeLayout:
         config_dir = config_root / "nested" / "deeper"
         dataset = project / "data files" / "data set.jsonl"
         (engine / "Trainers" / "sft").mkdir(parents=True)
+        (engine / "Trainers" / "shared").mkdir()
         (engine / "shared").mkdir()
         (engine / "tuner").mkdir()
+        (engine / "synaptic_tuner").mkdir()
         config_dir.mkdir(parents=True)
         dataset.parent.mkdir()
         expected_bytes = b'{"id":"canonical"}\n'
@@ -1162,6 +1184,80 @@ class TestEmbeddedProjectRuntimeLayout:
             "docker", "exec", "-u", "root", "container", "chmod", "-R", "a-w",
             "/workspace/engine", "/workspace/project",
         ]
+
+    def test_standalone_copy_mode_does_not_require_an_image_named_user(self, tmp_path):
+        context = ProjectContext.standalone(engine_root=tmp_path)
+        (tmp_path / "shared").mkdir()
+        handler = LocalRunHandler(context=context)
+        entry = CopyEntry(tmp_path / "shared", "/workspace/repo/shared", "engine")
+
+        with patch.object(handler, "_check") as check_mock:
+            handler._copy_into_container("container", [Path("shared")], copy_entries=[entry])
+
+        commands = [call.args[0] for call in check_mock.call_args_list]
+        assert [
+            "docker", "exec", "-u", "root", "container", "chmod", "-R", "a+rwX", "/workspace/repo"
+        ] in commands
+        assert not any("chown" in command for command in commands)
+
+    def test_default_copy_runtime_manifest_bootstraps_from_an_isolated_tree(self, tmp_path):
+        """The declared closure must not fall back to this checkout or site packages."""
+
+        repo_root = Path(__file__).resolve().parents[3]
+        staged_root = tmp_path / "staged"
+        members = (Path("Trainers/sft"), *_DEFAULT_COPY_RUNTIME_SUPPORT)
+        for relative in members:
+            destination = staged_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(repo_root / relative, destination)
+
+        bootstrap = r"""
+import importlib.util
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+modules = (
+    "Trainers.sft",
+    "Trainers.shared",
+    "shared",
+    "shared.env_bootstrap",
+    "tuner",
+    "synaptic_tuner",
+)
+for name in modules:
+    spec = importlib.util.find_spec(name)
+    if spec is None:
+        raise RuntimeError(f"missing staged module: {name}")
+    locations = list(spec.submodule_search_locations or ())
+    if spec.origin and spec.origin not in {"built-in", "frozen"}:
+        locations.append(spec.origin)
+    if not locations or any(
+        not Path(location).resolve().is_relative_to(root) for location in locations
+    ):
+        raise RuntimeError(f"module escaped staged closure: {name}")
+
+import tuner
+import synaptic_tuner
+from shared import env_bootstrap
+
+for module in (tuner, synaptic_tuner, env_bootstrap):
+    if not Path(module.__file__).resolve().is_relative_to(root):
+        raise RuntimeError(f"import escaped staged closure: {module.__name__}")
+"""
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(staged_root)
+        environment["PYTHONNOUSERSITE"] = "1"
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", bootstrap, str(staged_root)],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
 
     def test_host_mode_rejects_source_root_output(self, tmp_path):
         context, config = _host_fixture(tmp_path)

@@ -143,6 +143,47 @@ def test_settings_parse_real_contracts_and_return_owned_values():
     assert settings.canonical_bytes == canonical_bytes(document)
 
 
+def test_settings_accept_content_addressed_prepared_dataset_path():
+    document = _document()
+    digest = "e" * 64
+    document["dataset_project_path"] = f"private/dataset-{digest}"
+    document["training_input"]["dataset"]["ref"] = (
+        f"prepared://sha256/{digest}"
+    )
+
+    settings = ModalChatSettings.build(document)
+
+    assert settings.training_input.dataset.ref == f"prepared://sha256/{digest}"
+
+
+@pytest.mark.parametrize(
+    "dataset_ref",
+    [
+        "prepared://sha256/not-a-digest",
+        "prepared://sha256/" + "E" * 64,
+        "prepared://other/" + "e" * 64,
+    ],
+)
+def test_settings_reject_malformed_prepared_dataset_refs(dataset_ref):
+    document = _document()
+    document["dataset_project_path"] = "private/dataset-" + "e" * 64
+    document["training_input"]["dataset"]["ref"] = dataset_ref
+
+    with pytest.raises(ValueError):
+        ModalChatSettings.build(document)
+
+
+def test_settings_reject_prepared_path_for_a_different_digest():
+    document = _document()
+    document["dataset_project_path"] = "private/dataset-" + "e" * 64
+    document["training_input"]["dataset"]["ref"] = (
+        "prepared://sha256/" + "f" * 64
+    )
+
+    with pytest.raises(ValueError, match="content-addressed"):
+        ModalChatSettings.build(document)
+
+
 @pytest.mark.parametrize(
     "mutation",
     [

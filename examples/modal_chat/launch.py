@@ -66,6 +66,7 @@ _PURPOSES = frozenset(
         "source-lock-evidence/v1",
         "modal-deployment-evidence/v1",
         "modal-stage-claim/v2",
+        "modal-stage-claim/v3",
         "modal-launch-claim/v1",
         "modal-terminal/v1",
         "modal-log-metadata/v1",

@@ -421,6 +421,8 @@ def compose_modal_training_host(
             control_volume_id,
             artifact_volume_id,
             stage_key_ref,
+            private_dataset_bytes=resolver.private_dataset_bytes,
+            prepared_input_source=resolver.prepared_input_source,
         )
         host = compose_modal_chat_host(
             preparation=preparation,

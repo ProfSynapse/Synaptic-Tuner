@@ -479,6 +479,45 @@ def _join_path(root: str, *parts: str) -> str:
     return "/".join((root.rstrip("/"), *(part.strip("/") for part in parts)))
 
 
+def _expected_dataset_path(
+    dataset: object, normalized: dict[str, str], reported: object,
+) -> str | None:
+    if not isinstance(dataset, dict):
+        return None
+    ref = dataset.get("ref")
+    if isinstance(ref, str) and ref.startswith("project://"):
+        relative = ref.removeprefix("project://")
+        if not relative or "\\" in relative or "//" in relative or any(
+            part in {"", ".", ".."} for part in relative.split("/")
+        ):
+            return None
+        return _join_path(normalized["project"], relative)
+    match = (
+        re.fullmatch(r"prepared://sha256/([0-9a-f]{64})", ref)
+        if isinstance(ref, str)
+        else None
+    )
+    digest = dataset.get("content_digest")
+    size = dataset.get("size_bytes")
+    if (
+        match is None
+        or set(dataset) != {
+            "ref", "revision", "content_digest", "size_bytes", "format",
+        }
+        or dataset.get("revision") != match.group(1)
+        or dataset.get("format") != "syntunia-sft-row/v1"
+        or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        or type(size) is not int
+        or not 0 < size <= 2 * 1024 * 1024
+    ):
+        return None
+    retained = _normalized_path(reported)
+    if retained is None or re.fullmatch(r"/proc/self/fd/[1-9][0-9]*", retained) is None:
+        return None
+    return retained
+
+
 def _observed_runtime_roots(
     source_runtime: dict[str, object], environment: dict[str, object]
 ) -> dict[str, str] | None:
@@ -571,8 +610,12 @@ def _validate_evidence_paths_and_argv(
     if normalized is None:
         return False
     config = workload.document["configuration"]["document"]
-    relative_dataset = config["dataset"]["ref"].removeprefix("project://")
-    dataset_path = f"{normalized['project']}/{relative_dataset}"
+    reported_dataset_path = evidence["dataset"].get("resolved_path")
+    dataset_path = _expected_dataset_path(
+        config["dataset"], normalized, reported_dataset_path,
+    )
+    if dataset_path is None:
+        return False
     expected_outputs = {
         "run_dir": f"{normalized['state']}/runtime-v1-trainer/output/runtime-v1",
         "final_model_dir": f"{normalized['state']}/runtime-v1-trainer/output/runtime-v1/final_model",
@@ -583,10 +626,18 @@ def _validate_evidence_paths_and_argv(
         key: _normalized_path(value)
         for key, value in evidence["outputs"].items()
     }
+    dataset_ref = config["dataset"].get("ref")
+    descriptor_paths = [
+        item for item in evidence["argv"]
+        if isinstance(item, str) and item.startswith("/proc/self/fd/")
+    ]
+    prepared = isinstance(dataset_ref, str) and dataset_ref.startswith("prepared://")
     if (
         _normalized_path(evidence["dataset"]["resolved_path"]) != dataset_path
         or _normalized_path(evidence.get("cwd")) != normalized["tmp"]
         or outputs != expected_outputs
+        or (prepared and descriptor_paths != [dataset_path])
+        or (not prepared and descriptor_paths)
     ):
         return False
     interpreter = source_runtime.get("interpreter")
@@ -713,6 +764,74 @@ def _expected_trainer_argv(
     ))
     if sft["split_dataset"]:
         argv.append("--split-dataset")
+    prepared_sft_keys = {
+        "dataset_format",
+        "completion_only_loss",
+        "assistant_only_loss",
+        "use_preassigned_splits",
+    }
+    message_sft_keys = prepared_sft_keys | {
+        "prompt_render", "packing", "require_memory_efficient_loss",
+    }
+    present_prepared_keys = message_sft_keys & set(sft)
+    dataset_claims_raw = config["dataset"].get("format") == "syntunia-sft-row/v1"
+    dataset_claims_messages = (
+        config["dataset"].get("format") == "syntunia-sft-row/v2"
+    )
+    if dataset_claims_raw:
+        if (
+            present_prepared_keys != prepared_sft_keys
+            or sft.get("dataset_format") != "raw_text"
+        ):
+            return []
+        if (
+            config["dataset"].get("format") != "syntunia-sft-row/v1"
+            or sft.get("completion_only_loss") is not False
+            or sft.get("assistant_only_loss") is not False
+            or sft.get("use_preassigned_splits") is not True
+            or sft["split_dataset"] is not False
+        ):
+            return []
+        argv.extend(
+            (
+                "--no-completion-only-loss",
+                "--no-assistant-only-loss",
+                "--use-preassigned-splits",
+                "--runtime-v1-dataset-schema",
+                "syntunia-sft-row/v1",
+                "--runtime-v1-dataset-format",
+                "raw_text",
+            )
+        )
+    elif dataset_claims_messages:
+        if (
+            present_prepared_keys != message_sft_keys
+            or sft.get("dataset_format") != "messages"
+            or sft.get("completion_only_loss") is not True
+            or sft.get("assistant_only_loss") is not False
+            or sft.get("use_preassigned_splits") is not True
+            or sft.get("split_dataset") is not False
+            or sft.get("prompt_render") != "prompt_completion"
+            or sft.get("packing") is not False
+            or sft.get("require_memory_efficient_loss") is not True
+        ):
+            return []
+        argv.extend(
+            (
+                "--completion-only-loss",
+                "--no-assistant-only-loss",
+                "--use-preassigned-splits",
+                "--aux-head-prompt-render",
+                "prompt_completion",
+                "--require-memory-efficient-loss",
+                "--runtime-v1-dataset-schema",
+                "syntunia-sft-row/v2",
+                "--runtime-v1-dataset-format",
+                "messages",
+            )
+        )
+    elif present_prepared_keys:
+        return []
     argv.append("--load-in-4bit" if model["load_in_4bit"] else "--no-load-in-4bit")
     return argv
 
@@ -754,6 +873,30 @@ def _validate_embedded_trainer_lineage(
         "outputs": {"run_dir": evidence["outputs"]["run_dir"], "final_model_dir": evidence["outputs"]["final_model_dir"]},
         "status": "completed",
     }
+    if sft.get("dataset_format") in {"raw_text", "messages"}:
+        projection["dataset"].update(
+            {
+                "schema_version": config["dataset"]["format"],
+                "format": sft["dataset_format"],
+            }
+        )
+        projection["training"].update(
+            {
+                "completion_only_loss": sft["completion_only_loss"],
+                "assistant_only_loss": sft["assistant_only_loss"],
+                "use_preassigned_splits": sft["use_preassigned_splits"],
+            }
+        )
+        if sft.get("dataset_format") == "messages":
+            projection["training"].update(
+                {
+                    "prompt_render": sft["prompt_render"],
+                    "packing": sft["packing"],
+                    "require_memory_efficient_loss": sft[
+                        "require_memory_efficient_loss"
+                    ],
+                }
+            )
     model = trainer.get("model")
     dataset = trainer.get("dataset")
     training = trainer.get("training")

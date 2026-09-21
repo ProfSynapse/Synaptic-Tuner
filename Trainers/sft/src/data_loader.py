@@ -10,6 +10,10 @@ from preprocessing import (
     load_and_prepare_sft_dataset,
     sanitize_conversations as sanitize_prepared_conversations,
 )
+from shared.sft_preprocessing import (
+    detect_sft_record_format,
+    is_authoritative_preassigned_sft_record,
+)
 
 
 def _map_num_proc(num_proc: int) -> Optional[int]:
@@ -157,6 +161,10 @@ def load_and_prepare_tokenized_dataset(
     chat_template_kwargs: Optional[dict] = None,
     aux_target_field: Optional[str] = None,
     prompt_render: str = "full_conversation",
+    assistant_only_loss_requested: bool = False,
+    aux_token_position: str | int | None = None,
+    use_preassigned_splits: bool = False,
+    preparation_metadata: Optional[dict[str, str]] = None,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare dataset into explicit tokenized SFT features.
@@ -207,21 +215,76 @@ def load_and_prepare_tokenized_dataset(
         print(f"Filtered: {original_size} → {filtered_count} examples")
         print(f"Removed: {original_size - filtered_count} undesirable examples")
 
-    print("\nPreparing explicit encoded SFT features...")
-    train_dataset = load_and_prepare_sft_dataset(
-        dataset=raw_datasets,
-        tokenizer=tokenizer,
-        max_seq_length=max_seq_length,
-        loss_mask_mode=loss_mask_mode,
-        num_proc=num_proc,
-        include_text=False,
-        chat_template_kwargs=chat_template_kwargs,
-        aux_target_field=aux_target_field,
-        prompt_render=prompt_render,
-    )
+    def _prepare(dataset: Dataset) -> Dataset:
+        return load_and_prepare_sft_dataset(
+            dataset=dataset,
+            tokenizer=tokenizer,
+            max_seq_length=max_seq_length,
+            loss_mask_mode=loss_mask_mode,
+            num_proc=num_proc,
+            include_text=False,
+            chat_template_kwargs=chat_template_kwargs,
+            aux_target_field=aux_target_field,
+            prompt_render=prompt_render,
+            assistant_only_loss_requested=assistant_only_loss_requested,
+            aux_token_position=aux_token_position,
+            use_preassigned_splits=use_preassigned_splits,
+        )
 
+    print("\nPreparing explicit encoded SFT features...")
     eval_dataset = None
-    if split_dataset and test_size > 0:
+    records = [raw_datasets[index] for index in range(len(raw_datasets))]
+    formats = {detect_sft_record_format(record) for record in records}
+    authoritative = [is_authoritative_preassigned_sft_record(record) for record in records]
+    if any(authoritative) and not all(authoritative):
+        raise ValueError("Prepared authoritative rows cannot mix with legacy SFT rows.")
+    if not use_preassigned_splits and authoritative and all(authoritative):
+        raise ValueError(
+            "Authoritative prepared rows require explicit split consumption; set "
+            "dataset.use_preassigned_splits=true to consume them explicitly."
+        )
+    if use_preassigned_splits:
+        if split_dataset:
+            raise ValueError(
+                "dataset.use_preassigned_splits=true cannot be combined with "
+                "random split_dataset=true."
+            )
+        if not authoritative or not all(authoritative) or formats not in ({"raw_text"}, {"messages"}):
+            raise ValueError(
+                "Preassigned splits require a uniform authoritative prepared dataset."
+            )
+        if "split" not in raw_datasets.column_names:
+            raise ValueError(
+                "dataset.use_preassigned_splits=true requires every prepared row "
+                "to declare split='train' or split='validation'."
+            )
+        split_values = list(raw_datasets["split"])
+        invalid_splits = sorted(
+            {repr(value) for value in split_values if value not in {"train", "validation"}}
+        )
+        if invalid_splits:
+            raise ValueError(
+                "Preassigned splits must be exactly 'train' or 'validation'; "
+                f"found invalid values: {', '.join(invalid_splits)}."
+            )
+        train_rows = raw_datasets.filter(lambda row: row["split"] == "train")
+        validation_rows = raw_datasets.filter(lambda row: row["split"] == "validation")
+        if len(train_rows) == 0:
+            raise ValueError("Preassigned splits require a non-empty train split.")
+        if len(validation_rows) == 0:
+            raise ValueError(
+                "Preassigned splits require a non-empty declared validation split."
+            )
+        train_dataset = _prepare(train_rows)
+        eval_dataset = _prepare(validation_rows)
+        if preparation_metadata is not None:
+            preparation_metadata["dataset_format"] = next(iter(formats))
+        print(f"  Training set: {len(train_dataset)} examples")
+        print(f"  Validation set: {len(eval_dataset)} examples")
+    else:
+        train_dataset = _prepare(raw_datasets)
+
+    if not use_preassigned_splits and split_dataset and test_size > 0:
         print(f"\nCreating train/validation split ({1-test_size:.0%}/{test_size:.0%})")
         split = train_dataset.train_test_split(test_size=test_size, seed=42)
         train_dataset = split["train"]
@@ -229,7 +292,7 @@ def load_and_prepare_tokenized_dataset(
 
         print(f"  Training set: {len(train_dataset)} examples")
         print(f"  Validation set: {len(eval_dataset)} examples")
-    else:
+    elif not use_preassigned_splits:
         print(f"\nReady for training: {len(train_dataset)} examples")
 
     print("=" * 60)

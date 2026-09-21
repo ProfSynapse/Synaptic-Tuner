@@ -13,7 +13,7 @@ import stat
 import subprocess
 import sys
 import tarfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Mapping, Protocol, runtime_checkable
@@ -24,6 +24,17 @@ MAX_LINEAGE_BYTES = 4 * 1024 * 1024
 EXECUTION_SOURCE_SCHEMA = "synaptic-execution-source/v1"
 RUNTIME_SCHEMA = "synaptic-training-runtime/v1"
 _WORKLOAD_FINGERPRINT_DOMAIN = b"synaptic-training-workload/v1\0"
+_PREPARED_DATASET_REF_RE = re.compile(r"prepared://sha256/([0-9a-f]{64})")
+_MAX_PREPARED_DATASET_BYTES = 64 * 1024 * 1024
+# Reviewed Linux UAPI values from include/uapi/linux/memfd.h and fcntl.h.
+_LINUX_MFD_CLOEXEC = 0x0001
+_LINUX_MFD_ALLOW_SEALING = 0x0002
+_LINUX_F_ADD_SEALS = 1033
+_LINUX_F_GET_SEALS = 1034
+_LINUX_F_SEAL_SEAL = 0x0001
+_LINUX_F_SEAL_SHRINK = 0x0002
+_LINUX_F_SEAL_GROW = 0x0004
+_LINUX_F_SEAL_WRITE = 0x0008
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _MODEL_REVISION_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _MODEL_REF_PART_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
@@ -114,8 +125,26 @@ _SFT_KEYS = {
     "use_rslora",
     "init_lora_weights",
     "split_dataset",
+    "dataset_format",
+    "completion_only_loss",
+    "assistant_only_loss",
+    "use_preassigned_splits",
+    "prompt_render",
+    "packing",
+    "require_memory_efficient_loss",
 }
-_REQUIRED_SFT_KEYS = _SFT_KEYS - {"max_steps", "num_epochs"}
+_PREPARED_SFT_KEYS = {
+    "dataset_format",
+    "completion_only_loss",
+    "assistant_only_loss",
+    "use_preassigned_splits",
+}
+_MESSAGE_SFT_KEYS = _PREPARED_SFT_KEYS | {
+    "prompt_render",
+    "packing",
+    "require_memory_efficient_loss",
+}
+_REQUIRED_SFT_KEYS = _SFT_KEYS - {"max_steps", "num_epochs"} - _MESSAGE_SFT_KEYS
 
 
 class RuntimeV1Error(RuntimeError):
@@ -616,6 +645,117 @@ def _read_regular(path: Path, *, maximum: int) -> bytes:
     return content
 
 
+def _close_retained_fds(descriptors: tuple[int, ...]) -> None:
+    for descriptor in descriptors:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+
+def _linux_memfd_create(name: str) -> int:
+    if sys.platform != "linux" or not name.isascii():
+        raise RuntimeV1Error("prepared dataset immutable source is unavailable")
+    flags = _LINUX_MFD_CLOEXEC | _LINUX_MFD_ALLOW_SEALING
+    native = getattr(os, "memfd_create", None)
+    if callable(native):
+        if (
+            getattr(os, "MFD_CLOEXEC", _LINUX_MFD_CLOEXEC) != _LINUX_MFD_CLOEXEC
+            or getattr(os, "MFD_ALLOW_SEALING", _LINUX_MFD_ALLOW_SEALING)
+            != _LINUX_MFD_ALLOW_SEALING
+        ):
+            raise RuntimeV1Error("prepared dataset immutable source is unavailable")
+        return native(name, flags)
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        create = getattr(libc, "memfd_create")
+        create.argtypes = (ctypes.c_char_p, ctypes.c_uint)
+        create.restype = ctypes.c_int
+        descriptor = create(name.encode("ascii"), flags)
+        if descriptor < 0:
+            error_number = ctypes.get_errno()
+            raise OSError(error_number, "memfd_create failed")
+        return descriptor
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        raise RuntimeV1Error("prepared dataset immutable source is unavailable") from None
+
+
+def _sealed_prepared_dataset(content: bytes, *, content_digest: str) -> tuple[int, Path]:
+    """Retain one immutable Linux source for trainer ingestion and projection."""
+
+    descriptor = -1
+    try:
+        import fcntl
+
+        if (
+            sys.platform != "linux"
+            or not hasattr(os, "pread")
+            or not Path("/proc/self/fd").is_dir()
+        ):
+            raise RuntimeV1Error("prepared dataset immutable source is unavailable")
+        uapi = {
+            "F_ADD_SEALS": _LINUX_F_ADD_SEALS,
+            "F_GET_SEALS": _LINUX_F_GET_SEALS,
+            "F_SEAL_WRITE": _LINUX_F_SEAL_WRITE,
+            "F_SEAL_GROW": _LINUX_F_SEAL_GROW,
+            "F_SEAL_SHRINK": _LINUX_F_SEAL_SHRINK,
+            "F_SEAL_SEAL": _LINUX_F_SEAL_SEAL,
+        }
+        if any(getattr(fcntl, name, value) != value for name, value in uapi.items()):
+            raise RuntimeV1Error("prepared dataset immutable source is unavailable")
+        descriptor = _linux_memfd_create("synaptic-prepared-dataset")
+        view = memoryview(content)
+        offset = 0
+        while offset < len(view):
+            written = os.write(descriptor, view[offset:])
+            if written <= 0:
+                raise RuntimeV1Error("prepared dataset immutable source write failed")
+            offset += written
+        os.fsync(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        required_seals = (
+            _LINUX_F_SEAL_WRITE
+            | _LINUX_F_SEAL_GROW
+            | _LINUX_F_SEAL_SHRINK
+            | _LINUX_F_SEAL_SEAL
+        )
+        fcntl.fcntl(descriptor, _LINUX_F_ADD_SEALS, required_seals)
+        observed_seals = fcntl.fcntl(descriptor, _LINUX_F_GET_SEALS)
+        info = os.fstat(descriptor)
+        if (
+            observed_seals & required_seals != required_seals
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_size != len(content)
+        ):
+            raise RuntimeV1Error("prepared dataset immutable source sealing failed")
+        digest = hashlib.sha256()
+        offset = 0
+        while offset < len(content):
+            chunk = os.pread(descriptor, min(1024 * 1024, len(content) - offset), offset)
+            if not chunk:
+                raise RuntimeV1Error("prepared dataset immutable source readback failed")
+            digest.update(chunk)
+            offset += len(chunk)
+        if offset != len(content) or digest.hexdigest() != content_digest:
+            raise RuntimeV1Error("prepared dataset immutable source readback failed")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        path = Path(f"/proc/self/fd/{descriptor}")
+        path_info = path.stat()
+        if _file_identity(info) != _file_identity(path_info):
+            raise RuntimeV1Error("prepared dataset immutable source identity changed")
+        return descriptor, path
+    except RuntimeV1Error:
+        if descriptor >= 0:
+            _close_retained_fds((descriptor,))
+        raise
+    except (ImportError, AttributeError, OSError, ValueError):
+        if descriptor >= 0:
+            _close_retained_fds((descriptor,))
+        raise RuntimeV1Error("prepared dataset immutable source is unavailable") from None
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeRoots:
     engine: Path
@@ -1028,6 +1168,24 @@ class TrainerInvocation:
     expected_projection: Mapping[str, object]
     stdout_path: Path
     stderr_path: Path
+    retained_fds: tuple[int, ...] = field(default=(), repr=False)
+
+    def __post_init__(self) -> None:
+        if type(self.retained_fds) is not tuple or any(
+            type(descriptor) is not int or descriptor <= 0
+            for descriptor in self.retained_fds
+        ):
+            raise TypeError("retained trainer descriptors are invalid")
+        try:
+            dataset_path = self.argv[self.argv.index("--local-file") + 1]
+        except (ValueError, IndexError):
+            raise ValueError("trainer dataset argument is missing") from None
+        match = re.fullmatch(r"/proc/self/fd/([1-9][0-9]*)", dataset_path)
+        if self.retained_fds:
+            if len(self.retained_fds) != 1 or match is None or int(match.group(1)) != self.retained_fds[0]:
+                raise ValueError("trainer immutable dataset descriptor is not bound")
+        elif match is not None:
+            raise ValueError("trainer dataset descriptor is not retained")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1067,31 +1225,126 @@ def build_trainer_invocation(
     missing = _REQUIRED_SFT_KEYS - set(sft)
     if missing:
         raise RuntimeV1Error("resolved SFT configuration is not fully specified")
+    present_prepared_keys = _MESSAGE_SFT_KEYS & set(sft)
+    dataset_claims_raw = dataset.get("format") == "syntunia-sft-row/v1"
+    dataset_claims_messages = dataset.get("format") == "syntunia-sft-row/v2"
+    if dataset_claims_raw:
+        if (
+            present_prepared_keys != _PREPARED_SFT_KEYS
+            or sft.get("dataset_format") != "raw_text"
+        ):
+            raise RuntimeV1Error(
+                "runtime v1 raw-text configuration must bind every raw dataset field"
+            )
+        if dataset.get("format") != "syntunia-sft-row/v1":
+            raise RuntimeV1Error(
+                "runtime v1 raw-text dataset must declare syntunia-sft-row/v1"
+            )
+        for key in ("completion_only_loss", "assistant_only_loss", "use_preassigned_splits"):
+            if not isinstance(sft[key], bool):
+                raise RuntimeV1Error(f"{key} must be a boolean")
+        if sft["completion_only_loss"] or sft["assistant_only_loss"]:
+            raise RuntimeV1Error("runtime v1 raw-text training requires full-sequence loss")
+        if not sft["use_preassigned_splits"] or sft["split_dataset"]:
+            raise RuntimeV1Error(
+                "runtime v1 raw-text training requires only preassigned splits"
+            )
+    elif dataset_claims_messages:
+        if present_prepared_keys != _MESSAGE_SFT_KEYS:
+            raise RuntimeV1Error(
+                "runtime v1 message configuration must bind every prepared dataset field"
+            )
+        for key in (
+            "completion_only_loss",
+            "assistant_only_loss",
+            "use_preassigned_splits",
+            "packing",
+            "require_memory_efficient_loss",
+        ):
+            if not isinstance(sft[key], bool):
+                raise RuntimeV1Error(f"{key} must be a boolean")
+        if (
+            sft.get("dataset_format") != "messages"
+            or sft.get("prompt_render") != "prompt_completion"
+            or not sft["completion_only_loss"]
+            or sft["assistant_only_loss"]
+            or not sft["use_preassigned_splits"]
+            or sft["split_dataset"]
+            or sft["packing"]
+            or not sft["require_memory_efficient_loss"]
+        ):
+            raise RuntimeV1Error(
+                "runtime v1 authoritative messages require preassigned "
+                "prompt-completion training with packing disabled and the "
+                "memory-efficient loss guard"
+            )
+    elif present_prepared_keys:
+        raise RuntimeV1Error(
+            "runtime v1 prepared dataset controls require a prepared dataset format"
+        )
     model_revision = model.get("revision")
     if model.get("tokenizer_revision") != model_revision:
         raise RuntimeV1Error("runtime v1 requires one exact model/tokenizer snapshot")
     model_snapshot = _require_local_model_snapshot(model, roots, environment)
-    dataset_ref = dataset.get("ref")
-    if not isinstance(dataset_ref, str) or not dataset_ref.startswith("project://"):
-        raise RuntimeV1Error("runtime v1 requires a locked project-local dataset")
-    dataset_path = _resolve_relative(
-        roots.project, dataset_ref.removeprefix("project://"), require_file=True
-    )
-    sources = document["execution_source"]["sources"]
-    project_revision = sources["project"]["commit"]
-    if dataset.get("revision") != project_revision:
-        raise RuntimeV1Error(
-            "project dataset revision must match the locked project commit"
-        )
     content_digest = dataset.get("content_digest")
+    dataset_ref = dataset.get("ref")
+    prepared_match = (
+        _PREPARED_DATASET_REF_RE.fullmatch(dataset_ref)
+        if isinstance(dataset_ref, str)
+        else None
+    )
+    if isinstance(dataset_ref, str) and dataset_ref.startswith("project://"):
+        dataset_path = _resolve_relative(
+            roots.project, dataset_ref.removeprefix("project://"), require_file=True
+        )
+        sources = document["execution_source"]["sources"]
+        project_revision = sources["project"]["commit"]
+        if dataset.get("revision") != project_revision:
+            raise RuntimeV1Error(
+                "project dataset revision must match the locked project commit"
+            )
+        maximum_dataset_bytes = 8 * 1024 * 1024 * 1024
+    elif prepared_match is not None:
+        prepared_digest = prepared_match.group(1)
+        size_bytes = dataset.get("size_bytes")
+        if (
+            set(dataset) != {
+                "ref", "revision", "content_digest", "size_bytes", "format",
+            }
+            or dataset.get("revision") != prepared_digest
+            or dataset.get("format") not in {
+                "syntunia-sft-row/v1", "syntunia-sft-row/v2"
+            }
+            or type(size_bytes) is not int
+            or not 0 < size_bytes <= _MAX_PREPARED_DATASET_BYTES
+            or not isinstance(content_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", content_digest) is None
+        ):
+            raise RuntimeV1Error("prepared dataset identity is malformed")
+        dataset_path = (
+            roots.state
+            / "prepared-inputs"
+            / content_digest
+            / "private-dataset.jsonl"
+        )
+        dataset_path = _require_contained_regular(
+            dataset_path, roots.state, label="prepared dataset"
+        )
+        maximum_dataset_bytes = _MAX_PREPARED_DATASET_BYTES
+    else:
+        raise RuntimeV1Error("runtime v1 dataset reference scheme is unsupported")
+    dataset_content = _read_regular(
+        dataset_path, maximum=maximum_dataset_bytes,
+    )
     if (
         not isinstance(content_digest, str)
-        or hashlib.sha256(
-            _read_regular(dataset_path, maximum=8 * 1024 * 1024 * 1024)
-        ).hexdigest()
-        != content_digest
+        or hashlib.sha256(dataset_content).hexdigest() != content_digest
+        or (
+            prepared_match is not None
+            and len(dataset_content) != dataset.get("size_bytes")
+        )
     ):
-        raise RuntimeV1Error("project dataset content digest does not match")
+        raise RuntimeV1Error("dataset content does not match its identity")
 
     trainer_root = roots.state / "runtime-v1-trainer"
     if trainer_root.exists():
@@ -1212,25 +1465,39 @@ def build_trainer_invocation(
             "WANDB_DISABLED": "true",
         }
     )
-    expected_projection = _expected_trainer_projection(
-        workload,
-        dataset_path=dataset_path,
-        run_dir=run_dir,
-        final_model_dir=final_model_dir,
-    )
-    return TrainerInvocation(
-        argv=tuple(argv),
-        cwd=roots.tmp,
-        environment=tuple(sorted(child_env.items())),
-        run_dir=run_dir,
-        final_model_dir=final_model_dir,
-        tokenizer_dir=final_model_dir,
-        lineage_path=run_dir / "training_lineage.json",
-        projection_path=run_dir / "runtime_v1_projection.json",
-        expected_projection=expected_projection,
-        stdout_path=roots.tracking / "trainer.stdout.log",
-        stderr_path=roots.tracking / "trainer.stderr.log",
-    )
+    retained_fds: tuple[int, ...] = ()
+    trainer_dataset_path = dataset_path
+    try:
+        if prepared_match is not None:
+            descriptor, trainer_dataset_path = _sealed_prepared_dataset(
+                dataset_content, content_digest=content_digest,
+            )
+            retained_fds = (descriptor,)
+            dataset_index = argv.index("--local-file") + 1
+            argv[dataset_index] = str(trainer_dataset_path)
+        expected_projection = _expected_trainer_projection(
+            workload,
+            dataset_path=trainer_dataset_path,
+            run_dir=run_dir,
+            final_model_dir=final_model_dir,
+        )
+        return TrainerInvocation(
+            argv=tuple(argv),
+            cwd=roots.tmp,
+            environment=tuple(sorted(child_env.items())),
+            run_dir=run_dir,
+            final_model_dir=final_model_dir,
+            tokenizer_dir=final_model_dir,
+            lineage_path=run_dir / "training_lineage.json",
+            projection_path=run_dir / "runtime_v1_projection.json",
+            expected_projection=expected_projection,
+            stdout_path=roots.tracking / "trainer.stdout.log",
+            stderr_path=roots.tracking / "trainer.stderr.log",
+            retained_fds=retained_fds,
+        )
+    except Exception:
+        _close_retained_fds(retained_fds)
+        raise
 
 
 def _append_sft_arguments(
@@ -1288,6 +1555,33 @@ def _append_sft_arguments(
             raise RuntimeV1Error("split_dataset must be a boolean")
         if sft["split_dataset"]:
             argv.append("--split-dataset")
+    if sft.get("dataset_format") == "raw_text":
+        argv.extend(
+            (
+                "--no-completion-only-loss",
+                "--no-assistant-only-loss",
+                "--use-preassigned-splits",
+                "--runtime-v1-dataset-schema",
+                "syntunia-sft-row/v1",
+                "--runtime-v1-dataset-format",
+                "raw_text",
+            )
+        )
+    elif sft.get("dataset_format") == "messages":
+        argv.extend(
+            (
+                "--completion-only-loss",
+                "--no-assistant-only-loss",
+                "--use-preassigned-splits",
+                "--aux-head-prompt-render",
+                "prompt_completion",
+                "--require-memory-efficient-loss",
+                "--runtime-v1-dataset-schema",
+                "syntunia-sft-row/v2",
+                "--runtime-v1-dataset-format",
+                "messages",
+            )
+        )
     load_in_4bit = model["load_in_4bit"]
     if not isinstance(load_in_4bit, bool):
         raise RuntimeV1Error("model.load_in_4bit must be a boolean")
@@ -1328,11 +1622,16 @@ def _nonnegative_decimal(value: object, name: str) -> str:
 
 class SubprocessTrainerRunner:
     def run(self, invocation: TrainerInvocation) -> TrainerEvidence:
+        if invocation.retained_fds and os.name != "posix":
+            raise RuntimeV1Error("retained trainer descriptors are unavailable")
         invocation.stdout_path.parent.mkdir(parents=True, exist_ok=True)
         with (
             invocation.stdout_path.open("xb") as stdout,
             invocation.stderr_path.open("xb") as stderr,
         ):
+            run_options: dict[str, object] = {}
+            if invocation.retained_fds:
+                run_options["pass_fds"] = invocation.retained_fds
             completed = subprocess.run(
                 invocation.argv,
                 cwd=invocation.cwd,
@@ -1341,6 +1640,7 @@ class SubprocessTrainerRunner:
                 stdout=stdout,
                 stderr=stderr,
                 check=False,
+                **run_options,
             )
         if completed.returncode != 0:
             return TrainerEvidence(
@@ -1399,7 +1699,10 @@ def execute_runtime(
         invocation = build_trainer_invocation(workload, roots, environment)
     except RuntimeV1Error as error:
         raise _mark_runtime_stage(error, "runtime_invocation_rejected")
-    evidence = runner.run(invocation)
+    try:
+        evidence = runner.run(invocation)
+    finally:
+        _close_retained_fds(invocation.retained_fds)
     if not isinstance(evidence, TrainerEvidence):
         raise TypeError("trainer runner returned invalid evidence")
     if type(evidence.exit_code) is not int:
@@ -1523,7 +1826,10 @@ def _expected_trainer_projection(
     model = config["model"]
     dataset = config["dataset"]
     sft = config["sft"]
-    return {
+    dataset_text = str(dataset_path)
+    if re.fullmatch(r"/proc/self/fd/[1-9][0-9]*", dataset_text) is None:
+        dataset_text = str(dataset_path.resolve())
+    projection = {
         "schema_version": "synaptic-sft-trainer-projection/v1",
         "workload_fingerprint": workload.fingerprint,
         "configuration_revision": document["configuration"]["revision"],
@@ -1534,7 +1840,7 @@ def _expected_trainer_projection(
             "load_in_4bit": model["load_in_4bit"],
         },
         "dataset": {
-            "resolved_path": str(dataset_path.resolve()),
+            "resolved_path": dataset_text,
             "revision": dataset["revision"],
             "content_digest": dataset["content_digest"],
         },
@@ -1565,6 +1871,28 @@ def _expected_trainer_projection(
         },
         "status": "completed",
     }
+    if sft.get("dataset_format") in {"raw_text", "messages"}:
+        projection["dataset"].update(
+            {"schema_version": dataset["format"], "format": sft["dataset_format"]}
+        )
+        projection["training"].update(
+            {
+                "completion_only_loss": sft["completion_only_loss"],
+                "assistant_only_loss": sft["assistant_only_loss"],
+                "use_preassigned_splits": sft["use_preassigned_splits"],
+            }
+        )
+        if sft.get("dataset_format") == "messages":
+            projection["training"].update(
+                {
+                    "prompt_render": sft["prompt_render"],
+                    "packing": sft["packing"],
+                    "require_memory_efficient_loss": sft[
+                        "require_memory_efficient_loss"
+                    ],
+                }
+            )
+    return projection
 
 
 def _validate_trainer_evidence(
@@ -1572,6 +1900,17 @@ def _validate_trainer_evidence(
     invocation: TrainerInvocation,
     workload: object,
 ) -> None:
+    dataset_ref = workload.document["configuration"]["document"]["dataset"]["ref"]
+    dataset_path = invocation.argv[invocation.argv.index("--local-file") + 1]
+    prepared = isinstance(dataset_ref, str) and _PREPARED_DATASET_REF_RE.fullmatch(dataset_ref)
+    if prepared is not None:
+        if (
+            len(invocation.retained_fds) != 1
+            or dataset_path != f"/proc/self/fd/{invocation.retained_fds[0]}"
+        ):
+            raise RuntimeV1Error("trainer evidence lost the immutable dataset binding")
+    elif invocation.retained_fds:
+        raise RuntimeV1Error("project dataset unexpectedly retained a private descriptor")
     if (
         evidence.final_model_dir != invocation.final_model_dir
         or evidence.tokenizer_dir != invocation.tokenizer_dir

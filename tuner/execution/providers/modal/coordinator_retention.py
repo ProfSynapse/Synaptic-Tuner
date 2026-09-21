@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from tuner.execution.foundation_v2.authority import AuthenticatedGrantV2
@@ -16,10 +16,20 @@ from tuner.execution.foundation_v2.commands import (
 from tuner.execution.foundation_v2.repository import EffectRecordV2
 from tuner.training.coordinator_material import CoordinatorResolvedMaterial
 from tuner.training.recipes import RecipeRegistry
+from tuner.training.contracts import (
+    PreparedTrainingInputIdentity,
+    VerifiedTrainingInputSource,
+)
 
 from .contracts import BoundsPolicyV1
 from .coordinator_binding import ModalCommandBinding
 from .coordinator_bundle import ModalCoordinatorBundle
+from .coordinator_bundle import parse_workload_object
+from .prepared_input import (
+    MAX_PRIVATE_DATASET_BYTES,
+    MountedPreparedInputDescriptor,
+    bind_private_dataset,
+)
 from .coordinator_launch import (
     ModalLaunchEnvelope,
     admit_modal_foundation_launch,
@@ -29,6 +39,7 @@ from .coordinator_staging import (
     ModalStageMaterial,
     _claim_document,
     prepare_modal_foundation_stage,
+    stage_claim_purpose,
 )
 
 
@@ -54,6 +65,10 @@ class ModalRetainedPreparation:
     control_volume_id: str
     artifact_volume_id: str
     key_ref: str
+    private_dataset_bytes: bytes | None = field(default=None, repr=False)
+    prepared_input_source: VerifiedTrainingInputSource | None = field(
+        default=None, repr=False, compare=False,
+    )
 
     def __post_init__(self) -> None:
         if any(type(value) is not bytes for value in (
@@ -63,7 +78,29 @@ class ModalRetainedPreparation:
             raise TypeError("retained Modal inputs require exact immutable bytes")
         if type(self.recipes) is not RecipeRegistry:
             raise TypeError("retained Modal inputs require an exact recipe registry")
-        CoordinatorResolvedMaterial.parse(self.material_bytes, self.recipes)
+        material = CoordinatorResolvedMaterial.parse(self.material_bytes, self.recipes)
+        workload = parse_workload_object(material.workload_bytes)
+        dataset = workload.get("configuration", {}).get("document", {}).get("dataset")
+        source_identity = None
+        if self.prepared_input_source is not None:
+            if not isinstance(self.prepared_input_source, VerifiedTrainingInputSource):
+                raise TypeError("retained prepared input source is invalid")
+            source_identity = self.prepared_input_source.identity
+            if type(source_identity) is not PreparedTrainingInputIdentity:
+                raise TypeError("retained prepared input identity is invalid")
+        if isinstance(dataset, dict) and str(dataset.get("ref", "")).startswith("prepared://"):
+            identity = PreparedTrainingInputIdentity.from_mapping(dataset)
+            if identity.size_bytes <= MAX_PRIVATE_DATASET_BYTES:
+                if source_identity is not None:
+                    raise ValueError("inline prepared input must not retain a source")
+                bind_private_dataset(dataset, self.private_dataset_bytes)
+            else:
+                if self.private_dataset_bytes is not None or source_identity != identity:
+                    raise ValueError("mounted prepared input source does not match")
+        else:
+            if source_identity is not None:
+                raise ValueError("project dataset must not retain a prepared source")
+            bind_private_dataset(dataset, self.private_dataset_bytes)
         for name in ("control_volume_id", "artifact_volume_id", "key_ref"):
             safe_ref(getattr(self, name), name)
         if self.control_volume_id == self.artifact_volume_id:
@@ -140,10 +177,20 @@ class ModalFoundationRetentionDelegate:
         return self._foundation.recover_orphan(effect_id, now_epoch=now_epoch)
 
     def _stage(self, command, binding, retained):
+        mounted = (
+            MountedPreparedInputDescriptor.create(
+                retained.prepared_input_source.identity,
+                stage_effect_id=command.operation.effect.effect_id,
+            )
+            if retained.prepared_input_source is not None
+            else None
+        )
         bundle = ModalCoordinatorBundle.build(
             binding, retained.material, retained.recipes,
             log_terminal_policy=retained.log_terminal_policy,
             worker_closure_manifest=retained.worker_closure_manifest,
+            private_dataset_bytes=retained.private_dataset_bytes,
+            mounted_prepared_input=mounted,
         )
         existing = self._stages.resolve(command.digest)
         candidate = None
@@ -154,6 +201,10 @@ class ModalFoundationRetentionDelegate:
                 control_volume_id=retained.control_volume_id,
                 artifact_volume_id=retained.artifact_volume_id,
                 key_ref=retained.key_ref, bounds=self._bounds,
+                prepared_input_descriptor=(
+                    None if mounted is None else mounted.canonical_bytes
+                ),
+                prepared_input_source=retained.prepared_input_source,
             )
             self._stages.publish_if_absent(command.digest, candidate)
             existing = self._stages.resolve(command.digest)
@@ -162,10 +213,11 @@ class ModalFoundationRetentionDelegate:
         rebuilt = ModalStageMaterial(
             existing.binding, existing.control_volume_id, existing.artifact_volume_id,
             existing.key_ref, existing.bundle, existing.claim, existing.claim_tag,
+            existing.prepared_input_descriptor, existing.prepared_input_source,
         )
         try:
             verified = self._stage_authority.verify(
-                "modal-stage-claim/v2", rebuilt.claim, rebuilt.claim_tag,
+                stage_claim_purpose(rebuilt), rebuilt.claim, rebuilt.claim_tag,
                 rebuilt.key_ref,
             )
         except Exception:
@@ -190,18 +242,29 @@ class ModalFoundationRetentionDelegate:
         )
         if type(parse_exact_command(stage_binding.command_bytes)) is not StageCommandV2:
             raise ValueError("retained Modal stage binding is invalid")
+        mounted = (
+            MountedPreparedInputDescriptor.create(
+                retained.prepared_input_source.identity,
+                stage_effect_id=parse_exact_command(stage_binding.command_bytes).operation.effect.effect_id,
+            )
+            if retained.prepared_input_source is not None
+            else None
+        )
         bundle = ModalCoordinatorBundle.build(
             stage_binding, retained.material, retained.recipes,
             log_terminal_policy=retained.log_terminal_policy,
             worker_closure_manifest=retained.worker_closure_manifest,
+            private_dataset_bytes=retained.private_dataset_bytes,
+            mounted_prepared_input=mounted,
         )
         rebuilt = ModalStageMaterial(
             stage_binding, material.control_volume_id, material.artifact_volume_id,
             material.key_ref, material.bundle, material.claim, material.claim_tag,
+            material.prepared_input_descriptor, material.prepared_input_source,
         )
         try:
             verified = self._stage_authority.verify(
-                "modal-stage-claim/v2", rebuilt.claim, rebuilt.claim_tag,
+                stage_claim_purpose(rebuilt), rebuilt.claim, rebuilt.claim_tag,
                 rebuilt.key_ref,
             )
         except Exception:

@@ -23,7 +23,16 @@ from examples.modal_chat.training import (
 )
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from tests.examples.test_modal_chat_deployment import _SDK, _profile
-from tests.examples.test_modal_chat_resolution import _document, _source
+from tests.examples.test_modal_chat_resolution import (
+    _document,
+    _initialize_git_policy,
+    _source,
+)
+from tests.dataset_prep.test_dataset_prep_v1 import (
+    _bundle as _prepared_bundle,
+    _config as _prepared_config,
+    _prepare_reconciled,
+)
 from tuner.execution.providers.modal.composition import ModalVerificationPolicyV1
 from tuner.execution.providers.modal.coordinator_preflight import QUOTE_PURPOSE
 from tuner.project.context import ProjectContext
@@ -345,9 +354,20 @@ def test_full_training_composer_starts_real_public_graph_once(
     engine = project / "vendor" / "engine"
     (project / "data").mkdir(parents=True)
     engine.mkdir(parents=True)
-    (project / "data" / "train.jsonl").write_bytes(b'{"text":"row"}\n')
     context = ProjectContext.host(engine_root=engine, project_root=project)
-    request_json = json.dumps(_document(), sort_keys=True, separators=(",", ":"))
+    _initialize_git_policy(context, ignored=True)
+    structure, bundle = _prepared_bundle(
+        tmp_path / "prepared-source", ("PRIVATE COMPOSER SENTINEL",)
+    )
+    prepared = _prepare_reconciled(
+        _prepared_config(bundle, structure), project / "private"
+    )
+    prepared_ref = (
+        "prepared://sha256/" + prepared.semantic_identity.dataset_digest
+    )
+    request_json = json.dumps(
+        _document(prepared_ref), sort_keys=True, separators=(",", ":")
+    )
     purposes = frozenset(
         {
             "source-lock-evidence/v1",
@@ -375,7 +395,7 @@ def test_full_training_composer_starts_real_public_graph_once(
                 TrainingRunRef("run-a", "project-a"),
                 hashlib.sha256(request_json.encode()).hexdigest(),
             ),
-            dataset_project_path=Path("data/train.jsonl"),
+            dataset_project_path=prepared.path.relative_to(project),
             allowed_git_refs=frozenset(
                 {
                     (
@@ -448,5 +468,9 @@ def test_full_training_composer_starts_real_public_graph_once(
             "project-a",
         )
         assert sdk.deploy_calls
+        assert graph.retained.private_dataset_bytes == (
+            prepared.path / "dataset.jsonl"
+        ).read_bytes()
+        assert b"PRIVATE COMPOSER SENTINEL" not in graph.material.canonical_bytes
     finally:
         storage.close()

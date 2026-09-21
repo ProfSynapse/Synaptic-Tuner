@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+from types import MappingProxyType
 
 import pytest
 
@@ -24,9 +27,22 @@ from tuner.training.contracts import CanonicalDocument, TrainingRequest
 from tuner.training import default_recipe_registry
 from tuner.training.coordinator_material import derive_coordinator_material
 from tuner.training.methods.sft import SFT_ENTRYPOINT
+from tuner.training.methods.sft import compile_sft_workload
+from tuner.dataset_prep import (
+    DatasetPublicationUncertainV1,
+    DatasetSemanticIdentityV1,
+    VerifiedPreparedDatasetV1,
+    prepare_dataset_v2,
+)
 from tuner.training.service import TrainingService
 
 from tests.execution.providers.test_modal_source_resolution import _finalizer, _source
+from tests.dataset_prep.test_dataset_prep_v1 import (
+    _bundle as _prepared_bundle,
+    _config as _prepared_config,
+    _prepare_reconciled,
+)
+from tests.dataset_prep.test_context_messages_v2 import _config as _v2_config
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -105,6 +121,32 @@ def _context(tmp_path: Path) -> ProjectContext:
     return ProjectContext.host(engine_root=engine, project_root=project)
 
 
+def _git(project: Path, *arguments: str) -> bytes:
+    return subprocess.run(
+        ["git", "-C", str(project), *arguments],
+        check=True,
+        capture_output=True,
+    ).stdout
+
+
+def _initialize_git_policy(context: ProjectContext, *, ignored: bool) -> None:
+    _git(context.project_root, "init", "--quiet")
+    _git(context.project_root, "config", "user.email", "fixture@example.invalid")
+    _git(context.project_root, "config", "user.name", "Fixture")
+    if ignored:
+        (context.project_root / ".gitignore").write_text(
+            "private/\n", encoding="utf-8", newline="\n"
+        )
+        policy_file = ".gitignore"
+    else:
+        (context.project_root / ".git-policy-fixture").write_text(
+            "fixture\n", encoding="utf-8", newline="\n"
+        )
+        policy_file = ".git-policy-fixture"
+    _git(context.project_root, "add", "--", policy_file)
+    _git(context.project_root, "commit", "--quiet", "-m", "policy fixture")
+
+
 @pytest.mark.parametrize("model_ref", ["organization/model", "organization/modèle"])
 def test_training_service_resolves_and_derives_coordinator_material(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_ref: str
@@ -160,6 +202,351 @@ def test_training_service_resolves_and_derives_coordinator_material(
     )
     assert material.run_id == "run-1"
     assert material.planning_request.project_ref == "project"
+    assert resolver.private_dataset_bytes is None
+
+
+def test_prepared_dataset_resolves_verified_identity_and_retains_only_private_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = _context(tmp_path)
+    _initialize_git_policy(context, ignored=True)
+    structure, bundle = _prepared_bundle(
+        tmp_path / "prepared-source", ("PRIVATE DATASET SENTINEL",)
+    )
+    prepared = _prepare_reconciled(
+        _prepared_config(bundle, structure), context.project_root / "private"
+    )
+    relative = prepared.path.relative_to(context.project_root)
+    identity = prepared.semantic_identity
+    inspected = _source()
+    monkeypatch.setattr(
+        GitCliLocalSourceInspector, "inspect", lambda _self, *, context: inspected
+    )
+    inner = _finalizer(inspected)
+
+    class CapturingFinalizer:
+        source_lock = None
+
+        def finalize(self, source_lock, **kwargs):
+            self.source_lock = source_lock
+            return inner.finalize(source_lock, **kwargs)
+
+    finalizer = CapturingFinalizer()
+    resolver = ModalChatRichTrainingResolver(
+        context=context,
+        run=TrainingRunRef("run-1", "project"),
+        created_at="2026-08-25T12:00:00Z",
+        dataset_project_path=relative,
+        load_in_4bit=False,
+        deployment=_deployment(),
+        source_finalizer=finalizer,
+        audience_ref="project/run-1",
+    )
+    dataset_ref = f"prepared://sha256/{identity.dataset_digest}"
+    result = resolver.resolve(
+        TrainingRequest(CanonicalDocument.from_mapping(_document(dataset_ref))),
+        context=context,
+    )
+
+    dataset = result.resolved_config.to_dict()["dataset"]
+    assert dataset == {
+        "content_digest": identity.dataset_sha256,
+        "format": "syntunia-sft-row/v1",
+        "ref": dataset_ref,
+        "revision": identity.dataset_digest,
+        "size_bytes": identity.dataset_bytes,
+    }
+    assert resolver.private_dataset_bytes == (
+        prepared.path / "dataset.jsonl"
+    ).read_bytes()
+    public = result.resolved_config.canonical_json + json.dumps(
+        finalizer.source_lock.to_dict(), sort_keys=True
+    )
+    assert "PRIVATE DATASET SENTINEL" not in public
+    assert relative.as_posix() not in public
+
+
+def test_authoritative_v2_prepared_dataset_reaches_provider_neutral_runtime_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = _context(tmp_path)
+    _initialize_git_policy(context, ignored=True)
+    _bundle, _ids, _documents, config = _v2_config(tmp_path / "v2-source")
+    try:
+        prepared = prepare_dataset_v2(config, context.project_root / "private")
+    except DatasetPublicationUncertainV1:
+        prepared = prepare_dataset_v2(config, context.project_root / "private")
+    relative = prepared.path.relative_to(context.project_root)
+    identity = prepared.semantic_identity
+    inspected = _source()
+    monkeypatch.setattr(
+        GitCliLocalSourceInspector, "inspect", lambda _self, *, context: inspected
+    )
+    resolver = ModalChatRichTrainingResolver(
+        context=context,
+        run=TrainingRunRef("run-1", "project"),
+        created_at="2026-08-25T12:00:00Z",
+        dataset_project_path=relative,
+        load_in_4bit=False,
+        deployment=_deployment(),
+        source_finalizer=_finalizer(inspected),
+        audience_ref="project/run-1",
+    )
+    dataset_ref = f"prepared://sha256/{identity.dataset_digest}"
+    document = _document(dataset_ref)
+    document["hyperparameters"].update(  # type: ignore[union-attr]
+        {
+            "max_seq_length": 32768,
+            "dataset_format": "messages",
+            "completion_only_loss": True,
+            "assistant_only_loss": False,
+            "use_preassigned_splits": True,
+            "prompt_render": "prompt_completion",
+            "packing": False,
+            "require_memory_efficient_loss": True,
+        }
+    )
+    result = resolver.resolve(
+        TrainingRequest(CanonicalDocument.from_mapping(document)), context=context
+    )
+
+    resolved = result.resolved_config.to_dict()
+    assert resolved["dataset"]["format"] == "syntunia-sft-row/v2"
+    assert resolved["sft"]["dataset_format"] == "messages"
+    assert resolved["sft"]["packing"] is False
+    assert resolved["sft"]["completion_only_loss"] is True
+    assert resolved["sft"]["assistant_only_loss"] is False
+    assert resolved["sft"]["use_preassigned_splits"] is True
+    assert resolved["sft"]["prompt_render"] == "prompt_completion"
+    assert resolved["sft"]["require_memory_efficient_loss"] is True
+    assert resolver.private_dataset_bytes == (prepared.path / "dataset.jsonl").read_bytes()
+    workload = compile_sft_workload(
+        resolved_config=result.resolved_config,
+        execution_source=result.execution_source,
+    )
+    assert workload.document["configuration"]["document"]["dataset"]["format"] == (
+        "syntunia-sft-row/v2"
+    )
+
+
+def test_large_prepared_dataset_retains_source_instead_of_inline_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import examples.modal_chat.resolution as resolution_module
+
+    context = _context(tmp_path)
+    _initialize_git_policy(context, ignored=True)
+    dataset_digest = "a" * 64
+    relative = Path("private") / f"dataset-{dataset_digest}"
+    prepared_path = context.project_root / relative
+    prepared_path.mkdir(parents=True)
+    (prepared_path / "manifest.json").write_text("{}", encoding="utf-8")
+    (prepared_path / "dataset.jsonl").write_text("placeholder\n", encoding="utf-8")
+    semantic = DatasetSemanticIdentityV1(
+        f"dataset-{dataset_digest}",
+        dataset_digest,
+        1,
+        2 * 1024 * 1024 + 1,
+        "b" * 64,
+        "c" * 64,
+        MappingProxyType({"train": 1}),
+    )
+    verified = VerifiedPreparedDatasetV1(prepared_path, semantic)
+    monkeypatch.setattr(
+        resolution_module, "verify_prepared_dataset_v1", lambda path: verified,
+    )
+    monkeypatch.setattr(
+        resolution_module,
+        "snapshot_prepared_dataset_v1",
+        lambda path: (_ for _ in ()).throw(AssertionError("must not snapshot inline")),
+    )
+    inspected = _source()
+    monkeypatch.setattr(
+        GitCliLocalSourceInspector, "inspect", lambda _self, *, context: inspected,
+    )
+    resolver = ModalChatRichTrainingResolver(
+        context=context,
+        run=TrainingRunRef("run-1", "project"),
+        created_at="2026-08-25T12:00:00Z",
+        dataset_project_path=relative,
+        load_in_4bit=False,
+        deployment=_deployment(),
+        source_finalizer=_finalizer(inspected),
+        audience_ref="project/run-1",
+    )
+    result = resolver.resolve(
+        TrainingRequest(CanonicalDocument.from_mapping(
+            _document(f"prepared://sha256/{dataset_digest}")
+        )),
+        context=context,
+    )
+    assert result.resolved_config.to_dict()["dataset"]["size_bytes"] == semantic.dataset_bytes
+    assert resolver.private_dataset_bytes is None
+    assert resolver.prepared_input_source is not None
+    assert resolver.prepared_input_source.identity.content_digest == semantic.dataset_sha256
+
+
+def test_authoritative_v2_prepared_dataset_rejects_legacy_sft_controls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = _context(tmp_path)
+    _initialize_git_policy(context, ignored=True)
+    _bundle, _ids, _documents, config = _v2_config(tmp_path / "v2-source")
+    try:
+        prepared = prepare_dataset_v2(config, context.project_root / "private")
+    except DatasetPublicationUncertainV1:
+        prepared = prepare_dataset_v2(config, context.project_root / "private")
+    inspected = _source()
+    monkeypatch.setattr(
+        GitCliLocalSourceInspector, "inspect", lambda _self, *, context: inspected
+    )
+    resolver = ModalChatRichTrainingResolver(
+        context=context,
+        run=TrainingRunRef("run-1", "project"),
+        created_at="2026-08-25T12:00:00Z",
+        dataset_project_path=prepared.path.relative_to(context.project_root),
+        load_in_4bit=False,
+        deployment=_deployment(),
+        source_finalizer=_finalizer(inspected),
+        audience_ref="project/run-1",
+    )
+    dataset_ref = f"prepared://sha256/{prepared.semantic_identity.dataset_digest}"
+
+    with pytest.raises(ModalChatResolutionError, match="modal_chat_resolution_invalid"):
+        resolver.resolve(
+            TrainingRequest(CanonicalDocument.from_mapping(_document(dataset_ref))),
+            context=context,
+        )
+    assert resolver.private_dataset_bytes is None
+
+
+def test_prepared_dataset_reference_must_match_verified_semantic_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = _context(tmp_path)
+    _initialize_git_policy(context, ignored=True)
+    structure, bundle = _prepared_bundle(tmp_path / "prepared-source")
+    prepared = _prepare_reconciled(
+        _prepared_config(bundle, structure), context.project_root / "private"
+    )
+    inspected = _source()
+    monkeypatch.setattr(
+        GitCliLocalSourceInspector, "inspect", lambda _self, *, context: inspected
+    )
+    resolver = ModalChatRichTrainingResolver(
+        context=context,
+        run=TrainingRunRef("run-1", "project"),
+        created_at="2026-08-25T12:00:00Z",
+        dataset_project_path=prepared.path.relative_to(context.project_root),
+        load_in_4bit=False,
+        deployment=_deployment(),
+        source_finalizer=_finalizer(inspected),
+        audience_ref="project/run-1",
+    )
+
+    with pytest.raises(ModalChatResolutionError, match="modal_chat_resolution_invalid"):
+        resolver.resolve(
+            TrainingRequest(
+                CanonicalDocument.from_mapping(
+                    _document("prepared://sha256/" + "0" * 64)
+                )
+            ),
+            context=context,
+        )
+    assert resolver.private_dataset_bytes is None
+
+
+@pytest.mark.parametrize("git_state", ["tracked", "staged", "unignored"])
+def test_prepared_dataset_requires_untracked_ignored_private_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, git_state: str
+) -> None:
+    context = _context(tmp_path)
+    _initialize_git_policy(context, ignored=git_state != "unignored")
+    structure, bundle = _prepared_bundle(tmp_path / "prepared-source")
+    prepared = _prepare_reconciled(
+        _prepared_config(bundle, structure), context.project_root / "private"
+    )
+    relative = prepared.path.relative_to(context.project_root)
+    if git_state in {"tracked", "staged"}:
+        _git(context.project_root, "add", "-f", "--", relative.as_posix())
+    if git_state == "tracked":
+        _git(context.project_root, "commit", "--quiet", "-m", "fixture")
+    inspected = _source()
+    monkeypatch.setattr(
+        GitCliLocalSourceInspector, "inspect", lambda _self, *, context: inspected
+    )
+    resolver = ModalChatRichTrainingResolver(
+        context=context,
+        run=TrainingRunRef("run-1", "project"),
+        created_at="2026-08-25T12:00:00Z",
+        dataset_project_path=relative,
+        load_in_4bit=False,
+        deployment=_deployment(),
+        source_finalizer=_finalizer(inspected),
+        audience_ref="project/run-1",
+    )
+    dataset_ref = "prepared://sha256/" + prepared.semantic_identity.dataset_digest
+
+    with pytest.raises(ModalChatResolutionError) as raised:
+        resolver.resolve(
+            TrainingRequest(CanonicalDocument.from_mapping(_document(dataset_ref))),
+            context=context,
+        )
+    assert raised.value.args == ("modal_chat_resolution_invalid",)
+    assert str(prepared.path) not in repr(raised.value)
+    assert resolver.private_dataset_bytes is None
+
+
+def test_prepared_dataset_mutation_after_git_policy_check_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from examples.modal_chat import resolution as resolution_module
+
+    context = _context(tmp_path)
+    _initialize_git_policy(context, ignored=True)
+    structure, bundle = _prepared_bundle(
+        tmp_path / "prepared-source", ("PRIVATE MUTATION SENTINEL",)
+    )
+    prepared = _prepare_reconciled(
+        _prepared_config(bundle, structure), context.project_root / "private"
+    )
+    relative = prepared.path.relative_to(context.project_root)
+    inspected = _source()
+    monkeypatch.setattr(
+        GitCliLocalSourceInspector, "inspect", lambda _self, *, context: inspected
+    )
+    actual_snapshot = resolution_module.snapshot_prepared_dataset_v1
+
+    def mutate_then_snapshot(path: Path):
+        dataset = path / "dataset.jsonl"
+        dataset.chmod(0o600)
+        dataset.write_bytes(b"PRIVATE POST-CHECK SUBSTITUTION\n")
+        return actual_snapshot(path)
+
+    monkeypatch.setattr(
+        resolution_module, "snapshot_prepared_dataset_v1", mutate_then_snapshot
+    )
+    resolver = ModalChatRichTrainingResolver(
+        context=context,
+        run=TrainingRunRef("run-1", "project"),
+        created_at="2026-08-25T12:00:00Z",
+        dataset_project_path=relative,
+        load_in_4bit=False,
+        deployment=_deployment(),
+        source_finalizer=_finalizer(inspected),
+        audience_ref="project/run-1",
+    )
+    dataset_ref = "prepared://sha256/" + prepared.semantic_identity.dataset_digest
+
+    with pytest.raises(ModalChatResolutionError) as raised:
+        resolver.resolve(
+            TrainingRequest(CanonicalDocument.from_mapping(_document(dataset_ref))),
+            context=context,
+        )
+    assert raised.value.args == ("modal_chat_resolution_invalid",)
+    assert "PRIVATE" not in repr(raised.value)
+    assert str(prepared.path) not in repr(raised.value)
+    assert resolver.private_dataset_bytes is None
 
 
 def test_rejects_request_that_does_not_name_configured_consumer_dataset(

@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, BinaryIO, Mapping, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from synaptic_tuner.api.v1.training_input import TrainingInputV1
@@ -33,6 +33,91 @@ def _positive(value: int, field_name: str) -> None:
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _PINNED_IMAGE_PATTERN = re.compile(r"^\S+@sha256:(?P<digest>[0-9a-f]{64})$")
 _ACCELERATOR_TOKEN_PATTERN = re.compile(r"^[a-z][a-z0-9._-]*$")
+_PREPARED_REF_PATTERN = re.compile(r"^prepared://sha256/(?P<digest>[0-9a-f]{64})$")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedTrainingInputIdentity:
+    """Provider-neutral authority for one verified prepared training payload."""
+
+    ref: str
+    revision: str
+    content_digest: str
+    size_bytes: int
+    format: str
+
+    def __post_init__(self) -> None:
+        if type(self.ref) is not str or type(self.revision) is not str:
+            raise TypeError("prepared training input reference must be exact text")
+        if type(self.content_digest) is not str:
+            raise TypeError("prepared training input digest must be exact text")
+        match = _PREPARED_REF_PATTERN.fullmatch(self.ref)
+        if match is None or self.revision != match.group("digest"):
+            raise ValueError("prepared training input reference is invalid")
+        if _SHA256_PATTERN.fullmatch(self.content_digest) is None:
+            raise ValueError("prepared training input digest is invalid")
+        if type(self.size_bytes) is not int or not 1 <= self.size_bytes <= 64 * 1024 * 1024:
+            raise ValueError("prepared training input size is invalid")
+        object.__setattr__(self, "format", _required(self.format, "format"))
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, object]) -> "PreparedTrainingInputIdentity":
+        if not isinstance(value, Mapping) or set(value) != {
+            "ref", "revision", "content_digest", "size_bytes", "format",
+        }:
+            raise ValueError("prepared training input identity is malformed")
+        return cls(
+            ref=value["ref"],  # type: ignore[arg-type]
+            revision=value["revision"],  # type: ignore[arg-type]
+            content_digest=value["content_digest"],  # type: ignore[arg-type]
+            size_bytes=value["size_bytes"],  # type: ignore[arg-type]
+            format=value["format"],  # type: ignore[arg-type]
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "ref": self.ref,
+            "revision": self.revision,
+            "content_digest": self.content_digest,
+            "size_bytes": self.size_bytes,
+            "format": self.format,
+        }
+
+
+class RetainedTrainingInputStreamLease:
+    """One-use verified stream retained only for one staging upload attempt."""
+
+    __slots__ = ("identity", "_stream", "_consumed")
+
+    def __init__(self, identity: PreparedTrainingInputIdentity, stream: BinaryIO) -> None:
+        if type(identity) is not PreparedTrainingInputIdentity:
+            raise TypeError("exact prepared training input identity required")
+        if not callable(getattr(stream, "read", None)) or not callable(
+            getattr(stream, "close", None)
+        ):
+            raise TypeError("prepared training input lease requires a binary stream")
+        self.identity = identity
+        self._stream = stream
+        self._consumed = False
+
+    def take_stream(self) -> BinaryIO:
+        if self._consumed:
+            raise ValueError("prepared training input lease was already consumed")
+        self._consumed = True
+        return self._stream
+
+    def close(self) -> None:
+        self._stream.close()
+
+
+@runtime_checkable
+class VerifiedTrainingInputSource(Protocol):
+    """Internal source port; public requests carry only the prepared identity."""
+
+    @property
+    def identity(self) -> PreparedTrainingInputIdentity: ...
+
+    def open_lease(self) -> RetainedTrainingInputStreamLease: ...
 
 
 def _canonical_document(value: Mapping[str, object]) -> str:

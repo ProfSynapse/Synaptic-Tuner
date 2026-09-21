@@ -17,6 +17,7 @@ from types import ModuleType
 import pytest
 
 import Trainers.sft.runtime_v1 as runtime_v1
+from tuner.runtime import offline_sft_worker
 from tuner.training.contracts import CanonicalDocument
 from Trainers.sft.runtime_v1 import (
     MAX_WORKLOAD_BYTES,
@@ -180,6 +181,10 @@ def _fixture(
     mode: str = "dual_clone",
     redirected_capability: bool = False,
     extra_environment: dict[str, str] | None = None,
+    raw_sft_overrides: dict[str, object] | None = None,
+    message_sft_overrides: dict[str, object] | None = None,
+    raw_dataset_without_controls: bool = False,
+    prepared_payload: bytes | None = None,
 ):
     if mode != "dual_clone":
         raise ValueError(
@@ -204,7 +209,21 @@ def _fixture(
     engine_file = engine / "Trainers" / "sft" / "runtime_v1.py"
     dataset = project / "data" / "train.jsonl"
     dataset.parent.mkdir(parents=True)
-    dataset.write_bytes(b'{"messages":[]}\n')
+    if message_sft_overrides is not None:
+        dataset.write_bytes(
+            b'{"schema_version":"syntunia-sft-row/v2","format":"messages",'
+            b'"row_id":"row-1111111111111111111111111111111111111111111111111111111111111111",'
+            b'"target_item_id":"item-2222222222222222222222222222222222222222222222222222222222222222",'
+            b'"context_item_ids":[],"group_id":"fixture","split":"train",'
+            b'"messages":[{"role":"user","content":"prompt"},{"role":"assistant","content":"answer"}]}\n'
+        )
+    elif raw_sft_overrides is not None or raw_dataset_without_controls:
+        dataset.write_bytes(
+            b'{"schema_version":"syntunia-sft-row/v1","format":"raw_text","split":"train","text":"one"}\n'
+            b'{"schema_version":"syntunia-sft-row/v1","format":"raw_text","split":"validation","text":"two"}\n'
+        )
+    else:
+        dataset.write_bytes(b'{"messages":[]}\n')
     capability_root = tmp_path / "capabilities"
     if redirected_capability:
         provider_volume = tmp_path / "provider-volume"
@@ -265,8 +284,7 @@ def _fixture(
             "outputs": {},
         }
     )
-    config = CanonicalDocument.from_mapping(
-        {
+    config_document = {
             "schema_version": "synaptic-sft-config/v1",
             "method": "sft",
             "model": {
@@ -300,7 +318,53 @@ def _fixture(
                 "save_total_limit": 1,
             },
         }
-    )
+    if prepared_payload is not None:
+        prepared_digest = "d" * 64
+        content_digest = hashlib.sha256(prepared_payload).hexdigest()
+        config_document["dataset"] = {
+            "ref": f"prepared://sha256/{prepared_digest}",
+            "revision": prepared_digest,
+            "content_digest": content_digest,
+            "size_bytes": len(prepared_payload),
+            "format": "syntunia-sft-row/v1",
+        }
+        dataset = (
+            roots["state"]
+            / "prepared-inputs"
+            / content_digest
+            / "private-dataset.jsonl"
+        )
+        dataset.parent.mkdir(parents=True)
+        dataset.write_bytes(prepared_payload)
+    if raw_sft_overrides is not None or raw_dataset_without_controls:
+        config_document["dataset"]["format"] = "syntunia-sft-row/v1"
+    if raw_sft_overrides is not None:
+        config_document["sft"].update(
+            {
+                "dataset_format": "raw_text",
+                "completion_only_loss": False,
+                "assistant_only_loss": False,
+                "use_preassigned_splits": True,
+            }
+        )
+        config_document["sft"].update(raw_sft_overrides)
+    if message_sft_overrides is not None:
+        config_document["dataset"]["format"] = "syntunia-sft-row/v2"
+        config_document["sft"].update(
+            {
+                "max_seq_length": 32768,
+                "dataset_format": "messages",
+                "completion_only_loss": True,
+                "assistant_only_loss": False,
+                "use_preassigned_splits": True,
+                "split_dataset": False,
+                "prompt_render": "prompt_completion",
+                "packing": False,
+                "require_memory_efficient_loss": True,
+            }
+        )
+        config_document["sft"].update(message_sft_overrides)
+    config = CanonicalDocument.from_mapping(config_document)
     model_snapshot = (
         roots["cache"]
         / "model"
@@ -484,6 +548,405 @@ class FakeRunner:
 def test_trainer_evidence_rejects_boolean_exit_code() -> None:
     with pytest.raises(TypeError, match="exact integer"):
         TrainerEvidence(False, Path("model"), Path("tokenizer"), {}, {}, {})
+
+
+def _raw_trainer_arguments_from_runtime(tmp_path: Path) -> tuple[object, list[str]]:
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path, raw_sft_overrides={}
+    )
+    _, roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    invocation = runtime_v1.build_trainer_invocation(workload, roots, environment)
+    delimiter = invocation.argv.index("--")
+    return invocation, list(invocation.argv[delimiter + 1 :])
+
+
+def test_runtime_raw_text_invocation_binds_full_sequence_and_preassigned_splits(tmp_path):
+    invocation, trainer_arguments = _raw_trainer_arguments_from_runtime(tmp_path)
+
+    assert "--no-completion-only-loss" in invocation.argv
+    assert "--no-assistant-only-loss" in invocation.argv
+    assert "--use-preassigned-splits" in invocation.argv
+    assert "--split-dataset" not in invocation.argv
+    assert invocation.expected_projection["dataset"]["schema_version"] == "syntunia-sft-row/v1"
+    assert invocation.expected_projection["dataset"]["format"] == "raw_text"
+    assert invocation.expected_projection["training"]["completion_only_loss"] is False
+    assert invocation.expected_projection["training"]["assistant_only_loss"] is False
+    assert invocation.expected_projection["training"]["use_preassigned_splits"] is True
+
+    offline_sft_worker._validate_trainer_arguments(trainer_arguments)
+
+
+def _message_trainer_arguments_from_runtime(tmp_path: Path) -> tuple[object, list[str]]:
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path, message_sft_overrides={}
+    )
+    _, roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    invocation = runtime_v1.build_trainer_invocation(workload, roots, environment)
+    delimiter = invocation.argv.index("--")
+    return invocation, list(invocation.argv[delimiter + 1 :])
+
+
+def test_runtime_32k_messages_bind_no_packing_completion_loss_and_guard(tmp_path):
+    invocation, trainer_arguments = _message_trainer_arguments_from_runtime(tmp_path)
+
+    for flag in (
+        "--completion-only-loss",
+        "--no-assistant-only-loss",
+        "--use-preassigned-splits",
+        "--require-memory-efficient-loss",
+    ):
+        assert flag in invocation.argv
+    assert "--split-dataset" not in invocation.argv
+    assert invocation.argv[invocation.argv.index("--max-seq-length") + 1] == "32768"
+    assert invocation.expected_projection["dataset"]["schema_version"] == (
+        "syntunia-sft-row/v2"
+    )
+    assert invocation.expected_projection["dataset"]["format"] == "messages"
+    assert invocation.expected_projection["training"]["packing"] is False
+    assert invocation.expected_projection["training"]["completion_only_loss"] is True
+    assert invocation.expected_projection["training"]["assistant_only_loss"] is False
+    assert invocation.expected_projection["training"]["require_memory_efficient_loss"] is True
+    offline_sft_worker._validate_trainer_arguments(trainer_arguments)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"packing": True},
+        {"completion_only_loss": False},
+        {"assistant_only_loss": True},
+        {"use_preassigned_splits": False},
+        {"split_dataset": True},
+        {"prompt_render": "full_conversation"},
+        {"require_memory_efficient_loss": False},
+    ],
+)
+def test_runtime_authoritative_messages_fail_closed_with_stable_error(
+    tmp_path, overrides
+):
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path, message_sft_overrides=overrides
+    )
+    _, roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    with pytest.raises(RuntimeV1Error, match="authoritative messages require"):
+        runtime_v1.build_trainer_invocation(workload, roots, environment)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="sealed memfd requires Linux")
+def test_runtime_prepared_dataset_uses_one_sealed_descriptor(tmp_path):
+    payload = (
+        b'{"format":"raw_text","schema_version":"syntunia-sft-row/v1",'
+        b'"split":"train","text":"private"}\n'
+    )
+    workload, environment, _, root_paths, dataset = _fixture(
+        tmp_path,
+        raw_sft_overrides={},
+        prepared_payload=payload,
+    )
+    roots = runtime_v1.RuntimeRoots(
+        engine=Path(environment["SYNAPTIC_ENGINE_ROOT"]),
+        project=Path(environment["SYNAPTIC_PROJECT_ROOT"]),
+        **{name: Path(path) for name, path in root_paths.items()},
+    )
+    invocation = runtime_v1.build_trainer_invocation(workload, roots, environment)
+    dataset_argument = invocation.argv[invocation.argv.index("--local-file") + 1]
+    assert invocation.retained_fds and len(invocation.retained_fds) == 1
+    assert dataset_argument == f"/proc/self/fd/{invocation.retained_fds[0]}"
+    assert Path(dataset_argument).read_bytes() == payload
+    assert dataset == (
+        roots.state
+        / "prepared-inputs"
+        / hashlib.sha256(payload).hexdigest()
+        / "private-dataset.jsonl"
+    )
+    runtime_v1._close_retained_fds(invocation.retained_fds)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="libc memfd requires Linux")
+def test_runtime_sealed_dataset_uses_libc_when_python_omits_memfd(monkeypatch):
+    import fcntl
+
+    payload = b"fallback-private-dataset"
+    monkeypatch.delattr(runtime_v1.os, "memfd_create", raising=False)
+    monkeypatch.delattr(runtime_v1.os, "MFD_CLOEXEC", raising=False)
+    monkeypatch.delattr(runtime_v1.os, "MFD_ALLOW_SEALING", raising=False)
+    for name in (
+        "F_ADD_SEALS", "F_GET_SEALS", "F_SEAL_WRITE", "F_SEAL_GROW",
+        "F_SEAL_SHRINK", "F_SEAL_SEAL",
+    ):
+        monkeypatch.delattr(fcntl, name, raising=False)
+    descriptor, path = runtime_v1._sealed_prepared_dataset(
+        payload, content_digest=hashlib.sha256(payload).hexdigest(),
+    )
+    try:
+        assert path == Path(f"/proc/self/fd/{descriptor}")
+        assert path.read_bytes() == payload
+        assert fcntl.fcntl(descriptor, runtime_v1._LINUX_F_GET_SEALS) == (
+            runtime_v1._LINUX_F_SEAL_WRITE
+            | runtime_v1._LINUX_F_SEAL_GROW
+            | runtime_v1._LINUX_F_SEAL_SHRINK
+            | runtime_v1._LINUX_F_SEAL_SEAL
+        )
+    finally:
+        runtime_v1._close_retained_fds((descriptor,))
+
+
+def test_runtime_prepared_dataset_fails_closed_without_memfd(tmp_path, monkeypatch):
+    payload = (
+        b'{"format":"raw_text","schema_version":"syntunia-sft-row/v1",'
+        b'"split":"train","text":"private"}\n'
+    )
+    workload, environment, _, root_paths, _ = _fixture(
+        tmp_path, raw_sft_overrides={}, prepared_payload=payload,
+    )
+    roots = runtime_v1.RuntimeRoots(
+        engine=Path(environment["SYNAPTIC_ENGINE_ROOT"]),
+        project=Path(environment["SYNAPTIC_PROJECT_ROOT"]),
+        **{name: Path(path) for name, path in root_paths.items()},
+    )
+
+    def unavailable(*args, **kwargs):
+        raise OSError("unavailable")
+
+    monkeypatch.setattr(runtime_v1.os, "memfd_create", unavailable, raising=False)
+    with pytest.raises(RuntimeV1Error, match="immutable source is unavailable"):
+        runtime_v1.build_trainer_invocation(workload, roots, environment)
+
+
+def test_runtime_prepared_dataset_rejects_changed_materialized_bytes(tmp_path):
+    payload = (
+        b'{"format":"raw_text","schema_version":"syntunia-sft-row/v1",'
+        b'"split":"train","text":"private"}\n'
+    )
+    workload, environment, _, root_paths, dataset = _fixture(
+        tmp_path,
+        raw_sft_overrides={},
+        prepared_payload=payload,
+    )
+    dataset.write_bytes(payload + b"changed")
+    roots = runtime_v1.RuntimeRoots(
+        engine=Path(environment["SYNAPTIC_ENGINE_ROOT"]),
+        project=Path(environment["SYNAPTIC_PROJECT_ROOT"]),
+        **{name: Path(path) for name, path in root_paths.items()},
+    )
+    with pytest.raises(RuntimeV1Error, match="content does not match"):
+        runtime_v1.build_trainer_invocation(workload, roots, environment)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="sealed memfd requires Linux")
+def test_prepared_materialization_to_runtime_evidence_resists_replace_restore(tmp_path):
+    from tuner.execution.providers.modal.prepared_input import (
+        bind_private_dataset,
+        materialize_private_dataset,
+    )
+
+    payload = (
+        b'{"format":"raw_text","schema_version":"syntunia-sft-row/v1",'
+        b'"split":"train","text":"private"}\n'
+    )
+    workload, environment, engine_file, root_paths, dataset = _fixture(
+        tmp_path, raw_sft_overrides={}, prepared_payload=payload,
+    )
+    shutil.rmtree(dataset.parents[1])
+    binding = bind_private_dataset(
+        workload.document["configuration"]["document"]["dataset"], payload,
+    )
+    assert binding is not None
+    assert materialize_private_dataset(root_paths["state"], binding, payload) == dataset
+
+    class ReplaceRestoreRunner(FakeRunner):
+        def __init__(self):
+            super().__init__()
+            self.observed = b""
+            self.descriptor = -1
+
+        def run(self, invocation):
+            dataset_argument = invocation.argv[invocation.argv.index("--local-file") + 1]
+            self.descriptor = invocation.retained_fds[0]
+            assert dataset_argument == f"/proc/self/fd/{self.descriptor}"
+            backup = dataset.with_name("private-dataset.original")
+            attacker = dataset.with_name("private-dataset.attacker")
+            dataset.replace(backup)
+            attacker.write_bytes(b"attacker replacement")
+            attacker.replace(dataset)
+            self.observed = Path(dataset_argument).read_bytes()
+            backup.replace(dataset)
+            return super().run(invocation)
+
+    runner = ReplaceRestoreRunner()
+    execute_runtime(
+        workload.canonical_bytes,
+        environment=environment,
+        runner=runner,
+        engine_file=engine_file,
+    )
+    assert runner.observed == payload
+    assert dataset.read_bytes() == payload
+    with pytest.raises(OSError):
+        os.fstat(runner.descriptor)
+    lineage = json.loads(
+        (root_paths["artifacts"] / "training_lineage.json").read_text(encoding="utf-8")
+    )
+    execution = lineage["execution_evidence"]
+    assert execution["dataset"]["resolved_path"] == f"/proc/self/fd/{runner.descriptor}"
+    assert _validate_execution_evidence(
+        execution,
+        workload,
+        closure_digest=execution["environment"]["SYNAPTIC_WORKER_CLOSURE_DIGEST"],
+        closure_manifest_path=execution["environment"]["SYNAPTIC_WORKER_CLOSURE_MANIFEST"],
+    )
+    assert _validate_embedded_trainer_lineage(
+        lineage["trainer_lineage"], workload, execution,
+    )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="sealed memfd requires Linux")
+def test_execute_runtime_closes_retained_descriptor_exactly_once_after_runner_raises(
+    tmp_path, monkeypatch,
+):
+    payload = (
+        b'{"format":"raw_text","schema_version":"syntunia-sft-row/v1",'
+        b'"split":"train","text":"private"}\n'
+    )
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path, raw_sft_overrides={}, prepared_payload=payload,
+    )
+
+    class RunnerProbeError(RuntimeError):
+        pass
+
+    monkeypatch.setattr(
+        runtime_v1.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RunnerProbeError()),
+    )
+    real_close = runtime_v1._close_retained_fds
+    close_calls: list[tuple[int, ...]] = []
+    replacement: list[int] = []
+    replacement_path = tmp_path / "fd-reuse-probe"
+
+    def close_and_reuse(descriptors):
+        close_calls.append(descriptors)
+        real_close(descriptors)
+        if len(close_calls) == 1:
+            reopened = os.open(replacement_path, os.O_CREAT | os.O_RDWR, 0o600)
+            assert reopened == descriptors[0]
+            replacement.append(reopened)
+
+    monkeypatch.setattr(runtime_v1, "_close_retained_fds", close_and_reuse)
+    with pytest.raises(RunnerProbeError):
+        execute_runtime(
+            workload.canonical_bytes,
+            environment=environment,
+            runner=runtime_v1.SubprocessTrainerRunner(),
+            engine_file=engine_file,
+        )
+    assert len(close_calls) == 1
+    assert replacement
+    try:
+        assert os.fstat(replacement[0]).st_size == 0
+    finally:
+        os.close(replacement[0])
+
+
+@pytest.mark.parametrize(
+    ("flag", "takes_value"),
+    [
+        ("--no-completion-only-loss", False),
+        ("--no-assistant-only-loss", False),
+        ("--use-preassigned-splits", False),
+        ("--runtime-v1-dataset-schema", True),
+        ("--runtime-v1-dataset-format", True),
+    ],
+)
+def test_worker_rejects_each_missing_runtime_raw_text_flag(
+    tmp_path: Path, flag: str, takes_value: bool
+) -> None:
+    _, trainer_arguments = _raw_trainer_arguments_from_runtime(tmp_path)
+    index = trainer_arguments.index(flag)
+    del trainer_arguments[index : index + (2 if takes_value else 1)]
+
+    with pytest.raises(offline_sft_worker.OfflineSFTWorkerError, match="incomplete"):
+        offline_sft_worker._validate_trainer_arguments(trainer_arguments)
+
+
+@pytest.mark.parametrize(
+    ("flag", "takes_value"),
+    [
+        ("--no-completion-only-loss", False),
+        ("--no-assistant-only-loss", False),
+        ("--use-preassigned-splits", False),
+        ("--runtime-v1-dataset-schema", True),
+        ("--runtime-v1-dataset-format", True),
+    ],
+)
+def test_worker_rejects_each_duplicated_runtime_raw_text_flag(
+    tmp_path: Path, flag: str, takes_value: bool
+) -> None:
+    _, trainer_arguments = _raw_trainer_arguments_from_runtime(tmp_path)
+    index = trainer_arguments.index(flag)
+    duplicate = trainer_arguments[index : index + (2 if takes_value else 1)]
+    trainer_arguments[index:index] = duplicate
+
+    with pytest.raises(offline_sft_worker.OfflineSFTWorkerError, match="duplicated"):
+        offline_sft_worker._validate_trainer_arguments(trainer_arguments)
+
+
+@pytest.mark.parametrize(
+    ("contradictory_flag", "message"),
+    [
+        ("--split-dataset", "contradictory"),
+        ("--completion-only-loss", "feature is unavailable"),
+        ("--assistant-only-loss", "feature is unavailable"),
+        ("--no-use-preassigned-splits", "feature is unavailable"),
+    ],
+)
+def test_worker_rejects_contradictory_runtime_raw_text_controls(
+    tmp_path: Path, contradictory_flag: str, message: str
+) -> None:
+    _, trainer_arguments = _raw_trainer_arguments_from_runtime(tmp_path)
+    trainer_arguments.append(contradictory_flag)
+
+    with pytest.raises(offline_sft_worker.OfflineSFTWorkerError, match=message):
+        offline_sft_worker._validate_trainer_arguments(trainer_arguments)
+
+
+@pytest.mark.parametrize(
+    "overrides,message",
+    [
+        ({"completion_only_loss": True}, "full-sequence loss"),
+        ({"assistant_only_loss": True}, "full-sequence loss"),
+        ({"use_preassigned_splits": False}, "only preassigned splits"),
+        ({"split_dataset": True}, "only preassigned splits"),
+        ({"dataset_format": "messages"}, "bind every raw dataset field"),
+    ],
+)
+def test_runtime_rejects_incoherent_raw_text_configuration(tmp_path, overrides, message):
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path, raw_sft_overrides=overrides
+    )
+    _, roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    with pytest.raises(RuntimeV1Error, match=message):
+        runtime_v1.build_trainer_invocation(workload, roots, environment)
+
+
+def test_runtime_rejects_raw_dataset_schema_without_bound_controls(tmp_path):
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path, raw_dataset_without_controls=True
+    )
+    _, roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    with pytest.raises(RuntimeV1Error, match="bind every raw dataset field"):
+        runtime_v1.build_trainer_invocation(workload, roots, environment)
 
 
 def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
