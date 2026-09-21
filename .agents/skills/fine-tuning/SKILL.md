@@ -45,6 +45,8 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Cloud eval against a run | `python tuner.py cloud-eval --run latest --preset full` |
 | Local deterministic vLLM generation | `VLLM_BATCH_INVARIANT=1 python tuner.py batch-generate --engine vllm ...` |
 | HF gym against trained model | `python tuner.py cloud-gym --run latest --method sft` |
+| Prepare verified raw-text SFT data | `python tuner.py prepare-dataset --config <config.json> --json` |
+| Plan a derived training image | `python scripts/qualify_derived_training_image.py plan --config Trainers/image_profiles/<profile>.yaml` |
 | Warm Space scaffold | `python3 Trainers/cloud/scripts/manage_space.py render --template vllm_warm --output-dir /tmp/my-space --base-image ghcr.io/<org>/<image>:<tag>` |
 | Warm Space deploy | `python3 Trainers/cloud/scripts/manage_space.py deploy --space-id <user>/<space> --template vllm_warm --base-image ghcr.io/<org>/<image>:<tag> --hardware a10g-small --sleep-time 3600 --var BASE_MODEL=<model>` |
 | ML training | `python tuner.py ml train --config Trainers/ml/configs/templates/regression.yaml` |
@@ -111,7 +113,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For local trainer iteration, use the checked-in `train_sft.py`, `train_kto.py`, and `train_grpo.py` entrypoints.
 - For repeatable local GPU training, prefer `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes` over ad hoc `docker run` commands. Put the model, dataset, Docker image, package overrides, LoRA settings, training knobs, and artifact paths in YAML.
 - For Windows Docker Desktop with GPU, prefer `job.transfer: auto` or `copy` in local-run configs. The runner chooses copy mode on Windows because GPU bind mounts can fail with access denied.
-- Keep newly released model support in local-run `setup.pip` pins or image fields. Do not leave one-off package installs in shell history.
+- Keep newly released model support in local-run config, not shell history. For a reviewed overlay that must be immutable at launch, use the checked-in derived-image plan/build/capture/verify workflow rather than `setup.pip`.
 - For canonical HF experiments, prefer `python tuner.py cloud-pipeline ...` over `cloud-run`.
 - For full train → eval → exact loss → analysis → recommendation runs, prefer `python tuner.py run-experiment ...`.
 - Evolutionary SFT is experimental but now first-class in the cloud experiment path. Prefer a checked-in experiment spec or `cloud-pipeline --train-evolutionary-*` overrides over editing trainer YAMLs by hand.
@@ -137,8 +139,9 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - If `run-experiment` refuses to launch because the tracked worktree is dirty, prefer creating a clean temporary git worktree and launching from there over asking the user to stash or cleaning their checkout.
 - If a cloud run fails before bucket artifacts appear, treat it as a bootstrap/runtime problem first. Inspect `cloud-jobs logs` before changing training hyperparameters.
 - For a protected artifact slot that retains its verified anchor descriptor, do not unlink the open anchor directly. HF mount releases before v0.9.2 reject unlink-while-open. Atomically rename it with no-replace, verify the same identity through the claim, close and recheck it, then unlink only the claimed name.
-- For newly released architectures or day-zero model launches, verify official Docker Hub tags for `unsloth/unsloth` and `vllm/vllm-openai` before trusting the repo's pinned image profiles. As of 2026-04-02, Docker Hub shows `unsloth/unsloth:latest` updated 1 day ago and `vllm/vllm-openai:latest` / `v0.17.1` updated about 17 hours ago.
-- As of 2026-04-22, local `docker pull unsloth/unsloth:latest` resolved to digest `sha256:9be56babef4efc330316cff3a65f9f911b9e7709bce4114fa7817ba3ffd8565d`. That image still reports `transformers 4.57.1`, so Qwen3.5 local runs need config-level package overrides such as `transformers==5.5.0`, `trl==0.22.2`, and current `unsloth` / `unsloth_zoo`.
+- For the verified Qwen 3.5 4B SFT path, use `Trainers/recipes/qwen35_4b_32k_prompt_completion.yaml`. It selects the `qwen35-sft-v1` runtime profile, which admits only `Qwen/Qwen3.5-4B` at revision `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` for SFT and binds an immutable image plus its complete captured installed-distribution inventory. Treat that inventory as the transitive dependency lock; do not reconstruct Torch, CUDA, Transformers, TRL, Unsloth, Torchvision, or transitive pins manually.
+- Do not use mutable `unsloth/unsloth:latest`, `setup.pip`, or manual package overlays for the verified Qwen path. Inspect the compiled recipe/profile first, then run its ordinary dry smoke.
+- `qwen35-sft-v1` is not an inheritance template: do not apply it, or manually assemble equivalent pins, to Qwen 3.5 0.8B, 2B, 9B, another revision, or another method. Each exact model/revision/method needs its own successful smoke and an explicitly admitting, immutable profile before use.
 - If a named training image profile is broken, prefer an explicit `training.cloud_image` override to a currently verified official image tag over changing unrelated parts of the experiment such as evaluation backend.
 - If a run needs newer package versions but the right base image is otherwise close, use stage-local experiment-spec `pip_packages` pins under `training:`, `evaluation:`, or `loss:` instead of a one-off helper script or a repo-global image pin.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
@@ -180,6 +183,9 @@ Load the specific reference you need:
 | **Evolutionary Config** | Experimental gradient-selection config schema and defaults | `reference/training-config.md` |
 | **LoRA Surgery** | Eval-guided post-training weight optimization | `reference/lora-surgery.md` |
 | **Troubleshooting** | OOM errors, instability, platform issues | `reference/troubleshooting.md` |
+| **Tokenizer Profiling** | Offline token-length distributions and sequence-budget sizing | `reference/tokenizer-profiling.md` |
+| **Derived Training Images** | Immutable package-overlay planning, capture, diagnostic reporting, and live launch verification | `reference/derived-training-images.md` |
+| **Nexus Note Snapshot** | Read-only, explicit private-note snapshots for config-driven analysis | `reference/nexus-note-snapshot.md` |
 | **Env Alignment Protocol** | Canonical SynthChat → SFT → merge/publish → KTO → env-GRPO flow | `protocols/environment-backed-alignment-pipeline.md` |
 
 ## LoRA Technique Configs
@@ -201,20 +207,67 @@ See `reference/lora-techniques.md` for full details, integration status, and com
 
 ## Common Patterns
 
+**Profile JSONL token lengths before setting an SFT sequence budget:**
+```bash
+python .skills/fine-tuning/scripts/profile_tokenizer_lengths.py \
+  create \
+  --config .skills/fine-tuning/configs/qwen35_4b_token_profile.yaml \
+  --output-prefix private/token-profile/qwen35_4b
+```
+This is offline-only and fails closed unless the local tokenizer snapshot proves
+the configured immutable revision. See `reference/tokenizer-profiling.md` for
+the generic text, message, and component input schemas.
+
+For a verified normalized bundle that should remain one source item per training
+row, run `prepare-dataset` first and declare `syntunia-sft-row/v1` / `raw_text`
+in the SFT recipe. Raw-text rows use their preassigned train/validation splits
+and full-sequence labels; they do not pass through a chat template. See
+`reference/dataset-formats.md` and `reference/sft-training.md`.
+
+For authoritative two-turn prompt/completion rows, declare
+`syntunia-sft-row/v2` / `messages`, preserve the supplied train/validation split,
+and bind `packing: false`, `completion_only_loss: true`,
+`assistant_only_loss: false`, and `prompt_render: prompt_completion`. At a 32K
+budget also set `require_memory_efficient_loss: true`; the trainer then fails
+closed unless the loaded model resolves to Unsloth's reviewed causal-LM loss.
+`Trainers/recipes/qwen35_4b_32k_prompt_completion.yaml` is the verified,
+provider-free Qwen 3.5 4B SFT smoke path. Its named `qwen35-sft-v1` runtime
+profile supplies the exact model/revision admission, immutable image, and full
+installed-distribution inventory. Its batch/accumulation values are sizing
+candidates, not hardware qualification or permission to launch a paid run. See
+`reference/derived-training-images.md`.
+
+**Create a private, read-only snapshot of explicitly configured Nexus notes:**
+```bash
+python .skills/fine-tuning/scripts/snapshot_nexus_notes.py \
+  --config private/nexus_note_snapshot.yaml
+```
+The config supplies every note path; the adapter uses only `content read` and
+produces deterministic JSONL outside Git. See `reference/nexus-note-snapshot.md`.
+
 **Quick SFT test run:**
 ```bash
 cd Trainers/sft
 python train_sft.py --model-size 3b --tier quick --dry-run
 ```
 
-**Config-driven local Docker SFT smoke run:**
+**Verified Qwen 3.5 4B SFT compile inspection and dry smoke:**
 ```bash
 python tuner.py local-run \
-  --job-config Trainers/recipes/qwen35_2b_sft_smoke.yaml \
+  --job-config Trainers/recipes/qwen35_4b_32k_prompt_completion.yaml \
+  --json
+
+python tuner.py local-run \
+  --job-config Trainers/recipes/qwen35_4b_32k_prompt_completion.yaml \
   --yes
 ```
 
-For a different local SFT run, copy a recipe under `Trainers/recipes/` (one with `target: local` or `target: both`) and change `model`, `dataset`, `training`, `lora`, `job.image`, and `setup.pip` as needed. Use repo-relative local dataset paths; the runner translates them for the container.
+The `--json` command has no Docker effects; inspect its resolved profile, image,
+inventory, model revision, and lineage inputs before the `--yes` dry smoke. For
+a different local SFT run, use a recipe whose model/revision/method is admitted
+by its own named runtime profile. Do not inherit the Qwen profile or replace it
+with manual pins for an untested Qwen size or revision. Use repo-relative local
+dataset paths; the runner translates them for the container.
 
 **Config-driven local Docker embedding smoke run:**
 ```bash

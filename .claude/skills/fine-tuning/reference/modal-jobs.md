@@ -570,6 +570,20 @@ visible completion record cannot precede its artifacts. Any uncertainty after
 staging or `.spawn()` is reconciliation-only; it does not recreate submission
 authority.
 
+Prepared training inputs keep the provider-neutral request unchanged. The
+prepared `ref`, `revision`, content digest, byte size, and format remain the
+authority. Inputs at or below 2 MiB retain the legacy inline bundle transport.
+Inputs above 2 MiB and at or below the existing 64 MiB prepared-publication
+limit use one operation-scoped `payload.bin` object on the consumer-owned
+artifact Volume. The signed bundle contains only its canonical descriptor; it
+never contains the prose or an operator filesystem path. Staging reopens and
+reverifies the local prepared publication, uploads without overwrite, streams
+an exact size/hash readback, and writes control material last. An exact remote
+payload can complete recovery of the same authenticated stage even when the
+local source is no longer available; a fresh stage cannot. This does not raise
+the generic bundle or control limits, add a public provider verb, or create a
+cross-run cache.
+
 Treat both mounts as hostile shared storage. On the locked Linux runtime,
 reads and writes traverse through retained directory descriptors and open leaves
 relative to those descriptors, preventing an ancestor substitution between
@@ -796,7 +810,7 @@ lock for packages already fixed by the base image digest. It records the exact
 additive installer bytes and full measured distribution map. Candidate and
 current additive hashes must agree; CRLF conversion is not permission to accept
 different bytes. This initializer targets the reviewed isolated CPython 3.12.13
-and Modal 1.5.4 profile and preserves the existing fixed 118-source inventory.
+and Modal 1.5.4 profile and preserves the existing fixed 119-source inventory.
 It grants no runtime qualification: build a fresh wheel containing the resources,
 then run the concrete CPU image check and the separately authorized GPU/chat
 smoke. Do not run this standalone maintenance tool concurrently with serving;
@@ -807,9 +821,16 @@ local set before recovery, never overwrite targets or automatically delete it.
 For the separate inference image, use `python3 scripts/regenerate_modal_inference_lock.py`
 to check already-reviewed inference locks, or add `--write` for an intentional
 source-content refresh and then rerun the check. This offline tool preserves
-the fixed 118-source inventory, dependency bytes, and runtime pins. It cannot
+the fixed 119-source inventory, dependency bytes, and runtime pins. It cannot
 initialize missing locks or qualify a CPU candidate for live chat. Run it only
 as a standalone maintenance process, never inside a serving process.
+The current inventory deliberately adds
+`tuner/execution/providers/modal/prepared_input.py` because the inference
+closure reaches it through `coordinator_bundle.py`. The maintenance contract
+checks every declared Python member's static local imports against the fixed
+inventory so a transitive local dependency cannot be omitted while a stale
+inventory still reports `CURRENT`.
+
 The two lock replacements are individually atomic but not transactional. If
 interrupted between replacements, verification and reruns fail closed; recover
 the reviewed consistent lock pair before retrying. Do not bypass validation.
