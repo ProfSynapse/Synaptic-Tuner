@@ -37,8 +37,13 @@ from synaptic_tuner.api.v1.ingestion_facade import (
 
 MAX_SELECTION_ROOTS = 32
 MAX_ADMITTED_FILES = 10_000
-MAX_FILE_BYTES = 256 * 1024
-MAX_TOTAL_BYTES = 32 * 1024 * 1024
+DEFAULT_MAX_MEMBER_BYTES = 256 * 1024
+DEFAULT_MAX_TOTAL_BYTES = 32 * 1024 * 1024
+HARD_MAX_MEMBER_BYTES = 16 * 1024 * 1024
+HARD_MAX_TOTAL_BYTES = 32 * 1024 * 1024
+# Compatibility aliases for callers that imported the original fixed budgets.
+MAX_FILE_BYTES = DEFAULT_MAX_MEMBER_BYTES
+MAX_TOTAL_BYTES = DEFAULT_MAX_TOTAL_BYTES
 MAX_LOGICAL_PATH_BYTES = 1_024
 MAX_LOGICAL_PATH_SEGMENTS = 64
 MAX_DISCOVERY_ENTRIES = 100_000
@@ -152,6 +157,33 @@ class LocalSelectionRootV1:
 
 
 @dataclass(frozen=True, slots=True)
+class AdmissionLimitsV1:
+    """Caller-selected source-admission budgets under fixed safety ceilings."""
+
+    max_member_bytes: int = DEFAULT_MAX_MEMBER_BYTES
+    max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.max_member_bytes) is not int
+            or type(self.max_total_bytes) is not int
+        ):
+            raise TypeError("admission limits must be exact integers")
+        if not 1 <= self.max_member_bytes <= HARD_MAX_MEMBER_BYTES:
+            raise ValueError("max_member_bytes is outside the supported range")
+        if not 1 <= self.max_total_bytes <= HARD_MAX_TOTAL_BYTES:
+            raise ValueError("max_total_bytes is outside the supported range")
+        if self.max_member_bytes > self.max_total_bytes:
+            raise ValueError("max_member_bytes must not exceed max_total_bytes")
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "max_member_bytes": self.max_member_bytes,
+            "max_total_bytes": self.max_total_bytes,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class LocalDiscoveryPolicyV1:
     include: tuple[str, ...]
     exclude: tuple[str, ...]
@@ -190,8 +222,8 @@ class SnapshotEntryV1:
             raise TypeError("content must be exact bytes")
         if type(self.size_bytes) is not int or self.size_bytes != len(self.content):
             raise ValueError("size_bytes must bind content")
-        if self.size_bytes > MAX_FILE_BYTES:
-            raise ValueError("content exceeds the per-file limit")
+        if self.size_bytes > HARD_MAX_MEMBER_BYTES:
+            raise ValueError("content exceeds the hard member ceiling")
         expected = hashlib.sha256(self.content).hexdigest()
         if type(self.sha256) is not str or self.sha256 != expected:
             raise ValueError("sha256 must bind content")
@@ -226,7 +258,7 @@ class AdmissionReportV1:
             raise ValueError("admission report file counts are inconsistent")
         if (
             self.admitted_file_count > MAX_ADMITTED_FILES
-            or self.total_bytes > MAX_TOTAL_BYTES
+            or self.total_bytes > HARD_MAX_TOTAL_BYTES
         ):
             raise ValueError("admission report exceeds snapshot limits")
 
@@ -289,6 +321,7 @@ class _AuthorizedSelectionV1:
     source_ref: str
     roots: tuple[_AuthorizedRootV1, ...]
     policy: LocalDiscoveryPolicyV1
+    admission_limits: AdmissionLimitsV1
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,7 +414,9 @@ def glob_matches_v1(pattern: str, logical_path: str) -> bool:
 
 
 def _stable_regular_read(
-    path: Path, expected_identity: tuple[int, int, int, int, int]
+    path: Path,
+    expected_identity: tuple[int, int, int, int, int],
+    max_member_bytes: int = DEFAULT_MAX_MEMBER_BYTES,
 ) -> bytes:
     try:
         declared = path.lstat()
@@ -389,7 +424,7 @@ def _stable_regular_read(
             _raise(LocalSelectionCodeV1.SOURCE_UNSAFE)
         if _identity(declared) != expected_identity:
             _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
-        if declared.st_size > MAX_FILE_BYTES:
+        if declared.st_size > max_member_bytes:
             _raise(LocalSelectionCodeV1.LIMIT_EXCEEDED)
         if path.resolve(strict=True) != path.absolute():
             _raise(LocalSelectionCodeV1.SOURCE_UNSAFE)
@@ -403,8 +438,8 @@ def _stable_regular_read(
                 _raise(LocalSelectionCodeV1.SOURCE_UNSAFE)
             chunks: list[bytes] = []
             size = 0
-            while size <= MAX_FILE_BYTES:
-                chunk = os.read(descriptor, MAX_FILE_BYTES + 1 - size)
+            while size <= max_member_bytes:
+                chunk = os.read(descriptor, max_member_bytes + 1 - size)
                 if not chunk:
                     break
                 chunks.append(chunk)
@@ -421,7 +456,7 @@ def _stable_regular_read(
     identities = tuple(_identity(item) for item in (declared, before, after, final))
     if any(item != identities[0] for item in identities[1:]):
         _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
-    if len(payload) > MAX_FILE_BYTES:
+    if len(payload) > max_member_bytes:
         _raise(LocalSelectionCodeV1.LIMIT_EXCEEDED)
     if len(payload) != before.st_size:
         _raise(LocalSelectionCodeV1.SOURCE_CHANGED)
@@ -603,10 +638,14 @@ def _inventory(selection: _AuthorizedSelectionV1) -> ImmutableLocalSnapshotV1:
     for candidate in admitted:
         logical_path = candidate.logical_path
         _revalidate_retained(candidate.ancestors)
-        payload = _stable_regular_read(candidate.path, candidate.identity)
+        payload = _stable_regular_read(
+            candidate.path,
+            candidate.identity,
+            selection.admission_limits.max_member_bytes,
+        )
         _revalidate_retained(candidate.ancestors)
         total += len(payload)
-        if total > MAX_TOTAL_BYTES:
+        if total > selection.admission_limits.max_total_bytes:
             _raise(LocalSelectionCodeV1.LIMIT_EXCEEDED)
         entries.append(
             SnapshotEntryV1(
@@ -631,10 +670,14 @@ def _inventory(selection: _AuthorizedSelectionV1) -> ImmutableLocalSnapshotV1:
     verified_total = 0
     for candidate, captured in zip(final_admitted, entries, strict=True):
         _revalidate_retained(candidate.ancestors)
-        payload = _stable_regular_read(candidate.path, candidate.identity)
+        payload = _stable_regular_read(
+            candidate.path,
+            candidate.identity,
+            selection.admission_limits.max_member_bytes,
+        )
         _revalidate_retained(candidate.ancestors)
         verified_total += len(payload)
-        if verified_total > MAX_TOTAL_BYTES:
+        if verified_total > selection.admission_limits.max_total_bytes:
             _raise(LocalSelectionCodeV1.LIMIT_EXCEEDED)
         if (
             len(payload) != captured.size_bytes
@@ -676,6 +719,7 @@ class ProcessLocalSelectionRegistryV1:
         project_ref: str,
         roots: tuple[LocalSelectionRootV1, ...],
         policy: LocalDiscoveryPolicyV1,
+        admission_limits: AdmissionLimitsV1 | None = None,
     ) -> AuthorizedSourceRef:
         if type(roots) is not tuple or any(
             type(item) is not LocalSelectionRootV1 for item in roots
@@ -689,6 +733,19 @@ class ProcessLocalSelectionRegistryV1:
             raise TypeError("policy must be exact LocalDiscoveryPolicyV1")
         policy = LocalDiscoveryPolicyV1(
             policy.include, policy.exclude, policy.include_hidden
+        )
+        if (
+            admission_limits is not None
+            and type(admission_limits) is not AdmissionLimitsV1
+        ):
+            raise TypeError("admission_limits must be exact AdmissionLimitsV1 or None")
+        effective_limits = (
+            AdmissionLimitsV1()
+            if admission_limits is None
+            else AdmissionLimitsV1(
+                admission_limits.max_member_bytes,
+                admission_limits.max_total_bytes,
+            )
         )
         aliases = tuple(item.alias for item in roots)
         if len(aliases) != len(set(aliases)):
@@ -715,10 +772,12 @@ class ProcessLocalSelectionRegistryV1:
                     "include_hidden": policy.include_hidden,
                 },
             }
+            authority_domain = b"synaptic-process-local-selection-authority/v1\0"
+            if admission_limits is not None:
+                authority_document["admission_limits"] = effective_limits.to_dict()
+                authority_domain = b"synaptic-process-local-selection-authority/v2\0"
             authority_digest = hashlib.sha256(
-                b"synaptic-process-local-selection-authority/v1\0"
-                + self._secret
-                + canonical_bytes(authority_document)
+                authority_domain + self._secret + canonical_bytes(authority_document)
             ).hexdigest()
             reference = AuthorizedSourceRef(
                 project_ref,
@@ -727,7 +786,11 @@ class ProcessLocalSelectionRegistryV1:
                 authority_digest,
             )
             self._authorizations[source_ref] = _AuthorizedSelectionV1(
-                reference.project_ref, source_ref, prepared, policy
+                reference.project_ref,
+                source_ref,
+                prepared,
+                policy,
+                effective_limits,
             )
         return reference
 
@@ -742,7 +805,12 @@ class ProcessLocalSelectionRegistryV1:
 
 
 __all__ = [
+    "AdmissionLimitsV1",
     "AdmissionReportV1",
+    "DEFAULT_MAX_MEMBER_BYTES",
+    "DEFAULT_MAX_TOTAL_BYTES",
+    "HARD_MAX_MEMBER_BYTES",
+    "HARD_MAX_TOTAL_BYTES",
     "ImmutableLocalSnapshotV1",
     "LocalDiscoveryPolicyV1",
     "LocalSelectionCodeV1",

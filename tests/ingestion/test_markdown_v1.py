@@ -11,6 +11,7 @@ from synaptic_tuner.api.v1.ingestion_facade import (
     FieldValueKind,
     FrontmatterMode,
     MarkdownProfileV1,
+    ParsingProfile,
     StructureDefinition,
     TextProjection,
 )
@@ -73,10 +74,70 @@ Body
         parsed.frontmatter["truth"] = False  # type: ignore[index]
 
 
+def test_mapping_and_sequence_nulls_are_supported_without_coercing_quotes() -> None:
+    parsed = parse_markdown_v1(
+        b'''---
+mapping:
+  lower: null
+  capitalized: Null
+  upper: NULL
+  tilde: ~
+  empty:
+sequence:
+  - null
+  - ~
+  -
+quoted: "null"
+---
+Body
+''',
+        FrontmatterMode.REQUIRED,
+        ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V2,
+    )
+
+    mapping = parsed.frontmatter["mapping"]
+    assert type(mapping) is MappingProxyType
+    assert dict(mapping) == {
+        "lower": None,
+        "capitalized": None,
+        "upper": None,
+        "tilde": None,
+        "empty": None,
+    }
+    assert parsed.frontmatter["sequence"] == (None, None, None)
+    assert parsed.frontmatter["quoted"] == "null"
+
+
+@pytest.mark.parametrize("literal", ("null", "Null", "NULL", "~"))
+def test_v1_profile_preserves_null_rejection(literal: str) -> None:
+    with pytest.raises(MarkdownParseErrorV1) as invalid:
+        parse_markdown_v1(
+            f"---\nvalue: {literal}\n---\nBody".encode("utf-8"),
+            FrontmatterMode.REQUIRED,
+            ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1,
+        )
+    assert invalid.value.code is MarkdownParseCodeV1.FRONTMATTER_INVALID
+
+
+def test_empty_scalar_is_profile_versioned() -> None:
+    content = b"---\nvalue:\n---\nBody"
+    legacy = parse_markdown_v1(
+        content,
+        FrontmatterMode.REQUIRED,
+        ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1,
+    )
+    current = parse_markdown_v1(
+        content,
+        FrontmatterMode.REQUIRED,
+        ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V2,
+    )
+    assert legacy.frontmatter["value"] == ""
+    assert current.frontmatter["value"] is None
+
+
 @pytest.mark.parametrize(
     "frontmatter",
     (
-        "value: null",
         "value: .nan",
         "value: !!str tagged",
         "base: &base {x: 1}\ncopy: *base",

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import importlib
 import os
+import runpy
+import sys
 from argparse import Namespace
 from pathlib import Path
 
@@ -13,61 +15,94 @@ from tuner.cli.main import build_project_context, main as cli_main
 from tuner.cli.router import route_command
 from tuner.handlers.ingestion_handler import _selection_roots
 from tuner.ingestion.runtime_v1 import ProcessLocalIngestionOperationsV1
+from tuner.ingestion.local_selection_v1 import (
+    LocalSelectionCodeV1,
+    LocalSelectionErrorV1,
+    ProcessLocalSelectionRegistryV1,
+)
 from tuner.project import ProjectContext
 
 
-def _config(*, pattern: str = "**/*.md") -> str:
-    return json.dumps(
-        {
-            "schema_version": "synaptic-ingestion-cli/v1",
-            "project_ref": "project-1",
-            "admission_request_id": "admit-1",
-            "request_id": "request-1",
-            "discovery": {
-                "include": ["**/*"],
-                "exclude": [],
-                "include_hidden": False,
-            },
-            "structure": {
-                "name": "MarkdownNote",
-                "version": "1",
-                "frontmatter_mode": "optional",
-                "fields": [
-                    {
-                        "name": "body",
-                        "selector": {"kind": "document_body", "key": None},
-                        "value_kind": "string",
-                        "required": True,
-                    },
-                    {
-                        "name": "title",
-                        "selector": {
-                            "kind": "frontmatter_field",
-                            "key": "title",
-                        },
-                        "value_kind": "string",
-                        "required": False,
-                    },
-                ],
-                "text_projections": [{"name": "text", "field_ref": "body"}],
-                "metadata": [],
-            },
-            "binding": {"binding_id": "markdown", "pattern": pattern},
+def _config(
+    *,
+    pattern: str = "**/*.md",
+    admission_limits: dict[str, object] | None = None,
+) -> str:
+    document: dict[str, object] = {
+        "schema_version": (
+            "synaptic-ingestion-cli/v1"
+            if admission_limits is None
+            else "synaptic-ingestion-cli/v2"
+        ),
+        "project_ref": "project-1",
+        "admission_request_id": "admit-1",
+        "request_id": "request-1",
+        "discovery": {
+            "include": ["**/*"],
+            "exclude": [],
+            "include_hidden": False,
         },
-        separators=(",", ":"),
-    )
+        "structure": {
+            "name": "MarkdownNote",
+            "version": "1",
+            "frontmatter_mode": "optional",
+            "fields": [
+                {
+                    "name": "body",
+                    "selector": {"kind": "document_body", "key": None},
+                    "value_kind": "string",
+                    "required": True,
+                },
+                {
+                    "name": "title",
+                    "selector": {
+                        "kind": "frontmatter_field",
+                        "key": "title",
+                    },
+                    "value_kind": "string",
+                    "required": False,
+                },
+            ],
+            "text_projections": [{"name": "text", "field_ref": "body"}],
+            "metadata": [],
+        },
+        "binding": {"binding_id": "markdown", "pattern": pattern},
+    }
+    if admission_limits is not None:
+        document["admission_limits"] = admission_limits
+    return json.dumps(document, separators=(",", ":"))
 
 
 def _context(tmp_path: Path) -> ProjectContext:
-    return ProjectContext.standalone(
-        engine_root=tmp_path, invocation_cwd=tmp_path
-    )
+    return ProjectContext.standalone(engine_root=tmp_path, invocation_cwd=tmp_path)
 
 
 def _write_config(tmp_path: Path, content: str | None = None) -> Path:
     path = tmp_path / "ingestion.json"
     path.write_text(_config() if content is None else content, encoding="utf-8")
     return path
+
+
+def _skill_validator_accepts(config: Path) -> bool:
+    script = (
+        Path(__file__).parents[2]
+        / ".skills"
+        / "source-ingestion"
+        / "scripts"
+        / "validate_ingestion_config.py"
+    )
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        namespace = runpy.run_path(str(script))
+    finally:
+        sys.dont_write_bytecode = previous
+    violation = namespace["ConfigViolation"]
+    try:
+        namespace["validate"](namespace["_load"](config))
+    except violation:
+        return False
+    return True
 
 
 def _args(config: Path | str, selection: str, *, json_mode: bool = True) -> Namespace:
@@ -137,9 +172,7 @@ paths:
     monkeypatch.chdir(invocation)
     engine = tmp_path / "engine"
     engine.mkdir()
-    context = build_project_context(
-        _args(config, "notes=note.md"), engine_root=engine
-    )
+    context = build_project_context(_args(config, "notes=note.md"), engine_root=engine)
 
     assert context.mode == "host"
     assert context.project_root == project.resolve()
@@ -173,6 +206,169 @@ def test_ingest_success_is_bounded_and_leak_free(
     assert str(source) not in captured.out
     assert secret_content not in captured.out
     assert "title" not in captured.out
+
+
+def test_ingest_v2_accepts_member_above_legacy_budget_end_to_end(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "selected-private"
+    source.mkdir()
+    payload = "x" * (256 * 1024 + 1)
+    (source / "large.md").write_text(payload, encoding="utf-8")
+    config = _write_config(
+        tmp_path,
+        _config(
+            admission_limits={
+                "max_member_bytes": 512 * 1024,
+                "max_total_bytes": 2 * 1024 * 1024,
+            }
+        ),
+    )
+
+    assert (
+        route_command(_args(config, f"members={source}"), context=_context(tmp_path))
+        == 0
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["status"] == "verified"
+    assert result["source_count"] == 1
+    assert str(source) not in captured.out
+    assert payload[:100] not in captured.out
+
+
+def test_cli_schema_versions_bind_null_parsing_profile(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "selected-private"
+    source.mkdir()
+    (source / "null.md").write_text(
+        "---\ncontainer: {value: null}\n---\nBody\n", encoding="utf-8"
+    )
+
+    legacy = _write_config(tmp_path, _config())
+    assert route_command(
+        _args(legacy, f"notes={source}"), context=_context(tmp_path)
+    ) == 1
+    legacy_result = json.loads(capsys.readouterr().out)
+    assert legacy_result["status"] == "blocked"
+    assert legacy_result["diagnostic_codes"] == ["parse_failed"]
+
+    current = _write_config(
+        tmp_path,
+        _config(
+            admission_limits={
+                "max_member_bytes": 4 * 1024 * 1024,
+                "max_total_bytes": 32 * 1024 * 1024,
+            }
+        ),
+    )
+    assert route_command(
+        _args(current, f"notes={source}"), context=_context(tmp_path)
+    ) == 0
+    current_result = json.loads(capsys.readouterr().out)
+    assert current_result["status"] == "verified"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("project_ref", "bad project"),
+        ("admission_request_id", "../bad"),
+        ("request_id", "bad/request"),
+    ),
+)
+def test_config_validator_and_runtime_reject_bad_operational_ids(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    field: str,
+    value: str,
+) -> None:
+    document = json.loads(_config())
+    document[field] = value
+    config = _write_config(tmp_path, json.dumps(document))
+
+    assert not _skill_validator_accepts(config)
+    assert route_command(_args(config, "notes=missing.md"), context=_context(tmp_path)) == 2
+    assert json.loads(capsys.readouterr().out)["error_code"] == "invalid_input"
+
+
+@pytest.mark.parametrize(
+    ("list_name", "patterns"),
+    (
+        ("include", ["**/*.md", "**/*.md"]),
+        ("exclude", ["private/**", "private/**"]),
+        ("include", ["../*.md"]),
+    ),
+)
+def test_config_validator_and_runtime_reject_discovery_pattern_drift(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    list_name: str,
+    patterns: list[str],
+) -> None:
+    document = json.loads(_config())
+    document["discovery"][list_name] = patterns
+    config = _write_config(tmp_path, json.dumps(document))
+
+    assert not _skill_validator_accepts(config)
+    assert route_command(_args(config, "notes=missing.md"), context=_context(tmp_path)) == 2
+    assert json.loads(capsys.readouterr().out)["error_code"] == "invalid_input"
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {"max_member_bytes": True, "max_total_bytes": 1},
+        {"max_member_bytes": 1.0, "max_total_bytes": 1},
+        {"max_member_bytes": 0, "max_total_bytes": 1},
+        {"max_member_bytes": 2, "max_total_bytes": 1},
+        {"max_member_bytes": 16 * 1024 * 1024 + 1, "max_total_bytes": 32 * 1024 * 1024},
+        {"max_member_bytes": 1, "max_total_bytes": 32 * 1024 * 1024 + 1},
+        {"max_member_bytes": 1, "max_total_bytes": 2, "unknown": 3},
+    ],
+)
+def test_ingest_v2_rejects_invalid_admission_limits(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    limits: dict[str, object],
+) -> None:
+    config = _write_config(tmp_path, _config(admission_limits=limits))
+    assert (
+        route_command(_args(config, "members=missing.md"), context=_context(tmp_path))
+        == 2
+    )
+    assert json.loads(capsys.readouterr().out) == {
+        "success": False,
+        "status": "failed",
+        "error_code": "invalid_input",
+    }
+
+
+def test_ingest_v2_reports_sanitized_member_limit_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "private-source"
+    source.mkdir()
+    secret = "private-data-" * 200
+    (source / "member.md").write_text(secret, encoding="utf-8")
+    config = _write_config(
+        tmp_path,
+        _config(admission_limits={"max_member_bytes": 128, "max_total_bytes": 1024}),
+    )
+
+    assert (
+        route_command(_args(config, f"members={source}"), context=_context(tmp_path))
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {
+        "success": False,
+        "status": "failed",
+        "error_code": "limit_exceeded",
+    }
+    assert str(source) not in captured.out
+    assert secret not in captured.out
 
 
 def test_ingest_normalizes_ordinary_lexical_root_without_resolving_it(
@@ -230,9 +426,9 @@ def test_ingest_rejects_link_selected_as_root(
         pytest.skip("symlinks are unavailable to the test process")
     config = _write_config(tmp_path)
 
-    assert route_command(
-        _args(config, f"{alias}={link}"), context=_context(tmp_path)
-    ) == 1
+    assert (
+        route_command(_args(config, f"{alias}={link}"), context=_context(tmp_path)) == 1
+    )
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {
         "success": False,
@@ -247,11 +443,23 @@ def test_ingest_rejects_link_selected_as_root(
 @pytest.mark.parametrize(
     ("content", "selection"),
     [
-        ('{"schema_version":"synaptic-ingestion-cli/v1","schema_version":"x"}', "notes=note.md"),
+        (
+            '{"schema_version":"synaptic-ingestion-cli/v1","schema_version":"x"}',
+            "notes=note.md",
+        ),
         (_config(), "missing-separator"),
         (_config(), "notes="),
         (_config()[:-1] + ',"unknown":true}', "notes=note.md"),
-        (_config().replace('"include_hidden":false', '"include_hidden":NaN'), "notes=note.md"),
+        (
+            _config(
+                admission_limits={"max_member_bytes": 1024, "max_total_bytes": 2048}
+            ).replace("synaptic-ingestion-cli/v2", "synaptic-ingestion-cli/v1"),
+            "notes=note.md",
+        ),
+        (
+            _config().replace('"include_hidden":false', '"include_hidden":NaN'),
+            "notes=note.md",
+        ),
     ],
 )
 def test_ingest_rejects_invalid_config_and_selection(
@@ -292,9 +500,9 @@ def test_ingest_reports_preview_blockers_without_starting(
     monkeypatch.setattr(ProcessLocalIngestionOperationsV1, "start", record_start)
     config = _write_config(tmp_path)
 
-    assert route_command(
-        _args(config, f"notes={source}"), context=_context(tmp_path)
-    ) == 1
+    assert (
+        route_command(_args(config, f"notes={source}"), context=_context(tmp_path)) == 1
+    )
     output = capsys.readouterr().out
     payload = json.loads(output)
     assert started is False
@@ -304,6 +512,44 @@ def test_ingest_reports_preview_blockers_without_starting(
     assert payload["unmatched_sources"] == 1
     assert str(source) not in output
     assert "Private ignored content" not in output
+
+
+@pytest.mark.parametrize("code", list(LocalSelectionCodeV1))
+def test_ingest_reports_precise_closed_admission_failure(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    code: LocalSelectionCodeV1,
+) -> None:
+    source = tmp_path / "private-source"
+    source.mkdir()
+    secret = "private content must not reach diagnostics"
+    (source / "note.md").write_text(secret + "\n", encoding="utf-8")
+
+    def fail_snapshot(self, source_ref: str):
+        raise LocalSelectionErrorV1(code)
+
+    monkeypatch.setattr(
+        ProcessLocalSelectionRegistryV1, "consume_snapshot", fail_snapshot
+    )
+
+    assert (
+        route_command(
+            _args(_write_config(tmp_path), f"notes={source}"),
+            context=_context(tmp_path),
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out) == {
+        "success": False,
+        "status": "failed",
+        "error_code": code.value,
+    }
+    assert captured.err == ""
+    assert str(source) not in captured.out
+    assert secret not in captured.out
 
 
 def test_ingest_sanitizes_unexpected_operation_errors(
@@ -325,9 +571,9 @@ def test_ingest_sanitizes_unexpected_operation_errors(
     )
     config = _write_config(tmp_path)
 
-    assert route_command(
-        _args(config, f"notes={source}"), context=_context(tmp_path)
-    ) == 1
+    assert (
+        route_command(_args(config, f"notes={source}"), context=_context(tmp_path)) == 1
+    )
     output = capsys.readouterr().out
     assert json.loads(output) == {
         "success": False,
@@ -342,10 +588,13 @@ def test_ingest_requires_json_mode(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     config = _write_config(tmp_path)
-    assert route_command(
-        _args(config, "notes=note.md", json_mode=False),
-        context=_context(tmp_path),
-    ) == 2
+    assert (
+        route_command(
+            _args(config, "notes=note.md", json_mode=False),
+            context=_context(tmp_path),
+        )
+        == 2
+    )
     assert json.loads(capsys.readouterr().out)["error_code"] == "invalid_input"
 
 
@@ -366,9 +615,16 @@ def test_main_rejects_unreadable_or_oversized_config_without_leakage(
         config.write_bytes(b"{" + b"x" * 1_048_576)
 
     with pytest.raises(SystemExit) as stopped:
-        cli_main([
-            "ingest", "--config", str(config), "--select", f"notes={source}", "--json",
-        ])
+        cli_main(
+            [
+                "ingest",
+                "--config",
+                str(config),
+                "--select",
+                f"notes={source}",
+                "--json",
+            ]
+        )
 
     captured = capsys.readouterr()
     assert stopped.value.code == 2
@@ -394,10 +650,18 @@ def test_main_sanitizes_bootstrap_project_errors(
     missing_env = tmp_path / "secret" / "missing.env"
 
     with pytest.raises(SystemExit) as stopped:
-        cli_main([
-            "ingest", "--config", str(config), "--select", "notes=source",
-            "--env-file", str(missing_env), "--json",
-        ])
+        cli_main(
+            [
+                "ingest",
+                "--config",
+                str(config),
+                "--select",
+                "notes=source",
+                "--env-file",
+                str(missing_env),
+                "--json",
+            ]
+        )
 
     captured = capsys.readouterr()
     assert stopped.value.code == 1
@@ -425,9 +689,16 @@ def test_main_sanitizes_unexpected_bootstrap_errors(
     main_module = importlib.import_module("tuner.cli.main")
     monkeypatch.setattr(main_module, "build_project_context", fail_context)
     with pytest.raises(SystemExit) as stopped:
-        cli_main([
-            "ingest", "--config", str(config), "--select", "notes=source", "--json",
-        ])
+        cli_main(
+            [
+                "ingest",
+                "--config",
+                str(config),
+                "--select",
+                "notes=source",
+                "--json",
+            ]
+        )
 
     captured = capsys.readouterr()
     assert stopped.value.code == 1
@@ -451,9 +722,16 @@ def test_main_success_emits_one_json_document(
     config = _write_config(tmp_path)
 
     with pytest.raises(SystemExit) as stopped:
-        cli_main([
-            "ingest", "--config", str(config), "--select", f"notes={source}", "--json",
-        ])
+        cli_main(
+            [
+                "ingest",
+                "--config",
+                str(config),
+                "--select",
+                f"notes={source}",
+                "--json",
+            ]
+        )
 
     captured = capsys.readouterr()
     assert stopped.value.code == 0

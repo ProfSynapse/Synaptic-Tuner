@@ -61,8 +61,10 @@ from tuner.ingestion.bundle_v1 import (
     write_normalized_bundle_v1,
 )
 from tuner.ingestion.local_selection_v1 import (
+    AdmissionLimitsV1,
     ImmutableLocalSnapshotV1,
     LocalDiscoveryPolicyV1,
+    LocalSelectionCodeV1,
     LocalSelectionErrorV1,
     LocalSelectionRootV1,
     ProcessLocalSelectionRegistryV1,
@@ -76,6 +78,16 @@ from tuner.ingestion.markdown_v1 import (
 
 
 _PREFLIGHT_TTL = timedelta(minutes=5)
+
+_SELECTION_OPERATION_CODES = {
+    LocalSelectionCodeV1.INVALID_SELECTION: IngestionOperationCode.INVALID_SELECTION,
+    LocalSelectionCodeV1.AUTHORITY_UNAVAILABLE: (
+        IngestionOperationCode.AUTHORITY_UNAVAILABLE
+    ),
+    LocalSelectionCodeV1.SOURCE_UNSAFE: IngestionOperationCode.SOURCE_UNSAFE,
+    LocalSelectionCodeV1.SOURCE_CHANGED: IngestionOperationCode.SOURCE_CHANGED,
+    LocalSelectionCodeV1.LIMIT_EXCEEDED: IngestionOperationCode.LIMIT_EXCEEDED,
+}
 
 
 class _Clock(Protocol):
@@ -167,8 +179,11 @@ class ProcessLocalIngestionOperationsV1:
         project_ref: str,
         roots: tuple[LocalSelectionRootV1, ...],
         policy: LocalDiscoveryPolicyV1,
+        admission_limits: AdmissionLimitsV1 | None = None,
     ) -> AuthorizedSourceRef:
-        issued = self._selections.authorize(project_ref, roots, policy)
+        issued = self._selections.authorize(
+            project_ref, roots, policy, admission_limits
+        )
         retained = AuthorizedSourceRef.from_dict(issued.to_dict())
         returned = AuthorizedSourceRef.from_dict(issued.to_dict())
         with self._lock:
@@ -188,8 +203,12 @@ class ProcessLocalIngestionOperationsV1:
             self._authorized.pop(request.source.source_ref)
             try:
                 snapshot = self._selections.consume_snapshot(request.source.source_ref)
-            except LocalSelectionErrorV1:
-                raise _closed(IngestionOperationCode.ADMISSION_INELIGIBLE) from None
+            except LocalSelectionErrorV1 as error:
+                raise _closed(
+                    _SELECTION_OPERATION_CODES.get(
+                        error.code, IngestionOperationCode.OPERATION_FAILED
+                    )
+                ) from None
             except BaseException:
                 raise _closed(IngestionOperationCode.OPERATION_FAILED) from None
             if (
@@ -262,7 +281,9 @@ class ProcessLocalIngestionOperationsV1:
                 matched += 1
                 try:
                     parsed = parse_markdown_v1(
-                        entry.content, structure.markdown.frontmatter_mode
+                        entry.content,
+                        structure.markdown.frontmatter_mode,
+                        structure.parsing_profile,
                     )
                     fields = map_markdown_fields_v1(
                         parsed, entry.logical_path, structure

@@ -46,7 +46,7 @@ _LAZY_MODULE_ATTRIBUTES = {
         "IngestionVerification", "MarkdownProfileV1", "MetadataDeclaration", "MetadataPolicyRef", "NormalizedBundleRef",
         "ParsingProfile", "ProposalEvidenceCode", "RelationshipDeclaration", "SchemaRef", "SourceAdmissionKind", "SourceAdmissionRequest",
         "SourceMatcher", "SourceSnapshotRef", "StructureBinding", "StructureDefinition", "StructureProposal", "StructureProposalRequest",
-        "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest",
+        "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest", "validate_ingestion_identity",
     },
     "pipelines_facade": {
         "ADMITTED_STAGES", "PipelineEvaluateSpec", "PipelineListRequest", "PipelineOperationCode",
@@ -259,7 +259,7 @@ _FORMAL_EXPORTS = (
     "IngestionVerification", "MarkdownProfileV1", "MetadataDeclaration", "MetadataPolicyRef", "NormalizedBundleRef",
     "ParsingProfile", "ProposalEvidenceCode", "RelationshipDeclaration", "SchemaRef", "SourceAdmissionKind", "SourceAdmissionRequest",
     "SourceMatcher", "SourceSnapshotRef", "StructureBinding", "StructureDefinition", "StructureProposal", "StructureProposalRequest",
-    "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest",
+    "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest", "validate_ingestion_identity",
 )
 
 if not set(_FORMAL_EXPORTS).issubset(_LAZY_ATTRIBUTES):  # pragma: no cover - module invariant

@@ -17,7 +17,9 @@ from tuner.ingestion.bundle_v1 import (
     BundlePublicationUncertaintyPhaseV1,
     BundleSemanticIdentityV1,
     BundleValidationError,
+    LoadedNormalizedBundleV1,
     NormalizedItemInputV1,
+    load_verified_normalized_bundle_v1,
     verify_normalized_bundle_v1,
     retry_bundle_root_durability_v1,
     write_normalized_bundle_v1,
@@ -110,6 +112,51 @@ def test_verified_identical_destination_is_reused(tmp_path: Path) -> None:
     assert second == first
     assert verify_normalized_bundle_v1(first.path) == first
     assert not any(entry.name.startswith(f".{first.semantic_identity.bundle_id}.") for entry in first.path.parent.iterdir())
+
+
+def test_loader_returns_deeply_immutable_verified_records(tmp_path: Path) -> None:
+    written = _write(tmp_path)
+
+    loaded = load_verified_normalized_bundle_v1(written.path)
+
+    assert type(loaded) is LoadedNormalizedBundleV1
+    assert loaded.path == written.path
+    assert loaded.semantic_identity == written.semantic_identity
+    assert [item.logical_path for item in loaded.items] == ["a.md", "b.md"]
+    assert loaded.items[0].item_id.startswith("item-")
+    assert loaded.items[0].fields["body"] == "first"
+    assert loaded.items[0].fields["metadata"]["tags"] == ("x",)
+    with pytest.raises(TypeError):
+        loaded.structure_set["structures"] = ()
+    with pytest.raises(TypeError):
+        loaded.items[0].fields["body"] = "changed"
+    with pytest.raises(TypeError):
+        loaded.items[0].fields["metadata"]["tags"][0] = "changed"
+
+
+def test_loader_requires_content_addressed_directory_name(tmp_path: Path) -> None:
+    written = _write(tmp_path)
+    renamed = written.path.with_name("not-content-addressed")
+    written.path.rename(renamed)
+
+    with pytest.raises(BundleValidationError, match="content addressed"):
+        load_verified_normalized_bundle_v1(renamed)
+
+
+def test_loader_parses_observed_bytes_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    written = _write(tmp_path)
+    original = bundle_v1._load_observed_bytes
+    calls = 0
+
+    def count_parse(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(bundle_v1, "_load_observed_bytes", count_parse)
+
+    assert load_verified_normalized_bundle_v1(written.path).semantic_identity == written.semantic_identity
+    assert calls == 1
 
 
 def test_invalid_existing_destination_is_a_collision(

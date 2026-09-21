@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 import tuner.ingestion.local_selection_v1 as local_selection
+from synaptic_tuner.api.v1._contract import canonical_bytes
 from tuner.ingestion.local_selection_v1 import (
+    AdmissionLimitsV1,
     AdmissionReportV1,
     ImmutableLocalSnapshotV1,
     LocalDiscoveryPolicyV1,
@@ -18,6 +20,126 @@ from tuner.ingestion.local_selection_v1 import (
     SnapshotEntryV1,
     glob_matches_v1,
 )
+
+
+@pytest.mark.parametrize(
+    ("member", "total", "error"),
+    (
+        (True, 1, TypeError),
+        (1.0, 1, TypeError),
+        (0, 1, ValueError),
+        (1, 0, ValueError),
+        (
+            local_selection.HARD_MAX_MEMBER_BYTES + 1,
+            local_selection.HARD_MAX_TOTAL_BYTES,
+            ValueError,
+        ),
+        (1, local_selection.HARD_MAX_TOTAL_BYTES + 1, ValueError),
+        (2, 1, ValueError),
+    ),
+)
+def test_admission_limits_require_exact_bounded_integers(
+    member: object, total: object, error: type[Exception]
+) -> None:
+    with pytest.raises(error):
+        AdmissionLimitsV1(member, total)  # type: ignore[arg-type]
+
+
+def test_explicit_member_budget_can_admit_above_legacy_default(tmp_path: Path) -> None:
+    source = tmp_path / "large.md"
+    payload = b"x" * (local_selection.DEFAULT_MAX_MEMBER_BYTES + 1)
+    source.write_bytes(payload)
+    root = (LocalSelectionRootV1("large.md", source),)
+    policy = LocalDiscoveryPolicyV1(("*.md",), ())
+
+    legacy = ProcessLocalSelectionRegistryV1()
+    legacy_ref = legacy.authorize("project_01", root, policy)
+    with pytest.raises(LocalSelectionErrorV1) as bounded:
+        legacy.consume_snapshot(legacy_ref.source_ref)
+    assert bounded.value.code is LocalSelectionCodeV1.LIMIT_EXCEEDED
+
+    configured = ProcessLocalSelectionRegistryV1()
+    configured_ref = configured.authorize(
+        "project_01",
+        root,
+        policy,
+        AdmissionLimitsV1(len(payload), len(payload)),
+    )
+    snapshot = configured.consume_snapshot(configured_ref.source_ref)
+    assert snapshot.entries[0].content == payload
+
+
+def test_configured_aggregate_budget_fails_with_closed_limit_code(
+    tmp_path: Path,
+) -> None:
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    (selected / "a.md").write_bytes(b"1234")
+    (selected / "b.md").write_bytes(b"5678")
+    registry = ProcessLocalSelectionRegistryV1()
+    reference = registry.authorize(
+        "project_01",
+        (LocalSelectionRootV1("members", selected),),
+        LocalDiscoveryPolicyV1(("**/*.md",), ()),
+        AdmissionLimitsV1(4, 7),
+    )
+
+    with pytest.raises(LocalSelectionErrorV1) as bounded:
+        registry.consume_snapshot(reference.source_ref)
+    assert bounded.value.code is LocalSelectionCodeV1.LIMIT_EXCEEDED
+
+
+def test_authority_identity_preserves_legacy_domain_and_binds_explicit_limits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "member.md"
+    source.write_bytes(b"body")
+    root = LocalSelectionRootV1("member.md", source)
+    policy = LocalDiscoveryPolicyV1(("*.md",), ())
+    secret = b"s" * 32
+    source_ref = "local_" + "a" * 48
+    monkeypatch.setattr(local_selection.secrets, "token_bytes", lambda size: secret)
+    monkeypatch.setattr(
+        local_selection.secrets, "token_hex", lambda size: "a" * (size * 2)
+    )
+
+    legacy = ProcessLocalSelectionRegistryV1().authorize("project_01", (root,), policy)
+    prepared = local_selection._prepare_root(root)
+    legacy_document = {
+        "project_ref": "project_01",
+        "source_ref": source_ref,
+        "roots": [
+            {
+                "alias": prepared.alias,
+                "path": str(prepared.path),
+                "identity": list(prepared.identity),
+            }
+        ],
+        "policy": {
+            "include": ["*.md"],
+            "exclude": [],
+            "include_hidden": False,
+        },
+    }
+    expected_legacy = hashlib.sha256(
+        b"synaptic-process-local-selection-authority/v1\0"
+        + secret
+        + canonical_bytes(legacy_document)
+    ).hexdigest()
+    assert legacy.authority_digest == expected_legacy
+
+    first = ProcessLocalSelectionRegistryV1().authorize(
+        "project_01", (root,), policy, AdmissionLimitsV1(1024, 2048)
+    )
+    same = ProcessLocalSelectionRegistryV1().authorize(
+        "project_01", (root,), policy, AdmissionLimitsV1(1024, 2048)
+    )
+    changed = ProcessLocalSelectionRegistryV1().authorize(
+        "project_01", (root,), policy, AdmissionLimitsV1(2048, 4096)
+    )
+    assert first.authority_digest == same.authority_digest
+    assert first.authority_digest != changed.authority_digest
+    assert first.authority_digest != legacy.authority_digest
 
 
 @pytest.mark.parametrize(
@@ -193,7 +315,9 @@ def test_replaced_root_is_rejected_after_leaf_read(
     original_read = local_selection._stable_regular_read
     replaced = False
 
-    def replace_root(path: Path, identity: tuple[int, int, int, int, int]) -> bytes:
+    def replace_root(
+        path: Path, identity: tuple[int, int, int, int, int], max_member_bytes: int
+    ) -> bytes:
         nonlocal replaced
         if not replaced:
             displaced = tmp_path / "displaced"
@@ -203,7 +327,7 @@ def test_replaced_root_is_rejected_after_leaf_read(
             except OSError:
                 pytest.skip("directory replacement is unavailable to the test process")
             replaced = True
-        return original_read(path, identity)
+        return original_read(path, identity, max_member_bytes)
 
     monkeypatch.setattr(local_selection, "_stable_regular_read", replace_root)
     with pytest.raises(LocalSelectionErrorV1) as changed:
@@ -290,7 +414,8 @@ def test_directory_timestamp_change_does_not_change_selected_inventory(
     (nested / "note.md").write_bytes(b"body")
     registry = ProcessLocalSelectionRegistryV1()
     reference = registry.authorize(
-        "project_01", (LocalSelectionRootV1("notes", selected),),
+        "project_01",
+        (LocalSelectionRootV1("notes", selected),),
         LocalDiscoveryPolicyV1(("**/*.md",), ()),
     )
 
@@ -302,8 +427,10 @@ def test_directory_timestamp_change_does_not_change_selected_inventory(
     if during_read:
         original_read = local_selection._stable_regular_read
 
-        def read_and_touch(path: Path, identity: tuple[int, int, int, int, int]) -> bytes:
-            payload = original_read(path, identity)
+        def read_and_touch(
+            path: Path, identity: tuple[int, int, int, int, int], max_member_bytes: int
+        ) -> bytes:
+            payload = original_read(path, identity, max_member_bytes)
             touch_directories()
             return payload
 
@@ -318,8 +445,10 @@ def test_directory_timestamp_change_does_not_change_selected_inventory(
 @pytest.mark.parametrize("operation", ("create", "delete"))
 @pytest.mark.parametrize("irrelevant_name", ("cache.tmp", "skip.md", "empty-directory"))
 def test_irrelevant_namespace_churn_does_not_change_selected_inventory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    operation: str, irrelevant_name: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    irrelevant_name: str,
 ) -> None:
     selected = tmp_path / "selected"
     selected.mkdir()
@@ -340,15 +469,18 @@ def test_irrelevant_namespace_churn_does_not_change_selected_inventory(
         create()
     registry = ProcessLocalSelectionRegistryV1()
     reference = registry.authorize(
-        "project_01", (LocalSelectionRootV1("notes", selected),),
+        "project_01",
+        (LocalSelectionRootV1("notes", selected),),
         LocalDiscoveryPolicyV1(("**/*.md",), ("**/skip.md",)),
     )
     original_read = local_selection._stable_regular_read
     changed = False
 
-    def read_and_change(path: Path, identity: tuple[int, int, int, int, int]) -> bytes:
+    def read_and_change(
+        path: Path, identity: tuple[int, int, int, int, int], max_member_bytes: int
+    ) -> bytes:
         nonlocal changed
-        payload = original_read(path, identity)
+        payload = original_read(path, identity, max_member_bytes)
         if changed:
             return payload
         changed = True
@@ -369,7 +501,9 @@ def test_irrelevant_namespace_churn_does_not_change_selected_inventory(
 
 @pytest.mark.parametrize("operation", ("add", "remove", "rename", "modify"))
 def test_matching_inventory_changes_after_read_fail_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
 ) -> None:
     selected = tmp_path / "selected"
     selected.mkdir()
@@ -377,13 +511,16 @@ def test_matching_inventory_changes_after_read_fail_closed(
     source.write_bytes(b"body")
     registry = ProcessLocalSelectionRegistryV1()
     reference = registry.authorize(
-        "project_01", (LocalSelectionRootV1("notes", selected),),
+        "project_01",
+        (LocalSelectionRootV1("notes", selected),),
         LocalDiscoveryPolicyV1(("**/*.md",), ()),
     )
     original_read = local_selection._stable_regular_read
 
-    def read_and_change(path: Path, identity: tuple[int, int, int, int, int]) -> bytes:
-        payload = original_read(path, identity)
+    def read_and_change(
+        path: Path, identity: tuple[int, int, int, int, int], max_member_bytes: int
+    ) -> bytes:
+        payload = original_read(path, identity, max_member_bytes)
         if operation == "add":
             (selected / "new.md").write_bytes(b"new")
         elif operation == "remove":
@@ -401,7 +538,8 @@ def test_matching_inventory_changes_after_read_fail_closed(
 
 
 def test_earlier_file_mutation_while_reading_later_file_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selected = tmp_path / "selected"
     selected.mkdir()
@@ -410,13 +548,16 @@ def test_earlier_file_mutation_while_reading_later_file_fails_closed(
     (selected / "b.md").write_bytes(b"second")
     registry = ProcessLocalSelectionRegistryV1()
     reference = registry.authorize(
-        "project_01", (LocalSelectionRootV1("notes", selected),),
+        "project_01",
+        (LocalSelectionRootV1("notes", selected),),
         LocalDiscoveryPolicyV1(("**/*.md",), ()),
     )
     original_read = local_selection._stable_regular_read
 
-    def read_and_change(path: Path, identity: tuple[int, int, int, int, int]) -> bytes:
-        payload = original_read(path, identity)
+    def read_and_change(
+        path: Path, identity: tuple[int, int, int, int, int], max_member_bytes: int
+    ) -> bytes:
+        payload = original_read(path, identity, max_member_bytes)
         if path.name == "b.md":
             earlier.write_bytes(b"first changed")
         return payload
@@ -428,13 +569,15 @@ def test_earlier_file_mutation_while_reading_later_file_fails_closed(
 
 
 def test_selected_file_mutation_during_descriptor_read_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = tmp_path / "note.md"
     source.write_bytes(b"before")
     registry = ProcessLocalSelectionRegistryV1()
     reference = registry.authorize(
-        "project_01", (LocalSelectionRootV1("note.md", source),),
+        "project_01",
+        (LocalSelectionRootV1("note.md", source),),
         LocalDiscoveryPolicyV1(("*.md",), ()),
     )
     original_read = os.read
@@ -455,7 +598,8 @@ def test_selected_file_mutation_during_descriptor_read_fails_closed(
 
 
 def test_earlier_file_same_length_rewrite_with_restored_mtime_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selected = tmp_path / "selected"
     selected.mkdir()
@@ -465,21 +609,24 @@ def test_earlier_file_same_length_rewrite_with_restored_mtime_fails_closed(
     original_stat = earlier.stat()
     registry = ProcessLocalSelectionRegistryV1()
     reference = registry.authorize(
-        "project_01", (LocalSelectionRootV1("notes", selected),),
+        "project_01",
+        (LocalSelectionRootV1("notes", selected),),
         LocalDiscoveryPolicyV1(("**/*.md",), ()),
     )
     original_read = local_selection._stable_regular_read
     mutated = False
 
-    def read_and_rewrite(path: Path, identity: tuple[int, int, int, int, int]) -> bytes:
+    def read_and_rewrite(
+        path: Path, identity: tuple[int, int, int, int, int], max_member_bytes: int
+    ) -> bytes:
         nonlocal mutated
-        payload = original_read(path, identity)
+        payload = original_read(path, identity, max_member_bytes)
         if path.name == "b.md" and not mutated:
             earlier.write_bytes(b"other")
             os.utime(earlier, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
-            assert local_selection._identity(earlier.stat()) == local_selection._identity(
-                original_stat
-            )
+            assert local_selection._identity(
+                earlier.stat()
+            ) == local_selection._identity(original_stat)
             mutated = True
         return payload
 
@@ -491,14 +638,16 @@ def test_earlier_file_same_length_rewrite_with_restored_mtime_fails_closed(
 
 
 def test_descriptor_read_same_length_rewrite_with_restored_mtime_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = tmp_path / "note.md"
     source.write_bytes(b"before")
     original_stat = source.stat()
     registry = ProcessLocalSelectionRegistryV1()
     reference = registry.authorize(
-        "project_01", (LocalSelectionRootV1("note.md", source),),
+        "project_01",
+        (LocalSelectionRootV1("note.md", source),),
         LocalDiscoveryPolicyV1(("*.md",), ()),
     )
     original_read = os.read
@@ -510,9 +659,9 @@ def test_descriptor_read_same_length_rewrite_with_restored_mtime_fails_closed(
         if not mutated:
             source.write_bytes(b"after!")
             os.utime(source, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
-            assert local_selection._identity(source.stat()) == local_selection._identity(
-                original_stat
-            )
+            assert local_selection._identity(
+                source.stat()
+            ) == local_selection._identity(original_stat)
             mutated = True
         return payload
 
@@ -524,7 +673,8 @@ def test_descriptor_read_same_length_rewrite_with_restored_mtime_fails_closed(
 
 
 def test_replaced_nested_ancestor_with_same_leaf_identity_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selected = tmp_path / "selected"
     nested = selected / "nested"
@@ -539,13 +689,16 @@ def test_replaced_nested_ancestor_with_same_leaf_identity_fails_closed(
         pytest.skip("hard links are unavailable to the test process")
     registry = ProcessLocalSelectionRegistryV1()
     reference = registry.authorize(
-        "project_01", (LocalSelectionRootV1("notes", selected),),
+        "project_01",
+        (LocalSelectionRootV1("notes", selected),),
         LocalDiscoveryPolicyV1(("**/*.md",), ()),
     )
     original_read = local_selection._stable_regular_read
 
-    def read_and_replace(path: Path, identity: tuple[int, int, int, int, int]) -> bytes:
-        payload = original_read(path, identity)
+    def read_and_replace(
+        path: Path, identity: tuple[int, int, int, int, int], max_member_bytes: int
+    ) -> bytes:
+        payload = original_read(path, identity, max_member_bytes)
         try:
             nested.rename(tmp_path / "displaced")
             replacement.rename(nested)
@@ -560,7 +713,8 @@ def test_replaced_nested_ancestor_with_same_leaf_identity_fails_closed(
 
 
 def test_second_discovery_pass_enforces_its_entry_budget(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selected = tmp_path / "selected"
     selected.mkdir()
@@ -568,13 +722,16 @@ def test_second_discovery_pass_enforces_its_entry_budget(
     monkeypatch.setattr(local_selection, "MAX_DISCOVERY_ENTRIES", 2)
     registry = ProcessLocalSelectionRegistryV1()
     reference = registry.authorize(
-        "project_01", (LocalSelectionRootV1("notes", selected),),
+        "project_01",
+        (LocalSelectionRootV1("notes", selected),),
         LocalDiscoveryPolicyV1(("**/*.md",), ()),
     )
     original_read = local_selection._stable_regular_read
 
-    def read_and_grow(path: Path, identity: tuple[int, int, int, int, int]) -> bytes:
-        payload = original_read(path, identity)
+    def read_and_grow(
+        path: Path, identity: tuple[int, int, int, int, int], max_member_bytes: int
+    ) -> bytes:
+        payload = original_read(path, identity, max_member_bytes)
         for name in ("one.tmp", "two.tmp"):
             (selected / name).write_bytes(b"ignored")
         return payload

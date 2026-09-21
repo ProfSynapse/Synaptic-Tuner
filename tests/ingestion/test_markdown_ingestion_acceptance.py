@@ -14,6 +14,7 @@ from synaptic_tuner.api.v1.ingestion_facade import (
     IngestionRunState,
     MarkdownProfileV1,
     MetadataDeclaration,
+    ParsingProfile,
     SourceAdmissionRequest,
     SourceMatcher,
     StructureBinding,
@@ -22,6 +23,7 @@ from synaptic_tuner.api.v1.ingestion_facade import (
     TextProjection,
 )
 from tuner.ingestion.local_selection_v1 import (
+    AdmissionLimitsV1,
     LocalDiscoveryPolicyV1,
     LocalSelectionRootV1,
     ProcessLocalSelectionRegistryV1,
@@ -83,6 +85,7 @@ def _structure(config: dict[str, object]) -> StructureSet:
             MetadataDeclaration(item["name"], item["field_ref"])  # type: ignore[arg-type]
             for item in metadata
         ),
+        parsing_profile=ParsingProfile(definition_config["parsing_profile"]),  # type: ignore[arg-type]
     )
     return StructureSet(
         (definition,),
@@ -96,7 +99,9 @@ def _structure(config: dict[str, object]) -> StructureSet:
     )
 
 
-def _selection(config: dict[str, object]) -> tuple[LocalSelectionRootV1, LocalDiscoveryPolicyV1]:
+def _selection(
+    config: dict[str, object],
+) -> tuple[LocalSelectionRootV1, LocalDiscoveryPolicyV1]:
     selection = config["selection"]
     assert type(selection) is dict
     roots = selection["roots"]
@@ -116,7 +121,9 @@ def _selection(config: dict[str, object]) -> tuple[LocalSelectionRootV1, LocalDi
 
 
 def _run(
-    tmp_path: Path, config: dict[str, object]
+    tmp_path: Path,
+    config: dict[str, object],
+    admission_limits: AdmissionLimitsV1 | None = None,
 ) -> tuple[object, bytes, bytes, str]:
     root, policy = _selection(config)
     operations = ProcessLocalIngestionOperationsV1(
@@ -125,7 +132,7 @@ def _run(
     )
     api = IngestionAPI(operations, clock=_FixedClock())
     authorized = operations.authorize_local_selection(
-        config["project_ref"], (root,), policy  # type: ignore[arg-type]
+        config["project_ref"], (root,), policy, admission_limits  # type: ignore[arg-type]
     )
     snapshot = api.admit(
         SourceAdmissionRequest(
@@ -155,7 +162,10 @@ def _run(
     assert verification.diagnostic_codes == ()
     assert outcome.bundle is not None
     bundle_path = tmp_path / "private-bundles" / outcome.bundle.bundle_id
-    assert {entry.name for entry in bundle_path.iterdir()} == {"manifest.json", "items.jsonl"}
+    assert {entry.name for entry in bundle_path.iterdir()} == {
+        "manifest.json",
+        "items.jsonl",
+    }
     lifecycle = json.dumps(
         [
             snapshot.to_dict(),
@@ -168,10 +178,17 @@ def _run(
         ],
         sort_keys=True,
     )
-    return outcome, (bundle_path / "manifest.json").read_bytes(), (bundle_path / "items.jsonl").read_bytes(), lifecycle
+    return (
+        outcome,
+        (bundle_path / "manifest.json").read_bytes(),
+        (bundle_path / "items.jsonl").read_bytes(),
+        lifecycle,
+    )
 
 
-def test_markdown_fixture_ingests_privately_and_deterministically(tmp_path: Path) -> None:
+def test_markdown_fixture_ingests_privately_and_deterministically(
+    tmp_path: Path,
+) -> None:
     config = _config()
     assert set(config) == {
         "schema_version",
@@ -201,8 +218,12 @@ def test_markdown_fixture_ingests_privately_and_deterministically(tmp_path: Path
         "notes/plain.md",
     )
 
-    first, first_manifest, first_items, first_lifecycle = _run(tmp_path / "first", config)
-    second, second_manifest, second_items, second_lifecycle = _run(tmp_path / "second", config)
+    first, first_manifest, first_items, first_lifecycle = _run(
+        tmp_path / "first", config
+    )
+    second, second_manifest, second_items, second_lifecycle = _run(
+        tmp_path / "second", config
+    )
 
     for outcome in (first, second):
         assert outcome.state is IngestionRunState.SUCCEEDED
@@ -219,6 +240,12 @@ def test_markdown_fixture_ingests_privately_and_deterministically(tmp_path: Path
     }
     assert first_rows["notes/alpha.md"]["published"] is True
     assert first_rows["notes/alpha.md"]["tags"] == ["acceptance", "markdown"]
+    assert first_rows["notes/alpha.md"]["nullable_mapping"] == {
+        "empty": None,
+        "explicit": None,
+        "tilde": None,
+    }
+    assert first_rows["notes/alpha.md"]["nullable_sequence"] == [None, None, None]
     assert first_rows["notes/nested/beta.md"]["rank"] == 2
     assert "\r" not in first_rows["notes/nested/beta.md"]["body"]
     assert set(first_rows["notes/plain.md"]) == {"body", "path"}
@@ -226,7 +253,23 @@ def test_markdown_fixture_ingests_privately_and_deterministically(tmp_path: Path
     assert first_manifest == second_manifest
     assert first_items == second_items
 
-    for serialized in (first_manifest.decode("utf-8"), first_items.decode("utf-8"), first_lifecycle, second_lifecycle):
+    configured, configured_manifest, configured_items, _ = _run(
+        tmp_path / "configured",
+        config,
+        AdmissionLimitsV1(1_048_576, 32 * 1_048_576),
+    )
+    assert configured.bundle is not None
+    assert configured.run.authority_digest != first.run.authority_digest
+    assert configured.bundle.bundle_digest == first.bundle.bundle_digest
+    assert configured_manifest == first_manifest
+    assert configured_items == first_items
+
+    for serialized in (
+        first_manifest.decode("utf-8"),
+        first_items.decode("utf-8"),
+        first_lifecycle,
+        second_lifecycle,
+    ):
         assert str(_FIXTURE_ROOT.resolve()) not in serialized
         assert str(tmp_path.resolve()) not in serialized
         assert "F:\\" not in serialized

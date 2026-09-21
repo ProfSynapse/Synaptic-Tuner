@@ -19,16 +19,21 @@ from synaptic_tuner.api.v1.ingestion_facade import (
     IngestionRunState,
     MarkdownProfileV1,
     MetadataDeclaration,
+    ParsingProfile,
     SourceAdmissionRequest,
     SourceMatcher,
     StructureBinding,
     StructureDefinition,
     StructureSet,
     TextProjection,
+    validate_ingestion_identity,
 )
 from tuner.handlers.base import BaseHandler
 from tuner.ingestion.local_selection_v1 import (
+    HARD_MAX_MEMBER_BYTES,
+    HARD_MAX_TOTAL_BYTES,
     MAX_SELECTION_ROOTS,
+    AdmissionLimitsV1,
     LocalDiscoveryPolicyV1,
     LocalSelectionErrorV1,
     LocalSelectionRootV1,
@@ -37,7 +42,8 @@ from tuner.ingestion.runtime_v1 import ProcessLocalIngestionOperationsV1
 from tuner.project import ProjectContext
 
 
-_CONFIG_SCHEMA = "synaptic-ingestion-cli/v1"
+_CONFIG_SCHEMA_V1 = "synaptic-ingestion-cli/v1"
+_CONFIG_SCHEMA_V2 = "synaptic-ingestion-cli/v2"
 _MAX_CONFIG_BYTES = 1_048_576
 _OUTPUT_REF = "primary"
 
@@ -152,20 +158,22 @@ def _load_config(path_value: object, base: Path) -> dict[str, object]:
         )
     except (UnicodeError, json.JSONDecodeError, _ConfigError):
         _fail()
-    return _object(
-        value,
-        frozenset(
-            {
-                "schema_version",
-                "project_ref",
-                "admission_request_id",
-                "request_id",
-                "discovery",
-                "structure",
-                "binding",
-            }
-        ),
-    )
+    if type(value) is not dict:
+        _fail()
+    common = {
+        "schema_version",
+        "project_ref",
+        "admission_request_id",
+        "request_id",
+        "discovery",
+        "structure",
+        "binding",
+    }
+    if value.get("schema_version") == _CONFIG_SCHEMA_V1:
+        return _object(value, frozenset(common))
+    if value.get("schema_version") == _CONFIG_SCHEMA_V2:
+        return _object(value, frozenset(common | {"admission_limits"}))
+    _fail()
 
 
 def _structures(config: dict[str, object]) -> StructureSet:
@@ -214,6 +222,11 @@ def _structures(config: dict[str, object]) -> StructureSet:
         fields=fields,
         text_projections=projections,
         metadata=metadata,
+        parsing_profile=(
+            ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1
+            if config["schema_version"] == _CONFIG_SCHEMA_V1
+            else ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V2
+        ),
     )
     binding = _object(
         config["binding"], frozenset({"binding_id", "pattern"})
@@ -244,6 +257,26 @@ def _policy(config: dict[str, object]) -> LocalDiscoveryPolicyV1:
         exclude,  # type: ignore[arg-type]
         discovery["include_hidden"],  # type: ignore[arg-type]
     )
+
+
+def _admission_limits(config: dict[str, object]) -> AdmissionLimitsV1 | None:
+    if config["schema_version"] == _CONFIG_SCHEMA_V1:
+        return None
+    limits = _object(
+        config["admission_limits"],
+        frozenset({"max_member_bytes", "max_total_bytes"}),
+    )
+    member = limits["max_member_bytes"]
+    total = limits["max_total_bytes"]
+    if (
+        type(member) is not int
+        or type(total) is not int
+        or not 1 <= member <= HARD_MAX_MEMBER_BYTES
+        or not 1 <= total <= HARD_MAX_TOTAL_BYTES
+        or member > total
+    ):
+        _fail()
+    return AdmissionLimitsV1(member, total)
 
 
 def _selection_roots(values: object, base: Path) -> tuple[LocalSelectionRootV1, ...]:
@@ -292,10 +325,11 @@ class IngestionHandler(BaseHandler):
             config = _load_config(
                 getattr(self.args, "ml_config", None), self.context.invocation_cwd
             )
-            if config["schema_version"] != _CONFIG_SCHEMA:
-                _fail()
+            for key in ("project_ref", "admission_request_id", "request_id"):
+                validate_ingestion_identity(config[key], key)
             structures = _structures(config)
             policy = _policy(config)
+            admission_limits = _admission_limits(config)
             roots = _selection_roots(
                 getattr(self.args, "ingestion_selections", None),
                 self.context.invocation_cwd,
@@ -313,7 +347,10 @@ class IngestionHandler(BaseHandler):
             api = IngestionAPI(operations, clock=clock)
             project_ref = config["project_ref"]
             authorized = operations.authorize_local_selection(
-                project_ref, roots, policy  # type: ignore[arg-type]
+                project_ref,
+                roots,
+                policy,
+                admission_limits,  # type: ignore[arg-type]
             )
             snapshot = api.admit(
                 SourceAdmissionRequest(

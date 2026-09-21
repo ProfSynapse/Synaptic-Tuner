@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
-from typing import NoReturn
+from typing import Callable, NoReturn, TypeVar
 
 
 ITEM_SCHEMA_VERSION = "syntunia-normalized-item/v1"
@@ -441,6 +441,52 @@ class VerifiedNormalizedBundleV1:
             raise TypeError("semantic_identity must be exact BundleSemanticIdentityV1")
 
 
+@dataclass(frozen=True, slots=True)
+class NormalizedBundleItemRecordV1:
+    """One immutable, verified item parsed from a normalized bundle."""
+
+    item_id: str
+    logical_path: str
+    source_sha256: str
+    source_size_bytes: int
+    structure_ref: MappingProxyType
+    fields: MappingProxyType
+
+    def __post_init__(self) -> None:
+        if type(self.item_id) is not str or not self.item_id.startswith("item-") or len(self.item_id) != 69:
+            _invalid("item_id is invalid")
+        object.__setattr__(self, "logical_path", _logical_path(self.logical_path))
+        object.__setattr__(self, "source_sha256", _digest_text(self.source_sha256, "source_sha256"))
+        if type(self.source_size_bytes) is not int or not 0 <= self.source_size_bytes <= 2**63 - 1:
+            _invalid("source_size_bytes must be a nonnegative int64")
+        if type(self.structure_ref) is not MappingProxyType or type(self.fields) is not MappingProxyType:
+            raise TypeError("normalized bundle item mappings must be immutable")
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedNormalizedBundleV1:
+    """Immutable parsed records and identity from one verified bundle observation."""
+
+    path: Path
+    semantic_identity: BundleSemanticIdentityV1
+    structure_set: MappingProxyType
+    items: tuple[NormalizedBundleItemRecordV1, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.path) is not _PATH_TYPE:
+            raise TypeError("path must be a Path")
+        if type(self.semantic_identity) is not BundleSemanticIdentityV1:
+            raise TypeError("semantic_identity must be exact BundleSemanticIdentityV1")
+        if type(self.structure_set) is not MappingProxyType:
+            raise TypeError("structure_set must be immutable")
+        if type(self.items) is not tuple or not self.items or len(self.items) > MAX_ITEM_COUNT:
+            _invalid("loaded bundle items are invalid")
+        if any(type(item) is not NormalizedBundleItemRecordV1 for item in self.items):
+            raise TypeError("loaded bundle items must be exact records")
+        if len(self.items) != self.semantic_identity.item_count:
+            _invalid("loaded bundle item count does not match identity")
+
+
 class BundlePublicationUncertaintyPhaseV1(str, Enum):
     PARENT_DURABILITY = "parent_durability"
     FINAL_VERIFICATION = "final_verification"
@@ -793,13 +839,13 @@ def _bounded_json_lines(raw: bytes) -> list[bytes]:
     return lines
 
 
-def _verify_observed_bytes(
+def _load_observed_bytes(
     path: Path,
     manifest_raw: bytes,
     items_raw: bytes,
     *,
     require_content_addressed_name: bool,
-) -> VerifiedNormalizedBundleV1:
+) -> LoadedNormalizedBundleV1:
     manifest = _exact_fields(
         _parse_canonical_object(manifest_raw, MAX_MANIFEST_BYTES, "manifest"),
         _MANIFEST_FIELDS,
@@ -813,6 +859,7 @@ def _verify_observed_bytes(
     lines = _bounded_json_lines(items_raw)
     logical_paths: list[str] = []
     item_ids: list[str] = []
+    parsed_items: list[NormalizedBundleItemRecordV1] = []
     for line in lines:
         row = _exact_fields(
             _parse_canonical_object(line, MAX_ITEMS_BYTES, "item row"),
@@ -838,6 +885,16 @@ def _verify_observed_bytes(
             _invalid("item_id does not bind the item")
         logical_paths.append(logical_path)
         item_ids.append(expected_id)
+        parsed_items.append(
+            NormalizedBundleItemRecordV1(
+                item_id=expected_id,
+                logical_path=logical_path,
+                source_sha256=source_sha256,
+                source_size_bytes=source_size,
+                structure_ref=_freeze_json(structure_ref),
+                fields=_freeze_json(fields),
+            )
+        )
     if logical_paths != sorted(logical_paths) or len(logical_paths) != len(set(logical_paths)):
         _invalid("item logical paths must be unique and sorted")
     if len(item_ids) != len(set(item_ids)):
@@ -870,10 +927,42 @@ def _verify_observed_bytes(
         logical_paths_sha256=logical_paths_sha256,
         item_ids_sha256=item_ids_sha256,
     )
-    return VerifiedNormalizedBundleV1(path=path, semantic_identity=identity)
+    frozen_structure_set = _freeze_json(structure_document)
+    if type(frozen_structure_set) is not MappingProxyType:
+        _invalid("structure_set is invalid")
+    return LoadedNormalizedBundleV1(
+        path=path,
+        semantic_identity=identity,
+        structure_set=frozen_structure_set,
+        items=tuple(parsed_items),
+    )
 
 
-def _verify(path: Path, *, require_content_addressed_name: bool) -> VerifiedNormalizedBundleV1:
+def _verify_observed_bytes(
+    path: Path,
+    manifest_raw: bytes,
+    items_raw: bytes,
+    *,
+    require_content_addressed_name: bool,
+) -> VerifiedNormalizedBundleV1:
+    loaded = _load_observed_bytes(
+        path,
+        manifest_raw,
+        items_raw,
+        require_content_addressed_name=require_content_addressed_name,
+    )
+    return VerifiedNormalizedBundleV1(path=loaded.path, semantic_identity=loaded.semantic_identity)
+
+
+_ObservedBundleResult = TypeVar("_ObservedBundleResult")
+
+
+def _attest(
+    path: Path,
+    *,
+    require_content_addressed_name: bool,
+    parse_observed_bytes: Callable[..., _ObservedBundleResult],
+) -> _ObservedBundleResult:
     """Attest the exact bundle bytes observed during one retained-handle transaction."""
 
     if type(path) is not _PATH_TYPE:
@@ -881,7 +970,7 @@ def _verify(path: Path, *, require_content_addressed_name: bool) -> VerifiedNorm
     directory_identity = _plain_directory_identity(path)
     member_identities = _bounded_inventory(path, directory_identity)
     retained: list[_RetainedMember] = []
-    result: VerifiedNormalizedBundleV1 | None = None
+    result: _ObservedBundleResult | None = None
     close_failed = False
     try:
         manifest_member = _RetainedMember(
@@ -894,7 +983,7 @@ def _verify(path: Path, *, require_content_addressed_name: bool) -> VerifiedNorm
         retained.append(items_member)
         manifest_raw = manifest_member.read()
         items_raw = items_member.read()
-        result = _verify_observed_bytes(
+        result = parse_observed_bytes(
             path,
             manifest_raw,
             items_raw,
@@ -915,10 +1004,28 @@ def _verify(path: Path, *, require_content_addressed_name: bool) -> VerifiedNorm
     return result
 
 
+def _verify(path: Path, *, require_content_addressed_name: bool) -> VerifiedNormalizedBundleV1:
+    return _attest(
+        path,
+        require_content_addressed_name=require_content_addressed_name,
+        parse_observed_bytes=_verify_observed_bytes,
+    )
+
+
 def verify_normalized_bundle_v1(path: Path) -> VerifiedNormalizedBundleV1:
     """Attest an existing bundle's exact point-in-time observed bytes."""
 
     return _verify(path, require_content_addressed_name=True)
+
+
+def load_verified_normalized_bundle_v1(path: Path) -> LoadedNormalizedBundleV1:
+    """Load immutable records from one exact, verified bundle observation."""
+
+    return _attest(
+        path,
+        require_content_addressed_name=True,
+        parse_observed_bytes=_load_observed_bytes,
+    )
 
 
 def _fsync_directory(path: Path) -> None:
@@ -1134,8 +1241,11 @@ __all__ = [
     "BundlePublicationUncertaintyPhaseV1",
     "BundleSemanticIdentityV1",
     "BundleValidationError",
+    "LoadedNormalizedBundleV1",
+    "NormalizedBundleItemRecordV1",
     "NormalizedItemInputV1",
     "VerifiedNormalizedBundleV1",
+    "load_verified_normalized_bundle_v1",
     "verify_normalized_bundle_v1",
     "retry_bundle_root_durability_v1",
     "write_normalized_bundle_v1",

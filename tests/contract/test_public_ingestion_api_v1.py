@@ -22,7 +22,7 @@ from synaptic_tuner.api.v1.ingestion_facade import (
     IngestionPlan, IngestionPreflight, IngestionPreview, IngestionRequest,
     IngestionResult, IngestionRunRef, IngestionRunState, IngestionStart,
     IngestionVerification, MarkdownProfileV1, MetadataDeclaration, MetadataPolicyRef,
-    NormalizedBundleRef, ProposalEvidenceCode, RelationshipDeclaration,
+    NormalizedBundleRef, ParsingProfile, ProposalEvidenceCode, RelationshipDeclaration,
     SchemaRef, SourceAdmissionKind, SourceAdmissionRequest, SourceMatcher,
     SourceSnapshotRef, StructureBinding, StructureDefinition, StructureProposal,
     StructureProposalRequest, StructureRef, StructureSet, TextProjection,
@@ -47,7 +47,8 @@ def _snapshot(count: int = 2) -> SourceSnapshotRef:
 
 
 def _definition(*, name: str = "MarkdownNote", title_kind: FieldValueKind = FieldValueKind.STRING,
-                relationships: tuple[RelationshipDeclaration, ...] = ()) -> StructureDefinition:
+                relationships: tuple[RelationshipDeclaration, ...] = (),
+                parsing_profile: ParsingProfile = ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1) -> StructureDefinition:
     fields = (
         FieldMapping("body", FieldSelector(FieldSelectorKind.DOCUMENT_BODY), FieldValueKind.STRING, True),
         FieldMapping("title", FieldSelector(FieldSelectorKind.FRONTMATTER_FIELD, "title"), title_kind, False),
@@ -58,6 +59,7 @@ def _definition(*, name: str = "MarkdownNote", title_kind: FieldValueKind = Fiel
         text_projections=(TextProjection("text", "body"),),
         metadata=(MetadataDeclaration("title", "title"),), relationships=relationships,
         metadata_policy=MetadataPolicyRef("structure_policy", "c" * 64),
+        parsing_profile=parsing_profile,
     )
 
 
@@ -162,7 +164,9 @@ def test_exports_and_exact_verb_surface() -> None:
         assert tuple(inspect.signature(getattr(IngestionAPI, name)).parameters) == tuple(inspect.signature(getattr(IngestionOperations, name)).parameters)
     assert {item.value for item in IngestionOperationCode} == {
         "input_mutated", "operation_failed", "result_invalid", "result_unbound",
-        "admission_ineligible", "start_ineligible", "cancel_ineligible",
+        "admission_ineligible", "invalid_selection", "authority_unavailable",
+        "source_unsafe", "source_changed", "limit_exceeded",
+        "start_ineligible", "cancel_ineligible",
         "resume_ineligible", "reconcile_ineligible", "result_unavailable",
         "verify_ineligible", "run_missing", "cursor_invalid", "state_conflict",
         "integrity_error",
@@ -248,6 +252,18 @@ def test_v1_declarations_are_markdown_file_only_and_bounded() -> None:
             "a" * 64, True, AT, EXPIRES,
             tuple(AuthorizationRequirement(f"op{i}", False) for i in range(17)),
         )
+
+
+def test_parsing_profile_version_is_bound_to_structure_identity() -> None:
+    legacy = _definition()
+    current = _definition(
+        parsing_profile=ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V2
+    )
+
+    assert legacy.parsing_profile is ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1
+    assert current.parsing_profile is ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V2
+    assert legacy.ref != current.ref
+    assert StructureDefinition.from_dict(current.to_dict()) == current
 
 
 def test_preflight_has_an_inclusive_canonical_byte_bound() -> None:
@@ -357,6 +373,10 @@ def test_parser_semantics_and_limits_are_public_and_closed() -> None:
         "classify_integer_first", "float_requires_dot_or_exponent", "float_must_be_finite",
     )
     assert api.YAML_UNQUOTED_NULL_LITERALS_REJECTED == ("null", "Null", "NULL", "~")
+    assert "null" not in api.YAML_ALLOWED_VALUES
+    assert "null" in api.YAML_REJECTED_FEATURES
+    assert api.YAML_V2_UNQUOTED_NULL_LITERALS == ("", "null", "Null", "NULL", "~")
+    assert "null" in api.YAML_V2_ALLOWED_VALUES
     assert api.YAML_KEY_RULE == "all_nested_keys_nonempty_nfc_string_1_to_64_utf8_bytes"
     assert api.YAML_DUPLICATE_KEY_RULE == "reject_duplicate_keys_after_nfc_normalization"
     assert "typed_timestamp" in api.YAML_REJECTED_FEATURES

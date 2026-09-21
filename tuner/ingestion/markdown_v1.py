@@ -35,13 +35,15 @@ from synaptic_tuner.api.v1.ingestion_facade import (
     MAX_YAML_NODES,
     MAX_YAML_SCALAR_BYTES,
     MAX_YAML_SEQUENCE_ENTRIES,
+    ParsingProfile,
     StructureDefinition,
     YAML_FLOAT_PATTERN,
     YAML_INTEGER_PATTERN,
     YAML_UNQUOTED_NULL_LITERALS_REJECTED,
+    YAML_V2_UNQUOTED_NULL_LITERALS,
 )
 
-from .local_selection_v1 import MAX_FILE_BYTES
+from .local_selection_v1 import HARD_MAX_MEMBER_BYTES
 
 
 _INTEGER = re.compile(rf"^(?:{YAML_INTEGER_PATTERN})$")
@@ -49,6 +51,8 @@ _FLOAT = re.compile(rf"^(?:{YAML_FLOAT_PATTERN})$")
 _INT64_MIN = -(2**63)
 _INT64_MAX = 2**63 - 1
 _NONFINITE = frozenset({".nan", ".inf", "+.inf", "-.inf"})
+_V1_REJECTED_NULL_LITERALS = frozenset(YAML_UNQUOTED_NULL_LITERALS_REJECTED)
+_V2_NULL_LITERALS = frozenset(YAML_V2_UNQUOTED_NULL_LITERALS)
 
 
 class MarkdownParseCodeV1(str, Enum):
@@ -108,6 +112,7 @@ class ParsedMarkdownV1:
     frontmatter: dict[str, object]
     frontmatter_mode: FrontmatterMode
     had_frontmatter: bool
+    parsing_profile: ParsingProfile = ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1
 
     def __post_init__(self) -> None:
         if type(self.normalized_text) is not str or type(self.body) is not str:
@@ -117,8 +122,8 @@ class ParsedMarkdownV1:
         if (
             normalized_size is None
             or body_size is None
-            or normalized_size > MAX_FILE_BYTES
-            or body_size > MAX_FILE_BYTES
+            or normalized_size > HARD_MAX_MEMBER_BYTES
+            or body_size > HARD_MAX_MEMBER_BYTES
             or not self.body
         ):
             _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
@@ -128,8 +133,17 @@ class ParsedMarkdownV1:
             raise TypeError("frontmatter_mode must be exact FrontmatterMode")
         if type(self.had_frontmatter) is not bool:
             raise TypeError("had_frontmatter must be an exact boolean")
+        if type(self.parsing_profile) is not ParsingProfile:
+            raise TypeError("parsing_profile must be exact ParsingProfile")
         sanitized = _sanitize_value(
-            self.frontmatter, depth=1, budget=_YamlBudget(), mapping_root=True
+            self.frontmatter,
+            depth=1,
+            budget=_YamlBudget(),
+            mapping_root=True,
+            allow_null=(
+                self.parsing_profile
+                is ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V2
+            ),
         )
         if type(sanitized) is not MappingProxyType:
             _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
@@ -150,7 +164,12 @@ class _EventFrame:
 
 
 def _sanitize_value(
-    value: object, *, depth: int, budget: _YamlBudget, mapping_root: bool = False
+    value: object,
+    *,
+    depth: int,
+    budget: _YamlBudget,
+    mapping_root: bool = False,
+    allow_null: bool = False,
 ) -> object:
     if depth > MAX_YAML_DEPTH:
         _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
@@ -183,16 +202,25 @@ def _sanitize_value(
             ):
                 _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
             normalized_keys.add(key)
-            result[key] = _sanitize_value(item, depth=depth + 1, budget=budget)
+            result[key] = _sanitize_value(
+                item, depth=depth + 1, budget=budget, allow_null=allow_null
+            )
         return MappingProxyType(result)
     if mapping_root:
+        _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
+    if value is None:
+        if allow_null:
+            return None
         _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
     if type(value) in {list, tuple}:
         budget.sequence_entries += len(value)
         if budget.sequence_entries > MAX_YAML_SEQUENCE_ENTRIES:
             _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
         return tuple(
-            _sanitize_value(item, depth=depth + 1, budget=budget) for item in value
+            _sanitize_value(
+                item, depth=depth + 1, budget=budget, allow_null=allow_null
+            )
+            for item in value
         )
     if type(value) is str:
         size = _utf8_size(value)
@@ -208,8 +236,13 @@ def _sanitize_value(
     _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
 
 
-def _plain_scalar(value: str) -> object:
-    if value in YAML_UNQUOTED_NULL_LITERALS_REJECTED:
+def _plain_scalar(value: str, parsing_profile: ParsingProfile) -> object:
+    if (
+        parsing_profile is ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V2
+        and value in _V2_NULL_LITERALS
+    ):
+        return None
+    if value in _V1_REJECTED_NULL_LITERALS:
         _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
     if value.casefold() in _NONFINITE:
         _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
@@ -230,29 +263,37 @@ def _plain_scalar(value: str) -> object:
     return value
 
 
-def _convert_scalar(node: ScalarNode) -> object:
+def _convert_scalar(node: ScalarNode, parsing_profile: ParsingProfile) -> object:
     size = _utf8_size(node.value)
     if size is None or size > MAX_YAML_SCALAR_BYTES:
         _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
     if node.style is None:
-        return _plain_scalar(node.value)
+        return _plain_scalar(node.value, parsing_profile)
     return node.value
 
 
-def _convert_yaml(node: Node, *, depth: int, budget: _YamlBudget) -> object:
+def _convert_yaml(
+    node: Node, *, depth: int, budget: _YamlBudget, parsing_profile: ParsingProfile
+) -> object:
     if depth > MAX_YAML_DEPTH:
         _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
     budget.nodes += 1
     if budget.nodes > MAX_YAML_NODES:
         _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
     if type(node) is ScalarNode:
-        return _convert_scalar(node)
+        return _convert_scalar(node, parsing_profile)
     if type(node) is SequenceNode:
         budget.sequence_entries += len(node.value)
         if budget.sequence_entries > MAX_YAML_SEQUENCE_ENTRIES:
             _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
         return [
-            _convert_yaml(item, depth=depth + 1, budget=budget) for item in node.value
+            _convert_yaml(
+                item,
+                depth=depth + 1,
+                budget=budget,
+                parsing_profile=parsing_profile,
+            )
+            for item in node.value
         ]
     if type(node) is MappingNode:
         budget.mapping_entries += len(node.value)
@@ -263,7 +304,12 @@ def _convert_yaml(node: Node, *, depth: int, budget: _YamlBudget) -> object:
         for key_node, value_node in node.value:
             if type(key_node) is not ScalarNode:
                 _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
-            key_value = _convert_yaml(key_node, depth=depth + 1, budget=budget)
+            key_value = _convert_yaml(
+                key_node,
+                depth=depth + 1,
+                budget=budget,
+                parsing_profile=parsing_profile,
+            )
             if type(key_value) is not str or not key_value or key_value == "<<":
                 _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
             normalized = unicodedata.normalize("NFC", key_value)
@@ -278,7 +324,10 @@ def _convert_yaml(node: Node, *, depth: int, budget: _YamlBudget) -> object:
                 _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
             normalized_keys.add(normalized)
             result[key_value] = _convert_yaml(
-                value_node, depth=depth + 1, budget=budget
+                value_node,
+                depth=depth + 1,
+                budget=budget,
+                parsing_profile=parsing_profile,
             )
         return result
     _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
@@ -395,7 +444,9 @@ def _events_within_limits(value: str) -> bool:
     return not failed and documents == 1 and not frames
 
 
-def _parse_frontmatter(value: str) -> dict[str, object]:
+def _parse_frontmatter(
+    value: str, parsing_profile: ParsingProfile
+) -> dict[str, object]:
     frontmatter_size = _utf8_size(value)
     if frontmatter_size is None or frontmatter_size > MAX_FRONTMATTER_BYTES:
         _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
@@ -409,7 +460,9 @@ def _parse_frontmatter(value: str) -> dict[str, object]:
         compose_failed = True
     if compose_failed or type(node) is not MappingNode:
         _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
-    converted = _convert_yaml(node, depth=1, budget=_YamlBudget())
+    converted = _convert_yaml(
+        node, depth=1, budget=_YamlBudget(), parsing_profile=parsing_profile
+    )
     if type(converted) is not dict:
         _raise(MarkdownParseCodeV1.FRONTMATTER_INVALID)
     return converted
@@ -431,7 +484,9 @@ def _split_frontmatter(value: str) -> tuple[str, str]:
 
 
 def parse_markdown_v1(
-    content: bytes, frontmatter_mode: FrontmatterMode
+    content: bytes,
+    frontmatter_mode: FrontmatterMode,
+    parsing_profile: ParsingProfile = ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1,
 ) -> ParsedMarkdownV1:
     """Normalize and dry-parse one immutable Markdown source."""
 
@@ -439,7 +494,9 @@ def parse_markdown_v1(
         raise TypeError("content must be exact bytes")
     if type(frontmatter_mode) is not FrontmatterMode:
         raise TypeError("frontmatter_mode must be exact FrontmatterMode")
-    if len(content) > MAX_FILE_BYTES:
+    if type(parsing_profile) is not ParsingProfile:
+        raise TypeError("parsing_profile must be exact ParsingProfile")
+    if len(content) > HARD_MAX_MEMBER_BYTES:
         _raise(MarkdownParseCodeV1.CONTENT_TOO_LARGE)
     normalized: str | None = None
     decode_failed = False
@@ -465,12 +522,17 @@ def parse_markdown_v1(
         had_frontmatter = False
     else:
         frontmatter_text, body = _split_frontmatter(normalized)
-        metadata = _parse_frontmatter(frontmatter_text)
+        metadata = _parse_frontmatter(frontmatter_text, parsing_profile)
         had_frontmatter = True
     if body == "":
         _raise(MarkdownParseCodeV1.BODY_EMPTY)
     return ParsedMarkdownV1(
-        normalized, body, metadata, frontmatter_mode, had_frontmatter
+        normalized,
+        body,
+        metadata,
+        frontmatter_mode,
+        had_frontmatter,
+        parsing_profile,
     )
 
 
@@ -532,6 +594,8 @@ def map_markdown_fields_v1(
     if type(structure_definition) is not StructureDefinition:
         raise TypeError("structure_definition must be exact StructureDefinition")
     if parsed.frontmatter_mode is not structure_definition.markdown.frontmatter_mode:
+        _raise(MarkdownParseCodeV1.FIELD_MAPPING_INVALID)
+    if parsed.parsing_profile is not structure_definition.parsing_profile:
         _raise(MarkdownParseCodeV1.FIELD_MAPPING_INVALID)
     path = _validate_logical_path(logical_path)
     result: dict[str, object] = {}

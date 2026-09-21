@@ -18,6 +18,7 @@ from synaptic_tuner.api.v1.ingestion_facade import (
     IngestionRequest,
     IngestionRunState,
     MarkdownProfileV1,
+    ParsingProfile,
     SourceAdmissionKind,
     SourceAdmissionRequest,
     SourceMatcher,
@@ -28,7 +29,10 @@ from synaptic_tuner.api.v1.ingestion_facade import (
 )
 from tuner.ingestion.local_selection_v1 import (
     LocalDiscoveryPolicyV1,
+    LocalSelectionCodeV1,
+    LocalSelectionErrorV1,
     LocalSelectionRootV1,
+    ProcessLocalSelectionRegistryV1,
 )
 from tuner.ingestion.bundle_v1 import (
     BundleDurabilityError,
@@ -46,7 +50,11 @@ class _Clock:
         return self.value
 
 
-def _structure(*, frontmatter: FrontmatterMode = FrontmatterMode.OPTIONAL) -> StructureSet:
+def _structure(
+    *,
+    frontmatter: FrontmatterMode = FrontmatterMode.OPTIONAL,
+    parsing_profile: ParsingProfile = ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1,
+) -> StructureSet:
     definition = StructureDefinition.define(
         name="MarkdownNote",
         version="1",
@@ -66,6 +74,7 @@ def _structure(*, frontmatter: FrontmatterMode = FrontmatterMode.OPTIONAL) -> St
             ),
         ),
         text_projections=(TextProjection("text", "body"),),
+        parsing_profile=parsing_profile,
     )
     return StructureSet(
         (definition,),
@@ -82,6 +91,7 @@ def _composition(
     files: dict[str, bytes],
     *,
     frontmatter: FrontmatterMode = FrontmatterMode.OPTIONAL,
+    parsing_profile: ParsingProfile = ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1,
     clock: _Clock | None = None,
 ):
     source = tmp_path / "source"
@@ -106,7 +116,7 @@ def _composition(
         "request-1",
         "project",
         snapshot,
-        _structure(frontmatter=frontmatter),
+        _structure(frontmatter=frontmatter, parsing_profile=parsing_profile),
         "primary",
     )
     return api, operations, bundles, request
@@ -176,6 +186,42 @@ def test_malformed_frontmatter_is_a_sanitized_preflight_blocker(
     assert "unterminated" not in repr(preflight.to_dict())
 
 
+def test_null_behavior_is_bound_to_runtime_parsing_profile(tmp_path: Path) -> None:
+    content = {
+        "nulls.md": (
+            b"---\nmapping: {explicit: null, tilde: ~}\n"
+            b"sequence: [null, ~]\nempty_value:\n---\nBody\n"
+        )
+    }
+    legacy_root = tmp_path / "legacy"
+    current_root = tmp_path / "current"
+    legacy_root.mkdir()
+    current_root.mkdir()
+    legacy_api, _, _, legacy_request = _composition(
+        legacy_root,
+        content,
+        frontmatter=FrontmatterMode.REQUIRED,
+    )
+    current_api, _, _, current_request = _composition(
+        current_root,
+        content,
+        frontmatter=FrontmatterMode.REQUIRED,
+        parsing_profile=ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V2,
+    )
+
+    legacy_plan = legacy_api.plan(legacy_request)
+    legacy_preflight = legacy_api.preflight(legacy_plan)
+    current_plan = current_api.plan(current_request)
+    current_preflight = current_api.preflight(current_plan)
+
+    assert legacy_plan.request.structures.digest != current_plan.request.structures.digest
+    assert not legacy_preflight.ready
+    assert legacy_preflight.diagnostic_codes == (IngestionDiagnosticCode.PARSE_FAILED,)
+    assert current_plan.preview.ready
+    assert current_preflight.ready
+    assert current_preflight.diagnostic_codes == ()
+
+
 def test_only_explicit_verify_reopens_a_later_tampered_bundle(tmp_path: Path) -> None:
     api, _, bundles, _, _, started, outcome = _successful(tmp_path)
     result = api.result(outcome)
@@ -216,6 +262,53 @@ def test_admission_rejects_authority_digest_mismatch(tmp_path: Path) -> None:
     assert failure.value.code is IngestionOperationCode.ADMISSION_INELIGIBLE
     admitted = api.admit(SourceAdmissionRequest("admit-2", "project", issued))
     assert admitted.project_ref == "project"
+
+
+@pytest.mark.parametrize(
+    ("selection_code", "operation_code"),
+    [
+        (
+            LocalSelectionCodeV1.INVALID_SELECTION,
+            IngestionOperationCode.INVALID_SELECTION,
+        ),
+        (
+            LocalSelectionCodeV1.AUTHORITY_UNAVAILABLE,
+            IngestionOperationCode.AUTHORITY_UNAVAILABLE,
+        ),
+        (LocalSelectionCodeV1.SOURCE_UNSAFE, IngestionOperationCode.SOURCE_UNSAFE),
+        (LocalSelectionCodeV1.SOURCE_CHANGED, IngestionOperationCode.SOURCE_CHANGED),
+        (LocalSelectionCodeV1.LIMIT_EXCEEDED, IngestionOperationCode.LIMIT_EXCEEDED),
+    ],
+)
+def test_admission_preserves_closed_local_selection_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selection_code: LocalSelectionCodeV1,
+    operation_code: IngestionOperationCode,
+) -> None:
+    source = tmp_path / "note.md"
+    source.write_bytes(b"Body\n")
+    operations = ProcessLocalIngestionOperationsV1(
+        outputs={"primary": tmp_path / "bundles"}, clock=_Clock()
+    )
+    api = IngestionAPI(operations, clock=_Clock())
+    issued = operations.authorize_local_selection(
+        "project",
+        (LocalSelectionRootV1("note.md", source),),
+        LocalDiscoveryPolicyV1(("*.md",), (), False),
+    )
+
+    def fail_snapshot(self, source_ref: str):
+        raise LocalSelectionErrorV1(selection_code)
+
+    monkeypatch.setattr(
+        ProcessLocalSelectionRegistryV1, "consume_snapshot", fail_snapshot
+    )
+
+    with pytest.raises(IngestionOperationError) as failure:
+        api.admit(SourceAdmissionRequest("admit-closed", "project", issued))
+
+    assert failure.value.code is operation_code
 
 
 def test_returned_authority_is_detached_from_retained_authority(

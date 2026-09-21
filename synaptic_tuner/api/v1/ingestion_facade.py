@@ -51,6 +51,8 @@ YAML_REJECTED_FEATURES = (
     "alias", "anchor", "binary", "duplicate_key", "merge", "multidoc", "non_finite",
     "null", "object", "set", "tag", "typed_timestamp",
 )
+YAML_V2_UNQUOTED_NULL_LITERALS = ("", "null", "Null", "NULL", "~")
+YAML_V2_ALLOWED_VALUES = YAML_ALLOWED_VALUES + ("null",)
 YAML_KEY_RULE = "all_nested_keys_nonempty_nfc_string_1_to_64_utf8_bytes"
 YAML_DUPLICATE_KEY_RULE = "reject_duplicate_keys_after_nfc_normalization"
 YAML_LIMIT_ACCOUNTING = "global_across_entire_frontmatter_document"
@@ -126,6 +128,12 @@ def _identity(value: object, name: str) -> str:
     if _IDENTITY.fullmatch(value) is None:
         raise ValueError(f"{name} must be an opaque identity")
     return value
+
+
+def validate_ingestion_identity(value: object, name: str) -> str:
+    """Validate one public ingestion operational identity."""
+
+    return _identity(value, name)
 
 
 def _name(value: object, name: str) -> str:
@@ -253,6 +261,7 @@ class SourceAdmissionKind(str, Enum):
 
 class ParsingProfile(str, Enum):
     MARKDOWN_YAML_FRONTMATTER_V1 = "markdown_yaml_frontmatter_v1"
+    MARKDOWN_YAML_FRONTMATTER_V2 = "markdown_yaml_frontmatter_v2"
 
 
 class UnitBoundary(str, Enum):
@@ -315,6 +324,11 @@ class IngestionOperationCode(str, Enum):
     RESULT_INVALID = "result_invalid"
     RESULT_UNBOUND = "result_unbound"
     ADMISSION_INELIGIBLE = "admission_ineligible"
+    INVALID_SELECTION = "invalid_selection"
+    AUTHORITY_UNAVAILABLE = "authority_unavailable"
+    SOURCE_UNSAFE = "source_unsafe"
+    SOURCE_CHANGED = "source_changed"
+    LIMIT_EXCEEDED = "limit_exceeded"
     START_INELIGIBLE = "start_ineligible"
     CANCEL_INELIGIBLE = "cancel_ineligible"
     RESUME_INELIGIBLE = "resume_ineligible"
@@ -684,11 +698,14 @@ class StructureDefinition:
         relationships: tuple[RelationshipDeclaration, ...] = (),
         schema_ref: SchemaRef | None = None,
         metadata_policy: MetadataPolicyRef | None = None,
+        parsing_profile: ParsingProfile = ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1,
     ) -> "StructureDefinition":
-        """Build the sole V1 declaration and its content-addressed ref."""
+        """Build a supported Markdown declaration and its content-addressed ref."""
         name, version = _name(name, "name"), _version(version)
         if type(markdown) is not MarkdownProfileV1:
             raise TypeError("markdown must be exact MarkdownProfileV1")
+        if type(parsing_profile) is not ParsingProfile:
+            raise TypeError("parsing_profile must be exact ParsingProfile")
         fields = tuple(sorted(_tuple(fields, FieldMapping, "fields", MAX_FIELDS, minimum=1), key=lambda item: item.name))
         text_projections = tuple(sorted(_tuple(text_projections, TextProjection, "text_projections", MAX_TEXT_PROJECTIONS, minimum=1), key=lambda item: item.name))
         metadata = tuple(sorted(_tuple(metadata, MetadataDeclaration, "metadata", MAX_METADATA_DECLARATIONS), key=lambda item: item.name))
@@ -699,7 +716,7 @@ class StructureDefinition:
             raise TypeError("metadata_policy must be exact MetadataPolicyRef or None")
         document: dict[str, object] = {
             "ref": {"name": name, "version": version},
-            "parsing_profile": ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1.value,
+            "parsing_profile": parsing_profile.value,
             "unit": UnitBoundary.FILE.value,
             "markdown": markdown.to_dict(),
             "fields": [item.to_dict() for item in fields],
@@ -719,7 +736,7 @@ class StructureDefinition:
             )
             for item in relationships
         )
-        return cls(ref, ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1, UnitBoundary.FILE, markdown, fields,
+        return cls(ref, parsing_profile, UnitBoundary.FILE, markdown, fields,
                    text_projections, metadata, relationships, schema_ref, metadata_policy)
 
     def to_dict(self) -> dict[str, object]:
@@ -1646,5 +1663,5 @@ __all__ = [
     "IngestionVerification", "MarkdownProfileV1", "MetadataDeclaration", "MetadataPolicyRef", "NormalizedBundleRef",
     "ParsingProfile", "ProposalEvidenceCode", "RelationshipDeclaration", "SchemaRef", "SourceAdmissionKind", "SourceAdmissionRequest",
     "SourceMatcher", "SourceSnapshotRef", "StructureBinding", "StructureDefinition", "StructureProposal", "StructureProposalRequest",
-    "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest",
+    "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest", "validate_ingestion_identity",
 ]
