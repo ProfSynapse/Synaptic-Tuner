@@ -14,11 +14,19 @@ from tuner.cloud.modal_runtime_release_operator import (
     LocalModalRuntimeReleaseState,
     ModalRuntimeReleaseOperator,
     ModalRuntimeReleaseOperatorError,
+    ModalRuntimeReleaseQualificationController,
     run_modal_runtime_release_cli_action,
 )
 from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.providers.modal.runtime_release_deployment import (
     ModalRuntimeReleaseDeployer,
+)
+from tuner.cloud.modal_runtime_qualification_operator import ModalRuntimeQualificationOutcome
+from tuner.execution.providers.modal.runtime_release_qualification import (
+    ModalRuntimeQualificationHmacAuthenticator,
+    ModalRuntimeReleaseFixtureReceiptV1,
+    build_modal_runtime_release_qualification_dispatch,
+    parse_modal_runtime_release_qualification_dispatch,
 )
 
 from tests.execution.providers.test_modal_runtime_release_deployment import (
@@ -179,13 +187,36 @@ def test_changed_generation_does_not_authorize_binding() -> None:
         operator.verify(plan.deployment_spec_digest)
 
 
-def test_local_state_is_exclusive_bounded_and_round_trips(tmp_path: Path) -> None:
+def test_local_state_is_exclusive_bounded_and_round_trips(tmp_path: Path, monkeypatch) -> None:
+    import tuner.execution.providers.modal.runtime_release_qualification as qualification_module
+    from tests.execution.providers.test_modal_runtime_release_qualification import Facts, _case
+
     state = LocalModalRuntimeReleaseState((tmp_path / "private-state").resolve())
     ref = "a" * 64
     payload = b'{"closed":true}'
     assert state.publish_if_absent("attempt", ref, payload) is True
     assert state.publish_if_absent("attempt", ref, b'{"other":true}') is False
     assert state.resolve("attempt", ref) == payload
+    monkeypatch.setattr(qualification_module, "_qualification_facts_type", lambda: Facts)
+    dispatch, _ = _case()
+    auth = ModalRuntimeQualificationHmacAuthenticator(b"k" * 32)
+    signed = build_modal_runtime_release_qualification_dispatch(dispatch, auth)
+    assert state.publish_if_absent("qualification-dispatch", ref, signed) is True
+    assert parse_modal_runtime_release_qualification_dispatch(
+        state.resolve("qualification-dispatch", ref), auth,
+    ) == dispatch
+    assert state.publish_if_absent("qualification-dispatch", ref, signed) is False
+    large_raw = b"x" * (64 * 1024 + 1)
+    large_ref = "b" * 64
+    assert state.publish_if_absent("qualification-dispatch", large_ref, large_raw) is True
+    assert state.resolve("qualification-dispatch", large_ref) == large_raw
+    assert state.publish_if_absent("qualification-dispatch", large_ref, large_raw) is False
+    with pytest.raises(ValueError, match="oversized"):
+        state.publish_if_absent("qualification-dispatch", "c" * 64, b"x" * (512 * 1024 + 1))
+    claim = b'{"cpu_call_limit":1}'
+    assert state.publish_if_absent("qualification-attempt", ref, claim) is True
+    assert state.publish_if_absent("qualification-attempt", ref, claim) is False
+    assert state.resolve("qualification-attempt", ref) == claim
 
 
 def test_installed_entrypoint_resolver_requires_exact_plan_callables() -> None:
@@ -225,3 +256,90 @@ def test_cli_approval_is_provider_and_credential_free(tmp_path: Path, monkeypatc
 
     assert result["credentials_included"] is False
     assert result["deployment_spec_digest"] == ref
+
+
+def test_cpu_qualification_needs_separate_preflight_approval_and_claim_before_staging() -> None:
+    plan = _plan()
+    current = _observation(1)
+    state = MemoryState()
+    release, _ = _operator(Reader([None, None] + [current] * 10), state)
+    release.preflight(plan.canonical_bytes)
+    _approve(release, plan.deployment_spec_digest)
+    assert release.execute(plan.deployment_spec_digest)["status"] == "ACKNOWLEDGED"
+    release.verify(plan.deployment_spec_digest)
+    ref = plan.deployment_spec_digest
+    auth = ModalRuntimeQualificationHmacAuthenticator(b"k" * 32)
+
+    class Qualification:
+        stages = 0
+        submits = 0
+
+        def stage_fixture_once(self, *, effect_id, deployment_facts):
+            assert state.resolve("qualification-attempt", ref) is not None
+            self.stages += 1
+            return ModalRuntimeReleaseFixtureReceiptV1.create(
+                effect_id=effect_id, artifact_volume_id=next(
+                    item.volume_id for item in deployment_facts.volumes
+                    if item.spec.role == "artifacts"
+                ),
+            )
+
+        def submit_once(self, raw, *, expected_facts):
+            assert state.resolve("qualification-dispatch", ref) == raw
+            dispatch = parse_modal_runtime_release_qualification_dispatch(raw, auth)
+            assert dispatch.deployment_facts == expected_facts
+            self.submits += 1
+            return ModalRuntimeQualificationOutcome("indeterminate")
+
+    qualification = Qualification()
+    controller = ModalRuntimeReleaseQualificationController(
+        state=state, clock=Clock(), deployer=release._deployer,
+        qualification_operator=qualification, authenticator=auth,
+    )
+    with pytest.raises(ModalRuntimeReleaseOperatorError, match="preflight_unavailable"):
+        controller.approve(ref, authorization_reference="cpu-call", issued_at="2026-09-22T11:00:00Z",
+                           expires_at="2026-09-22T13:00:00Z")
+    with pytest.raises(ModalRuntimeReleaseOperatorError, match="approval_unavailable"):
+        controller.execute(ref)
+    preflight = controller.preflight(ref)
+    assert preflight["policy"]["gpu"] is False
+    approval = controller.approve(
+        ref, authorization_reference="separate-cpu-call",
+        issued_at="2026-09-22T11:00:00Z", expires_at="2026-09-22T13:00:00Z",
+    )
+    assert approval["authorization_id"] != json.loads(state.resolve("approval", ref))["authorization_id"]
+    outcome = controller.execute(ref)
+    assert outcome["status"] == "INDETERMINATE"
+    assert outcome["retry_allowed"] is False
+    assert state.resolve("qualification-dispatch", ref) is not None
+    assert qualification.stages == qualification.submits == 1
+    with pytest.raises(ModalRuntimeReleaseOperatorError, match="claim_consumed"):
+        controller.execute(ref)
+    assert qualification.stages == qualification.submits == 1
+    assert controller.recover(ref)["status"] == "INDETERMINATE"
+    state.values[("qualification-dispatch", ref)] = b"{}"
+    with pytest.raises(ValueError, match="dispatch"):
+        controller.recover(ref)
+
+
+def test_cpu_qualification_rejects_future_issued_approval_before_claim() -> None:
+    plan = _plan()
+    current = _observation(1)
+    state = MemoryState()
+    release, _ = _operator(Reader([None, None] + [current] * 10), state)
+    release.preflight(plan.canonical_bytes)
+    _approve(release, plan.deployment_spec_digest)
+    assert release.execute(plan.deployment_spec_digest)["status"] == "ACKNOWLEDGED"
+    release.verify(plan.deployment_spec_digest)
+    controller = ModalRuntimeReleaseQualificationController(
+        state=state, clock=Clock(), deployer=release._deployer,
+    )
+    ref = plan.deployment_spec_digest
+    controller.preflight(ref)
+    controller.approve(
+        ref, authorization_reference="future-cpu-call",
+        issued_at="2026-09-22T12:01:00Z", expires_at="2026-09-22T13:00:00Z",
+    )
+    with pytest.raises(ModalRuntimeReleaseOperatorError, match="not_yet_valid"):
+        controller.execute(ref)
+    assert state.resolve("qualification-attempt", ref) is None

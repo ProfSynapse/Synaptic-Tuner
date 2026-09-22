@@ -9,7 +9,9 @@ from tuner.handlers.modal_runtime_release_handler import ModalRuntimeReleaseHand
 
 
 @pytest.mark.parametrize(
-    "action", ("preflight", "approve", "execute", "recover", "observe", "verify"),
+    "action", ("preflight", "approve", "execute", "recover", "observe", "verify",
+               "qualify-preflight", "qualify-approve", "qualify-execute",
+               "qualify-recover", "qualify-observe", "qualify-verify"),
 )
 def test_routes_exact_release_actions(action, capsys) -> None:
     args = Namespace(subcommand=action, json=True)

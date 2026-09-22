@@ -8,7 +8,11 @@ from typing import Callable
 from tuner.handlers.base import BaseHandler
 
 
-_ACTIONS = frozenset({"preflight", "approve", "execute", "recover", "observe", "verify"})
+_ACTIONS = frozenset({
+    "preflight", "approve", "execute", "recover", "observe", "verify",
+    "qualify-preflight", "qualify-approve", "qualify-execute",
+    "qualify-recover", "qualify-observe", "qualify-verify",
+})
 _ERROR_MESSAGE = "Protected Modal runtime release action failed."
 
 

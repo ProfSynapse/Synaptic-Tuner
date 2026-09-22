@@ -90,6 +90,25 @@ _PROTECTED_ACTION_OPTIONS = {
         "--base-dir", "--env-file", "--json", "--manifest",
         "--project-root", "--release-ref",
     }),
+    ("modal-runtime-release", "qualify-preflight"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-approve"): frozenset({
+        "--authorization-reference", "--base-dir", "--expires-at", "--issued-at",
+        "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-execute"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-recover"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-observe"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-verify"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
 }
 
 
@@ -139,7 +158,9 @@ class _SynapticArgumentParser(argparse.ArgumentParser):
             return parsed
         if command == "modal-runtime-release":
             action = getattr(parsed, "subcommand", None)
-            allowed_actions = {"preflight", "approve", "execute", "recover", "observe", "verify"}
+            allowed_actions = {"preflight", "approve", "execute", "recover", "observe", "verify",
+                               "qualify-preflight", "qualify-approve", "qualify-execute",
+                               "qualify-recover", "qualify-observe", "qualify-verify"}
             if action not in allowed_actions:
                 self.error("modal-runtime-release requires an action: preflight, approve, execute, recover, observe, or verify")
             if capability_id is not None:

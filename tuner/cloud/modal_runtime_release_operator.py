@@ -11,6 +11,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 import importlib
+import base64
+import binascii
+import hashlib
 import os
 from pathlib import Path
 import stat
@@ -48,7 +51,10 @@ MODAL_RUNTIME_RELEASE_VERIFICATION_SCHEMA = "synaptic-modal-runtime-release-veri
 
 _KINDS = frozenset({
     "plan", "preflight", "approval", "attempt", "facts", "outcome",
-    "observation", "verification",
+    "observation", "verification", "qualification-preflight",
+    "qualification-approval", "qualification-attempt", "qualification-fixture",
+    "qualification-dispatch", "qualification-call", "qualification-outcome",
+    "qualification-verification",
 })
 _MAX_DOCUMENT_BYTES = 64 * 1024
 
@@ -105,8 +111,9 @@ class LocalModalRuntimeReleaseState:
         if kind not in _KINDS:
             raise ValueError("Modal release state kind is unsupported")
         digest_text(release_ref, "release_ref")
+        limit = 512 * 1024 if kind == "qualification-dispatch" else _MAX_DOCUMENT_BYTES
         if payload is not None and (
-            type(payload) is not bytes or not payload or len(payload) > _MAX_DOCUMENT_BYTES
+            type(payload) is not bytes or not payload or len(payload) > limit
         ):
             raise ValueError("Modal release state document is missing or oversized")
 
@@ -145,17 +152,18 @@ class LocalModalRuntimeReleaseState:
 
     def resolve(self, kind: str, release_ref: str) -> bytes | None:
         path = self._path(kind, release_ref)
+        limit = 512 * 1024 if kind == "qualification-dispatch" else _MAX_DOCUMENT_BYTES
         try:
             before = path.lstat()
         except FileNotFoundError:
             return None
         if not stat.S_ISREG(before.st_mode) or path.is_symlink() \
-                or before.st_size <= 0 or before.st_size > _MAX_DOCUMENT_BYTES:
+                or before.st_size <= 0 or before.st_size > limit:
             raise ModalRuntimeReleaseOperatorError("modal_release_state_invalid")
         with path.open("rb") as handle:
-            payload = handle.read(_MAX_DOCUMENT_BYTES + 1)
+            payload = handle.read(limit + 1)
             after = os.fstat(handle.fileno())
-        if len(payload) > _MAX_DOCUMENT_BYTES \
+        if len(payload) > limit \
                 or (before.st_dev, before.st_ino, before.st_size) \
                 != (after.st_dev, after.st_ino, after.st_size):
             raise ModalRuntimeReleaseOperatorError("modal_release_state_changed")
@@ -470,6 +478,274 @@ class ModalRuntimeReleaseOperator:
         return dict(document)
 
 
+class _QualificationCallCatalog:
+    def __init__(self, state: ModalRuntimeReleaseStatePort):
+        self._state = state
+
+    def resolve(self, dispatch_digest: str) -> str | None:
+        raw = self._state.resolve("qualification-call", digest_text(dispatch_digest, "dispatch_digest"))
+        if raw is None:
+            return None
+        value = parse_canonical_object(raw, name="qualification call")
+        exact_fields(value, frozenset({"dispatch_digest", "provider_call_id"}), "qualification call")
+        if value["dispatch_digest"] != dispatch_digest:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_call_substituted")
+        return safe_ref(value["provider_call_id"], "provider_call_id")
+
+    def publish_if_absent(self, dispatch_digest: str, provider_call_id: str) -> bool:
+        return self._state.publish_if_absent(
+            "qualification-call", digest_text(dispatch_digest, "dispatch_digest"),
+            canonical_bytes({"dispatch_digest": dispatch_digest,
+                             "provider_call_id": safe_ref(provider_call_id, "provider_call_id")}),
+        )
+
+
+class ModalRuntimeReleaseQualificationController:
+    """One separately authorized CPU call for one verified release deployment."""
+
+    def __init__(self, *, state: ModalRuntimeReleaseStatePort, clock: object,
+                 deployer: ModalRuntimeReleaseDeployer | None = None,
+                 qualification_operator: object | None = None,
+                 reader: object | None = None, authenticator: object | None = None):
+        self._release = ModalRuntimeReleaseOperator(
+            state=state, deployer=deployer,
+            entrypoints=InstalledModalRuntimeReleaseEntrypoints() if deployer else None,
+            clock=clock,
+        )
+        self._state, self._clock = state, clock
+        self._operator, self._reader, self._auth = qualification_operator, reader, authenticator
+        self._calls = _QualificationCallCatalog(state)
+
+    def _binding(self, ref: str):
+        plan = self._release._plan(ref)
+        raw = self._state.resolve("facts", ref)
+        verification = self._state.resolve("verification", ref)
+        if raw is None or verification is None:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_release_unverified")
+        facts = ModalRuntimeReleaseDeploymentFactsV1.parse(raw)
+        facts.validate_plan(plan)
+        verified = parse_canonical_object(verification, name="Modal release verification")
+        unsigned = dict(verified)
+        identifier = unsigned.pop("verification_id", None)
+        if verified.get("schema_version") != MODAL_RUNTIME_RELEASE_VERIFICATION_SCHEMA \
+                or verified.get("deployment_spec_digest") != ref \
+                or verified.get("release_facts_digest") != facts.facts_digest \
+                or identifier != _doc_id(MODAL_RUNTIME_RELEASE_VERIFICATION_SCHEMA, unsigned):
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_release_unverified")
+        packaged = ModalPackagedRuntimeFactsV1.from_release_deployment(facts)
+        binding = packaged.build_provider_binding(plan.release)
+        if verified.get("packaged_runtime_facts_digest") != packaged.facts_digest \
+                or verified.get("provider_runtime_binding_digest") != binding.binding_digest:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_release_unverified")
+        return plan, facts, binding, identifier
+
+    def _retain(self, kind: str, ref: str, document: dict[str, object]) -> None:
+        raw = canonical_bytes(document)
+        created = self._state.publish_if_absent(kind, ref, raw)
+        if self._state.resolve(kind, ref) != raw \
+                or (kind == "qualification-attempt" and not created):
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_claim_consumed")
+
+    def preflight(self, release_ref: str) -> dict[str, object]:
+        ref = digest_text(release_ref, "release_ref")
+        plan, facts, binding, verification_id = self._binding(ref)
+        from tuner.execution.providers.modal.runtime_release_qualification import (
+            _validate_deployment_release,
+        )
+        _validate_deployment_release(facts, plan.release)
+        if self._release.observe(ref).get("status") != "CURRENT":
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_deployment_changed")
+        unsigned: dict[str, object] = {
+            "schema_version": "synaptic-modal-runtime-qualification-preflight/v1",
+            "deployment_spec_digest": ref, "release_facts_digest": facts.facts_digest,
+            "provider_runtime_binding_digest": binding.binding_digest,
+            "release_verification_id": verification_id,
+            "policy": {"cpu": 1, "memory_mib": 512, "timeout_seconds": 120,
+                       "network_access": False, "gpu": False},
+            "authorizing": False,
+        }
+        document = {**unsigned, "preflight_id": _doc_id(unsigned["schema_version"], unsigned)}
+        self._retain("qualification-preflight", ref, document)
+        return document
+
+    def approve(self, release_ref: str, *, authorization_reference: str,
+                issued_at: str, expires_at: str) -> dict[str, object]:
+        ref = digest_text(release_ref, "release_ref")
+        _, facts, binding, verification_id = self._binding(ref)
+        raw = self._state.resolve("qualification-preflight", ref)
+        if raw is None:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_preflight_unavailable")
+        preflight = parse_canonical_object(raw, name="qualification preflight")
+        unsigned_preflight = dict(preflight)
+        preflight_id = unsigned_preflight.pop("preflight_id", None)
+        if preflight.get("schema_version") != "synaptic-modal-runtime-qualification-preflight/v1" \
+                or preflight.get("deployment_spec_digest") != ref \
+                or preflight.get("release_facts_digest") != facts.facts_digest \
+                or preflight.get("provider_runtime_binding_digest") != binding.binding_digest \
+                or preflight.get("release_verification_id") != verification_id \
+                or preflight.get("policy") != {"cpu": 1, "memory_mib": 512,
+                                                "timeout_seconds": 120,
+                                                "network_access": False, "gpu": False} \
+                or preflight.get("authorizing") is not False \
+                or preflight_id != _doc_id(preflight["schema_version"], unsigned_preflight):
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_preflight_invalid")
+        issued, expires = _utc(issued_at, "issued_at"), _utc(expires_at, "expires_at")
+        if datetime.fromisoformat(expires.replace("Z", "+00:00")) \
+                <= datetime.fromisoformat(issued.replace("Z", "+00:00")):
+            raise ValueError("qualification approval must expire after issuance")
+        unsigned: dict[str, object] = {
+            "schema_version": "synaptic-modal-runtime-qualification-approval/v1",
+            "deployment_spec_digest": ref, "preflight_id": preflight_id,
+            "release_facts_digest": facts.facts_digest,
+            "provider_runtime_binding_digest": binding.binding_digest,
+            "authorization_reference": safe_ref(authorization_reference, "authorization_reference"),
+            "issued_at": issued, "expires_at": expires,
+            "permitted_cpu_calls": 1, "credentials_included": False,
+        }
+        document = {**unsigned, "authorization_id": _doc_id(unsigned["schema_version"], unsigned)}
+        self._retain("qualification-approval", ref, document)
+        return document
+
+    def _approved(self, ref: str, facts, binding) -> dict[str, object]:
+        raw = self._state.resolve("qualification-approval", ref)
+        if raw is None:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_approval_unavailable")
+        value = parse_canonical_object(raw, name="qualification approval")
+        unsigned = dict(value)
+        identifier = unsigned.pop("authorization_id", None)
+        if value.get("schema_version") != "synaptic-modal-runtime-qualification-approval/v1" \
+                or value.get("deployment_spec_digest") != ref \
+                or value.get("release_facts_digest") != facts.facts_digest \
+                or value.get("provider_runtime_binding_digest") != binding.binding_digest \
+                or value.get("permitted_cpu_calls") != 1 \
+                or value.get("credentials_included") is not False \
+                or identifier != _doc_id(value["schema_version"], unsigned):
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_approval_invalid")
+        issued = datetime.fromisoformat(_utc(value["issued_at"], "issued_at").replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(_utc(value["expires_at"], "expires_at").replace("Z", "+00:00"))
+        now = _now(self._clock)
+        if now < issued:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_approval_not_yet_valid")
+        if now >= expires:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_approval_expired")
+        return value
+
+    def execute(self, release_ref: str) -> dict[str, object]:
+        from tuner.execution.providers.modal.runtime_release_qualification import (
+            QUALIFICATION_HMAC_KEY_REF, ModalRuntimeReleaseQualificationDispatchV1,
+            ModalRuntimeReleaseQualificationPolicyV1,
+            build_modal_runtime_release_qualification_dispatch,
+        )
+        from tuner.runtime.releases import ProviderRuntimeBindingV1
+        ref = digest_text(release_ref, "release_ref")
+        plan, facts, binding, _ = self._binding(ref)
+        approval = self._approved(ref, facts, binding)
+        if self._release.observe(ref).get("status") != "CURRENT":
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_deployment_changed")
+        effect_id = safe_ref("qualify-" + ref[:32], "effect_id")
+        unsigned: dict[str, object] = {
+            "schema_version": "synaptic-modal-runtime-qualification-attempt/v1",
+            "deployment_spec_digest": ref, "authorization_id": approval["authorization_id"],
+            "release_facts_digest": facts.facts_digest, "effect_id": effect_id,
+            "claimed_at": _now(self._clock).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "cpu_call_limit": 1, "retry_allowed": False, "credentials_included": False,
+        }
+        attempt = {**unsigned, "attempt_id": _doc_id(unsigned["schema_version"], unsigned)}
+        # Exclusive claim precedes fixture staging and Function.spawn, including
+        # any failure or lost acknowledgement on either provider operation.
+        self._retain("qualification-attempt", ref, attempt)
+        try:
+            if self._operator is None or self._auth is None:
+                raise ValueError
+            fixture = self._operator.stage_fixture_once(effect_id=effect_id, deployment_facts=facts)
+            self._retain("qualification-fixture", ref, fixture.to_dict())
+            dispatch = ModalRuntimeReleaseQualificationDispatchV1(
+                effect_id, plan.release, ProviderRuntimeBindingV1.build(
+                    provider_ref="modal", runtime_release=plan.release,
+                    provider_facts_schema=facts.schema_version,
+                    provider_facts_digest=facts.facts_digest,
+                ), facts, fixture,
+                ModalRuntimeReleaseQualificationPolicyV1(), QUALIFICATION_HMAC_KEY_REF,
+            )
+            raw = build_modal_runtime_release_qualification_dispatch(dispatch, self._auth)
+            if not self._state.publish_if_absent("qualification-dispatch", ref, raw) \
+                    or self._state.resolve("qualification-dispatch", ref) != raw:
+                raise ValueError
+            outcome = self._operator.submit_once(raw, expected_facts=facts)
+            status = "SUBMITTED" if outcome.disposition == "found" else "INDETERMINATE"
+            call_id = outcome.provider_call_id
+        except Exception:
+            status, call_id = "INDETERMINATE", None
+        result: dict[str, object] = {
+            "schema_version": "synaptic-modal-runtime-qualification-outcome/v1",
+            "deployment_spec_digest": ref, "attempt_id": attempt["attempt_id"],
+            "status": status, "provider_call_id": call_id,
+            "retry_allowed": False, "gpu_qualified": False, "training_executed": False,
+        }
+        try:
+            self._retain("qualification-outcome", ref, result)
+        except Exception:
+            return {"status": "INDETERMINATE", "retry_allowed": False,
+                    "reason_code": "OUTCOME_NOT_DURABLE"}
+        return result
+
+    def recover(self, release_ref: str) -> dict[str, object]:
+        ref = digest_text(release_ref, "release_ref")
+        _, facts, _, _ = self._binding(ref)
+        raw = self._state.resolve("qualification-attempt", ref)
+        if raw is None:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_attempt_unavailable")
+        dispatch_raw = self._state.resolve("qualification-dispatch", ref)
+        if dispatch_raw is None or self._auth is None:
+            return {"status": "INDETERMINATE", "retry_allowed": False}
+        from tuner.execution.providers.modal.runtime_release_qualification import (
+            parse_modal_runtime_release_qualification_dispatch,
+        )
+        dispatch = parse_modal_runtime_release_qualification_dispatch(dispatch_raw, self._auth)
+        attempt = parse_canonical_object(raw, name="qualification attempt")
+        if dispatch.deployment_facts != facts or dispatch.effect_id != attempt.get("effect_id") \
+                or attempt.get("deployment_spec_digest") != ref:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_dispatch_substituted")
+        found = self._calls.resolve(dispatch.dispatch_digest)
+        return {"status": "FOUND" if found else "INDETERMINATE",
+                "provider_call_id": found, "retry_allowed": False}
+
+    def verify(self, release_ref: str) -> dict[str, object]:
+        ref = digest_text(release_ref, "release_ref")
+        if self._reader is None or self._auth is None:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_reader_unavailable")
+        _, facts, _, _ = self._binding(ref)
+        from tuner.execution.providers.modal.runtime_release_qualification import (
+            parse_modal_runtime_release_qualification_dispatch,
+        )
+        raw = self._state.resolve("qualification-dispatch", ref)
+        if raw is None:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_dispatch_unavailable")
+        dispatch = parse_modal_runtime_release_qualification_dispatch(raw, self._auth)
+        attempt_raw = self._state.resolve("qualification-attempt", ref)
+        if attempt_raw is None:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_attempt_unavailable")
+        attempt = parse_canonical_object(attempt_raw, name="qualification attempt")
+        if dispatch.deployment_facts != facts or dispatch.effect_id != attempt.get("effect_id") \
+                or attempt.get("deployment_spec_digest") != ref:
+            raise ModalRuntimeReleaseOperatorError("modal_qualification_dispatch_substituted")
+        call_id = self._calls.resolve(dispatch.dispatch_digest)
+        if call_id is None:
+            return {"status": "INDETERMINATE", "retry_allowed": False}
+        observed = self._reader.observe(dispatch, provider_call_id=call_id)
+        result: dict[str, object] = {
+            "schema_version": "synaptic-modal-runtime-qualification-verification/v1",
+            "deployment_spec_digest": ref, "dispatch_digest": dispatch.dispatch_digest,
+            "provider_call_id": call_id,
+            "receipt_digest": hashlib.sha256(canonical_bytes(observed.receipt.to_dict())).hexdigest(),
+            "output_sha256": observed.receipt.output_sha256,
+            "status": "PASSED", "training_executed": False,
+            "gpu_qualified": False, "retry_allowed": False,
+        }
+        self._retain("qualification-verification", ref, result)
+        return result
+
+
 def run_modal_runtime_release_action(
     action: str, *, operator: ModalRuntimeReleaseOperator,
     release_ref: str | None = None, plan_bytes: bytes | None = None,
@@ -591,11 +867,74 @@ def _compose_cli_provider(
     return deployer, InstalledModalRuntimeReleaseEntrypoints()
 
 
+def _compose_qualification(
+    *, state: ModalRuntimeReleaseStatePort, deployer: ModalRuntimeReleaseDeployer,
+    plan: ModalRuntimeReleaseDeploymentPlanV1,
+    facts: ModalRuntimeReleaseDeploymentFactsV1,
+):
+    from tuner.cloud.modal_runtime_qualification_operator import ModalRuntimeQualificationOperator
+    from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
+    from tuner.execution.providers.modal.runtime_release_qualification import (
+        ModalRuntimeQualificationHmacAuthenticator, QUALIFICATION_HMAC_ENV_KEY,
+    )
+    from tuner.execution.providers.modal.runtime_release_qualification_reader import (
+        ModalRuntimeReleaseQualificationReader,
+    )
+
+    encoded = os.environ.get(QUALIFICATION_HMAC_ENV_KEY)
+    try:
+        if type(encoded) is not str or not encoded.isascii():
+            raise ValueError
+        key = base64.b64decode(encoded, validate=True)
+        if len(key) != 32 or base64.b64encode(key).decode("ascii") != encoded:
+            raise ValueError
+        auth = ModalRuntimeQualificationHmacAuthenticator(key)
+        if deployer._binding != facts.client_binding:
+            raise ValueError
+        def observe_scope(client):
+            if client is not deployer._client:
+                raise ValueError
+            deployer._observe_scope(plan.environment_name)
+            binding = facts.client_binding
+            return (binding.account_ref, binding.workspace_ref,
+                    binding.environment_ref, binding.client_ref)
+
+        facade = ExplicitModal154ReadFacade(
+            facts.client_binding, sdk=deployer._sdk, client=deployer._client,
+            scope_observer=observe_scope,
+            deployment_observer=lambda **_: deployer.observe(plan),
+            volume_names={item.volume_id: item.spec.name for item in facts.volumes},
+        )
+
+        class Observer:
+            def observe(self, expected):
+                if expected != facts:
+                    raise ValueError
+                return deployer.observe(plan)
+
+        observer = Observer()
+        catalog = _QualificationCallCatalog(state)
+        return (
+            ModalRuntimeQualificationOperator(
+                facade=facade, deployment_observer=observer, verifier=auth,
+                call_catalog=catalog,
+            ),
+            ModalRuntimeReleaseQualificationReader(
+                facade=facade, deployment_observer=observer, verifier=auth,
+            ),
+            auth,
+        )
+    except (ValueError, TypeError, binascii.Error):
+        raise ModalRuntimeReleaseOperatorError("modal_qualification_composition_unavailable") from None
+
+
 def run_modal_runtime_release_cli_action(
     action: str, *, args: object, context: object,
 ) -> dict[str, object]:
     """Compose the protected release command without ambient provider fallback."""
-    if action not in {"preflight", "approve", "execute", "recover", "observe", "verify"}:
+    qualification_actions = {"qualify-preflight", "qualify-approve", "qualify-execute",
+                             "qualify-recover", "qualify-observe", "qualify-verify"}
+    if action not in {"preflight", "approve", "execute", "recover", "observe", "verify"} | qualification_actions:
         raise ValueError("unsupported Modal runtime release action")
     state = _cli_state(args, context)
     plan_bytes: bytes | None = None
@@ -610,6 +949,41 @@ def run_modal_runtime_release_cli_action(
             raise ModalRuntimeReleaseOperatorError("modal_release_plan_unavailable")
         plan = ModalRuntimeReleaseDeploymentPlanV1.parse(retained)
 
+    if action in qualification_actions:
+        if action == "qualify-approve":
+            deployer = None
+        else:
+            deployer, _ = _compose_cli_provider(args=args, context=context, plan=plan)
+        qualification_operator = reader = auth = None
+        if action in {"qualify-execute", "qualify-recover", "qualify-observe", "qualify-verify"}:
+            raw = state.resolve("facts", release_ref)
+            if raw is None:
+                raise ModalRuntimeReleaseOperatorError("modal_qualification_release_unverified")
+            facts = ModalRuntimeReleaseDeploymentFactsV1.parse(raw)
+            qualification_operator, reader, auth = _compose_qualification(
+                state=state, deployer=deployer, plan=plan, facts=facts,
+            )
+        controller = ModalRuntimeReleaseQualificationController(
+            state=state, clock=lambda: datetime.now(timezone.utc),
+            deployer=deployer, qualification_operator=qualification_operator,
+            reader=reader, authenticator=auth,
+        )
+        if action == "qualify-preflight":
+            return controller.preflight(release_ref)
+        if action == "qualify-approve":
+            return controller.approve(
+                release_ref,
+                authorization_reference=getattr(args, "authorization_reference", None),
+                issued_at=getattr(args, "issued_at", None),
+                expires_at=getattr(args, "expires_at", None),
+            )
+        if action == "qualify-execute":
+            return controller.execute(release_ref)
+        if action == "qualify-recover":
+            return controller.recover(release_ref)
+        if action == "qualify-observe":
+            return controller.recover(release_ref)
+        return controller.verify(release_ref)
     if action == "approve":
         deployer = entrypoints = None
     else:
@@ -637,6 +1011,7 @@ __all__ = [
     "InstalledModalRuntimeReleaseEntrypoints",
     "LocalModalRuntimeReleaseState",
     "ModalRuntimeReleaseOperator",
+    "ModalRuntimeReleaseQualificationController",
     "ModalRuntimeReleaseOperatorError",
     "ModalRuntimeReleaseStatePort",
     "run_modal_runtime_release_action",
