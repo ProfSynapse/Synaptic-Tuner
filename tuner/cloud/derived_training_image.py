@@ -371,8 +371,11 @@ def render_dockerfile(profile: DerivedImageProfile) -> str:
                    f"RUN test \"$SYNAPTIC_RUNTIME_INPUTS_SHA256\" = '{digest}'\n"
                    "COPY runtime/ /opt/synaptic-runtime/\n"
                    f"RUN echo '{digest}  /opt/synaptic-runtime/build-inputs.json' | sha256sum -c -\n"
-                   f"RUN {shlex.quote(profile.python_executable)} -I -m pip install --no-index --no-deps --require-hashes --no-cache-dir -r /opt/synaptic-runtime/requirements.txt\n"
-                   f"RUN {shlex.quote(profile.python_executable)} -I -m pip check\n")
+                   "RUN set -eu; \\\n"
+                   f"    before=\"$({shlex.quote(profile.python_executable)} -I -m pip check 2>&1)\" || test \"$?\" -eq 1; \\\n"
+                   f"    {shlex.quote(profile.python_executable)} -I -m pip install --no-index --no-deps --require-hashes --no-cache-dir -r /opt/synaptic-runtime/requirements.txt; \\\n"
+                   f"    after=\"$({shlex.quote(profile.python_executable)} -I -m pip check 2>&1)\" || test \"$?\" -eq 1; \\\n"
+                   "    test \"$before\" = \"$after\"\n")
     return result
 
 

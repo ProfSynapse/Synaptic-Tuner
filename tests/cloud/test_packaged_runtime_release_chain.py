@@ -269,6 +269,9 @@ def test_exact_wheels_and_bootstrap_are_staged_without_install(chain):
         assert "--hash=sha256:" + item["sha256"] in requirements
     dockerfile = d.render_dockerfile(profile)
     assert "--require-hashes" in dockerfile and "--no-index" in dockerfile
+    assert dockerfile.count("-I -m pip check 2>&1") == 2
+    assert dockerfile.index("before=") < dockerfile.index("-I -m pip install") < dockerfile.index("after=")
+    assert 'test "$before" = "$after"' in dockerfile
 
 
 def test_interpreter_substitution_stops_before_package_import(chain):
