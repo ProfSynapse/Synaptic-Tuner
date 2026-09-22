@@ -512,7 +512,11 @@ class ModalChatOwnedDeployment:
                 raise ValueError
             scope.observe(scope.client)
             current = self._read_current()
-            expected_generation = 1 if prior is None else prior.generation + 1
+            expected_generation = (
+                prior.generation + 1
+                if prior is not None and prior.deployed is True
+                else 1
+            )
             definition_available = self._validate_current(
                 current,
                 app_id=identity["app_id"],

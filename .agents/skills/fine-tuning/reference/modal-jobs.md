@@ -519,10 +519,12 @@ The cross-provider contract and proof matrix live in
   generation. Read its bounded historical layout through that previous ID,
   bracket the read with an unchanged scoped lookup, and reject a selected-name
   collision. The normal same-name redeploy creates a new current app; accept it
-  only when its ID differs from the stopped predecessor and its generation is
-  exactly `N+1`. Transitional states, drift, ID reuse, generation reuse/skips,
-  or ambiguity fail closed before training submission and never authorize an
-  automatic retry or cleanup.
+  only when its ID differs from the stopped predecessor and its new-app
+  lifecycle generation is exactly `1`. The retained stopped version does not
+  carry into the new app. Later redeploys of a current app retain the same ID
+  and require exactly `N+1`. Transitional states, drift, ID reuse, unexpected
+  generations, or ambiguity fail closed before training submission and never
+  authorize an automatic retry or cleanup.
 - One A10 GPU, one canonical command argument, `retries=0`, and one detached
   `.spawn()` call behind the authenticated Foundation effect broker.
 - One digest-pinned Unsloth registry image with its inherited entrypoint

@@ -685,7 +685,7 @@ def test_existing_generation_advances_exactly_once_without_name_collision(
 def test_stopped_generation_redeploys_to_new_app_identity(case, monkeypatch):
     sdk, client, storage, _, owner = case
     prior = _stopped()
-    values = iter((prior, _current(generation=7), _current(generation=7)))
+    values = iter((prior, _current(generation=1), _current(generation=1)))
     monkeypatch.setattr(
         deployment, "read_current_deployment", lambda **kwargs: next(values)
     )
@@ -693,7 +693,7 @@ def test_stopped_generation_redeploys_to_new_app_identity(case, monkeypatch):
         owner.deploy_once(attempt_ref="stopped"), name="receipt"
     )
     assert receipt["app_id"] == "ap-1"
-    assert receipt["deployment_generation"] == 7
+    assert receipt["deployment_generation"] == 1
     prestate = parse_canonical_object(
         storage.catalog("deployment-prestates", encode=bytes, decode=bytes).resolve(
             "stopped"
@@ -752,13 +752,14 @@ def test_malformed_stopped_prestate_fails_before_dispatch(case, monkeypatch, pri
 @pytest.mark.parametrize(
     "current",
     [
+        _current(generation=0),
+        _current(generation=2),
         _current(generation=6),
-        _current(generation=8),
-        _current(generation=7, app_id="ap-other"),
-        _stopped(generation=7),
+        _current(generation=1, app_id="ap-other"),
+        _stopped(generation=1),
     ],
 )
-def test_stopped_redeploy_requires_exact_new_identity_and_next_generation(
+def test_stopped_redeploy_requires_exact_new_identity_and_generation_one(
     case, monkeypatch, current
 ):
     _, _, storage, _, owner = case

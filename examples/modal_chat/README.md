@@ -186,11 +186,14 @@ retained deployment generation. The consumer brackets a bounded historical
 layout read through that previous ID and records a non-authorizing `STOPPED`
 prestate. A same-name deploy then follows the pinned SDK's normal `AppCreate`
 path. It is accepted only when readback proves a new current app ID distinct
-from the stopped predecessor, the exact next generation, and the usual private
-single-function/zero-class layout. Transitional states, identity reuse,
-generation skips, selected-function collisions, or drift during the bracketed
-read fail closed. A failed or ambiguous deploy remains permanently claimed and
-does not authorize retry, cleanup, training submission, or invocation.
+from the stopped predecessor, lifecycle generation `1`, and the usual private
+single-function/zero-class layout. The stopped predecessor's retained version
+is historical deployment-name evidence; Modal does not carry it into the new
+app's lifecycle. Subsequent redeploys of that current app still require the
+same app ID and exactly `N+1`. Transitional states, identity reuse, unexpected
+generations, selected-function collisions, or drift during the bracketed read
+fail closed. A failed or ambiguous deploy remains permanently claimed and does
+not authorize retry, cleanup, training submission, or invocation.
 
 Training acceptance is not completion. Observe the exact returned run through
 `RunsAPI`; successful verification and its authenticated five-artifact inventory
