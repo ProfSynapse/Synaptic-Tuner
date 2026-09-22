@@ -33,12 +33,18 @@ from tuner.cloud.hf_training_image_lock import (
     parse_image_reference,
     subprocess_runner,
 )
+from tuner.runtime.packaged_training_worker import PACKAGED_TRAINING_WORKER_ENTRYPOINT
+from tuner.runtime.packaged_worker_closure import load_packaged_worker_closure, stable_read
+from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1
 
 
 PROFILE_SCHEMA = "synaptic-derived-training-image-profile/v1"
 BUILD_RECEIPT_SCHEMA = "synaptic-derived-training-image-build-receipt/v1"
 CANDIDATE_SCHEMA = "synaptic-derived-training-image-candidate/v1"
 VERIFICATION_SCHEMA = "synaptic-derived-training-image-verification/v1"
+RELEASE_VERIFICATION_SCHEMA = "synaptic-packaged-runtime-release-verification/v1"
+RELEASE_PROMOTION_SCHEMA = "synaptic-packaged-runtime-release-promotion/v1"
+FINAL_RUNTIME_CAPTURE_SCHEMA = "synaptic-packaged-runtime-final-capture/v1"
 PLATFORM = "linux/amd64"
 MAX_DOCUMENT_BYTES = 1024 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 1024 * 1024
@@ -142,6 +148,8 @@ class DerivedImageProfile:
     python_executable: str
     packages: tuple[PackageExpectation, ...]
     canonical_sha256: str
+    packaged_runtime: dict[str, object] | None = None
+    artifact_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -216,9 +224,7 @@ def _sha256(raw: bytes) -> str:
 
 def _read_object(path: Path) -> tuple[dict[str, object], bytes]:
     try:
-        if path.is_symlink() or not path.is_file():
-            raise OSError("not a regular file")
-        raw = path.read_bytes()
+        raw = stable_read(path, MAX_DOCUMENT_BYTES)
     except OSError as exc:
         raise DerivedTrainingImageError("DOCUMENT_INVALID") from exc
     if not raw or len(raw) > MAX_DOCUMENT_BYTES:
@@ -266,6 +272,7 @@ def load_profile(path: Path) -> DerivedImageProfile:
     _closed(
         value,
         {"schema_version", "name", "platform", "base_image", "python_executable", "packages"},
+        {"packaged_runtime"},
     )
     if value["schema_version"] != PROFILE_SCHEMA or value["platform"] != PLATFORM:
         raise DerivedTrainingImageError("PROFILE_INVALID")
@@ -281,7 +288,7 @@ def load_profile(path: Path) -> DerivedImageProfile:
         or not python_executable.startswith("/")
         or len(python_executable) > 256
         or not isinstance(packages, list)
-        or not 1 <= len(packages) <= 64
+        or not (0 if "packaged_runtime" in value else 1) <= len(packages) <= 64
     ):
         raise DerivedTrainingImageError("PROFILE_INVALID")
     try:
@@ -334,24 +341,93 @@ def load_profile(path: Path) -> DerivedImageProfile:
         "python_executable": python_executable,
         "packages": [item.to_dict() for item in expectations],
     }
+    packaged = value.get("packaged_runtime")
+    if packaged is not None:
+        _validate_packaged_profile(packaged, python_executable)
+        normalized_profile["packaged_runtime"] = packaged
     return DerivedImageProfile(
         name=name,
         base_image=base_image,
         python_executable=python_executable,
         packages=tuple(expectations),
         canonical_sha256=_sha256(_canonical_bytes(normalized_profile)),
+        packaged_runtime=packaged,
+        artifact_root=path.absolute().parent,
     )
 
 
 def render_dockerfile(profile: DerivedImageProfile) -> str:
     requirements = " \\\n    ".join(shlex.quote(item.requirement()) for item in profile.packages)
-    return (
+    result = (
         f"FROM {profile.base_image}\n"
         f"LABEL ai.synapticlabs.derived-training-profile={json.dumps(profile.canonical_sha256)} \\\n"
         f"      ai.synapticlabs.derived-training-base={json.dumps(profile.base_image)}\n"
-        f"RUN {shlex.quote(profile.python_executable)} -m pip install --no-cache-dir --upgrade \\\n"
-        f"    {requirements}\n"
     )
+    if requirements:
+        result += f"RUN {shlex.quote(profile.python_executable)} -m pip install --no-cache-dir --upgrade \\\n    {requirements}\n"
+    if profile.packaged_runtime is not None:
+        digest = hashlib.sha256(_canonical_bytes(profile.packaged_runtime)).hexdigest()
+        result += ("ARG SYNAPTIC_RUNTIME_INPUTS_SHA256\n"
+                   f"RUN test \"$SYNAPTIC_RUNTIME_INPUTS_SHA256\" = '{digest}'\n"
+                   "COPY runtime/ /opt/synaptic-runtime/\n"
+                   f"RUN echo '{digest}  /opt/synaptic-runtime/build-inputs.json' | sha256sum -c -\n"
+                   f"RUN {shlex.quote(profile.python_executable)} -I -m pip install --no-index --no-deps --require-hashes --no-cache-dir -r /opt/synaptic-runtime/requirements.txt\n"
+                   f"RUN {shlex.quote(profile.python_executable)} -I -m pip check\n")
+    return result
+
+
+def _validate_packaged_profile(value: object, executable: str) -> None:
+    if not isinstance(value, dict):
+        raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+    _closed(value, {"wheel", "bootstrap", "python", "capabilities"})
+    wheels = [value["wheel"], *value["bootstrap"]] if isinstance(value["bootstrap"], list) else []
+    if not 2 <= len(wheels) <= 128:
+        raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+    names, filenames = set(), set()
+    for wheel in wheels:
+        if not isinstance(wheel, dict): raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+        _closed(wheel, {"filename", "distribution", "version", "sha256"})
+        name, filename = wheel["distribution"], wheel["filename"]
+        if (not isinstance(name, str) or _NAME.fullmatch(name) is None or name in names
+                or re.sub(r"[-_.]+", "-", name) != name
+                or not isinstance(filename, str) or re.fullmatch(r"[A-Za-z0-9_.+-]+\.whl", filename) is None or filename in filenames
+                or not isinstance(wheel["version"], str) or _VERSION.fullmatch(wheel["version"]) is None
+                or not isinstance(wheel["sha256"], str) or re.fullmatch(r"[0-9a-f]{64}", wheel["sha256"]) is None):
+            raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+        names.add(name); filenames.add(filename)
+    if value["wheel"]["distribution"] != "synaptic-tuner": raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+    python = value["python"]
+    if not isinstance(python, dict): raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+    _closed(python, {"implementation", "version", "executable", "executable_digest", "purelib", "platlib"})
+    if python["executable"] != executable or python["implementation"] != "cpython" or re.fullmatch(r"[0-9a-f]{64}", str(python["executable_digest"])) is None:
+        raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+    for key in ("executable", "purelib", "platlib"):
+        if not isinstance(python[key], str) or re.fullmatch(r"/[A-Za-z0-9_./+-]+", python[key]) is None or ".." in python[key].split("/"):
+            raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+    capability = value["capabilities"]
+    if not isinstance(capability, dict): raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+    _closed(capability, {"compatibility", "contracts"})
+    # Shared release parser validates capability semantics at reconstruction;
+    # here enforce closed transport and bounded canonical bytes.
+    if not isinstance(capability["compatibility"], dict) or not isinstance(capability["contracts"], dict): raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+    _closed(capability["compatibility"], {"methods", "models", "dataset_formats"})
+    _closed(capability["contracts"], {"workload_schema", "prepared_input_schema", "artifact_contract_schema"})
+    if len(_canonical_bytes(value)) > MAX_DOCUMENT_BYTES: raise DerivedTrainingImageError("PACKAGED_PROFILE_INVALID")
+
+
+def _stage_packaged_inputs(profile: DerivedImageProfile, context: Path) -> None:
+    if profile.packaged_runtime is None: return
+    value = profile.packaged_runtime
+    target = context / "runtime"
+    target.mkdir()
+    requirements = []
+    for wheel in [value["wheel"], *value["bootstrap"]]:
+        raw = stable_read(profile.artifact_root / wheel["filename"], 256 * 1024 * 1024)
+        if hashlib.sha256(raw).hexdigest() != wheel["sha256"]: raise DerivedTrainingImageError("WHEEL_ARTIFACT_INVALID")
+        _write_exclusive_bytes(target / wheel["filename"], raw)
+        requirements.append(f"/opt/synaptic-runtime/{wheel['filename']} --hash=sha256:{wheel['sha256']}")
+    _write_exclusive_bytes(target / "requirements.txt", ("\n".join(requirements) + "\n").encode())
+    _write_exclusive(target / "build-inputs.json", value)
 
 
 def plan_profile(profile_path: Path) -> dict[str, object]:
@@ -649,7 +725,8 @@ def _run_buildx_authorized(
 
 
 def build_command(
-    *, docker: Path, docker_config: Path, tag: str, dockerfile: Path, metadata_file: Path
+    *, docker: Path, docker_config: Path, tag: str, dockerfile: Path, metadata_file: Path,
+    runtime_inputs_digest: str | None = None,
 ) -> CommandSpec:
     _validate_tag(tag)
     return CommandSpec(
@@ -657,7 +734,9 @@ def build_command(
             str(docker), "--config", str(docker_config), "buildx", "build",
             "--pull", "--no-cache", "--platform", PLATFORM, "--load",
             "--provenance=mode=max", "--tag", tag, "--metadata-file",
-            str(metadata_file), "--file", str(dockerfile), str(dockerfile.parent),
+            str(metadata_file), "--file", str(dockerfile),
+            *(("--build-arg", "SYNAPTIC_RUNTIME_INPUTS_SHA256=" + runtime_inputs_digest) if runtime_inputs_digest is not None else ()),
+            str(dockerfile.parent),
         ),
         env=_docker_env(docker, buildx=True),
         timeout_seconds=BUILD_TIMEOUT_SECONDS,
@@ -741,7 +820,10 @@ def _runtime_command(
 
 
 def _write_exclusive(path: Path, value: object) -> None:
-    payload = _canonical_bytes(value)
+    _write_exclusive_bytes(path, _canonical_bytes(value))
+
+
+def _write_exclusive_bytes(path: Path, payload: bytes) -> None:
     descriptor: int | None = None
     created = False
     try:
@@ -760,7 +842,7 @@ def _write_exclusive(path: Path, value: object) -> None:
         os.fsync(descriptor)
         os.close(descriptor)
         descriptor = None
-        if path.read_bytes() != payload:
+        if stable_read(path, len(payload)) != payload:
             raise OSError("readback mismatch")
     except OSError as exc:
         if descriptor is not None:
@@ -768,11 +850,8 @@ def _write_exclusive(path: Path, value: object) -> None:
                 os.close(descriptor)
             except OSError:
                 pass
-        if created:
-            try:
-                path.unlink(missing_ok=True)
-            except OSError:
-                pass
+        # Preserve partial evidence for diagnosis; never unlink a substituted
+        # pathname after a failed write/readback.
         raise DerivedTrainingImageError("OUTPUT_INVALID") from exc
 
 
@@ -802,14 +881,16 @@ def build_derived_image(
             else authority.config_directory
         )
         dockerfile.write_text(dockerfile_text, encoding="utf-8", newline="\n")
+        _stage_packaged_inputs(profile, temporary)
         _run_buildx_authorized(authority, buildx_authority, runner, build_command(
             docker=authority.executable,
             docker_config=command_config,
             tag=tag,
             dockerfile=dockerfile, metadata_file=metadata_path,
+            runtime_inputs_digest=(hashlib.sha256(_canonical_bytes(profile.packaged_runtime)).hexdigest() if profile.packaged_runtime is not None else None),
         ))
         try:
-            metadata_raw = metadata_path.read_bytes()
+            metadata_raw = stable_read(metadata_path, MAX_DOCUMENT_BYTES)
             if not metadata_raw or len(metadata_raw) > MAX_DOCUMENT_BYTES:
                 raise ValueError("metadata size")
             metadata = _load_json(metadata_raw)
@@ -817,6 +898,7 @@ def build_derived_image(
             raise DerivedTrainingImageError("BUILD_METADATA_INVALID") from exc
         if not isinstance(metadata, dict):
             raise DerivedTrainingImageError("BUILD_METADATA_INVALID")
+        _validate_packaged_build_metadata(metadata, profile)
         try:
             metadata_bytes = _canonical_bytes(metadata)
         except DerivedTrainingImageError as exc:
@@ -937,6 +1019,11 @@ def capture_candidate(
         )
     )
     runtime = _parse_runtime(runtime_result.stdout)
+    if profile.packaged_runtime is not None:
+        measured = _run_authorized(authority, runner, _final_runtime_command(
+            docker=authority.executable, docker_config=authority.config_directory,
+            image=image_id, profile=profile))
+        runtime["final_runtime"] = _load_json(measured.stdout)
     final_inspect = _run_authorized(
         authority,
         runner,
@@ -973,7 +1060,7 @@ def capture_candidate(
         "build_metadata": receipt["build_metadata"],
         "build_metadata_sha256": receipt["build_metadata_sha256"],
         "runtime": runtime,
-        "runtime_bytes_sha256": _sha256(runtime_result.stdout),
+        "runtime_bytes_sha256": _sha256(_runtime_payload_bytes(runtime)),
     }
     _write_exclusive(output, candidate)
     return candidate
@@ -1003,6 +1090,7 @@ def _validate_build_receipt(value: Mapping[str, object], profile: DerivedImagePr
         raise DerivedTrainingImageError("BUILD_RECEIPT_INVALID") from exc
     repo_digests = value.get("repo_digests")
     build_metadata = value.get("build_metadata")
+    _validate_packaged_build_metadata(build_metadata, profile)
     expected_dockerfile_sha256 = _sha256(
         render_dockerfile(profile).encode("utf-8")
     )
@@ -1036,6 +1124,16 @@ def _validate_build_receipt(value: Mapping[str, object], profile: DerivedImagePr
         raise DerivedTrainingImageError("BUILD_RECEIPT_INVALID")
 
 
+def _validate_packaged_build_metadata(metadata: object, profile: DerivedImageProfile) -> None:
+    if profile.packaged_runtime is None: return
+    try:
+        digest = hashlib.sha256(_canonical_bytes(profile.packaged_runtime)).hexdigest()
+        args = metadata["buildx.build.provenance"]["invocation"]["parameters"]["args"]
+        if args["build-arg:SYNAPTIC_RUNTIME_INPUTS_SHA256"] != digest: raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise DerivedTrainingImageError("BUILD_METADATA_INVALID") from None
+
+
 def _validate_runtime_against_profile(
     runtime: Mapping[str, object], profile: DerivedImageProfile
 ) -> None:
@@ -1061,6 +1159,7 @@ def _validate_runtime_against_profile(
             continue
         if not isinstance(direct_url, dict) or set(direct_url) != {"url", "vcs_info"}:
             raise DerivedTrainingImageError("PACKAGE_MISMATCH")
+
         vcs = direct_url.get("vcs_info")
         if (
             direct_url.get("url") != expected.url
@@ -1071,6 +1170,15 @@ def _validate_runtime_against_profile(
             or vcs.get("requested_revision") != expected.commit
         ):
             raise DerivedTrainingImageError("PACKAGE_MISMATCH")
+
+    if profile.packaged_runtime is not None:
+        measured = runtime.get("final_runtime")
+        _parse_final_runtime(measured, image_verification={
+            "packaged_runtime": profile.packaged_runtime,
+            "packages": packages, "final_runtime": measured,
+        })
+    elif "final_runtime" in runtime:
+        raise DerivedTrainingImageError("RUNTIME_EVIDENCE_INVALID")
 
 
 def verify_candidate(
@@ -1093,6 +1201,7 @@ def verify_candidate(
         raise DerivedTrainingImageError("CANDIDATE_INVALID") from exc
     repo_digests = candidate.get("repo_digests")
     build_metadata = candidate.get("build_metadata")
+    _validate_packaged_build_metadata(build_metadata, profile)
     expected_dockerfile_sha256 = _sha256(
         render_dockerfile(profile).encode("utf-8")
     )
@@ -1155,6 +1264,8 @@ def verify_candidate(
         "image_config_digest": candidate["image_config_digest"],
         "packages": runtime["packages"],
     }
+    if profile.packaged_runtime is not None:
+        verification["final_runtime"] = runtime["final_runtime"]
     if output is not None:
         if output.exists() or output.is_symlink() or output.suffix.lower() != ".json":
             raise DerivedTrainingImageError("OUTPUT_INVALID")
@@ -1173,7 +1284,7 @@ def validate_verification_report(
         "build_metadata_sha256",
         "base_image", "final_oci_reference", "final_oci_digest",
         "image_config_digest", "packages",
-    })
+    }, {"final_runtime"} if profile.packaged_runtime is not None else set())
     final_reference = verification.get("final_oci_reference")
     final_digest = verification.get("final_oci_digest")
     image_config_digest = verification.get("image_config_digest")
@@ -1224,6 +1335,9 @@ def validate_verification_report(
         "schema_version": "synaptic-derived-training-image-runtime/v1",
         "packages": verification["packages"],
     }
+    if profile.packaged_runtime is not None:
+        _validate_packaged_build_metadata(build_metadata, profile)
+        runtime["final_runtime"] = verification.get("final_runtime")
     _validate_runtime_against_profile(runtime, profile)
     return verification
 
@@ -1286,6 +1400,13 @@ def verify_effectful_launch(
         ),
     )
     runtime = _parse_runtime(runtime_result.stdout)
+    if profile.packaged_runtime is not None:
+        measured = _run_authorized(authority, runner, _final_runtime_command(
+            docker=authority.executable, docker_config=authority.config_directory,
+            image=image_id, profile=profile))
+        runtime["final_runtime"] = _load_json(measured.stdout)
+        if runtime["final_runtime"] != verification.get("final_runtime"):
+            raise DerivedTrainingImageError("LIVE_IMAGE_MISMATCH")
     _validate_runtime_against_profile(runtime, profile)
     if runtime.get("packages") != verification.get("packages"):
         raise DerivedTrainingImageError("LIVE_IMAGE_MISMATCH")
@@ -1321,10 +1442,437 @@ def verify_effectful_launch(
     return DockerLaunchAuthority(evidence=evidence, _authority=authority)
 
 
+def _final_runtime_inspector(profile: DerivedImageProfile) -> str:
+    """Fixed stdlib bootstrap; no site hooks, ambient interpreter or search path."""
+    if profile.packaged_runtime is None:
+        raise DerivedTrainingImageError("PACKAGED_PROFILE_REQUIRED")
+    expected = profile.packaged_runtime
+    return f"""import hashlib,json,os,platform,sys,sysconfig
+expected = {expected!r}
+python = expected['python']
+if os.path.realpath(sys.executable) != python['executable'] or platform.python_implementation().lower() != python['implementation'] or platform.python_version() != python['version']:
+    raise RuntimeError('INTERPRETER_INVALID')
+with open(sys.executable, 'rb') as source:
+    raw = source.read(67108865)
+if len(raw) > 67108864 or hashlib.sha256(raw).hexdigest() != python['executable_digest']:
+    raise RuntimeError('INTERPRETER_INVALID')
+paths = sysconfig.get_paths()
+if any(paths[key] != python[key] for key in ('purelib', 'platlib')):
+    raise RuntimeError('PACKAGE_PATH_INVALID')
+sys.path.extend(dict.fromkeys(python[key] for key in ('purelib', 'platlib')))
+from tuner.runtime.packaged_training_worker import inspect_installed_runtime
+print(json.dumps(inspect_installed_runtime(expected),sort_keys=True,separators=(',',':')))
+"""
+
+
+def _final_runtime_command(*, docker: Path, docker_config: Path, image: str, profile: DerivedImageProfile) -> CommandSpec:
+    return CommandSpec(
+        argv=_docker_argv(docker, docker_config) + (
+            "run", "--rm", "--network", "none", "--entrypoint", profile.python_executable,
+            image, "-I", "-S", "-c", _final_runtime_inspector(profile),
+        ), env=_docker_env(docker), timeout_seconds=CAPTURE_TIMEOUT_SECONDS,
+        maximum_output_bytes=MAX_COMMAND_OUTPUT_BYTES,
+    )
+
+
+def _load_image_evidence(*, profile_path: Path, build_receipt_path: Path, candidate_path: Path, image_verification_path: Path) -> tuple[dict[str, object], bytes]:
+    """Re-open every immutable image artifact; never trust a detached summary."""
+    profile = load_profile(profile_path)
+    build, build_raw = _read_object(build_receipt_path)
+    _validate_build_receipt(build, profile)
+    candidate, candidate_raw = _read_object(candidate_path)
+    expected = verify_candidate(profile_path=profile_path, candidate_path=candidate_path)
+    if candidate.get("build_receipt_sha256") != _sha256(build_raw):
+        raise DerivedTrainingImageError("IMAGE_EVIDENCE_INVALID")
+    if (expected["build_receipt_sha256"] != _sha256(build_raw)
+            or expected["candidate_sha256"] != _sha256(candidate_raw)
+            or expected["profile_sha256"] != profile.canonical_sha256
+            or any(expected[key] != build[key] for key in ("final_oci_reference", "final_oci_digest", "image_config_digest", "build_metadata_sha256", "dockerfile_sha256"))):
+        raise DerivedTrainingImageError("IMAGE_EVIDENCE_INVALID")
+    verification, verification_raw = _read_object(image_verification_path)
+    if verification_raw != _canonical_bytes(expected):
+        raise DerivedTrainingImageError("IMAGE_EVIDENCE_INVALID")
+    if profile.packaged_runtime is None:
+        raise DerivedTrainingImageError("PACKAGED_PROFILE_REQUIRED")
+    return {**verification, "packaged_runtime": profile.packaged_runtime}, verification_raw
+
+
+def _parse_final_runtime(value: object, *, image_verification: Mapping[str, object]) -> dict[str, object]:
+    """Use only facts cross-bound to the revalidated image candidate and profile."""
+    try:
+        if not isinstance(value, dict): raise ValueError
+        _closed(value, {"schema_version", "package", "python", "installed_distributions", "platform", "worker", "closure", "contracts", "capabilities", "build_inputs_digest", "provenance"})
+        expected = image_verification["packaged_runtime"]
+        if value != image_verification["final_runtime"]: raise ValueError
+        if value["schema_version"] != "synaptic-packaged-runtime-inspector/v1": raise ValueError
+        if value["build_inputs_digest"] != hashlib.sha256(_canonical_bytes(expected)).hexdigest(): raise ValueError
+        if value["capabilities"] != expected["capabilities"] or value["contracts"] != expected["capabilities"]["contracts"]: raise ValueError
+        for key in ("package", "python", "installed_distributions", "platform", "worker", "closure", "provenance"):
+            if not isinstance(value[key], dict): raise ValueError
+        _closed(value["package"], {"name", "version", "digest", "source_provenance_digest"})
+        _closed(value["python"], {"implementation", "version", "executable", "executable_digest"})
+        _closed(value["installed_distributions"], {"inventory", "digest", "count"})
+        _closed(value["platform"], {"system", "machine", "cuda_version", "runtime_facts"})
+        _closed(value["worker"], {"entrypoint", "closure_digest"})
+        _closed(value["closure"], {"verified_digest"})
+        if value["python"] != {key: expected["python"][key] for key in value["python"]}: raise ValueError
+        wheel = expected["wheel"]
+        if value["package"] != {"name": "synaptic-tuner", "version": wheel["version"], "digest": wheel["sha256"], "source_provenance_digest": value["provenance"].get("synaptic-tuner")}: raise ValueError
+        wheels = [wheel, *expected["bootstrap"]]
+        if set(value["provenance"]) != {item["distribution"] for item in wheels}: raise ValueError
+        if any(not isinstance(item, str) or re.fullmatch(r"[0-9a-f]{64}", item) is None or item == hashlib.sha256(b"").hexdigest() for item in value["provenance"].values()): raise ValueError
+        inventory = value["installed_distributions"]["inventory"]
+        if not isinstance(inventory, list) or not 1 <= len(inventory) <= 4096 or type(value["installed_distributions"]["count"]) is not int or value["installed_distributions"]["count"] != len(inventory): raise ValueError
+        installed = {}
+        for item in inventory:
+            if not isinstance(item, dict) or set(item) != {"name", "version"}: raise ValueError
+            name, version = item["name"], item["version"]
+            if not isinstance(name, str) or _NAME.fullmatch(name) is None or re.sub(r"[-_.]+", "-", name) != name or name in installed or not isinstance(version, str) or _VERSION.fullmatch(version) is None: raise ValueError
+            installed[name] = version
+        if list(installed) != sorted(installed): raise ValueError
+        if hashlib.sha256(json.dumps(inventory, separators=(",", ":")).encode()).hexdigest() != value["installed_distributions"]["digest"]: raise ValueError
+        for item in wheels:
+            if installed.get(item["distribution"]) != item["version"]: raise ValueError
+        for name, item in image_verification["packages"].items():
+            if installed.get(name) != item["version"]: raise ValueError
+        if value["platform"]["system"] != "linux" or value["platform"]["machine"] != "x86_64": raise ValueError
+        closure = load_packaged_worker_closure()
+        if value["worker"] != {"entrypoint": PACKAGED_TRAINING_WORKER_ENTRYPOINT, "closure_digest": closure.digest} or value["closure"] != {"verified_digest": closure.digest}: raise ValueError
+        return value
+    except (KeyError, TypeError, ValueError):
+        raise DerivedTrainingImageError("FINAL_RUNTIME_INVALID") from None
+
+
+def _bound_capture(path: Path, *, image: dict, image_raw: bytes) -> tuple[dict, bytes]:
+    capture, raw = _load_final_capture(path)
+    if (capture["image_verification_sha256"] != _sha256(image_raw)
+            or capture["image"] != {"reference": image["final_oci_reference"], "digest": image["final_oci_digest"][7:]}):
+        raise DerivedTrainingImageError("FINAL_RUNTIME_CAPTURE_INVALID")
+    _parse_final_runtime(capture["measured"], image_verification=image)
+    return capture, raw
+
+
+def _release_facts(capture: dict, compatibility: dict, release_ref: str) -> dict:
+    measured = capture["measured"]
+    # Exact capability derivation is deliberately stricter than a subset.
+    if compatibility != measured["capabilities"]["compatibility"]:
+        raise DerivedTrainingImageError("CAPABILITY_MISMATCH")
+    return {"release_ref": release_ref, "image": capture["image"], "compatibility": compatibility,
+            **{key: measured[key] for key in ("package", "worker", "python", "installed_distributions", "platform", "contracts") }}
+
+
+def capture_final_runtime(*, profile_path: Path, build_receipt_path: Path, candidate_path: Path, image_verification_path: Path, docker: Path, docker_config: Path, output: Path, runner: Runner = subprocess_runner) -> dict[str, object]:
+    image, image_raw = _load_image_evidence(profile_path=profile_path, build_receipt_path=build_receipt_path, candidate_path=candidate_path, image_verification_path=image_verification_path)
+    if output.exists() or output.is_symlink() or output.suffix.lower() != ".json": raise DerivedTrainingImageError("OUTPUT_INVALID")
+    authority = _validate_docker_inputs(docker, docker_config)
+    profile = load_profile(profile_path)
+    inspected = _run_authorized(authority, runner, _inspect_command(docker=authority.executable, docker_config=authority.config_directory, image=str(image["final_oci_reference"])))
+    identity, references, labels = _parse_inspect(inspected.stdout)
+    if identity != image["image_config_digest"] or labels.get("ai.synapticlabs.derived-training-profile") != profile.canonical_sha256 or labels.get("ai.synapticlabs.derived-training-base") != profile.base_image or (references and image["final_oci_reference"] not in references):
+        raise DerivedTrainingImageError("DOCKER_EVIDENCE_INVALID")
+    result = _run_authorized(authority, runner, _final_runtime_command(docker=authority.executable, docker_config=authority.config_directory, image=identity, profile=profile))
+    after = _run_authorized(authority, runner, _inspect_command(docker=authority.executable, docker_config=authority.config_directory, image=identity))
+    if _parse_inspect(after.stdout) != (identity, references, labels):
+        raise DerivedTrainingImageError("DOCKER_EVIDENCE_INVALID")
+    measured = _parse_final_runtime(_load_json(result.stdout), image_verification=image)
+    capture = {"schema_version": FINAL_RUNTIME_CAPTURE_SCHEMA, "status": "FINAL_RUNTIME_CAPTURED", "image_verification_sha256": _sha256(image_raw), "image": {"reference": image["final_oci_reference"], "digest": str(image["final_oci_digest"])[7:]}, "measured": measured}
+    _write_exclusive(output, capture)
+    return capture
+
+
+def _load_final_capture(path: Path) -> tuple[dict[str, object], bytes]:
+    value, raw = _read_object(path)
+    try:
+        _closed(value, {"schema_version", "status", "image_verification_sha256", "image", "measured"})
+        if value["schema_version"] != FINAL_RUNTIME_CAPTURE_SCHEMA or value["status"] != "FINAL_RUNTIME_CAPTURED" or not isinstance(value["image"], dict) or set(value["image"]) != {"reference", "digest"} or not isinstance(value["measured"], dict): raise ValueError
+        if not isinstance(value["image_verification_sha256"], str) or _DIGEST.fullmatch(value["image_verification_sha256"]) is None: raise ValueError
+        return value, raw
+    except (KeyError, TypeError, ValueError): raise DerivedTrainingImageError("FINAL_RUNTIME_CAPTURE_INVALID") from None
+
+
+def _release_from_input(value: object) -> PackagedTrainingRuntimeReleaseV1:
+    """Build the audited release contract from an unsigned manifest-shaped input.
+
+    This deliberately delegates all semantic validation and digest construction
+    to ``PackagedTrainingRuntimeReleaseV1``.  The input is only a convenient
+    transport for the contract's public fields; it is not another release
+    schema.
+    """
+
+    if not isinstance(value, dict):
+        raise DerivedTrainingImageError("RELEASE_INPUT_INVALID")
+    required = {
+        "release_ref", "package", "worker", "image", "python",
+        "installed_distributions", "platform", "compatibility", "contracts",
+    }
+    try:
+        _closed(value, required)
+        package = value["package"]
+        worker = value["worker"]
+        image = value["image"]
+        python = value["python"]
+        installed = value["installed_distributions"]
+        platform = value["platform"]
+        compatibility = value["compatibility"]
+        contracts = value["contracts"]
+        if not all(isinstance(item, dict) for item in (
+            package, worker, image, python, installed, platform, compatibility, contracts,
+        )):
+            raise TypeError
+        _closed(package, {"name", "version", "digest", "source_provenance_digest"})
+        _closed(worker, {"entrypoint", "closure_digest"})
+        _closed(image, {"reference", "digest"})
+        _closed(python, {"implementation", "version", "executable", "executable_digest"})
+        _closed(installed, {"digest", "count"}, {"inventory"})
+        _closed(platform, {"system", "machine", "cuda_version", "runtime_facts"})
+        _closed(compatibility, {"methods", "models", "dataset_formats"})
+        _closed(contracts, {"workload_schema", "prepared_input_schema", "artifact_contract_schema"})
+        release = PackagedTrainingRuntimeReleaseV1.build(
+            release_ref=value["release_ref"],
+            package_name=package["name"], package_version=package["version"],
+            package_digest=package["digest"], source_provenance_digest=package["source_provenance_digest"],
+            worker_entrypoint=worker["entrypoint"], worker_closure_digest=worker["closure_digest"],
+            image_ref=image["reference"], image_digest=image["digest"],
+            python_implementation=python["implementation"], python_version=python["version"],
+            python_executable=python["executable"], python_executable_digest=python["executable_digest"],
+            installed_distributions_digest=installed["digest"], installed_distribution_count=installed["count"],
+            platform_system=platform["system"], platform_machine=platform["machine"],
+            cuda_version=platform["cuda_version"], runtime_facts=platform["runtime_facts"],
+            compatible_methods=compatibility["methods"], compatible_models=compatibility["models"],
+            compatible_dataset_formats=compatibility["dataset_formats"],
+            workload_schema=contracts["workload_schema"], prepared_input_schema=contracts["prepared_input_schema"],
+            artifact_contract_schema=contracts["artifact_contract_schema"],
+        )
+        if release.worker_entrypoint != PACKAGED_TRAINING_WORKER_ENTRYPOINT:
+            raise ValueError("worker entrypoint is unsupported")
+        return release
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DerivedTrainingImageError("RELEASE_INPUT_INVALID") from exc
+
+
+def build_runtime_release(*, capture_path: Path, compatibility_path: Path, output: Path, profile_path: Path, build_receipt_path: Path, candidate_path: Path, image_verification_path: Path) -> PackagedTrainingRuntimeReleaseV1:
+    image, image_raw = _load_image_evidence(profile_path=profile_path, build_receipt_path=build_receipt_path, candidate_path=candidate_path, image_verification_path=image_verification_path)
+    capture, _raw = _bound_capture(capture_path, image=image, image_raw=image_raw)
+    compatibility, _ = _read_object(compatibility_path)
+    measured = capture["measured"]
+    assert isinstance(measured, dict)
+    try:
+        _closed(compatibility, {"release_ref", "compatibility"})
+        facts = _release_facts(capture, compatibility["compatibility"], compatibility["release_ref"])
+    except (KeyError, TypeError, ValueError): raise DerivedTrainingImageError("RELEASE_INPUT_INVALID") from None
+    release = _release_from_input(facts)
+    if output.suffix.lower() != ".json":
+        raise DerivedTrainingImageError("OUTPUT_INVALID")
+    _write_exclusive_bytes(output, release.canonical_bytes())
+    return release
+
+
+def _load_runtime_release(path: Path) -> tuple[PackagedTrainingRuntimeReleaseV1, bytes]:
+    try:
+        raw = _read_regular_release(path)
+        release = PackagedTrainingRuntimeReleaseV1.from_json(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, TypeError, ValueError) as exc:
+        raise DerivedTrainingImageError("RELEASE_INVALID") from exc
+    if release.canonical_bytes() != raw:
+        raise DerivedTrainingImageError("RELEASE_INVALID")
+    return release, raw
+
+
+def _read_regular_release(path: Path) -> bytes:
+    raw = stable_read(path, MAX_DOCUMENT_BYTES)
+    if not raw or len(raw) > MAX_DOCUMENT_BYTES:
+        raise OSError("release exceeds byte limit")
+    return raw
+
+
+LOCAL_QUALIFICATION_CONFIG_SCHEMA = "synaptic-packaged-local-qualification-config/v1"
+LOCAL_QUALIFICATION_EVIDENCE_SCHEMA = "synaptic-packaged-local-qualification-evidence/v1"
+
+
+def _local_qualification_inputs(*, qualification_config_path, release_path, capture_path,
+        profile_path, build_receipt_path, candidate_path, image_verification_path):
+    from tuner.runtime.packaged_training_worker import LOCAL_CPU_PROTOCOL, local_cpu_result
+    from zipfile import ZipFile
+    from io import BytesIO
+    config, config_raw = _read_object(qualification_config_path)
+    _closed(config, {"schema_version", "protocol", "runtime_release_digest"})
+    release, release_raw = _load_runtime_release(release_path)
+    if config != {"schema_version": LOCAL_QUALIFICATION_CONFIG_SCHEMA, "protocol": LOCAL_CPU_PROTOCOL,
+                  "runtime_release_digest": release.manifest_digest}:
+        raise DerivedTrainingImageError("LOCAL_QUALIFICATION_CONFIG_INVALID")
+    image, image_raw = _load_image_evidence(profile_path=profile_path, build_receipt_path=build_receipt_path,
+        candidate_path=candidate_path, image_verification_path=image_verification_path)
+    capture, capture_raw = _bound_capture(capture_path, image=image, image_raw=image_raw)
+    if release.to_dict() != _release_from_input(_release_facts(capture, release.to_dict()["compatibility"], release.release_ref)).to_dict():
+        raise DerivedTrainingImageError("RELEASE_CAPTURE_MISMATCH")
+    profile = load_profile(profile_path)
+    wheel = stable_read(profile.artifact_root / profile.packaged_runtime["wheel"]["filename"], 256 * 1024 * 1024)
+    if hashlib.sha256(wheel).hexdigest() != release.package_digest:
+        raise DerivedTrainingImageError("WHEEL_ARTIFACT_INVALID")
+    with ZipFile(BytesIO(wheel)) as archive:
+        members = archive.infolist()
+        target = [item for item in members if item.filename == "Trainers/sft/train_sft.py"]
+        if len(target) != 1 or target[0].file_size > 4 * 1024 * 1024: raise DerivedTrainingImageError("WHEEL_ARTIFACT_INVALID")
+        trainer_digest = hashlib.sha256(archive.read(target[0])).hexdigest()
+    expected = {"schema_version": LOCAL_QUALIFICATION_EVIDENCE_SCHEMA, "status": "LOCAL_CPU_DIAGNOSTIC_PASS",
+        "scope": "installed_child_cpu_only", "qualification_config_sha256": hashlib.sha256(config_raw).hexdigest(),
+        "runtime_release_sha256": hashlib.sha256(release_raw).hexdigest(), "runtime_release_digest": release.manifest_digest,
+        "worker_closure_digest": release.worker_closure_digest, "package_digest": release.package_digest,
+        "python_executable_digest": release.python_executable_digest,
+        "installed_distributions_digest": release.installed_distributions_digest,
+        "final_runtime_capture_sha256": hashlib.sha256(capture_raw).hexdigest(), "image_verification_sha256": hashlib.sha256(image_raw).hexdigest(),
+        "profile_sha256": profile.canonical_sha256.removeprefix("sha256:"), "image_config_digest": image["image_config_digest"],
+        "image_reference": image["final_oci_reference"], "child": local_cpu_result(release, trainer_digest),
+        "training_executed": False, "gpu_qualified": False, "provider_qualified": False}
+    return profile, release, image, expected
+
+
+def local_qualification_command(*, docker, docker_config, profile, release, image):
+    # Fixed harness only. No caller executable, code, environment, or mount selection.
+    bootstrap = ("import os,sys;os.environ.clear();"
+        f"sys.path.extend({list(dict.fromkeys(profile.packaged_runtime['python'][key] for key in ('purelib', 'platlib')))!r});"
+        "from tuner.runtime.packaged_training_worker import local_cpu_main;"
+        f"raise SystemExit(local_cpu_main({release.to_dict()!r}))")
+    return CommandSpec(argv=_docker_argv(docker, docker_config) + (
+        "run", "--rm", "--pull=never", "--network=none", "--read-only", "--cap-drop=ALL",
+        "--runtime=runc", "--env=NVIDIA_VISIBLE_DEVICES=void", "--env=CUDA_VISIBLE_DEVICES=",
+        "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=512m", "--cpus=1",
+        "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777", "--workdir=/tmp",
+        "--entrypoint", release.python_executable, image, "-I", "-S", "-c", bootstrap),
+        env=_docker_env(docker), timeout_seconds=120, maximum_output_bytes=16384)
+
+
+def qualify_local_runtime(*, docker: Path, docker_config: Path, output: Path, execute=False,
+                          runner: Runner = subprocess_runner, **inputs):
+    profile, release, image, expected = _local_qualification_inputs(**inputs)
+    if output.exists() or output.is_symlink() or output.suffix.lower() != ".json":
+        raise DerivedTrainingImageError("OUTPUT_INVALID")
+    command = local_qualification_command(docker=docker, docker_config=docker_config, profile=profile,
+                                         release=release, image=image["image_config_digest"])
+    if not execute:
+        return {"schema_version": LOCAL_QUALIFICATION_EVIDENCE_SCHEMA, "status": "PLAN_ONLY",
+                "scope": "installed_child_cpu_only", "argv": list(command.argv),
+                "training_executed": False, "gpu_qualified": False, "provider_qualified": False}
+    authority = _validate_docker_inputs(docker, docker_config)
+    before = _parse_inspect(_run_authorized(authority, runner, _inspect_command(
+        docker=authority.executable, docker_config=authority.config_directory, image=image["image_config_digest"])).stdout)
+    identity, references, labels = before
+    if (identity != image["image_config_digest"] or labels.get("ai.synapticlabs.derived-training-profile") != profile.canonical_sha256
+            or labels.get("ai.synapticlabs.derived-training-base") != profile.base_image
+            or (references and image["final_oci_reference"] not in references)):
+        raise DerivedTrainingImageError("DOCKER_EVIDENCE_INVALID")
+    result = _run_authorized(authority, runner, command)
+    after = _parse_inspect(_run_authorized(authority, runner, _inspect_command(
+        docker=authority.executable, docker_config=authority.config_directory, image=identity)).stdout)
+    if before != after or result.stderr or result.stdout != _canonical_bytes(expected["child"]):
+        raise DerivedTrainingImageError("LOCAL_QUALIFICATION_REJECTED")
+    _write_exclusive(output, expected)
+    return expected
+
+
+def verify_local_runtime(*, evidence_path: Path, output: Path, **inputs):
+    _, _, _, expected = _local_qualification_inputs(**inputs)
+    evidence, raw = _read_object(evidence_path)
+    if evidence != expected or raw != _canonical_bytes(expected):
+        raise DerivedTrainingImageError("LOCAL_QUALIFICATION_EVIDENCE_INVALID")
+    report = {"schema_version": LOCAL_QUALIFICATION_EVIDENCE_SCHEMA, "status": "LOCAL_CPU_DIAGNOSTIC_VERIFIED",
+              "evidence_sha256": hashlib.sha256(raw).hexdigest(), "runtime_release_digest": expected["runtime_release_digest"],
+              "training_executed": False, "gpu_qualified": False, "provider_qualified": False}
+    if output.suffix.lower() != ".json": raise DerivedTrainingImageError("OUTPUT_INVALID")
+    _write_exclusive(output, report)
+    return report
+
+
+def verify_runtime_release(*, release_path: Path, capture_path: Path, profile_path: Path, build_receipt_path: Path, candidate_path: Path, image_verification_path: Path, output: Path) -> dict[str, object]:
+    """Verify an already-built release without Docker, registry, or provider I/O."""
+
+    release, raw = _load_runtime_release(release_path)
+    image, image_raw = _load_image_evidence(profile_path=profile_path, build_receipt_path=build_receipt_path, candidate_path=candidate_path, image_verification_path=image_verification_path)
+    capture, capture_raw = _bound_capture(capture_path, image=image, image_raw=image_raw)
+    measured = capture["measured"]
+    assert isinstance(measured, dict)
+    facts = _release_facts(capture, release.to_dict()["compatibility"], release.release_ref)
+    if release.to_dict() != _release_from_input(facts).to_dict(): raise DerivedTrainingImageError("RELEASE_CAPTURE_MISMATCH")
+    closure = load_packaged_worker_closure()
+    if (
+        release.worker_entrypoint != PACKAGED_TRAINING_WORKER_ENTRYPOINT
+        or release.worker_closure_digest != closure.digest
+    ):
+        raise DerivedTrainingImageError("WORKER_CLOSURE_MISMATCH")
+    report = {
+        "schema_version": RELEASE_VERIFICATION_SCHEMA,
+        "status": "RELEASE_VERIFIED",
+        "runtime_release_digest": release.manifest_digest,
+        "runtime_release_sha256": hashlib.sha256(raw).hexdigest(),
+        "worker_closure_digest": closure.digest,
+        "final_runtime_capture_sha256": _sha256(capture_raw),
+        "image_verification_sha256": _sha256(image_raw),
+    }
+    if output.suffix.lower() != ".json":
+        raise DerivedTrainingImageError("OUTPUT_INVALID")
+    _write_exclusive(output, report)
+    return report
+
+
+def promote_runtime_release(
+    *, release_path: Path, verification_path: Path, final_runtime_capture_path: Path,
+    profile_path: Path, build_receipt_path: Path, candidate_path: Path,
+    image_verification_path: Path, output: Path,
+) -> dict[str, object]:
+    """Record a local, immutable promotion after offline release verification.
+
+    Promotion never contacts a registry or provider and intentionally retains no
+    provider-native facts.  It is an exclusive local evidence transition, not
+    image publication or deployment authority.
+    """
+
+    release, release_raw = _load_runtime_release(release_path)
+    image, image_raw = _load_image_evidence(profile_path=profile_path, build_receipt_path=build_receipt_path, candidate_path=candidate_path, image_verification_path=image_verification_path)
+    capture, capture_raw = _bound_capture(final_runtime_capture_path, image=image, image_raw=image_raw)
+    measured = capture["measured"]
+    assert isinstance(measured, dict)
+    facts = _release_facts(capture, release.to_dict()["compatibility"], release.release_ref)
+    if release.to_dict() != _release_from_input(facts).to_dict():
+        raise DerivedTrainingImageError("RELEASE_CAPTURE_MISMATCH")
+    verification, verification_raw = _read_object(verification_path)
+    try:
+        _closed(verification, {
+            "schema_version", "status", "runtime_release_digest",
+            "runtime_release_sha256", "worker_closure_digest", "final_runtime_capture_sha256", "image_verification_sha256",
+        })
+        closure = load_packaged_worker_closure()
+        if (
+            verification["schema_version"] != RELEASE_VERIFICATION_SCHEMA
+            or verification["status"] != "RELEASE_VERIFIED"
+            or verification["runtime_release_digest"] != release.manifest_digest
+            or verification["runtime_release_sha256"] != hashlib.sha256(release_raw).hexdigest()
+            or verification["worker_closure_digest"] != release.worker_closure_digest
+            or release.worker_closure_digest != closure.digest
+            or verification["final_runtime_capture_sha256"] != _sha256(capture_raw)
+            or verification["image_verification_sha256"] != _sha256(image_raw)
+        ):
+            raise ValueError
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DerivedTrainingImageError("RELEASE_VERIFICATION_INVALID") from exc
+    promotion = {
+        "schema_version": RELEASE_PROMOTION_SCHEMA,
+        "status": "PROMOTED_LOCAL_ONLY",
+        "runtime_release_digest": release.manifest_digest,
+        "runtime_release_sha256": hashlib.sha256(release_raw).hexdigest(),
+        "verification_sha256": hashlib.sha256(verification_raw).hexdigest(),
+        "final_runtime_capture_sha256": _sha256(capture_raw),
+        "image_verification_sha256": _sha256(image_raw),
+    }
+    if output.suffix.lower() != ".json":
+        raise DerivedTrainingImageError("OUTPUT_INVALID")
+    _write_exclusive(output, promotion)
+    return promotion
+
+
 __all__ = [
-    "BUILD_RECEIPT_SCHEMA", "CANDIDATE_SCHEMA",
+    "BUILD_RECEIPT_SCHEMA", "CANDIDATE_SCHEMA", "FINAL_RUNTIME_CAPTURE_SCHEMA", "RELEASE_PROMOTION_SCHEMA", "RELEASE_VERIFICATION_SCHEMA",
     "DerivedImageProfile", "DerivedTrainingImageError", "DockerLaunchAuthority", "PackageExpectation",
     "PROFILE_SCHEMA", "VERIFICATION_SCHEMA", "build_command", "build_derived_image", "capture_candidate",
-    "load_profile", "plan_profile", "render_dockerfile", "verify_candidate",
+    "build_runtime_release", "capture_final_runtime", "load_profile", "plan_profile", "promote_runtime_release", "render_dockerfile", "verify_candidate", "verify_runtime_release",
     "validate_verification_report", "verify_effectful_launch",
 ]

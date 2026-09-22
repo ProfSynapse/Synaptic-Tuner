@@ -1688,6 +1688,23 @@ def execute_runtime(
         )
     except RuntimeV1Error as error:
         raise _mark_runtime_stage(error, "runtime_workload_rejected")
+    return execute_compiled_sft(
+        payload, workload=workload, roots=roots, environment=environment,
+        runner=runner,
+    )
+
+
+def execute_compiled_sft(
+    payload: bytes, *, workload: object, roots: object,
+    environment: Mapping[str, str], runner: TrainerRunner,
+    invocation_builder=None, lineage_builder=None,
+) -> RuntimeResult:
+    """Execute admitted configuration; callers own transport and source admission.
+
+    Keep this core inside the legacy source closure. Installed-package callers
+    supply their invocation and lineage builders without importing that branch
+    into the legacy worker or manufacturing legacy execution-source evidence.
+    """
     if not isinstance(runner, TrainerRunner):
         raise TypeError("runner must implement TrainerRunner")
     if any(roots.artifacts.iterdir()):
@@ -1696,7 +1713,7 @@ def execute_runtime(
             "runtime_artifact_precondition",
         )
     try:
-        invocation = build_trainer_invocation(workload, roots, environment)
+        invocation = (invocation_builder or build_trainer_invocation)(workload, roots, environment)
     except RuntimeV1Error as error:
         raise _mark_runtime_stage(error, "runtime_invocation_rejected")
     try:
@@ -1724,7 +1741,7 @@ def execute_runtime(
     artifacts.append(
         _write_artifact(roots.artifacts, "workload_record", "workload.json", payload)
     )
-    lineage = {
+    lineage = lineage_builder(workload, invocation, evidence, execution_evidence) if lineage_builder is not None else {
         "schema_version": "synaptic-sft-training-lineage/v1",
         "workload_fingerprint": workload.fingerprint,
         "execution_source": workload.document["execution_source"],

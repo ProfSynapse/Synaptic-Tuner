@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Local operator consistency diagnostics, not training, provider, publication or GPU authority. Authoritative verification requires the original release/image evidence chain.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "protocol",
+    "runtime_release_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "synaptic-packaged-local-qualification-config/v1"
+    },
+    "protocol": {
+      "const": "synaptic-installed-child-cpu/v1"
+    },
+    "runtime_release_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

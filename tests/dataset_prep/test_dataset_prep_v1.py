@@ -150,6 +150,25 @@ def test_snapshot_returns_the_jsonl_bytes_from_the_retained_verification(
     assert snapshot == before
 
 
+@pytest.mark.parametrize("member_name", ["manifest.json", "dataset.jsonl"])
+def test_snapshot_rejects_externally_hardlinked_publication_member(
+    tmp_path: Path, member_name: str,
+) -> None:
+    structure, bundle = _bundle(tmp_path / "source")
+    prepared = _prepare_reconciled(_config(bundle, structure), tmp_path / "private")
+    external = tmp_path / f"external-{member_name}"
+    try:
+        os.link(prepared.path / member_name, external)
+    except OSError as error:
+        pytest.skip(f"hardlinks unavailable: {error}")
+    try:
+        with pytest.raises(DatasetPrepValidationError):
+            snapshot_prepared_dataset_v1(prepared.path)
+    finally:
+        external.chmod(0o600)
+        external.unlink()
+
+
 def test_row_identity_excludes_order_and_split_but_dataset_identity_binds_them(tmp_path: Path) -> None:
     structure, bundle = _bundle(tmp_path)
     source_order = _prepare_reconciled(_config(bundle, structure), tmp_path / "one")

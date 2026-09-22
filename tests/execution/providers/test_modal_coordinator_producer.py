@@ -120,11 +120,10 @@ def _mounted_fakes(monkeypatch, inventory, files):
                 (member.value, len(files[f"artifact-{index}.bin"]))
                 for index, member in enumerate(sorted(EXACT_ARTIFACT_ROLES, key=lambda value: value.value))
             ))
-        prefix = str(path) + "/"
         return tuple(sorted(
-            (__import__("pathlib").Path(name).name, len(content))
+            (Path(name).name, len(content))
             for name, content in writes
-            if name.startswith(prefix) and "/" not in name[len(prefix):]
+            if Path(name).parent == path
         ))
     monkeypatch.setattr(
         "tuner.execution.providers.modal.coordinator_producer.list_regular_sizes", listing,

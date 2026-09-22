@@ -51,5 +51,14 @@ class LocalPreparedTrainingInputSource:
             raise ValueError("prepared publication changed before staging")
         return RetainedTrainingInputStreamLease(current, BytesIO(content))
 
+    def __reduce_ex__(self, _protocol: int):
+        raise TypeError("host-only prepared input sources are not serializable")
+
+    def __copy__(self):
+        raise TypeError("host-only prepared input sources are not copyable")
+
+    def __deepcopy__(self, _memo):
+        raise TypeError("host-only prepared input sources are not copyable")
+
 
 __all__ = ["LocalPreparedTrainingInputSource"]

@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "synaptic-packaged-sft-training-lineage/v1",
+  "$comment": "Structural validation is necessary but not authority. verify_packaged_sft_artifacts must authenticate original inventory commitments and reconstruct every projection and invocation against the admitted workload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "runtime_release_digest", "provider_runtime_binding_digest", "execution_binding_digest", "workload_fingerprint", "configuration_digest", "artifact_policy_digest", "run_ref", "prepared_input", "model_snapshot", "trainer_projection", "trainer_lineage", "execution_evidence", "execution_evidence_sha256", "status", "trainer_exit_code"],
+  "properties": {
+    "schema_version": {"const": "synaptic-packaged-sft-training-lineage/v1"},
+    "runtime_release_digest": {"$ref": "#/$defs/digest"},
+    "provider_runtime_binding_digest": {"$ref": "#/$defs/digest"},
+    "execution_binding_digest": {"$ref": "#/$defs/digest"},
+    "workload_fingerprint": {"$ref": "#/$defs/digest"},
+    "configuration_digest": {"$ref": "#/$defs/digest"},
+    "artifact_policy_digest": {"$ref": "#/$defs/digest"},
+    "run_ref": {"type": "string", "minLength": 1},
+    "prepared_input": {"type": "object", "additionalProperties": false, "required": ["ref", "revision", "content_digest", "size_bytes", "format"], "properties": {
+      "ref": {"type": "string", "pattern": "^prepared://sha256/[0-9a-f]{64}$"},
+      "revision": {"$ref": "#/$defs/digest"}, "content_digest": {"$ref": "#/$defs/digest"},
+      "size_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864},
+      "format": {"enum": ["syntunia-sft-row/v1", "syntunia-sft-row/v2"]}
+    }},
+    "trainer_projection": {"$ref": "#/$defs/projection"},
+    "model_snapshot": {"$ref": "#/$defs/snapshot"},
+    "trainer_lineage": {
+      "$comment": "Trainer diagnostic metadata is intentionally extensible and non-authoritative. The authoritative verifier requires synaptic_runtime_projection to equal the independently reconstructed projection; other trainer metadata never grants execution authority.",
+      "type": "object", "required": ["synaptic_runtime_projection"],
+      "properties": {"synaptic_runtime_projection": {"$ref": "#/$defs/projection"}},
+      "additionalProperties": true
+    },
+    "execution_evidence": {"$ref": "#/$defs/execution"},
+    "execution_evidence_sha256": {"$ref": "#/$defs/digest"},
+    "status": {"const": "completed"},
+    "trainer_exit_code": {"type": "integer", "const": 0}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "path": {"type": "string", "minLength": 1},
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ref", "revision", "tokenizer_revision", "load_in_4bit"],
+      "properties": {
+        "ref": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+        "tokenizer_revision": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+        "load_in_4bit": {"type": "boolean"}
+      }
+    },
+    "snapshot": {
+      "type": "object", "additionalProperties": false, "required": ["root", "device", "inode", "members"],
+      "properties": {
+        "root": {"type": "string", "pattern": "packaged-model-[0-9a-f]{32}$"},
+        "device": {"type": "integer", "minimum": 0}, "inode": {"type": "integer", "minimum": 0},
+        "members": {"type": "array", "minItems": 1, "maxItems": 10000, "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "size_bytes", "sha256", "device", "inode"],
+          "properties": {
+            "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "size_bytes": {"type": "integer", "minimum": 0, "maximum": 34359738368},
+            "sha256": {"$ref": "#/$defs/digest"},
+            "device": {"type": "integer", "minimum": 0}, "inode": {"type": "integer", "minimum": 0}
+          }
+        }}
+      }
+    },
+    "projection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "workload_fingerprint", "configuration_revision", "model", "dataset", "training", "lora", "outputs", "status"],
+      "properties": {
+        "schema_version": {"const": "synaptic-sft-trainer-projection/v1"},
+        "workload_fingerprint": {"$ref": "#/$defs/digest"}, "configuration_revision": {"$ref": "#/$defs/digest"},
+        "model": {"$ref": "#/$defs/model"},
+        "dataset": {
+          "type": "object", "additionalProperties": false,
+          "required": ["resolved_path", "revision", "content_digest", "schema_version", "format"],
+          "properties": {
+            "resolved_path": {"type": "string", "pattern": "^/proc/self/fd/[1-9][0-9]*$"},
+            "revision": {"$ref": "#/$defs/digest"}, "content_digest": {"$ref": "#/$defs/digest"},
+            "schema_version": {"enum": ["syntunia-sft-row/v1", "syntunia-sft-row/v2"]},
+            "format": {"enum": ["raw_text", "messages"]}
+          }
+        },
+        "training": {
+          "type": "object", "additionalProperties": false,
+          "required": ["batch_size", "gradient_accumulation_steps", "learning_rate", "max_steps", "num_epochs", "max_seq_length", "seed", "save_steps", "save_total_limit", "split_dataset", "completion_only_loss", "assistant_only_loss", "use_preassigned_splits"],
+          "properties": {
+            "batch_size": {"type": "integer", "minimum": 1}, "gradient_accumulation_steps": {"type": "integer", "minimum": 1},
+            "learning_rate": {"type": "number", "exclusiveMinimum": 0}, "max_steps": {"type": "integer", "minimum": -1},
+            "num_epochs": {"type": "integer", "minimum": 1}, "max_seq_length": {"type": "integer", "minimum": 1},
+            "seed": {"type": "integer", "minimum": 0}, "save_steps": {"type": "integer", "minimum": 1},
+            "save_total_limit": {"type": "integer", "minimum": 1}, "split_dataset": {"const": false},
+            "completion_only_loss": {"type": "boolean"}, "assistant_only_loss": {"const": false},
+            "use_preassigned_splits": {"const": true}, "prompt_render": {"const": "prompt_completion"},
+            "packing": {"const": false}, "require_memory_efficient_loss": {"type": "boolean"}
+          }
+        },
+        "lora": {
+          "type": "object", "additionalProperties": false,
+          "required": ["rank", "alpha", "dropout", "target_modules", "use_dora", "use_rslora", "init_lora_weights"],
+          "properties": {
+            "rank": {"type": "integer", "minimum": 1}, "alpha": {"type": "integer", "minimum": 1},
+            "dropout": {"type": "number", "minimum": 0, "maximum": 1},
+            "target_modules": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "use_dora": {"type": "boolean"}, "use_rslora": {"type": "boolean"}, "init_lora_weights": {"type": "boolean"}
+          }
+        },
+        "outputs": {"type": "object", "additionalProperties": false, "required": ["run_dir", "final_model_dir"],
+          "properties": {"run_dir": {"$ref": "#/$defs/path"}, "final_model_dir": {"$ref": "#/$defs/path"}}},
+        "status": {"const": "completed"}
+      }
+    },
+    "sft": {
+      "type": "object", "additionalProperties": false,
+      "required": ["batch_size", "gradient_accumulation_steps", "learning_rate", "max_seq_length", "seed", "save_steps", "save_total_limit", "lora_rank", "lora_alpha", "lora_dropout", "lora_target_modules", "use_dora", "use_rslora", "init_lora_weights", "split_dataset", "dataset_format", "completion_only_loss", "assistant_only_loss", "use_preassigned_splits", "prompt_render", "packing", "require_memory_efficient_loss"],
+      "oneOf": [{"required": ["max_steps"], "not": {"required": ["num_epochs"]}}, {"required": ["num_epochs"], "not": {"required": ["max_steps"]}}],
+      "properties": {
+        "batch_size": {"type": "integer", "minimum": 1}, "gradient_accumulation_steps": {"type": "integer", "minimum": 1},
+        "learning_rate": {"type": "number", "exclusiveMinimum": 0}, "max_steps": {"type": "integer", "minimum": 1},
+        "num_epochs": {"type": "integer", "minimum": 1}, "max_seq_length": {"type": "integer", "minimum": 1},
+        "seed": {"type": "integer", "minimum": 0}, "save_steps": {"type": "integer", "minimum": 1}, "save_total_limit": {"type": "integer", "minimum": 1},
+        "lora_rank": {"type": "integer", "minimum": 1}, "lora_alpha": {"type": "integer", "minimum": 1}, "lora_dropout": {"type": "number", "minimum": 0, "maximum": 1},
+        "lora_target_modules": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "use_dora": {"type": "boolean"}, "use_rslora": {"type": "boolean"}, "init_lora_weights": {"type": "boolean"},
+        "split_dataset": {"const": false}, "dataset_format": {"enum": ["raw_text", "messages"]},
+        "completion_only_loss": {"type": "boolean"}, "assistant_only_loss": {"const": false}, "use_preassigned_splits": {"const": true},
+        "prompt_render": {"enum": ["full_conversation", "prompt_completion"]}, "packing": {"const": false}, "require_memory_efficient_loss": {"type": "boolean"}
+      }
+    },
+    "execution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "workload_fingerprint", "configuration_revision", "model", "dataset", "sft", "argv", "environment", "cwd", "outputs", "result"],
+      "properties": {
+        "schema_version": {"const": "synaptic-packaged-sft-execution-evidence/v1"},
+        "workload_fingerprint": {"$ref": "#/$defs/digest"}, "configuration_revision": {"$ref": "#/$defs/digest"},
+        "model": {"$ref": "#/$defs/model"},
+        "dataset": {"type": "object", "additionalProperties": false,
+          "required": ["ref", "resolved_path", "revision", "content_digest"], "properties": {
+            "ref": {"type": "string", "pattern": "^prepared://sha256/[0-9a-f]{64}$"},
+            "resolved_path": {"type": "string", "pattern": "^/proc/self/fd/[1-9][0-9]*$"},
+            "revision": {"$ref": "#/$defs/digest"}, "content_digest": {"$ref": "#/$defs/digest"}
+          }},
+        "sft": {"$ref": "#/$defs/sft"},
+        "argv": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "environment": {"type": "object", "additionalProperties": false,
+          "required": ["PATH", "LC_ALL", "PYTHONNOUSERSITE", "PYTHONSAFEPATH", "PYTHONDONTWRITEBYTECODE", "HF_HOME", "TRANSFORMERS_CACHE", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "WANDB_DISABLED", "TMPDIR", "HOME", "SYNAPTIC_MODEL_SNAPSHOT"],
+          "properties": {
+            "PATH": {"type": "string", "minLength": 1}, "LANG": {"type": "string"}, "LC_ALL": {"type": "string"},
+            "CUDA_VISIBLE_DEVICES": {"type": "string"}, "NVIDIA_VISIBLE_DEVICES": {"type": "string"},
+            "PYTHONNOUSERSITE": {"const": "1"}, "PYTHONSAFEPATH": {"const": "1"}, "PYTHONDONTWRITEBYTECODE": {"const": "1"},
+            "HF_HOME": {"$ref": "#/$defs/path"}, "TRANSFORMERS_CACHE": {"$ref": "#/$defs/path"},
+            "HF_HUB_OFFLINE": {"const": "1"}, "TRANSFORMERS_OFFLINE": {"const": "1"}, "WANDB_DISABLED": {"const": "true"},
+            "TMPDIR": {"$ref": "#/$defs/path"}, "HOME": {"$ref": "#/$defs/path"}, "SYNAPTIC_MODEL_SNAPSHOT": {"$ref": "#/$defs/path"}
+          }},
+        "cwd": {"$ref": "#/$defs/path"},
+        "outputs": {"type": "object", "additionalProperties": false,
+          "required": ["run_dir", "final_model_dir", "tokenizer_dir", "lineage_path"], "properties": {
+            "run_dir": {"$ref": "#/$defs/path"}, "final_model_dir": {"$ref": "#/$defs/path"},
+            "tokenizer_dir": {"$ref": "#/$defs/path"}, "lineage_path": {"$ref": "#/$defs/path"}
+          }},
+        "result": {"type": "object", "additionalProperties": false, "required": ["exit_code", "status"],
+          "properties": {"exit_code": {"type": "integer", "const": 0}, "status": {"const": "completed"}}}
+      }
+    }
+  }
+}

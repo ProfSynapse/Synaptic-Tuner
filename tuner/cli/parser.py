@@ -65,6 +65,31 @@ _PROTECTED_ACTION_OPTIONS = {
     ("hf-training-smoke", "verify"): frozenset({
         "--base-dir", "--env-file", "--experiment-id", "--json", "--manifest", "--project-root",
     }),
+    ("modal-runtime-release", "preflight"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-plan",
+    }),
+    ("modal-runtime-release", "approve"): frozenset({
+        "--authorization-reference", "--base-dir", "--expires-at",
+        "--issued-at", "--json", "--manifest", "--project-root",
+        "--release-ref",
+    }),
+    ("modal-runtime-release", "execute"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "recover"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "observe"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "verify"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
 }
 
 
@@ -111,6 +136,17 @@ class _SynapticArgumentParser(argparse.ArgumentParser):
             if capability_id is not None:
                 self.error(f"unrecognized arguments: {capability_id}")
             _enforce_protected_action_allowlist(self, arguments, command=command, action=action)
+            return parsed
+        if command == "modal-runtime-release":
+            action = getattr(parsed, "subcommand", None)
+            allowed_actions = {"preflight", "approve", "execute", "recover", "observe", "verify"}
+            if action not in allowed_actions:
+                self.error("modal-runtime-release requires an action: preflight, approve, execute, recover, observe, or verify")
+            if capability_id is not None:
+                self.error(f"unrecognized arguments: {capability_id}")
+            _enforce_protected_action_allowlist(
+                self, arguments, command=command, action=action,
+            )
             return parsed
         if command == "hf-smoke":
             action = getattr(parsed, "subcommand", None)
@@ -224,6 +260,7 @@ Commands:
   hf-source   Prepare or provision one exact immutable HF Profile-C source transport
   hf-smoke    Approve, execute, or observe one fixed bootstrap-only HF smoke
   hf-training-smoke  Preflight, approve, execute, recover, observe, or verify the protected A10G smoke
+  modal-runtime-release  Release one exact packaged Modal runtime deployment
   ingest      Ingest one explicit local Markdown selection to a private bundle
   prepare-dataset  Convert one verified bundle into a private training dataset
   list        Discover available resources
@@ -284,7 +321,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "ingest", "prepare-dataset", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "modal-runtime-release", "ingest", "prepare-dataset", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -348,6 +385,14 @@ Examples:
     parser.add_argument("--source-prefix", help="Authenticated source Bucket prefix.")
     parser.add_argument("--artifact-bucket-id", help="Exclusive artifact Bucket identifier.")
     parser.add_argument("--artifact-prefix", help="Approval-bound artifact base prefix.")
+    parser.add_argument(
+        "--release-plan",
+        help="Canonical packaged Modal runtime release deployment plan JSON.",
+    )
+    parser.add_argument(
+        "--release-ref",
+        help="Exact deployment-spec digest for a retained Modal runtime release.",
+    )
     parser.add_argument(
         "--profile",
         help="Named project configuration profile.",

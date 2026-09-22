@@ -79,12 +79,15 @@ def _completed_transport(monkeypatch):
     MountedModalCoordinatorProducer(
         signer, clock=lambda: "2026-09-09T00:00:00Z",
     ).finalize(invocation, ModalProcessResult(0), job_ref="job-a")
+    control_root = Path("/workspace/control")
+    artifact_root = Path("/workspace/run")
     stored = {
-        path.removeprefix("/workspace/control/").removeprefix("/workspace/run/"): content
+        Path(path).relative_to(control_root).as_posix(): content
         for path, content in writes
     }
     stored.update({
-        path.removeprefix("/workspace/run/"): content for path, content in copied.items()
+        Path(path).relative_to(artifact_root).as_posix(): content
+        for path, content in copied.items()
     })
     binding = case["envelope"].submit_binding
     selection = binding.deployment.selection

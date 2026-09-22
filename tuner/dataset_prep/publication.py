@@ -375,7 +375,12 @@ def _inventory(path: Path, directory_identity: tuple[int, int, int, int, int]) -
                 # Windows DirEntry.stat() may report zero device/inode values
                 # while opening the same member yields its real identity.
                 info = (path / entry.name).lstat()
-                if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or _is_reparse(info):
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or stat.S_ISLNK(info.st_mode)
+                    or _is_reparse(info)
+                    or info.st_nlink != 1
+                ):
                     _invalid("prepared dataset member is not a plain file")
                 result[entry.name] = _identity(info)
     except DatasetPrepValidationError:
@@ -421,7 +426,12 @@ class _RetainedMember:
             declared_identity = _identity(declared)
             if declared_identity != expected_identity:
                 _invalid("prepared dataset member identity changed")
-            if stat.S_ISLNK(declared.st_mode) or _is_reparse(declared) or not stat.S_ISREG(declared.st_mode):
+            if (
+                stat.S_ISLNK(declared.st_mode)
+                or _is_reparse(declared)
+                or not stat.S_ISREG(declared.st_mode)
+                or declared.st_nlink != 1
+            ):
                 _invalid("prepared dataset member is not a plain file")
             if declared.st_size > maximum or path.resolve(strict=True) != path.absolute():
                 _invalid("prepared dataset member is not a bounded plain file")
@@ -432,7 +442,10 @@ class _RetainedMember:
             except BaseException:
                 os.close(descriptor)
                 raise
-            opened = _identity(os.fstat(self.handle.fileno()))
+            opened_info = os.fstat(self.handle.fileno())
+            opened = _identity(opened_info)
+            if opened_info.st_nlink != 1:
+                _invalid("prepared dataset member is hardlinked")
             if not _same_file(declared_identity, opened):
                 _invalid("prepared dataset member identity changed")
             if opened[3] > maximum:
@@ -474,10 +487,11 @@ class _RetainedMember:
         if self.handle is None or self.closed:
             _invalid("prepared dataset member handle is unavailable")
         try:
-            final = _identity(os.fstat(self.handle.fileno()))
+            final_info = os.fstat(self.handle.fileno())
+            final = _identity(final_info)
         except BaseException:
             _invalid("prepared dataset member identity could not be revalidated")
-        if final != self.opened_identity:
+        if final != self.opened_identity or final_info.st_nlink != 1:
             _invalid("prepared dataset member changed during verification")
 
     def close(self) -> bool:
@@ -513,7 +527,11 @@ class _RetainedRelativeMember:
             declared = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
             if _identity(declared) != expected_identity:
                 _invalid("prepared dataset member identity changed")
-            if stat.S_ISLNK(declared.st_mode) or not stat.S_ISREG(declared.st_mode):
+            if (
+                stat.S_ISLNK(declared.st_mode)
+                or not stat.S_ISREG(declared.st_mode)
+                or declared.st_nlink != 1
+            ):
                 _invalid("prepared dataset member is not a plain file")
             descriptor = os.open(
                 name,
@@ -525,9 +543,12 @@ class _RetainedRelativeMember:
             except BaseException:
                 os.close(descriptor)
                 raise
-            opened = _identity(os.fstat(self.handle.fileno()))
+            opened_info = os.fstat(self.handle.fileno())
+            opened = _identity(opened_info)
             if not _same_file(expected_identity, opened) or opened[3] > maximum:
                 _invalid("prepared dataset member identity changed")
+            if opened_info.st_nlink != 1:
+                _invalid("prepared dataset member is hardlinked")
             if stat.S_IMODE(opened[2]) & 0o077:
                 _invalid("prepared dataset member permissions are not private")
             self.opened_identity = opened
@@ -1415,7 +1436,11 @@ def _relative_inventory(stage: _OwnedStageAuthority) -> dict[str, tuple[int, int
             if name not in _EXPECTED_INVENTORY or name in result:
                 _invalid("prepared dataset inventory is invalid")
             info = os.stat(name, dir_fd=stage.descriptor, follow_symlinks=False)
-            if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or stat.S_ISLNK(info.st_mode)
+                or info.st_nlink != 1
+            ):
                 _invalid("prepared dataset member is not a plain file")
             result[name] = _identity(info)
     except DatasetPrepValidationError:

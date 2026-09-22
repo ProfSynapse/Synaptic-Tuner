@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 from pathlib import Path
+import tomllib
 
 from tuner.runtime.offline_sft_worker import (
     OFFLINE_SFT_CLOSURE_REF,
@@ -122,8 +124,27 @@ def test_manifest_is_the_exact_authoritative_offline_sft_closure() -> None:
 
 
 def test_manifest_is_declared_as_tuner_runtime_package_data() -> None:
-    pyproject = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"tuner.runtime" = ["manifests/offline-sft-worker-v1.json"]' in pyproject
+    pyproject = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["tool"]["setuptools"]["package-data"]["tuner.runtime"] == [
+        "manifests/offline-sft-worker-v1.json",
+        "manifests/packaged-training-worker-v1.json",
+    ]
+
+
+def test_training_contract_identity_import_stays_inside_fixed_closure() -> None:
+    contracts_path = _ROOT / "tuner/training/contracts.py"
+    imports = {
+        (node.module, alias.name)
+        for node in ast.walk(ast.parse(contracts_path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    assert (
+        "synaptic_tuner.api.v1._contract", "PreparedTrainingInputIdentity"
+    ) in imports
+    assert not any(module == "synaptic_tuner.api.v1.training_sources" for module, _ in imports)
+    assert "synaptic_tuner/api/v1/_contract.py" in _MEMBERS
+    assert "synaptic_tuner/api/v1/training_sources.py" not in _MEMBERS
 
 
 def test_regenerator_reports_no_drift_on_the_checked_in_manifest() -> None:

@@ -142,6 +142,15 @@
   "TrainingInputContractErrorV1",
   "TrainingInputContractIdentityV1",
   "load_training_input_contract_v1",
+  "LocalTrainingInputPathV1",
+  "OneUseTrainingInputUploadV1",
+  "PreparedTrainingInputIdentity",
+  "PreparedTrainingInputResultV1",
+  "PreparedTrainingInputV1",
+  "RetainedPreparedTrainingInputSourceV1",
+  "TrainingInputSourceV1",
+  "TrainingNormalizerConfigV1",
+  "TrainingPreparationConfigV1",
   "ObservationFamily",
   "ObservationKind",
   "ObservationStreamRef",
@@ -303,5 +312,6 @@
   "StructureSet",
   "TextProjection",
   "UnitBoundary",
-  "run_authority_digest"
+  "run_authority_digest",
+  "validate_ingestion_identity"
 ]

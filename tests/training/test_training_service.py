@@ -153,3 +153,60 @@ def test_service_rejects_context_source_topology_drift(tmp_path: Path) -> None:
 
     with pytest.raises(TrainingResolutionError, match="submodule path"):
         service.resolve(request)
+
+
+def test_selected_entrypoint_requires_mode_but_legacy_git_keeps_omission(tmp_path):
+    engine = tmp_path / "vendor" / "engine"
+    engine.mkdir(parents=True)
+    service = TrainingService(
+        context=ProjectContext.host(engine_root=engine, project_root=tmp_path),
+        resolver=Resolver(_execution_source("vendor/engine")),
+        recipes=default_recipe_registry(),
+    )
+    request = service.load(CanonicalDocument.from_mapping({"method": "sft"}))
+    legacy = service.resolve(request)
+    assert "execution" not in legacy.resolved_config.to_dict()
+    with pytest.raises(ValueError, match="explicit"):
+        service.resolve_selected(request)
+
+
+def test_explicit_developer_selection_uses_identical_legacy_compilation(tmp_path):
+    from dataclasses import replace
+
+    class ExplicitResolver(Resolver):
+        def resolve(self, request, *, context):
+            components = super().resolve(request, context=context)
+            config = components.resolved_config.to_dict()
+            config["execution"] = {"mode": "developer_integration"}
+            return replace(components, resolved_config=CanonicalDocument.from_mapping(config))
+
+    engine = tmp_path / "vendor" / "engine"
+    engine.mkdir(parents=True)
+    service = TrainingService(
+        context=ProjectContext.host(engine_root=engine, project_root=tmp_path),
+        resolver=ExplicitResolver(_execution_source("vendor/engine")),
+        recipes=default_recipe_registry(),
+    )
+    request = service.load(CanonicalDocument.from_mapping({"method": "sft"}))
+    assert service.resolve_selected(request) == service.resolve(request)
+    assert service.plan(service.resolve_selected(request)).fingerprint == service.plan(service.resolve(request)).fingerprint
+
+
+def test_selected_developer_rejects_packaged_authority_fields(tmp_path):
+    from dataclasses import replace
+
+    class MixedResolver(Resolver):
+        def resolve(self, request, *, context):
+            components = super().resolve(request, context=context)
+            config = components.resolved_config.to_dict()
+            config.update(execution={"mode": "developer_integration"}, runtime_release={})
+            return replace(components, resolved_config=CanonicalDocument.from_mapping(config))
+
+    engine = tmp_path / "vendor" / "engine"
+    engine.mkdir(parents=True)
+    service = TrainingService(
+        context=ProjectContext.host(engine_root=engine, project_root=tmp_path),
+        resolver=MixedResolver(_execution_source("vendor/engine")), recipes=default_recipe_registry(),
+    )
+    with pytest.raises(ValueError, match="mixed execution"):
+        service.resolve_selected(service.load(CanonicalDocument.from_mapping({"method": "sft"})))

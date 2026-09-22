@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import copy
+import pickle
+from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -13,6 +17,7 @@ from tuner.dataset_prep import (
     prepare_dataset_v2,
 )
 from tuner.training.contracts import PreparedTrainingInputIdentity
+from tuner.training.contracts import RetainedTrainingInputStreamLease
 
 
 def _prepared(tmp_path: Path):
@@ -59,3 +64,28 @@ def test_local_prepared_source_rejects_mutation_between_resolution_and_stage(tmp
         stream.write(b"mutated\n")
     with pytest.raises(DatasetPrepValidationError):
         source.open_lease()
+
+
+def test_retained_lease_is_atomic_noncopyable_and_nonserializable():
+    digest = "a" * 64
+    identity = PreparedTrainingInputIdentity(
+        f"prepared://sha256/{digest}", digest, "b" * 64, 7, ROW_SCHEMA_VERSION_V2,
+    )
+    lease = RetainedTrainingInputStreamLease(identity, BytesIO(b"payload"))
+
+    def take():
+        try:
+            return lease.take_stream()
+        except ValueError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        results = list(executor.map(lambda _value: take(), range(64)))
+    streams = [value for value in results if value is not None]
+    assert len(streams) == 1
+    assert streams[0].read() == b"payload"
+    for operation in (pickle.dumps, copy.copy, copy.deepcopy):
+        with pytest.raises(TypeError):
+            operation(lease)
+    lease.close()
+    lease.close()

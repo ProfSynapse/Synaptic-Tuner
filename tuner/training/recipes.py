@@ -15,6 +15,40 @@ WORKLOAD_FINGERPRINT_DOMAIN = b"synaptic-training-workload/v1\0"
 MAX_WORKLOAD_BYTES = 256 * 1024
 
 
+def selected_execution_mode(config: CanonicalDocument, *, required: bool = True) -> str:
+    """Select explicitly, except at the historical Git-only API boundary."""
+    value = config.to_dict()
+    if "execution" not in value and not required:
+        return "developer_integration"
+    execution = value.get("execution")
+    if (type(execution) is not dict or set(execution) != {"mode"}
+            or type(execution["mode"]) is not str
+            or execution["mode"] not in {"packaged_runtime", "developer_integration"}):
+        raise ValueError("execution requires exactly one explicit supported mode")
+    return execution["mode"]
+
+
+def compile_execution_workload(*, resolved_config, execution_source, recipes,
+                               require_mode: bool = False) -> "CompiledWorkload":
+    if type(execution_source) is not ExecutionSourceV1:
+        raise TypeError("developer compilation requires exact ExecutionSourceV1")
+    mode = selected_execution_mode(resolved_config, required=require_mode)
+    if mode != "developer_integration":
+        raise ValueError("developer compilation requires developer_integration mode")
+    config = resolved_config.to_dict()
+    if "execution" in config and set(config) & {
+        "runtime_release", "provider_runtime_binding", "execution_binding",
+        "packaged_execution_binding",
+    }:
+        raise ValueError("selected developer configuration has mixed execution fields")
+    method = config.get("method")
+    if type(method) is not str or not method.strip():
+        raise ValueError("resolved config requires a method")
+    return recipes.resolve(method).compile(
+        resolved_config=resolved_config, execution_source=execution_source,
+    )
+
+
 def canonical_json_bytes(value: Mapping[str, object]) -> bytes:
     """Encode a JSON object in the one accepted byte representation."""
 

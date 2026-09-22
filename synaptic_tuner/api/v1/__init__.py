@@ -64,7 +64,8 @@ _LAZY_MODULE_ATTRIBUTES = {
     "events": {"EventEnvelope", "ResultEnvelope"},
     "execution": {
         "ArtifactRef", "ArtifactState", "ErrorCode",
-        "ExecutionError", "ExecutionGrant", "RunRef", "RunState", "RunStatus",
+        "ExecutionError", "ExecutionGrant", "PreparedTrainingInputIdentity",
+        "RunRef", "RunState", "RunStatus",
     },
     "host": {
         "APIHost", "Clock", "EvidenceAuthenticator", "EvidenceReplayStore",
@@ -142,6 +143,13 @@ _LAZY_MODULE_ATTRIBUTES = {
         "TrainingInputContractErrorV1", "TrainingInputContractIdentityV1",
         "load_training_input_contract_v1",
     },
+    "training_sources": {
+        "LocalTrainingInputPathV1", "OneUseTrainingInputUploadV1",
+        "PreparedTrainingInputResultV1",
+        "PreparedTrainingInputV1", "RetainedPreparedTrainingInputSourceV1",
+        "TrainingInputSourceV1", "TrainingNormalizerConfigV1",
+        "TrainingPreparationConfigV1",
+    },
     "usage": {"SpendRef", "UsageAvailability", "UsageRecordV1"},
 }
 
@@ -200,6 +208,11 @@ _FORMAL_EXPORTS = (
     "LoadedTrainingInputContractV1", "TrainingInputContractCodeV1",
     "TrainingInputContractErrorV1", "TrainingInputContractIdentityV1",
     "load_training_input_contract_v1",
+    "LocalTrainingInputPathV1", "OneUseTrainingInputUploadV1",
+    "PreparedTrainingInputIdentity", "PreparedTrainingInputResultV1",
+    "PreparedTrainingInputV1", "RetainedPreparedTrainingInputSourceV1",
+    "TrainingInputSourceV1", "TrainingNormalizerConfigV1",
+    "TrainingPreparationConfigV1",
     "ObservationFamily", "ObservationKind", "ObservationStreamRef",
     "ObservationRecordV1", "ObservationsRequest", "ObservationPage",
     "TrainingPhaseObservedPayloadV1", "EvaluationCaseStartedPayloadV1",
