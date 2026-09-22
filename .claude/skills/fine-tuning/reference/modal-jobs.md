@@ -555,6 +555,22 @@ run. Hub publication is optional and separately authorized. The remote producer
 emits exactly five artifacts: workload record, training lineage, training
 metrics, final model, and tokenizer.
 
+### Training artifact retention policy
+
+The live Modal training policy admits at most **192 MiB for one artifact** and
+**256 MiB for the complete five-artifact set**. `final_model` remains a required
+member of that exact set even when intermediate checkpoints are not retained.
+These are output-retention limits, not the separate prepared-input publication
+limits (for example, the 64 MiB prepared-input limit below).
+
+Large LoRA output is not trusted merely because training reports success. Its
+publication and later retrieval stream bounded bytes, then verify the expected
+digest and re-list/read back the durable provider inventory before the run can
+verify. Before a paid launch, estimate the final adapter archive from a measured
+same-family/rank result and ensure the rank-scaled estimate fits both limits;
+do not treat an unmeasured rank as admitted. Any future increase requires new
+size/transfer evidence and a synchronized review of host and remote policy.
+
 The control Volume contains operation-scoped, authenticated structured logs,
 terminal evidence, and the completion manifest. The host database stores the
 expected workflow/effect identities, one-shot authority consumption, provider
