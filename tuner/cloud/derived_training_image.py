@@ -1453,13 +1453,17 @@ def _final_runtime_inspector(profile: DerivedImageProfile) -> str:
     return f"""import hashlib,json,os,platform,sys,sysconfig
 expected = {expected!r}
 python = expected['python']
-if os.path.realpath(sys.executable) != python['executable'] or platform.python_implementation().lower() != python['implementation'] or platform.python_version() != python['version']:
+if sys.executable != python['executable'] or platform.python_implementation().lower() != python['implementation'] or platform.python_version() != python['version']:
     raise RuntimeError('INTERPRETER_INVALID')
 with open(sys.executable, 'rb') as source:
     raw = source.read(67108865)
 if len(raw) > 67108864 or hashlib.sha256(raw).hexdigest() != python['executable_digest']:
     raise RuntimeError('INTERPRETER_INVALID')
-paths = sysconfig.get_paths()
+venv_root = os.path.dirname(os.path.dirname(sys.executable))
+if os.path.isfile(os.path.join(venv_root, 'pyvenv.cfg')):
+    paths = sysconfig.get_paths(scheme='venv', vars={{'base': venv_root, 'platbase': venv_root}})
+else:
+    paths = sysconfig.get_paths()
 if any(paths[key] != python[key] for key in ('purelib', 'platlib')):
     raise RuntimeError('PACKAGE_PATH_INVALID')
 sys.path.extend(dict.fromkeys(python[key] for key in ('purelib', 'platlib')))

@@ -242,7 +242,9 @@ def test_inspector_contains_exact_interpreter_and_installed_closure_entrypoint(c
     compile(script, "<inspector>", "exec")
     assert "sysconfig.get_paths()" in script
     assert "inspect_installed_runtime(expected)" in script
-    assert "os.path.realpath(sys.executable)" in script
+    assert "sys.executable != python['executable']" in script
+    assert "os.path.isfile(os.path.join(venv_root, 'pyvenv.cfg'))" in script
+    assert "sysconfig.get_paths(scheme='venv'" in script
     assert "source.read(67108865)" in script
 
 
