@@ -1,0 +1,76 @@
+schema_version: synaptic-derived-training-image-profile/v1
+name: qwen35-4b-packaged-sft-3360351c
+platform: linux/amd64
+
+# This profile preserves the measured ML stack in the immutable Unsloth base.
+# The base has four pre-existing `pip check` findings. The bootstrap closure
+# below was verified to leave their combined output byte-identical; a build
+# requires the generic derived-image gate to distinguish that retained baseline
+# from dependency conflicts introduced by the packaged runtime.
+base_image: docker.io/unsloth/unsloth@sha256:1644d635bc7c5b57ed64cabbab1ae00647dfb583c2135fdfb6a461aeeba52739
+python_executable: /opt/unsloth-venv/bin/python3
+packages: []
+
+packaged_runtime:
+  wheel:
+    filename: synaptic_tuner-1.1.0-py3-none-any.whl
+    distribution: synaptic-tuner
+    version: 1.1.0
+    sha256: 5857815dc7694af1cbe8df98da44e3941fe157c0dd23651f992c9f9401a88d7d
+  bootstrap:
+    - filename: grpclib-0.4.9-py3-none-any.whl
+      distribution: grpclib
+      version: 0.4.9
+      sha256: 7762ec1c8ed94dfad597475152dd35cbd11aecaaca2f243e29702435ca24cf0e
+    - filename: h2-4.4.1-py3-none-any.whl
+      distribution: h2
+      version: 4.4.1
+      sha256: 0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6
+    - filename: hpack-4.2.0-py3-none-any.whl
+      distribution: hpack
+      version: 4.2.0
+      sha256: 858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986
+    - filename: hyperframe-6.1.0-py3-none-any.whl
+      distribution: hyperframe
+      version: 6.1.0
+      sha256: b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5
+    - filename: modal-1.5.4-py3-none-any.whl
+      distribution: modal
+      version: 1.5.4
+      sha256: 3e54e26037c445af42f9a9ef9862b66bdd2e0b1faeced5fcc7adf3e5f59e44ed
+    - filename: synchronicity-0.12.5-py3-none-any.whl
+      distribution: synchronicity
+      version: 0.12.5
+      sha256: fdbbb10d437bc08a6b0f814fc66fddd1b58ffed314533d42f1ab555801e781af
+    - filename: toml-0.10.2-py2.py3-none-any.whl
+      distribution: toml
+      version: 0.10.2
+      sha256: 806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b
+    - filename: types_certifi-2021.10.8.3-py3-none-any.whl
+      distribution: types-certifi
+      version: 2021.10.8.3
+      sha256: b2d1e325e69f71f7c78e5943d410e650b4707bb0ef32e4ddf3da37f54176e88a
+    - filename: types_toml-0.10.8.20260518-py3-none-any.whl
+      distribution: types-toml
+      version: 0.10.8.20260518
+      sha256: 0e564ab05f6fde62a315b3b5a9b6624fda569399795d30a37e64705a70459303
+  python:
+    implementation: cpython
+    version: 3.12.3
+    executable: /opt/unsloth-venv/bin/python3
+    executable_digest: e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f
+    purelib: /opt/unsloth-venv/lib/python3.12/site-packages
+    platlib: /opt/unsloth-venv/lib/python3.12/site-packages
+  capabilities:
+    compatibility:
+      methods:
+        - sft
+      models:
+        - ref: Qwen/Qwen3.5-4B
+          revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+      dataset_formats:
+        - syntunia-sft-row/v2
+    contracts:
+      workload_schema: synaptic-sft-workload/v1
+      prepared_input_schema: synaptic-prepared-training-input/v1
+      artifact_contract_schema: synaptic-sft-artifacts/v1
