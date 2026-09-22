@@ -200,13 +200,127 @@ def test_capability_overclaim_rejected(chain):
     with pytest.raises(d.DerivedTrainingImageError, match="CAPABILITY_MISMATCH"): build(chain)
 
 
-def test_buildkit_artifact_binding_required(chain):
-    path = chain["evidence"]["build_receipt_path"]
-    receipt = json.loads(path.read_bytes())
-    receipt["build_metadata"].pop("buildx.build.provenance")
+def test_local_buildkit_metadata_can_omit_provenance(chain):
+    metadata = json.loads(chain["evidence"]["build_receipt_path"].read_bytes())["build_metadata"]
+    metadata.pop("buildx.build.provenance")
+    d._validate_packaged_build_metadata(metadata, chain["profile"])
+    digest = chain["measured"]["build_inputs_digest"]
+    assert f"RUN test \"$SYNAPTIC_RUNTIME_INPUTS_SHA256\" = '{digest}'" in d.render_dockerfile(chain["profile"])
+
+
+def test_packaged_build_metadata_without_config_digest_requires_repo_binding(chain):
+    receipt = json.loads(chain["evidence"]["build_receipt_path"].read_bytes())
+    receipt["build_metadata"].pop("containerimage.config.digest")
     receipt["build_metadata_sha256"] = d._sha256(d._canonical_bytes(receipt["build_metadata"]))
-    write(path, receipt)
-    with pytest.raises(d.DerivedTrainingImageError, match="BUILD_METADATA_INVALID"): build(chain)
+    d._validate_build_receipt(receipt, chain["profile"])
+    receipt["repo_digests"] = []
+    with pytest.raises(d.DerivedTrainingImageError, match="BUILD_RECEIPT_INVALID"):
+        d._validate_build_receipt(receipt, chain["profile"])
+    receipt["repo_digests"] = [receipt["final_oci_reference"]]
+    receipt["build_metadata"]["containerimage.config.digest"] = "sha256:" + "0" * 64
+    receipt["build_metadata_sha256"] = d._sha256(d._canonical_bytes(receipt["build_metadata"]))
+    with pytest.raises(d.DerivedTrainingImageError, match="BUILD_RECEIPT_INVALID"):
+        d._validate_build_receipt(receipt, chain["profile"])
+
+
+@pytest.mark.parametrize("repo_bound", [True, False])
+def test_packaged_build_without_metadata_config_digest_checks_inspected_repo(chain, tmp_path, repo_bound):
+    profile_path = chain["evidence"]["profile_path"]
+    profile_document = json.loads(profile_path.read_bytes())
+    bootstrap = profile_document["packaged_runtime"]["bootstrap"][0]
+    bootstrap_raw = b"reviewed bootstrap fixture"
+    (chain["root"] / bootstrap["filename"]).write_bytes(bootstrap_raw)
+    bootstrap["sha256"] = hashlib.sha256(bootstrap_raw).hexdigest()
+    write(profile_path, profile_document)
+    profile = d.load_profile(profile_path)
+    resources = tmp_path / "docker-install" / "resources"
+    docker = resources / "bin" / "docker.exe"
+    docker.parent.mkdir(parents=True)
+    docker.write_bytes(b"docker")
+    plugin = resources / "cli-plugins" / "docker-buildx.exe"
+    plugin.parent.mkdir()
+    plugin.write_bytes(b"buildx")
+    config = tmp_path / "build-docker-config"
+    config.mkdir()
+    final_digest = "sha256:" + "2" * 64
+    config_digest = "sha256:" + "3" * 64
+    final_reference = "registry.example/synaptic/runtime@" + final_digest
+
+    def runner(spec):
+        if "buildx" in spec.argv:
+            metadata_path = Path(spec.argv[spec.argv.index("--metadata-file") + 1])
+            metadata_path.write_text(json.dumps({"containerimage.digest": final_digest}), encoding="utf-8")
+            return CommandResult()
+        assert "inspect" in spec.argv
+        labels = {
+            "ai.synapticlabs.derived-training-profile": profile.canonical_sha256,
+            "ai.synapticlabs.derived-training-base": profile.base_image,
+        }
+        repo_digests = [final_reference] if repo_bound else []
+        return CommandResult(stdout=(json.dumps(config_digest) + "\n" + json.dumps(repo_digests) + "\n" + json.dumps(labels)).encode())
+
+    output = tmp_path / "new-build.json"
+    kwargs = dict(profile_path=profile_path, docker=docker, docker_config=config,
+                  tag="registry.example/synaptic/runtime:test", output=output, runner=runner)
+    if repo_bound:
+        receipt = d.build_derived_image(**kwargs)
+        assert receipt["image_config_digest"] == config_digest
+        assert receipt["final_oci_reference"] == final_reference
+        assert "containerimage.config.digest" not in receipt["build_metadata"]
+    else:
+        with pytest.raises(d.DerivedTrainingImageError, match="BUILD_METADATA_INVALID:REPO_DIGEST"):
+            d.build_derived_image(**kwargs)
+        assert not output.exists()
+
+
+def test_packaged_verification_without_metadata_config_digest_keeps_repo_binding(chain):
+    path = chain["evidence"]["image_verification_path"]
+    report = json.loads(path.read_bytes())
+    report["build_metadata"].pop("containerimage.config.digest")
+    report["build_metadata_sha256"] = d._sha256(d._canonical_bytes(report["build_metadata"]))
+    report["repo_digests"] = [report["final_oci_reference"]]
+    write(path, report)
+    d.validate_verification_report(
+        profile_path=chain["evidence"]["profile_path"],
+        verification_report_path=path,
+        image=report["image_config_digest"],
+    )
+    report["repo_digests"] = []
+    write(path, report)
+    with pytest.raises(d.DerivedTrainingImageError, match="IMAGE_QUALIFICATION_INVALID"):
+        d.validate_verification_report(
+            profile_path=chain["evidence"]["profile_path"],
+            verification_report_path=path,
+            image=report["image_config_digest"],
+        )
+
+
+def test_present_buildkit_provenance_must_bind_exact_inputs(chain):
+    metadata = json.loads(chain["evidence"]["build_receipt_path"].read_bytes())["build_metadata"]
+    metadata["buildx.build.provenance"]["invocation"]["parameters"]["args"]["build-arg:SYNAPTIC_RUNTIME_INPUTS_SHA256"] = "0" * 64
+    with pytest.raises(d.DerivedTrainingImageError, match="BUILD_METADATA_INVALID"):
+        d._validate_packaged_build_metadata(metadata, chain["profile"])
+
+
+def test_slsa_v1_buildkit_provenance_binds_exact_inputs(chain):
+    metadata = json.loads(chain["evidence"]["build_receipt_path"].read_bytes())["build_metadata"]
+    digest = chain["measured"]["build_inputs_digest"]
+    metadata["buildx.build.provenance"] = {"buildDefinition": {"externalParameters": {"request": {"args": {
+        "build-arg:SYNAPTIC_RUNTIME_INPUTS_SHA256": digest,
+    }}}}}
+    d._validate_packaged_build_metadata(metadata, chain["profile"])
+    metadata["buildx.build.provenance"]["buildDefinition"]["externalParameters"]["request"]["args"]["build-arg:SYNAPTIC_RUNTIME_INPUTS_SHA256"] = "0" * 64
+    with pytest.raises(d.DerivedTrainingImageError, match="BUILD_METADATA_INVALID"):
+        d._validate_packaged_build_metadata(metadata, chain["profile"])
+
+
+def test_mixed_buildkit_provenance_shapes_are_rejected(chain):
+    metadata = json.loads(chain["evidence"]["build_receipt_path"].read_bytes())["build_metadata"]
+    metadata["buildx.build.provenance"]["buildDefinition"] = {"externalParameters": {"request": {"args": {
+        "build-arg:SYNAPTIC_RUNTIME_INPUTS_SHA256": chain["measured"]["build_inputs_digest"],
+    }}}}
+    with pytest.raises(d.DerivedTrainingImageError, match="BUILD_METADATA_INVALID:PROVENANCE"):
+        d._validate_packaged_build_metadata(metadata, chain["profile"])
 
 
 def test_wheel_artifact_bytes_must_match_reviewed_hash(chain):

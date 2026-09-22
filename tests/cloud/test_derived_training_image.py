@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -369,6 +370,34 @@ def test_windows_build_rejects_buildx_replacement_during_command(
             runner=runner,
         )
     assert not any(docker_config.iterdir())
+
+
+def test_windows_buildx_allows_transient_directory_timestamp_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(derived_image, "_WINDOWS", True)
+    resources = tmp_path / "docker-install" / "resources"
+    docker = resources / "bin" / "docker.exe"
+    docker.parent.mkdir(parents=True)
+    docker.write_bytes(b"docker")
+    buildx = resources / "cli-plugins" / "docker-buildx.exe"
+    buildx.parent.mkdir()
+    buildx.write_bytes(b"buildx")
+    config_directory = tmp_path / "buildx-config"
+    config_directory.mkdir()
+    authority = derived_image._create_buildx_authority(
+        docker=docker, config_directory=config_directory,
+    )
+    assert authority is not None
+    before = config_directory.stat().st_mtime_ns
+    os.utime(config_directory, ns=(before + 1_000_000_000, before + 1_000_000_000))
+    (config_directory / "buildx").mkdir()
+    (config_directory / ".token_seed").write_bytes(b"buildx-owned-seed")
+    (config_directory / ".token_seed.lock").write_bytes(b"")
+    derived_image._assert_buildx_authority(authority)
+    (config_directory / "unexpected").write_bytes(b"unexpected")
+    with pytest.raises(DerivedTrainingImageError, match="DOCKER_AUTHORITY_CHANGED"):
+        derived_image._assert_buildx_authority(authority)
 
 
 def test_verify_emits_diagnostic_report_with_vcs_commit_provenance(tmp_path: Path) -> None:

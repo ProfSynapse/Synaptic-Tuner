@@ -54,6 +54,21 @@ def test_inspector_runs_real_installed_closure_verification(installed):
     assert measured["package"]["digest"] == installed[0]["wheel"]["sha256"]
 
 
+def test_bootstrap_can_use_matching_dependency_from_pinned_base(installed):
+    expected, _retained, _packages, distributions = installed
+    distributions["bootstrap"].requires = ["base-dependency>=2,<3"]
+    distributions["base-dependency"] = SimpleNamespace(
+        version="2.1.0", metadata={"Name": "base-dependency"}, requires=[], files=[],
+    )
+    measured = worker.inspect_installed_runtime(expected)
+    assert {item["name"] for item in measured["installed_distributions"]["inventory"]} == {
+        "synaptic-tuner", "bootstrap", "base-dependency",
+    }
+    distributions["base-dependency"].version = "3.0.0"
+    with pytest.raises(ValueError, match="bootstrap transitive closure incomplete"):
+        worker.inspect_installed_runtime(expected)
+
+
 @pytest.mark.parametrize("mutation", ["missing-provenance", "wrong-provenance", "member", "wheel", "capability", "bootstrap-dependency"])
 def test_installed_provenance_and_members_are_authenticated(installed, mutation):
     expected, retained, packages, distributions = installed

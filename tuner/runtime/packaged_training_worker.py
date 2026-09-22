@@ -212,7 +212,15 @@ def inspect_installed_runtime(expected: dict) -> dict:
                     continue
                 name = re.sub(r"[-_.]+", "-", requirement.name.lower())
                 version = bootstrap_versions.get(name)
-                if requirement.url or requirement.extras or version is None or version not in requirement.specifier:
+                if version is None:
+                    # The digest-pinned base may already provide a dependency.
+                    # It is included in the complete final distribution
+                    # inventory; no additional wheel needs to replace it.
+                    try:
+                        version = importlib.metadata.distribution(requirement.name).version
+                    except (importlib.metadata.PackageNotFoundError, KeyError) as exc:
+                        raise ValueError("bootstrap transitive closure incomplete") from exc
+                if requirement.url or requirement.extras or version not in requirement.specifier:
                     raise ValueError("bootstrap transitive closure incomplete")
         direct_file = next((item for item in distribution.files or () if str(item).replace("\\", "/").endswith(".dist-info/direct_url.json")), None)
         if direct_file is None:

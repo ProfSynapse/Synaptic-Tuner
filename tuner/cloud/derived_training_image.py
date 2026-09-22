@@ -169,7 +169,7 @@ class _BuildxAuthority:
     plugin_executable_sha256: str
     plugin_executable_identity: tuple[int, int, int, int]
     config_directory: Path
-    config_directory_identity: tuple[int, int, int]
+    config_directory_identity: tuple[int, int]
     config_file: Path
     config_file_sha256: str
     config_file_identity: tuple[int, int, int, int]
@@ -634,7 +634,6 @@ def _create_buildx_authority(
         config_directory_identity=(
             config_directory_stat.st_dev,
             config_directory_stat.st_ino,
-            config_directory_stat.st_mtime_ns,
         ),
         config_file=config_file,
         config_file_sha256=_file_sha256(config_file),
@@ -657,13 +656,29 @@ def _assert_buildx_authority(authority: _BuildxAuthority | None) -> None:
             or authority.plugin_executable.is_symlink()
             or not authority.plugin_executable.is_file()
             or authority.plugin_executable.parent != authority.plugin_directory
-            or authority.config_directory.is_symlink()
-            or not authority.config_directory.is_dir()
-            or authority.config_file.is_symlink()
-            or not authority.config_file.is_file()
-            or tuple(authority.config_directory.iterdir()) != (authority.config_file,)
         ):
             raise OSError("Buildx authority changed")
+        if authority.config_directory.is_symlink() or not authority.config_directory.is_dir():
+            raise OSError("Buildx authority changed")
+        if authority.config_file.is_symlink() or not authority.config_file.is_file():
+            raise OSError("Buildx authority changed")
+        state_directory = authority.config_directory / "buildx"
+        token_seed = authority.config_directory / ".token_seed"
+        token_seed_lock = authority.config_directory / ".token_seed.lock"
+        members = set(authority.config_directory.iterdir())
+        if (authority.config_file not in members
+                or not members <= {authority.config_file, state_directory, token_seed, token_seed_lock}
+                or (token_seed in members) != (token_seed_lock in members)):
+            raise OSError("Buildx authority changed")
+        if state_directory in members and (
+            state_directory.is_symlink() or not state_directory.is_dir()
+        ):
+            raise OSError("Buildx authority changed")
+        for path in (token_seed, token_seed_lock):
+            if path in members and (
+                path.is_symlink() or not path.is_file() or path.stat().st_size > 4096
+            ):
+                raise OSError("Buildx authority changed")
         plugin_directory_stat = authority.plugin_directory.stat()
         plugin_executable_stat = authority.plugin_executable.stat()
         config_directory_stat = authority.config_directory.stat()
@@ -682,10 +697,11 @@ def _assert_buildx_authority(authority: _BuildxAuthority | None) -> None:
                 plugin_executable_stat.st_mtime_ns,
             )
             != authority.plugin_executable_identity
+            # Buildx may create and remove temporary entries here. The sole
+            # surviving config file, its identity, and its bytes are checked.
             or (
                 config_directory_stat.st_dev,
                 config_directory_stat.st_ino,
-                config_directory_stat.st_mtime_ns,
             )
             != authority.config_directory_identity
             or (
@@ -910,11 +926,15 @@ def build_derived_image(
             raise DerivedTrainingImageError("BUILD_METADATA_INVALID")
         final_digest = metadata.get("containerimage.digest")
         config_digest = metadata.get("containerimage.config.digest")
-        if (
-            not isinstance(final_digest, str) or _DIGEST.fullmatch(final_digest) is None
-            or not isinstance(config_digest, str) or _DIGEST.fullmatch(config_digest) is None
+        if not isinstance(final_digest, str) or _DIGEST.fullmatch(final_digest) is None:
+            raise DerivedTrainingImageError("BUILD_METADATA_INVALID:FINAL_DIGEST")
+        config_digest_omitted = "containerimage.config.digest" not in metadata
+        if config_digest_omitted and profile.packaged_runtime is None:
+            raise DerivedTrainingImageError("BUILD_METADATA_INVALID:CONFIG_DIGEST")
+        if not config_digest_omitted and (
+            not isinstance(config_digest, str) or _DIGEST.fullmatch(config_digest) is None
         ):
-            raise DerivedTrainingImageError("BUILD_METADATA_INVALID")
+            raise DerivedTrainingImageError("BUILD_METADATA_INVALID:CONFIG_DIGEST")
         inspect = _run_authorized(
             authority,
             runner,
@@ -925,12 +945,20 @@ def build_derived_image(
             ),
         )
         image_id, repo_digests, labels = _parse_inspect(inspect.stdout)
+        final_reference = f"{repository}@{final_digest}"
+        if config_digest_omitted:
+            # Docker's local multi-platform export may omit the config digest.
+            # In that case, use the inspected image ID only when the same
+            # inspection binds this tag to Buildx's exact final OCI digest.
+            if final_reference not in repo_digests:
+                raise DerivedTrainingImageError("BUILD_METADATA_INVALID:REPO_DIGEST")
+            config_digest = image_id
         if image_id != config_digest:
-            raise DerivedTrainingImageError("BUILD_METADATA_INVALID")
+            raise DerivedTrainingImageError("BUILD_METADATA_INVALID:IMAGE_CONFIG_DIGEST")
         if labels.get("ai.synapticlabs.derived-training-profile") != profile.canonical_sha256:
-            raise DerivedTrainingImageError("BUILD_METADATA_INVALID")
+            raise DerivedTrainingImageError("BUILD_METADATA_INVALID:PROFILE_LABEL")
         if labels.get("ai.synapticlabs.derived-training-base") != profile.base_image:
-            raise DerivedTrainingImageError("BUILD_METADATA_INVALID")
+            raise DerivedTrainingImageError("BUILD_METADATA_INVALID:BASE_LABEL")
         receipt = {
             "schema_version": BUILD_RECEIPT_SCHEMA,
             "status": "BUILT_NOT_ATTESTED",
@@ -938,7 +966,7 @@ def build_derived_image(
             "base_image": profile.base_image,
             "dockerfile_sha256": _sha256(dockerfile_text.encode("utf-8")),
             "tag": tag,
-            "final_oci_reference": f"{repository}@{final_digest}",
+            "final_oci_reference": final_reference,
             "final_oci_digest": final_digest,
             "image_config_digest": config_digest,
             "repo_digests": list(repo_digests),
@@ -1112,8 +1140,10 @@ def _validate_build_receipt(value: Mapping[str, object], profile: DerivedImagePr
         or len(build_metadata_bytes) > MAX_DOCUMENT_BYTES
         or _sha256(build_metadata_bytes) != value.get("build_metadata_sha256")
         or build_metadata.get("containerimage.digest") != final_digest
-        or build_metadata.get("containerimage.config.digest")
-        != value.get("image_config_digest")
+        or not _metadata_config_digest_matches(
+            build_metadata, value.get("image_config_digest"),
+            final_reference, repo_digests, profile,
+        )
         or not isinstance(repo_digests, list)
         or any(not isinstance(item, str) for item in repo_digests)
     ):
@@ -1129,12 +1159,39 @@ def _validate_build_receipt(value: Mapping[str, object], profile: DerivedImagePr
 
 def _validate_packaged_build_metadata(metadata: object, profile: DerivedImageProfile) -> None:
     if profile.packaged_runtime is None: return
+    if not isinstance(metadata, dict):
+        raise DerivedTrainingImageError("BUILD_METADATA_INVALID")
+    # Buildx's local Docker exporter can omit provenance from the metadata file.
+    # The exact build inputs remain bound by the rendered Dockerfile's profile
+    # label and digest check, then rechecked inside the final runtime image.
+    # If Buildx does provide provenance, never accept a contradictory claim.
+    if "buildx.build.provenance" not in metadata:
+        return
     try:
         digest = hashlib.sha256(_canonical_bytes(profile.packaged_runtime)).hexdigest()
-        args = metadata["buildx.build.provenance"]["invocation"]["parameters"]["args"]
+        provenance = metadata["buildx.build.provenance"]
+        if "buildDefinition" in provenance and "invocation" in provenance:
+            raise ValueError("ambiguous provenance")
+        if "buildDefinition" in provenance:
+            args = provenance["buildDefinition"]["externalParameters"]["request"]["args"]
+        else:
+            args = provenance["invocation"]["parameters"]["args"]
         if args["build-arg:SYNAPTIC_RUNTIME_INPUTS_SHA256"] != digest: raise ValueError
     except (KeyError, TypeError, ValueError):
-        raise DerivedTrainingImageError("BUILD_METADATA_INVALID") from None
+        raise DerivedTrainingImageError("BUILD_METADATA_INVALID:PROVENANCE") from None
+
+
+def _metadata_config_digest_matches(
+    metadata: Mapping[str, object], config_digest: object,
+    final_reference: str, repo_digests: object, profile: DerivedImageProfile,
+) -> bool:
+    if "containerimage.config.digest" in metadata:
+        return metadata["containerimage.config.digest"] == config_digest
+    return (
+        profile.packaged_runtime is not None
+        and isinstance(repo_digests, list)
+        and final_reference in repo_digests
+    )
 
 
 def _validate_runtime_against_profile(
@@ -1228,8 +1285,10 @@ def verify_candidate(
         or len(build_metadata_bytes) > MAX_DOCUMENT_BYTES
         or _sha256(build_metadata_bytes) != candidate.get("build_metadata_sha256")
         or build_metadata.get("containerimage.digest") != final_digest
-        or build_metadata.get("containerimage.config.digest")
-        != candidate.get("image_config_digest")
+        or not _metadata_config_digest_matches(
+            build_metadata, candidate.get("image_config_digest"),
+            final_reference, repo_digests, profile,
+        )
         or not isinstance(repo_digests, list)
         or any(not isinstance(item, str) for item in repo_digests)
         or any(
@@ -1269,6 +1328,7 @@ def verify_candidate(
     }
     if profile.packaged_runtime is not None:
         verification["final_runtime"] = runtime["final_runtime"]
+        verification["repo_digests"] = candidate["repo_digests"]
     if output is not None:
         if output.exists() or output.is_symlink() or output.suffix.lower() != ".json":
             raise DerivedTrainingImageError("OUTPUT_INVALID")
@@ -1287,7 +1347,7 @@ def validate_verification_report(
         "build_metadata_sha256",
         "base_image", "final_oci_reference", "final_oci_digest",
         "image_config_digest", "packages",
-    }, {"final_runtime"} if profile.packaged_runtime is not None else set())
+    }, {"final_runtime", "repo_digests"} if profile.packaged_runtime is not None else set())
     final_reference = verification.get("final_oci_reference")
     final_digest = verification.get("final_oci_digest")
     image_config_digest = verification.get("image_config_digest")
@@ -1319,8 +1379,10 @@ def validate_verification_report(
         or _sha256(build_metadata_bytes)
         != verification.get("build_metadata_sha256")
         or build_metadata.get("containerimage.digest") != final_digest
-        or build_metadata.get("containerimage.config.digest")
-        != image_config_digest
+        or not _metadata_config_digest_matches(
+            build_metadata, image_config_digest,
+            final_reference, verification.get("repo_digests"), profile,
+        )
         or image not in {final_reference, image_config_digest}
         or not isinstance(verification.get("candidate_sha256"), str)
         or _DIGEST.fullmatch(str(verification["candidate_sha256"])) is None

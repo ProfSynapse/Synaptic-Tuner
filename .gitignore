@@ -161,6 +161,8 @@ Datasets/synthchat/
 
 # Obvious generated training/test artifacts
 Trainers/archive/
+/Trainers/image_profiles/*.whl
+/qualification-artifacts/
 docs/test_*.jsonl
 docs/test_*.review.md
 docs/test_webllm_node.mjs
