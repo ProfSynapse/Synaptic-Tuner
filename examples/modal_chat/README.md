@@ -61,6 +61,15 @@ evidence, successful public outcome/verification, and separate bounded chat
 authority before one turn and exact owned-Sandbox stopped readback. Native
 training qualification alone does not qualify chat or the other capabilities.
 
+Provisioning is deliberately creation-only: all three configured Volume names
+(control, artifacts, and the attempt-derived model cache) and the runtime Secret
+name must be unused for a genuinely fresh attempt. Rotating only `attempt_ref`
+or the deployment/function identity is insufficient when earlier resources
+remain. An already-exists failure retains its claim and authorizes neither
+reuse, adoption, deletion, nor an automatic retry; preserve that state, inspect
+the exact named resources read-only, and use a separately authorized fresh
+configuration with wholly fresh resource names.
+
 Modal credentials come only from the explicitly named SDK 1.5.4 profile, with
 environment overrides disabled. `HF_TOKEN` is inherited, or read from the one
 existing file explicitly selected by `--hf-token-env-file /absolute/file`.

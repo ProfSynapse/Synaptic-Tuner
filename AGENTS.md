@@ -48,6 +48,14 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- The minimal consumer's provisioning step is create-only
+  (`allow_existing=False`). A genuinely fresh manual attempt must use unused
+  control Volume, artifact Volume, model-cache Volume, and runtime Secret names;
+  changing only the attempt or deployment reference is insufficient. Preserve
+  failed state and existing resources, diagnose exact collisions read-only, and
+  never reinterpret an already-exists failure as retry, adoption, or cleanup
+  authority.
+
 - Training and model chat are independent processes. Use the model-first
   `scripts/chat_model.py` / `tuner.inference.model_chat.open_model_chat` boundary
   when testing serving. Do not submit training to obtain in-memory chat authority.

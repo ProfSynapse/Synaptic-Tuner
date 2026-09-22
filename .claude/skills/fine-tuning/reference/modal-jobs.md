@@ -529,6 +529,13 @@ The cross-provider contract and proof matrix live in
   cleared.
 - One existing Modal Volume v1 for control/log/evidence records and one
   distinct existing Modal Volume v1 for input/output artifacts.
+- In the minimal consumer qualification workflow, provisioning those configured
+  Volumes, the attempt-derived model-cache Volume, and the runtime Secret is
+  creation-only (`allow_existing=False`). A separately authorized fresh attempt
+  must rotate every one of those names; changing only the attempt or deployment
+  reference will collide with retained resources. Preserve the failed claim and
+  resources, diagnose exact names read-only, and never convert an already-exists
+  result into retry, adoption, deletion, or cleanup authority.
 - Each effect is isolated below `operations/{effect_id}/`; jobs never share
   global `input/`, `output/`, `logs/`, or `evidence/` paths.
 - The remote job independently clones the exact pushed host project and exact
