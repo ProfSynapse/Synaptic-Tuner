@@ -12,7 +12,10 @@ from tuner.execution.foundation_v2.commands import parse_exact_command
 from tuner.execution.providers.modal.contracts import EXACT_ARTIFACT_ROLES, operation_path
 from tuner.execution.providers.modal.contracts import TerminalEvidenceV1, _object
 from tuner.execution.providers.modal.coordinator_dispatch import build_modal_worker_dispatch
-from tuner.execution.providers.modal.coordinator_producer import MountedModalCoordinatorProducer
+from tuner.execution.providers.modal.coordinator_producer import (
+    MODAL_TRAINING_ARTIFACT_BOUNDS_V1,
+    MountedModalCoordinatorProducer,
+)
 from tuner.execution.providers.modal.coordinator_wire import ModalWorkerLaunchExpectation
 from tuner.execution.providers.modal.coordinator_worker import (
     ModalWorkerStaticExpectation, admit_modal_worker,
@@ -205,6 +208,64 @@ def test_entire_inventory_shape_is_rejected_before_copy(monkeypatch, mutation):
             invocation, ModalProcessResult(0), job_ref="job-a",
         )
     assert copied == {} and writes == []
+
+
+def test_training_artifact_policy_admits_large_lora_metadata_without_large_allocation(monkeypatch):
+    invocation, signer = _invocation(monkeypatch)
+    large_size = 162 * 1024 * 1024
+    inventory, _ = _inventory(
+        invocation,
+        mutate=lambda document: document["artifacts"][0].update(
+            size=large_size, sha256="a" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.coordinator_producer.read_regular",
+        lambda root, path, maximum: inventory,
+    )
+    members = MountedModalCoordinatorProducer(signer)._inventory(invocation)
+    assert members[0].size == large_size
+    assert large_size > 64 * 1024 * 1024
+    assert large_size <= MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes
+
+
+def test_training_artifact_policy_has_reviewed_exact_limits():
+    assert MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes == 192 * 1024 * 1024
+    assert MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_total_bytes == 256 * 1024 * 1024
+
+
+def test_training_artifact_policy_rejects_per_artifact_and_aggregate_overflow(monkeypatch):
+    invocation, signer = _invocation(monkeypatch)
+    producer = MountedModalCoordinatorProducer(signer)
+    inventory, _ = _inventory(
+        invocation,
+        mutate=lambda document: document["artifacts"][0].update(
+            size=MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes + 1,
+            sha256="a" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.coordinator_producer.read_regular",
+        lambda root, path, maximum: inventory,
+    )
+    with pytest.raises(ValueError, match="invalid artifact size"):
+        producer._inventory(invocation)
+
+    each_size = 52 * 1024 * 1024
+    inventory, _ = _inventory(
+        invocation,
+        mutate=lambda document: [
+            record.update(size=each_size, sha256="a" * 64)
+            for record in document["artifacts"]
+        ],
+    )
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.coordinator_producer.read_regular",
+        lambda root, path, maximum: inventory,
+    )
+    with pytest.raises(ValueError, match="artifact set is invalid"):
+        producer._inventory(invocation)
+    assert each_size * 5 > MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_total_bytes
 
 
 def test_mutated_invocation_does_not_touch_mounted_state(monkeypatch):

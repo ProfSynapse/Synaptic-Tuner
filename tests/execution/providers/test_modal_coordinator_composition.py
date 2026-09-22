@@ -16,6 +16,7 @@ from tuner.execution.providers.modal.coordinator_composition import (
 from tuner.execution.providers.modal.coordinator_retention import ModalRetainedPreparation
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
 from tuner.execution.providers.modal.coordinator_preflight import AuthenticatedModalQuote
+from tuner.execution.providers.modal.coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
 from tuner.project.errors import SourceLockError
 
 from tests.execution.coordinator_v1 import test_start_reconcile_service as generic
@@ -152,6 +153,12 @@ def test_factory_is_provider_io_free_then_stages_and_spawns_once(monkeypatch):
             InMemoryPreparationStoreV1(),InMemoryExecutionGrantStoreV1(grants),
             InMemoryReconciliationGrantStoreV1(grants)),
     )
+    executor_transport = composed.registration.executor_factory_ref._executor._transport
+    reader = composed.registration.reader_factory_ref._reader
+    assert executor_transport._bounds is MODAL_TRAINING_ARTIFACT_BOUNDS_V1
+    assert reader._bounds is MODAL_TRAINING_ARTIFACT_BOUNDS_V1
+    assert reader._transport._bounds is MODAL_TRAINING_ARTIFACT_BOUNDS_V1
+    assert composed.foundation._bounds is MODAL_TRAINING_ARTIFACT_BOUNDS_V1
     assert (len(Volume.calls),len(Function.resolutions),len(Function.spawns)) == before
     request=composed.training.load('{"method":"sft"}')
     resolved=composed.training.resolve(request)

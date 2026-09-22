@@ -226,7 +226,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_producer_py": {
       "path": "tuner/execution/providers/modal/coordinator_producer.py",
-      "sha256": "a1d02b4af9a8d877aa81c6400aaef31f50b0c9cbed9a2bc04b2d042a53af8f78"
+      "sha256": "7cf35df7e9ed4a005fd742bba3597d5d720811d12edc661131a3af81ea319cd6"
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_wire_py": {
       "path": "tuner/execution/providers/modal/coordinator_wire.py",
@@ -362,7 +362,7 @@
     },
     "deployment_wrapper": {
       "path": "tuner/execution/providers/modal/coordinator_deployment.py",
-      "sha256": "d7458beb2146804a5632e2261c877634be208723f60487cd915392b134a67b85"
+      "sha256": "f22e54af85efdb4e966c6f509ee68b8029b8f3a5b3335d8fa76a023c3971c792"
     },
     "modal_mounted_io": {
       "path": "tuner/execution/providers/modal/mounted_io.py",
