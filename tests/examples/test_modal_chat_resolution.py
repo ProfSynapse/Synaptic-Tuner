@@ -13,6 +13,7 @@ import pytest
 from examples.modal_chat.resolution import (
     ModalChatResolutionError,
     ModalChatRichTrainingResolver,
+    verify_configured_dataset,
 )
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from tuner.execution.providers.modal.config import ModalRuntimeLockV1
@@ -454,6 +455,83 @@ def test_prepared_dataset_reference_must_match_verified_semantic_digest(
             context=context,
         )
     assert resolver.private_dataset_bytes is None
+
+
+@pytest.mark.parametrize("configured_format", (None, "raw_text"))
+def test_provider_free_dataset_check_verifies_content_addressed_v1_bundle(
+    tmp_path: Path, configured_format: str | None
+) -> None:
+    context = _context(tmp_path)
+    _initialize_git_policy(context, ignored=True)
+    structure, bundle = _prepared_bundle(tmp_path / "prepared-source")
+    prepared = _prepare_reconciled(
+        _prepared_config(bundle, structure), context.project_root / "private"
+    )
+
+    verified, dataset_format = verify_configured_dataset(
+        context.project_root,
+        prepared.path.relative_to(context.project_root),
+        "prepared://sha256/" + prepared.semantic_identity.dataset_digest,
+        16 * 1024 * 1024,
+        configured_format,
+    )
+
+    assert dataset_format == "syntunia-sft-row/v1"
+    assert verified.semantic_identity == prepared.semantic_identity
+
+
+def test_provider_free_dataset_check_verifies_content_addressed_v2_bundle(
+    tmp_path: Path,
+) -> None:
+    context = _context(tmp_path)
+    _initialize_git_policy(context, ignored=True)
+    _bundle, _ids, _documents, config = _v2_config(tmp_path / "v2-source")
+    try:
+        prepared = prepare_dataset_v2(config, context.project_root / "private")
+    except DatasetPublicationUncertainV1:
+        prepared = prepare_dataset_v2(config, context.project_root / "private")
+
+    verified, dataset_format = verify_configured_dataset(
+        context.project_root,
+        prepared.path.relative_to(context.project_root),
+        "prepared://sha256/" + prepared.semantic_identity.dataset_digest,
+        16 * 1024 * 1024,
+        "messages",
+    )
+
+    assert dataset_format == "syntunia-sft-row/v2"
+    assert verified.semantic_identity == prepared.semantic_identity
+
+
+@pytest.mark.parametrize(
+    ("prepared_version", "configured_format"),
+    (("v1", "messages"), ("v2", "raw_text")),
+)
+def test_provider_free_dataset_check_rejects_incompatible_sft_controls(
+    tmp_path: Path, prepared_version: str, configured_format: str
+) -> None:
+    context = _context(tmp_path)
+    _initialize_git_policy(context, ignored=True)
+    if prepared_version == "v1":
+        structure, bundle = _prepared_bundle(tmp_path / "v1-source")
+        prepared = _prepare_reconciled(
+            _prepared_config(bundle, structure), context.project_root / "private"
+        )
+    else:
+        _bundle, _ids, _documents, config = _v2_config(tmp_path / "v2-source")
+        try:
+            prepared = prepare_dataset_v2(config, context.project_root / "private")
+        except DatasetPublicationUncertainV1:
+            prepared = prepare_dataset_v2(config, context.project_root / "private")
+
+    with pytest.raises(ValueError, match="prepared dataset format differs"):
+        verify_configured_dataset(
+            context.project_root,
+            prepared.path.relative_to(context.project_root),
+            "prepared://sha256/" + prepared.semantic_identity.dataset_digest,
+            16 * 1024 * 1024,
+            configured_format,
+        )
 
 
 @pytest.mark.parametrize("git_state", ["tracked", "staged", "unignored"])

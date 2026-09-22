@@ -153,6 +153,49 @@ def _require_private_prepared_path(root: Path, relative: Path) -> None:
         _local_git(root, "check-ignore", "--no-index", "-q", "--", path)
 
 
+def verify_configured_dataset(
+    root: Path,
+    relative: Path,
+    dataset_ref: str,
+    maximum_regular_bytes: int,
+    configured_format: str | None,
+):
+    """Verify a configured project file or content-addressed prepared bundle.
+
+    This deliberately has no provider dependency, so local input checks validate
+    the same prepared-dataset identity as the later rich resolver.
+    """
+    if type(dataset_ref) is not str:
+        raise TypeError("dataset_ref must be an exact string")
+    prepared_match = _PREPARED_REF.fullmatch(dataset_ref)
+    if prepared_match is None:
+        expected_ref = "project://" + relative.as_posix()
+        if dataset_ref != expected_ref:
+            raise ValueError("dataset reference differs from consumer project path")
+        _regular_digest(root, relative, maximum_regular_bytes)
+        return None
+    _require_private_prepared_path(root, relative)
+    prepared_path = root / relative
+    try:
+        verified = verify_prepared_dataset_v1(prepared_path)
+        dataset_format = ROW_SCHEMA_VERSION
+    except DatasetPrepValidationError:
+        verified = verify_prepared_dataset_v2(prepared_path)
+        dataset_format = ROW_SCHEMA_VERSION_V2
+    _require_private_prepared_path(root, relative)
+    if verified.semantic_identity.dataset_digest != prepared_match.group(1):
+        raise ValueError("prepared dataset reference differs from its identity")
+    if (
+        dataset_format == ROW_SCHEMA_VERSION_V2
+        and configured_format != "messages"
+    ) or (
+        dataset_format == ROW_SCHEMA_VERSION
+        and configured_format not in {None, "raw_text"}
+    ):
+        raise ValueError("prepared dataset format differs from SFT controls")
+    return verified, dataset_format
+
+
 class ModalChatRichTrainingResolver:
     """Resolve one allocated request through real local and authenticated sources."""
 

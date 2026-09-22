@@ -38,7 +38,7 @@ from examples.modal_chat.deployment import ModalChatOwnedDeployment, ModalChatSc
 from examples.modal_chat.diagnostics import modal_chat_failure_diagnostic
 from examples.modal_chat.provisioning import ModalChatProvisioner
 from examples.modal_chat.replay import ModalChatEvidenceReplay
-from examples.modal_chat.resolution import _regular_digest
+from examples.modal_chat.resolution import verify_configured_dataset
 from examples.modal_chat.settings import ModalChatSettings
 from examples.modal_chat.storage import ModalChatStorage
 from synaptic_tuner.api.v1.providers import ProviderRef
@@ -205,7 +205,13 @@ def check_inputs(project_root, configuration, *, mode="check"):
     context = manifest.create_context(engine_root=ENGINE, invocation_cwd=Path.cwd())
     raw = read_regular(project_root, project_root / configuration, 256 * 1024)
     settings = ModalChatSettings.parse(raw[:-1] if raw.endswith(b"\n") else raw)
-    _regular_digest(project_root, Path(settings.dataset_project_path), 16 * 1024 * 1024)
+    verify_configured_dataset(
+        project_root,
+        Path(settings.dataset_project_path),
+        settings.training_input.dataset.ref,
+        16 * 1024 * 1024,
+        settings.training_input.hyperparameters.dataset_format,
+    )
     source = GitCliLocalSourceInspector().inspect(context=context)
     allowed = frozenset((item["url"], item["ref"]) for item in settings.allowed_refs)
     observed_refs = set()
