@@ -513,6 +513,16 @@ The cross-provider contract and proof matrix live in
   profile or `Client.from_env()` fallback in engine code.
 - Fixed app `synaptic-training-v1`; the exact function name is derived by
   `modal_function_name(deployment_ref)` and includes the deployment identity.
+- A stopped fixed-name app is retained as non-authorizing history, not treated
+  as true absence. With Modal SDK `1.5.4`, scoped lookup returns an empty current
+  `app_id`, the stopped identity as `previous_app_id`, and the retained
+  generation. Read its bounded historical layout through that previous ID,
+  bracket the read with an unchanged scoped lookup, and reject a selected-name
+  collision. The normal same-name redeploy creates a new current app; accept it
+  only when its ID differs from the stopped predecessor and its generation is
+  exactly `N+1`. Transitional states, drift, ID reuse, generation reuse/skips,
+  or ambiguity fail closed before training submission and never authorize an
+  automatic retry or cleanup.
 - One A10 GPU, one canonical command argument, `retries=0`, and one detached
   `.spawn()` call behind the authenticated Foundation effect broker.
 - One digest-pinned Unsloth registry image with its inherited entrypoint

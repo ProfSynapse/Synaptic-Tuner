@@ -170,6 +170,19 @@ These current-state checks do not make later invocation version-pinned or
 eliminate an external administrator's race after the last observation.
 See [Modal's lookup semantics and plan constraints](https://modal.com/docs/guide/trigger-deployed-functions#version-pinned-lookups).
 
+Correction (2026-09-22): a stopped deployment name is neither a current app nor
+true absence in Modal SDK 1.5.4. The scoped name lookup returns an empty current
+`app_id`, the stopped app as `previous_app_id`, `APP_STATE_STOPPED`, and the
+retained deployment generation. The consumer brackets a bounded historical
+layout read through that previous ID and records a non-authorizing `STOPPED`
+prestate. A same-name deploy then follows the pinned SDK's normal `AppCreate`
+path. It is accepted only when readback proves a new current app ID distinct
+from the stopped predecessor, the exact next generation, and the usual private
+single-function/zero-class layout. Transitional states, identity reuse,
+generation skips, selected-function collisions, or drift during the bracketed
+read fail closed. A failed or ambiguous deploy remains permanently claimed and
+does not authorize retry, cleanup, training submission, or invocation.
+
 Training acceptance is not completion. Observe the exact returned run through
 `RunsAPI`; successful verification and its authenticated five-artifact inventory
 must precede chat. The selected adapter reverifies and prepares on its execution
