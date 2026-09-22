@@ -179,14 +179,23 @@ class PackagedSFTResult:
     artifacts: tuple
 
 
+def _installed_python_digest(executable: str) -> str:
+    physical_python = Path(executable).resolve(strict=True)
+    return _digest(stable_read(physical_python, 256 * 1024 * 1024))
+
+
 def _inspect_release(release):
     """Measure the installed wheel graph, never a source checkout or Git tree."""
     from tuner.runtime.packaged_training_worker import inspect_installed_runtime
     expected = json.loads(stable_read(Path("/opt/synaptic-runtime/build-inputs.json")))
     if (sys.implementation.name != release.python_implementation
             or platform.python_version() != release.python_version
-            or str(Path(sys.executable)) != release.python_executable
-            or _digest(stable_read(Path(release.python_executable), 256 * 1024 * 1024)) != release.python_executable_digest):
+            or str(Path(sys.executable)) != release.python_executable):
+        raise ValueError
+    # A venv executable may be a symlink to the immutable image's physical
+    # interpreter. Keep the configured invocation path exact, then hash the
+    # resolved regular file through the no-follow stable reader.
+    if _installed_python_digest(release.python_executable) != release.python_executable_digest:
         raise ValueError
     measured = inspect_installed_runtime(expected)
     document = release.to_dict()

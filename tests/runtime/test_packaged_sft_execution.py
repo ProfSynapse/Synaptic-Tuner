@@ -323,6 +323,21 @@ def test_exact_python_version_rejected_before_inventory_inspection(monkeypatch):
     assert not calls
 
 
+def test_installed_python_digest_resolves_pinned_venv_symlink(tmp_path):
+    physical = tmp_path / "python3.12"
+    physical.write_bytes(b"reviewed interpreter")
+    venv = tmp_path / "venv"
+    venv.mkdir()
+    executable = venv / "python3"
+    try:
+        executable.symlink_to(physical)
+    except OSError:
+        pytest.skip("symlink creation unavailable on this host")
+    assert seam._installed_python_digest(str(executable)) == seam._digest(b"reviewed interpreter")
+    physical.write_bytes(b"substituted interpreter")
+    assert seam._installed_python_digest(str(executable)) != seam._digest(b"reviewed interpreter")
+
+
 @pytest.mark.parametrize("name", ["PATH", "LD_LIBRARY_PATH"])
 def test_caller_loader_search_paths_are_rejected(material, name):
     material["environment"] = ((name, "/hostile"),)
