@@ -126,6 +126,50 @@ def test_protected_action_option_allowlists_are_frozen():
             "--base-dir", "--env-file", "--experiment-id", "--json",
             "--manifest", "--project-root",
         }),
+        ("modal-runtime-release", "preflight"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest",
+            "--project-root", "--release-plan",
+        }),
+        ("modal-runtime-release", "approve"): frozenset({
+            "--authorization-reference", "--base-dir", "--expires-at",
+            "--issued-at", "--json", "--manifest", "--project-root",
+            "--release-ref",
+        }),
+        ("modal-runtime-release", "execute"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest",
+            "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "recover"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest",
+            "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "observe"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest",
+            "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "verify"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest",
+            "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-preflight"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-approve"): frozenset({
+            "--authorization-reference", "--base-dir", "--expires-at", "--issued-at",
+            "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-execute"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-recover"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-observe"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-verify"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+        }),
     }
 
 
@@ -143,6 +187,18 @@ def test_protected_action_option_allowlists_are_frozen():
         (["hf-training-smoke", "recover", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "recover")),
         (["hf-training-smoke", "observe", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "observe")),
         (["hf-training-smoke", "verify", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "verify")),
+        (["modal-runtime-release", "preflight", "--release-plan=release.json", "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "preflight")),
+        (["modal-runtime-release", "approve", "--release-ref=" + "a" * 64, "--authorization-reference=chat", "--issued-at=2026-09-22T00:00:00Z", "--expires-at=2026-09-22T00:15:00Z", "--base-dir=C:/external"], ("modal-runtime-release", "approve")),
+        (["modal-runtime-release", "execute", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "execute")),
+        (["modal-runtime-release", "recover", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "recover")),
+        (["modal-runtime-release", "observe", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "observe")),
+        (["modal-runtime-release", "verify", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "verify")),
+        (["modal-runtime-release", "qualify-preflight", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-preflight")),
+        (["modal-runtime-release", "qualify-approve", "--release-ref=" + "a" * 64, "--authorization-reference=chat", "--issued-at=2026-09-22T00:00:00Z", "--expires-at=2026-09-22T00:15:00Z", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-approve")),
+        (["modal-runtime-release", "qualify-execute", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-execute")),
+        (["modal-runtime-release", "qualify-recover", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-recover")),
+        (["modal-runtime-release", "qualify-observe", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-observe")),
+        (["modal-runtime-release", "qualify-verify", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-verify")),
     ],
 )
 def test_protected_action_allowlists_accept_equals_syntax(argv, expected):

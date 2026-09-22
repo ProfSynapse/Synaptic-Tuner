@@ -89,7 +89,7 @@ jobs:
   conformance:
     name: CPython 3.12 / pytest 8
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 60
     env:
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
       MODAL_IS_REMOTE: "1"

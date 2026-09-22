@@ -1,4 +1,8 @@
+import argparse
+import ast
 from pathlib import Path
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -84,6 +88,61 @@ def test_train_sft_threads_protected_revision_and_evidence_without_ambient_token
     assert "finalize_protected_evidence(" in source
 
 
+def test_train_sft_persists_runtime_profile_in_metadata_and_lineage() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(
+        encoding="utf-8"
+    )
+
+    for flag in (
+        '"--runtime-profile-name"',
+        '"--runtime-profile-digest"',
+        '"--runtime-inventory-digest"',
+        '"--runtime-image"',
+    ):
+        assert flag in source
+    assert '"runtime_profile": resolved_runtime_profile' in source
+    assert '"revision": config.model.model_revision' in source
+    assert 'lineage["runtime_profile"] = profile_metadata' in source
+    dry_run_start = source.index("if args.dry_run:")
+    dry_run_end = source.index("# Extract previous log entries", dry_run_start)
+    dry_run_block = source[dry_run_start:dry_run_end]
+    assert 'lineage["dry_run"] = True' in dry_run_block
+    assert "save_training_lineage(lineage, run_dir)" in dry_run_block
+    assert 'run_metadata["lineage_path"]' in dry_run_block
+
+
+def test_train_sft_disables_argparse_long_option_abbreviation() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'description="SFT Training for RTX 3090", allow_abbrev=False' in source
+
+    parsed = ast.parse(source)
+    functions = {
+        node.name: node
+        for node in parsed.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_parse_init_lora_weights", "parse_args"}
+    }
+    namespace = {"argparse": argparse}
+    exec(
+        compile(
+            ast.Module(body=list(functions.values()), type_ignores=[]),
+            "train_sft_argparse_subset",
+            "exec",
+        ),
+        namespace,
+    )
+    for argv in (
+        ["--model-rev", "other"],
+        ["--model-rev=other"],
+        ["--runtime-im", "example/image"],
+    ):
+        with pytest.raises(SystemExit):
+            namespace["parse_args"](argv)
+
+
 def test_train_sft_exposes_aux_head_cli_flags() -> None:
     # train_sft imports unsloth at module load, so verify the local-run lane's
     # aux_head argparse surface at the source level. All 12 flags must exist so
@@ -151,6 +210,43 @@ def test_train_sft_threads_prompt_render_and_warns_on_off_anchor_combo() -> None
     assert 'aux_head_cfg.token_position == "end_of_prompt"' in source
     assert 'config.training.prompt_render == "full_conversation"' in source
     assert "WARNING: aux_head token_position='end_of_prompt'" in source
+
+
+def test_train_sft_threads_explicit_preassigned_splits_and_records_raw_lineage() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    config_source = (
+        REPO_ROOT / "Trainers" / "sft" / "configs" / "config_loader.py"
+    ).read_text(encoding="utf-8")
+
+    assert "use_preassigned_splits: bool = False" in config_source
+    assert 'preprocessing_metadata["dataset_format"] = prepared_dataset_format' in source
+    assert '"loss_mask_mode": loss_mask_mode' in source
+    assert "use_preassigned_splits=getattr(" in source
+    assert "assistant_only_loss_requested=config.training.assistant_only_loss" in source
+    assert "aux_token_position=aux_head_cfg.token_position if aux_head_enabled else None" in source
+    for flag in (
+        '"--completion-only-loss"',
+        '"--no-completion-only-loss"',
+        '"--assistant-only-loss"',
+        '"--no-assistant-only-loss"',
+        '"--use-preassigned-splits"',
+        '"--no-use-preassigned-splits"',
+    ):
+        assert flag in source
+    assert 'dataset_preparation_metadata: dict[str, str] = {}' in source
+    assert 'prepared_dataset_format in {"raw_text", "messages"}' in source
+
+
+def test_train_sft_has_fail_closed_memory_efficient_loss_gate() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    config_source = (
+        REPO_ROOT / "Trainers" / "sft" / "configs" / "config_loader.py"
+    ).read_text(encoding="utf-8")
+
+    assert "require_memory_efficient_loss: bool = False" in config_source
+    assert '"--require-memory-efficient-loss"' in source
+    assert "require_unsloth_memory_efficient_loss(model)" in source
+    assert "SFT_LONG_CONTEXT_LOSS_GUARD_REQUIRED" in source
 
 
 def test_train_sft_revalidates_aux_head_coherence_after_cli_overrides() -> None:

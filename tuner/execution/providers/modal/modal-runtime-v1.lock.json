@@ -14,11 +14,11 @@
     },
     "bootstrap__synaptic_tuner__api__v1____init___py": {
       "path": "synaptic_tuner/api/v1/__init__.py",
-      "sha256": "f633c06fc5319a24b4826b7b09b5565425b259ff799094c693c3907f22ad8a02"
+      "sha256": "a8d106a373d46e9d48bb80844bdc8cb84c7094d7153e9c97614294d516c23619"
     },
     "bootstrap__synaptic_tuner__api__v1___contract_py": {
       "path": "synaptic_tuner/api/v1/_contract.py",
-      "sha256": "e63846c96924707e79473cb4a13644a1901da5e56f4f303be482afb776d83f6b"
+      "sha256": "dcd6fc1ebdc75fbfd74ad4c6c96837b73209081258353557fedaaca76164673a"
     },
     "bootstrap__synaptic_tuner__api__v1___timestamps_py": {
       "path": "synaptic_tuner/api/v1/_timestamps.py",
@@ -30,7 +30,7 @@
     },
     "bootstrap__synaptic_tuner__api__v1__execution_py": {
       "path": "synaptic_tuner/api/v1/execution.py",
-      "sha256": "e92cd4d93cc5c130852dd15f24344befc617aef55bbfacd8b92eed9baf8f6884"
+      "sha256": "3309cbfdea5a7746b0463147a22bb61d8e14028134ef5a2b05dadcad985fdfbc"
     },
     "bootstrap__synaptic_tuner__api__v1__planning_py": {
       "path": "synaptic_tuner/api/v1/planning.py",
@@ -54,11 +54,11 @@
     },
     "bootstrap__synaptic_tuner__api__v1__training_facade_py": {
       "path": "synaptic_tuner/api/v1/training_facade.py",
-      "sha256": "6be0807734cc90cebd624f019d4ff46e9d9c29d7e0c62ea8621c95e917f05600"
+      "sha256": "bf094d0e152f5861bf8a8ff51962e0700123d9b43ed91d914b9e78bbea6facd9"
     },
     "bootstrap__synaptic_tuner__api__v1__training_input_py": {
       "path": "synaptic_tuner/api/v1/training_input.py",
-      "sha256": "0bed2af4bae42ec280626ed7602dfa14a16eda2a10df85517d4c2e56a7b32b32"
+      "sha256": "ddb3567475515b8172a0ced6b03928bc026f6af8ba28a926611b0a1446687d64"
     },
     "bootstrap__tuner____init___py": {
       "path": "tuner/__init__.py",
@@ -194,7 +194,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__config_py": {
       "path": "tuner/execution/providers/modal/config.py",
-      "sha256": "2f6b39924d55b0a7b07ee75c562f5f29a3b8dc53c547bfaa548977b66eccf762"
+      "sha256": "bfa32ed26f3b8ece5e89e1a3524cb81e85ae3240e72ce93430ffb82dbb02f525"
     },
     "bootstrap__tuner__execution__providers__modal__contracts_py": {
       "path": "tuner/execution/providers/modal/contracts.py",
@@ -214,7 +214,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_bundle_py": {
       "path": "tuner/execution/providers/modal/coordinator_bundle.py",
-      "sha256": "604b6ad3e954a7c9ee9696569ed405f8009dbf8a6b94b72987c0787520a28897"
+      "sha256": "8fee0cc9fabcc3a78ae1f1871b55e343e8cb74423734793905be2d702fcff60a"
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_dispatch_py": {
       "path": "tuner/execution/providers/modal/coordinator_dispatch.py",
@@ -226,15 +226,15 @@
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_producer_py": {
       "path": "tuner/execution/providers/modal/coordinator_producer.py",
-      "sha256": "a1d02b4af9a8d877aa81c6400aaef31f50b0c9cbed9a2bc04b2d042a53af8f78"
+      "sha256": "7cf35df7e9ed4a005fd742bba3597d5d720811d12edc661131a3af81ea319cd6"
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_wire_py": {
       "path": "tuner/execution/providers/modal/coordinator_wire.py",
-      "sha256": "1b87cef9e8edbc4f522981d9a55feabb370972502f79f5670b8b57e782548c3e"
+      "sha256": "07d46b92b33e30cb45bb6b1139ce4f80afdb09e1a17a3f3c2526ddcfae6983c9"
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_worker_py": {
       "path": "tuner/execution/providers/modal/coordinator_worker.py",
-      "sha256": "0600448a08a622f42f17e00176cdafc506bc14826b893ac9213c83ab1d8cfc6a"
+      "sha256": "9230064f684fa0313820a2986614c19447d58c5df0c9f1e3cca4a6ee42f163b4"
     },
     "bootstrap__tuner__execution__providers__modal__deployment_identity_py": {
       "path": "tuner/execution/providers/modal/deployment_identity.py",
@@ -318,23 +318,23 @@
     },
     "bootstrap__tuner__runtime__manifests__offline-sft-worker-v1_json": {
       "path": "tuner/runtime/manifests/offline-sft-worker-v1.json",
-      "sha256": "5a0a856994f0648080af75e62cc4dfddf01b0978eb48c0b6cc2eea0549a300cd"
+      "sha256": "ebbaef787a93ea0af7e3705fc06a187dd44c708804d75d6bcece43bd6e7cbcb1"
     },
     "bootstrap__tuner__runtime__offline_sft_worker_py": {
       "path": "tuner/runtime/offline_sft_worker.py",
-      "sha256": "dfd7fffbb87cd67b7e7f5e06002b39a4ab8f2c6450a717ae765046b197c9b710"
+      "sha256": "b0889773413f2a7147b22ce29a255dc50a7055ba2a01b5e71b91a094fe462b27"
     },
     "bootstrap__tuner__training____init___py": {
       "path": "tuner/training/__init__.py",
-      "sha256": "527b020c19f556837408af7a6ab80b912e4af84f55df69f9b3fd64d21ca86721"
+      "sha256": "d8e18a17937449fa4abe793bd1f9aa05823301c7374b711f78f395931576d22d"
     },
     "bootstrap__tuner__training__contracts_py": {
       "path": "tuner/training/contracts.py",
-      "sha256": "03edde04614f3c8da096d120b21a56ac9bd25d8164f8955994de98a6a8cb2db2"
+      "sha256": "78ae67a00c7b8ee4446bbb29d9202d1d43a051206ddc603a69822e694016de84"
     },
     "bootstrap__tuner__training__coordinator_material_py": {
       "path": "tuner/training/coordinator_material.py",
-      "sha256": "08329d5be523d7fee26ffd53f7cb5c751737d6ab868029d3895657dbf6a0ea4c"
+      "sha256": "98e10dc7cb297a696bd4e4a49263a9a4032ac889632d502fa61bac5705ab3fa0"
     },
     "bootstrap__tuner__training__methods____init___py": {
       "path": "tuner/training/methods/__init__.py",
@@ -342,11 +342,11 @@
     },
     "bootstrap__tuner__training__methods__sft_py": {
       "path": "tuner/training/methods/sft.py",
-      "sha256": "57dd1e628d8eee49d4886a0da01781cde36ebdba373e114cc16ec55179f12f89"
+      "sha256": "63d775d6b56e31dbe042defd916f4521e17acd3c1bf837e567860f4124344d21"
     },
     "bootstrap__tuner__training__recipes_py": {
       "path": "tuner/training/recipes.py",
-      "sha256": "a293025c84f108a8e9bc99f8963de4b01f44daee7a8bd86eb02bf1d48fcda37f"
+      "sha256": "0b589222259c854d1c26e630cd2c716ca1204740a3407c5bf49ab7273c0f55f3"
     },
     "bootstrap__tuner__training__resolution_py": {
       "path": "tuner/training/resolution.py",
@@ -354,7 +354,7 @@
     },
     "bootstrap__tuner__training__service_py": {
       "path": "tuner/training/service.py",
-      "sha256": "42798dee6c1cc679075768e97d0ff1886e98ae43ef4dc98d59dbb78ca43e451b"
+      "sha256": "1fa000dd75322c07ea4598046f5122439f27021b06ba83edf9cfbe02d7f70661"
     },
     "dependency_lock": {
       "path": "requirements/modal-launcher-v1.lock",
@@ -362,11 +362,15 @@
     },
     "deployment_wrapper": {
       "path": "tuner/execution/providers/modal/coordinator_deployment.py",
-      "sha256": "d7458beb2146804a5632e2261c877634be208723f60487cd915392b134a67b85"
+      "sha256": "f22e54af85efdb4e966c6f509ee68b8029b8f3a5b3335d8fa76a023c3971c792"
     },
     "modal_mounted_io": {
       "path": "tuner/execution/providers/modal/mounted_io.py",
-      "sha256": "70d67b5d8efd496fb68b059a1eb52558d7a337900199b5194b3f21cce145b52c"
+      "sha256": "e49da2e749d3be1ca19fdc7f581b29fb6d1e748a86fffcf0fde2be5cdc1a0d5b"
+    },
+    "modal_prepared_input": {
+      "path": "tuner/execution/providers/modal/prepared_input.py",
+      "sha256": "c16cef5cfcc73ab9a7826977b26e18912ac46409d91b9eae165893ed265896ac"
     },
     "modal_runtime": {
       "path": "tuner/execution/providers/modal/runtime.py",
@@ -374,7 +378,7 @@
     },
     "modal_worker_ports": {
       "path": "tuner/execution/providers/modal/worker_ports.py",
-      "sha256": "78fbbbf14a7ae2c5b2bc66a061b43c126cb1f7ac2635a3a934280daf738e6c76"
+      "sha256": "adf334368dbb75e40177078cd32aedc445cd9dde8b5ece2401319d472dbccdb0"
     },
     "modal_worker_source": {
       "path": "tuner/execution/providers/modal/worker_source.py",
@@ -386,7 +390,7 @@
     },
     "sft_runtime": {
       "path": "Trainers/sft/runtime_v1.py",
-      "sha256": "8a9f5b125a97606c59108056eff5b3adb76dd3198592f03af1dd50c40b6747d2"
+      "sha256": "bef46e2965d19529329f4f981bade9035008fb80c822c615c1e0fb6f55cba340"
     }
   },
   "ml_stack": {

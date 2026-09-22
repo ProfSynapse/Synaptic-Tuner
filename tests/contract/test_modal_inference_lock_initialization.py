@@ -64,9 +64,14 @@ def test_proposal_is_deterministic_and_read_only(tmp_path):
     closure = json.loads(first[tool.CLOSURE_RELATIVE])
     runtime = json.loads(first[tool.RUNTIME_RELATIVE])
     dependency = json.loads(first[tool.DEPENDENCY_RELATIVE])
-    assert closure["member_count"] == len(tool.SOURCE_MEMBERS) == 118
+    assert (
+        closure["member_count"]
+        == len(tool.SOURCE_MEMBERS)
+        == tool.SOURCE_MEMBER_COUNT
+        == 119
+    )
     assert [item["path"] for item in closure["members"]] == list(tool.SOURCE_MEMBERS)
-    assert len(runtime["source_inventory"]) == 120
+    assert len(runtime["source_inventory"]) == 121
     assert dependency["distributions"] == runtime["distributions"]
     assert dependency["base_registry_reference"] == runtime["base_registry_reference"]
     assert dependency["provenance"]["status"] == "ACCEPTED_AS_STARTING_PINS_ONLY"
@@ -193,13 +198,13 @@ def test_cli_default_only_reports_proposal(tmp_path, capsys):
     assert tool.main(argv, root=root) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "PROPOSED"
-    assert report["member_count"] == 118
+    assert report["member_count"] == tool.SOURCE_MEMBER_COUNT == 119
     assert all(not (root / relative).exists() for relative in report["resource_sha256"])
 
 
 def test_initializer_does_not_modify_hash_only_maintainer_contract():
     assert tool.SOURCE_MEMBERS is tool._maintenance.SOURCE_MEMBERS
-    assert len(tool.SOURCE_MEMBERS) == 118
+    assert len(tool.SOURCE_MEMBERS) == tool.SOURCE_MEMBER_COUNT == 119
     assert not hasattr(tool._maintenance, "initialize")
 
 

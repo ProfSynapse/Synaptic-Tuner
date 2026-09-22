@@ -149,6 +149,38 @@ def _config(*, model_revision: str = "b" * 40) -> CanonicalDocument:
     )
 
 
+def _prepared_config() -> CanonicalDocument:
+    value = _config().to_dict()
+    digest = "f" * 64
+    value["dataset"] = {
+        "ref": f"prepared://sha256/{digest}",
+        "revision": digest,
+        "content_digest": "e" * 64,
+        "size_bytes": 123,
+        "format": "syntunia-sft-row/v1",
+    }
+    return CanonicalDocument.from_mapping(value)
+
+
+def _prepared_message_config() -> CanonicalDocument:
+    value = _prepared_config().to_dict()
+    value["dataset"]["format"] = "syntunia-sft-row/v2"
+    value["sft"].update(
+        {
+            "max_seq_length": 32768,
+            "dataset_format": "messages",
+            "packing": False,
+            "completion_only_loss": True,
+            "assistant_only_loss": False,
+            "prompt_render": "prompt_completion",
+            "require_memory_efficient_loss": True,
+            "use_preassigned_splits": True,
+            "split_dataset": False,
+        }
+    )
+    return CanonicalDocument.from_mapping(value)
+
+
 def test_sft_workload_is_canonical_and_deterministic() -> None:
     first = compile_sft_workload(
         resolved_config=_config(), execution_source=_execution_source()
@@ -176,6 +208,53 @@ def test_sft_workload_is_canonical_and_deterministic() -> None:
         requirements["allowed_environment"]
     )
     assert "python_executable" not in json.dumps(requirements)
+
+
+def test_prepared_dataset_identity_is_preserved_without_private_location() -> None:
+    workload = compile_sft_workload(
+        resolved_config=_prepared_config(), execution_source=_execution_source()
+    )
+
+    dataset = workload.document["identities"]["dataset"]
+    assert dataset == _prepared_config().to_dict()["dataset"]
+    _workload_validator().validate(workload.document)
+    encoded = workload.canonical_bytes
+    assert b"dataset.jsonl" not in encoded
+    assert b"private" not in encoded
+
+
+def test_prepared_authoritative_messages_identity_is_preserved() -> None:
+    workload = compile_sft_workload(
+        resolved_config=_prepared_message_config(), execution_source=_execution_source()
+    )
+    assert workload.document["identities"]["dataset"]["format"] == (
+        "syntunia-sft-row/v2"
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["dataset"].update(ref="prepared://sha256/not-a-digest"),
+        lambda value: value["dataset"].update(revision="0" * 64),
+        lambda value: value["dataset"].update(content_digest="short"),
+        lambda value: value["dataset"].update(size_bytes=True),
+        lambda value: value["dataset"].update(size_bytes=0),
+        lambda value: value["dataset"].update(format="raw_text"),
+        lambda value: value["dataset"].update(path="private/dataset.jsonl"),
+    ],
+)
+def test_prepared_dataset_identity_rejects_malformed_or_nonexact_fields(
+    mutation,
+) -> None:
+    value = _prepared_config().to_dict()
+    mutation(value)
+
+    with pytest.raises((TypeError, ValueError)):
+        compile_sft_workload(
+            resolved_config=CanonicalDocument.from_mapping(value),
+            execution_source=_execution_source(),
+        )
 
 
 def test_allowed_environment_admits_the_redirected_cache_roots_and_not_tmpdir() -> None:

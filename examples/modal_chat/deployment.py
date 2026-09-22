@@ -357,23 +357,55 @@ class ModalChatOwnedDeployment:
             scope.observe(scope.client)
             prior = self._read_current()
             if prior is not None:
-                if (
-                    type(prior) is not CurrentModalDeployment
-                    or prior.deployed is not True
-                    or type(prior.generation) is not int
-                    or prior.generation <= 0
-                    or any(
-                        name == self._selection.function_name
-                        for name, _ in prior.function_ids
-                    )
-                ):
+                if type(prior) is not CurrentModalDeployment:
                     raise ValueError
+                if prior.deployed is True:
+                    if (
+                        not prior.app_id
+                        or type(prior.generation) is not int
+                        or prior.generation <= 0
+                        or any(
+                            name == self._selection.function_name
+                            for name, _ in prior.function_ids
+                        )
+                    ):
+                        raise ValueError
+                    safe_ref(prior.app_id, "app_id")
+                    prestate_kind = "DEPLOYED"
+                elif prior.deployed is False:
+                    if (
+                        prior.app_id != ""
+                        or not prior.previous_app_id
+                        or type(prior.generation) is not int
+                        or prior.generation <= 0
+                        or prior.class_ids != ()
+                        or prior.functions != ()
+                        or any(
+                            name == self._selection.function_name
+                            for name, _ in prior.function_ids
+                        )
+                    ):
+                        raise ValueError
+                    safe_ref(prior.previous_app_id, "previous_app_id")
+                    prestate_kind = "STOPPED"
+                else:
+                    raise ValueError
+            else:
+                prestate_kind = "ABSENT"
             prestate = canonical_bytes(
                 {
-                    "schema_version": "synaptic-modal-chat-deployment-prestate/v1",
+                    "schema_version": "synaptic-modal-chat-deployment-prestate/v2",
+                    "state": prestate_kind,
                     "app_absent": prior is None,
                     "app_id": (
-                        None if prior is None else safe_ref(prior.app_id, "app_id")
+                        None
+                        if prior is None or prior.app_id == ""
+                        else safe_ref(prior.app_id, "app_id")
+                    ),
+                    "previous_app_id": (
+                        None
+                        if prior is None or prior.previous_app_id == ""
+                        else safe_ref(prior.previous_app_id, "previous_app_id")
                     ),
                     "deployment_generation": (
                         None if prior is None else prior.generation
@@ -446,8 +478,14 @@ class ModalChatOwnedDeployment:
             identity = self._function_identity(objects.function)
             if objects.app.app_id != identity["app_id"]:
                 raise ValueError
-            if prior is not None and prior.app_id != identity["app_id"]:
-                raise ValueError
+            if prior is not None:
+                if prior.deployed is True and prior.app_id != identity["app_id"]:
+                    raise ValueError
+                if (
+                    prior.deployed is False
+                    and prior.previous_app_id == identity["app_id"]
+                ):
+                    raise ValueError
             if [
                 objects.control_volume.object_id,
                 objects.artifact_volume.object_id,
@@ -474,7 +512,11 @@ class ModalChatOwnedDeployment:
                 raise ValueError
             scope.observe(scope.client)
             current = self._read_current()
-            expected_generation = 1 if prior is None else prior.generation + 1
+            expected_generation = (
+                prior.generation + 1
+                if prior is not None and prior.deployed is True
+                else 1
+            )
             definition_available = self._validate_current(
                 current,
                 app_id=identity["app_id"],

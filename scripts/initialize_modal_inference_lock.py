@@ -58,6 +58,7 @@ _maintenance = _load_sibling("regenerate_modal_inference_lock.py")
 _runtime_reader = _load_sibling("regenerate_modal_runtime_lock.py")
 _capture = _load_sibling("capture_modal_inference_runtime.py")
 SOURCE_MEMBERS = _maintenance.SOURCE_MEMBERS
+SOURCE_MEMBER_COUNT = _maintenance.SOURCE_MEMBER_COUNT
 RUNTIME_RELATIVE = _maintenance.RUNTIME_RELATIVE
 CLOSURE_RELATIVE = _maintenance.CLOSURE_RELATIVE
 DEPENDENCY_RELATIVE = _maintenance.DEPENDENCY_RELATIVE
@@ -310,8 +311,8 @@ def proposal(
         raise InitializationFault("BASE_IMAGE_INVALID")
     if (
         SOURCE_MEMBERS != tuple(sorted(SOURCE_MEMBERS))
-        or len(SOURCE_MEMBERS) != 118
-        or len(set(SOURCE_MEMBERS)) != 118
+        or len(SOURCE_MEMBERS) != SOURCE_MEMBER_COUNT
+        or len(set(SOURCE_MEMBERS)) != SOURCE_MEMBER_COUNT
     ):
         raise InitializationFault("FIXED_INVENTORY_INVALID")
     evidence_bytes = _read(root, accepted_evidence, _MAX_EVIDENCE_BYTES)
@@ -522,7 +523,7 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
     print(
         json.dumps(
             {
-                "member_count": 118,
+                "member_count": SOURCE_MEMBER_COUNT,
                 "status": "INITIALIZED" if args.write else "PROPOSED",
                 "resource_sha256": {
                     path: hashlib.sha256(payload).hexdigest()

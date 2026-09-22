@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-packaged-training-runtime-release-v1.schema.json",
+  "title": "Synaptic Packaged Training Runtime Release v1",
+  "description": "Structural schema. Signed runtime-fact keys are portable bounded ASCII identifiers; Unicode is admitted only in NFC values. The canonical parser additionally enforces sorted arrays, alias-free exact built-ins, global runtime-fact depth/node/text limits, cross-field image digest equality, and the release manifest digest. Release refs are opaque identity material, never paths or dereferenceable URIs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "release_ref", "package", "worker", "image", "python",
+    "installed_distributions", "platform", "compatibility", "contracts", "manifest_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "synaptic-packaged-training-runtime-release/v1"},
+    "release_ref": {"$ref": "#/$defs/opaqueRef"},
+    "package": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "version", "digest", "source_provenance_digest"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$"},
+        "version": {"$ref": "#/$defs/version"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "source_provenance_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "worker": {
+      "type": "object", "additionalProperties": false,
+      "required": ["entrypoint", "closure_digest"],
+      "properties": {
+        "entrypoint": {"type": "string", "maxLength": 512, "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*:[A-Za-z_][A-Za-z0-9_]*$"},
+        "closure_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "image": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reference", "digest"],
+      "properties": {
+        "reference": {"type": "string", "maxLength": 512, "pattern": "^[a-z0-9](?:[a-z0-9._:/-]{0,510}[a-z0-9])?@sha256:[0-9a-f]{64}$"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "python": {
+      "type": "object", "additionalProperties": false,
+      "required": ["implementation", "version", "executable", "executable_digest"],
+      "properties": {
+        "implementation": {"const": "cpython"},
+        "version": {"$ref": "#/$defs/version"},
+        "executable": {"type": "string", "pattern": "^/[^\\\\]*$", "maxLength": 512},
+        "executable_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "installed_distributions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["digest", "count"],
+      "properties": {
+        "digest": {"$ref": "#/$defs/digest"},
+        "count": {"type": "integer", "minimum": 1, "maximum": 1000000}
+      }
+    },
+    "platform": {
+      "type": "object", "additionalProperties": false,
+      "required": ["system", "machine", "cuda_version", "runtime_facts"],
+      "properties": {
+        "system": {"$ref": "#/$defs/safeRef"},
+        "machine": {"$ref": "#/$defs/safeRef"},
+        "cuda_version": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/version"}]},
+        "runtime_facts": {"$ref": "#/$defs/runtimeFacts"}
+      }
+    },
+    "compatibility": {
+      "type": "object", "additionalProperties": false,
+      "required": ["methods", "models", "dataset_formats"],
+      "properties": {
+        "methods": {"$ref": "#/$defs/sortedRefs"},
+        "models": {
+          "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["ref", "revision"],
+            "properties": {
+              "ref": {"$ref": "#/$defs/safeRef"},
+              "revision": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"}
+            }
+          }
+        },
+        "dataset_formats": {"$ref": "#/$defs/sortedRefs"}
+      }
+    },
+    "contracts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["workload_schema", "prepared_input_schema", "artifact_contract_schema"],
+      "properties": {
+        "workload_schema": {"$ref": "#/$defs/safeRef"},
+        "prepared_input_schema": {"$ref": "#/$defs/safeRef"},
+        "artifact_contract_schema": {"$ref": "#/$defs/safeRef"}
+      }
+    },
+    "manifest_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "safeRef": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+\\-]{0,511}$"},
+    "opaqueRef": {
+      "type": "string", "minLength": 1, "maxLength": 256,
+      "description": "Opaque identity material; not a filesystem path or dereferenceable URI.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+\\-]{0,255}$"
+    },
+    "version": {"type": "string", "maxLength": 128, "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:[A-Za-z0-9.+\\-]{0,64})?$"},
+    "sortedRefs": {
+      "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/safeRef"}
+    },
+    "runtimeFacts": {
+      "type": "object", "maxProperties": 128,
+      "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"},
+      "additionalProperties": {"$ref": "#/$defs/runtimeFactValue"}
+    },
+    "runtimeFactValue": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991},
+        {"type": "string", "maxLength": 4096},
+        {
+          "type": "array", "maxItems": 128,
+          "items": {"$ref": "#/$defs/runtimeFactValue"}
+        },
+        {
+          "type": "object", "maxProperties": 128,
+          "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"},
+          "additionalProperties": {"$ref": "#/$defs/runtimeFactValue"}
+        }
+      ]
+    }
+  }
+}

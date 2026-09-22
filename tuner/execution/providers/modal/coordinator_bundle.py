@@ -34,6 +34,13 @@ from tuner.training.recipes import RecipeRegistry
 
 from .config import ModalRuntimeLockV1
 from .coordinator_binding import ModalCommandBinding
+from .prepared_input import (
+    MAX_PRIVATE_DATASET_BYTES,
+    PRIVATE_DATASET_MEMBER,
+    PREPARED_INPUT_DESCRIPTOR_MEMBER,
+    MountedPreparedInputDescriptor,
+    bind_private_dataset,
+)
 from .resolution import VerifiedModalDeploymentIdentityV1
 
 MAX_TRANSPORT_BYTES = 8_388_608
@@ -41,6 +48,8 @@ MAX_CANONICAL_BYTES = 6_291_456
 MAX_MEMBER_BYTES = 1_048_576
 MAX_MEMBER_TOTAL_BYTES = 4_194_304
 BUNDLE_SCHEMA = "synaptic-modal-coordinator-bundle/v2"
+PREPARED_BUNDLE_SCHEMA = "synaptic-modal-coordinator-bundle/v3"
+MOUNTED_PREPARED_BUNDLE_SCHEMA = "synaptic-modal-coordinator-bundle/v4"
 MEMBER_NAMES = (
     "artifact-contract.json",
     "deployment.json",
@@ -50,6 +59,10 @@ MEMBER_NAMES = (
     "stage-plan.json",
     "worker-closure-manifest.json",
     "workload.json",
+)
+PREPARED_MEMBER_NAMES = tuple(sorted((*MEMBER_NAMES, PRIVATE_DATASET_MEMBER)))
+MOUNTED_PREPARED_MEMBER_NAMES = tuple(
+    sorted((*MEMBER_NAMES, PREPARED_INPUT_DESCRIPTOR_MEMBER))
 )
 _B64 = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
 _JWT = re.compile(r"^[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}$")
@@ -351,14 +364,19 @@ def _expected_plan(
 @dataclass(frozen=True, slots=True)
 class CoordinatorBundleMember:
     name: str
-    content: bytes
+    content: bytes = field(repr=False)
 
     def __post_init__(self) -> None:
-        if self.name not in MEMBER_NAMES:
+        if self.name not in set(PREPARED_MEMBER_NAMES) | set(MOUNTED_PREPARED_MEMBER_NAMES):
             raise ValueError("unknown coordinator bundle member")
+        maximum = (
+            MAX_PRIVATE_DATASET_BYTES
+            if self.name == PRIVATE_DATASET_MEMBER
+            else MAX_MEMBER_BYTES
+        )
         if (
             type(self.content) is not bytes
-            or not 0 < len(self.content) <= MAX_MEMBER_BYTES
+            or not 0 < len(self.content) <= maximum
         ):
             raise ValueError("coordinator bundle member exceeds its bound")
 
@@ -489,6 +507,25 @@ def _validate(bundle: "ModalCoordinatorBundle") -> None:
         != source.canonical_bytes
     ):
         raise ValueError("workload embeds a different execution source")
+    dataset = workload_document.get("configuration", {}).get("document", {}).get(
+        "dataset"
+    )
+    private_member = members.get(PRIVATE_DATASET_MEMBER)
+    descriptor_member = members.get(PREPARED_INPUT_DESCRIPTOR_MEMBER)
+    descriptor = (
+        None
+        if descriptor_member is None
+        else MountedPreparedInputDescriptor.parse(descriptor_member.content)
+    )
+    if descriptor is not None and descriptor != MountedPreparedInputDescriptor.create(
+        descriptor.identity, stage_effect_id=command.operation.effect.effect_id,
+    ):
+        raise ValueError("prepared input descriptor is not stage scoped")
+    bind_private_dataset(
+        dataset,
+        None if private_member is None else private_member.content,
+        descriptor,
+    )
     artifact = _object(members["artifact-contract.json"].content, "artifact contract")
     _artifact(artifact)
     if members["artifact-contract.json"].content != material.artifact_contract_bytes:
@@ -529,7 +566,38 @@ class ModalCoordinatorBundle:
         members = tuple(self.members)
         if any(type(member) is not CoordinatorBundleMember for member in members):
             raise TypeError("exact CoordinatorBundleMember values required")
-        if tuple(sorted(member.name for member in members)) != MEMBER_NAMES:
+        workload_document = parse_workload_object(material.workload_bytes)
+        dataset = workload_document.get("configuration", {}).get("document", {}).get(
+            "dataset"
+        )
+        private_members = tuple(
+            member for member in members if member.name == PRIVATE_DATASET_MEMBER
+        )
+        descriptor_members = tuple(
+            member
+            for member in members
+            if member.name == PREPARED_INPUT_DESCRIPTOR_MEMBER
+        )
+        descriptor = (
+            MountedPreparedInputDescriptor.parse(descriptor_members[0].content)
+            if len(descriptor_members) == 1
+            else None
+        )
+        bind_private_dataset(
+            dataset,
+            private_members[0].content if len(private_members) == 1 else None,
+            descriptor,
+        )
+        if private_members and descriptor_members:
+            raise ValueError("coordinator bundle prepared transport is ambiguous")
+        expected_names = (
+            PREPARED_MEMBER_NAMES
+            if private_members
+            else MOUNTED_PREPARED_MEMBER_NAMES
+            if descriptor_members
+            else MEMBER_NAMES
+        )
+        if tuple(sorted(member.name for member in members)) != expected_names:
             raise ValueError("coordinator bundle requires the exact member set")
         if sum(len(member.content) for member in members) > MAX_MEMBER_TOTAL_BYTES:
             raise ValueError("coordinator bundle members exceed aggregate bound")
@@ -548,7 +616,16 @@ class ModalCoordinatorBundle:
     def to_dict(self) -> dict[str, object]:
         command = parse_exact_command(self.binding.command_bytes)
         return {
-            "schema_version": BUNDLE_SCHEMA,
+            "schema_version": (
+                PREPARED_BUNDLE_SCHEMA
+                if any(member.name == PRIVATE_DATASET_MEMBER for member in self.members)
+                else MOUNTED_PREPARED_BUNDLE_SCHEMA
+                if any(
+                    member.name == PREPARED_INPUT_DESCRIPTOR_MEMBER
+                    for member in self.members
+                )
+                else BUNDLE_SCHEMA
+            ),
             "stage_command_digest": command.digest,
             "binding_digest": self.binding.authenticated_binding_digest,
             "stage_effect_id": command.operation.effect.effect_id,
@@ -577,6 +654,8 @@ class ModalCoordinatorBundle:
         *,
         log_terminal_policy: bytes,
         worker_closure_manifest: bytes,
+        private_dataset_bytes: bytes | None = None,
+        mounted_prepared_input: MountedPreparedInputDescriptor | None = None,
     ) -> "ModalCoordinatorBundle":
         rebuilt, _ = _binding(binding)
         resolved = _material(material, recipes)
@@ -589,6 +668,20 @@ class ModalCoordinatorBundle:
             "resolved-material.json": resolved.canonical_bytes,
             "worker-closure-manifest.json": worker_closure_manifest,
         }
+        workload_document = parse_workload_object(resolved.workload_bytes)
+        dataset = workload_document.get("configuration", {}).get("document", {}).get(
+            "dataset"
+        )
+        private_binding = bind_private_dataset(
+            dataset, private_dataset_bytes, mounted_prepared_input,
+        )
+        if private_binding is not None:
+            if private_dataset_bytes is not None:
+                member_documents[PRIVATE_DATASET_MEMBER] = private_dataset_bytes
+            elif mounted_prepared_input is not None:
+                member_documents[PREPARED_INPUT_DESCRIPTOR_MEMBER] = (
+                    mounted_prepared_input.canonical_bytes
+                )
         members = {
             name: CoordinatorBundleMember(name, value)
             for name, value in member_documents.items()
@@ -646,7 +739,10 @@ class ModalCoordinatorBundle:
             },
             "coordinator bundle",
         )
-        if document["schema_version"] != BUNDLE_SCHEMA:
+        schema = document["schema_version"]
+        if schema not in {
+            BUNDLE_SCHEMA, PREPARED_BUNDLE_SCHEMA, MOUNTED_PREPARED_BUNDLE_SCHEMA,
+        }:
             raise ValueError("coordinator bundle schema unsupported")
         if (
             document["stage_command_digest"] != command.digest
@@ -656,7 +752,14 @@ class ModalCoordinatorBundle:
         ):
             raise ValueError("coordinator bundle identity differs from binding")
         values = document["members"]
-        if type(values) is not list or len(values) != len(MEMBER_NAMES):
+        expected_names = (
+            PREPARED_MEMBER_NAMES
+            if schema == PREPARED_BUNDLE_SCHEMA
+            else MOUNTED_PREPARED_MEMBER_NAMES
+            if schema == MOUNTED_PREPARED_BUNDLE_SCHEMA
+            else MEMBER_NAMES
+        )
+        if type(values) is not list or len(values) != len(expected_names):
             raise ValueError("coordinator bundle member collection is malformed")
         members = []
         for value in values:
@@ -670,7 +773,11 @@ class ModalCoordinatorBundle:
                 raise ValueError("bundle member content is not ASCII Base64")
             content = _decode(
                 item["content_base64"].encode("ascii"),
-                maximum=4 * ((MAX_MEMBER_BYTES + 2) // 3),
+                maximum=4 * (((
+                    MAX_PRIVATE_DATASET_BYTES
+                    if item["name"] == PRIVATE_DATASET_MEMBER
+                    else MAX_MEMBER_BYTES
+                ) + 2) // 3),
                 name="bundle member content",
             )
             if type(item["size"]) is not int or item["size"] != len(content):
@@ -679,6 +786,8 @@ class ModalCoordinatorBundle:
             if item["sha256"] != _sha(content):
                 raise ValueError("bundle member digest mismatch")
             members.append(CoordinatorBundleMember(item["name"], content))
+        if tuple(sorted(member.name for member in members)) != expected_names:
+            raise ValueError("coordinator bundle member collection is malformed")
         material_member = next(
             member for member in members if member.name == "resolved-material.json"
         )

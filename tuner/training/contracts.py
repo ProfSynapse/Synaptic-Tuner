@@ -4,16 +4,53 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Mapping, Protocol, runtime_checkable
+from threading import Lock
+from typing import TYPE_CHECKING, BinaryIO, Mapping, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from synaptic_tuner.api.v1.training_input import TrainingInputV1
     from tuner.project.context import ProjectContext
 
-from synaptic_tuner.api.v1._contract import contract_digest
+from synaptic_tuner.api.v1._contract import contract_digest, PreparedTrainingInputIdentity
 from tuner.project.execution_source import ExecutionSourceV1
+
+
+GitExecutionSourceV1 = ExecutionSourceV1
+# Host execution material is opaque to the legacy closure. The explicit host
+# boundary exports the precise union; these constructors enforce exact types.
+_ExecutionMaterialAnnotation = object
+
+
+def __getattr__(name: str):
+    if name in {"ExecutionMaterialV1", "compile_training_plan_for_execution_v1"}:
+        from importlib import import_module
+        return getattr(import_module("tuner.training.packaged_boundary"), name)
+    raise AttributeError(name)
+
+
+def is_packaged_execution_material(value: object) -> bool:
+    # Do not import the packaged boundary while running the fixed Git closure.
+    module = sys.modules.get("tuner.training.packaged_boundary")
+    return module is not None and type(value) is vars(module).get("PackagedExecutionBindingV1")
+
+
+def require_execution_material(value: object) -> None:
+    if type(value) is not GitExecutionSourceV1 and not is_packaged_execution_material(value):
+        raise TypeError("execution_source must be exact ExecutionSourceV1 or PackagedExecutionBindingV1")
+
+
+def execution_material_digest(value: _ExecutionMaterialAnnotation) -> str:
+    require_execution_material(value)
+    return value.fingerprint if type(value) is GitExecutionSourceV1 else value.binding_digest
+
+
+def execution_material_run(value: _ExecutionMaterialAnnotation) -> str:
+    require_execution_material(value)
+    return value.run_id if type(value) is GitExecutionSourceV1 else value.run_ref
 
 
 def _required(value: str, field_name: str) -> str:
@@ -35,18 +72,123 @@ _PINNED_IMAGE_PATTERN = re.compile(r"^\S+@sha256:(?P<digest>[0-9a-f]{64})$")
 _ACCELERATOR_TOKEN_PATTERN = re.compile(r"^[a-z][a-z0-9._-]*$")
 
 
+class RetainedTrainingInputStreamLease:
+    """One-use verified stream retained only for one staging upload attempt."""
+
+    __slots__ = ("identity", "_stream", "_state", "_lock")
+
+    def __init__(self, identity: PreparedTrainingInputIdentity, stream: BinaryIO) -> None:
+        if type(identity) is not PreparedTrainingInputIdentity:
+            raise TypeError("exact prepared training input identity required")
+        if not callable(getattr(stream, "read", None)) or not callable(
+            getattr(stream, "close", None)
+        ):
+            raise TypeError("prepared training input lease requires a binary stream")
+        self.identity = identity
+        self._stream = stream
+        self._state = "available"
+        self._lock = Lock()
+
+    def take_stream(self) -> BinaryIO:
+        with self._lock:
+            if self._state != "available":
+                raise ValueError("prepared training input lease was already consumed")
+            self._state = "transferred"
+            return self._stream
+
+    def close(self) -> None:
+        with self._lock:
+            if self._state == "closed":
+                return
+            self._state = "closed"
+            self._stream.close()
+
+    def __copy__(self):
+        raise TypeError("prepared training input leases are not copyable")
+
+    def __deepcopy__(self, _memo):
+        raise TypeError("prepared training input leases are not copyable")
+
+    def __reduce_ex__(self, _protocol: int):
+        raise TypeError("prepared training input leases are not serializable")
+
+
+@runtime_checkable
+class VerifiedTrainingInputSource(Protocol):
+    """Internal source port; public requests carry only the prepared identity."""
+
+    @property
+    def identity(self) -> PreparedTrainingInputIdentity: ...
+
+    def open_lease(self) -> RetainedTrainingInputStreamLease: ...
+
+
 def _canonical_document(value: Mapping[str, object]) -> str:
     if not isinstance(value, Mapping):
         raise TypeError("document must be a mapping")
+    _bound_json(value)
     try:
         encoded = json.dumps(
             value, sort_keys=True, separators=(",", ":"), allow_nan=False
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("document must contain only JSON values") from exc
+    if len(encoded.encode("utf-8")) > 512 * 1024:
+        raise ValueError("document exceeds its byte bound")
     if not isinstance(json.loads(encoded), dict):  # pragma: no cover - mapping invariant
         raise ValueError("document must encode a JSON object")
     return encoded
+
+
+def _bound_json(value: object) -> None:
+    pending = [(value, 0)]
+    nodes = 0
+    while pending:
+        item, depth = pending.pop()
+        nodes += 1
+        if nodes > 16384 or depth > 32:
+            raise ValueError("document exceeds its structural bound")
+        if type(item) is dict:
+            if len(item) > 4096 or any(type(key) is not str for key in item):
+                raise ValueError("document requires bounded string keys")
+            pending.extend((key, depth + 1) for key in item)
+            pending.extend((child, depth + 1) for child in item.values())
+        elif type(item) in (list, tuple):
+            if len(item) > 4096:
+                raise ValueError("document exceeds its container bound")
+            pending.extend((child, depth + 1) for child in item)
+        elif type(item) is str:
+            if len(item) > 512 * 1024:
+                raise ValueError("document exceeds its text bound")
+        elif type(item) is float:
+            if not math.isfinite(item):
+                raise ValueError("document requires finite numbers")
+        elif item is not None and type(item) not in (int, bool):
+            raise ValueError("document must contain only JSON values")
+
+
+def _json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("document contains duplicate keys")
+        result[key] = value
+    return result
+
+
+def bounded_json_object(payload: str) -> dict[str, object]:
+    if type(payload) is not str or len(payload) > 512 * 1024:
+        raise ValueError("document exceeds its byte bound")
+    try:
+        if len(payload.encode("utf-8")) > 512 * 1024:
+            raise ValueError("document exceeds its byte bound")
+        value = json.loads(payload, object_pairs_hook=_json_object)
+    except (UnicodeError, json.JSONDecodeError, RecursionError):
+        raise ValueError("document must contain bounded valid JSON") from None
+    if type(value) is not dict:
+        raise ValueError("canonical_json must encode a JSON object")
+    _bound_json(value)
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,12 +200,7 @@ class CanonicalDocument:
     def __post_init__(self) -> None:
         if not isinstance(self.canonical_json, str):
             raise TypeError("canonical_json must be a string")
-        try:
-            value = json.loads(self.canonical_json)
-        except json.JSONDecodeError as exc:
-            raise ValueError("canonical_json must contain valid JSON") from exc
-        if not isinstance(value, dict):
-            raise ValueError("canonical_json must encode a JSON object")
+        value = bounded_json_object(self.canonical_json)
         object.__setattr__(self, "canonical_json", _canonical_document(value))
 
     @classmethod
@@ -200,7 +337,7 @@ class TrainingRequest:
 @dataclass(frozen=True, slots=True)
 class ResolvedTrainingRequest:
     request: TrainingRequest
-    execution_source: ExecutionSourceV1
+    execution_source: _ExecutionMaterialAnnotation
     execution_context: CanonicalDocument
     resolved_config: CanonicalDocument
     workload: CanonicalDocument
@@ -209,9 +346,9 @@ class ResolvedTrainingRequest:
     artifact_policy: ArtifactPolicy = ArtifactPolicy()
 
     def __post_init__(self) -> None:
+        require_execution_material(self.execution_source)
         expected = (
             (self.request, TrainingRequest, "request"),
-            (self.execution_source, ExecutionSourceV1, "execution_source"),
             (self.execution_context, CanonicalDocument, "execution_context"),
             (self.resolved_config, CanonicalDocument, "resolved_config"),
             (self.workload, CanonicalDocument, "workload"),
@@ -232,7 +369,7 @@ class TrainingResolutionError(ValueError):
 class ResolvedTrainingComponents:
     """Exact host resolver output before deterministic workload compilation."""
 
-    execution_source: ExecutionSourceV1
+    execution_source: _ExecutionMaterialAnnotation
     execution_context: CanonicalDocument
     resolved_config: CanonicalDocument
     runtime: RuntimeSpec
@@ -240,8 +377,8 @@ class ResolvedTrainingComponents:
     artifact_policy: ArtifactPolicy = ArtifactPolicy()
 
     def __post_init__(self) -> None:
+        require_execution_material(self.execution_source)
         checks = (
-            (self.execution_source, ExecutionSourceV1, "execution_source"),
             (self.execution_context, CanonicalDocument, "execution_context"),
             (self.resolved_config, CanonicalDocument, "resolved_config"),
             (self.runtime, RuntimeSpec, "runtime"),
@@ -301,7 +438,7 @@ def _safe_training_request_resolver(
 
 @dataclass(frozen=True, slots=True)
 class TrainingPlan:
-    execution_source: ExecutionSourceV1
+    execution_source: _ExecutionMaterialAnnotation
     execution_context: CanonicalDocument
     resolved_config: CanonicalDocument
     workload: CanonicalDocument
@@ -310,8 +447,8 @@ class TrainingPlan:
     artifact_policy: ArtifactPolicy
 
     def __post_init__(self) -> None:
+        require_execution_material(self.execution_source)
         expected = (
-            (self.execution_source, ExecutionSourceV1, "execution_source"),
             (self.execution_context, CanonicalDocument, "execution_context"),
             (self.resolved_config, CanonicalDocument, "resolved_config"),
             (self.workload, CanonicalDocument, "workload"),
@@ -387,9 +524,12 @@ def compile_training_plan_v1(
     return plan
 
 
+
+
 __all__ = [
     "AcceleratorDeviceRequestV1", "ArtifactPolicy", "CanonicalDocument",
     "ResolvedTrainingComponents", "ResolvedTrainingRequest", "ResourceSpec",
     "RuntimeSpec", "TrainingPlan", "TrainingRequest", "TrainingRequestResolver",
     "TrainingResolutionError", "compile_training_plan_v1",
+    "GitExecutionSourceV1", "ExecutionMaterialV1", "compile_training_plan_for_execution_v1",
 ]

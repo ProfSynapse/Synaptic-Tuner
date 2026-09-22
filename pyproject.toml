@@ -60,8 +60,9 @@ namespaces = true
   "inference-worker-closure.json",
   "inference-dependencies.lock",
 ]
-"tuner.runtime" = ["manifests/offline-sft-worker-v1.json"]
+"tuner.runtime" = ["manifests/offline-sft-worker-v1.json", "manifests/packaged-training-worker-v1.json"]
+"Trainers.sft.configs" = ["config.yaml"]
 
-# The Modal runtime lock is part of the importable engine contract. Broader
+# The Modal runtime lock and exact packaged SFT default config ship as assets. Broader
 # runtime scripts, schemas, templates, containers, and configuration assets are
 # still source-tree assets pending the full publication inventory.

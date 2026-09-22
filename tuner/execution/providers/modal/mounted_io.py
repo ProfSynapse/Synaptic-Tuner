@@ -277,14 +277,6 @@ def copy_regular(
     source_parent, source_leaf, source_path = _parent_handle(
         source_root, source, create=False
     )
-    try:
-        destination_parent, destination_leaf, destination_path = _parent_handle(
-            destination_root, destination, create=True
-        )
-    except Exception:
-        if source_parent is not None:
-            os.close(source_parent)
-        raise
     source_descriptor: int | None = None
     try:
         before = _leaf_info(source_parent, source_leaf, source_path)
@@ -300,13 +292,25 @@ def copy_regular(
             source_path,
             os.O_RDONLY | _BINARY | _NOFOLLOW | _CLOEXEC,
         )
-        destination_descriptor = _open_leaf(
-            destination_parent,
-            destination_leaf,
-            destination_path,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY | _NOFOLLOW | _CLOEXEC,
-            0o600,
+        opened = os.fstat(source_descriptor)
+        if not stat.S_ISREG(opened.st_mode) or (
+            opened.st_dev, opened.st_ino
+        ) != (before.st_dev, before.st_ino):
+            raise ValueError("runtime artifact changed before publication")
+        destination_parent, destination_leaf, destination_path = _parent_handle(
+            destination_root, destination, create=True
         )
+        try:
+            destination_descriptor = _open_leaf(
+                destination_parent,
+                destination_leaf,
+                destination_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY | _NOFOLLOW | _CLOEXEC,
+                0o600,
+            )
+        finally:
+            if destination_parent is not None:
+                os.close(destination_parent)
     except Exception:
         if source_descriptor is not None:
             os.close(source_descriptor)
@@ -314,18 +318,11 @@ def copy_regular(
     finally:
         if source_parent is not None:
             os.close(source_parent)
-        if destination_parent is not None:
-            os.close(destination_parent)
     digest = hashlib.sha256()
     size = 0
     with os.fdopen(source_descriptor, "rb") as source_stream, os.fdopen(
         destination_descriptor, "wb"
     ) as target:
-        opened = os.fstat(source_stream.fileno())
-        if not stat.S_ISREG(opened.st_mode) or (
-            opened.st_dev, opened.st_ino
-        ) != (before.st_dev, before.st_ino):
-            raise ValueError("runtime artifact changed before publication")
         for chunk in iter(lambda: source_stream.read(1024 * 1024), b""):
             size += len(chunk)
             if size > maximum:

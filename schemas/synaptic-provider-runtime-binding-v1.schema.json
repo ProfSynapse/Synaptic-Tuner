@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-provider-runtime-binding-v1.schema.json",
+  "title": "Synaptic Provider Runtime Binding v1",
+  "description": "Structural schema. The shared durable binding contains only a commitment to a provider-specific, independently retained and authenticated facts document. It never embeds provider-native deployment facts, environment maps, secret references, or secret values. Canonical parsing additionally verifies digest bindings, NFC text, and exact built-in value types.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "provider_ref", "runtime_release_digest", "provider_facts_schema", "provider_facts_digest", "binding_digest"],
+  "properties": {
+    "schema_version": {"const": "synaptic-provider-runtime-binding/v1"},
+    "provider_ref": {"$ref": "#/$defs/opaqueRef"},
+    "runtime_release_digest": {"$ref": "#/$defs/digest"},
+    "provider_facts_schema": {
+      "type": "string", "minLength": 4, "maxLength": 132,
+      "description": "Versioned identity of the provider-adapter-owned closed facts schema; never a URI.",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}/v[1-9][0-9]*$"
+    },
+    "provider_facts_digest": {"$ref": "#/$defs/digest"},
+    "binding_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "opaqueRef": {
+      "type": "string", "minLength": 1, "maxLength": 256,
+      "description": "Opaque identity material; not a path, URL, or value-bearing environment entry.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+\\-]{0,255}$"
+    }
+  }
+}

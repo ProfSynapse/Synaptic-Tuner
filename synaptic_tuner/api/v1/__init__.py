@@ -37,6 +37,17 @@ _LAZY_MODULE_ATTRIBUTES = {
         "DatasetPage", "DatasetValidateRequest", "ValidationFinding", "ValidationFindingCode",
         "ValidationReport",
     },
+    "ingestion_facade": {
+        "AuthorizedSourceRef", "BindingPreview", "FieldMapping", "FieldSelector", "FieldSelectorKind", "FieldValueKind",
+        "FrontmatterMode", "INGESTION_PLAN_SCHEMA_VERSION", "INGESTION_RESULT_SCHEMA_VERSION", "IngestionAPI", "IngestionDiagnosticCode", "IngestionListRequest", "IngestionObservation",
+        "IngestionObservationKind", "IngestionObservationPage", "IngestionObservationsRequest", "IngestionOperationCode",
+        "IngestionOperationError", "IngestionOperations", "IngestionOutcome", "IngestionPage", "IngestionPlan", "IngestionPreflight",
+        "IngestionPreview", "IngestionRequest", "IngestionResult", "IngestionRunRef", "IngestionRunState", "IngestionStart",
+        "IngestionVerification", "MarkdownProfileV1", "MetadataDeclaration", "MetadataPolicyRef", "NormalizedBundleRef",
+        "ParsingProfile", "ProposalEvidenceCode", "RelationshipDeclaration", "SchemaRef", "SourceAdmissionKind", "SourceAdmissionRequest",
+        "SourceMatcher", "SourceSnapshotRef", "StructureBinding", "StructureDefinition", "StructureProposal", "StructureProposalRequest",
+        "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest", "validate_ingestion_identity",
+    },
     "pipelines_facade": {
         "ADMITTED_STAGES", "PipelineEvaluateSpec", "PipelineListRequest", "PipelineOperationCode",
         "PipelineOperationError", "PipelinePage", "PipelinePlan", "PipelineRecord", "PipelineRef",
@@ -53,7 +64,8 @@ _LAZY_MODULE_ATTRIBUTES = {
     "events": {"EventEnvelope", "ResultEnvelope"},
     "execution": {
         "ArtifactRef", "ArtifactState", "ErrorCode",
-        "ExecutionError", "ExecutionGrant", "RunRef", "RunState", "RunStatus",
+        "ExecutionError", "ExecutionGrant", "PreparedTrainingInputIdentity",
+        "RunRef", "RunState", "RunStatus",
     },
     "host": {
         "APIHost", "Clock", "EvidenceAuthenticator", "EvidenceReplayStore",
@@ -131,6 +143,13 @@ _LAZY_MODULE_ATTRIBUTES = {
         "TrainingInputContractErrorV1", "TrainingInputContractIdentityV1",
         "load_training_input_contract_v1",
     },
+    "training_sources": {
+        "LocalTrainingInputPathV1", "OneUseTrainingInputUploadV1",
+        "PreparedTrainingInputResultV1",
+        "PreparedTrainingInputV1", "RetainedPreparedTrainingInputSourceV1",
+        "TrainingInputSourceV1", "TrainingNormalizerConfigV1",
+        "TrainingPreparationConfigV1",
+    },
     "usage": {"SpendRef", "UsageAvailability", "UsageRecordV1"},
 }
 
@@ -189,6 +208,11 @@ _FORMAL_EXPORTS = (
     "LoadedTrainingInputContractV1", "TrainingInputContractCodeV1",
     "TrainingInputContractErrorV1", "TrainingInputContractIdentityV1",
     "load_training_input_contract_v1",
+    "LocalTrainingInputPathV1", "OneUseTrainingInputUploadV1",
+    "PreparedTrainingInputIdentity", "PreparedTrainingInputResultV1",
+    "PreparedTrainingInputV1", "RetainedPreparedTrainingInputSourceV1",
+    "TrainingInputSourceV1", "TrainingNormalizerConfigV1",
+    "TrainingPreparationConfigV1",
     "ObservationFamily", "ObservationKind", "ObservationStreamRef",
     "ObservationRecordV1", "ObservationsRequest", "ObservationPage",
     "TrainingPhaseObservedPayloadV1", "EvaluationCaseStartedPayloadV1",
@@ -240,6 +264,15 @@ _FORMAL_EXPORTS = (
     "ChatOpenRequest", "ChatOperationCode", "ChatOperationError", "ChatOperations",
     "ChatSession", "ChatSessionPage", "ChatSessionPolicyV1", "ChatSessionRef",
     "ChatSessionState", "ChatTurn", "ChatTurnRef", "ChatTurnRequest",
+    "AuthorizedSourceRef", "BindingPreview", "FieldMapping", "FieldSelector", "FieldSelectorKind", "FieldValueKind",
+    "FrontmatterMode", "INGESTION_PLAN_SCHEMA_VERSION", "INGESTION_RESULT_SCHEMA_VERSION", "IngestionAPI", "IngestionDiagnosticCode", "IngestionListRequest", "IngestionObservation",
+    "IngestionObservationKind", "IngestionObservationPage", "IngestionObservationsRequest", "IngestionOperationCode",
+    "IngestionOperationError", "IngestionOperations", "IngestionOutcome", "IngestionPage", "IngestionPlan", "IngestionPreflight",
+    "IngestionPreview", "IngestionRequest", "IngestionResult", "IngestionRunRef", "IngestionRunState", "IngestionStart",
+    "IngestionVerification", "MarkdownProfileV1", "MetadataDeclaration", "MetadataPolicyRef", "NormalizedBundleRef",
+    "ParsingProfile", "ProposalEvidenceCode", "RelationshipDeclaration", "SchemaRef", "SourceAdmissionKind", "SourceAdmissionRequest",
+    "SourceMatcher", "SourceSnapshotRef", "StructureBinding", "StructureDefinition", "StructureProposal", "StructureProposalRequest",
+    "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest", "validate_ingestion_identity",
 )
 
 if not set(_FORMAL_EXPORTS).issubset(_LAZY_ATTRIBUTES):  # pragma: no cover - module invariant

@@ -65,6 +65,50 @@ _PROTECTED_ACTION_OPTIONS = {
     ("hf-training-smoke", "verify"): frozenset({
         "--base-dir", "--env-file", "--experiment-id", "--json", "--manifest", "--project-root",
     }),
+    ("modal-runtime-release", "preflight"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-plan",
+    }),
+    ("modal-runtime-release", "approve"): frozenset({
+        "--authorization-reference", "--base-dir", "--expires-at",
+        "--issued-at", "--json", "--manifest", "--project-root",
+        "--release-ref",
+    }),
+    ("modal-runtime-release", "execute"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "recover"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "observe"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "verify"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-preflight"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-approve"): frozenset({
+        "--authorization-reference", "--base-dir", "--expires-at", "--issued-at",
+        "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-execute"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-recover"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-observe"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-verify"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
 }
 
 
@@ -111,6 +155,19 @@ class _SynapticArgumentParser(argparse.ArgumentParser):
             if capability_id is not None:
                 self.error(f"unrecognized arguments: {capability_id}")
             _enforce_protected_action_allowlist(self, arguments, command=command, action=action)
+            return parsed
+        if command == "modal-runtime-release":
+            action = getattr(parsed, "subcommand", None)
+            allowed_actions = {"preflight", "approve", "execute", "recover", "observe", "verify",
+                               "qualify-preflight", "qualify-approve", "qualify-execute",
+                               "qualify-recover", "qualify-observe", "qualify-verify"}
+            if action not in allowed_actions:
+                self.error("modal-runtime-release requires an action: preflight, approve, execute, recover, observe, or verify")
+            if capability_id is not None:
+                self.error(f"unrecognized arguments: {capability_id}")
+            _enforce_protected_action_allowlist(
+                self, arguments, command=command, action=action,
+            )
             return parsed
         if command == "hf-smoke":
             action = getattr(parsed, "subcommand", None)
@@ -224,6 +281,9 @@ Commands:
   hf-source   Prepare or provision one exact immutable HF Profile-C source transport
   hf-smoke    Approve, execute, or observe one fixed bootstrap-only HF smoke
   hf-training-smoke  Preflight, approve, execute, recover, observe, or verify the protected A10G smoke
+  modal-runtime-release  Release one exact packaged Modal runtime deployment
+  ingest      Ingest one explicit local Markdown selection to a private bundle
+  prepare-dataset  Convert one verified bundle into a private training dataset
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
 
@@ -267,6 +327,8 @@ Examples:
   python tuner.py analyze-experiment --experiment-id latest
   synaptic capabilities list --json
   synaptic capabilities describe mechinterp.steer --json
+  python tuner.py ingest --config <config.json> --select notes=./notes --json
+  python tuner.py prepare-dataset --config <config.json> --json
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
   python tuner.py list datasets    # List datasets
@@ -280,7 +342,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "modal-runtime-release", "ingest", "prepare-dataset", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -345,6 +407,14 @@ Examples:
     parser.add_argument("--artifact-bucket-id", help="Exclusive artifact Bucket identifier.")
     parser.add_argument("--artifact-prefix", help="Approval-bound artifact base prefix.")
     parser.add_argument(
+        "--release-plan",
+        help="Canonical packaged Modal runtime release deployment plan JSON.",
+    )
+    parser.add_argument(
+        "--release-ref",
+        help="Exact deployment-spec digest for a retained Modal runtime release.",
+    )
+    parser.add_argument(
         "--profile",
         help="Named project configuration profile.",
     )
@@ -378,7 +448,18 @@ Examples:
     parser.add_argument(
         "--config",
         dest="ml_config",
-        help="Path to config YAML (ml train or mechinterp run)."
+        help=(
+            "Command config file: YAML for ml/mechinterp, or strict JSON "
+            "for ingest/prepare-dataset."
+        ),
+    )
+    parser.add_argument(
+        "--select",
+        action="append",
+        default=None,
+        dest="ingestion_selections",
+        metavar="ALIAS=PATH",
+        help="One local ingestion selection; repeat for additional roots.",
     )
 
     # Flywheel-specific flags

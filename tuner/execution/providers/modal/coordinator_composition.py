@@ -36,6 +36,7 @@ from .coordinator_adapter import ModalPreparationAdapter
 from .coordinator_effects import ModalFoundationEffectExecutor, ModalFoundationReconciliationAdapter, ModalFoundationExecutorResolver, ModalFoundationReconciliationResolver
 from .coordinator_factories import modal_coordinator_registration
 from .coordinator_preflight import ModalOperationalPreflightAdapter
+from .coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
 from .coordinator_reader import ModalCoordinatorRunReader
 from .coordinator_read_transport import ModalFoundationReadTransport
 from .coordinator_retention import ModalFoundationRetentionDelegate
@@ -83,8 +84,9 @@ class ModalCoordinatorComposition:
 class _ModalFoundationRetention:
     """``ProviderFamilyV1.foundation_retention``: wrap the core in the Modal delegate."""
 
-    def __init__(self, ports: ModalFoundationCompositionPorts) -> None:
+    def __init__(self, ports: ModalFoundationCompositionPorts, *, bounds) -> None:
         self._ports = ports
+        self._bounds = bounds
 
     def retain(self, core) -> ModalFoundationRetentionDelegate:
         ports = self._ports
@@ -98,6 +100,7 @@ class _ModalFoundationRetention:
             stage_catalog=ports.stage_catalog,
             launch_catalog=ports.launch_catalog,
             retained_inputs=ports.retained_inputs,
+            bounds=self._bounds,
         )
 
 
@@ -186,6 +189,7 @@ def compose_modal_coordinator(
         assessment_authenticator=foundation_ports.assessment_authority,
         stage_verifier=foundation_ports.stage_authority,
         launch_verifier=foundation_ports.launch_authority, recipes=recipes,
+        bounds=MODAL_TRAINING_ARTIFACT_BOUNDS_V1,
     )
     executor = ModalFoundationEffectExecutor(
         profile_ref=context.provider.profile_ref, account_ref=binding.scope.account_ref,
@@ -208,6 +212,7 @@ def compose_modal_coordinator(
         stage_verifier=foundation_ports.stage_authority,
         launch_verifier=foundation_ports.launch_authority,
         evidence_verifier=evidence_verifier, recipes=recipes,
+        bounds=MODAL_TRAINING_ARTIFACT_BOUNDS_V1,
     )
     reader = ModalCoordinatorRunReader(
         catalog=foundation_ports.binding_catalog,
@@ -215,7 +220,7 @@ def compose_modal_coordinator(
         foundation_authenticator=foundation_ports.foundation_authenticator,
         assessment_authenticator=foundation_ports.assessment_authority,
         evidence_authority=evidence_authority, transport=read_transport,
-        observed_at=observed_at,
+        observed_at=observed_at, bounds=MODAL_TRAINING_ARTIFACT_BOUNDS_V1,
     )
     family = ProviderFamilyV1(
         descriptor=preparation.describe(context.provider),
@@ -228,7 +233,9 @@ def compose_modal_coordinator(
         artifact_verifier=artifact_verifier,
         observation_authenticator=observation_authenticator,
         log_authenticator=log_authenticator,
-        foundation_retention=_ModalFoundationRetention(foundation_ports),
+        foundation_retention=_ModalFoundationRetention(
+            foundation_ports, bounds=MODAL_TRAINING_ARTIFACT_BOUNDS_V1,
+        ),
     )
     composed = compose_family_coordinator(
         family=family,

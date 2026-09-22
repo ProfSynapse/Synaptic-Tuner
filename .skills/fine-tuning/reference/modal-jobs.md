@@ -513,12 +513,31 @@ The cross-provider contract and proof matrix live in
   profile or `Client.from_env()` fallback in engine code.
 - Fixed app `synaptic-training-v1`; the exact function name is derived by
   `modal_function_name(deployment_ref)` and includes the deployment identity.
+- A stopped fixed-name app is retained as non-authorizing history, not treated
+  as true absence. With Modal SDK `1.5.4`, scoped lookup returns an empty current
+  `app_id`, the stopped identity as `previous_app_id`, and the retained
+  generation. Read its bounded historical layout through that previous ID,
+  bracket the read with an unchanged scoped lookup, and reject a selected-name
+  collision. The normal same-name redeploy creates a new current app; accept it
+  only when its ID differs from the stopped predecessor and its new-app
+  lifecycle generation is exactly `1`. The retained stopped version does not
+  carry into the new app. Later redeploys of a current app retain the same ID
+  and require exactly `N+1`. Transitional states, drift, ID reuse, unexpected
+  generations, or ambiguity fail closed before training submission and never
+  authorize an automatic retry or cleanup.
 - One A10 GPU, one canonical command argument, `retries=0`, and one detached
   `.spawn()` call behind the authenticated Foundation effect broker.
 - One digest-pinned Unsloth registry image with its inherited entrypoint
   cleared.
 - One existing Modal Volume v1 for control/log/evidence records and one
   distinct existing Modal Volume v1 for input/output artifacts.
+- In the minimal consumer qualification workflow, provisioning those configured
+  Volumes, the attempt-derived model-cache Volume, and the runtime Secret is
+  creation-only (`allow_existing=False`). A separately authorized fresh attempt
+  must rotate every one of those names; changing only the attempt or deployment
+  reference will collide with retained resources. Preserve the failed claim and
+  resources, diagnose exact names read-only, and never convert an already-exists
+  result into retry, adoption, deletion, or cleanup authority.
 - Each effect is isolated below `operations/{effect_id}/`; jobs never share
   global `input/`, `output/`, `logs/`, or `evidence/` paths.
 - The remote job independently clones the exact pushed host project and exact
@@ -555,6 +574,22 @@ run. Hub publication is optional and separately authorized. The remote producer
 emits exactly five artifacts: workload record, training lineage, training
 metrics, final model, and tokenizer.
 
+### Training artifact retention policy
+
+The live Modal training policy admits at most **192 MiB for one artifact** and
+**256 MiB for the complete five-artifact set**. `final_model` remains a required
+member of that exact set even when intermediate checkpoints are not retained.
+These are output-retention limits, not the separate prepared-input publication
+limits (for example, the 64 MiB prepared-input limit below).
+
+Large LoRA output is not trusted merely because training reports success. Its
+publication and later retrieval stream bounded bytes, then verify the expected
+digest and re-list/read back the durable provider inventory before the run can
+verify. Before a paid launch, estimate the final adapter archive from a measured
+same-family/rank result and ensure the rank-scaled estimate fits both limits;
+do not treat an unmeasured rank as admitted. Any future increase requires new
+size/transfer evidence and a synchronized review of host and remote policy.
+
 The control Volume contains operation-scoped, authenticated structured logs,
 terminal evidence, and the completion manifest. The host database stores the
 expected workflow/effect identities, one-shot authority consumption, provider
@@ -569,6 +604,20 @@ The artifact Volume is committed before the control Volume so an intentionally
 visible completion record cannot precede its artifacts. Any uncertainty after
 staging or `.spawn()` is reconciliation-only; it does not recreate submission
 authority.
+
+Prepared training inputs keep the provider-neutral request unchanged. The
+prepared `ref`, `revision`, content digest, byte size, and format remain the
+authority. Inputs at or below 2 MiB retain the legacy inline bundle transport.
+Inputs above 2 MiB and at or below the existing 64 MiB prepared-publication
+limit use one operation-scoped `payload.bin` object on the consumer-owned
+artifact Volume. The signed bundle contains only its canonical descriptor; it
+never contains the prose or an operator filesystem path. Staging reopens and
+reverifies the local prepared publication, uploads without overwrite, streams
+an exact size/hash readback, and writes control material last. An exact remote
+payload can complete recovery of the same authenticated stage even when the
+local source is no longer available; a fresh stage cannot. This does not raise
+the generic bundle or control limits, add a public provider verb, or create a
+cross-run cache.
 
 Treat both mounts as hostile shared storage. On the locked Linux runtime,
 reads and writes traverse through retained directory descriptors and open leaves
@@ -679,6 +728,31 @@ dependency/runtime pins unchanged. Source/runtime
 and live qualification gates still apply; version agreement is not proof of a
 successful deployment. See [Modal's serialized-function guidance](https://modal.com/docs/guide/jupyter-notebooks#known-issues).
 
+## Read-only training rate observation
+
+Use the named SDK profile explicitly when observing current training rates:
+
+```bash
+python -B examples/modal_chat/launch.py \
+  --project-root /absolute/consumer \
+  --configuration configuration/training.json \
+  --mode quote-training \
+  --modal-profile <name>
+```
+
+This is a non-authorizing, read-only rate observation. It validates the local
+source, configuration, and prepared dataset before it reads only the selected
+existing environment and current workspace billing rates. It neither provisions
+nor deploys, accesses Secrets or Volumes, consumes attempt state, submits or
+spawns work, nor allocates a GPU. The estimate is GPU-only and explicitly lists
+excluded costs; it is not a billing cap or permission to train. Do not print
+profile credentials or any other secret material.
+
+For reproducibility, run it from a clean WSL/Linux CPython 3.11.14 environment
+with the hash-pinned launcher requirements. Preserve canonical configuration
+bytes exactly—host formatters must not rewrite them. Under WSL, keep the private
+prepared bundle on a POSIX filesystem with private modes.
+
 Candidate launcher update (2026-09-14): the reusable consuming-layer
 `examples/modal_chat/launch.py` now composes explicit profile credentials,
 fresh resource provisioning and exact deployment ownership, real source
@@ -689,6 +763,14 @@ disabled; it does not invoke chat or require an inference image. `train-chat`
 refuses before cloud activity until observation/artifact capabilities are
 qualified. Keep one-shot claims, owned cleanup and source/quote checks intact.
 The consumer owns all example settings, identities, authorities and state.
+
+Prepared-input check update (2026-09-21): provider-free launcher admission now
+distinguishes an ordinary `project://` dataset file from a private
+content-addressed `prepared://sha256/` bundle. It verifies the latter's v1/v2
+publication and semantic digest, then checks the configured SFT controls before
+any provider action: v1 accepts raw-text controls and v2 requires `messages`.
+Do not replace this with a regular-file check on the bundle directory or defer a
+format mismatch until after provisioning.
 
 Consumer deployment diagnostics retain only closed local phases and exception
 categories, bounded allowlisted traceback file/line locations, and known object
@@ -796,7 +878,7 @@ lock for packages already fixed by the base image digest. It records the exact
 additive installer bytes and full measured distribution map. Candidate and
 current additive hashes must agree; CRLF conversion is not permission to accept
 different bytes. This initializer targets the reviewed isolated CPython 3.12.13
-and Modal 1.5.4 profile and preserves the existing fixed 118-source inventory.
+and Modal 1.5.4 profile and preserves the existing fixed 119-source inventory.
 It grants no runtime qualification: build a fresh wheel containing the resources,
 then run the concrete CPU image check and the separately authorized GPU/chat
 smoke. Do not run this standalone maintenance tool concurrently with serving;
@@ -807,9 +889,16 @@ local set before recovery, never overwrite targets or automatically delete it.
 For the separate inference image, use `python3 scripts/regenerate_modal_inference_lock.py`
 to check already-reviewed inference locks, or add `--write` for an intentional
 source-content refresh and then rerun the check. This offline tool preserves
-the fixed 118-source inventory, dependency bytes, and runtime pins. It cannot
+the fixed 119-source inventory, dependency bytes, and runtime pins. It cannot
 initialize missing locks or qualify a CPU candidate for live chat. Run it only
 as a standalone maintenance process, never inside a serving process.
+The current inventory deliberately adds
+`tuner/execution/providers/modal/prepared_input.py` because the inference
+closure reaches it through `coordinator_bundle.py`. The maintenance contract
+checks every declared Python member's static local imports against the fixed
+inventory so a transitive local dependency cannot be omitted while a stale
+inventory still reports `CURRENT`.
+
 The two lock replacements are individually atomic but not transactional. If
 interrupted between replacements, verification and reruns fail closed; recover
 the reviewed consistent lock pair before retrying. Do not bypass validation.

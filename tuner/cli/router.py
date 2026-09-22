@@ -102,6 +102,18 @@ def route_command(args: Namespace, context: ProjectContext | None = None) -> int
         from tuner.handlers.hf_training_smoke_handler import HFTrainingSmokeHandler
         return HFTrainingSmokeHandler(args=args, context=context).handle()
 
+    if command == "modal-runtime-release":
+        from tuner.handlers.modal_runtime_release_handler import ModalRuntimeReleaseHandler
+        return ModalRuntimeReleaseHandler(args=args, context=context).handle()
+
+    if command == "ingest":
+        from tuner.handlers.ingestion_handler import IngestionHandler
+        return IngestionHandler(args=args, context=context).handle()
+
+    if command == "prepare-dataset":
+        from tuner.handlers.dataset_prepare_handler import DatasetPrepareHandler
+        return DatasetPrepareHandler(args=args, context=context).handle()
+
     if command == "batch-generate":
         from tuner.handlers.batch_generate_handler import BatchGenerateHandler
         return _bind_context(BatchGenerateHandler(args=args), context).handle()

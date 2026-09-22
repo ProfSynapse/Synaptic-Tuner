@@ -1,0 +1,24 @@
+schema_version: synaptic-derived-training-image-profile/v1
+name: qwen35-4b-32k-prompt-completion
+platform: linux/amd64
+
+# Official Unsloth base observed at this immutable digest. The workflow rejects
+# tags, including `latest`, before it can render or build an image.
+base_image: docker.io/unsloth/unsloth@sha256:9be56babef4efc330316cff3a65f9f911b9e7709bce4114fa7817ba3ffd8565d
+python_executable: /opt/conda/bin/python3
+
+packages:
+  - distribution: transformers
+    source: index
+    version: 5.5.0
+  - distribution: trl
+    source: index
+    version: 0.22.2
+  - distribution: unsloth-zoo
+    source: vcs
+    url: https://github.com/unslothai/unsloth-zoo.git
+    commit: b6d292bb58cf485183ec43967829ad5e405208f6
+  - distribution: unsloth
+    source: vcs
+    url: https://github.com/unslothai/unsloth.git
+    commit: 66cfbeac1d6dc26d177244861062b31cee2d65f1

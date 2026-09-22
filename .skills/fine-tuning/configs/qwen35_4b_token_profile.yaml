@@ -1,0 +1,30 @@
+# Example only: materialize this exact tokenizer snapshot before invoking the
+# offline profiler. Replace the two private paths; keep identities immutable.
+model:
+  ref: Qwen/Qwen3.5-4B
+  model_revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  tokenizer_revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  local_tokenizer_path: /replace/with/local/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+runtime:
+  provider: modal
+  lock_path: tuner/execution/providers/modal/modal-runtime-v1.lock.json
+  expected_lock_sha256: 9d1f651e9d7adf06061d71e7d55b86b848f7f526eea790be178494956dc2ccf5
+input:
+  jsonl_path: /replace/with/private/prepared-dataset.jsonl
+  mode: text
+  text_field: text
+budgets:
+  # Run separate immutable profiles for each candidate sequence budget.
+  max_sequence_tokens: 2048
+  completion_reserve_tokens: 0
+limits:
+  max_input_bytes: 1073741824
+  max_rows: 1000000
+  max_line_bytes: 67108864
+  max_record_bytes: 67108864
+  max_tokens_per_record: 10000000
+  max_components: 64
+  max_component_label_chars: 128
+  max_snapshot_files: 64
+  max_snapshot_file_bytes: 536870912
+  max_snapshot_total_bytes: 1073741824

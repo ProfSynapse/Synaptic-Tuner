@@ -1317,6 +1317,20 @@
             }
           ]
         },
+        "modal_prepared_input": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "properties": {
+                "path": {
+                  "const": "tuner/execution/providers/modal/prepared_input.py"
+                }
+              }
+            }
+          ]
+        },
         "modal_runtime": {
           "allOf": [
             {
@@ -1481,6 +1495,7 @@
         "dependency_lock",
         "deployment_wrapper",
         "modal_mounted_io",
+        "modal_prepared_input",
         "modal_runtime",
         "modal_worker_ports",
         "modal_worker_source",

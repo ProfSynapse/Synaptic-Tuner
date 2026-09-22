@@ -10,10 +10,11 @@ from synaptic_tuner.api.v1.planning import ResolvedTrainingRequest as PlanningRe
 from tuner.training.contracts import (
     ArtifactPolicy, CanonicalDocument, ResolvedTrainingRequest, ResourceSpec,
     RuntimeSpec, TrainingRequest,
+    bounded_json_object,
 )
 from tuner.project.execution_source import ExecutionSourceV1
 
-from .recipes import CompiledWorkload, RecipeRegistry
+from .recipes import CompiledWorkload, RecipeRegistry, compile_execution_workload
 
 
 _SCHEMA = "synaptic-coordinator-resolved-material/v1"
@@ -50,6 +51,11 @@ def _mapping(value, name):
     if type(value) is not dict:
         raise ValueError(f"{name} must be an exact object")
     return value
+
+
+def _execution_material(value):
+    value = _mapping(value, "execution material")
+    return ExecutionSourceV1.from_dict(value)
 
 
 def _runtime(value: RuntimeSpec) -> dict[str, object]:
@@ -129,10 +135,17 @@ class CoordinatorResolvedMaterial:
 
     @classmethod
     def parse(cls, payload: bytes, recipes: RecipeRegistry) -> "CoordinatorResolvedMaterial":
+        """Parse only historical Git/developer material."""
+        return cls._parse(payload, recipes, decode_source=_execution_material,
+                          derive=derive_coordinator_material)
+
+    @classmethod
+    def _parse(cls, payload, recipes, *, decode_source, derive):
+        """Dependency-neutral reconstruction kernel for explicit host composition."""
         if type(payload) is not bytes or not payload or len(payload) > _MAX_MATERIAL_BYTES:
             raise ValueError("coordinator material bytes are invalid")
         try:
-            document = json.loads(payload.decode("utf-8"))
+            document = bounded_json_object(payload.decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError) as exc:
             raise ValueError("coordinator material is invalid JSON") from exc
         if _canonical(document) != payload or type(document) is not dict or frozenset(document) != _FIELDS:
@@ -148,13 +161,13 @@ class CoordinatorResolvedMaterial:
         )
         resolved = ResolvedTrainingRequest(
             TrainingRequest(CanonicalDocument.from_mapping(_mapping(document["request"], "request"))),
-            ExecutionSourceV1.from_dict(_mapping(document["execution_source"], "execution_source")),
+            decode_source(document["execution_source"]),
             CanonicalDocument.from_mapping(_mapping(document["execution_context"], "execution_context")),
             CanonicalDocument.from_mapping(_mapping(document["resolved_config"], "resolved_config")),
             CanonicalDocument.from_mapping(_mapping(document["workload"], "workload")),
             runtime, resources, policy,
         )
-        rebuilt = derive_coordinator_material(
+        rebuilt = derive(
             resolved, recipes, request_id=document["request_id"],
             project_ref=document["project_ref"], run_id=document["run_id"],
         )
@@ -167,6 +180,26 @@ def derive_coordinator_material(
     resolved: ResolvedTrainingRequest, recipes: RecipeRegistry, *,
     request_id: str, project_ref: str, run_id: str,
 ) -> CoordinatorResolvedMaterial:
+    """Derive only historical Git/developer material."""
+    if type(resolved) is not ResolvedTrainingRequest:
+        raise TypeError("exact resolved training request required")
+    if type(resolved.execution_source) is not ExecutionSourceV1:
+        raise TypeError("developer coordinator requires exact ExecutionSourceV1")
+    _require_material_inputs(resolved, recipes, request_id, project_ref, run_id)
+    if resolved.execution_source.run_id != run_id:
+        raise ValueError("allocated coordinator run differs from execution source run")
+    compiled = compile_execution_workload(
+        resolved_config=resolved.resolved_config, execution_source=resolved.execution_source,
+        recipes=recipes,
+    )
+    return _derive_coordinator_material(
+        resolved, recipes, request_id=request_id, project_ref=project_ref, run_id=run_id,
+        execution_run=resolved.execution_source.run_id,
+        source_digest=resolved.execution_source.fingerprint, compiled=compiled,
+    )
+
+
+def _require_material_inputs(resolved, recipes, request_id, project_ref, run_id):
     if type(resolved) is not ResolvedTrainingRequest:
         raise TypeError("exact resolved training request required")
     if type(recipes) is not RecipeRegistry:
@@ -177,7 +210,6 @@ def derive_coordinator_material(
     exact = (
         (resolved.request, TrainingRequest, "request"),
         (resolved.request.document, CanonicalDocument, "request document"),
-        (resolved.execution_source, ExecutionSourceV1, "execution source"),
         (resolved.execution_context, CanonicalDocument, "execution context"),
         (resolved.resolved_config, CanonicalDocument, "resolved config"),
         (resolved.workload, CanonicalDocument, "workload"),
@@ -188,16 +220,20 @@ def derive_coordinator_material(
     if any(type(value) is not kind for value, kind, _ in exact):
         failed = next(name for value, kind, name in exact if type(value) is not kind)
         raise TypeError(f"exact {failed} required")
-    if resolved.execution_source.run_id != run_id:
+
+
+def _derive_coordinator_material(
+    resolved, recipes, *, request_id, project_ref, run_id,
+    execution_run, source_digest, compiled,
+) -> CoordinatorResolvedMaterial:
+    """Retain already-admitted material without selecting an execution family."""
+    _require_material_inputs(resolved, recipes, request_id, project_ref, run_id)
+    if execution_run != run_id:
         raise ValueError("allocated coordinator run differs from execution source run")
     config = resolved.resolved_config.to_dict()
     method = config.get("method")
     if type(method) is not str or not method:
         raise ValueError("resolved config requires a method")
-    compiled = recipes.resolve(method).compile(
-        resolved_config=resolved.resolved_config,
-        execution_source=resolved.execution_source,
-    )
     if type(compiled) is not CompiledWorkload:
         raise TypeError("recipe must return exact CompiledWorkload")
     workload = CanonicalDocument(compiled.canonical_bytes.decode("utf-8"))
@@ -225,7 +261,7 @@ def derive_coordinator_material(
     }
     planning = PlanningRequest(
         "synaptic-resolved-training-request/v1", request_id, project_ref,
-        resolved.execution_source.fingerprint,
+        source_digest,
         _domain("synaptic-coordinator-resolved-input/v1", resolved_input),
         compiled.fingerprint,
         _domain("synaptic-coordinator-runtime/v1", runtime),

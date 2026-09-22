@@ -102,6 +102,11 @@ class SFTTrainingConfig:
     #       because it REPLACES the assistant_only masking region rather than
     #       configuring the head; see shared.sft_preprocessing.materialize_sft_example.
     prompt_render: str = "full_conversation"
+    # Fail closed after model loading unless the selected runtime has installed
+    # Unsloth's memory-efficient causal-LM loss. This is opt-in so existing
+    # recipes retain their historical behavior; long-context recipes should
+    # enable it explicitly.
+    require_memory_efficient_loss: bool = False
 
 
 @dataclass
@@ -114,6 +119,9 @@ class DatasetConfig:
     test_size: float
     split_dataset: bool
     filter_desirable: bool
+    # Consume row-level train/validation assignments from an authoritative
+    # prepared dataset instead of creating a random split.
+    use_preassigned_splits: bool = False
 
 
 @dataclass

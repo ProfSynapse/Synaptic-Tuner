@@ -38,12 +38,17 @@ from examples.modal_chat.deployment import ModalChatOwnedDeployment, ModalChatSc
 from examples.modal_chat.diagnostics import modal_chat_failure_diagnostic
 from examples.modal_chat.provisioning import ModalChatProvisioner
 from examples.modal_chat.replay import ModalChatEvidenceReplay
-from examples.modal_chat.resolution import _regular_digest
+from examples.modal_chat.resolution import verify_configured_dataset
 from examples.modal_chat.settings import ModalChatSettings
 from examples.modal_chat.storage import ModalChatStorage
 from synaptic_tuner.api.v1.providers import ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef, TrainingRunState
-from tuner.execution.foundation_v2.canonical import canonical_bytes, safe_ref
+from tuner.execution.foundation_v2.canonical import (
+    canonical_bytes,
+    domain_digest,
+    parse_canonical_object,
+    safe_ref,
+)
 from tuner.execution.providers.modal.composition import ModalVerificationPolicyV1
 from tuner.execution.providers.modal.config import ModalRuntimeLockV1
 from tuner.execution.providers.modal.facade import ModalFunctionCallState
@@ -55,6 +60,7 @@ from tuner.execution.providers.modal.inference_transport import (
     _bounded,
 )
 from tuner.execution.providers.modal.mounted_io import read_regular
+from tuner.execution.providers.modal.resolution import ModalDeploymentSelectionV1
 from tuner.project.git_verification import GitCliLocalSourceInspector
 from tuner.project.manifest import load_project_manifest
 
@@ -66,6 +72,7 @@ _PURPOSES = frozenset(
         "source-lock-evidence/v1",
         "modal-deployment-evidence/v1",
         "modal-stage-claim/v2",
+        "modal-stage-claim/v3",
         "modal-launch-claim/v1",
         "modal-terminal/v1",
         "modal-log-metadata/v1",
@@ -94,7 +101,9 @@ def build_parser():
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--configuration", type=Path, required=True)
     parser.add_argument(
-        "--mode", choices=("check", "qualify-training", "train-chat"), default="check"
+        "--mode",
+        choices=("check", "quote-training", "qualify-training", "train-chat"),
+        default="check",
     )
     parser.add_argument("--modal-profile")
     parser.add_argument("--hf-token-env-file", type=Path)
@@ -191,7 +200,7 @@ def _model_token(selected_env_file):
 
 
 def check_inputs(project_root, configuration, *, mode="check"):
-    if mode not in {"check", "qualify-training", "train-chat"}:
+    if mode not in {"check", "quote-training", "qualify-training", "train-chat"}:
         raise ModalChatLauncherError("modal_chat_arguments_invalid")
     if (
         not project_root.is_absolute()
@@ -204,7 +213,13 @@ def check_inputs(project_root, configuration, *, mode="check"):
     context = manifest.create_context(engine_root=ENGINE, invocation_cwd=Path.cwd())
     raw = read_regular(project_root, project_root / configuration, 256 * 1024)
     settings = ModalChatSettings.parse(raw[:-1] if raw.endswith(b"\n") else raw)
-    _regular_digest(project_root, Path(settings.dataset_project_path), 16 * 1024 * 1024)
+    verify_configured_dataset(
+        project_root,
+        Path(settings.dataset_project_path),
+        settings.training_input.dataset.ref,
+        16 * 1024 * 1024,
+        settings.training_input.hyperparameters.dataset_format,
+    )
     source = GitCliLocalSourceInspector().inspect(context=context)
     allowed = frozenset((item["url"], item["ref"]) for item in settings.allowed_refs)
     observed_refs = set()
@@ -214,7 +229,7 @@ def check_inputs(project_root, configuration, *, mode="check"):
         observed_refs.add((item.location.canonical_url, "refs/heads/" + item.branch))
     if len(observed_refs) != 2 or observed_refs != allowed:
         raise ModalChatLauncherError("modal_chat_source_invalid")
-    if mode != "qualify-training":
+    if mode not in {"quote-training", "qualify-training"}:
         # Training qualification never opens chat or relies on inference-image
         # authority. Check the chat image only for the paths that require it.
         reviewed = settings.reviewed_runtime
@@ -226,6 +241,89 @@ def check_inputs(project_root, configuration, *, mode="check"):
         )
         _packaged()
     return manifest, context, settings, source
+
+
+def _training_quote_binding(
+    provider_profile, client_binding, runtime_environment, timeout_seconds
+):
+    """Derive the coordinator's planned namespace/resource binding."""
+    selection = ModalDeploymentSelectionV1.from_profile(
+        provider_profile,
+        binding=client_binding,
+        runtime_environment=runtime_environment,
+        timeout_seconds=timeout_seconds,
+    )
+    namespace_ref = domain_digest(
+        "synaptic-modal-namespace/v1",
+        canonical_bytes(
+            {
+                "workspace_ref": selection.workspace_ref,
+                "environment_ref": selection.environment_ref,
+            }
+        ),
+    )
+    resource_digest = domain_digest(
+        "synaptic-modal-coordinator-resources/v1",
+        canonical_bytes(
+            {
+                "accelerator": selection.accelerator,
+                "accelerator_count": 1,
+                "timeout_seconds": selection.timeout_seconds,
+                "max_retries": selection.max_retries,
+            }
+        ),
+    )
+    return {
+        "provider_id": "modal",
+        "profile_ref": provider_profile.profile,
+        "account_ref": selection.account_ref,
+        "namespace_ref": namespace_ref,
+        "resource_digest": resource_digest,
+        "timeout_seconds": selection.timeout_seconds,
+    }
+
+
+def quote_training(settings, source, *, profile):
+    """Read current training rates without minting authority or changing state."""
+    import modal
+    from examples.modal_chat.training import _training_rate_calculation
+
+    scope = ModalChatScope(
+        sdk=modal,
+        client=_client(modal, profile),
+        environment_name=settings.environment_name,
+        client_ref="consumer-client",
+    )
+    binding = _training_quote_binding(
+        settings.profile,
+        scope.binding,
+        settings.runtime_environment,
+        settings.training_timeout_seconds,
+    )
+    calculation, estimate_minor = _training_rate_calculation(
+        scope=scope,
+        binding=binding,
+        maximum_cost_minor_units=settings.maximum_training_cost_minor_units,
+    )
+    return canonical_bytes(
+        {
+            "schema_version": "synaptic-modal-chat-training-quote-observation/v1",
+            "status": "TRAINING_QUOTE_OBSERVED",
+            "authorizing": False,
+            "credential_profile_ref": safe_ref(profile, "modal_profile"),
+            "configuration_sha256": hashlib.sha256(
+                settings.canonical_bytes
+            ).hexdigest(),
+            "project_commit": source.project_source.commit,
+            "engine_commit": source.engine_source.commit,
+            "within_configured_operator_maximum": (
+                settings.maximum_training_cost_minor_units >= estimate_minor
+            ),
+            "calculation": parse_canonical_object(
+                calculation, name="training rate calculation"
+            ),
+        }
+    )
 
 
 def _snapshot_workflow(host, storage, run):
@@ -706,6 +804,7 @@ def main(argv=None):
 
     try:
         arguments = build_parser().parse_args(argv)
+        quote = None
         with (
             open(os.devnull, "w") as sink,
             contextlib.redirect_stdout(sink),
@@ -719,16 +818,27 @@ def main(argv=None):
                 return 0
             if arguments.modal_profile is None:
                 raise ModalChatLauncherError("modal_chat_credentials_missing")
-            execute(
-                manifest,
-                context,
-                settings,
-                source,
-                mode=arguments.mode,
-                profile=arguments.modal_profile,
-                hf_token_env_file=arguments.hf_token_env_file,
-                emit=emit,
-            )
+            if arguments.mode == "quote-training":
+                if arguments.hf_token_env_file is not None:
+                    raise ModalChatLauncherError("modal_chat_arguments_invalid")
+                phase = "QUOTE_TRAINING"
+                quote = quote_training(
+                    settings, source, profile=arguments.modal_profile
+                )
+            else:
+                execute(
+                    manifest,
+                    context,
+                    settings,
+                    source,
+                    mode=arguments.mode,
+                    profile=arguments.modal_profile,
+                    hf_token_env_file=arguments.hf_token_env_file,
+                    emit=emit,
+                )
+        if quote is not None:
+            stream.write(quote.decode("ascii") + "\n")
+            stream.flush()
         return 0
     except KeyboardInterrupt:
         stream.write(

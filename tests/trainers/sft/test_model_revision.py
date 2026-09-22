@@ -175,3 +175,39 @@ def test_runtime_loader_never_falls_back_when_local_loading_fails(
     assert len(calls) == 1
     assert calls[0]["model_name"] == str(snapshot)
     assert calls[0]["local_files_only"] is True
+
+
+def _unsloth_loss():
+    def UnslothForCausalLMLoss():
+        pass
+
+    UnslothForCausalLMLoss.__module__ = "unsloth_zoo.loss_utils"
+    return UnslothForCausalLMLoss
+
+
+def test_memory_efficient_loss_gate_accepts_exact_unsloth_mapping(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module, _ = _load(monkeypatch, None, tmp_path)
+    loss = _unsloth_loss()
+    module.require_unsloth_memory_efficient_loss(
+        SimpleNamespace(loss_function=loss),
+        loss_mapping={"ForCausalLM": loss, "ForConditionalGeneration": loss},
+    )
+
+
+@pytest.mark.parametrize(
+    "selected,mapping",
+    [
+        (lambda: None, {"ForCausalLM": lambda: None}),
+        (_unsloth_loss(), {}),
+    ],
+)
+def test_memory_efficient_loss_gate_rejects_fallback_or_missing_mapping(
+    monkeypatch, tmp_path: Path, selected, mapping
+) -> None:
+    module, _ = _load(monkeypatch, None, tmp_path)
+    with pytest.raises(RuntimeError, match="SFT_MEMORY_EFFICIENT_LOSS_REQUIRED"):
+        module.require_unsloth_memory_efficient_loss(
+            SimpleNamespace(loss_function=selected), loss_mapping=mapping
+        )

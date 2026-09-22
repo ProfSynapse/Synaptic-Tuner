@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from tuner.execution.foundation_v2.canonical import (
@@ -64,7 +64,7 @@ class ModalWireLaunchAdmission:
     control_volume_id: str
     artifact_volume_id: str
     key_ref: str
-    bundle: bytes
+    bundle: bytes = field(repr=False)
     launch_claim_sha256: str
 
 
@@ -85,6 +85,7 @@ _STAGE_FIELDS = {
     "control_volume_id", "artifact_volume_id", "key_ref", "bundle_sha256",
     "bundle_size",
 }
+_STAGE_FIELDS_V3 = _STAGE_FIELDS | {"prepared_input"}
 
 
 def _bounded_object(raw: bytes, maximum: int, name: str) -> dict[str, object]:
@@ -125,7 +126,20 @@ def admit_modal_launch_wire(
 
     stage_doc = _bounded_object(stage_claim, bounds.max_control_bytes, "stage claim")
     strict_int(stage_doc.get("bundle_size"), "stage bundle_size", minimum=1)
-    _verified(verifier, "modal-stage-claim/v2", stage_claim, stage_claim_tag, key_ref)
+    stage_schema = stage_doc.get("schema_version")
+    if stage_schema not in {
+        "synaptic.modal-stage-claim/v2", "synaptic.modal-stage-claim/v3",
+    }:
+        raise ValueError("stage claim schema is invalid")
+    _verified(
+        verifier,
+        "modal-stage-claim/v3"
+        if stage_schema == "synaptic.modal-stage-claim/v3"
+        else "modal-stage-claim/v2",
+        stage_claim,
+        stage_claim_tag,
+        key_ref,
+    )
     if type(bundle) is not bytes or not bundle or len(bundle) > bounds.max_bundle_bytes:
         raise ValueError("bundle exceeds bound")
     strict_int(launch["stage_bundle_size"], "stage_bundle_size", minimum=1)
@@ -188,7 +202,12 @@ def admit_modal_launch_wire(
         "artifact_volume_id": launch["artifact_volume_id"], "key_ref": key_ref,
         "bundle_sha256": sha(bundle), "bundle_size": len(bundle),
     }
-    if set(stage_doc) != _STAGE_FIELDS or stage_doc.get("schema_version") != "synaptic.modal-stage-claim/v2" or any(
+    expected_stage_fields = (
+        _STAGE_FIELDS_V3
+        if stage_schema == "synaptic.modal-stage-claim/v3"
+        else _STAGE_FIELDS
+    )
+    if set(stage_doc) != expected_stage_fields or any(
         stage_doc.get(name) != value for name, value in stage_expected.items()
     ):
         raise ValueError("stage claim projection differs")

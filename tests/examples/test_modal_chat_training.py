@@ -16,6 +16,7 @@ from examples.modal_chat.replay import ModalChatEvidenceReplay
 from examples.modal_chat.storage import ModalChatStorage
 from examples.modal_chat.training import (
     _AllocatedIdentity,
+    _training_rate_calculation,
     _training_quote,
     ModalChatRunIdentity,
     ModalChatTrainingCompositionError,
@@ -23,7 +24,16 @@ from examples.modal_chat.training import (
 )
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from tests.examples.test_modal_chat_deployment import _SDK, _profile
-from tests.examples.test_modal_chat_resolution import _document, _source
+from tests.examples.test_modal_chat_resolution import (
+    _document,
+    _initialize_git_policy,
+    _source,
+)
+from tests.dataset_prep.test_dataset_prep_v1 import (
+    _bundle as _prepared_bundle,
+    _config as _prepared_config,
+    _prepare_reconciled,
+)
 from tuner.execution.providers.modal.composition import ModalVerificationPolicyV1
 from tuner.execution.providers.modal.coordinator_preflight import QUOTE_PURPOSE
 from tuner.project.context import ProjectContext
@@ -131,6 +141,104 @@ def test_training_quote_rejects_operator_authorization_below_nominal() -> None:
             key_ref="quote-key",
             authenticator=auth,
             clock=Clock(),
+        )
+
+
+def test_training_rate_observation_reports_over_cap_without_minting_quote() -> None:
+    calculation, estimate_minor = _training_rate_calculation(
+        scope=Scope(),
+        binding={
+            "provider_id": "modal",
+            "profile_ref": "profile-a",
+            "account_ref": "workspace-a",
+            "namespace_ref": "namespace-a",
+            "resource_digest": "a" * 64,
+            "timeout_seconds": 3600,
+        },
+        maximum_cost_minor_units=1,
+    )
+    document = json.loads(calculation)
+    assert estimate_minor == 110
+    assert document["gpu_only_timeout_estimate_minor_units"] == 110
+    assert document["operator_authorization_minor_units"] == 1
+    assert document["excluded_billing_dimensions"] == [
+        "build",
+        "cpu",
+        "memory",
+        "storage",
+        "usage-beyond-timeout",
+    ]
+
+
+@pytest.mark.parametrize(
+    "rates",
+    [
+        None,
+        {
+            "gpu_hour_cost_a10g": "1.10000",
+            "cpu_hour_cost": Decimal("0.04730"),
+            "mem_gib_hour_cost": Decimal("0.00800"),
+        },
+        {
+            "gpu_hour_cost_a10g": Decimal("0"),
+            "cpu_hour_cost": Decimal("0.04730"),
+            "mem_gib_hour_cost": Decimal("0.00800"),
+        },
+    ],
+)
+def test_training_rate_observation_rejects_malformed_rates(rates) -> None:
+    class BadBilling:
+        def rates(self):
+            return rates
+
+    class BadWorkspace(Workspace):
+        billing = BadBilling()
+
+    class BadSDK:
+        class Workspace:
+            @staticmethod
+            def from_context(*, client):
+                return BadWorkspace()
+
+    scope = Scope()
+    scope.sdk = BadSDK()
+    with pytest.raises(ValueError):
+        _training_rate_calculation(
+            scope=scope,
+            binding={
+                "provider_id": "modal",
+                "profile_ref": "profile-a",
+                "account_ref": "workspace-a",
+                "namespace_ref": "namespace-a",
+                "resource_digest": "a" * 64,
+                "timeout_seconds": 600,
+            },
+            maximum_cost_minor_units=20,
+        )
+
+
+def test_training_rate_observation_rejects_scope_drift_after_rate_read() -> None:
+    class DriftingScope(Scope):
+        calls = 0
+
+        def observe(self, client):
+            self.calls += 1
+            if self.calls > 1:
+                raise ValueError("scope changed")
+            return super().observe(client)
+
+    with pytest.raises(ValueError, match="scope changed"):
+        _training_rate_calculation(
+            scope=DriftingScope(),
+            binding={
+                "provider_id": "modal",
+                "profile_ref": "profile-a",
+                "account_ref": "workspace-a",
+                "namespace_ref": "namespace-a",
+                "resource_digest": "a" * 64,
+                "timeout_seconds": 600,
+            },
+            maximum_cost_minor_units=20,
         )
 
 
@@ -345,9 +453,20 @@ def test_full_training_composer_starts_real_public_graph_once(
     engine = project / "vendor" / "engine"
     (project / "data").mkdir(parents=True)
     engine.mkdir(parents=True)
-    (project / "data" / "train.jsonl").write_bytes(b'{"text":"row"}\n')
     context = ProjectContext.host(engine_root=engine, project_root=project)
-    request_json = json.dumps(_document(), sort_keys=True, separators=(",", ":"))
+    _initialize_git_policy(context, ignored=True)
+    structure, bundle = _prepared_bundle(
+        tmp_path / "prepared-source", ("PRIVATE COMPOSER SENTINEL",)
+    )
+    prepared = _prepare_reconciled(
+        _prepared_config(bundle, structure), project / "private"
+    )
+    prepared_ref = (
+        "prepared://sha256/" + prepared.semantic_identity.dataset_digest
+    )
+    request_json = json.dumps(
+        _document(prepared_ref), sort_keys=True, separators=(",", ":")
+    )
     purposes = frozenset(
         {
             "source-lock-evidence/v1",
@@ -375,7 +494,7 @@ def test_full_training_composer_starts_real_public_graph_once(
                 TrainingRunRef("run-a", "project-a"),
                 hashlib.sha256(request_json.encode()).hexdigest(),
             ),
-            dataset_project_path=Path("data/train.jsonl"),
+            dataset_project_path=prepared.path.relative_to(project),
             allowed_git_refs=frozenset(
                 {
                     (
@@ -448,5 +567,9 @@ def test_full_training_composer_starts_real_public_graph_once(
             "project-a",
         )
         assert sdk.deploy_calls
+        assert graph.retained.private_dataset_bytes == (
+            prepared.path / "dataset.jsonl"
+        ).read_bytes()
+        assert b"PRIVATE COMPOSER SENTINEL" not in graph.material.canonical_bytes
     finally:
         storage.close()

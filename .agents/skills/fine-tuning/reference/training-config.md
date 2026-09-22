@@ -54,6 +54,31 @@ python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes
 
 Use repo-relative paths for `dataset.local_file`; the runner translates them into the trainer's container working directory. On Windows, `job.transfer: auto` uses copy mode because GPU bind mounts can fail with access denied.
 
+For recipes that require an immutable reviewed package overlay, add the optional
+config-driven safety contract below and use the derived-image workflow in
+`derived-training-images.md`:
+
+```yaml
+job:
+  image: sha256:<real-local-image-config-digest>
+  pull_policy: never
+  image_qualification:
+    required: true
+    profile: Trainers/image_profiles/my-profile.yaml
+    verification_report: private/image-qualifications/my-verification.json
+```
+
+The block is opt-in and does not change existing recipes. `local-run --json`
+can still compile a template with no image or report. An effectful run with the
+block fails before project/artifact preparation unless a fresh, network-disabled
+Docker probe of the exact immutable `job.image` agrees with the profile and
+diagnostic report. The report alone is never launch authority. Omit `job.image`
+from checked-in templates until a real captured digest exists; never use a fake
+runnable-looking placeholder.
+Qualified recipes also reject non-empty `setup.pip`, because mutating packages
+after the live check would invalidate it. This is an honest-local consistency
+gate, not cryptographic build provenance or release/Modal promotion authority.
+
 ### `job.user` — container user + artifact ownership
 
 Controls which UID the container runs as and whether artifacts are chowned back to the host user on exit. Optional; omit to get the default.
@@ -147,6 +172,9 @@ training:
   max_seq_length: 2048
   packing: true                     # 2.5-5x faster!
   completion_only_loss: true        # Train only on assistant responses
+  assistant_only_loss: false        # Explicit for authoritative v2 rows
+  prompt_render: full_conversation  # Use prompt_completion for exact boundaries
+  require_memory_efficient_loss: false  # Fail closed on stock/fallback LM loss
 
   # Memory optimizations
   gradient_checkpointing: true

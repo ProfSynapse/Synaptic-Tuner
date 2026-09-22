@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_CEILING
 import hashlib
 from pathlib import Path
+from typing import Mapping
 
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from tuner.execution.foundation_v2.canonical import (
@@ -114,21 +115,26 @@ class _AllocatedIdentity:
         return self._value
 
 
-def _training_quote(
+def _training_rate_calculation(
     *,
     scope,
     binding,
     maximum_cost_minor_units,
-    issued_at,
-    expires_at,
-    issuer_ref,
-    audience_ref,
-    challenge_nonce,
-    key_ref,
-    authenticator,
-    clock,
 ):
-    if clock.now_iso() != issued_at or type(maximum_cost_minor_units) is not int:
+    if (
+        type(binding) is not dict
+        or set(binding)
+        != {
+            "provider_id",
+            "profile_ref",
+            "account_ref",
+            "namespace_ref",
+            "resource_digest",
+            "timeout_seconds",
+        }
+        or type(maximum_cost_minor_units) is not int
+        or maximum_cost_minor_units < 0
+    ):
         raise ValueError
     scope.observe(scope.client)
     workspace = scope.sdk.Workspace.from_context(client=scope.client)
@@ -139,6 +145,8 @@ def _training_quote(
     ):
         raise ValueError
     rates = workspace.billing.rates()
+    if not isinstance(rates, Mapping):
+        raise ValueError
     selected = {}
     for name in ("gpu_hour_cost_a10g", "cpu_hour_cost", "mem_gib_hour_cost"):
         value = rates.get(name)
@@ -149,10 +157,10 @@ def _training_quote(
     # quantity. The operator quote retains the observed rates and authorizes the
     # GPU nominal; it is explicitly not a provider billing cap.
     timeout = binding["timeout_seconds"]
+    if type(timeout) is not int or not 1 <= timeout <= 86400:
+        raise ValueError
     estimate = selected["gpu_hour_cost_a10g"] * Decimal(timeout) / Decimal(3600)
     estimate_minor = int((estimate * 100).to_integral_value(rounding=ROUND_CEILING))
-    if maximum_cost_minor_units < estimate_minor:
-        raise ValueError
     calculation = canonical_bytes(
         {
             "schema_version": "synaptic-modal-chat-training-rate-calculation/v1",
@@ -179,6 +187,33 @@ def _training_quote(
             "authorization_semantics": "operator-maximum-not-provider-billing-cap",
         }
     )
+    scope.observe(scope.client)
+    return calculation, estimate_minor
+
+
+def _training_quote(
+    *,
+    scope,
+    binding,
+    maximum_cost_minor_units,
+    issued_at,
+    expires_at,
+    issuer_ref,
+    audience_ref,
+    challenge_nonce,
+    key_ref,
+    authenticator,
+    clock,
+):
+    if clock.now_iso() != issued_at or type(maximum_cost_minor_units) is not int:
+        raise ValueError
+    calculation, estimate_minor = _training_rate_calculation(
+        scope=scope,
+        binding=binding,
+        maximum_cost_minor_units=maximum_cost_minor_units,
+    )
+    if maximum_cost_minor_units < estimate_minor:
+        raise ValueError
     evidence_ref = "rate-" + hashlib.sha256(calculation).hexdigest()
     raw = canonical_bytes(
         {
@@ -200,7 +235,6 @@ def _training_quote(
         }
     )
     body = ModalQuoteBody.parse(raw)
-    scope.observe(scope.client)
     quote = AuthenticatedModalQuote(
         body.canonical_bytes,
         authenticator.sign(QUOTE_PURPOSE, body.canonical_bytes, key_ref),
@@ -421,6 +455,8 @@ def compose_modal_training_host(
             control_volume_id,
             artifact_volume_id,
             stage_key_ref,
+            private_dataset_bytes=resolver.private_dataset_bytes,
+            prepared_input_source=resolver.prepared_input_source,
         )
         host = compose_modal_chat_host(
             preparation=preparation,

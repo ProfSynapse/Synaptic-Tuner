@@ -33,6 +33,12 @@ from .mounted_io import (
 from .worker_ports import ModalProcessResult
 
 
+MODAL_TRAINING_ARTIFACT_BOUNDS_V1 = BoundsPolicyV1(
+    max_artifact_bytes=192 * 1024 * 1024,
+    max_artifact_total_bytes=256 * 1024 * 1024,
+)
+
+
 class ModalCoordinatorEvidenceSigner(Protocol):
     def sign(self, purpose: str, payload: bytes, key_ref: str) -> bytes: ...
 
@@ -73,7 +79,7 @@ class MountedModalCoordinatorProducer:
         *,
         control_root: str = "/workspace/control",
         artifact_root: str = "/workspace/run",
-        bounds: BoundsPolicyV1 = BoundsPolicyV1(),
+        bounds: BoundsPolicyV1 = MODAL_TRAINING_ARTIFACT_BOUNDS_V1,
         clock: Callable[[], str] = lambda: datetime.now(timezone.utc).isoformat(),
     ) -> None:
         if not hasattr(authenticator, "sign"):

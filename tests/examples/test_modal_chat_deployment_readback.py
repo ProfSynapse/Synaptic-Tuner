@@ -8,14 +8,20 @@ import pytest
 from examples.modal_chat import deployment_readback as reader
 
 
-def case(*, change=None, missing=False, public=False, metadata_error=None):
+def case(
+    *, change=None, missing=False, public=False, metadata_error=None, stopped=False
+):
     pytest.importorskip("modal")
     from modal_proto import api_pb2 as pb
 
     scoped = pb.AppGetByDeploymentNameResponse(
-        app_id="ap-owned",
+        app_id="" if stopped else "ap-owned",
+        previous_app_id="ap-previous" if stopped else "",
         environment_name="isolated",
-        lifecycle=pb.AppLifecycle(app_state=pb.APP_STATE_DEPLOYED, version=7),
+        lifecycle=pb.AppLifecycle(
+            app_state=pb.APP_STATE_STOPPED if stopped else pb.APP_STATE_DEPLOYED,
+            version=7,
+        ),
     )
     after = pb.AppGetByDeploymentNameResponse()
     after.CopyFrom(scoped)
@@ -27,8 +33,18 @@ def case(*, change=None, missing=False, public=False, metadata_error=None):
         after.app_id = "ap-other"
     elif change == "stopped":
         after.lifecycle.app_state = pb.APP_STATE_STOPPED
-    layout = pb.AppLayout(function_ids={} if missing else {"worker": "fu-owned"})
-    if not missing:
+    elif change == "deployed":
+        after.lifecycle.app_state = pb.APP_STATE_DEPLOYED
+    elif change == "previous_app":
+        after.previous_app_id = "ap-other"
+    layout = pb.AppLayout(
+        function_ids=(
+            {"historical-worker": "fu-old"}
+            if stopped
+            else ({} if missing else {"worker": "fu-owned"})
+        )
+    )
+    if not missing and not stopped:
         item = layout.objects.add(object_id="fu-owned")
         item.function_handle_metadata.CopyFrom(
             pb.FunctionHandleMetadata(
@@ -81,6 +97,96 @@ def test_reads_only_exact_app_and_brackets_layout_with_current_generation():
         ("layout", "ap-owned"),
         ("scope", "app", "isolated"),
     ]
+
+
+def test_stopped_app_brackets_historical_layout_and_preserves_previous_identity():
+    client, calls = case(stopped=True)
+    observed = asyncio.run(reader._bounded_read(client, "app", "isolated", "worker"))
+    assert observed == reader.CurrentModalDeployment(
+        "", 7, False, (("historical-worker", "fu-old"),), (), (), "ap-previous"
+    )
+    assert calls == [
+        ("scope", "app", "isolated"),
+        ("layout", "ap-previous"),
+        ("scope", "app", "isolated"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "change", ["version", "environment", "app", "deployed", "previous_app"]
+)
+def test_stopped_app_drift_is_rejected(change):
+    client, _ = case(stopped=True, change=change)
+    with pytest.raises(ValueError):
+        asyncio.run(reader._bounded_read(client, "app", "isolated", "worker"))
+
+
+@pytest.mark.parametrize(
+    "app_id,previous_app_id",
+    [("ap-current", "ap-previous"), ("", "")],
+)
+def test_stopped_app_requires_empty_current_and_safe_previous_identity(
+    app_id, previous_app_id
+):
+    pytest.importorskip("modal")
+    from modal_proto import api_pb2 as pb
+
+    response = pb.AppGetByDeploymentNameResponse(
+        app_id=app_id,
+        previous_app_id=previous_app_id,
+        environment_name="isolated",
+        lifecycle=pb.AppLifecycle(app_state=pb.APP_STATE_STOPPED, version=7),
+    )
+
+    class Stub:
+        async def AppGetByDeploymentName(self, request):
+            return response
+
+        async def AppGetLayout(self, request):
+            return pb.AppGetLayoutResponse(app_layout=pb.AppLayout())
+
+    with pytest.raises(ValueError):
+        asyncio.run(
+            reader._bounded_read(
+                SimpleNamespace(stub=Stub()), "app", "isolated", "worker"
+            )
+        )
+
+
+def test_transitional_and_disabled_states_fail_closed_before_layout():
+    pytest.importorskip("modal")
+    from modal_proto import api_pb2 as pb
+
+    rejected = (
+        pb.APP_STATE_UNSPECIFIED,
+        pb.APP_STATE_INITIALIZING,
+        pb.APP_STATE_EPHEMERAL,
+        pb.APP_STATE_DETACHED,
+        pb.APP_STATE_DETACHED_DISCONNECTED,
+        pb.APP_STATE_DISABLED,
+        pb.APP_STATE_STOPPING,
+        pb.APP_STATE_DERIVED,
+    )
+    for state in rejected:
+        response = pb.AppGetByDeploymentNameResponse(
+            app_id="ap-owned",
+            environment_name="isolated",
+            lifecycle=pb.AppLifecycle(app_state=state, version=7),
+        )
+
+        class Stub:
+            async def AppGetByDeploymentName(self, request):
+                return response
+
+            async def AppGetLayout(self, request):
+                raise AssertionError("inadmissible state layout must not be read")
+
+        with pytest.raises(ValueError):
+            asyncio.run(
+                reader._bounded_read(
+                    SimpleNamespace(stub=Stub()), "app", "isolated", "worker"
+                )
+            )
 
 
 @pytest.mark.parametrize("change", ["version", "environment", "app", "stopped"])

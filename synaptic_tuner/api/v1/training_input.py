@@ -349,6 +349,13 @@ class SFTTrainingHyperparametersV1:
     use_rslora: bool
     init_lora_weights: bool
     split_dataset: bool
+    dataset_format: str | None = None
+    completion_only_loss: bool | None = None
+    assistant_only_loss: bool | None = None
+    use_preassigned_splits: bool | None = None
+    prompt_render: str | None = None
+    packing: bool | None = None
+    require_memory_efficient_loss: bool | None = None
 
     def __post_init__(self) -> None:
         integer_bounds = {
@@ -395,9 +402,36 @@ class SFTTrainingHyperparametersV1:
         )
         for field in ("use_dora", "use_rslora", "init_lora_weights", "split_dataset"):
             object.__setattr__(self, field, _exact_bool(getattr(self, field), field))
+        prepared_fields = (
+            "dataset_format",
+            "completion_only_loss",
+            "assistant_only_loss",
+            "use_preassigned_splits",
+            "prompt_render",
+            "packing",
+            "require_memory_efficient_loss",
+        )
+        present = tuple(getattr(self, field) is not None for field in prepared_fields)
+        if any(present) and not all(present):
+            raise ValueError("prepared SFT controls must be supplied together")
+        if all(present):
+            if self.dataset_format not in {"raw_text", "messages"}:
+                raise ValueError("dataset_format is unsupported")
+            if self.prompt_render not in {"full_conversation", "prompt_completion"}:
+                raise ValueError("prompt_render is unsupported")
+            for field in (
+                "completion_only_loss",
+                "assistant_only_loss",
+                "use_preassigned_splits",
+                "packing",
+                "require_memory_efficient_loss",
+            ):
+                object.__setattr__(
+                    self, field, _exact_bool(getattr(self, field), field)
+                )
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        result = {
             "schema_version": _SFT_SCHEMA,
             "batch_size": self.batch_size,
             "gradient_accumulation_steps": self.gradient_accumulation_steps,
@@ -416,10 +450,23 @@ class SFTTrainingHyperparametersV1:
             "init_lora_weights": self.init_lora_weights,
             "split_dataset": self.split_dataset,
         }
+        if self.dataset_format is not None:
+            result.update(
+                {
+                    "dataset_format": self.dataset_format,
+                    "completion_only_loss": self.completion_only_loss,
+                    "assistant_only_loss": self.assistant_only_loss,
+                    "use_preassigned_splits": self.use_preassigned_splits,
+                    "prompt_render": self.prompt_render,
+                    "packing": self.packing,
+                    "require_memory_efficient_loss": self.require_memory_efficient_loss,
+                }
+            )
+        return result
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> "SFTTrainingHyperparametersV1":
-        expected = frozenset(
+        base_fields = frozenset(
             {
                 "schema_version", "batch_size", "gradient_accumulation_steps",
                 "learning_rate", "duration", "max_seq_length", "seed", "save_steps",
@@ -428,6 +475,15 @@ class SFTTrainingHyperparametersV1:
                 "init_lora_weights", "split_dataset",
             }
         )
+        prepared_fields = frozenset(
+            {
+                "dataset_format", "completion_only_loss", "assistant_only_loss",
+                "use_preassigned_splits", "prompt_render", "packing",
+                "require_memory_efficient_loss",
+            }
+        )
+        supplied = frozenset(value) if type(value) is dict else frozenset()
+        expected = base_fields | prepared_fields if supplied & prepared_fields else base_fields
         value = _fields(value, expected, "hyperparameters")
         if value["schema_version"] != _SFT_SCHEMA:
             raise ValueError("hyperparameters schema is unsupported")
@@ -451,6 +507,13 @@ class SFTTrainingHyperparametersV1:
             use_rslora=value["use_rslora"],  # type: ignore[arg-type]
             init_lora_weights=value["init_lora_weights"],  # type: ignore[arg-type]
             split_dataset=value["split_dataset"],  # type: ignore[arg-type]
+            dataset_format=value.get("dataset_format"),  # type: ignore[arg-type]
+            completion_only_loss=value.get("completion_only_loss"),  # type: ignore[arg-type]
+            assistant_only_loss=value.get("assistant_only_loss"),  # type: ignore[arg-type]
+            use_preassigned_splits=value.get("use_preassigned_splits"),  # type: ignore[arg-type]
+            prompt_render=value.get("prompt_render"),  # type: ignore[arg-type]
+            packing=value.get("packing"),  # type: ignore[arg-type]
+            require_memory_efficient_loss=value.get("require_memory_efficient_loss"),  # type: ignore[arg-type]
         )
 
 

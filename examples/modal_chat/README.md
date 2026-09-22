@@ -61,6 +61,15 @@ evidence, successful public outcome/verification, and separate bounded chat
 authority before one turn and exact owned-Sandbox stopped readback. Native
 training qualification alone does not qualify chat or the other capabilities.
 
+Provisioning is deliberately creation-only: all three configured Volume names
+(control, artifacts, and the attempt-derived model cache) and the runtime Secret
+name must be unused for a genuinely fresh attempt. Rotating only `attempt_ref`
+or the deployment/function identity is insufficient when earlier resources
+remain. An already-exists failure retains its claim and authorizes neither
+reuse, adoption, deletion, nor an automatic retry; preserve that state, inspect
+the exact named resources read-only, and use a separately authorized fresh
+configuration with wholly fresh resource names.
+
 Modal credentials come only from the explicitly named SDK 1.5.4 profile, with
 environment overrides disabled. `HF_TOKEN` is inherited, or read from the one
 existing file explicitly selected by `--hf-token-env-file /absolute/file`.
@@ -169,6 +178,22 @@ ID remains acknowledged evidence, not a claim that floating lookup returned it.
 These current-state checks do not make later invocation version-pinned or
 eliminate an external administrator's race after the last observation.
 See [Modal's lookup semantics and plan constraints](https://modal.com/docs/guide/trigger-deployed-functions#version-pinned-lookups).
+
+Correction (2026-09-22): a stopped deployment name is neither a current app nor
+true absence in Modal SDK 1.5.4. The scoped name lookup returns an empty current
+`app_id`, the stopped app as `previous_app_id`, `APP_STATE_STOPPED`, and the
+retained deployment generation. The consumer brackets a bounded historical
+layout read through that previous ID and records a non-authorizing `STOPPED`
+prestate. A same-name deploy then follows the pinned SDK's normal `AppCreate`
+path. It is accepted only when readback proves a new current app ID distinct
+from the stopped predecessor, lifecycle generation `1`, and the usual private
+single-function/zero-class layout. The stopped predecessor's retained version
+is historical deployment-name evidence; Modal does not carry it into the new
+app's lifecycle. Subsequent redeploys of that current app still require the
+same app ID and exactly `N+1`. Transitional states, identity reuse, unexpected
+generations, selected-function collisions, or drift during the bracketed read
+fail closed. A failed or ambiguous deploy remains permanently claimed and does
+not authorize retry, cleanup, training submission, or invocation.
 
 Training acceptance is not completion. Observe the exact returned run through
 `RunsAPI`; successful verification and its authenticated five-artifact inventory
