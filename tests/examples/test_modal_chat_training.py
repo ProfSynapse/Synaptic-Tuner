@@ -16,6 +16,7 @@ from examples.modal_chat.replay import ModalChatEvidenceReplay
 from examples.modal_chat.storage import ModalChatStorage
 from examples.modal_chat.training import (
     _AllocatedIdentity,
+    _training_rate_calculation,
     _training_quote,
     ModalChatRunIdentity,
     ModalChatTrainingCompositionError,
@@ -140,6 +141,104 @@ def test_training_quote_rejects_operator_authorization_below_nominal() -> None:
             key_ref="quote-key",
             authenticator=auth,
             clock=Clock(),
+        )
+
+
+def test_training_rate_observation_reports_over_cap_without_minting_quote() -> None:
+    calculation, estimate_minor = _training_rate_calculation(
+        scope=Scope(),
+        binding={
+            "provider_id": "modal",
+            "profile_ref": "profile-a",
+            "account_ref": "workspace-a",
+            "namespace_ref": "namespace-a",
+            "resource_digest": "a" * 64,
+            "timeout_seconds": 3600,
+        },
+        maximum_cost_minor_units=1,
+    )
+    document = json.loads(calculation)
+    assert estimate_minor == 110
+    assert document["gpu_only_timeout_estimate_minor_units"] == 110
+    assert document["operator_authorization_minor_units"] == 1
+    assert document["excluded_billing_dimensions"] == [
+        "build",
+        "cpu",
+        "memory",
+        "storage",
+        "usage-beyond-timeout",
+    ]
+
+
+@pytest.mark.parametrize(
+    "rates",
+    [
+        None,
+        {
+            "gpu_hour_cost_a10g": "1.10000",
+            "cpu_hour_cost": Decimal("0.04730"),
+            "mem_gib_hour_cost": Decimal("0.00800"),
+        },
+        {
+            "gpu_hour_cost_a10g": Decimal("0"),
+            "cpu_hour_cost": Decimal("0.04730"),
+            "mem_gib_hour_cost": Decimal("0.00800"),
+        },
+    ],
+)
+def test_training_rate_observation_rejects_malformed_rates(rates) -> None:
+    class BadBilling:
+        def rates(self):
+            return rates
+
+    class BadWorkspace(Workspace):
+        billing = BadBilling()
+
+    class BadSDK:
+        class Workspace:
+            @staticmethod
+            def from_context(*, client):
+                return BadWorkspace()
+
+    scope = Scope()
+    scope.sdk = BadSDK()
+    with pytest.raises(ValueError):
+        _training_rate_calculation(
+            scope=scope,
+            binding={
+                "provider_id": "modal",
+                "profile_ref": "profile-a",
+                "account_ref": "workspace-a",
+                "namespace_ref": "namespace-a",
+                "resource_digest": "a" * 64,
+                "timeout_seconds": 600,
+            },
+            maximum_cost_minor_units=20,
+        )
+
+
+def test_training_rate_observation_rejects_scope_drift_after_rate_read() -> None:
+    class DriftingScope(Scope):
+        calls = 0
+
+        def observe(self, client):
+            self.calls += 1
+            if self.calls > 1:
+                raise ValueError("scope changed")
+            return super().observe(client)
+
+    with pytest.raises(ValueError, match="scope changed"):
+        _training_rate_calculation(
+            scope=DriftingScope(),
+            binding={
+                "provider_id": "modal",
+                "profile_ref": "profile-a",
+                "account_ref": "workspace-a",
+                "namespace_ref": "namespace-a",
+                "resource_digest": "a" * 64,
+                "timeout_seconds": 600,
+            },
+            maximum_cost_minor_units=20,
         )
 
 

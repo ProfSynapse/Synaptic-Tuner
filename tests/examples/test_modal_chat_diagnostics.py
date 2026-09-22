@@ -47,6 +47,17 @@ def test_diagnostic_is_closed_canonical_and_uses_exact_relative_allowlist():
     assert b"/checkout/" not in payload
 
 
+def test_quote_training_is_an_admitted_non_authorizing_phase():
+    error = RuntimeError("private-rate-detail")
+    payload = modal_chat_failure_diagnostic(phase="QUOTE_TRAINING", error=error)
+    document = json.loads(payload)
+
+    assert document["phase"] == "QUOTE_TRAINING"
+    assert document["authorizing"] is False
+    assert document["retry_authorized"] is False
+    assert b"private-rate-detail" not in payload
+
+
 def test_diagnostic_rejects_same_basename_and_unknown_exception_details():
     class PrivateFailure(Exception):
         pass
