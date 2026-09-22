@@ -704,6 +704,14 @@ refuses before cloud activity until observation/artifact capabilities are
 qualified. Keep one-shot claims, owned cleanup and source/quote checks intact.
 The consumer owns all example settings, identities, authorities and state.
 
+Prepared-input check update (2026-09-21): provider-free launcher admission now
+distinguishes an ordinary `project://` dataset file from a private
+content-addressed `prepared://sha256/` bundle. It verifies the latter's v1/v2
+publication and semantic digest, then checks the configured SFT controls before
+any provider action: v1 accepts raw-text controls and v2 requires `messages`.
+Do not replace this with a regular-file check on the bundle directory or defer a
+format mismatch until after provisioning.
+
 Consumer deployment diagnostics retain only closed local phases and exception
 categories, bounded allowlisted traceback file/line locations, and known object
 IDs in the existing private catalog. Do not save raw exception messages, source
