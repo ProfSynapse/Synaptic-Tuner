@@ -29,6 +29,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Staggered experiment batch | `python3 scripts/launch_experiment_batch.py Trainers/cloud/experiments/<spec1>.yaml Trainers/cloud/experiments/<spec2>.yaml --yes` |
 | One-shot RunPod wrapper job | `python3 scripts/runpod_run_job.py --run-tag <tag> --repo-url <git-url> --commit <full-sha> --wrapper <repo-relative.sh> --dry-run` |
 | Modal training | Public `TrainingAPI` with a host-owned durable grant; no manual `modal run` path |
+| Modal rate observation | `python -B examples/modal_chat/launch.py --project-root <consumer> --configuration <config> --mode quote-training --modal-profile <name>` — read-only; see `reference/modal-jobs.md` |
 | Chat with a verified SFT run | Embedded `open_run_chat` with a consumer-owned `RunsAPI` and runtime adapter; see `docs/architecture/verified-run-chat.md` (repo root) |
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |

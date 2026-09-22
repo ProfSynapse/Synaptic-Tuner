@@ -693,6 +693,31 @@ dependency/runtime pins unchanged. Source/runtime
 and live qualification gates still apply; version agreement is not proof of a
 successful deployment. See [Modal's serialized-function guidance](https://modal.com/docs/guide/jupyter-notebooks#known-issues).
 
+## Read-only training rate observation
+
+Use the named SDK profile explicitly when observing current training rates:
+
+```bash
+python -B examples/modal_chat/launch.py \
+  --project-root /absolute/consumer \
+  --configuration configuration/training.json \
+  --mode quote-training \
+  --modal-profile <name>
+```
+
+This is a non-authorizing, read-only rate observation. It validates the local
+source, configuration, and prepared dataset before it reads only the selected
+existing environment and current workspace billing rates. It neither provisions
+nor deploys, accesses Secrets or Volumes, consumes attempt state, submits or
+spawns work, nor allocates a GPU. The estimate is GPU-only and explicitly lists
+excluded costs; it is not a billing cap or permission to train. Do not print
+profile credentials or any other secret material.
+
+For reproducibility, run it from a clean WSL/Linux CPython 3.11.14 environment
+with the hash-pinned launcher requirements. Preserve canonical configuration
+bytes exactly—host formatters must not rewrite them. Under WSL, keep the private
+prepared bundle on a POSIX filesystem with private modes.
+
 Candidate launcher update (2026-09-14): the reusable consuming-layer
 `examples/modal_chat/launch.py` now composes explicit profile credentials,
 fresh resource provisioning and exact deployment ownership, real source
