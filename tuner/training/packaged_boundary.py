@@ -15,7 +15,7 @@ import re
 
 from synaptic_tuner.api.v1.training_input import TrainingInputV1
 from tuner.project.context import ProjectContext
-from tuner.runtime.releases import PackagedExecutionBindingV1, PackagedTrainingRuntimeReleaseV1
+from tuner.runtime.releases import PackagedExecutionBindingV1, PackagedTrainingRuntimeReleaseV2, parse_packaged_runtime_release
 from .contracts import (
     CanonicalDocument, GitExecutionSourceV1, ResolvedTrainingRequest,
     RuntimeSpec, TrainingPlan, TrainingRequest, TrainingRequestResolver,
@@ -70,7 +70,7 @@ def validate_packaged_material(*, request: TrainingRequest, material) -> Compile
     context = _fields(material.execution_context.to_dict(), {"schema_version", "runtime_release"}, "packaged context")
     if context["schema_version"] != PACKAGED_CONTEXT_SCHEMA:
         raise ValueError("unsupported packaged context")
-    release = PackagedTrainingRuntimeReleaseV1.from_dict(context["runtime_release"])
+    release = parse_packaged_runtime_release(context["runtime_release"])
     config = material.resolved_config.to_dict()
     if (
         release.manifest_digest != binding.runtime_release_digest
@@ -83,8 +83,20 @@ def validate_packaged_material(*, request: TrainingRequest, material) -> Compile
         or release.artifact_contract_schema != workload.document["artifacts"]["schema_version"]
     ):
         raise ValueError("runtime release does not admit the packaged workload")
-    expected_runtime = RuntimeSpec(release.image_ref, release.installed_distributions_digest,
-                                   release.python_version)
+    if type(release) is PackagedTrainingRuntimeReleaseV2:
+        if release.material["kind"] == "modal_build":
+            expected_runtime = RuntimeSpec(
+                None, release.installed_distributions_digest, release.python_version,
+                "modal_build", release.material_digest,
+            )
+        else:
+            expected_runtime = RuntimeSpec(
+                release.material["image"]["reference"],
+                release.installed_distributions_digest, release.python_version,
+            )
+    else:
+        expected_runtime = RuntimeSpec(release.image_ref, release.installed_distributions_digest,
+                                       release.python_version)
     if type(material.runtime) is not RuntimeSpec or material.runtime != expected_runtime:
         raise ValueError("packaged runtime differs from admitted release")
     public = TrainingInputV1.from_json(request.document.canonical_json)

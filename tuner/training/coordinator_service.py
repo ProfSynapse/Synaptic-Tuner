@@ -34,13 +34,14 @@ def _rebuild(value, expected):
 class CoordinatorTrainingService:
     """Compose planning ports with one authenticated durable coordinator."""
 
-    __slots__ = ("_loader", "_resolver", "_planning", "_store", "_coordinator", "_clock")
+    __slots__ = ("_loader", "_resolver", "_planning", "_store", "_coordinator", "_clock", "_input_preparation")
 
     def __init__(self, *, loader: RequestLoaderPortV1,
                  resolver: RequestResolutionPortV1,
                  planning: PlanningPortV1,
                  planning_store: PlanningStorePortV1,
-                 coordinator: TrainingCoordinatorV1, clock: Clock) -> None:
+                 coordinator: TrainingCoordinatorV1, clock: Clock,
+                 input_preparation: object | None = None) -> None:
         for value, method in ((loader, "load"), (resolver, "resolve"),
                               (planning, "describe"), (planning, "context"),
                               (planning, "preflight"), (planning_store, "put_plan_if_absent"),
@@ -51,8 +52,21 @@ class CoordinatorTrainingService:
                 raise TypeError("coordinator training dependency is incomplete")
         if type(coordinator) is not TrainingCoordinatorV1:
             raise TypeError("exact TrainingCoordinatorV1 required")
+        if input_preparation is not None and not callable(getattr(input_preparation, "prepare", None)):
+            raise TypeError("input preparation port is incomplete")
         self._loader, self._resolver, self._planning = loader, resolver, planning
         self._store, self._coordinator, self._clock = planning_store, coordinator, clock
+        self._input_preparation = input_preparation
+
+    def prepare(self, source, config):
+        from synaptic_tuner.api.v1.training_sources import PreparedTrainingInputResultV1
+
+        if self._input_preparation is None:
+            raise ValueError("preparation_unavailable")
+        result = self._input_preparation.prepare(source, config)
+        if type(result) is not PreparedTrainingInputResultV1:
+            raise TypeError("input preparation returned an invalid result")
+        return result
 
     def load(self, canonical_json: str) -> TrainingRequest:
         if type(canonical_json) is not str or not canonical_json:

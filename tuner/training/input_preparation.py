@@ -40,6 +40,7 @@ from tuner.training.contracts import RetainedTrainingInputStreamLease
 
 
 DATASET_PREP_NORMALIZER_V1 = "synaptic.dataset-prep/v1"
+PUBLISHED_PREPARED_DATASET_NORMALIZER_V1 = "synaptic.published-prepared-dataset/v1"
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _BUNDLE_MEMBERS = frozenset({"manifest.json", "items.jsonl"})
 
@@ -190,6 +191,66 @@ class DatasetPrepNormalizerConfigV1:
 
     def bind_source(self, source_path: Path) -> DatasetPrepConfigV1 | DatasetPrepConfigV2:
         return self._bound(source_path)
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedPreparedDatasetNormalizerConfigV1:
+    """Expected identity for a previously published v2 dataset; no host path."""
+
+    dataset_digest: str
+    train_rows: int
+    validation_rows: int
+
+    def __post_init__(self) -> None:
+        if (type(self.dataset_digest) is not str or len(self.dataset_digest) != 64
+                or any(char not in "0123456789abcdef" for char in self.dataset_digest)):
+            raise ValueError("dataset_digest must be a lowercase SHA-256 digest")
+        for count in (self.train_rows, self.validation_rows):
+            if type(count) is not int or count < 1:
+                raise ValueError("prepared split counts must be positive integers")
+
+    @property
+    def normalizer_ref(self) -> str:
+        return PUBLISHED_PREPARED_DATASET_NORMALIZER_V1
+
+
+class PublishedPreparedDatasetNormalizerV1:
+    """Admit one existing publication beneath a stable authorized root."""
+
+    __slots__ = ("_root", "_identity")
+
+    def __init__(self, *, authorized_root: Path) -> None:
+        if type(authorized_root) is not type(Path()) or not authorized_root.is_absolute():
+            raise TypeError("authorized_root must be an absolute Path")
+        self._root = Path(os.path.abspath(authorized_root))
+        self._identity = _stable_directory_identity(self._root, "authorized root")
+
+    def prepare(self, source: TrainingInputSourceV1, *, config: TrainingNormalizerConfigV1,
+                output_root: Path) -> NormalizedTrainingInputV1:
+        if type(source) is not LocalTrainingInputPathV1:
+            raise TypeError("published input requires a local path")
+        if type(config) is not PublishedPreparedDatasetNormalizerConfigV1:
+            raise TypeError("published input requires its exact config")
+        if _stable_directory_identity(self._root, "authorized root") != self._identity:
+            raise ValueError("authorized root identity changed")
+        candidate = Path(os.path.abspath(source.path))
+        if candidate.name == "dataset.jsonl":
+            candidate = candidate.parent
+        if (candidate.resolve(strict=True) != candidate or candidate.parent != output_root
+                or candidate.parent != self._root):
+            raise ValueError("published dataset is outside the authorized prepared root")
+        from tuner.dataset_prep.publication import snapshot_prepared_dataset_v2
+
+        verified, _ = snapshot_prepared_dataset_v2(candidate)
+        identity = verified.semantic_identity
+        if (identity.dataset_digest != config.dataset_digest
+                or dict(identity.split_counts) != {
+                    "train": config.train_rows, "validation": config.validation_rows,
+                }):
+            raise ValueError("published dataset identity or split counts differ")
+        if _stable_directory_identity(self._root, "authorized root") != self._identity:
+            raise ValueError("authorized root identity changed")
+        return NormalizedTrainingInputV1(candidate, ROW_SCHEMA_VERSION_V2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -554,8 +615,11 @@ class TrainingInputPreparationServiceV1:
 
 __all__ = [
     "DATASET_PREP_NORMALIZER_V1",
+    "PUBLISHED_PREPARED_DATASET_NORMALIZER_V1",
     "DatasetPrepNormalizerConfigV1",
     "DatasetPrepTrainingInputNormalizerV1",
+    "PublishedPreparedDatasetNormalizerConfigV1",
+    "PublishedPreparedDatasetNormalizerV1",
     "DatasetPreparedInputFormatVerifierV1",
     "NormalizedTrainingInputV1",
     "PosixPrivatePreparedRootAuthorityV1",

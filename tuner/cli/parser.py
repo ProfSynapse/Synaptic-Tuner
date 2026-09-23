@@ -664,7 +664,13 @@ Examples:
     parser.add_argument("--env-template", help="E2B template ID for cloud-eval/cloud-gym when --env-backend e2b.")
     parser.add_argument("--env-tool-schema", help="Custom tool schema YAML for cloud-eval/cloud-gym.")
     parser.add_argument("--env-exec-config", help="Custom environment execution YAML for cloud-eval/cloud-gym.")
-    parser.add_argument("--job-config", help="Config-driven job YAML (cloud-run or local-run workflow).")
+    parser.add_argument("--job-config", help="Config-driven job YAML (train, cloud-run or local-run workflow).")
+    parser.add_argument("--plan", action="store_true", help="Resolve a train --job-config plan without provider effects.")
+    parser.add_argument("--quote", action="store_true", help="Read scoped Modal GPU rates for a train --job-config without starting a job.")
+    parser.add_argument("--qualify", action="store_true", help="Build and run the packaged Modal CPU self-check without starting training.")
+    parser.add_argument("--fresh-attempt", action="store_true", help="Explicitly start a separate one-shot Modal attempt with a new private journal.")
+    parser.add_argument("--modal-profile", help="Named local Modal credential profile for train --quote or execution.")
+    parser.add_argument("--modal-environment", help="Existing Modal environment for train --quote or execution.")
     parser.add_argument(
         "--provider",
         choices=["local", "modal"],

@@ -11,7 +11,8 @@ from tuner.execution.foundation_v2.canonical import canonical_bytes, parse_canon
 from tuner.execution.foundation_v2.commands import SubmitCommandV2, parse_exact_command
 from tuner.runtime.releases import (
     PackagedExecutionBindingV1,
-    PackagedTrainingRuntimeReleaseV1,
+    PackagedRuntimeRelease, PackagedTrainingRuntimeReleaseV1,
+    PackagedTrainingRuntimeReleaseV2, parse_packaged_runtime_release,
     ProviderRuntimeBindingV1,
 )
 from tuner.training.contracts import ArtifactPolicy, CanonicalDocument
@@ -108,7 +109,7 @@ def _policy_dict(policy: ArtifactPolicy) -> dict[str, object]:
 @dataclass(frozen=True, slots=True)
 class ModalPackagedDispatch:
     submit_command_bytes: bytes = field(repr=False)
-    runtime_release: PackagedTrainingRuntimeReleaseV1
+    runtime_release: PackagedRuntimeRelease
     provider_binding: ProviderRuntimeBindingV1
     provider_facts: ModalPackagedRuntimeFactsV1
     execution_binding: PackagedExecutionBindingV1
@@ -122,7 +123,7 @@ class ModalPackagedDispatch:
         command = parse_exact_command(self.submit_command_bytes)
         if type(command) is not SubmitCommandV2:
             raise ValueError("packaged dispatch requires an exact submit command")
-        if type(self.runtime_release) is not PackagedTrainingRuntimeReleaseV1:
+        if type(self.runtime_release) not in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2):
             raise TypeError("exact packaged runtime release required")
         if type(self.provider_binding) is not ProviderRuntimeBindingV1:
             raise TypeError("exact provider runtime binding required")
@@ -301,7 +302,7 @@ def parse_modal_packaged_dispatch(
         raise ValueError("packaged workload encoding is invalid") from None
     result = ModalPackagedDispatch(
         canonical_bytes(document["submit_command"]),
-        PackagedTrainingRuntimeReleaseV1.from_dict(document["runtime_release"]),
+        parse_packaged_runtime_release(document["runtime_release"]),
         ProviderRuntimeBindingV1.from_dict(document["provider_binding"]),
         ModalPackagedRuntimeFactsV1.from_dict(document["provider_facts"]),
         PackagedExecutionBindingV1.from_dict(document["execution_binding"]),

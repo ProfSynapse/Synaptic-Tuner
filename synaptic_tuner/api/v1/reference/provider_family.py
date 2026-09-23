@@ -134,6 +134,7 @@ class CoordinatorRequestPortsV1:
     authorization: object
     cursor_authority: object
     clock: object
+    input_preparation: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +214,8 @@ def check_composition_ports(
         checks.append((family.quiescence_evidence, ("obtain",)))
     if family.foundation_retention is not None:
         checks.append((family.foundation_retention, ("retain",)))
+    if requests.input_preparation is not None:
+        checks.append((requests.input_preparation, ("prepare",)))
     for value, names in checks:
         require_methods(value, *names)
 
@@ -276,6 +279,7 @@ def compose_family_coordinator(
         planning_store=stores.planning_store,
         coordinator=coordinator,
         clock=requests.clock,
+        input_preparation=requests.input_preparation,
     )
     runs = build_run_operations(
         planning=family.planning,

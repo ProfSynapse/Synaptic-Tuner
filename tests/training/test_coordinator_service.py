@@ -81,6 +81,12 @@ def service(monkeypatch):
     return value, planning, store, coordinator
 
 
+def test_prepare_requires_an_explicit_host_port(monkeypatch):
+    value, _, _, _ = service(monkeypatch)
+    with pytest.raises(ValueError, match="preparation_unavailable"):
+        value.prepare(object(), object())
+
+
 def test_load_resolve_plan_and_restart_safe_retention(monkeypatch):
     value, _, store, _ = service(monkeypatch)
     assert value.load(REQUEST.canonical_json) == REQUEST

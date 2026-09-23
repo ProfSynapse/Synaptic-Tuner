@@ -160,6 +160,10 @@ def route_command(args: Namespace, context: ProjectContext | None = None) -> int
             context=context,
         ).handle()
 
+    if command == "train" and getattr(args, "job_config", None):
+        from tuner.handlers.modal_job_config_handler import ModalJobConfigHandler
+        return ModalJobConfigHandler(args=args, context=context).handle()
+
     # Import handlers (deferred to avoid circular imports)
     try:
         from tuner.handlers.train_handler import TrainHandler

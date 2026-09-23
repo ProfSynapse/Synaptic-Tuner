@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-packaged-training-runtime-release-v2.schema.json",
+  "title": "Synaptic Packaged Training Runtime Release v2",
+  "description": "The canonical parser additionally checks ordered inputs, cross-field identities, and manifest/build-input digests.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release_ref", "package", "worker", "material", "python", "installed_distributions", "platform", "compatibility", "contracts", "manifest_digest"],
+  "properties": {
+    "schema_version": {"const": "synaptic-packaged-training-runtime-release/v2"},
+    "release_ref": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/$defs/opaqueRef"},
+    "package": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/properties/package"},
+    "worker": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/properties/worker"},
+    "material": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "image"],
+          "properties": {
+            "kind": {"const": "published_oci"},
+            "image": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/properties/image"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "base_image", "build_inputs", "build_inputs_digest"],
+          "properties": {
+            "kind": {"const": "modal_build"},
+            "base_image": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/properties/image"},
+            "build_inputs": {
+              "type": "object", "additionalProperties": false,
+              "required": ["sdk_version", "python_executable", "commands", "installer_flags", "wheels", "builder_policy"],
+              "properties": {
+                "sdk_version": {"const": "1.5.4"},
+                "python_executable": {"type": "string", "pattern": "^/"},
+                "commands": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 2048}},
+                "installer_flags": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 2048}},
+                "wheels": {"type": "array", "minItems": 2, "maxItems": 128, "items": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["filename", "sha256"],
+                  "properties": {
+                    "filename": {"type": "string", "pattern": "^[A-Za-z0-9_.+-]+\\.whl$"},
+                    "sha256": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/$defs/digest"}
+                  }
+                }},
+                "builder_policy": {"enum": ["synaptic-modal-wheel-build/v1", "synaptic-modal-wheel-build/v2"]},
+                "builder_lock_sha256": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/$defs/digest"}
+              },
+              "allOf": [
+                {"if": {"properties": {"builder_policy": {"const": "synaptic-modal-wheel-build/v2"}}},
+                 "then": {"required": ["builder_lock_sha256"]},
+                 "else": {"not": {"required": ["builder_lock_sha256"]}}}
+              ]
+            },
+            "build_inputs_digest": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/$defs/digest"}
+          }
+        }
+      ]
+    },
+    "python": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/properties/python"},
+    "installed_distributions": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/properties/installed_distributions"},
+    "platform": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/properties/platform"},
+    "compatibility": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/properties/compatibility"},
+    "contracts": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/properties/contracts"},
+    "manifest_digest": {"$ref": "synaptic-packaged-training-runtime-release-v1.schema.json#/$defs/digest"}
+  }
+}

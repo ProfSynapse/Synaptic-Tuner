@@ -24,7 +24,7 @@ from tuner.runtime.packaged_worker_closure import (
     load_packaged_worker_closure,
     stable_read,
 )
-from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1
+from tuner.runtime.releases import PackagedRuntimeRelease, parse_packaged_runtime_release
 
 
 PACKAGED_TRAINING_WORKER_ENTRYPOINT = "tuner.runtime.packaged_training_worker:main"
@@ -38,7 +38,7 @@ class PackagedTrainingWorkerError(RuntimeError):
 
 def admit_packaged_training_release(
     payload: bytes, *, expected_release_digest: str
-) -> PackagedTrainingRuntimeReleaseV1:
+) -> PackagedRuntimeRelease:
     """Authenticate one canonical release against the installed worker closure.
 
     The caller supplies bytes from the immutable image/package layer, not a
@@ -52,7 +52,10 @@ def admit_packaged_training_release(
     if type(expected_release_digest) is not str or _DIGEST.fullmatch(expected_release_digest) is None:
         raise PackagedTrainingWorkerError("PACKAGED_RELEASE_REJECTED")
     try:
-        release = PackagedTrainingRuntimeReleaseV1.from_json(payload.decode("utf-8"))
+        document = json.loads(payload.decode("utf-8"))
+        release = parse_packaged_runtime_release(document)
+        if release.canonical_bytes() != payload:
+            raise ValueError
         closure = load_packaged_worker_closure()
     except BaseException as exc:
         # The boundary has one externally observable rejection.  In particular,
@@ -121,7 +124,7 @@ def qualify_installed_child(release_document):
     import subprocess
     import tempfile
     from tuner.runtime.packaged_sft_execution import _canonical, _digest, _inspect_release, _HeldDirectory, _HeldModelFile
-    release = PackagedTrainingRuntimeReleaseV1.from_dict(release_document)
+    release = parse_packaged_runtime_release(release_document)
     release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=release.manifest_digest)
     trainer = _inspect_release(release)
     if os.name != "posix" or not sys.flags.isolated:

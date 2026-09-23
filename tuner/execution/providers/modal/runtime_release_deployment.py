@@ -17,8 +17,11 @@ from dataclasses import dataclass
 import os
 from pathlib import PurePosixPath
 import re
+import signal
+import sys
 import tempfile
 import threading
+import time
 from typing import Callable, Mapping, Protocol
 
 from tuner.execution.foundation_v2.canonical import (
@@ -30,7 +33,10 @@ from tuner.execution.foundation_v2.canonical import (
     parse_canonical_object,
     safe_ref,
 )
-from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1
+from tuner.runtime.releases import (
+    PackagedRuntimeRelease, PackagedTrainingRuntimeReleaseV1,
+    PackagedTrainingRuntimeReleaseV2, parse_packaged_runtime_release,
+)
 
 from .binding import ModalClientBinding
 from .facade import EXACT_MODAL_SDK_VERSION, MODAL_VOLUME_V1
@@ -39,14 +45,22 @@ from .facade import EXACT_MODAL_SDK_VERSION, MODAL_VOLUME_V1
 MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_SCHEMA = (
     "synaptic-modal-runtime-release-deployment-plan/v1"
 )
+MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA = (
+    "synaptic-modal-runtime-release-deployment-plan/v2"
+)
 MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_SCHEMA = (
     "synaptic-modal-runtime-release-deployment-facts/v1"
+)
+MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_V2_SCHEMA = (
+    "synaptic-modal-runtime-release-deployment-facts/v2"
 )
 MODAL_RUNTIME_RELEASE_DEPLOYMENT_OBSERVATION_SCHEMA = (
     "synaptic-modal-runtime-release-deployment-observation/v1"
 )
 EXACT_SELF_CHECK_MODULE = "tuner.runtime.runtime_release_modal_self_check"
 EXACT_SELF_CHECK_QUALNAME = "run_runtime_release_self_check"
+EXACT_PACKAGED_TRAINING_MODULE = "tuner.runtime.runtime_release_modal_training"
+EXACT_PACKAGED_TRAINING_QUALNAME = "run_modal_packaged_training"
 EXACT_QUALIFICATION_SECRET_REQUIRED_KEYS = (
     "SYNAPTIC_MODAL_QUALIFICATION_HMAC_KEY",
 )
@@ -67,6 +81,18 @@ _DEPLOY_CWD_LOCK = threading.Lock()
 
 class ModalRuntimeReleaseDeploymentError(RuntimeError):
     """Closed release-deployment failure without provider response detail."""
+
+
+def require_bounded_modal_deployment_host() -> None:
+    """Pure precondition for the paid Linux main-thread deploy boundary."""
+    if sys.platform != "linux" or threading.current_thread() is not threading.main_thread():
+        raise ModalRuntimeReleaseDeploymentError("modal_release_bounded_deploy_unavailable")
+    try:
+        if (signal.getsignal(signal.SIGALRM) is not signal.SIG_DFL
+                or any(signal.getitimer(signal.ITIMER_REAL))):
+            raise ModalRuntimeReleaseDeploymentError("modal_release_bounded_deploy_unavailable")
+    except (AttributeError, ValueError):
+        raise ModalRuntimeReleaseDeploymentError("modal_release_bounded_deploy_unavailable") from None
 
 
 def _provider_id(value: object, kind: str, *, optional: bool = False) -> str:
@@ -281,7 +307,7 @@ class ModalRuntimeReleaseSecretSpecV1:
 
 @dataclass(frozen=True, slots=True)
 class ModalRuntimeReleaseDeploymentPlanV1:
-    release: PackagedTrainingRuntimeReleaseV1
+    release: PackagedRuntimeRelease
     app_name: str
     environment_name: str
     functions: tuple[ModalRuntimeReleaseFunctionSpecV1, ...]
@@ -292,10 +318,12 @@ class ModalRuntimeReleaseDeploymentPlanV1:
     schema_version: str = MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_SCHEMA
 
     def __post_init__(self) -> None:
-        if self.schema_version != MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_SCHEMA:
+        if self.schema_version not in (MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_SCHEMA, MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA):
             raise ValueError("unsupported Modal runtime release deployment plan")
-        if type(self.release) is not PackagedTrainingRuntimeReleaseV1:
+        if type(self.release) not in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2):
             raise TypeError("exact packaged runtime release required")
+        if (type(self.release) is PackagedTrainingRuntimeReleaseV1) != (self.schema_version == MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_SCHEMA):
+            raise ValueError("Modal release plan version differs from runtime release")
         if self.sdk_version != EXACT_MODAL_SDK_VERSION or self.strategy != "rolling":
             raise ValueError("Modal release deployment policy is unsupported")
         object.__setattr__(self, "app_name", safe_ref(self.app_name, "app_name"))
@@ -335,6 +363,13 @@ class ModalRuntimeReleaseDeploymentPlanV1:
                 or len({item.name for item in volumes}) != len(volumes) \
                 or len({item.mount_path for item in volumes}) != len(volumes):
             raise ValueError("Modal release Volume layout is invalid")
+        if type(self.release) is PackagedTrainingRuntimeReleaseV2:
+            if (tuple(item.role for item in volumes) != ("control", "artifacts", "model_cache")
+                    or volumes[2].mount_path != "/mnt/model-cache"
+                    or functions[0].volume_roles != ("control", "artifacts", "model_cache")
+                    or functions[0].module != EXACT_PACKAGED_TRAINING_MODULE
+                    or functions[0].qualname != EXACT_PACKAGED_TRAINING_QUALNAME):
+                raise ValueError("v2 Modal release requires a distinct model-cache Volume")
         object.__setattr__(self, "volumes", volumes)
         if type(self.secrets) not in (tuple, list) \
                 or any(type(item) is not ModalRuntimeReleaseSecretSpecV1 for item in self.secrets):
@@ -354,7 +389,7 @@ class ModalRuntimeReleaseDeploymentPlanV1:
             if not set(function.volume_roles) <= roles \
                     or not set(function.secret_names) <= {item.name for item in secrets}:
                 raise ValueError("Modal release function references an undeclared resource")
-        if self.release.image_ref.rsplit("@sha256:", 1)[-1] != self.release.image_digest:
+        if type(self.release) is PackagedTrainingRuntimeReleaseV1 and self.release.image_ref.rsplit("@sha256:", 1)[-1] != self.release.image_digest:
             raise ValueError("runtime release image reference is not digest-bound")
 
     def _unsigned_dict(self) -> dict[str, object]:
@@ -393,7 +428,7 @@ class ModalRuntimeReleaseDeploymentPlanV1:
                 or type(value["secrets"]) is not list:
             raise TypeError("Modal release plan inventories must be exact arrays")
         result = cls(
-            release=PackagedTrainingRuntimeReleaseV1.from_dict(value["runtime_release"]),  # type: ignore[arg-type]
+            release=parse_packaged_runtime_release(value["runtime_release"]),  # type: ignore[arg-type]
             app_name=value["app_name"], environment_name=value["environment_name"],
             functions=tuple(ModalRuntimeReleaseFunctionSpecV1.from_dict(item) for item in value["functions"]),
             volumes=tuple(ModalRuntimeReleaseVolumeSpecV1.from_dict(item) for item in value["volumes"]),
@@ -626,8 +661,8 @@ class ModalRuntimeReleaseDeploymentFactsV1:
     app_name: str
     app_id: str
     generation: int
-    image_reference: str
-    image_digest: str
+    image_reference: str | None
+    image_digest: str | None
     image_id: str
     functions: tuple[ModalRuntimeReleaseFunctionFactV1, ...]
     volumes: tuple[ModalRuntimeReleaseVolumeFactV1, ...]
@@ -640,17 +675,25 @@ class ModalRuntimeReleaseDeploymentFactsV1:
     installed_distributions_digest: str
     worker_entrypoint: str
     worker_closure_digest: str
+    material_digest: str | None = None
     current_state_version_pinned: bool = False
     function_image_link_readable: bool = False
     schema_version: str = MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_SCHEMA
 
     def __post_init__(self) -> None:
-        if self.schema_version != MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_SCHEMA:
+        if self.schema_version not in (MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_SCHEMA, MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_V2_SCHEMA):
             raise ValueError("unsupported Modal runtime release deployment facts")
+        if self.schema_version == MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_SCHEMA:
+            if self.material_digest is not None:
+                raise ValueError("v1 deployment facts cannot carry build material")
+            identity_fields = ("image_digest",)
+        else:
+            if self.image_reference is not None or self.image_digest is not None:
+                raise ValueError("v2 deployment facts cannot claim final OCI identity")
+            identity_fields = ("material_digest",)
         for field in (
-            "deployment_spec_digest", "runtime_release_digest", "image_digest",
-            "python_executable_digest", "package_digest",
-            "installed_distributions_digest", "worker_closure_digest",
+            "deployment_spec_digest", "runtime_release_digest", *identity_fields,
+            "python_executable_digest", "package_digest", "installed_distributions_digest", "worker_closure_digest",
         ):
             object.__setattr__(self, field, digest_text(getattr(self, field), field))
         if type(self.client_binding) is not ModalClientBinding \
@@ -659,7 +702,8 @@ class ModalRuntimeReleaseDeploymentFactsV1:
         object.__setattr__(self, "app_name", safe_ref(self.app_name, "app_name"))
         object.__setattr__(self, "app_id", _provider_id(self.app_id, "app_id"))
         exact_integer(self.generation, "generation", minimum=1)
-        object.__setattr__(self, "image_reference", safe_ref(self.image_reference, "image_reference"))
+        if self.schema_version == MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_SCHEMA:
+            object.__setattr__(self, "image_reference", safe_ref(self.image_reference, "image_reference"))
         object.__setattr__(self, "image_id", _provider_id(self.image_id, "image_id"))
         for field in ("python_implementation", "python_version", "worker_entrypoint"):
             object.__setattr__(self, field, safe_ref(getattr(self, field), field))
@@ -678,6 +722,11 @@ class ModalRuntimeReleaseDeploymentFactsV1:
                 or any(type(item) is not ModalRuntimeReleaseVolumeFactV1 for item in self.volumes):
             raise TypeError("exact Modal release Volume facts required")
         object.__setattr__(self, "volumes", tuple(self.volumes))
+        if self.schema_version == MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_V2_SCHEMA:
+            roles = tuple(item.spec.role for item in self.volumes)
+            ids = tuple(item.volume_id for item in self.volumes)
+            if roles != ("control", "artifacts", "model_cache") or len(set(ids)) != 3:
+                raise ValueError("v2 Modal deployment facts require distinct cache Volume")
         if type(self.secrets) not in (tuple, list) \
                 or any(type(item) is not ModalRuntimeReleaseSecretFactV1 for item in self.secrets):
             raise TypeError("exact Modal release Secret facts required")
@@ -706,8 +755,9 @@ class ModalRuntimeReleaseDeploymentFactsV1:
                 "classes": [],
             },
             "runtime": {
-                "image_reference": self.image_reference,
-                "image_digest": self.image_digest,
+                **({"image_reference": self.image_reference, "image_digest": self.image_digest}
+                   if self.schema_version == MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_SCHEMA
+                   else {"material_digest": self.material_digest}),
                 "image_id": self.image_id,
                 "python": {
                     "implementation": self.python_implementation,
@@ -742,8 +792,13 @@ class ModalRuntimeReleaseDeploymentFactsV1:
                 or self.runtime_release_digest != plan.release.manifest_digest \
                 or self.app_name != plan.app_name \
                 or self.client_binding.environment_ref != plan.environment_name \
-                or self.image_reference != plan.release.image_ref \
-                or self.image_digest != plan.release.image_digest \
+                or (type(plan.release) is PackagedTrainingRuntimeReleaseV1 and (
+                    self.schema_version != MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_SCHEMA
+                    or self.image_reference != plan.release.image_ref
+                    or self.image_digest != plan.release.image_digest)) \
+                or (type(plan.release) is PackagedTrainingRuntimeReleaseV2 and (
+                    self.schema_version != MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_V2_SCHEMA
+                    or self.material_digest != plan.release.material_digest)) \
                 or tuple(item.spec for item in self.functions) != plan.functions \
                 or tuple(item.spec for item in self.volumes) != plan.volumes \
                 or tuple(item.spec for item in self.secrets) != plan.secrets:
@@ -765,8 +820,8 @@ class ModalRuntimeReleaseDeploymentFactsV1:
             "app_name", "app_id", "generation", "private", "functions", "classes",
         }), "Modal release deployment")
         exact_fields(runtime, frozenset({
-            "image_reference", "image_digest", "image_id", "python", "package_digest",
-            "installed_distributions_digest", "worker_entrypoint", "worker_closure_digest",
+            *({"image_reference", "image_digest"} if value["schema_version"] == MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_SCHEMA else {"material_digest"}),
+            "image_id", "python", "package_digest", "installed_distributions_digest", "worker_entrypoint", "worker_closure_digest",
         }), "Modal release runtime")
         exact_fields(limits, frozenset({
             "current_state_version_pinned", "function_image_link_readable",
@@ -815,7 +870,7 @@ class ModalRuntimeReleaseDeploymentFactsV1:
             client_binding=ModalClientBinding(**scope),  # type: ignore[arg-type]
             app_name=deployment["app_name"], app_id=deployment["app_id"],
             generation=deployment["generation"],
-            image_reference=runtime["image_reference"], image_digest=runtime["image_digest"],
+            image_reference=runtime.get("image_reference"), image_digest=runtime.get("image_digest"),
             image_id=runtime["image_id"], functions=tuple(function_facts),
             volumes=tuple(volume_facts), secrets=tuple(secret_facts),
             python_implementation=python["implementation"], python_version=python["version"],
@@ -825,6 +880,7 @@ class ModalRuntimeReleaseDeploymentFactsV1:
             installed_distributions_digest=runtime["installed_distributions_digest"],
             worker_entrypoint=runtime["worker_entrypoint"],
             worker_closure_digest=runtime["worker_closure_digest"],
+            material_digest=runtime.get("material_digest"),
             current_state_version_pinned=limits["current_state_version_pinned"],
             function_image_link_readable=limits["function_image_link_readable"],
             schema_version=value["schema_version"],
@@ -876,12 +932,21 @@ class ModalRuntimeReleaseDeployer:
     def _observe_scope(self, environment_name: str) -> None:
         failed = False
         try:
-            workspace = self._sdk.Workspace.from_context(client=self._client)
-            workspace.hydrate(self._client)
-            environment = self._sdk.Environment.from_name(
-                environment_name, create_if_missing=False, client=self._client,
+            from .runtime_build import _bounded
+
+            def scoped_read():
+                workspace = self._sdk.Workspace.from_context(client=self._client)
+                workspace.hydrate(self._client)
+                environment = self._sdk.Environment.from_name(
+                    environment_name, create_if_missing=False, client=self._client,
+                )
+                environment.hydrate(self._client)
+                return workspace, environment
+
+            workspace, environment = _bounded(
+                scoped_read, deadline=time.monotonic() + 60,
+                code="modal_release_scope_unavailable",
             )
-            environment.hydrate(self._client)
             if getattr(workspace, "is_hydrated", False) is not True \
                     or getattr(environment, "is_hydrated", False) is not True \
                     or safe_ref(getattr(workspace, "name", None), "workspace_ref") \
@@ -921,30 +986,36 @@ class ModalRuntimeReleaseDeployer:
         secrets: dict[str, tuple[object, ModalRuntimeReleaseSecretFactV1]] = {}
         failed = False
         try:
-            for spec in plan.volumes:
-                value = self._sdk.Volume.from_name(
-                    spec.name, environment_name=plan.environment_name,
-                    create_if_missing=False, version=spec.version, client=self._client,
-                )
-                value.hydrate(self._client)
-                if getattr(value, "is_hydrated", False) is not True:
-                    raise ValueError
-                fact = ModalRuntimeReleaseVolumeFactV1(
-                    spec, getattr(value, "object_id", None),
-                )
-                volumes[spec.role] = (value, fact)
-            for spec in plan.secrets:
-                value = self._sdk.Secret.from_name(
-                    spec.name, environment_name=plan.environment_name,
-                    required_keys=list(spec.required_keys), client=self._client,
-                )
-                value.hydrate(self._client)
-                if getattr(value, "is_hydrated", False) is not True:
-                    raise ValueError
-                fact = ModalRuntimeReleaseSecretFactV1(
-                    spec, getattr(value, "object_id", None),
-                )
-                secrets[spec.name] = (value, fact)
+            from .runtime_build import _bounded
+
+            def scoped_read():
+                for spec in plan.volumes:
+                    value = self._sdk.Volume.from_name(
+                        spec.name, environment_name=plan.environment_name,
+                        create_if_missing=False, version=spec.version, client=self._client,
+                    )
+                    value.hydrate(self._client)
+                    if getattr(value, "is_hydrated", False) is not True:
+                        raise ValueError
+                    fact = ModalRuntimeReleaseVolumeFactV1(
+                        spec, getattr(value, "object_id", None),
+                    )
+                    volumes[spec.role] = (value, fact)
+                for spec in plan.secrets:
+                    value = self._sdk.Secret.from_name(
+                        spec.name, environment_name=plan.environment_name,
+                        required_keys=list(spec.required_keys), client=self._client,
+                    )
+                    value.hydrate(self._client)
+                    if getattr(value, "is_hydrated", False) is not True:
+                        raise ValueError
+                    fact = ModalRuntimeReleaseSecretFactV1(
+                        spec, getattr(value, "object_id", None),
+                    )
+                    secrets[spec.name] = (value, fact)
+
+            _bounded(scoped_read, deadline=time.monotonic() + 60,
+                     code="modal_release_resource_unavailable")
         except Exception:
             failed = True
         if failed:
@@ -1007,29 +1078,54 @@ class ModalRuntimeReleaseDeployer:
         with _DEPLOY_CWD_LOCK:
             original = os.getcwd()
             with tempfile.TemporaryDirectory(prefix="synaptic-modal-release-") as directory:
+                v2_release = type(plan.release) is PackagedTrainingRuntimeReleaseV2
+                if v2_release:
+                    require_bounded_modal_deployment_host()
+                bounded_v2 = v2_release and sys.platform == "linux"
+
+                def alarm(_signum, _frame):
+                    raise ModalRuntimeReleaseDeploymentError("modal_release_deployment_indeterminate")
+
                 try:
                     if os.name != "nt":
                         os.chmod(directory, 0o700)
                     os.chdir(directory)
+                    if bounded_v2:
+                        signal.signal(signal.SIGALRM, alarm)
+                        signal.setitimer(signal.ITIMER_REAL, 600)
                     app.deploy(
                         environment_name=plan.environment_name,
                         client=client,
                         strategy=plan.strategy,
                     )
                 finally:
+                    if bounded_v2:
+                        signal.setitimer(signal.ITIMER_REAL, 0)
+                        signal.signal(signal.SIGALRM, signal.SIG_DFL)
                     os.chdir(original)
 
     def deploy_once(
         self, plan: ModalRuntimeReleaseDeploymentPlanV1, *,
         entrypoints: Mapping[str, Callable],
+        candidate: object | None = None,
     ) -> ModalRuntimeReleaseDeploymentFactsV1:
         """Perform one already-authorized deployment call, never a retry."""
+        if type(plan) is ModalRuntimeReleaseDeploymentPlanV1 \
+                and type(plan.release) is PackagedTrainingRuntimeReleaseV2:
+            require_bounded_modal_deployment_host()
         if type(plan) is not ModalRuntimeReleaseDeploymentPlanV1:
             raise TypeError("exact Modal release deployment plan required")
         if plan.environment_name != self._binding.environment_ref:
             raise ValueError("Modal release plan differs from the explicit client scope")
         if type(entrypoints) is not dict or set(entrypoints) != {"training", "self_check"}:
             raise TypeError("exact packaged training and self-check entrypoints required")
+        if type(plan.release) is PackagedTrainingRuntimeReleaseV2 and plan.release.material["kind"] == "modal_build":
+            from .runtime_build import ModalBuildCandidateV1
+            if type(candidate) is not ModalBuildCandidateV1:
+                raise TypeError("exact captured Modal build candidate required")
+            candidate.validate_release(plan.release)
+        elif candidate is not None:
+            raise ValueError("published OCI deployment cannot accept a build candidate")
         resolved = {
             spec.role: self._validate_entrypoint(spec, entrypoints[spec.role])
             for spec in plan.functions
@@ -1039,8 +1135,24 @@ class ModalRuntimeReleaseDeployer:
         self._validate_prior(prior, plan)
         volume_objects, secret_objects = self._hydrate_resources(plan)
         try:
-            image = self._sdk.Image.from_registry(plan.release.image_ref).entrypoint([])
-            app = self._sdk.App(plan.app_name, image=image, include_source=False)
+            if (type(plan.release) is PackagedTrainingRuntimeReleaseV1
+                    or (type(plan.release) is PackagedTrainingRuntimeReleaseV2
+                        and plan.release.material["kind"] == "published_oci")):
+                reference = (plan.release.image_ref if type(plan.release) is PackagedTrainingRuntimeReleaseV1
+                             else plan.release.material["image"]["reference"])
+                image = self._sdk.Image.from_registry(reference).entrypoint([])
+                app = self._sdk.App(plan.app_name, image=image, include_source=False)
+            else:
+                app = self._sdk.App(plan.app_name, include_source=False)
+                image = self._sdk.Image.from_id(candidate.image_id, client=self._client)
+                from .runtime_build import _bounded
+
+                image = _bounded(
+                    lambda: image.build(app), deadline=time.monotonic() + 600,
+                    code="modal_release_image_rebind_indeterminate",
+                )
+                if self._provider_identity(image, "object_id", "image_id") != candidate.image_id:
+                    raise ValueError("captured Modal image differs")
             function_objects: list[tuple[ModalRuntimeReleaseFunctionSpecV1, object]] = []
             for spec in plan.functions:
                 volumes = {
@@ -1100,7 +1212,8 @@ class ModalRuntimeReleaseDeployer:
                 runtime_release_digest=release.manifest_digest,
                 client_binding=self._binding,
                 app_name=plan.app_name, app_id=app_id, generation=current.generation,
-                image_reference=release.image_ref, image_digest=release.image_digest,
+                image_reference=(release.image_ref if type(release) is PackagedTrainingRuntimeReleaseV1 else None),
+                image_digest=(release.image_digest if type(release) is PackagedTrainingRuntimeReleaseV1 else None),
                 image_id=image_id, functions=function_facts,
                 volumes=tuple(item[1] for item in volume_objects.values()),
                 secrets=tuple(item[1] for item in secret_objects.values()),
@@ -1112,6 +1225,10 @@ class ModalRuntimeReleaseDeployer:
                 installed_distributions_digest=release.installed_distributions_digest,
                 worker_entrypoint=release.worker_entrypoint,
                 worker_closure_digest=release.worker_closure_digest,
+                material_digest=(release.material_digest if type(release) is PackagedTrainingRuntimeReleaseV2 else None),
+                schema_version=(MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_V2_SCHEMA
+                                if type(release) is PackagedTrainingRuntimeReleaseV2
+                                else MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_SCHEMA),
             )
             facts.validate_plan(plan)
             return facts

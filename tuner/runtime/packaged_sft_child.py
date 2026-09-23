@@ -99,7 +99,7 @@ def run_packaged_child(argv=None):
         _private_manifest, _MAX_CHILD_BYTES,
     )
     from tuner.runtime.packaged_training_worker import admit_packaged_training_release
-    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1, ProviderRuntimeBindingV1, PackagedExecutionBindingV1
+    from tuner.runtime.releases import parse_packaged_runtime_release, ProviderRuntimeBindingV1, PackagedExecutionBindingV1
     from tuner.training.contracts import ArtifactPolicy
     from Trainers.sft import runtime_v1 as core
     from types import SimpleNamespace
@@ -114,7 +114,7 @@ def run_packaged_child(argv=None):
     payload = _document(raw, _MAX_CHILD_BYTES)
     if set(payload) != {"release", "release_digest", "arguments", "provider_binding", "execution_binding", "workload", "artifact_policy", "paths", "environment", "model_snapshot"} or payload["arguments"] != args[5:]:
         raise ValueError
-    release = PackagedTrainingRuntimeReleaseV1.from_dict(payload["release"])
+    release = parse_packaged_runtime_release(payload["release"])
     release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=payload["release_digest"])
     trainer = _inspect_release(release)
     provider = ProviderRuntimeBindingV1.from_dict(payload["provider_binding"])
@@ -218,13 +218,13 @@ def run_local_cpu_child(args):
         local_cpu_result, admit_packaged_training_release,
     )
     from tuner.runtime.packaged_sft_execution import _canonical, _document, _digest, _inspect_release, _HeldDirectory, _HeldModelFile
-    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1
+    from tuner.runtime.releases import parse_packaged_runtime_release
     if len(args) != 3 or args[0] != "--qualify-local" or not sys.flags.isolated or os.name != "posix": raise ValueError
     raw = stable_read(Path(args[1]), 256 * 1024)
     if _digest(raw) != args[2]: raise ValueError
     payload = _document(raw)
     if set(payload) != {"schema_version", "release", "input_fd", "root", "root_identity", "member"} or payload["schema_version"] != LOCAL_CPU_PROTOCOL: raise ValueError
-    release = PackagedTrainingRuntimeReleaseV1.from_dict(payload["release"])
+    release = parse_packaged_runtime_release(payload["release"])
     release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=release.manifest_digest)
     _check_local_cpu_environment(release)
     trainer = _inspect_release(release)

@@ -379,7 +379,8 @@ class ReferenceAuthorizationV1:
 
 
 def build_training_operations(
-    *, loader, resolver, planning, planning_store, coordinator, clock
+    *, loader, resolver, planning, planning_store, coordinator, clock,
+    input_preparation=None,
 ) -> CoordinatorTrainingService:
     """The ``TrainingOperations`` implementation over a composed coordinator."""
     return CoordinatorTrainingService(
@@ -389,6 +390,7 @@ def build_training_operations(
         planning_store=planning_store,
         coordinator=coordinator,
         clock=clock,
+        input_preparation=input_preparation,
     )
 
 

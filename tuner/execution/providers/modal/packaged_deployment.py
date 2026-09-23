@@ -11,7 +11,8 @@ from __future__ import annotations
 from typing import Protocol
 
 from tuner.runtime.releases import (
-    PackagedTrainingRuntimeReleaseV1,
+    PackagedRuntimeRelease, PackagedTrainingRuntimeReleaseV1,
+    PackagedTrainingRuntimeReleaseV2,
     ProviderRuntimeBindingV1,
 )
 
@@ -67,12 +68,12 @@ class ModalPackagedDeploymentObserver:
         self,
         expected: ModalPackagedRuntimeFactsV1,
         *,
-        runtime_release: PackagedTrainingRuntimeReleaseV1,
+        runtime_release: PackagedRuntimeRelease,
         provider_binding: ProviderRuntimeBindingV1,
     ) -> ModalPackagedRuntimeFactsV1:
         if type(expected) is not ModalPackagedRuntimeFactsV1:
             raise TypeError("exact committed Modal packaged facts required")
-        if type(runtime_release) is not PackagedTrainingRuntimeReleaseV1:
+        if type(runtime_release) not in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2):
             raise TypeError("exact packaged runtime release required")
         if type(provider_binding) is not ProviderRuntimeBindingV1:
             raise TypeError("exact provider runtime binding required")
@@ -114,7 +115,7 @@ def observe_modal_packaged_deployment(
     observer: ModalPackagedDeploymentObserver,
     expected: ModalPackagedRuntimeFactsV1,
     *,
-    runtime_release: PackagedTrainingRuntimeReleaseV1,
+    runtime_release: PackagedRuntimeRelease,
     provider_binding: ProviderRuntimeBindingV1,
 ) -> ModalPackagedRuntimeFactsV1:
     if type(observer) is not ModalPackagedDeploymentObserver:

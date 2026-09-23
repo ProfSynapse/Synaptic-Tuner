@@ -22,8 +22,11 @@ from tuner.execution.foundation_v2.canonical import (
 from tuner.execution.foundation_v2.commands import parse_exact_command
 from tuner.runtime.releases import (
     PackagedExecutionBindingV1,
+    PackagedRuntimeRelease,
     PackagedTrainingRuntimeReleaseV1,
+    PackagedTrainingRuntimeReleaseV2,
     ProviderRuntimeBindingV1,
+    parse_packaged_runtime_release,
 )
 
 from .binding import ModalClientBinding
@@ -31,6 +34,7 @@ from .facade import EXACT_MODAL_SDK_VERSION
 
 
 MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA = "synaptic-modal-packaged-runtime-facts/v1"
+MODAL_PACKAGED_RUNTIME_FACTS_V2_SCHEMA = "synaptic-modal-packaged-runtime-facts/v2"
 EXACT_ARTIFACT_ROLES = frozenset({
     "workload_record", "training_lineage", "training_metrics", "final_model",
     "tokenizer",
@@ -71,17 +75,19 @@ class ModalPackagedRuntimeFactsV1:
     self_check_function_id: str
     deployment_spec_digest: str
     image_id: str
-    image_digest: str
+    image_digest: str | None
     package_digest: str
     installed_distributions_digest: str
     worker_entrypoint: str
     worker_closure_digest: str
     control_volume_id: str
     artifact_volume_id: str
+    material_digest: str | None = None
+    model_cache_volume_id: str | None = None
     schema_version: str = MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA
 
     def __post_init__(self) -> None:
-        if self.schema_version != MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA:
+        if self.schema_version not in (MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA, MODAL_PACKAGED_RUNTIME_FACTS_V2_SCHEMA):
             raise ValueError("unsupported Modal packaged runtime facts")
         for name in (
             "account_ref", "workspace_ref", "environment_ref", "client_ref",
@@ -100,10 +106,19 @@ class ModalPackagedRuntimeFactsV1:
             raise ValueError("Modal packaged deployment requires two distinct functions")
         if type(self.deployment_generation) is not int or self.deployment_generation < 1:
             raise ValueError("deployment_generation must be a positive integer")
-        for name in (
-            "deployment_spec_digest", "image_digest", "package_digest", "installed_distributions_digest",
-            "worker_closure_digest",
-        ):
+        if self.schema_version == MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA:
+            if self.material_digest is not None or self.model_cache_volume_id is not None:
+                raise ValueError("v1 Modal facts cannot have material digest")
+            names = ("deployment_spec_digest", "image_digest", "package_digest", "installed_distributions_digest", "worker_closure_digest")
+        else:
+            if self.image_digest is not None:
+                raise ValueError("v2 Modal facts cannot claim a final OCI digest")
+            cache_id = _provider_id(self.model_cache_volume_id, "control_volume_id")
+            if cache_id in {self.control_volume_id, self.artifact_volume_id}:
+                raise ValueError("v2 Modal cache Volume must be distinct")
+            object.__setattr__(self, "model_cache_volume_id", cache_id)
+            names = ("deployment_spec_digest", "material_digest", "package_digest", "installed_distributions_digest", "worker_closure_digest")
+        for name in names:
             object.__setattr__(self, name, digest_text(getattr(self, name), name))
 
     @property
@@ -143,7 +158,8 @@ class ModalPackagedRuntimeFactsV1:
             },
             "runtime": {
                 "image_id": self.image_id,
-                "image_digest": self.image_digest,
+                **({"image_digest": self.image_digest} if self.schema_version == MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA
+                   else {"material_digest": self.material_digest}),
                 "package_digest": self.package_digest,
                 "installed_distributions_digest": self.installed_distributions_digest,
                 "worker_entrypoint": self.worker_entrypoint,
@@ -152,6 +168,8 @@ class ModalPackagedRuntimeFactsV1:
             "volumes": {
                 "control_id": self.control_volume_id,
                 "artifact_id": self.artifact_volume_id,
+                **({"model_cache_id": self.model_cache_volume_id}
+                   if self.schema_version == MODAL_PACKAGED_RUNTIME_FACTS_V2_SCHEMA else {}),
             },
         }
 
@@ -161,13 +179,17 @@ class ModalPackagedRuntimeFactsV1:
 
     @property
     def facts_digest(self) -> str:
-        return domain_digest(MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA, self.canonical_bytes)
+        return domain_digest(self.schema_version, self.canonical_bytes)
 
-    def validate_release(self, release: PackagedTrainingRuntimeReleaseV1) -> None:
-        if type(release) is not PackagedTrainingRuntimeReleaseV1:
+    def validate_release(self, release: PackagedRuntimeRelease) -> None:
+        if type(release) not in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2):
             raise TypeError("exact packaged runtime release required")
+        if type(release) is PackagedTrainingRuntimeReleaseV1:
+            material_ok = self.schema_version == MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA and self.image_digest == release.image_digest
+        else:
+            material_ok = self.schema_version == MODAL_PACKAGED_RUNTIME_FACTS_V2_SCHEMA and self.material_digest == release.material_digest
         if (
-            self.image_digest != release.image_digest
+            not material_ok
             or self.package_digest != release.package_digest
             or self.installed_distributions_digest
             != release.installed_distributions_digest
@@ -177,13 +199,13 @@ class ModalPackagedRuntimeFactsV1:
             raise ValueError("Modal deployment facts differ from the runtime release")
 
     def build_provider_binding(
-        self, release: PackagedTrainingRuntimeReleaseV1,
+        self, release: PackagedRuntimeRelease,
     ) -> ProviderRuntimeBindingV1:
         self.validate_release(release)
         return ProviderRuntimeBindingV1.build(
             provider_ref="modal",
             runtime_release=release,
-            provider_facts_schema=MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA,
+            provider_facts_schema=self.schema_version,
             provider_facts_digest=self.facts_digest,
         )
 
@@ -212,12 +234,17 @@ class ModalPackagedRuntimeFactsV1:
                 "role", "name", "function_id", "private",
             } or item.get("role") != role or item.get("private") is not True:
                 raise ValueError("Modal packaged deployment function layout is invalid")
-        if type(runtime) is not dict or set(runtime) != {
-            "image_id", "image_digest", "package_digest",
-            "installed_distributions_digest", "worker_entrypoint", "worker_closure_digest",
-        }:
+        expected_runtime = {
+            "image_id", "package_digest", "installed_distributions_digest",
+            "worker_entrypoint", "worker_closure_digest",
+            "image_digest" if value["schema_version"] == MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA else "material_digest",
+        }
+        if type(runtime) is not dict or set(runtime) != expected_runtime:
             raise ValueError("Modal packaged runtime identity is invalid")
-        if type(volumes) is not dict or set(volumes) != {"control_id", "artifact_id"}:
+        expected_volumes = ({"control_id", "artifact_id"}
+                            if value["schema_version"] == MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA
+                            else {"control_id", "artifact_id", "model_cache_id"})
+        if type(volumes) is not dict or set(volumes) != expected_volumes:
             raise ValueError("Modal packaged volume identity is invalid")
         return cls(
             **scope,
@@ -228,8 +255,10 @@ class ModalPackagedRuntimeFactsV1:
             self_check_function_id=functions[1]["function_id"],
             deployment_spec_digest=deployment["deployment_spec_digest"],
             **runtime,
+            **({"image_digest": None} if value["schema_version"] == MODAL_PACKAGED_RUNTIME_FACTS_V2_SCHEMA else {}),
             control_volume_id=volumes["control_id"],
             artifact_volume_id=volumes["artifact_id"],
+            model_cache_volume_id=volumes.get("model_cache_id"),
             schema_version=value["schema_version"],
         )  # type: ignore[arg-type]
 
@@ -247,6 +276,9 @@ class ModalPackagedRuntimeFactsV1:
         if set(functions) != {"training", "self_check"} \
                 or not {"control", "artifacts"} <= set(volumes):
             raise ValueError("acknowledged Modal release layout is incomplete")
+        if value.schema_version == "synaptic-modal-runtime-release-deployment-facts/v2" \
+                and "model_cache" not in volumes:
+            raise ValueError("v2 acknowledged Modal release lacks cache Volume")
         training, self_check = functions["training"], functions["self_check"]
         binding = value.client_binding
         return cls(
@@ -271,6 +303,12 @@ class ModalPackagedRuntimeFactsV1:
             worker_closure_digest=value.worker_closure_digest,
             control_volume_id=volumes["control"].volume_id,
             artifact_volume_id=volumes["artifacts"].volume_id,
+            model_cache_volume_id=(volumes["model_cache"].volume_id
+                                   if "model_cache" in volumes else None),
+            material_digest=value.material_digest,
+            schema_version=(MODAL_PACKAGED_RUNTIME_FACTS_V2_SCHEMA
+                            if value.schema_version == "synaptic-modal-runtime-release-deployment-facts/v2"
+                            else MODAL_PACKAGED_RUNTIME_FACTS_SCHEMA),
         )
 
     @classmethod
@@ -303,8 +341,8 @@ class ModalPackagedCommandBinding:
         )):
             raise TypeError("Modal packaged command binding requires exact bytes")
         command = parse_exact_command(self.command_bytes)
-        release = PackagedTrainingRuntimeReleaseV1.from_json(
-            self.runtime_release_bytes.decode("utf-8")
+        release = parse_packaged_runtime_release(
+            parse_canonical_object(self.runtime_release_bytes, name="runtime release")
         )
         provider = ProviderRuntimeBindingV1.from_json(
             self.provider_binding_bytes.decode("utf-8")
@@ -344,8 +382,8 @@ class ModalPackagedCommandBinding:
         return self.command.digest
 
     @property
-    def runtime_release(self) -> PackagedTrainingRuntimeReleaseV1:
-        return PackagedTrainingRuntimeReleaseV1.from_json(self.runtime_release_bytes.decode("utf-8"))
+    def runtime_release(self) -> PackagedRuntimeRelease:
+        return parse_packaged_runtime_release(parse_canonical_object(self.runtime_release_bytes, name="runtime release"))
 
     @property
     def provider_binding(self) -> ProviderRuntimeBindingV1:

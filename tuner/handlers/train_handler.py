@@ -172,6 +172,13 @@ class TrainHandler(BaseHandler):
         Returns:
             int: Exit code (0 = success, non-zero = failure)
         """
+        job_config = getattr(self.args, "job_config", None)
+        if job_config:
+            return self._handle_job_config(job_config)
+        if getattr(self.args, "plan", False):
+            self.output_error("--plan requires --job-config", code="TRAIN_RECIPE_REQUIRED")
+            return 2
+
         # JSON mode: return status information
         if self.json_mode:
             status = self._get_training_status()
@@ -273,3 +280,13 @@ class TrainHandler(BaseHandler):
             print_error(f"Training failed with exit code: {exit_code}")
 
         return exit_code
+
+    def _handle_job_config(self, requested: str) -> int:
+        from tuner.handlers.modal_job_config_handler import ModalJobConfigHandler
+
+        return ModalJobConfigHandler(self.args, self.context).handle()
+
+    def _quote_job_config(self, plan: object) -> int:
+        from tuner.handlers.modal_job_config_handler import ModalJobConfigHandler
+
+        return ModalJobConfigHandler(self.args, self.context)._quote(plan)

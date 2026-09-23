@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+from types import SimpleNamespace
+import os
+import signal
 
 import pytest
 
@@ -24,6 +29,9 @@ from tuner.execution.providers.modal.runtime_release_deployment import (
 from tuner.runtime.runtime_release_modal_self_check import (
     run_runtime_release_self_check,
 )
+from tuner.runtime.runtime_release_modal_training import run_modal_packaged_training
+from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV2
+from tuner.execution.providers.modal import runtime_release_deployment as deployment_module
 
 from tests.execution.providers.test_modal_packaged_binding import _release_and_execution
 
@@ -81,7 +89,11 @@ class FakeVolume:
     @classmethod
     def from_name(cls, name, **kwargs):
         cls.calls.append((name, kwargs))
-        return FakeObject("vo-control" if name == "control-volume" else "vo-artifact")
+        return FakeObject({
+            "control-volume": "vo-control",
+            "artifact-volume": "vo-artifact",
+            "cache-volume": "vo-cache",
+        }[name])
 
 
 class FakeSecret:
@@ -200,7 +212,9 @@ def _observation(generation: int, *, app_id: str = "ap-release"):
 
 
 @pytest.fixture(autouse=True)
-def _reset_fakes():
+def _reset_fakes(monkeypatch):
+    if os.name == "nt":
+        monkeypatch.setattr(deployment_module, "require_bounded_modal_deployment_host", lambda: None)
     FakeApp.instances.clear()
     FakeApp.fail_deploy = False
     FakeImage.calls.clear()
@@ -270,6 +284,142 @@ def test_plan_and_acknowledged_facts_round_trip_and_project_to_adapter() -> None
         "required_keys": ["SYNAPTIC_MODAL_QUALIFICATION_HMAC_KEY"],
         "client": client,
     })]
+
+
+def test_v2_published_oci_uses_exact_registry_branch_without_build_candidate() -> None:
+    from tuner.execution.providers.modal.runtime_release_deployment import (
+        MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA,
+        MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_V2_SCHEMA,
+    )
+    original = _plan()
+    source = original.release
+    fields = {
+        name: getattr(source, name)
+        for name in (
+            "release_ref", "package_name", "package_version", "package_digest",
+            "source_provenance_digest", "worker_entrypoint", "worker_closure_digest",
+            "python_implementation", "python_version", "python_executable",
+            "python_executable_digest", "installed_distributions_digest",
+            "installed_distribution_count", "platform_system", "platform_machine",
+            "cuda_version", "runtime_facts", "compatible_methods", "compatible_models",
+            "compatible_dataset_formats", "workload_schema", "prepared_input_schema",
+            "artifact_contract_schema",
+        )
+    }
+    release = PackagedTrainingRuntimeReleaseV2.build(
+        **fields,
+        material={"kind": "published_oci", "image": {"reference": source.image_ref, "digest": source.image_digest}},
+    )
+    training = replace(original.functions[0], volume_roles=("control", "artifacts", "model_cache"),
+                       module="tuner.runtime.runtime_release_modal_training",
+                       qualname="run_modal_packaged_training")
+    cache = ModalRuntimeReleaseVolumeSpecV1("model_cache", "cache-volume", "/mnt/model-cache")
+    plan = replace(original, release=release, functions=(training, original.functions[1]),
+                   volumes=(*original.volumes, cache), schema_version=MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA)
+    deployer, _ = _deployer(Reader([None, _observation(1)]))
+    facts = deployer.deploy_once(plan, entrypoints={
+        "training": run_modal_packaged_training,
+        "self_check": run_runtime_release_self_check,
+    })
+    assert facts.schema_version == MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_V2_SCHEMA
+    assert facts.image_id == "im-release"
+    assert facts.material_digest == release.material_digest
+    assert {item.spec.role: item.volume_id for item in facts.volumes}["model_cache"] == "vo-cache"
+    assert FakeImage.calls == [source.image_ref]
+    assert ModalRuntimeReleaseDeploymentFactsV1.parse(facts.canonical_bytes) == facts
+    packaged = ModalPackagedRuntimeFactsV1.from_release_deployment(facts)
+    assert packaged.model_cache_volume_id == "vo-cache"
+    assert ModalPackagedRuntimeFactsV1.parse(packaged.canonical_bytes) == packaged
+
+
+def test_v2_plan_rejects_missing_or_reused_cache_volume() -> None:
+    from tuner.execution.providers.modal.runtime_release_deployment import MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA
+    original = _plan()
+    source = original.release
+    fields = {name: getattr(source, name) for name in (
+        "release_ref", "package_name", "package_version", "package_digest",
+        "source_provenance_digest", "worker_entrypoint", "worker_closure_digest",
+        "python_implementation", "python_version", "python_executable",
+        "python_executable_digest", "installed_distributions_digest",
+        "installed_distribution_count", "platform_system", "platform_machine",
+        "cuda_version", "runtime_facts", "compatible_methods", "compatible_models",
+        "compatible_dataset_formats", "workload_schema", "prepared_input_schema",
+        "artifact_contract_schema",
+    )}
+    release = PackagedTrainingRuntimeReleaseV2.build(
+        **fields, material={"kind": "published_oci", "image": {
+            "reference": source.image_ref, "digest": source.image_digest,
+        }},
+    )
+    with pytest.raises(ValueError, match="model-cache Volume"):
+        replace(original, release=release,
+                schema_version=MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA)
+    cache = ModalRuntimeReleaseVolumeSpecV1("model_cache", "cache-volume", "/mnt/model-cache")
+    training = replace(original.functions[0], volume_roles=("control", "artifacts", "model_cache"),
+                       module="tuner.runtime.runtime_release_modal_training",
+                       qualname="run_modal_packaged_training")
+    plan = replace(original, release=release, functions=(training, original.functions[1]),
+                   volumes=(*original.volumes, cache),
+                   schema_version=MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA)
+    with pytest.raises(ValueError, match="distinct model-cache Volume"):
+        replace(plan, functions=(replace(training, module=__name__,
+                                         qualname="packaged_training_entry"), original.functions[1]))
+    facts = _deployer(Reader([None, _observation(1)]))[0].deploy_once(plan, entrypoints={
+        "training": run_modal_packaged_training,
+        "self_check": run_runtime_release_self_check,
+    })
+    cache_fact = next(item for item in facts.volumes if item.spec.role == "model_cache")
+    with pytest.raises(ValueError, match="distinct cache Volume"):
+        replace(facts, volumes=(*facts.volumes[:2], replace(cache_fact, volume_id=facts.volumes[0].volume_id)))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX main-thread alarm boundary")
+def test_v2_deploy_timeout_restores_process_cwd(monkeypatch) -> None:
+    v2_type = type("_V2", (), {})
+    monkeypatch.setattr(deployment_module, "PackagedTrainingRuntimeReleaseV2", v2_type)
+    original = Path.cwd()
+    real_setitimer = signal.setitimer
+
+    def fire_immediately(which, seconds):
+        if seconds:
+            signal.getsignal(signal.SIGALRM)(signal.SIGALRM, None)
+        return real_setitimer(which, seconds)
+
+    monkeypatch.setattr(signal, "setitimer", fire_immediately)
+    plan = SimpleNamespace(release=v2_type(), environment_name="production", strategy="rolling")
+    with pytest.raises(ModalRuntimeReleaseDeploymentError, match="indeterminate"):
+        ModalRuntimeReleaseDeployer._deploy_from_private_nonrepo(
+            SimpleNamespace(deploy=lambda **kwargs: pytest.fail("timed-out deploy called")),
+            client=object(), plan=plan,
+        )
+    assert Path.cwd() == original
+    assert signal.getsignal(signal.SIGALRM) is signal.SIG_DFL
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Linux signal precondition")
+def test_v2_deploy_entry_rejects_wrong_thread_before_sdk_reads(monkeypatch) -> None:
+    plan = _plan()
+    monkeypatch.setattr(deployment_module, "PackagedTrainingRuntimeReleaseV2", type(plan.release))
+    reader = Reader([])
+    deployer, _ = _deployer(reader)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with pytest.raises(ModalRuntimeReleaseDeploymentError, match="bounded_deploy_unavailable"):
+            pool.submit(deployer.deploy_once, plan, entrypoints={}).result()
+    assert reader.calls == []
+    assert not FakeApp.instances and not FakeVolume.calls and not FakeSecret.calls
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Linux signal precondition")
+def test_v2_deploy_entry_rejects_active_interval_before_sdk_reads(monkeypatch) -> None:
+    plan = _plan()
+    monkeypatch.setattr(deployment_module, "PackagedTrainingRuntimeReleaseV2", type(plan.release))
+    monkeypatch.setattr(signal, "getitimer", lambda which: (0.0, 1.0))
+    reader = Reader([])
+    deployer, _ = _deployer(reader)
+    with pytest.raises(ModalRuntimeReleaseDeploymentError, match="bounded_deploy_unavailable"):
+        deployer.deploy_once(plan, entrypoints={})
+    assert reader.calls == []
+    assert not FakeApp.instances and not FakeVolume.calls and not FakeSecret.calls
 
 
 def test_redeploy_requires_exact_single_generation_advance_and_layout() -> None:

@@ -23,7 +23,8 @@ from tuner.execution.foundation_v2.canonical import (
 )
 from tuner.runtime.packaged_training_worker import LOCAL_CPU_DATA
 from tuner.runtime.releases import (
-    PackagedTrainingRuntimeReleaseV1,
+    PackagedRuntimeRelease, PackagedTrainingRuntimeReleaseV1,
+    PackagedTrainingRuntimeReleaseV2, parse_packaged_runtime_release,
     ProviderRuntimeBindingV1,
 )
 
@@ -89,8 +90,11 @@ def _validate_deployment_release(facts, release) -> None:
         return
     if (
         facts.runtime_release_digest != release.manifest_digest
-        or facts.image_reference != release.image_ref
-        or facts.image_digest != release.image_digest
+        or (type(release) is PackagedTrainingRuntimeReleaseV1 and (
+            facts.image_reference != release.image_ref or facts.image_digest != release.image_digest))
+        or (type(release) is PackagedTrainingRuntimeReleaseV2 and (
+            facts.image_reference is not None or facts.image_digest is not None
+            or facts.material_digest != release.material_digest))
         or facts.python_implementation != release.python_implementation
         or facts.python_version != release.python_version
         or facts.python_executable != release.python_executable
@@ -305,7 +309,7 @@ class ModalRuntimeQualificationHmacAuthenticator:
 @dataclass(frozen=True, slots=True)
 class ModalRuntimeReleaseQualificationDispatchV1:
     effect_id: str
-    runtime_release: PackagedTrainingRuntimeReleaseV1
+    runtime_release: PackagedRuntimeRelease
     provider_binding: ProviderRuntimeBindingV1
     deployment_facts: object
     fixture: ModalRuntimeReleaseFixtureReceiptV1
@@ -314,7 +318,7 @@ class ModalRuntimeReleaseQualificationDispatchV1:
 
     def __post_init__(self) -> None:
         facts_type = _qualification_facts_type()
-        if type(self.runtime_release) is not PackagedTrainingRuntimeReleaseV1 \
+        if type(self.runtime_release) not in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2) \
                 or type(self.provider_binding) is not ProviderRuntimeBindingV1 \
                 or type(self.deployment_facts) is not facts_type \
                 or type(self.fixture) is not ModalRuntimeReleaseFixtureReceiptV1 \
@@ -409,7 +413,7 @@ def parse_modal_runtime_release_qualification_dispatch(
         raise ValueError("qualification deployment facts digest differs")
     dispatch = ModalRuntimeReleaseQualificationDispatchV1(
         document["effect_id"],
-        PackagedTrainingRuntimeReleaseV1.from_dict(document["runtime_release"]),
+        parse_packaged_runtime_release(document["runtime_release"]),
         ProviderRuntimeBindingV1.from_dict(document["provider_binding"]),
         facts, ModalRuntimeReleaseFixtureReceiptV1.from_dict(document["fixture"]),
         ModalRuntimeReleaseQualificationPolicyV1.from_dict(document["policy"]),

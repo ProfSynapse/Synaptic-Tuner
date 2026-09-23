@@ -276,15 +276,24 @@ class AcceleratorDeviceRequestV1:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeSpec:
-    image: str
+    image: str | None
     dependency_lock_digest: str
     python_version: str
+    material_kind: str = "published_oci"
+    material_digest: str | None = None
 
     def __post_init__(self) -> None:
-        image = _required(self.image, "image")
-        match = _PINNED_IMAGE_PATTERN.fullmatch(image)
-        if match is None:
-            raise ValueError("image must be pinned to an exact sha256 digest")
+        if self.material_kind == "published_oci":
+            image = _required(self.image, "image")
+            if _PINNED_IMAGE_PATTERN.fullmatch(image) is None or self.material_digest is not None:
+                raise ValueError("image must be pinned to an exact sha256 digest")
+        elif self.material_kind == "modal_build":
+            if self.image is not None or type(self.material_digest) is not str \
+                    or _SHA256_PATTERN.fullmatch(self.material_digest) is None:
+                raise ValueError("Modal build runtime requires only a material digest")
+            image = None
+        else:
+            raise ValueError("runtime material kind is unsupported")
         dependency_digest = _required(
             self.dependency_lock_digest, "dependency_lock_digest"
         )
@@ -477,6 +486,9 @@ class TrainingPlan:
                 "dependency_lock_digest": self.runtime.dependency_lock_digest,
                 "image": self.runtime.image,
                 "python_version": self.runtime.python_version,
+                **({"material_kind": self.runtime.material_kind,
+                    "material_digest": self.runtime.material_digest}
+                   if self.runtime.material_kind != "published_oci" else {}),
             },
             "execution_source": self.execution_source.to_dict(),
             "execution_context": self.execution_context.to_dict(),

@@ -21,7 +21,8 @@ from typing import Mapping, Protocol
 
 from tuner.runtime.packaged_worker_closure import stable_read, stable_file_digest
 from tuner.runtime.releases import (
-    PackagedExecutionBindingV1, PackagedTrainingRuntimeReleaseV1,
+    PackagedExecutionBindingV1, PackagedRuntimeRelease,
+    PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2,
     ProviderRuntimeBindingV1,
 )
 from tuner.training.contracts import ArtifactPolicy, CanonicalDocument
@@ -147,7 +148,7 @@ class _HeldDirectory:
 
 @dataclass(frozen=True, slots=True)
 class AdmittedPackagedSFT:
-    release: PackagedTrainingRuntimeReleaseV1
+    release: PackagedRuntimeRelease
     provider_binding: ProviderRuntimeBindingV1
     execution: PackagedExecutionBindingV1
     workload_bytes: bytes
@@ -236,7 +237,7 @@ def _require_trainer_assets(distribution, wheel):
 
 def _admit_contracts(release, provider_binding, execution, workload_bytes, policy):
     from tuner.runtime.packaged_training_worker import admit_packaged_training_release
-    if type(release) is not PackagedTrainingRuntimeReleaseV1 or type(provider_binding) is not ProviderRuntimeBindingV1 or type(execution) is not PackagedExecutionBindingV1 or type(policy) is not ArtifactPolicy:
+    if type(release) not in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2) or type(provider_binding) is not ProviderRuntimeBindingV1 or type(execution) is not PackagedExecutionBindingV1 or type(policy) is not ArtifactPolicy:
         raise TypeError
     release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=execution.runtime_release_digest)
     provider_binding = ProviderRuntimeBindingV1.from_dict(provider_binding.to_dict())

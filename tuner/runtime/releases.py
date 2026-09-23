@@ -19,6 +19,7 @@ from typing import Any
 
 
 PACKAGED_RUNTIME_RELEASE_SCHEMA = "synaptic-packaged-training-runtime-release/v1"
+PACKAGED_RUNTIME_RELEASE_V2_SCHEMA = "synaptic-packaged-training-runtime-release/v2"
 PROVIDER_RUNTIME_BINDING_SCHEMA = "synaptic-provider-runtime-binding/v1"
 PACKAGED_EXECUTION_BINDING_SCHEMA = "synaptic-packaged-execution-binding/v1"
 
@@ -528,6 +529,244 @@ class PackagedTrainingRuntimeReleaseV1:
 
 
 @dataclass(frozen=True, slots=True)
+class PackagedTrainingRuntimeReleaseV2:
+    """Closed runtime release with an explicit final-OCI or Modal-build material."""
+
+    _raw: bytes
+
+    @classmethod
+    def build(cls, **values: Any) -> "PackagedTrainingRuntimeReleaseV2":
+        if "manifest_digest" in values or "schema_version" in values:
+            raise ValueError("build computes the release identity")
+        required = {
+            "release_ref", "package_name", "package_version", "package_digest",
+            "source_provenance_digest", "worker_entrypoint", "worker_closure_digest",
+            "material", "python_implementation", "python_version", "python_executable",
+            "python_executable_digest", "installed_distributions_digest",
+            "installed_distribution_count", "platform_system", "platform_machine",
+            "cuda_version", "runtime_facts", "compatible_methods", "compatible_models",
+            "compatible_dataset_formats", "workload_schema", "prepared_input_schema",
+            "artifact_contract_schema",
+        }
+        if set(values) != required:
+            raise TypeError("runtime release build fields differ")
+        material = values["material"]
+        document = {
+            "schema_version": PACKAGED_RUNTIME_RELEASE_V2_SCHEMA,
+            "release_ref": values["release_ref"],
+            "package": {
+                "name": values["package_name"], "version": values["package_version"],
+                "digest": values["package_digest"],
+                "source_provenance_digest": values["source_provenance_digest"],
+            },
+            "worker": {"entrypoint": values["worker_entrypoint"], "closure_digest": values["worker_closure_digest"]},
+            "material": material,
+            "python": {
+                "implementation": values["python_implementation"], "version": values["python_version"],
+                "executable": values["python_executable"], "executable_digest": values["python_executable_digest"],
+            },
+            "installed_distributions": {
+                "digest": values["installed_distributions_digest"],
+                "count": values["installed_distribution_count"],
+            },
+            "platform": {
+                "system": values["platform_system"], "machine": values["platform_machine"],
+                "cuda_version": values["cuda_version"], "runtime_facts": _facts(_fact_bytes(values["runtime_facts"], "runtime_facts")),
+            },
+            "compatibility": {
+                "methods": list(values["compatible_methods"]),
+                "models": [{"ref": ref, "revision": revision} for ref, revision in values["compatible_models"]],
+                "dataset_formats": list(values["compatible_dataset_formats"]),
+            },
+            "contracts": {
+                "workload_schema": values["workload_schema"],
+                "prepared_input_schema": values["prepared_input_schema"],
+                "artifact_contract_schema": values["artifact_contract_schema"],
+            },
+        }
+        document["manifest_digest"] = _domain_digest(PACKAGED_RUNTIME_RELEASE_V2_SCHEMA, document)
+        return cls.from_dict(document)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "PackagedTrainingRuntimeReleaseV2":
+        root = _fields(value, frozenset({
+            "schema_version", "release_ref", "package", "worker", "material", "python",
+            "installed_distributions", "platform", "compatibility", "contracts", "manifest_digest",
+        }), "runtime release")
+        if root["schema_version"] != PACKAGED_RUNTIME_RELEASE_V2_SCHEMA:
+            raise ValueError("runtime release schema is unsupported")
+        _opaque_ref(root["release_ref"], "release_ref")
+        package = _fields(root["package"], frozenset({"name", "version", "digest", "source_provenance_digest"}), "package")
+        if type(package["name"]) is not str or _PACKAGE.fullmatch(package["name"]) is None:
+            raise ValueError("package.name is invalid")
+        if _VERSION.fullmatch(_text(package["version"], "package.version", maximum=128)) is None:
+            raise ValueError("package.version is invalid")
+        for key in ("digest", "source_provenance_digest"):
+            _digest(package[key], f"package.{key}")
+        worker = _fields(root["worker"], frozenset({"entrypoint", "closure_digest"}), "worker")
+        if _ENTRYPOINT.fullmatch(_text(worker["entrypoint"], "worker.entrypoint")) is None:
+            raise ValueError("worker.entrypoint is invalid")
+        _digest(worker["closure_digest"], "worker.closure_digest")
+        material = root["material"]
+        if type(material) is not dict or material.get("kind") not in {"published_oci", "modal_build"}:
+            raise ValueError("runtime material kind is unsupported")
+        if material["kind"] == "published_oci":
+            selected = _fields(material, frozenset({"kind", "image"}), "runtime material")
+            image = _fields(selected["image"], frozenset({"reference", "digest"}), "image")
+            match = _OCI_IMAGE.fullmatch(_text(image["reference"], "image.reference"))
+            if match is None or match.group("digest") != _digest(image["digest"], "image.digest"):
+                raise ValueError("published image identity differs")
+        else:
+            selected = _fields(material, frozenset({"kind", "base_image", "build_inputs", "build_inputs_digest"}), "runtime material")
+            image = _fields(selected["base_image"], frozenset({"reference", "digest"}), "base image")
+            match = _OCI_IMAGE.fullmatch(_text(image["reference"], "base_image.reference"))
+            if match is None or match.group("digest") != _digest(image["digest"], "base_image.digest"):
+                raise ValueError("base image identity differs")
+            input_fields = {
+                "sdk_version", "python_executable", "commands", "installer_flags", "wheels", "builder_policy",
+            }
+            raw_inputs = selected["build_inputs"]
+            policy = raw_inputs.get("builder_policy") if type(raw_inputs) is dict else None
+            if policy == "synaptic-modal-wheel-build/v2":
+                input_fields.add("builder_lock_sha256")
+            inputs = _fields(raw_inputs, frozenset(input_fields), "build inputs")
+            if inputs["sdk_version"] != "1.5.4" or policy not in {
+                    "synaptic-modal-wheel-build/v1", "synaptic-modal-wheel-build/v2"}:
+                raise ValueError("Modal build policy is unsupported")
+            if policy == "synaptic-modal-wheel-build/v2":
+                _digest(inputs["builder_lock_sha256"], "builder lock digest")
+            _text(inputs["python_executable"], "build python executable")
+            for name in ("commands", "installer_flags"):
+                items = inputs[name]
+                if type(items) is not list or not 1 <= len(items) <= 32:
+                    raise ValueError(f"build {name} is invalid")
+                for item in items:
+                    _text(item, f"build {name} member", maximum=2048)
+            wheels = inputs["wheels"]
+            if type(wheels) is not list or not 2 <= len(wheels) <= 128:
+                raise ValueError("build wheel inventory is invalid")
+            names = set()
+            for wheel in wheels:
+                item = _fields(wheel, frozenset({"filename", "sha256"}), "build wheel")
+                filename = _text(item["filename"], "build wheel filename")
+                if re.fullmatch(r"[A-Za-z0-9_.+-]+\.whl", filename) is None or filename in names:
+                    raise ValueError("build wheel filename is invalid")
+                names.add(filename)
+                _digest(item["sha256"], "build wheel digest")
+            if inputs["python_executable"] != _fields(root["python"], frozenset({"implementation", "version", "executable", "executable_digest"}), "python")["executable"]:
+                raise ValueError("build interpreter differs from runtime")
+            if _digest(selected["build_inputs_digest"], "build inputs digest") != hashlib.sha256(_canonical(inputs)).hexdigest():
+                raise ValueError("build input digest differs")
+        python = _fields(root["python"], frozenset({"implementation", "version", "executable", "executable_digest"}), "python")
+        if python["implementation"] != "cpython" or _VERSION.fullmatch(_text(python["version"], "python.version")) is None:
+            raise ValueError("python runtime is unsupported")
+        executable = _text(python["executable"], "python.executable")
+        if not PurePosixPath(executable).is_absolute() or PurePosixPath(executable).as_posix() != executable or ".." in PurePosixPath(executable).parts:
+            raise ValueError("python executable is invalid")
+        _digest(python["executable_digest"], "python.executable_digest")
+        installed = _fields(root["installed_distributions"], frozenset({"digest", "count"}), "installed distributions")
+        _digest(installed["digest"], "installed distributions digest")
+        _integer(installed["count"], "installed distributions count", minimum=1, maximum=1_000_000)
+        platform = _fields(root["platform"], frozenset({"system", "machine", "cuda_version", "runtime_facts"}), "platform")
+        _safe_ref(platform["system"], "platform.system")
+        _safe_ref(platform["machine"], "platform.machine")
+        if platform["cuda_version"] is not None and _VERSION.fullmatch(_text(platform["cuda_version"], "platform.cuda_version")) is None:
+            raise ValueError("platform CUDA version is invalid")
+        _fact_bytes(platform["runtime_facts"], "runtime_facts")
+        compatibility = _fields(root["compatibility"], frozenset({"methods", "models", "dataset_formats"}), "compatibility")
+        _canonical_tuple(compatibility["methods"], "compatibility.methods")
+        models = compatibility["models"]
+        if type(models) is not list:
+            raise TypeError("compatibility.models must be an exact array")
+        _models(models)
+        _canonical_tuple(compatibility["dataset_formats"], "compatibility.dataset_formats")
+        contracts = _fields(root["contracts"], frozenset({"workload_schema", "prepared_input_schema", "artifact_contract_schema"}), "contracts")
+        for key, item in contracts.items():
+            _safe_ref(item, f"contracts.{key}")
+        digest = _digest(root["manifest_digest"], "manifest_digest")
+        unsigned = {key: item for key, item in root.items() if key != "manifest_digest"}
+        if digest != _domain_digest(PACKAGED_RUNTIME_RELEASE_V2_SCHEMA, unsigned):
+            raise ValueError("manifest_digest does not bind the runtime release")
+        return cls(_canonical(root))
+
+    @classmethod
+    def from_json(cls, value: str) -> "PackagedTrainingRuntimeReleaseV2":
+        result = cls.from_dict(_parse_json(value, "runtime release"))
+        if result.canonical_json() != value:
+            raise ValueError("runtime release JSON must be canonical")
+        return result
+
+    def to_dict(self) -> dict[str, object]:
+        return json.loads(self._raw.decode("utf-8"))
+
+    def canonical_bytes(self) -> bytes:
+        return self._raw
+
+    def canonical_json(self) -> str:
+        return self._raw.decode("utf-8")
+
+    @property
+    def schema_version(self) -> str:
+        return PACKAGED_RUNTIME_RELEASE_V2_SCHEMA
+
+    @property
+    def manifest_digest(self) -> str:
+        return self.to_dict()["manifest_digest"]
+
+    @property
+    def material(self) -> dict[str, object]:
+        return self.to_dict()["material"]
+
+    @property
+    def material_digest(self) -> str:
+        return _domain_digest("synaptic-runtime-material/v1", self.material)
+
+    def __getattr__(self, name: str) -> object:
+        fields = {
+            "release_ref": ("release_ref",), "package_name": ("package", "name"),
+            "package_version": ("package", "version"), "package_digest": ("package", "digest"),
+            "source_provenance_digest": ("package", "source_provenance_digest"),
+            "worker_entrypoint": ("worker", "entrypoint"), "worker_closure_digest": ("worker", "closure_digest"),
+            "python_implementation": ("python", "implementation"), "python_version": ("python", "version"),
+            "python_executable": ("python", "executable"), "python_executable_digest": ("python", "executable_digest"),
+            "installed_distributions_digest": ("installed_distributions", "digest"),
+            "installed_distribution_count": ("installed_distributions", "count"),
+            "platform_system": ("platform", "system"), "platform_machine": ("platform", "machine"),
+            "cuda_version": ("platform", "cuda_version"), "runtime_facts": ("platform", "runtime_facts"),
+            "compatible_methods": ("compatibility", "methods"), "compatible_models": ("compatibility", "models"),
+            "compatible_dataset_formats": ("compatibility", "dataset_formats"),
+            "workload_schema": ("contracts", "workload_schema"),
+            "prepared_input_schema": ("contracts", "prepared_input_schema"),
+            "artifact_contract_schema": ("contracts", "artifact_contract_schema"),
+        }
+        if name not in fields:
+            raise AttributeError(name)
+        value = self.to_dict()
+        for key in fields[name]:
+            value = value[key]
+        if name == "compatible_models":
+            return tuple((item["ref"], item["revision"]) for item in value)
+        if name in {"compatible_methods", "compatible_dataset_formats"}:
+            return tuple(value)
+        if name == "runtime_facts":
+            return _fact_bytes(value, "runtime_facts")
+        return value
+
+
+PackagedRuntimeRelease = PackagedTrainingRuntimeReleaseV1 | PackagedTrainingRuntimeReleaseV2
+
+
+def parse_packaged_runtime_release(value: dict[str, object]) -> PackagedRuntimeRelease:
+    if type(value) is not dict:
+        raise TypeError("runtime release must be an exact object")
+    if value.get("schema_version") == PACKAGED_RUNTIME_RELEASE_SCHEMA:
+        return PackagedTrainingRuntimeReleaseV1.from_dict(value)
+    if value.get("schema_version") == PACKAGED_RUNTIME_RELEASE_V2_SCHEMA:
+        return PackagedTrainingRuntimeReleaseV2.from_dict(value)
+    raise ValueError("runtime release schema is unsupported")
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderRuntimeBindingV1:
     provider_ref: str
     runtime_release_digest: str
@@ -558,11 +797,11 @@ class ProviderRuntimeBindingV1:
     @classmethod
     def build(
         cls, *, provider_ref: str,
-        runtime_release: PackagedTrainingRuntimeReleaseV1,
+        runtime_release: PackagedRuntimeRelease,
         provider_facts_schema: str, provider_facts_digest: str,
     ) -> "ProviderRuntimeBindingV1":
-        if type(runtime_release) is not PackagedTrainingRuntimeReleaseV1:
-            raise TypeError("runtime_release must be exact PackagedTrainingRuntimeReleaseV1")
+        if type(runtime_release) not in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2):
+            raise TypeError("runtime_release must be an exact packaged runtime release")
         provider_ref = _opaque_ref(provider_ref, "provider_ref")
         provider_facts_schema = _schema_identity(
             provider_facts_schema, "provider_facts_schema"
@@ -595,8 +834,8 @@ class ProviderRuntimeBindingV1:
     def expected_binding_digest(self) -> str:
         return _domain_digest(PROVIDER_RUNTIME_BINDING_SCHEMA, self._unsigned_dict())
 
-    def binds(self, runtime_release: PackagedTrainingRuntimeReleaseV1) -> bool:
-        return type(runtime_release) is PackagedTrainingRuntimeReleaseV1 and self.runtime_release_digest == runtime_release.manifest_digest
+    def binds(self, runtime_release: PackagedRuntimeRelease) -> bool:
+        return type(runtime_release) in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2) and self.runtime_release_digest == runtime_release.manifest_digest
 
     def to_dict(self) -> dict[str, object]:
         return {**self._unsigned_dict(), "binding_digest": self.binding_digest}
@@ -691,15 +930,15 @@ class PackagedExecutionBindingV1:
 
     @classmethod
     def build(
-        cls, *, run_ref: str, runtime_release: PackagedTrainingRuntimeReleaseV1,
+        cls, *, run_ref: str, runtime_release: PackagedRuntimeRelease,
         provider_runtime_binding: ProviderRuntimeBindingV1, prepared_input_ref: str,
         prepared_input_revision: str, prepared_input_content_digest: str,
         prepared_input_size_bytes: int, prepared_input_format: str,
         workload_digest: str, configuration_digest: str,
         artifact_policy_digest: str,
     ) -> "PackagedExecutionBindingV1":
-        if type(runtime_release) is not PackagedTrainingRuntimeReleaseV1:
-            raise TypeError("runtime_release must be exact PackagedTrainingRuntimeReleaseV1")
+        if type(runtime_release) not in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2):
+            raise TypeError("runtime_release must be an exact packaged runtime release")
         if type(provider_runtime_binding) is not ProviderRuntimeBindingV1:
             raise TypeError("provider_runtime_binding must be exact ProviderRuntimeBindingV1")
         if not provider_runtime_binding.binds(runtime_release):
@@ -773,10 +1012,10 @@ class PackagedExecutionBindingV1:
         return _domain_digest(PACKAGED_EXECUTION_BINDING_SCHEMA, self._unsigned_dict())
 
     def validate_bindings(
-        self, runtime_release: PackagedTrainingRuntimeReleaseV1,
+        self, runtime_release: PackagedRuntimeRelease,
         provider_runtime_binding: ProviderRuntimeBindingV1,
     ) -> None:
-        if type(runtime_release) is not PackagedTrainingRuntimeReleaseV1 or type(provider_runtime_binding) is not ProviderRuntimeBindingV1:
+        if type(runtime_release) not in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2) or type(provider_runtime_binding) is not ProviderRuntimeBindingV1:
             raise TypeError("exact runtime release and provider binding are required")
         if (
             self.runtime_release_digest != runtime_release.manifest_digest
@@ -823,8 +1062,12 @@ class PackagedExecutionBindingV1:
 __all__ = [
     "PACKAGED_EXECUTION_BINDING_SCHEMA",
     "PACKAGED_RUNTIME_RELEASE_SCHEMA",
+    "PACKAGED_RUNTIME_RELEASE_V2_SCHEMA",
     "PROVIDER_RUNTIME_BINDING_SCHEMA",
     "PackagedExecutionBindingV1",
     "PackagedTrainingRuntimeReleaseV1",
+    "PackagedTrainingRuntimeReleaseV2",
+    "PackagedRuntimeRelease",
+    "parse_packaged_runtime_release",
     "ProviderRuntimeBindingV1",
 ]

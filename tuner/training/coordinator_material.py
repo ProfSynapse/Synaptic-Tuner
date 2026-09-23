@@ -62,6 +62,8 @@ def _runtime(value: RuntimeSpec) -> dict[str, object]:
     return {
         "image": value.image, "dependency_lock_digest": value.dependency_lock_digest,
         "python_version": value.python_version,
+        **({"material_kind": value.material_kind, "material_digest": value.material_digest}
+           if value.material_kind != "published_oci" else {}),
     }
 
 
