@@ -48,7 +48,9 @@ from tuner.training.modal_host_prepared_copy import stage_published_modal_datase
 from tuner.training.modal_host_qualification import (
     ModalHostCPUQualificationV1, qualify_modal_runtime_for_host,
 )
-from tuner.training.modal_host_runtime import prepare_modal_runtime_for_host
+from tuner.training.modal_host_runtime import (
+    ModalHostBootstrapUnavailable, prepare_modal_runtime_for_host,
+)
 from tuner.training.modal_host_scope import observe_modal_host_scope, open_modal_host_scope
 from tuner.training.modal_host_storage import ModalHostStorageV1
 from tuner.training.modal_recipe import ModalSFTRecipePlanV1
@@ -226,6 +228,8 @@ def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             runtime.deployment_facts.facts_digest,
             qualification.output_sha256,
         )
+    except ModalHostBootstrapUnavailable:
+        raise
     except Exception:
         raise ModalStandaloneRunUnavailable("modal_host_qualification_unavailable") from None
 
@@ -428,5 +432,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 runtime.quote.gpu_only_timeout_estimate_minor_units,
                 recipe.maximum_cost_minor_units,
             )
+    except ModalHostBootstrapUnavailable:
+        raise
     except Exception:
         raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable") from None

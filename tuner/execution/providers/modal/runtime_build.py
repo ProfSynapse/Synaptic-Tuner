@@ -35,6 +35,15 @@ from tuner.execution.providers.modal.modal_wheel_builder import (
 _IMAGE_ID = re.compile(r"^im-[A-Za-z0-9]{1,64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _BUILDER_ATTESTATION = object()
+_WHEEL_SOURCE_PATHS = (
+    "pyproject.toml", "README.md", "LICENSE",
+    "tuner", "synaptic_tuner", "shared", "SynthChat", "Evaluator",
+    "MechInterp", "Trainers",
+)
+
+
+class SourceArchiveInvalid(ValueError):
+    """The bound engine commit could not supply a bounded wheel source archive."""
 
 
 def plan_modal_build_material(profile_path: Path) -> dict[str, object]:
@@ -91,7 +100,8 @@ def prepare_current_source_wheel(source_root: Path, output_dir: Path, *,
     if status.returncode != 0 or status.stdout or status.stderr:
         raise ValueError("accepted engine source must be clean")
     archive = subprocess.run(
-        ["git", "-C", str(root), "archive", "--format=tar", expected_source_commit],
+        ["git", "-C", str(root), "archive", "--format=tar",
+         expected_source_commit, *_WHEEL_SOURCE_PATHS],
         capture_output=True, timeout=120, check=False,
     )
     bound_head()
@@ -102,7 +112,7 @@ def prepare_current_source_wheel(source_root: Path, output_dir: Path, *,
     if status_after.returncode != 0 or status_after.stdout or status_after.stderr:
         raise ValueError("accepted engine source must remain clean")
     if archive.returncode != 0 or not archive.stdout or len(archive.stdout) > 512 * 1024 * 1024:
-        raise ValueError("accepted engine source archive failed")
+        raise SourceArchiveInvalid("accepted engine source archive failed")
     with tempfile.TemporaryDirectory(prefix="synaptic-wheel-source-") as scratch:
         source = Path(scratch) / "source"
         source.mkdir()

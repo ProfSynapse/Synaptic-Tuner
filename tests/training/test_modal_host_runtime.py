@@ -341,6 +341,32 @@ def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkey
     assert len(_Secret.created) == 2 and len(_App.created) == 1
 
 
+def test_source_archive_failure_projects_only_fixed_nonretryable_diagnosis(monkeypatch):
+    from tuner.execution.providers.modal.runtime_build import SourceArchiveInvalid
+
+    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+
+    def fail_capture(**_kwargs):
+        raise SourceArchiveInvalid("private provider detail must not escape")
+
+    monkeypatch.setattr(host, "capture_modal_build_candidate", fail_capture)
+    storage = _Storage(_Attempts([]))
+    with pytest.raises(host.ModalHostBootstrapUnavailable) as caught:
+        _paid_factory_probe(storage)
+    error = caught.value
+    assert (error.phase, error.failure_class, error.location, error.retry_authorized) == (
+        "BUILD_CAPTURE", "SOURCE_ARCHIVE_INVALID",
+        "runtime_build.prepare_current_source_wheel", False,
+    )
+    assert str(error) == "modal_host_bootstrap_unavailable"
+    assert "private provider detail" not in str(error)
+    assert error.__cause__ is None
+    with pytest.raises(AttributeError, match="immutable"):
+        error.phase = "OTHER"
+    assert len(storage.attempts.refs) == 1
+
+
 def test_current_reader_rechecks_layout_and_cache_identity(monkeypatch):
     facts = SimpleNamespace(
         app_name="training-fake", function_name="packaged-training", app_id="ap-fake",

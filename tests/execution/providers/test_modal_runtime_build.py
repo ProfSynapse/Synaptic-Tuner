@@ -292,7 +292,11 @@ def test_wheel_archive_rejects_head_change_before_builder(monkeypatch, tmp_path)
             assert "--untracked-files=no" in command
             return subprocess.CompletedProcess(command, 0, b"", b"")
         if "archive" in command:
-            assert command[-1] == first
+            assert command[3:] == [
+                "archive", "--format=tar", first,
+                "pyproject.toml", "README.md", "LICENSE", "tuner", "synaptic_tuner",
+                "shared", "SynthChat", "Evaluator", "MechInterp", "Trainers",
+            ]
             return subprocess.CompletedProcess(command, 0, b"not-needed", b"")
         pytest.fail("builder must not start after HEAD changes")
 
@@ -302,6 +306,32 @@ def test_wheel_archive_rejects_head_change_before_builder(monkeypatch, tmp_path)
             source, output, expected_source_commit=first,
         )
     assert sum("rev-parse" in call for call in calls) == 2
+
+
+def test_wheel_archive_failure_is_specific_and_builder_does_not_start(monkeypatch, tmp_path) -> None:
+    from tuner.execution.providers.modal import runtime_build
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text("[build-system]\n", encoding="ascii")
+    output = tmp_path / "output"
+    output.mkdir()
+    commit = "a" * 40
+
+    def run(command, **_kwargs):
+        if "rev-parse" in command:
+            return subprocess.CompletedProcess(command, 0, commit.encode() + b"\n", b"")
+        if "status" in command:
+            return subprocess.CompletedProcess(command, 0, b"", b"")
+        if "archive" in command:
+            assert command[5] == commit
+            assert "tests" not in command and "Datasets" not in command
+            return subprocess.CompletedProcess(command, 0, b"", b"")
+        pytest.fail("builder must not start without an archive")
+
+    monkeypatch.setattr(runtime_build.subprocess, "run", run)
+    with pytest.raises(runtime_build.SourceArchiveInvalid, match="source archive failed"):
+        runtime_build.prepare_current_source_wheel(source, output, expected_source_commit=commit)
 
 
 def test_wheel_archive_rejects_tracked_dirty_source(monkeypatch, tmp_path) -> None:

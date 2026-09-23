@@ -36,6 +36,7 @@ from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV2
 from tuner.training.contracts import ResourceSpec
 from tuner.training.modal_host_reader import ModalPackagedCoordinatorReaderV1, ModalPackagedReadUnavailable
 from tuner.training.modal_host_runtime import ModalHostRuntimeV1
+from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
 from tuner.training.modal_host_qualification import ModalHostCPUQualificationV1
 from tuner.training.modal_recipe import ModalSFTRecipePlanV1, load_modal_sft_recipe
 from tuner.training.packaged_compilation import (
@@ -346,3 +347,51 @@ def test_explicit_fresh_attempt_uses_private_distinct_journal_and_preserves_defa
     assert attempts[0].stat().st_mode & 0o777 == 0o700
     assert (attempts[0] / "modal-host.sqlite3").is_file()
     assert "stage" not in events and "spawn" not in events
+
+
+@pytest.mark.parametrize("qualify_only", [True, False])
+def test_known_source_archive_failure_surfaces_only_closed_diagnostic(
+        tmp_path, monkeypatch, capsys, qualify_only):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+
+    def source_archive_failure(**_kwargs):
+        events.append("bootstrap")
+        try:
+            raise RuntimeError("HF_TOKEN=private /home/owner/dataset.jsonl")
+        except RuntimeError:
+            raise ModalHostBootstrapUnavailable() from None
+
+    monkeypatch.setattr(runner, "prepare_modal_runtime_for_host", source_archive_failure)
+    handler = ModalJobConfigHandler(Namespace(
+        modal_profile="explicit", modal_environment="main", json=True,
+    ), context)
+    assert (handler._qualify(plan) if qualify_only else handler._execute(plan)) == 2
+    output = capsys.readouterr().out
+    assert "HF_TOKEN" not in output and "/home/owner" not in output
+    payload = json.loads(output)
+    assert payload["error"]["code"] == (
+        "MODAL_QUALIFICATION_UNAVAILABLE" if qualify_only else "MODAL_TRAINING_UNAVAILABLE"
+    )
+    assert payload["error"]["details"] == {
+        "phase": "BUILD_CAPTURE",
+        "failure_class": "SOURCE_ARCHIVE_INVALID",
+        "location": "runtime_build.prepare_current_source_wheel",
+        "retry_authorized": False,
+    }
+    assert events == ["bootstrap"]
+
+
+def test_unknown_bootstrap_exception_remains_generic(tmp_path, monkeypatch, capsys):
+    plan, context, _events = _setup(tmp_path, monkeypatch)
+
+    def hostile(**_kwargs):
+        raise RuntimeError("HF_TOKEN=private /home/owner/dataset.jsonl")
+
+    monkeypatch.setattr(runner, "prepare_modal_runtime_for_host", hostile)
+    handler = ModalJobConfigHandler(Namespace(
+        modal_profile="explicit", modal_environment="main", json=True,
+    ), context)
+    assert handler._qualify(plan) == 2
+    output = capsys.readouterr().out
+    assert "HF_TOKEN" not in output and "/home/owner" not in output
+    assert "details" not in json.loads(output)["error"]

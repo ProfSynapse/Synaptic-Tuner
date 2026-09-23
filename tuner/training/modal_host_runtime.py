@@ -23,7 +23,7 @@ from tuner.execution.providers.modal.binding import ModalClientBinding
 from tuner.execution.providers.modal.facade import MODAL_VOLUME_V1
 from tuner.execution.providers.modal.packaged_binding import ModalPackagedRuntimeFactsV1
 from tuner.execution.providers.modal.runtime_build import (
-    _bounded, build_modal_runtime_release_v2, capture_modal_build_candidate,
+    SourceArchiveInvalid, _bounded, build_modal_runtime_release_v2, capture_modal_build_candidate,
     plan_modal_build_material,
 )
 from tuner.execution.providers.modal.runtime_release_deployment import (
@@ -47,6 +47,40 @@ from tuner.training.contracts import ResourceSpec
 _A100_80GB_RATE_KEY = "gpu_hour_cost_a100_80gb"
 _RATE_KEY = re.compile(r"^gpu_hour_cost_[a-z0-9_]+$")
 _T = TypeVar("_T")
+
+
+class ModalHostBootstrapUnavailable(RuntimeError):
+    """Closed, non-retryable diagnosis for a known host bootstrap boundary."""
+
+    __slots__ = ("_phase", "_failure_class", "_location")
+
+    def __init__(self) -> None:
+        super().__init__("modal_host_bootstrap_unavailable")
+        object.__setattr__(self, "_phase", "BUILD_CAPTURE")
+        object.__setattr__(self, "_failure_class", "SOURCE_ARCHIVE_INVALID")
+        object.__setattr__(self, "_location", "runtime_build.prepare_current_source_wheel")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in {"_phase", "_failure_class", "_location", "phase",
+                    "failure_class", "location", "retry_authorized"}:
+            raise AttributeError("Modal bootstrap diagnosis is immutable")
+        super().__setattr__(name, value)
+
+    @property
+    def phase(self) -> str:
+        return self._phase
+
+    @property
+    def failure_class(self) -> str:
+        return self._failure_class
+
+    @property
+    def location(self) -> str:
+        return self._location
+
+    @property
+    def retry_authorized(self) -> bool:
+        return False
 
 
 def _closed_provider_call(operation: Callable[[], _T], code: str) -> _T:
@@ -355,14 +389,17 @@ def prepare_modal_runtime_for_host(
                        code="modal_build_app_start_ambiguous",
                        late_cleanup=lambda _value: context.__exit__(None, None, None))
     try:
-        candidate = capture_modal_build_candidate(
-            sdk=sdk, client=client, profile_path=profile_path,
-            build_claim=lambda: None, app_name=deployment_name,
-            environment_name=environment_name,
-            expected_intent_digest=runtime_material_intent_digest,
-            build_app=entered,
-            builder_cache_root=builder_cache_root,
-        )
+        try:
+            candidate = capture_modal_build_candidate(
+                sdk=sdk, client=client, profile_path=profile_path,
+                build_claim=lambda: None, app_name=deployment_name,
+                environment_name=environment_name,
+                expected_intent_digest=runtime_material_intent_digest,
+                build_app=entered,
+                builder_cache_root=builder_cache_root,
+            )
+        except SourceArchiveInvalid:
+            raise ModalHostBootstrapUnavailable() from None
     finally:
         _bounded(lambda: context.__exit__(None, None, None),
                  deadline=time.monotonic() + 60,

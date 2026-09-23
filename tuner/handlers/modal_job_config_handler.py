@@ -9,6 +9,27 @@ from tuner.handlers.base import BaseHandler
 from tuner.project import ProjectContext
 
 
+def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
+    """Expose only the reviewed, non-authorizing build-source diagnostic."""
+    try:
+        from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
+    except Exception:
+        return None
+
+    if (type(error) is ModalHostBootstrapUnavailable
+            and error.phase == "BUILD_CAPTURE"
+            and error.failure_class == "SOURCE_ARCHIVE_INVALID"
+            and error.location == "runtime_build.prepare_current_source_wheel"
+            and error.retry_authorized is False):
+        return {
+            "phase": "BUILD_CAPTURE",
+            "failure_class": "SOURCE_ARCHIVE_INVALID",
+            "location": "runtime_build.prepare_current_source_wheel",
+            "retry_authorized": False,
+        }
+    return None
+
+
 class ModalJobConfigHandler(BaseHandler):
     def __init__(self, args: Namespace, context: ProjectContext | None = None) -> None:
         super().__init__(args=args, context=context)
@@ -118,8 +139,11 @@ class ModalJobConfigHandler(BaseHandler):
                 ],
             })
             return 0
-        except Exception:
-            self.output_error("Modal training did not complete", code="MODAL_TRAINING_UNAVAILABLE")
+        except Exception as error:
+            self.output_error(
+                "Modal training did not complete", code="MODAL_TRAINING_UNAVAILABLE",
+                details=_closed_bootstrap_details(error),
+            )
             return 2
 
     def _qualify(self, plan: object) -> int:
@@ -138,6 +162,10 @@ class ModalJobConfigHandler(BaseHandler):
             )
             self.output(result.to_dict())
             return 0
-        except Exception:
-            self.output_error("Modal CPU qualification did not complete", code="MODAL_QUALIFICATION_UNAVAILABLE")
+        except Exception as error:
+            self.output_error(
+                "Modal CPU qualification did not complete",
+                code="MODAL_QUALIFICATION_UNAVAILABLE",
+                details=_closed_bootstrap_details(error),
+            )
             return 2
