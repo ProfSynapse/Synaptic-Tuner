@@ -17,6 +17,7 @@ from tuner.execution.providers.modal.binding import ModalClientBinding
 from tuner.execution.providers.modal.runtime_release_deployment import ModalRuntimeReleaseDeploymentError
 from tuner.training.contracts import ResourceSpec
 from tuner.training import modal_host_runtime as host
+from tuner.training import modal_standalone_runner as runner
 
 
 class _Hydrated:
@@ -213,6 +214,39 @@ def test_unverified_rate_key_fails_closed_before_effect(monkeypatch):
             hf_token_ref=SecretRef("env", "HF_TOKEN"), qualification_secret_name="qualify",
             hf_token_secret_name="hf", app_name="training", environment_name="production",
         )
+    assert storage.attempts.refs == []
+    assert not _Volume.created and not _Secret.created and not _App.created
+
+
+def test_runner_default_resource_names_pass_real_preclaim_validator(monkeypatch):
+    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+    storage = _Storage(_Attempts([]))
+
+    class ClaimReached(RuntimeError):
+        pass
+
+    def claim(_ref, _evidence):
+        raise ClaimReached
+
+    storage.attempts.claim = claim
+
+    def prepare(qualification_name):
+        return host.prepare_modal_runtime_for_host(
+            sdk=_SDK, client=object(), client_binding=_binding(), profile_path=Path("profile.json"),
+            runtime_material_intent_digest="a" * 64,
+            recipe_resource=ResourceSpec("A100-80GB", 1, 1800),
+            maximum_cost_minor_units=200, private_storage=storage, secret_resolver=_Resolver(),
+            hf_token_ref=SecretRef("env", "HF_TOKEN"),
+            qualification_secret_name=qualification_name,
+            hf_token_secret_name=runner._HF_TOKEN_SECRET_NAME,
+            app_name=runner._APP_NAME, environment_name="production",
+        )
+
+    with pytest.raises(ClaimReached):
+        prepare(runner._QUALIFICATION_SECRET_NAME)
+    with pytest.raises(ValueError, match="resource name is invalid"):
+        prepare("synaptic-training-qualification")
     assert storage.attempts.refs == []
     assert not _Volume.created and not _Secret.created and not _App.created
 

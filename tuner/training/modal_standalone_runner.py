@@ -58,6 +58,11 @@ from tuner.training.packaged_compilation import (
 )
 
 
+_QUALIFICATION_SECRET_NAME = "synaptic-qualification"
+_HF_TOKEN_SECRET_NAME = "synaptic-training-hf-token"
+_APP_NAME = "synaptic-training"
+
+
 class ModalStandaloneRunUnavailable(RuntimeError):
     """Fixed host diagnostic; no private path, provider text or credential."""
 
@@ -163,9 +168,9 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
         maximum_cost_minor_units=plan.recipe.maximum_cost_minor_units,
         private_storage=storage, secret_resolver=secrets_port,
         hf_token_ref=hf_ref,
-        qualification_secret_name="synaptic-training-qualification",
-        hf_token_secret_name="synaptic-training-hf-token",
-        app_name="synaptic-training", environment_name=modal_environment,
+        qualification_secret_name=_QUALIFICATION_SECRET_NAME,
+        hf_token_secret_name=_HF_TOKEN_SECRET_NAME,
+        app_name=_APP_NAME, environment_name=modal_environment,
         builder_cache_root=builder_cache_root,
     )
     qualification = qualify_modal_runtime_for_host(
