@@ -22,6 +22,16 @@ python -m Evaluator.cli [options]
 | `--model` | Model name or path | `finetuned`, `qwen2.5-7b-instruct`, `path/to/lora` |
 | `--host` | Backend host override | `127.0.0.1` |
 | `--port` | Backend port override | `8011` |
+| `--no-load-in-4bit` | `unsloth` only: load at full/half precision instead of the default 4-bit | Full-precision reference runs |
+
+### Model Artifact
+
+Recorded in `metadata.model_artifact` of the results JSON and in the lineage.
+
+| Flag | Description | Example |
+|------|-------------|---------|
+| `--quantization` | Quant label of the evaluated artifact; default is detected from the model path/name | `Q4_K_M` |
+| `--artifact-manifest` | `gguf_manifest.json`; the entry matching the model file name and the calibration block are recorded | `gguf/gguf_manifest.json` |
 
 ### Generation
 
@@ -172,7 +182,42 @@ python -m Evaluator.cli --backend vllm --model base \
 python -m Evaluator.cli --backend vllm --model finetuned \
   --scenario tool_prompts.yaml \
   --output Evaluator/results/finetuned.json
+
+python -m Evaluator.compare \
+  --reference Evaluator/results/base.json \
+  --candidate finetuned=Evaluator/results/finetuned.json
 ```
+
+---
+
+## Compare Command
+
+```bash
+python -m Evaluator.compare --reference REF.json --candidate [LABEL=]CAND.json [--candidate ...] [options]
+```
+
+Compares results files written by `Evaluator.cli`: deltas, per-tag deltas,
+per-case flips, request errors, latency ratio and an exact McNemar p-value.
+Without a label, a candidate is labelled by its recorded quantization, a quant
+name in the model/file name, or the file stem.
+
+| Flag | Description |
+|------|-------------|
+| `--reference` | Reference results JSON (e.g. full-precision model) |
+| `--candidate` | Candidate results JSON, optionally `LABEL=PATH`; repeatable |
+| `--max-pass-rate-drop PP` | Gate: max overall pass-rate drop in percentage points |
+| `--max-correctness-drop PP` | Gate: max correctness pass-rate drop |
+| `--max-tag-drop PP` | Gate: max per-tag pass-rate drop |
+| `--min-tag-cases N` | Only gate tags with at least N shared cases (default 1) |
+| `--max-regressions N` | Gate: max cases flipping pass to fail |
+| `--alpha A` | Drops only breach when McNemar p < A |
+| `--allow-mismatch` | Do not fail candidates whose case ids or settings differ |
+| `--output` | Comparison JSON path |
+| `--markdown` | Comparison Markdown path |
+
+No thresholds means report only (exit 0). Exit `1` when a gate breaches, `2` on
+input errors. See `results-metrics.md` "Quantization Regression Check" for the
+full-precision vs GGUF recipe.
 
 ---
 

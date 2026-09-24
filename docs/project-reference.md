@@ -134,6 +134,7 @@ tail -f sft_output/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 | Training (SFT/KTO) | | X | Needs dataset choice, model size |
 | Local Docker training | | X | `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml`; UID-agnostic, persistent-container mode |
 | Evaluation | | X | Needs model path, scenario set |
+| Eval comparison / quant regression gate | X | | `python -m Evaluator.compare --reference REF.json --candidate CAND.json` |
 | Upload to HuggingFace | | X | Needs repo name, HF_TOKEN |
 | Dataset improvement | | X | Needs rubrics, line range |
 | Synthetic data gen | | X | Needs config, teacher model |

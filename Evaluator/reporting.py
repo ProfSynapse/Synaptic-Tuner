@@ -559,6 +559,7 @@ def build_evaluation_lineage(
     test_suites: List[str],
     eval_config: Dict[str, Any],
     hardware_info: Optional[Dict[str, Any]] = None,
+    model_artifact: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build comprehensive evaluation lineage for model cards.
 
@@ -573,6 +574,10 @@ def build_evaluation_lineage(
         test_suites: List of test suite files used
         eval_config: Evaluation configuration (temperature, max_tokens, etc.)
         hardware_info: Optional hardware information (GPU, VRAM, etc.)
+        model_artifact: Optional description of the evaluated artifact
+            (quantization label and source, backend load settings such as
+            ``load_in_4bit``, matched GGUF manifest entry); see
+            ``Evaluator/model_artifact.py``.
 
     Returns:
         Complete evaluation lineage dictionary
@@ -676,6 +681,8 @@ def build_evaluation_lineage(
     # Add hardware info if provided
     if hardware_info:
         lineage["hardware"] = hardware_info
+    if model_artifact:
+        lineage["model_artifact"] = model_artifact
 
     return lineage
 
@@ -741,6 +748,11 @@ def generate_evaluation_model_card_section(lineage: Dict[str, Any]) -> str:
         lines.append(f"| Max Tokens | {config['max_tokens']} |")
     if "seed" in config:
         lines.append(f"| Seed | {config['seed']} |")
+    artifact = lineage.get("model_artifact") or {}
+    if artifact.get("quantization"):
+        lines.append(f"| Quantization | {artifact['quantization']} |")
+    if "load_in_4bit" in (artifact.get("load_settings") or {}):
+        lines.append(f"| Loaded in 4-bit | {artifact['load_settings']['load_in_4bit']} |")
 
     # Top failures (if any)
     if lineage.get("top_failure_reasons"):
