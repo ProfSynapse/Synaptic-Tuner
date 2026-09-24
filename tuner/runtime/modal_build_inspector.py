@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import sys
 import sysconfig
 
@@ -14,6 +15,7 @@ import sysconfig
 _INPUT = Path("/opt/synaptic-runtime/build-inputs.json")
 _MAX_INPUT_BYTES = 128 * 1024
 _MAX_OUTPUT_BYTES = 128 * 1024
+_SANDBOX_ID = re.compile(r"sb-[A-Za-z0-9]{1,64}\Z")
 
 
 def inspect() -> dict[str, object]:
@@ -27,7 +29,7 @@ def inspect() -> dict[str, object]:
         raise ValueError("build input is invalid")
     python = expected["python"]
     if (
-        os.environ.get("MODAL_IS_REMOTE") != "1"
+        _SANDBOX_ID.fullmatch(os.environ.get("MODAL_SANDBOX_ID", "")) is None
         or type(os.environ.get("MODAL_IMAGE_ID")) is not str
         or not os.environ["MODAL_IMAGE_ID"].startswith("im-")
         or sys.implementation.name != python["implementation"]
