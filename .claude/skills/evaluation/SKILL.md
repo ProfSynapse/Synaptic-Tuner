@@ -23,6 +23,7 @@ The evaluator does not hardcode a specific tool family, manager id, wrapper name
 | Eval with environment runtime | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --env-backend local` |
 | Eval with LLM judge | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --judge --judge-rubrics tool_call_quality` |
 | Eval + upload to HF | `python -m Evaluator.cli --backend unsloth --model PATH --upload-to-hf user/model` |
+| Compare / quant regression gate | `python -m Evaluator.compare --reference f16.json --candidate q4.json --max-pass-rate-drop 3` |
 
 ## Status System
 

@@ -61,6 +61,7 @@ from .config import (
     parse_tags,
 )
 from .config_loader import ConfigLoader, load_yaml_scenarios
+from .model_artifact import build_model_artifact
 from .reporting import (
     build_run_payload,
     console_summary,
@@ -356,6 +357,24 @@ Backend Configuration:
     parser.add_argument("--seed", type=int, help="Optional generation seed")
     parser.add_argument("--host", help="Override backend host (OLLAMA_HOST or LMSTUDIO_HOST)")
     parser.add_argument("--port", type=int, help="Override backend port (OLLAMA_PORT or LMSTUDIO_PORT)")
+    parser.add_argument(
+        "--no-load-in-4bit",
+        action="store_true",
+        help="unsloth backend only: load the model at full/half precision instead of the default 4-bit "
+        "(use for a full-precision reference run)",
+    )
+    parser.add_argument(
+        "--quantization",
+        metavar="LABEL",
+        help="Quantization label of the evaluated artifact (e.g. Q4_K_M, Q8_0, F16), recorded in results "
+        "metadata and lineage. Default: detected from the model path/name when it carries a llama.cpp quant name",
+    )
+    parser.add_argument(
+        "--artifact-manifest",
+        metavar="PATH",
+        help="gguf_manifest.json describing the evaluated GGUF; the entry matching the model file name "
+        "and the calibration block are recorded in results metadata and lineage",
+    )
     parser.add_argument("--mlc-port", type=int, default=8000, help="Port for MLC/WebLLM HTTP server (default: 8000)")
     parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser for MLC evaluation")
     parser.add_argument("--retries", type=int, default=2, help="HTTP retry attempts")
@@ -603,6 +622,31 @@ def main(argv: List[str] | None = None) -> int:
         reasoning_effort=args.reasoning_effort,
         **settings_kwargs,
     )
+    if args.no_load_in_4bit:
+        if args.backend != "unsloth":
+            print("Error: --no-load-in-4bit applies only to --backend unsloth.", file=sys.stderr)
+            return 1
+        settings.load_in_4bit = False
+
+    load_settings = (
+        {"load_in_4bit": settings.load_in_4bit, "max_seq_length": settings.max_seq_length}
+        if args.backend == "unsloth"
+        else None
+    )
+    model_artifact = build_model_artifact(
+        model=args.model,
+        backend=args.backend,
+        quantization=args.quantization,
+        manifest_path=(
+            expand_path(args.artifact_manifest)
+            if args.artifact_manifest
+            else None
+        ),
+        load_settings=load_settings,
+    )
+    for warning in model_artifact.get("warnings", []):
+        print(f"Warning: {warning}", file=sys.stderr)
+
     client = create_client(
         backend=args.backend,
         settings=settings,
@@ -775,6 +819,9 @@ def main(argv: List[str] | None = None) -> int:
 
     def build_current_metadata() -> Dict[str, Any]:
         metadata = build_metadata(config, settings, total_cases, len(selected_cases), args.backend)
+        metadata["scenarios"] = list(args.scenarios or [])
+        metadata["preset"] = args.preset
+        metadata["model_artifact"] = model_artifact
         if args.env_backend != "none":
             metadata["environment"] = {
                 "backend": args.env_backend,
@@ -959,6 +1006,7 @@ def main(argv: List[str] | None = None) -> int:
             test_suites=[str(prompt_path)],
             eval_config=eval_config,
             hardware_info={"platform": sys.platform},
+            model_artifact=model_artifact,
         )
         model_card_section = generate_evaluation_model_card_section(lineage)
 

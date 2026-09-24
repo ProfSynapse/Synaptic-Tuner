@@ -74,6 +74,7 @@ class UploadOrchestrator:
         self.artifacts_created: List[Path] = []
         self.formats_created: List[str] = []
         self.gguf_files: List[Path] = []
+        self.gguf_converter = None
 
     def execute(self) -> Dict[str, Any]:
         """
@@ -174,9 +175,11 @@ class UploadOrchestrator:
             quantizations=self.conversion_config.quantizations,
             model_name=model_name,
             cleanup=self.conversion_config.cleanup_temp,
-            model_size=self.save_config.model_size
+            model_size=self.save_config.model_size,
+            calibration=self.conversion_config.calibration,
         )
 
+        self.gguf_converter = converter
         self.formats_created.append(self.conversion_config.converter_name)
         self.gguf_files = converted_files
         self.artifacts_created.extend(converted_files)
@@ -188,8 +191,13 @@ class UploadOrchestrator:
 
         uploader = UploaderRegistry.get("huggingface")
 
+        files = list(self.gguf_files)
+        manifest_path = getattr(self.gguf_converter, "manifest_path", None)
+        if manifest_path is not None and Path(manifest_path).exists():
+            files.append(Path(manifest_path))
+
         uploader.upload_files(
-            self.gguf_files,
+            files,
             self.upload_config.repo_id,
             self.upload_config.credential
         )

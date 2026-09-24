@@ -7,9 +7,12 @@ that replace primitive parameter passing.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from .types import ModelPath, RepositoryId, Credential
+
+if TYPE_CHECKING:
+    from ..converters.calibration import CalibrationSpec
 
 
 @dataclass
@@ -79,11 +82,14 @@ class ConversionConfig:
         quantizations: List of quantization methods to apply
         cleanup_temp: Whether to cleanup temporary files after conversion
         use_wsl_native: Whether to use WSL native filesystem for better I/O
+        calibration: Calibration dataset for a llama.cpp importance matrix
+            (reliable GGUF converter only); None disables the imatrix
     """
     converter_name: str = "gguf"
     quantizations: List[str] = field(default_factory=lambda: ["Q4_K_M", "Q5_K_M", "Q8_0"])
     cleanup_temp: bool = True
     use_wsl_native: bool = True
+    calibration: Optional["CalibrationSpec"] = None
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -93,6 +99,12 @@ class ConversionConfig:
                 f"Invalid converter: {self.converter_name}. "
                 f"Valid options: {valid_converters}"
             )
+        # Fail fast (before any save/upload work) on IQ types without calibration.
+        from ..converters.gguf_reliable import validate_quantizations
+
+        self.quantizations = validate_quantizations(
+            self.quantizations, has_calibration=self.calibration is not None
+        )
 
 
 @dataclass

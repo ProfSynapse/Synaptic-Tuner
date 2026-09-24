@@ -26,6 +26,12 @@ from ..core.config import (
 )
 from ..core.types import ModelPath, to_repository_id, to_credential
 from ..orchestrator import UploadOrchestrator
+from ..converters.calibration import (
+    CalibrationSpec,
+    DEFAULT_IMATRIX_CHUNKS,
+    DEFAULT_IMATRIX_CTX,
+    DEFAULT_MAX_ROWS,
+)
 
 
 def load_env_file():
@@ -58,6 +64,10 @@ Examples:
 
   # Upload with GGUF creation
   python -m shared.upload.cli.upload_cli ./final_model username/my-model --create-gguf
+
+  # GGUF with an importance matrix calibrated on the training data
+  python -m shared.upload.cli.upload_cli ./final_model username/my-model --create-gguf \\
+      --gguf-quantizations Q4_K_M IQ3_XXS --gguf-calibration Datasets/train.jsonl
 
   # LoRA-only upload (fastest, smallest)
   python -m shared.upload.cli.upload_cli ./final_model username/my-model --save-method lora
@@ -133,6 +143,34 @@ Examples:
         nargs="+",
         default=["Q4_K_M", "Q5_K_M", "Q8_0"],
         help="GGUF quantization methods (default: Q4_K_M Q5_K_M Q8_0)"
+    )
+    parser.add_argument(
+        "--gguf-calibration",
+        type=str,
+        metavar="JSONL",
+        help=(
+            "Calibration dataset (JSONL, e.g. the SFT training data) for a llama.cpp "
+            "importance matrix; improves Q4-and-below quants and enables IQ types. "
+            "Applies to --create-gguf only (not --gguf-only)."
+        ),
+    )
+    parser.add_argument(
+        "--gguf-calibration-rows",
+        type=int,
+        default=DEFAULT_MAX_ROWS,
+        help=f"Max calibration rows sampled (default: {DEFAULT_MAX_ROWS})",
+    )
+    parser.add_argument(
+        "--gguf-imatrix-chunks",
+        type=int,
+        default=DEFAULT_IMATRIX_CHUNKS,
+        help=f"Max llama-imatrix chunks of --gguf-imatrix-ctx tokens (default: {DEFAULT_IMATRIX_CHUNKS})",
+    )
+    parser.add_argument(
+        "--gguf-imatrix-ctx",
+        type=int,
+        default=DEFAULT_IMATRIX_CTX,
+        help=f"llama-imatrix context size per chunk (default: {DEFAULT_IMATRIX_CTX})",
     )
     parser.add_argument(
         "--skip-standard",
@@ -364,12 +402,33 @@ def main(args=None):
         model_size=args.model_size,
     )
 
+    if args.gguf_calibration and not args.create_gguf:
+        print("Error: --gguf-calibration requires --create-gguf")
+        sys.exit(1)
+
     conversion_config = None
     if args.create_gguf:
-        conversion_config = ConversionConfig(
-            converter_name="gguf",
-            quantizations=args.gguf_quantizations,
-        )
+        calibration = None
+        if args.gguf_calibration:
+            calibration_path = Path(args.gguf_calibration).resolve()
+            if not calibration_path.is_file():
+                print(f"Error: calibration dataset not found: {calibration_path}")
+                sys.exit(1)
+            calibration = CalibrationSpec(
+                dataset_path=calibration_path,
+                max_rows=args.gguf_calibration_rows,
+                chunks=args.gguf_imatrix_chunks,
+                ctx_size=args.gguf_imatrix_ctx,
+            )
+        try:
+            conversion_config = ConversionConfig(
+                converter_name="gguf",
+                quantizations=args.gguf_quantizations,
+                calibration=calibration,
+            )
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
 
     documentation_config = DocumentationConfig(
         training_lineage_path=Path(args.training_lineage) if args.training_lineage else None,
