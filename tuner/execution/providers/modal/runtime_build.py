@@ -34,6 +34,7 @@ from tuner.execution.providers.modal.modal_wheel_builder import (
 
 _IMAGE_ID = re.compile(r"^im-[A-Za-z0-9]{1,64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_MAX_CAPTURE_BODY_BYTES = 128 * 1024
 _BUILDER_ATTESTATION = object()
 _WHEEL_SOURCE_PATHS = (
     "pyproject.toml", "README.md", "LICENSE",
@@ -106,6 +107,20 @@ class _CaptureOutputFailure(ValueError):
             raise ValueError("Modal capture reason is invalid")
         super().__init__("Modal capture output is invalid")
         self.reason = reason
+
+
+def _canonical_capture_bytes(document: dict[str, object]) -> bytes:
+    """Encode an inspector report with its own bounded output contract."""
+    try:
+        encoded = json.dumps(
+            document, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError):
+        raise ValueError("Modal build capture is invalid") from None
+    if len(encoded) > _MAX_CAPTURE_BODY_BYTES:
+        raise ValueError("Modal build capture is too large")
+    return encoded
 
 
 def plan_modal_build_material(profile_path: Path) -> dict[str, object]:
@@ -311,9 +326,11 @@ def _capture_output(sandbox: object) -> bytes:
     for chunk in sandbox.stdout:
         if type(chunk) is str:
             chunk = chunk.encode("utf-8")
-        if type(chunk) is not bytes or len(chunk) > 128 * 1024 - len(output):
+        if type(chunk) is not bytes or len(chunk) > _MAX_CAPTURE_BODY_BYTES + 1 - len(output):
             raise _CaptureOutputFailure("OUTPUT_INVALID")
         output.extend(chunk)
+    if len(output) == _MAX_CAPTURE_BODY_BYTES + 1 and output[-1:] != b"\n":
+        raise _CaptureOutputFailure("OUTPUT_INVALID")
     sandbox.wait(raise_on_termination=False)
     if type(sandbox.returncode) is not int or sandbox.returncode != 0:
         raise _CaptureOutputFailure("INSPECTOR_REJECTED")
@@ -510,6 +527,8 @@ class ModalBuildCandidateV1:
 
     def _validate_capture(self) -> None:
         if (type(self._capture_raw) is not bytes or not self._capture_raw
+                or len(self._capture_raw) > _MAX_CAPTURE_BODY_BYTES + 1
+                or self._capture_raw[-1:] != b"\n"
                 or hashlib.sha256(self._capture_raw).hexdigest() != self.capture_digest
                 or _IMAGE_ID.fullmatch(self.image_id) is None
                 or _SHA256.fullmatch(self.inspector_sha256) is None):
@@ -519,7 +538,7 @@ class ModalBuildCandidateV1:
                 or document.get("schema_version") != "synaptic-modal-build-capture/v1"
                 or document.get("image_id") != self.image_id
                 or document.get("inspector_sha256") != self.inspector_sha256
-                or canonical_bytes(document) + b"\n" != self._capture_raw):
+                or _canonical_capture_bytes(document) + b"\n" != self._capture_raw):
             raise ValueError("Modal candidate capture differs")
         material = self.material
         if material.get("kind") != "modal_build" or canonical_bytes(material) != self._material_raw:
@@ -537,7 +556,7 @@ class ModalBuildCandidateV1:
         expected_image_id: str, expected_inspector_sha256: str,
         expected_build_inputs_digest: str,
     ) -> "ModalBuildCandidateV1":
-        if not raw or len(raw) > 128 * 1024 or raw[-1:] != b"\n":
+        if type(raw) is not bytes or not raw or len(raw) > _MAX_CAPTURE_BODY_BYTES + 1 or raw[-1:] != b"\n":
             raise ValueError("Modal build capture is invalid")
         if _IMAGE_ID.fullmatch(expected_image_id) is None or _SHA256.fullmatch(expected_inspector_sha256) is None:
             raise ValueError("Modal build identity is invalid")
@@ -551,7 +570,7 @@ class ModalBuildCandidateV1:
                 or document["image_id"] != expected_image_id
                 or document["inspector_sha256"] != expected_inspector_sha256
                 or type(document["measured"]) is not dict
-                or canonical_bytes(document) + b"\n" != raw):
+                or _canonical_capture_bytes(document) + b"\n" != raw):
             raise ValueError("Modal build capture identity differs")
         selected = dict(material)
         if selected.get("kind") != "modal_build":
