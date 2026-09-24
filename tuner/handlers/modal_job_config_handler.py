@@ -32,6 +32,13 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
         "CAPTURE_CLEANUP": ("runtime_build.cleanup_capture_sandbox", {"TIMEOUT", "OPERATION_FAILED"}),
         "CAPTURE_VALIDATE": ("runtime_build.validate_capture", {"INVALID"}),
         "RELEASE_VALIDATE": ("modal_host_runtime.build_release", {"INVALID"}),
+        "RELEASE_OBSERVE": ("modal_host_runtime.observe_release", {
+            "SCOPE_UNAVAILABLE", "OBSERVATION_UNAVAILABLE", "OBSERVATION_INVALID"}),
+        "RELEASE_ATTEMPT": ("modal_host_runtime.deploy_release", {
+            "BOUNDED_DEPLOY_UNAVAILABLE", "SCOPE_UNAVAILABLE",
+            "OBSERVATION_UNAVAILABLE", "OBSERVATION_INVALID",
+            "RESOURCE_UNAVAILABLE", "CONSTRUCTION_FAILED",
+            "DEPLOYMENT_INDETERMINATE", "ACKNOWLEDGEMENT_INVALID"}),
     }
     if type(error) is ModalHostBootstrapUnavailable and error.retry_authorized is False:
         admitted = closed.get(error.phase)

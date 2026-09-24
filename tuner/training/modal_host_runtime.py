@@ -32,7 +32,7 @@ from tuner.execution.providers.modal.runtime_release_deployment import (
     EXACT_QUALIFICATION_SECRET_REQUIRED_KEYS,
     EXACT_SELF_CHECK_MODULE, EXACT_SELF_CHECK_QUALNAME,
     ExplicitModal154ReleaseDeploymentReader, ModalRuntimeReleaseDeployer,
-    require_bounded_modal_deployment_host,
+    ModalRuntimeReleaseDeploymentError, require_bounded_modal_deployment_host,
     ModalRuntimeReleaseDeploymentPlanV1, ModalRuntimeReleaseFunctionSpecV1,
     ModalRuntimeReleaseDeploymentFactsV1,
     ModalRuntimeReleaseSecretSpecV1, ModalRuntimeReleaseVolumeSpecV1,
@@ -74,7 +74,47 @@ _CLOSED_BOOTSTRAP_DIAGNOSTICS = {
     "CAPTURE_CLEANUP_OPERATION_FAILED": ("CAPTURE_CLEANUP", "OPERATION_FAILED", "runtime_build.cleanup_capture_sandbox"),
     "CAPTURE_VALIDATE_INVALID": ("CAPTURE_VALIDATE", "INVALID", "runtime_build.validate_capture"),
     "RELEASE_VALIDATE_INVALID": ("RELEASE_VALIDATE", "INVALID", "modal_host_runtime.build_release"),
+    "RELEASE_OBSERVE_SCOPE_UNAVAILABLE": ("RELEASE_OBSERVE", "SCOPE_UNAVAILABLE", "modal_host_runtime.observe_release"),
+    "RELEASE_OBSERVE_OBSERVATION_UNAVAILABLE": ("RELEASE_OBSERVE", "OBSERVATION_UNAVAILABLE", "modal_host_runtime.observe_release"),
+    "RELEASE_OBSERVE_OBSERVATION_INVALID": ("RELEASE_OBSERVE", "OBSERVATION_INVALID", "modal_host_runtime.observe_release"),
+    "RELEASE_ATTEMPT_BOUNDED_DEPLOY_UNAVAILABLE": ("RELEASE_ATTEMPT", "BOUNDED_DEPLOY_UNAVAILABLE", "modal_host_runtime.deploy_release"),
+    "RELEASE_ATTEMPT_SCOPE_UNAVAILABLE": ("RELEASE_ATTEMPT", "SCOPE_UNAVAILABLE", "modal_host_runtime.deploy_release"),
+    "RELEASE_ATTEMPT_OBSERVATION_UNAVAILABLE": ("RELEASE_ATTEMPT", "OBSERVATION_UNAVAILABLE", "modal_host_runtime.deploy_release"),
+    "RELEASE_ATTEMPT_OBSERVATION_INVALID": ("RELEASE_ATTEMPT", "OBSERVATION_INVALID", "modal_host_runtime.deploy_release"),
+    "RELEASE_ATTEMPT_RESOURCE_UNAVAILABLE": ("RELEASE_ATTEMPT", "RESOURCE_UNAVAILABLE", "modal_host_runtime.deploy_release"),
+    "RELEASE_ATTEMPT_CONSTRUCTION_FAILED": ("RELEASE_ATTEMPT", "CONSTRUCTION_FAILED", "modal_host_runtime.deploy_release"),
+    "RELEASE_ATTEMPT_DEPLOYMENT_INDETERMINATE": ("RELEASE_ATTEMPT", "DEPLOYMENT_INDETERMINATE", "modal_host_runtime.deploy_release"),
+    "RELEASE_ATTEMPT_ACKNOWLEDGEMENT_INVALID": ("RELEASE_ATTEMPT", "ACKNOWLEDGEMENT_INVALID", "modal_host_runtime.deploy_release"),
 }
+
+_CLOSED_RELEASE_OBSERVE_ERRORS = {
+    "modal_release_scope_unavailable": "RELEASE_OBSERVE_SCOPE_UNAVAILABLE",
+    "modal_release_observation_unavailable": "RELEASE_OBSERVE_OBSERVATION_UNAVAILABLE",
+    "modal_release_observation_invalid": "RELEASE_OBSERVE_OBSERVATION_INVALID",
+}
+_CLOSED_RELEASE_ATTEMPT_ERRORS = {
+    "modal_release_bounded_deploy_unavailable": "RELEASE_ATTEMPT_BOUNDED_DEPLOY_UNAVAILABLE",
+    "modal_release_scope_unavailable": "RELEASE_ATTEMPT_SCOPE_UNAVAILABLE",
+    "modal_release_observation_unavailable": "RELEASE_ATTEMPT_OBSERVATION_UNAVAILABLE",
+    "modal_release_observation_invalid": "RELEASE_ATTEMPT_OBSERVATION_INVALID",
+    "modal_release_resource_unavailable": "RELEASE_ATTEMPT_RESOURCE_UNAVAILABLE",
+    "modal_release_construction_failed": "RELEASE_ATTEMPT_CONSTRUCTION_FAILED",
+    "modal_release_deployment_indeterminate": "RELEASE_ATTEMPT_DEPLOYMENT_INDETERMINATE",
+    "modal_release_acknowledgement_invalid": "RELEASE_ATTEMPT_ACKNOWLEDGEMENT_INVALID",
+}
+
+
+def _closed_release_diagnosis(
+    error: ModalRuntimeReleaseDeploymentError, *, before_deploy: bool,
+) -> str | None:
+    """Admit only exact provider codes at the known call boundary."""
+    if (type(error) is not ModalRuntimeReleaseDeploymentError
+            or type(error.args) is not tuple or len(error.args) != 1
+            or type(error.args[0]) is not str):
+        return None
+    mapping = (_CLOSED_RELEASE_OBSERVE_ERRORS if before_deploy
+               else _CLOSED_RELEASE_ATTEMPT_ERRORS)
+    return mapping.get(error.args[0])
 
 
 class ModalHostBootstrapUnavailable(RuntimeError):
@@ -502,15 +542,28 @@ def prepare_modal_runtime_for_host(
         sdk=sdk, client=client, client_binding=client_binding, reader=reader,
     )
     # The fresh attempt name must be absent before the one authorized deploy.
-    if deployer.observe(plan) is not None:
+    try:
+        prior = deployer.observe(plan)
+    except ModalRuntimeReleaseDeploymentError as error:
+        diagnosis = _closed_release_diagnosis(error, before_deploy=True)
+        if diagnosis is not None:
+            raise ModalHostBootstrapUnavailable(diagnosis) from None
+        raise
+    if prior is not None:
         raise ValueError("fresh Modal deployment name already exists")
-    acknowledged = deployer.deploy_once(
-        plan, candidate=candidate,
-        entrypoints={
-            "training": run_modal_packaged_training,
-            "self_check": run_runtime_release_self_check,
-        },
-    )
+    try:
+        acknowledged = deployer.deploy_once(
+            plan, candidate=candidate,
+            entrypoints={
+                "training": run_modal_packaged_training,
+                "self_check": run_runtime_release_self_check,
+            },
+        )
+    except ModalRuntimeReleaseDeploymentError as error:
+        diagnosis = _closed_release_diagnosis(error, before_deploy=False)
+        if diagnosis is not None:
+            raise ModalHostBootstrapUnavailable(diagnosis) from None
+        raise
     facts = ModalPackagedRuntimeFactsV1.from_release_deployment(acknowledged)
     current = _CurrentPackagedDeploymentReader(
         sdk=sdk, client=client, binding=client_binding, facts=facts, names=names,

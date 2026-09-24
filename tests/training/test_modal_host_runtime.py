@@ -404,6 +404,72 @@ def test_closed_build_stage_constructor_rejects_unreviewed_reason():
         host.ModalHostBootstrapUnavailable("IMAGE_BUILD_HOSTILE_PROVIDER_TEXT")
 
 
+@pytest.mark.parametrize("boundary,code,phase,failure_class", [
+    ("observe", "modal_release_scope_unavailable", "RELEASE_OBSERVE", "SCOPE_UNAVAILABLE"),
+    ("observe", "modal_release_observation_unavailable", "RELEASE_OBSERVE", "OBSERVATION_UNAVAILABLE"),
+    ("deploy", "modal_release_construction_failed", "RELEASE_ATTEMPT", "CONSTRUCTION_FAILED"),
+    ("deploy", "modal_release_deployment_indeterminate", "RELEASE_ATTEMPT", "DEPLOYMENT_INDETERMINATE"),
+    ("deploy", "modal_release_acknowledgement_invalid", "RELEASE_ATTEMPT", "ACKNOWLEDGEMENT_INVALID"),
+])
+def test_release_failure_after_claim_is_closed_without_second_deploy(
+        monkeypatch, boundary, code, phase, failure_class):
+    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+    monkeypatch.setattr(host, "capture_modal_build_candidate",
+                        lambda **kw: SimpleNamespace(capture_digest="b" * 64))
+    monkeypatch.setattr(host, "build_modal_runtime_release_v2",
+                        lambda *args, **kw: SimpleNamespace(manifest_digest="c" * 64))
+    monkeypatch.setattr(host, "ModalRuntimeReleaseDeploymentPlanV1",
+                        lambda **kw: SimpleNamespace(**kw))
+    monkeypatch.setattr(host, "ExplicitModal154ReleaseDeploymentReader",
+                        lambda **kw: object())
+    calls = []
+
+    class _FailingDeployer:
+        def __init__(self, **kwargs):
+            pass
+
+        def observe(self, plan):
+            calls.append("observe")
+            if boundary == "observe":
+                raise ModalRuntimeReleaseDeploymentError(code) from ValueError(
+                    "HF_TOKEN=private /home/owner/dataset.jsonl")
+            return None
+
+        def deploy_once(self, plan, **kwargs):
+            calls.append("deploy")
+            raise ModalRuntimeReleaseDeploymentError(code) from ValueError(
+                "HF_TOKEN=private /home/owner/dataset.jsonl")
+
+    monkeypatch.setattr(host, "ModalRuntimeReleaseDeployer", _FailingDeployer)
+    storage = _Storage(_Attempts([]))
+    with pytest.raises(host.ModalHostBootstrapUnavailable) as caught:
+        _paid_factory_probe(storage)
+    error = caught.value
+    assert (error.phase, error.failure_class, error.location, error.retry_authorized) == (
+        phase, failure_class,
+        "modal_host_runtime.observe_release" if boundary == "observe"
+        else "modal_host_runtime.deploy_release", False,
+    )
+    assert str(error) == "modal_host_bootstrap_unavailable"
+    assert error.__cause__ is None
+    assert "HF_TOKEN" not in str(error)
+    assert storage.attempts.refs == ["build-" + "a" * 64, "deploy-" + "c" * 64]
+    assert calls == (["observe"] if boundary == "observe" else ["observe", "deploy"])
+
+
+def test_release_error_requires_exact_class_single_known_code():
+    class HostileReleaseError(ModalRuntimeReleaseDeploymentError):
+        pass
+
+    for error in (
+        HostileReleaseError("modal_release_deployment_indeterminate"),
+        ModalRuntimeReleaseDeploymentError("modal_release_deployment_indeterminate", "secret"),
+        ModalRuntimeReleaseDeploymentError("modal_release_unknown_private_detail"),
+    ):
+        assert host._closed_release_diagnosis(error, before_deploy=False) is None
+
+
 @pytest.mark.parametrize("capture_fails", [False, True])
 def test_build_app_cleanup_does_not_hide_prior_capture_failure(monkeypatch, capture_fails):
     from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
