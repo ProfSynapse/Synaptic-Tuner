@@ -18,7 +18,9 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
 
     closed = {
         "SOURCE_WHEEL": ("runtime_build.prepare_current_source_wheel", {
-            "SOURCE_ARCHIVE_INVALID", "LOCAL_BUILD_FAILED"}),
+            "SOURCE_ARCHIVE_INVALID", "LOCAL_BUILD_FAILED", "SOURCE_STATE_INVALID",
+            "BUILDER_SETUP_FAILED", "OFFLINE_WHEEL_TIMEOUT", "OFFLINE_WHEEL_FAILED",
+            "WHEEL_INVENTORY_INVALID"}),
         "BUILD_INPUTS": ("runtime_build.prepare_build_inputs", {"INVALID"}),
         "APP_START": ("modal_host_runtime.build_app", {"TIMEOUT", "OPERATION_FAILED"}),
         "APP_CLEANUP": ("modal_host_runtime.close_build_app", {"TIMEOUT", "OPERATION_FAILED"}),

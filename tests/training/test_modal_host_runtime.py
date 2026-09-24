@@ -368,6 +368,8 @@ def test_source_archive_failure_projects_only_fixed_nonretryable_diagnosis(monke
 
 
 @pytest.mark.parametrize("stage,reason,location", [
+    ("SOURCE_WHEEL", "BUILDER_SETUP_FAILED", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "OFFLINE_WHEEL_TIMEOUT", "runtime_build.prepare_current_source_wheel"),
     ("BUILD_INPUTS", "INVALID", "runtime_build.prepare_build_inputs"),
     ("IMAGE_BUILD", "OPERATION_FAILED", "runtime_build.build_image"),
     ("CAPTURE_OUTPUT", "INSPECTOR_REJECTED", "runtime_build.capture_output"),

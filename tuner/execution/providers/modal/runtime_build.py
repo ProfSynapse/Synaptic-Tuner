@@ -46,6 +46,22 @@ class SourceArchiveInvalid(ValueError):
     """The bound engine commit could not supply a bounded wheel source archive."""
 
 
+class SourceWheelFailure(ValueError):
+    """Closed local source-wheel failure without subprocess or filesystem detail."""
+
+    __slots__ = ("reason",)
+    _REASONS = frozenset({
+        "SOURCE_STATE_INVALID", "BUILDER_SETUP_FAILED", "OFFLINE_WHEEL_TIMEOUT",
+        "OFFLINE_WHEEL_FAILED", "WHEEL_INVENTORY_INVALID",
+    })
+
+    def __init__(self, reason: str) -> None:
+        if reason not in self._REASONS:
+            raise ValueError("source wheel reason is invalid")
+        super().__init__("source_wheel_unavailable")
+        self.reason = reason
+
+
 class ModalBoundedOperationFailure(RuntimeError):
     """A bounded call failed; its provider exception is never retained."""
 
@@ -63,7 +79,10 @@ class ModalBuildStageFailure(RuntimeError):
 
     __slots__ = ("stage", "reason")
     _REASONS = {
-        "SOURCE_WHEEL": frozenset({"LOCAL_BUILD_FAILED"}),
+        "SOURCE_WHEEL": frozenset({
+            "LOCAL_BUILD_FAILED", "SOURCE_STATE_INVALID", "BUILDER_SETUP_FAILED",
+            "OFFLINE_WHEEL_TIMEOUT", "OFFLINE_WHEEL_FAILED", "WHEEL_INVENTORY_INVALID",
+        }),
         "BUILD_INPUTS": frozenset({"INVALID"}),
         "IMAGE_BUILD": frozenset({"TIMEOUT", "OPERATION_FAILED", "IDENTITY_MISSING"}),
         "CAPTURE_CREATE": frozenset({"TIMEOUT", "OPERATION_FAILED"}),
@@ -121,63 +140,96 @@ def prepare_current_source_wheel(source_root: Path, output_dir: Path, *,
                                  expected_source_commit: str,
                                  builder_cache_root: Path | None = None) -> tuple[Path, str]:
     """Build the accepted clean engine commit offline, without a customer repo."""
-    root = source_root.resolve(strict=True)
-    if (not (root / "pyproject.toml").is_file() or not output_dir.is_dir()
-            or type(expected_source_commit) is not str
-            or re.fullmatch(r"[0-9a-f]{40}", expected_source_commit) is None):
-        raise ValueError("engine source or private output is invalid")
+    try:
+        root = source_root.resolve(strict=True)
+        if (not (root / "pyproject.toml").is_file()
+                or type(expected_source_commit) is not str
+                or re.fullmatch(r"[0-9a-f]{40}", expected_source_commit) is None):
+            raise ValueError
+    except Exception:
+        raise SourceWheelFailure("SOURCE_STATE_INVALID") from None
+    try:
+        if not output_dir.is_dir():
+            raise ValueError
+    except Exception:
+        raise SourceWheelFailure("BUILDER_SETUP_FAILED") from None
+
     def bound_head() -> None:
-        head = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True, timeout=30, check=False,
-        )
-        if (head.returncode != 0 or head.stdout.decode("ascii", "strict").strip()
-                != expected_source_commit):
-            raise ValueError("accepted engine source HEAD changed")
+        try:
+            head = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                capture_output=True, timeout=30, check=False,
+            )
+            if (head.returncode != 0 or head.stdout.decode("ascii", "strict").strip()
+                    != expected_source_commit):
+                raise ValueError
+        except Exception:
+            raise SourceWheelFailure("SOURCE_STATE_INVALID") from None
 
     bound_head()
-    status = subprocess.run(
-        ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
-        capture_output=True, timeout=30, check=False,
-    )
-    if status.returncode != 0 or status.stdout or status.stderr:
-        raise ValueError("accepted engine source must be clean")
-    archive = subprocess.run(
-        ["git", "-C", str(root), "archive", "--format=tar",
-         expected_source_commit, *_WHEEL_SOURCE_PATHS],
-        capture_output=True, timeout=120, check=False,
-    )
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True, timeout=30, check=False,
+        )
+        if status.returncode != 0 or status.stdout or status.stderr:
+            raise ValueError
+    except Exception:
+        raise SourceWheelFailure("SOURCE_STATE_INVALID") from None
+    try:
+        archive = subprocess.run(
+            ["git", "-C", str(root), "archive", "--format=tar",
+             expected_source_commit, *_WHEEL_SOURCE_PATHS],
+            capture_output=True, timeout=120, check=False,
+        )
+    except Exception:
+        raise SourceArchiveInvalid("accepted engine source archive failed") from None
     bound_head()
-    status_after = subprocess.run(
-        ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
-        capture_output=True, timeout=30, check=False,
-    )
-    if status_after.returncode != 0 or status_after.stdout or status_after.stderr:
-        raise ValueError("accepted engine source must remain clean")
+    try:
+        status_after = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True, timeout=30, check=False,
+        )
+        if status_after.returncode != 0 or status_after.stdout or status_after.stderr:
+            raise ValueError
+    except Exception:
+        raise SourceWheelFailure("SOURCE_STATE_INVALID") from None
     if archive.returncode != 0 or not archive.stdout or len(archive.stdout) > 512 * 1024 * 1024:
         raise SourceArchiveInvalid("accepted engine source archive failed")
-    with tempfile.TemporaryDirectory(prefix="synaptic-wheel-source-") as scratch:
-        source = Path(scratch) / "source"
-        source.mkdir()
-        with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as members:
-            for member in members:
-                if not member.isfile() and not member.isdir():
-                    raise ValueError("engine source archive contains an unsupported member")
-                destination = source.joinpath(*Path(member.name).parts)
-                if not destination.resolve().is_relative_to(source.resolve()):
-                    raise ValueError("engine source archive path escapes scratch")
-                if member.isdir():
-                    destination.mkdir(parents=True, exist_ok=True)
-                else:
-                    if member.size > 64 * 1024 * 1024:
-                        raise ValueError("engine source member is too large")
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    stream = members.extractfile(member)
-                    if stream is None:
-                        raise ValueError("engine source member is unreadable")
-                    destination.write_bytes(stream.read())
+    try:
+        private_scratch = tempfile.TemporaryDirectory(prefix="synaptic-wheel-source-")
+    except Exception:
+        raise SourceWheelFailure("BUILDER_SETUP_FAILED") from None
+    with private_scratch as scratch:
+        try:
+            source = Path(scratch) / "source"
+            source.mkdir()
+            with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as members:
+                for member in members:
+                    if not member.isfile() and not member.isdir():
+                        raise ValueError("engine source archive contains an unsupported member")
+                    destination = source.joinpath(*Path(member.name).parts)
+                    if not destination.resolve().is_relative_to(source.resolve()):
+                        raise ValueError("engine source archive path escapes scratch")
+                    if member.isdir():
+                        destination.mkdir(parents=True, exist_ok=True)
+                    else:
+                        if member.size > 64 * 1024 * 1024:
+                            raise ValueError("engine source member is too large")
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        stream = members.extractfile(member)
+                        if stream is None:
+                            raise ValueError("engine source member is unreadable")
+                        destination.write_bytes(stream.read())
+        except OSError:
+            raise SourceWheelFailure("BUILDER_SETUP_FAILED") from None
+        except Exception:
+            raise SourceArchiveInvalid("accepted engine source archive failed") from None
         cache = builder_cache_root if builder_cache_root is not None else Path(scratch) / "builder-cache"
-        builder_python = create_offline_wheel_builder(Path(scratch), cache)
+        try:
+            builder_python = create_offline_wheel_builder(Path(scratch), cache)
+        except Exception:
+            raise SourceWheelFailure("BUILDER_SETUP_FAILED") from None
         command = [str(builder_python), "-I", "-m", "pip", "wheel", "--no-index", "--no-deps", "--no-build-isolation", "--no-cache-dir", "--wheel-dir", str(output_dir), str(source)]
         build_env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -186,16 +238,24 @@ def prepare_current_source_wheel(source_root: Path, output_dir: Path, *,
             "PIP_DISABLE_PIP_VERSION_CHECK": "1",
             "PYTHONNOUSERSITE": "1",
         }
-        result = subprocess.run(command, capture_output=True, timeout=300, check=False, env=build_env)
+        try:
+            result = subprocess.run(command, capture_output=True, timeout=300, check=False, env=build_env)
+        except subprocess.TimeoutExpired:
+            raise SourceWheelFailure("OFFLINE_WHEEL_TIMEOUT") from None
+        except Exception:
+            raise SourceWheelFailure("OFFLINE_WHEEL_FAILED") from None
         if result.returncode != 0:
-            raise ValueError("offline engine wheel build failed")
-    wheels = list(output_dir.glob("synaptic_tuner-*-py3-none-any.whl"))
-    if len(wheels) != 1:
-        raise ValueError("offline engine wheel result is ambiguous")
-    wheel = wheels[0]
-    raw = wheel.read_bytes()
-    if not raw or len(raw) > 256 * 1024 * 1024:
-        raise ValueError("offline engine wheel is invalid")
+            raise SourceWheelFailure("OFFLINE_WHEEL_FAILED")
+    try:
+        wheels = list(output_dir.glob("synaptic_tuner-*-py3-none-any.whl"))
+        if len(wheels) != 1:
+            raise ValueError
+        wheel = wheels[0]
+        raw = wheel.read_bytes()
+        if not raw or len(raw) > 256 * 1024 * 1024:
+            raise ValueError
+    except Exception:
+        raise SourceWheelFailure("WHEEL_INVENTORY_INVALID") from None
     return wheel, hashlib.sha256(raw).hexdigest()
 
 
@@ -316,6 +376,8 @@ def capture_modal_build_candidate(
             )
         except SourceArchiveInvalid:
             raise
+        except SourceWheelFailure as error:
+            raise ModalBuildStageFailure("SOURCE_WHEEL", error.reason) from None
         except Exception:
             raise ModalBuildStageFailure("SOURCE_WHEEL", "LOCAL_BUILD_FAILED") from None
         try:

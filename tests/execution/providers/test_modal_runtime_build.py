@@ -368,10 +368,11 @@ def test_wheel_archive_rejects_head_change_before_builder(monkeypatch, tmp_path)
         pytest.fail("builder must not start after HEAD changes")
 
     monkeypatch.setattr(runtime_build.subprocess, "run", run)
-    with pytest.raises(ValueError, match="HEAD changed"):
+    with pytest.raises(runtime_build.SourceWheelFailure) as caught:
         runtime_build.prepare_current_source_wheel(
             source, output, expected_source_commit=first,
         )
+    assert caught.value.reason == "SOURCE_STATE_INVALID"
     assert sum("rev-parse" in call for call in calls) == 2
 
 
@@ -422,8 +423,130 @@ def test_wheel_archive_rejects_tracked_dirty_source(monkeypatch, tmp_path) -> No
         pytest.fail("dirty tracked source must not be archived")
 
     monkeypatch.setattr(runtime_build.subprocess, "run", run)
-    with pytest.raises(ValueError, match="must be clean"):
+    with pytest.raises(runtime_build.SourceWheelFailure) as caught:
         runtime_build.prepare_current_source_wheel(
             source, output, expected_source_commit=commit,
         )
+    assert caught.value.reason == "SOURCE_STATE_INVALID"
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize("failure,reason", [
+    ("builder", "BUILDER_SETUP_FAILED"),
+    ("pip_timeout", "OFFLINE_WHEEL_TIMEOUT"),
+    ("pip_exit", "OFFLINE_WHEEL_FAILED"),
+    ("inventory", "WHEEL_INVENTORY_INVALID"),
+])
+def test_source_wheel_local_substages_are_closed(monkeypatch, tmp_path, failure, reason) -> None:
+    from contextlib import nullcontext
+    from tuner.execution.providers.modal import runtime_build
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text("[build-system]\n", encoding="ascii")
+    output = tmp_path / "output"
+    output.mkdir()
+    commit = "a" * 40
+
+    def run(command, **_kwargs):
+        if "rev-parse" in command:
+            return subprocess.CompletedProcess(command, 0, commit.encode() + b"\n", b"")
+        if "status" in command:
+            return subprocess.CompletedProcess(command, 0, b"", b"")
+        if "archive" in command:
+            return subprocess.CompletedProcess(command, 0, b"bounded-tar", b"")
+        if failure == "pip_timeout":
+            raise subprocess.TimeoutExpired(command, 300, stderr=b"token=must-not-escape")
+        return subprocess.CompletedProcess(command, 2 if failure == "pip_exit" else 0,
+                                           b"", b"token=must-not-escape")
+
+    def builder(_scratch, _cache):
+        if failure == "builder":
+            raise ValueError("token=must-not-escape")
+        return tmp_path / "builder-python"
+
+    monkeypatch.setattr(runtime_build.subprocess, "run", run)
+    monkeypatch.setattr(runtime_build.tarfile, "open", lambda **_kwargs: nullcontext(()))
+    monkeypatch.setattr(runtime_build, "create_offline_wheel_builder", builder)
+    with pytest.raises(runtime_build.SourceWheelFailure) as caught:
+        runtime_build.prepare_current_source_wheel(source, output, expected_source_commit=commit)
+    assert caught.value.reason == reason
+    assert str(caught.value) == "source_wheel_unavailable"
+    assert "must-not-escape" not in str(caught.value)
+
+
+def test_source_wheel_invalid_local_output_is_setup_failure(monkeypatch, tmp_path) -> None:
+    from tuner.execution.providers.modal import runtime_build
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text("[build-system]\n", encoding="ascii")
+    monkeypatch.setattr(runtime_build.subprocess, "run",
+                        lambda *_args, **_kwargs: pytest.fail("git must not start"))
+    with pytest.raises(runtime_build.SourceWheelFailure) as caught:
+        runtime_build.prepare_current_source_wheel(
+            source, tmp_path / "missing-output", expected_source_commit="a" * 40,
+        )
+    assert caught.value.reason == "BUILDER_SETUP_FAILED"
+
+
+@pytest.mark.parametrize("failure", ["scratch_mkdir", "source_write"])
+def test_source_wheel_scratch_io_is_not_archive_invalid(monkeypatch, tmp_path, failure) -> None:
+    import io
+    from contextlib import nullcontext
+    from tuner.execution.providers.modal import runtime_build
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text("[build-system]\n", encoding="ascii")
+    output = tmp_path / "output"
+    output.mkdir()
+    commit = "a" * 40
+
+    def run(command, **_kwargs):
+        if "rev-parse" in command:
+            return subprocess.CompletedProcess(command, 0, commit.encode() + b"\n", b"")
+        if "status" in command:
+            return subprocess.CompletedProcess(command, 0, b"", b"")
+        if "archive" in command:
+            return subprocess.CompletedProcess(command, 0, b"bounded-tar", b"")
+        pytest.fail("builder must not start after local I/O failure")
+
+    class Member:
+        name = "member.txt"
+        size = 4
+
+        def isfile(self):
+            return True
+
+        def isdir(self):
+            return False
+
+    class Archive:
+        def __iter__(self):
+            return iter((Member(),))
+
+        def extractfile(self, _member):
+            return io.BytesIO(b"data")
+
+    original_mkdir = runtime_build.Path.mkdir
+    original_write = runtime_build.Path.write_bytes
+
+    def mkdir(path, *args, **kwargs):
+        if failure == "scratch_mkdir" and path.name == "source":
+            raise OSError("token=must-not-escape")
+        return original_mkdir(path, *args, **kwargs)
+
+    def write(path, data):
+        if failure == "source_write" and path.name == "member.txt":
+            raise OSError("token=must-not-escape")
+        return original_write(path, data)
+
+    monkeypatch.setattr(runtime_build.subprocess, "run", run)
+    monkeypatch.setattr(runtime_build.tarfile, "open", lambda **_kwargs: nullcontext(Archive()))
+    monkeypatch.setattr(runtime_build.Path, "mkdir", mkdir)
+    monkeypatch.setattr(runtime_build.Path, "write_bytes", write)
+    with pytest.raises(runtime_build.SourceWheelFailure) as caught:
+        runtime_build.prepare_current_source_wheel(source, output, expected_source_commit=commit)
+    assert caught.value.reason == "BUILDER_SETUP_FAILED"
+    assert str(caught.value) == "source_wheel_unavailable"
