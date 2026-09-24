@@ -7,10 +7,6 @@ import pytest
 
 import Evaluator.cli as evaluator_cli
 from Evaluator.reporting import generate_evaluation_model_card_section
-from tuner.project import ProjectContext
-
-
-ENGINE_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
@@ -33,7 +29,6 @@ def run_cli(tmp_path, monkeypatch):
         return object()
 
     monkeypatch.setattr(evaluator_cli, "create_client", fake_create_client)
-    context = ProjectContext.standalone(engine_root=ENGINE_ROOT, invocation_cwd=tmp_path)
 
     def run(*extra: str):
         output = tmp_path / "results.json"
@@ -47,8 +42,7 @@ def run_cli(tmp_path, monkeypatch):
                 "--output", str(output),
                 "--lineage", str(lineage),
                 *extra,
-            ],
-            project_context=context,
+            ]
         )
         payload = json.loads(output.read_text(encoding="utf-8")) if output.exists() else None
         lineage_payload = json.loads(lineage.read_text(encoding="utf-8")) if lineage.exists() else None

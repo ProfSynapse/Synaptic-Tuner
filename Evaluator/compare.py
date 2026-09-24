@@ -38,15 +38,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from .config import expand_path
 from .model_artifact import detect_quantization, is_full_precision
 from .reporting import write_json
-from tuner.project import (
-    ProjectContext,
-    discover_project_context,
-    load_project_manifest,
-    resolve_path,
-)
-from tuner.project.errors import ProjectError
 
 
 COMPARISON_SCHEMA_VERSION = "synaptic-evaluation-comparison/v1"
@@ -740,22 +734,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(list(argv))
 
 
-def _compare_context() -> ProjectContext:
-    engine_root = Path(__file__).resolve().parents[1]
-    context = discover_project_context(engine_root=engine_root, invocation_cwd=Path.cwd())
-    if context.mode == "host" and context.manifest_path and context.manifest_path.is_file():
-        return load_project_manifest(context.manifest_path).create_context(
-            engine_root=engine_root,
-            invocation_cwd=context.invocation_cwd,
-        )
-    return context
-
-
-def main(
-    argv: Sequence[str] | None = None,
-    *,
-    project_context: ProjectContext | None = None,
-) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = parse_args(sys.argv[1:] if argv is None else argv)
     except SystemExit as exc:
@@ -771,29 +750,21 @@ def main(
         allow_mismatch=args.allow_mismatch,
     )
     try:
-        context = project_context or _compare_context()
-
-        def read_path(value: str) -> Path:
-            return resolve_path(value, context, from_cli=True, access="read")
-
-        reference = load_results(read_path(args.reference))
+        reference = load_results(expand_path(args.reference))
         candidates = []
         for value in args.candidate:
             label, path = parse_candidate_arg(value)
-            candidates.append(load_results(read_path(path), label=label))
+            candidates.append(load_results(expand_path(path), label=label))
         labels = [candidate.label for candidate in candidates]
         repeated = sorted({label for label in labels if labels.count(label) > 1})
         if repeated:
             raise CompareInputError(
                 f"duplicate candidate labels {repeated}; pass explicit LABEL=PATH values"
             )
-        output_path = resolve_path(args.output, context, from_cli=True, access="write") if args.output else None
-        markdown_path = resolve_path(args.markdown, context, from_cli=True, access="write") if args.markdown else None
+        output_path = expand_path(args.output) if args.output else None
+        markdown_path = expand_path(args.markdown) if args.markdown else None
     except CompareInputError as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        return EXIT_INPUT_ERROR
-    except ProjectError as exc:
-        print(f"Error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_INPUT_ERROR
 
     report = build_comparison(reference, candidates, thresholds)

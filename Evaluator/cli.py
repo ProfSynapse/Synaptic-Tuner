@@ -638,7 +638,7 @@ def main(argv: List[str] | None = None) -> int:
         backend=args.backend,
         quantization=args.quantization,
         manifest_path=(
-            resolve_path(args.artifact_manifest, context, from_cli=True, access="read")
+            expand_path(args.artifact_manifest)
             if args.artifact_manifest
             else None
         ),

@@ -18,10 +18,8 @@ from Evaluator.compare import (
     mcnemar_exact_p,
     parse_candidate_arg,
 )
-from tuner.project import ProjectContext
 
 
-ENGINE_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _record(
@@ -107,10 +105,6 @@ def _files(tmp_path: Path, candidate: Optional[Dict[str, Any]] = None):
         _write(tmp_path / "cand.json", candidate or _payload(_candidate_records(), model="model-Q4_K_M.gguf"))
     )
     return reference, cand
-
-
-def _context(tmp_path: Path) -> ProjectContext:
-    return ProjectContext.standalone(engine_root=ENGINE_ROOT, invocation_cwd=tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -337,8 +331,7 @@ def test_main_report_only_writes_outputs(tmp_path, capsys):
     out_md = tmp_path / "out" / "cmp.md"
 
     code = compare.main(
-        ["--reference", str(ref), "--candidate", str(cand), "--output", str(out_json), "--markdown", str(out_md)],
-        project_context=_context(tmp_path),
+        ["--reference", str(ref), "--candidate", str(cand), "--output", str(out_json), "--markdown", str(out_md)]
     )
 
     assert code == EXIT_OK
@@ -357,10 +350,8 @@ def test_main_report_only_writes_outputs(tmp_path, capsys):
 def test_main_exit_codes(tmp_path):
     ref = _write(tmp_path / "ref.json", _reference_payload())
     cand = _write(tmp_path / "cand.json", _payload(_candidate_records()))
-    context = _context(tmp_path)
-
     def run(*args: str) -> int:
-        return compare.main(["--reference", str(ref), *args], project_context=context)
+        return compare.main(["--reference", str(ref), *args])
 
     assert run("--candidate", f"Q4={cand}", "--max-pass-rate-drop", "20") == EXIT_OK
     assert run("--candidate", f"Q4={cand}", "--max-pass-rate-drop", "5") == EXIT_GATE_FAILED
@@ -372,4 +363,4 @@ def test_main_exit_codes(tmp_path):
     assert run("--candidate", str(bad)) == EXIT_INPUT_ERROR
     not_results = _write(tmp_path / "other.json", {"hello": "world"})
     assert run("--candidate", str(not_results)) == EXIT_INPUT_ERROR
-    assert compare.main(["--reference", str(ref)], project_context=context) == EXIT_INPUT_ERROR
+    assert compare.main(["--reference", str(ref)]) == EXIT_INPUT_ERROR
