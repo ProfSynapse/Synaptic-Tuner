@@ -350,8 +350,12 @@ def test_explicit_fresh_attempt_uses_private_distinct_journal_and_preserves_defa
 
 
 @pytest.mark.parametrize("qualify_only", [True, False])
-def test_known_source_archive_failure_surfaces_only_closed_diagnostic(
-        tmp_path, monkeypatch, capsys, qualify_only):
+@pytest.mark.parametrize("diagnosis", (
+    "SOURCE_ARCHIVE_INVALID", "BUILD_INPUTS_INVALID", "APP_START_TIMEOUT",
+    "CAPTURE_OUTPUT_INSPECTOR_REJECTED",
+))
+def test_known_bootstrap_failure_surfaces_only_closed_diagnostic(
+        tmp_path, monkeypatch, capsys, qualify_only, diagnosis):
     plan, context, events = _setup(tmp_path, monkeypatch)
 
     def source_archive_failure(**_kwargs):
@@ -359,7 +363,7 @@ def test_known_source_archive_failure_surfaces_only_closed_diagnostic(
         try:
             raise RuntimeError("HF_TOKEN=private /home/owner/dataset.jsonl")
         except RuntimeError:
-            raise ModalHostBootstrapUnavailable() from None
+            raise ModalHostBootstrapUnavailable(diagnosis) from None
 
     monkeypatch.setattr(runner, "prepare_modal_runtime_for_host", source_archive_failure)
     handler = ModalJobConfigHandler(Namespace(
@@ -373,9 +377,9 @@ def test_known_source_archive_failure_surfaces_only_closed_diagnostic(
         "MODAL_QUALIFICATION_UNAVAILABLE" if qualify_only else "MODAL_TRAINING_UNAVAILABLE"
     )
     assert payload["error"]["details"] == {
-        "phase": "BUILD_CAPTURE",
-        "failure_class": "SOURCE_ARCHIVE_INVALID",
-        "location": "runtime_build.prepare_current_source_wheel",
+        "phase": ModalHostBootstrapUnavailable(diagnosis).phase,
+        "failure_class": ModalHostBootstrapUnavailable(diagnosis).failure_class,
+        "location": ModalHostBootstrapUnavailable(diagnosis).location,
         "retry_authorized": False,
     }
     assert events == ["bootstrap"]

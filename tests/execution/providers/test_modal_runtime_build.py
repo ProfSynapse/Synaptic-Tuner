@@ -235,12 +235,13 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
         original = runtime_build.builder_lock_bytes()
         reads = iter((original, original + b"changed", original + b"changed"))
         monkeypatch.setattr(runtime_build, "builder_lock_bytes", lambda: next(reads))
-        with pytest.raises(ValueError, match="intent changed before claim"):
+        with pytest.raises(runtime_build.ModalBuildStageFailure) as caught:
             capture_modal_build_candidate(
                 sdk=SDK(), client=client, profile_path=profile,
                 build_claim=lambda: events.append("claim"), app_name="training-build",
                 environment_name="production", expected_intent_digest=intent,
             )
+        assert (caught.value.stage, caught.value.reason) == ("BUILD_INPUTS", "INVALID")
         assert events == []
         return
     candidate = capture_modal_build_candidate(
@@ -270,6 +271,72 @@ def test_ambiguous_late_sandbox_create_retains_cleanup_lease() -> None:
                  code="create_ambiguous", late_cleanup=lambda value: cleaned.set() if value is sandbox else None)
     release.set()
     assert cleaned.wait(2)
+
+
+def test_bounded_failure_separates_timeout_and_operation_without_provider_text() -> None:
+    import time
+    from tuner.execution.providers.modal.runtime_build import (
+        ModalBoundedOperationFailure, _bounded,
+    )
+
+    with pytest.raises(ModalBoundedOperationFailure) as timeout:
+        _bounded(lambda: pytest.fail("expired call must not start"),
+                 deadline=time.monotonic() - 1, code="fixed_image_build_code")
+    assert (timeout.value.reason, str(timeout.value)) == ("TIMEOUT", "fixed_image_build_code")
+
+    def hostile():
+        raise ValueError("token=must-not-escape")
+
+    with pytest.raises(ModalBoundedOperationFailure) as failed:
+        _bounded(hostile, deadline=time.monotonic() + 2, code="fixed_image_build_code")
+    assert (failed.value.reason, str(failed.value)) == ("OPERATION_FAILED", "fixed_image_build_code")
+    assert "must-not-escape" not in str(failed.value)
+    assert failed.value.__cause__ is None
+
+
+def test_capture_cleanup_poll_deadline_reports_timeout(monkeypatch) -> None:
+    from tuner.execution.providers.modal import runtime_build
+
+    ticks = iter((0.0, 0.0, 30.0))
+    monkeypatch.setattr(runtime_build.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runtime_build.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runtime_build, "_bounded", lambda operation, **_kwargs: operation())
+
+    class Sandbox:
+        def terminate(self, *, wait):
+            assert wait is False
+
+        def poll(self):
+            return None
+
+    with pytest.raises(runtime_build.ModalBoundedOperationFailure) as caught:
+        runtime_build._cleanup_sandbox(Sandbox())
+    assert caught.value.reason == "TIMEOUT"
+    assert str(caught.value) == "modal_training_capture_cleanup_unresolved"
+
+
+@pytest.mark.parametrize("output,returncode,reason", [
+    (b"", 2, "INSPECTOR_REJECTED"),
+    (b"x" * (128 * 1024 + 1), 0, "OUTPUT_INVALID"),
+], ids=["inspector-exit", "oversized-output"])
+def test_capture_output_reports_only_fixed_inspector_reason(output, returncode, reason) -> None:
+    import time
+    from tuner.execution.providers.modal.runtime_build import (
+        ModalBoundedOperationFailure, _bounded, _capture_output,
+    )
+
+    class Sandbox:
+        stdout = (output,)
+
+        def wait(self, *, raise_on_termination):
+            assert raise_on_termination is False
+
+    sandbox = Sandbox()
+    sandbox.returncode = returncode
+    with pytest.raises(ModalBoundedOperationFailure) as caught:
+        _bounded(lambda: _capture_output(sandbox), deadline=time.monotonic() + 2,
+                 code="modal_training_capture_failed")
+    assert (caught.value.reason, str(caught.value)) == (reason, "modal_training_capture_failed")
 
 
 def test_wheel_archive_rejects_head_change_before_builder(monkeypatch, tmp_path) -> None:

@@ -23,7 +23,8 @@ from tuner.execution.providers.modal.binding import ModalClientBinding
 from tuner.execution.providers.modal.facade import MODAL_VOLUME_V1
 from tuner.execution.providers.modal.packaged_binding import ModalPackagedRuntimeFactsV1
 from tuner.execution.providers.modal.runtime_build import (
-    SourceArchiveInvalid, _bounded, build_modal_runtime_release_v2, capture_modal_build_candidate,
+    ModalBoundedOperationFailure, ModalBuildStageFailure, SourceArchiveInvalid,
+    _bounded, build_modal_runtime_release_v2, capture_modal_build_candidate,
     plan_modal_build_material,
 )
 from tuner.execution.providers.modal.runtime_release_deployment import (
@@ -47,6 +48,28 @@ from tuner.training.contracts import ResourceSpec
 _A100_80GB_RATE_KEY = "gpu_hour_cost_a100_80gb"
 _RATE_KEY = re.compile(r"^gpu_hour_cost_[a-z0-9_]+$")
 _T = TypeVar("_T")
+_CLOSED_BOOTSTRAP_DIAGNOSTICS = {
+    "SOURCE_ARCHIVE_INVALID": ("SOURCE_WHEEL", "SOURCE_ARCHIVE_INVALID", "runtime_build.prepare_current_source_wheel"),
+    "APP_START_TIMEOUT": ("APP_START", "TIMEOUT", "modal_host_runtime.build_app"),
+    "APP_START_OPERATION_FAILED": ("APP_START", "OPERATION_FAILED", "modal_host_runtime.build_app"),
+    "APP_CLEANUP_TIMEOUT": ("APP_CLEANUP", "TIMEOUT", "modal_host_runtime.close_build_app"),
+    "APP_CLEANUP_OPERATION_FAILED": ("APP_CLEANUP", "OPERATION_FAILED", "modal_host_runtime.close_build_app"),
+    "SOURCE_WHEEL_LOCAL_BUILD_FAILED": ("SOURCE_WHEEL", "LOCAL_BUILD_FAILED", "runtime_build.prepare_current_source_wheel"),
+    "BUILD_INPUTS_INVALID": ("BUILD_INPUTS", "INVALID", "runtime_build.prepare_build_inputs"),
+    "IMAGE_BUILD_TIMEOUT": ("IMAGE_BUILD", "TIMEOUT", "runtime_build.build_image"),
+    "IMAGE_BUILD_OPERATION_FAILED": ("IMAGE_BUILD", "OPERATION_FAILED", "runtime_build.build_image"),
+    "IMAGE_BUILD_IDENTITY_MISSING": ("IMAGE_BUILD", "IDENTITY_MISSING", "runtime_build.build_image"),
+    "CAPTURE_CREATE_TIMEOUT": ("CAPTURE_CREATE", "TIMEOUT", "runtime_build.create_capture_sandbox"),
+    "CAPTURE_CREATE_OPERATION_FAILED": ("CAPTURE_CREATE", "OPERATION_FAILED", "runtime_build.create_capture_sandbox"),
+    "CAPTURE_OUTPUT_TIMEOUT": ("CAPTURE_OUTPUT", "TIMEOUT", "runtime_build.capture_output"),
+    "CAPTURE_OUTPUT_OPERATION_FAILED": ("CAPTURE_OUTPUT", "OPERATION_FAILED", "runtime_build.capture_output"),
+    "CAPTURE_OUTPUT_INSPECTOR_REJECTED": ("CAPTURE_OUTPUT", "INSPECTOR_REJECTED", "runtime_build.capture_output"),
+    "CAPTURE_OUTPUT_OUTPUT_INVALID": ("CAPTURE_OUTPUT", "OUTPUT_INVALID", "runtime_build.capture_output"),
+    "CAPTURE_CLEANUP_TIMEOUT": ("CAPTURE_CLEANUP", "TIMEOUT", "runtime_build.cleanup_capture_sandbox"),
+    "CAPTURE_CLEANUP_OPERATION_FAILED": ("CAPTURE_CLEANUP", "OPERATION_FAILED", "runtime_build.cleanup_capture_sandbox"),
+    "CAPTURE_VALIDATE_INVALID": ("CAPTURE_VALIDATE", "INVALID", "runtime_build.validate_capture"),
+    "RELEASE_VALIDATE_INVALID": ("RELEASE_VALIDATE", "INVALID", "modal_host_runtime.build_release"),
+}
 
 
 class ModalHostBootstrapUnavailable(RuntimeError):
@@ -54,11 +77,14 @@ class ModalHostBootstrapUnavailable(RuntimeError):
 
     __slots__ = ("_phase", "_failure_class", "_location")
 
-    def __init__(self) -> None:
+    def __init__(self, diagnosis: str = "SOURCE_ARCHIVE_INVALID") -> None:
+        if type(diagnosis) is not str or diagnosis not in _CLOSED_BOOTSTRAP_DIAGNOSTICS:
+            raise ValueError("Modal bootstrap diagnosis is invalid")
         super().__init__("modal_host_bootstrap_unavailable")
-        object.__setattr__(self, "_phase", "BUILD_CAPTURE")
-        object.__setattr__(self, "_failure_class", "SOURCE_ARCHIVE_INVALID")
-        object.__setattr__(self, "_location", "runtime_build.prepare_current_source_wheel")
+        phase, failure_class, location = _CLOSED_BOOTSTRAP_DIAGNOSTICS[diagnosis]
+        object.__setattr__(self, "_phase", phase)
+        object.__setattr__(self, "_failure_class", failure_class)
+        object.__setattr__(self, "_location", location)
 
     def __setattr__(self, name: str, value: object) -> None:
         if name in {"_phase", "_failure_class", "_location", "phase",
@@ -375,19 +401,23 @@ def prepare_modal_runtime_for_host(
     )
     token = ""
 
-    build_app = _closed_provider_call(
-        lambda: sdk.App(deployment_name, include_source=False),
-        "modal_host_build_app_construction_failed",
-    )
-    context = _closed_provider_call(
-        lambda: build_app.run(name=deployment_name + "-build", client=client,
-                              environment_name=environment_name),
-        "modal_host_build_app_start_indeterminate",
-    )
     deadline = time.monotonic() + 3600
-    entered = _bounded(context.__enter__, deadline=deadline,
-                       code="modal_build_app_start_ambiguous",
-                       late_cleanup=lambda _value: context.__exit__(None, None, None))
+    try:
+        build_app = _bounded(
+            lambda: sdk.App(deployment_name, include_source=False),
+            deadline=time.monotonic() + 60, code="modal_host_build_app_construction_failed",
+        )
+        context = _bounded(
+            lambda: build_app.run(name=deployment_name + "-build", client=client,
+                                  environment_name=environment_name),
+            deadline=time.monotonic() + 60, code="modal_host_build_app_start_indeterminate",
+        )
+        entered = _bounded(context.__enter__, deadline=deadline,
+                           code="modal_build_app_start_ambiguous",
+                           late_cleanup=lambda _value: context.__exit__(None, None, None))
+    except ModalBoundedOperationFailure as error:
+        raise ModalHostBootstrapUnavailable("APP_START_" + error.reason) from None
+    capture_failure: BaseException | None = None
     try:
         try:
             candidate = capture_modal_build_candidate(
@@ -400,13 +430,25 @@ def prepare_modal_runtime_for_host(
             )
         except SourceArchiveInvalid:
             raise ModalHostBootstrapUnavailable() from None
+        except ModalBuildStageFailure as error:
+            raise ModalHostBootstrapUnavailable(error.stage + "_" + error.reason) from None
+    except BaseException as error:
+        capture_failure = error
+        raise
     finally:
-        _bounded(lambda: context.__exit__(None, None, None),
-                 deadline=time.monotonic() + 60,
-                 code="modal_build_app_cleanup_unresolved")
-    release = build_modal_runtime_release_v2(
-        candidate, release_ref="runtime:modal-" + nonce,
-    )
+        try:
+            _bounded(lambda: context.__exit__(None, None, None),
+                     deadline=time.monotonic() + 60,
+                     code="modal_build_app_cleanup_unresolved")
+        except ModalBoundedOperationFailure as error:
+            if capture_failure is None:
+                raise ModalHostBootstrapUnavailable("APP_CLEANUP_" + error.reason) from None
+    try:
+        release = build_modal_runtime_release_v2(
+            candidate, release_ref="runtime:modal-" + nonce,
+        )
+    except Exception:
+        raise ModalHostBootstrapUnavailable("RELEASE_VALIDATE_INVALID") from None
     private_storage.attempts.claim(
         "deploy-" + release.manifest_digest,
         canonical_bytes({

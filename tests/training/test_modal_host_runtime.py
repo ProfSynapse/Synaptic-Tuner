@@ -356,7 +356,7 @@ def test_source_archive_failure_projects_only_fixed_nonretryable_diagnosis(monke
         _paid_factory_probe(storage)
     error = caught.value
     assert (error.phase, error.failure_class, error.location, error.retry_authorized) == (
-        "BUILD_CAPTURE", "SOURCE_ARCHIVE_INVALID",
+        "SOURCE_WHEEL", "SOURCE_ARCHIVE_INVALID",
         "runtime_build.prepare_current_source_wheel", False,
     )
     assert str(error) == "modal_host_bootstrap_unavailable"
@@ -364,6 +364,74 @@ def test_source_archive_failure_projects_only_fixed_nonretryable_diagnosis(monke
     assert error.__cause__ is None
     with pytest.raises(AttributeError, match="immutable"):
         error.phase = "OTHER"
+    assert len(storage.attempts.refs) == 1
+
+
+@pytest.mark.parametrize("stage,reason,location", [
+    ("BUILD_INPUTS", "INVALID", "runtime_build.prepare_build_inputs"),
+    ("IMAGE_BUILD", "OPERATION_FAILED", "runtime_build.build_image"),
+    ("CAPTURE_OUTPUT", "INSPECTOR_REJECTED", "runtime_build.capture_output"),
+    ("CAPTURE_CLEANUP", "TIMEOUT", "runtime_build.cleanup_capture_sandbox"),
+])
+def test_closed_build_stage_projection_never_leaks_hostile_error(
+        monkeypatch, stage, reason, location):
+    from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
+
+    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+
+    def fail_capture(**_kwargs):
+        raise ModalBuildStageFailure(stage, reason) from ValueError("token=must-not-escape")
+
+    monkeypatch.setattr(host, "capture_modal_build_candidate", fail_capture)
+    storage = _Storage(_Attempts([]))
+    with pytest.raises(host.ModalHostBootstrapUnavailable) as caught:
+        _paid_factory_probe(storage)
+    error = caught.value
+    assert (error.phase, error.failure_class, error.location, error.retry_authorized) == (
+        stage, reason, location, False,
+    )
+    assert str(error) == "modal_host_bootstrap_unavailable"
+    assert "must-not-escape" not in str(error)
+    assert error.__cause__ is None
+    assert len(storage.attempts.refs) == 1
+
+
+def test_closed_build_stage_constructor_rejects_unreviewed_reason():
+    with pytest.raises(ValueError, match="diagnosis is invalid"):
+        host.ModalHostBootstrapUnavailable("IMAGE_BUILD_HOSTILE_PROVIDER_TEXT")
+
+
+@pytest.mark.parametrize("capture_fails", [False, True])
+def test_build_app_cleanup_does_not_hide_prior_capture_failure(monkeypatch, capture_fails):
+    from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
+
+    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+
+    class BrokenContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            raise ValueError("token=must-not-escape")
+
+    monkeypatch.setattr(_App, "run", lambda self, **kwargs: BrokenContext())
+
+    def capture(**_kwargs):
+        if capture_fails:
+            raise ModalBuildStageFailure("CAPTURE_OUTPUT", "INSPECTOR_REJECTED")
+        return object()
+
+    monkeypatch.setattr(host, "capture_modal_build_candidate", capture)
+    storage = _Storage(_Attempts([]))
+    with pytest.raises(host.ModalHostBootstrapUnavailable) as caught:
+        _paid_factory_probe(storage)
+    expected = ("CAPTURE_OUTPUT", "INSPECTOR_REJECTED") if capture_fails else (
+        "APP_CLEANUP", "OPERATION_FAILED",
+    )
+    assert (caught.value.phase, caught.value.failure_class) == expected
+    assert "must-not-escape" not in str(caught.value)
     assert len(storage.attempts.refs) == 1
 
 

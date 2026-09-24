@@ -10,23 +10,37 @@ from tuner.project import ProjectContext
 
 
 def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
-    """Expose only the reviewed, non-authorizing build-source diagnostic."""
+    """Expose only reviewed, non-authorizing bootstrap diagnostics."""
     try:
         from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
     except Exception:
         return None
 
-    if (type(error) is ModalHostBootstrapUnavailable
-            and error.phase == "BUILD_CAPTURE"
-            and error.failure_class == "SOURCE_ARCHIVE_INVALID"
-            and error.location == "runtime_build.prepare_current_source_wheel"
-            and error.retry_authorized is False):
-        return {
-            "phase": "BUILD_CAPTURE",
-            "failure_class": "SOURCE_ARCHIVE_INVALID",
-            "location": "runtime_build.prepare_current_source_wheel",
-            "retry_authorized": False,
-        }
+    closed = {
+        "SOURCE_WHEEL": ("runtime_build.prepare_current_source_wheel", {
+            "SOURCE_ARCHIVE_INVALID", "LOCAL_BUILD_FAILED"}),
+        "BUILD_INPUTS": ("runtime_build.prepare_build_inputs", {"INVALID"}),
+        "APP_START": ("modal_host_runtime.build_app", {"TIMEOUT", "OPERATION_FAILED"}),
+        "APP_CLEANUP": ("modal_host_runtime.close_build_app", {"TIMEOUT", "OPERATION_FAILED"}),
+        "IMAGE_BUILD": ("runtime_build.build_image", {
+            "TIMEOUT", "OPERATION_FAILED", "IDENTITY_MISSING"}),
+        "CAPTURE_CREATE": ("runtime_build.create_capture_sandbox", {"TIMEOUT", "OPERATION_FAILED"}),
+        "CAPTURE_OUTPUT": ("runtime_build.capture_output", {
+            "TIMEOUT", "OPERATION_FAILED", "INSPECTOR_REJECTED", "OUTPUT_INVALID"}),
+        "CAPTURE_CLEANUP": ("runtime_build.cleanup_capture_sandbox", {"TIMEOUT", "OPERATION_FAILED"}),
+        "CAPTURE_VALIDATE": ("runtime_build.validate_capture", {"INVALID"}),
+        "RELEASE_VALIDATE": ("modal_host_runtime.build_release", {"INVALID"}),
+    }
+    if type(error) is ModalHostBootstrapUnavailable and error.retry_authorized is False:
+        admitted = closed.get(error.phase)
+        if (admitted is not None and error.location == admitted[0]
+                and error.failure_class in admitted[1]):
+            return {
+                "phase": error.phase,
+                "failure_class": error.failure_class,
+                "location": error.location,
+                "retry_authorized": False,
+            }
     return None
 
 
