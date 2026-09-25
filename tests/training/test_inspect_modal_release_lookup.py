@@ -252,3 +252,60 @@ def test_production_reader_mode_is_closed_and_single_read(
     assert result["result"] == expected
     assert "secret" not in str(result)
     assert calls == [(client, "exact-name", "main")]
+
+
+def test_function_check_compares_only_current_layout_identity(monkeypatch, capsys):
+    monkeypatch.setattr(diagnostic, "read_deploy_claim", lambda *_: "exact-name")
+    modal = ModuleType("modal")
+    modal.__version__ = "1.5.4"
+    client = object()
+    modal.Client = SimpleNamespace(from_credentials=lambda *_: client)
+    calls = []
+
+    class Function:
+        is_hydrated = True
+        object_id = "fu-private"
+
+        def hydrate(self, supplied):
+            assert supplied is client
+            calls.append("hydrate")
+            return self
+
+    modal.Function = SimpleNamespace(from_name=lambda *args, **kwargs: (
+        calls.append((args, kwargs)) or Function()
+    ))
+    config_module = ModuleType("modal.config")
+    config_module.config = SimpleNamespace(get=lambda *_args, **_kwargs: "credential")
+    async_module = ModuleType("modal._utils.async_utils")
+    async_module.synchronizer = SimpleNamespace(create_blocking=lambda fn: fn)
+    proto_module = ModuleType("modal_proto")
+    proto_module.api_pb2 = object()
+    reader_module = ModuleType("tuner.execution.providers.modal.runtime_release_deployment")
+    reader_module.ExplicitModal154ReleaseDeploymentReader = lambda *, sdk: SimpleNamespace(
+        observe=lambda **kwargs: SimpleNamespace(
+            deployed=True, function_ids=(("packaged-self-check", "fu-private"),),
+        )
+    )
+    for key, module in (
+        ("modal", modal), ("modal.config", config_module),
+        ("modal._utils", ModuleType("modal._utils")),
+        ("modal._utils.async_utils", async_module),
+        ("modal_proto", proto_module),
+        ("tuner.execution.providers.modal.runtime_release_deployment", reader_module),
+    ):
+        monkeypatch.setitem(sys.modules, key, module)
+    code = diagnostic.main([
+        "--journal", "/unused/private.sqlite3", "--claim-ref", _CLAIM_REF,
+        "--environment", "main", "--modal-profile", "synaptic-labs",
+        "--production-reader", "--check-function", "packaged-self-check",
+    ])
+    result = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert result["result"] == "FUNCTION_MATCH"
+    assert "fu-private" not in str(result)
+    assert calls == [
+        (("exact-name", "packaged-self-check"), {
+            "environment_name": "main", "client": client,
+        }),
+        "hydrate",
+    ]

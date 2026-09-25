@@ -674,6 +674,10 @@ That mode performs one bounded logical read through the pinned runtime reader
 (one lookup when absent, up to three read-only RPCs when present) and emits
 only `READER_ABSENT`, `READER_PRESENT`, or `READER_UNAVAILABLE`; it remains
 non-authorizing and must not be used to replay the failed attempt.
+For a present deployment, `--production-reader --check-function <configured-name>`
+also compares one read-only named Function hydration with the current layout.
+`FUNCTION_MATCH` is a current-state diagnostic only; it is not a call receipt,
+version-pinned invocation, or retry authority.
 
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in

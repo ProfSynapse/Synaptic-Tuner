@@ -157,12 +157,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--modal-profile", required=True)
     parser.add_argument("--production-reader", action="store_true",
                         help="Use the exact runtime reader instead of raw response classification")
+    parser.add_argument("--check-function",
+                        help="With --production-reader, compare one named lazy Function to current layout")
     args = parser.parse_args(argv)
     result: dict[str, object]
     try:
         name = read_deploy_claim(args.journal, args.claim_ref)
         environment = safe_ref(args.environment, "environment")
         profile = safe_ref(args.modal_profile, "modal_profile")
+        function_name = (safe_ref(args.check_function, "function_name")
+                         if args.check_function is not None else None)
+        if function_name is not None and not args.production_reader:
+            raise DiagnosticUnavailable("option_invalid")
         with open(os.devnull, "w") as sink:
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
                 import modal
@@ -191,10 +197,29 @@ def main(argv: list[str] | None = None) -> int:
                             client=client, app_name=name,
                             environment_name=environment,
                         )
-                        result = {"result": "READER_ABSENT" if observation is None
-                                  else "READER_PRESENT"}
+                        if function_name is None:
+                            result = {"result": "READER_ABSENT" if observation is None
+                                      else "READER_PRESENT"}
+                        elif observation is None or not observation.deployed:
+                            result = {"result": "FUNCTION_NOT_DEPLOYED"}
+                        else:
+                            expected = dict(observation.function_ids).get(function_name)
+                            if expected is None:
+                                result = {"result": "FUNCTION_NOT_IN_LAYOUT"}
+                            else:
+                                function = modal.Function.from_name(
+                                    name, function_name,
+                                    environment_name=environment, client=client,
+                                )
+                                hydrated = function.hydrate(client)
+                                result = {"result": "FUNCTION_MATCH" if (
+                                    hydrated is function
+                                    and getattr(function, "is_hydrated", False) is True
+                                    and getattr(function, "object_id", None) == expected
+                                ) else "FUNCTION_MISMATCH"}
                     except Exception:
-                        result = {"result": "READER_UNAVAILABLE"}
+                        result = {"result": "FUNCTION_UNAVAILABLE" if function_name
+                                  else "READER_UNAVAILABLE"}
                 else:
                     result = synchronizer.create_blocking(inspect_lookup)(
                         client, name, environment, api_pb2,
@@ -212,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0 if result["result"] in {
         "ABSENT", "DEPLOYED", "STOPPED", "READER_ABSENT", "READER_PRESENT",
+        "FUNCTION_MATCH",
     } else 1
 
 
