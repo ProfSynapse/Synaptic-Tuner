@@ -537,9 +537,17 @@ class ExplicitModal154ReleaseDeploymentReader:
             before = await client.stub.AppGetByDeploymentName(request)
         except NotFoundError:
             return None
+        if before.environment_name != environment_name:
+            raise ValueError
+        # Modal 1.5.4 also returns an empty response for an absent deployment
+        # name.  Admit only that exact shape; partial identity or lifecycle
+        # evidence must never be mistaken for absence.
+        if before.app_id == "" and before.previous_app_id == "":
+            if before.lifecycle != api_pb2.AppLifecycle():
+                raise ValueError
+            return None
         state = before.lifecycle.app_state
-        if before.environment_name != environment_name \
-                or state not in (api_pb2.APP_STATE_DEPLOYED, api_pb2.APP_STATE_STOPPED) \
+        if state not in (api_pb2.APP_STATE_DEPLOYED, api_pb2.APP_STATE_STOPPED) \
                 or type(before.lifecycle.version) is not int \
                 or before.lifecycle.version < 1:
             raise ValueError

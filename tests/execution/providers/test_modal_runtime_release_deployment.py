@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+import asyncio
 import os
 import signal
+import sys
 
 import pytest
 
@@ -16,6 +18,7 @@ from tuner.execution.providers.modal.packaged_binding import ModalPackagedRuntim
 from tuner.execution.providers.modal.runtime_release_deployment import (
     EXACT_SELF_CHECK_MODULE,
     EXACT_SELF_CHECK_QUALNAME,
+    ExplicitModal154ReleaseDeploymentReader,
     ModalRuntimeReleaseDeployer,
     ModalRuntimeReleaseDeploymentError,
     ModalRuntimeReleaseDeploymentFactsV1,
@@ -36,6 +39,73 @@ from tuner.execution.providers.modal.runtime_build import build_modal_runtime_re
 
 from tests.execution.providers.test_modal_packaged_binding import _release_and_execution
 from tests.execution.providers.test_modal_runtime_build import _candidate
+
+
+def _read_deployment_response(monkeypatch, response):
+    """Exercise the pinned read without importing or contacting the real SDK."""
+    modal = ModuleType("modal")
+    modal.__path__ = []
+    exception = ModuleType("modal.exception")
+    exception.NotFoundError = type("NotFoundError", (Exception,), {})
+    proto = ModuleType("modal_proto")
+    proto.__path__ = []
+    api_pb2 = ModuleType("modal_proto.api_pb2")
+    api_pb2.APP_STATE_DEPLOYED = 3
+    api_pb2.APP_STATE_STOPPED = 5
+    api_pb2.AppLifecycle = lambda: SimpleNamespace(app_state=0, version=0, created_by="")
+    api_pb2.AppGetByDeploymentNameRequest = lambda **kwargs: SimpleNamespace(**kwargs)
+    monkeypatch.setitem(sys.modules, "modal", modal)
+    monkeypatch.setitem(sys.modules, "modal.exception", exception)
+    monkeypatch.setitem(sys.modules, "modal_proto", proto)
+    monkeypatch.setitem(sys.modules, "modal_proto.api_pb2", api_pb2)
+
+    class Stub:
+        lookup_count = 0
+
+        async def AppGetByDeploymentName(self, request):
+            self.lookup_count += 1
+            assert (request.name, request.environment_name) == ("fresh-app", "production")
+            return response
+
+        async def AppGetLayout(self, request):
+            raise AssertionError("absent or malformed app must not request layout")
+
+    stub = Stub()
+    client = SimpleNamespace(stub=stub)
+    return asyncio.run(
+        ExplicitModal154ReleaseDeploymentReader._read(client, "fresh-app", "production")
+    ), stub.lookup_count
+
+
+def test_pinned_readback_accepts_exact_empty_response(monkeypatch):
+    response = SimpleNamespace(
+        environment_name="production", app_id="", previous_app_id="",
+        lifecycle=SimpleNamespace(app_state=0, version=0, created_by=""),
+    )
+    result, calls = _read_deployment_response(monkeypatch, response)
+    assert result is None
+    assert calls == 1
+
+
+@pytest.mark.parametrize("change", [
+    {"environment_name": "other"},
+    {"environment_name": ""},
+    {"app_id": "ap-partial"},
+    {"app_id": None},
+    {"previous_app_id": "ap-partial"},
+    {"previous_app_id": None},
+    {"lifecycle": SimpleNamespace(app_state=3, version=0, created_by="")},
+    {"lifecycle": SimpleNamespace(app_state=0, version=1, created_by="")},
+    {"lifecycle": SimpleNamespace(app_state=0, version=0, created_by="someone")},
+])
+def test_pinned_readback_rejects_partial_or_inconsistent_empty_response(monkeypatch, change):
+    fields = {
+        "environment_name": "production", "app_id": "", "previous_app_id": "",
+        "lifecycle": SimpleNamespace(app_state=0, version=0, created_by=""),
+    }
+    fields.update(change)
+    with pytest.raises(ValueError):
+        _read_deployment_response(monkeypatch, SimpleNamespace(**fields))
 
 
 def packaged_training_entry(payload: bytes):
