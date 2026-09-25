@@ -741,6 +741,15 @@ before the child launch; `CALL_CHILD_RESULT` covers child invocation, timeout,
 bounded output read, or a non-admitted result. Neither label warrants relaxing the child's exact
 interpreter or installed-package checks.
 
+After a signed CPU receipt, the standalone train path reports only fixed,
+non-secret host boundaries: `RUN_HOST_ASSEMBLY` before public training
+preflight, `RUN_PUBLIC_PREFLIGHT` before `start`, and
+`RUN_START_INDETERMINATE` once `start` is invoked. The last phase never proves
+that a remote job was not spawned, even if the local call catalog is empty.
+All three retain the consumed attempt and have `retry_authorized: false`;
+unknown and post-start failures remain generic. Do not replay or clean up a
+failed attempt based on an absent local catalog entry.
+
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in
 `scripts/chat_model.py` command; do not rerun training to rebuild ephemeral host

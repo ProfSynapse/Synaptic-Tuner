@@ -13,6 +13,7 @@ import sys
 
 import pytest
 
+from synaptic_tuner.api.v1.training_facade import TrainingAPI
 from tests.dataset_prep.test_context_messages_v2 import _config
 from tests.execution.providers.test_modal_runtime_build import _candidate
 from tuner.dataset_prep import prepare_dataset_v2
@@ -442,4 +443,54 @@ def test_cpu_failure_surfaces_closed_stage_in_both_cli_modes(
         "location": ModalHostQualificationUnavailable(phase).location,
         "retry_authorized": False,
     }
+    assert events == ["bootstrap", "cpu"]
+
+
+@pytest.mark.parametrize("phase, failure_class, location", (
+    ("RUN_HOST_ASSEMBLY", "UNAVAILABLE", "modal_standalone_runner.compose_host"),
+    ("RUN_PUBLIC_PREFLIGHT", "UNAVAILABLE", "modal_standalone_runner.public_preflight"),
+    ("RUN_START_INDETERMINATE", "INDETERMINATE", "modal_standalone_runner.training_start"),
+))
+def test_post_cpu_host_failures_have_only_closed_non_retryable_diagnostics(
+        tmp_path, monkeypatch, phase, failure_class, location):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+    secret = "HF_TOKEN=private-and-absolute-/home/private/customer"
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(secret)
+
+    if phase == "RUN_HOST_ASSEMBLY":
+        monkeypatch.setattr(runner, "compose_modal_packaged_reference_host", fail)
+    elif phase == "RUN_PUBLIC_PREFLIGHT":
+        monkeypatch.setattr(TrainingAPI, "preflight", fail)
+    else:
+        monkeypatch.setattr(TrainingAPI, "start", fail)
+
+    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
+        runner.run_modal_standalone_job(
+            plan=plan, context=context, modal_profile="explicit",
+            modal_environment="main",
+        )
+    diagnosis = caught.value
+    assert type(diagnosis) is runner.ModalStandalonePhaseUnavailable
+    assert (diagnosis.phase, diagnosis.failure_class, diagnosis.location,
+            diagnosis.retry_authorized) == (phase, failure_class, location, False)
+    assert diagnosis.args == ("modal_standalone_phase_unavailable",)
+    assert secret not in str(diagnosis)
+    assert "/home/private/customer" not in repr(diagnosis)
+    assert events == ["bootstrap", "cpu"]
+
+
+def test_post_cpu_start_rejection_remains_indeterminate(tmp_path, monkeypatch):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        TrainingAPI, "start", lambda *_args, **_kwargs: SimpleNamespace(accepted=False),
+    )
+    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
+        runner.run_modal_standalone_job(
+            plan=plan, context=context, modal_profile="explicit",
+            modal_environment="main",
+        )
+    assert caught.value.phase == "RUN_START_INDETERMINATE"
+    assert caught.value.retry_authorized is False
     assert events == ["bootstrap", "cpu"]

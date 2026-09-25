@@ -14,6 +14,7 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
     try:
         from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
         from tuner.training.modal_host_qualification import ModalHostQualificationUnavailable
+        from tuner.training.modal_standalone_runner import ModalStandalonePhaseUnavailable
     except Exception:
         return None
 
@@ -73,6 +74,20 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
     }
     if type(error) is ModalHostQualificationUnavailable and error.retry_authorized is False:
         admitted = qualification.get(error.phase)
+        if admitted == (error.failure_class, error.location):
+            return {
+                "phase": error.phase,
+                "failure_class": error.failure_class,
+                "location": error.location,
+                "retry_authorized": False,
+            }
+    run_phase = {
+        "RUN_HOST_ASSEMBLY": ("UNAVAILABLE", "modal_standalone_runner.compose_host"),
+        "RUN_PUBLIC_PREFLIGHT": ("UNAVAILABLE", "modal_standalone_runner.public_preflight"),
+        "RUN_START_INDETERMINATE": ("INDETERMINATE", "modal_standalone_runner.training_start"),
+    }
+    if type(error) is ModalStandalonePhaseUnavailable and error.retry_authorized is False:
+        admitted = run_phase.get(error.phase)
         if admitted == (error.failure_class, error.location):
             return {
                 "phase": error.phase,

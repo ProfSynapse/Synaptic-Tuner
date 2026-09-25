@@ -70,6 +70,25 @@ class ModalStandaloneRunUnavailable(RuntimeError):
     """Fixed host diagnostic; no private path, provider text or credential."""
 
 
+_RUN_PHASE_DIAGNOSTICS = {
+    "RUN_HOST_ASSEMBLY": ("UNAVAILABLE", "modal_standalone_runner.compose_host"),
+    "RUN_PUBLIC_PREFLIGHT": ("UNAVAILABLE", "modal_standalone_runner.public_preflight"),
+    "RUN_START_INDETERMINATE": ("INDETERMINATE", "modal_standalone_runner.training_start"),
+}
+
+
+class ModalStandalonePhaseUnavailable(RuntimeError):
+    """Closed, non-authorizing diagnosis after a validated CPU receipt."""
+
+    def __init__(self, phase: str):
+        if phase not in _RUN_PHASE_DIAGNOSTICS:
+            raise ValueError("invalid_modal_standalone_phase")
+        self.phase = phase
+        self.failure_class, self.location = _RUN_PHASE_DIAGNOSTICS[phase]
+        self.retry_authorized = False
+        super().__init__("modal_standalone_phase_unavailable")
+
+
 class _HostSecrets:
     def __init__(self, generated: dict[str, str]):
         self._generated = dict(generated)
@@ -250,6 +269,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             or type(modal_environment) is not str or not modal_environment
             or plan.recipe.maximum_cost_minor_units is None):
         raise ModalStandaloneRunUnavailable("modal_host_configuration_invalid")
+    phase: str | None = None
     try:
         import modal
         if modal.__version__ != "1.5.4":
@@ -303,6 +323,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 modal_profile=modal_profile, modal_environment=modal_environment,
                 builder_cache_root=root / "modal-wheel-builder",
             )
+            phase = "RUN_HOST_ASSEMBLY"
             release, facts = runtime.release, runtime.facts
             provider_binding = facts.build_provider_binding(release)
             execution = PackagedExecutionBindingV1.build(
@@ -389,6 +410,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 maximum_cost_minor_units=recipe.maximum_cost_minor_units,
             )
             api = host.api
+            phase = "RUN_PUBLIC_PREFLIGHT"
             publicly_prepared = api.training.prepare(source_port, configuration)
             if publicly_prepared.prepared != prepared.prepared:
                 raise ValueError
@@ -396,9 +418,11 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             resolved = api.training.resolve(request)
             training_plan = api.training.plan(resolved, ProviderRef("modal", recipe.runtime_profile))
             preflight = api.training.preflight(training_plan)
+            phase = "RUN_START_INDETERMINATE"
             started = api.training.start(training_plan, preflight)
             if started.accepted is not True:
                 raise ValueError
+            phase = None
             workflow = host.composition.stores.workflow_store.get(started.run)
             read_request = host.composition.runs._request(
                 workflow, ProviderReadPurposeV1.OBSERVE,
@@ -436,4 +460,6 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
     except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable):
         raise
     except Exception:
+        if phase is not None:
+            raise ModalStandalonePhaseUnavailable(phase) from None
         raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable") from None

@@ -5,6 +5,7 @@ import pytest
 from tuner.handlers.modal_job_config_handler import _closed_bootstrap_details
 from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
 from tuner.training.modal_host_qualification import ModalHostQualificationUnavailable
+from tuner.training.modal_standalone_runner import ModalStandalonePhaseUnavailable
 
 
 @pytest.mark.parametrize("diagnosis", (
@@ -73,3 +74,29 @@ def test_cpu_qualification_diagnosis_projects_only_closed_fields(phase):
         "location": error.location,
         "retry_authorized": False,
     }
+
+
+@pytest.mark.parametrize("phase", (
+    "RUN_HOST_ASSEMBLY", "RUN_PUBLIC_PREFLIGHT", "RUN_START_INDETERMINATE",
+))
+def test_standalone_run_diagnosis_projects_only_closed_fields(phase):
+    error = ModalStandalonePhaseUnavailable(phase)
+    assert _closed_bootstrap_details(error) == {
+        "phase": error.phase,
+        "failure_class": error.failure_class,
+        "location": error.location,
+        "retry_authorized": False,
+    }
+
+
+def test_standalone_run_diagnosis_subclass_cannot_project_hostile_fields():
+    class HostileRunError(ModalStandalonePhaseUnavailable):
+        @property
+        def location(self):
+            return "HF_TOKEN=private /home/owner/dataset.jsonl"
+
+        @location.setter
+        def location(self, _value):
+            pass
+
+    assert _closed_bootstrap_details(HostileRunError("RUN_HOST_ASSEMBLY")) is None
