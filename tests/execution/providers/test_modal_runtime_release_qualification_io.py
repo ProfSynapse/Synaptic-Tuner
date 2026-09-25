@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import threading
+import time
 
 import pytest
 
@@ -9,6 +12,7 @@ import tuner.execution.providers.modal.runtime_release_qualification as qualific
 from tuner.cloud.modal_runtime_qualification_operator import (
     ModalRuntimeQualificationOperator, ModalRuntimeQualificationOutcome,
 )
+from tuner.execution.providers.modal.runtime_build import _bounded
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
 from tuner.execution.providers.modal.runtime_release_qualification import (
     ModalRuntimeReleaseQualificationRoots,
@@ -19,6 +23,7 @@ from tuner.execution.providers.modal.runtime_release_qualification_reader import
     ModalRuntimeReleaseQualificationReader,
 )
 from tuner.runtime.packaged_training_worker import LOCAL_CPU_DATA, local_cpu_result
+from tuner.training.modal_host_storage import ModalHostStorageV1
 
 from tests.execution.providers.test_modal_runtime_release_qualification import (
     Auth, Facts, Observer, _case,
@@ -139,6 +144,141 @@ def test_submit_reports_only_closed_failure_stage_without_retry(
     assert catalog.publish_calls == 0
     assert operator.reconcile(dispatch.dispatch_digest).disposition == "indeterminate"
     assert len(FakeFunction.spawn_calls) == spawn_count
+
+
+@pytest.mark.skipif(os.name != "posix", reason="owner-thread SQLite journal")
+def test_bounded_provider_segment_keeps_real_catalog_on_owner_thread(tmp_path):
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    dispatch, facts = _case(); facade = _facade(facts); auth = Auth()
+    with ModalHostStorageV1(private / "journal.sqlite3", "standalone-training") as journal:
+        catalog = journal.catalog(
+            "qualification-calls", encode=lambda value: value.encode("ascii"),
+            decode=lambda raw: raw.decode("ascii"),
+        )
+        operator = ModalRuntimeQualificationOperator(
+            facade=facade, deployment_observer=Observer(facts), verifier=auth,
+            call_catalog=catalog,
+        )
+        raw = build_modal_runtime_release_qualification_dispatch(dispatch, auth)
+        outcome = operator.submit_once(
+            raw, expected_facts=facts,
+            provider_invoker=lambda operation: _bounded(
+                operation, deadline=time.monotonic() + 2, code="closed",
+            ),
+        )
+        assert outcome == ModalRuntimeQualificationOutcome("found", "fc-1")
+        assert catalog.resolve(dispatch.dispatch_digest) == "fc-1"
+    assert len(FakeFunction.spawn_calls) == 1
+
+
+def test_provider_invoker_timeout_is_ambiguous_without_reinvocation():
+    dispatch, facts = _case(); facade = _facade(facts); auth = Auth(); catalog = Catalog()
+    operator = ModalRuntimeQualificationOperator(
+        facade=facade, deployment_observer=Observer(facts), verifier=auth,
+        call_catalog=catalog,
+    )
+    release = threading.Event()
+    invocations = []
+
+    def late_invoker(_operation):
+        invocations.append("entered")
+        return _bounded(lambda: release.wait(1),
+                        deadline=time.monotonic() + 0.02, code="closed")
+
+    try:
+        outcome = operator.submit_once(
+            build_modal_runtime_release_qualification_dispatch(dispatch, auth),
+            expected_facts=facts, provider_invoker=late_invoker,
+        )
+    finally:
+        release.set()
+    assert outcome == ModalRuntimeQualificationOutcome(
+        "indeterminate", failure_stage="SPAWN_INDETERMINATE",
+    )
+    assert invocations == ["entered"]
+    assert FakeFunction.spawn_calls == []
+    assert catalog.publish_calls == 0
+    assert operator.reconcile(dispatch.dispatch_digest).disposition == "indeterminate"
+    assert FakeFunction.spawn_calls == []
+
+
+def test_custom_invoker_cannot_invoke_provider_operation_twice():
+    dispatch, facts = _case(); facade = _facade(facts); auth = Auth(); catalog = Catalog()
+    operator = ModalRuntimeQualificationOperator(
+        facade=facade, deployment_observer=Observer(facts), verifier=auth,
+        call_catalog=catalog,
+    )
+
+    def invoke_twice(operation):
+        first = operation()
+        second = operation()
+        assert second == ModalRuntimeQualificationOutcome(
+            "indeterminate", failure_stage="SPAWN_INDETERMINATE",
+        )
+        return first
+
+    outcome = operator.submit_once(
+        build_modal_runtime_release_qualification_dispatch(dispatch, auth),
+        expected_facts=facts, provider_invoker=invoke_twice,
+    )
+    assert outcome == ModalRuntimeQualificationOutcome("found", "fc-1")
+    assert len(FakeFunction.spawn_calls) == 1
+    assert catalog.publish_calls == 1
+
+
+def test_custom_invoker_cannot_fabricate_a_found_outcome():
+    dispatch, facts = _case(); facade = _facade(facts); auth = Auth(); catalog = Catalog()
+    operator = ModalRuntimeQualificationOperator(
+        facade=facade, deployment_observer=Observer(facts), verifier=auth,
+        call_catalog=catalog,
+    )
+    outcome = operator.submit_once(
+        build_modal_runtime_release_qualification_dispatch(dispatch, auth),
+        expected_facts=facts,
+        provider_invoker=lambda _operation: ModalRuntimeQualificationOutcome("found", "fc-forged"),
+    )
+    assert outcome == ModalRuntimeQualificationOutcome(
+        "indeterminate", failure_stage="SPAWN_INDETERMINATE",
+    )
+    assert FakeFunction.spawn_calls == []
+    assert catalog.publish_calls == 0
+
+
+def test_late_spawn_after_timeout_never_publishes_or_reinvokes(monkeypatch):
+    dispatch, facts = _case(); facade = _facade(facts); auth = Auth(); catalog = Catalog()
+    operator = ModalRuntimeQualificationOperator(
+        facade=facade, deployment_observer=Observer(facts), verifier=auth,
+        call_catalog=catalog,
+    )
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    def blocked_spawn(self, *args):
+        type(self).spawn_calls.append(args)
+        entered.set()
+        release.wait(2)
+        finished.set()
+        return type("Call", (), {"object_id": "fc-late"})()
+
+    monkeypatch.setattr(FakeFunction, "spawn", blocked_spawn)
+    try:
+        outcome = operator.submit_once(
+            build_modal_runtime_release_qualification_dispatch(dispatch, auth),
+            expected_facts=facts,
+            provider_invoker=lambda operation: _bounded(
+                operation, deadline=time.monotonic() + 0.05, code="closed",
+            ),
+        )
+        assert entered.is_set()
+        assert outcome == ModalRuntimeQualificationOutcome(
+            "indeterminate", failure_stage="SPAWN_INDETERMINATE",
+        )
+    finally:
+        release.set()
+    assert finished.wait(2)
+    assert len(FakeFunction.spawn_calls) == 1
+    assert catalog.publish_calls == 0
+    assert operator.reconcile(dispatch.dispatch_digest).disposition == "indeterminate"
 
 
 def test_reader_authenticates_rehashes_and_relists_one_authoritative_output(monkeypatch, tmp_path: Path) -> None:

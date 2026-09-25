@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-from typing import Protocol
+import threading
+from typing import Callable, Protocol
 
 from tuner.execution.foundation_v2.canonical import digest_text, safe_ref
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
@@ -91,7 +92,13 @@ class ModalRuntimeQualificationOperator:
             raise ValueError("runtime qualification fixture readback differs")
         return receipt
 
-    def submit_once(self, dispatch_bytes: bytes, *, expected_facts):
+    def submit_once(self, dispatch_bytes: bytes, *, expected_facts,
+                    provider_invoker: Callable[[Callable[[], object]], object] | None = None):
+        """Keep catalog I/O on the caller thread; bound only provider submission.
+
+        Layout reads have their own bounds. There is no whole-submit deadline;
+        an invoker timeout is ambiguous and never authorizes replay.
+        """
         dispatch = parse_modal_runtime_release_qualification_dispatch(
             dispatch_bytes, self._verifier,
         )
@@ -106,25 +113,67 @@ class ModalRuntimeQualificationOperator:
         fact = _self_check_fact(expected_facts)
         function_name = safe_ref(fact.spec.name, "self_check_function_name")
         expected_id = safe_ref(fact.function_id, "self_check_function_id")
-        function = self._facade._function(
-            app_name=expected_facts.app_name, function_name=function_name,
-        )
-        failure_stage = "FUNCTION_IDENTITY"
+        if provider_invoker is not None and not callable(provider_invoker):
+            raise TypeError("qualification provider invoker must be callable")
+
+        invocation_lock = threading.Lock()
+        invocation_claimed = False
+        produced_outcome: ModalRuntimeQualificationOutcome | None = None
+
+        def provider_operation():
+            nonlocal invocation_claimed, produced_outcome
+            with invocation_lock:
+                if invocation_claimed:
+                    return ModalRuntimeQualificationOutcome(
+                        "indeterminate", failure_stage="SPAWN_INDETERMINATE",
+                    )
+                invocation_claimed = True
+            failure_stage = "FUNCTION_IDENTITY"
+            try:
+                function = self._facade._function(
+                    app_name=expected_facts.app_name, function_name=function_name,
+                )
+                function.hydrate(self._facade.client)
+                if getattr(function, "is_hydrated", False) is not True \
+                        or safe_ref(getattr(function, "object_id", None), "function_id") != expected_id:
+                    raise ValueError
+                failure_stage = "SPAWN_INDETERMINATE"
+                call = function.spawn(dispatch_bytes)
+                call_id = safe_ref(getattr(call, "object_id", None), "provider_call_id")
+                result = ModalRuntimeQualificationOutcome("found", call_id)
+            except Exception:
+                result = ModalRuntimeQualificationOutcome(
+                    "indeterminate", failure_stage=failure_stage,
+                )
+            with invocation_lock:
+                produced_outcome = result
+            return result
+
         try:
-            function.hydrate(self._facade.client)
-            if getattr(function, "is_hydrated", False) is not True \
-                    or safe_ref(getattr(function, "object_id", None), "function_id") != expected_id:
-                raise ValueError
-            failure_stage = "SPAWN_INDETERMINATE"
-            call = function.spawn(dispatch_bytes)
-            call_id = safe_ref(getattr(call, "object_id", None), "provider_call_id")
-            failure_stage = "CATALOG_INDETERMINATE"
+            provider_outcome = (provider_operation() if provider_invoker is None
+                                else provider_invoker(provider_operation))
+        except Exception:
+            # A timeout can outlive this caller; the worker may later spawn.
+            return ModalRuntimeQualificationOutcome(
+                "indeterminate", failure_stage="SPAWN_INDETERMINATE",
+            )
+        with invocation_lock:
+            authenticated_outcome = provider_outcome is produced_outcome
+        if (type(provider_outcome) is not ModalRuntimeQualificationOutcome
+                or not authenticated_outcome):
+            return ModalRuntimeQualificationOutcome(
+                "indeterminate", failure_stage="SPAWN_INDETERMINATE",
+            )
+        if provider_outcome.disposition != "found":
+            return provider_outcome
+        call_id = provider_outcome.provider_call_id
+        try:
             if self._calls.publish_if_absent(dispatch.dispatch_digest, call_id) is not True \
                     or self._calls.resolve(dispatch.dispatch_digest) != call_id:
                 raise ValueError
         except Exception:
             return ModalRuntimeQualificationOutcome(
-                "indeterminate", failure_stage=failure_stage,
+                "indeterminate", failure_stage="CATALOG_INDETERMINATE",
             )
         return ModalRuntimeQualificationOutcome("found", call_id)
 

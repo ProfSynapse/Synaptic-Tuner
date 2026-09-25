@@ -197,10 +197,12 @@ def qualify_modal_runtime_for_host(
         if staged != fixture:
             raise ValueError
         phase = "DISPATCH_SUBMIT"
-        outcome = _bounded(
-            lambda: operator.submit_once(payload, expected_facts=deployment),
-            deadline=time.monotonic() + 60,
-            code="modal_host_cpu_dispatch_indeterminate",
+        outcome = operator.submit_once(
+            payload, expected_facts=deployment,
+            provider_invoker=lambda operation: _bounded(
+                operation, deadline=time.monotonic() + 60,
+                code="modal_host_cpu_dispatch_indeterminate",
+            ),
         )
         failure_phases = {
             "FUNCTION_IDENTITY": "DISPATCH_FUNCTION_IDENTITY",

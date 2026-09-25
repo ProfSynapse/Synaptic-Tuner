@@ -48,6 +48,13 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- The standalone host's SQLite attempt journal and call catalogs are thread-affine.
+  Do not pass catalog resolve/publish through `_bounded`'s worker thread. Keep
+  journal operations on their owning thread and bound only the provider
+  hydrate/spawn/call-ID closure. A timed-out worker may still spawn later;
+  preserve the consumed claim and never auto-replay or infer no call from a
+  missing catalog row.
+
 - The minimal consumer's provisioning step is create-only
   (`allow_existing=False`). A genuinely fresh manual attempt must use unused
   control Volume, artifact Volume, model-cache Volume, and runtime Secret names;

@@ -692,6 +692,13 @@ or returned without a valid call ID), or `DISPATCH_CATALOG_INDETERMINATE`
 grant replay authority. Other pre-spawn failures and bounded timeouts remain
 the conservative `DISPATCH_SUBMIT` result.
 
+The standalone host's SQLite attempt journal and call catalogs are
+thread-affine. Resolve and publish catalog entries on the storage-owning
+caller thread; the 60-second worker boundary wraps only provider lookup,
+hydration, identity check, spawn and call-ID extraction. A timed-out provider
+worker may still spawn after the host reports ambiguity. Keep the consumed
+claim and never replay it or infer that no call exists from an empty catalog.
+
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in
 `scripts/chat_model.py` command; do not rerun training to rebuild ephemeral host

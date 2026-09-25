@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -95,6 +96,7 @@ def test_cpu_gate_claims_before_fixture_and_spawn_and_returns_authenticated_iden
     monkeypatch.setattr(SDK, "FunctionCall", _FunctionCall, raising=False)
     events = []
     journal = _Journal(events)
+    owner_thread = threading.get_ident()
 
     class _Observer:
         def __init__(self, **kwargs):
@@ -115,8 +117,11 @@ def test_cpu_gate_claims_before_fixture_and_spawn_and_returns_authenticated_iden
                 effect_id=effect_id, artifact_volume_id=artifact,
             )
 
-        def submit_once(self, payload, *, expected_facts):
+        def submit_once(self, payload, *, expected_facts, provider_invoker=None):
             assert type(payload) is bytes and payload
+            assert threading.get_ident() == owner_thread
+            assert callable(provider_invoker)
+            assert provider_invoker(lambda: threading.get_ident()) != owner_thread
             events.append("spawn")
             return ModalRuntimeQualificationOutcome("found", "fc-cpu123")
 
@@ -208,7 +213,7 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
                 effect_id=effect_id, artifact_volume_id=artifact,
             )
 
-        def submit_once(self, payload, *, expected_facts):
+        def submit_once(self, payload, *, expected_facts, provider_invoker=None):
             events.append("dispatch")
             if failure_stage == "dispatch":
                 raise RuntimeError("HF_TOKEN=private")
@@ -282,7 +287,7 @@ def test_cpu_gate_projects_closed_operator_stage_only(
                 effect_id=effect_id, artifact_volume_id=artifact,
             )
 
-        def submit_once(self, _payload, *, expected_facts):
+        def submit_once(self, _payload, *, expected_facts, provider_invoker=None):
             events.append("submit")
             return ModalRuntimeQualificationOutcome(
                 "indeterminate", failure_stage=operator_stage,
