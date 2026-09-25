@@ -4,6 +4,7 @@ import pytest
 
 from tuner.handlers.modal_job_config_handler import _closed_bootstrap_details
 from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
+from tuner.training.modal_host_qualification import ModalHostQualificationUnavailable
 
 
 @pytest.mark.parametrize("diagnosis", (
@@ -55,3 +56,16 @@ def test_unknown_bootstrap_exception_has_no_details():
     assert _closed_bootstrap_details(
         RuntimeError("HF_TOKEN=private /home/owner/dataset.jsonl")
     ) is None
+
+
+@pytest.mark.parametrize("phase", (
+    "FIXTURE_STAGE", "DISPATCH_SUBMIT", "CALL_OBSERVE", "RECEIPT_VERIFY",
+))
+def test_cpu_qualification_diagnosis_projects_only_closed_fields(phase):
+    error = ModalHostQualificationUnavailable(phase)
+    assert _closed_bootstrap_details(error) == {
+        "phase": error.phase,
+        "failure_class": error.failure_class,
+        "location": error.location,
+        "retry_authorized": False,
+    }

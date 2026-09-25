@@ -38,6 +38,35 @@ from tuner.training.modal_host_scope import observe_modal_host_scope
 class ModalHostQualificationUnavailable(RuntimeError):
     """Fixed closed failure after a consumed qualification claim."""
 
+    _STAGES = {
+        "FIXTURE_STAGE": ("UNAVAILABLE", "modal_host_qualification.stage_fixture"),
+        "DISPATCH_SUBMIT": ("INDETERMINATE", "modal_host_qualification.submit_once"),
+        "CALL_OBSERVE": ("UNAVAILABLE", "modal_host_qualification.observe_call"),
+        "RECEIPT_VERIFY": ("UNAVAILABLE", "modal_host_qualification.verify_receipt"),
+    }
+
+    def __init__(self, phase: str) -> None:
+        if phase not in self._STAGES:
+            raise ValueError("qualification diagnostic is invalid")
+        super().__init__("modal_host_cpu_qualification_unavailable")
+        self._phase = phase
+
+    @property
+    def phase(self) -> str:
+        return self._phase
+
+    @property
+    def failure_class(self) -> str:
+        return self._STAGES[self._phase][0]
+
+    @property
+    def location(self) -> str:
+        return self._STAGES[self._phase][1]
+
+    @property
+    def retry_authorized(self) -> bool:
+        return False
+
 
 @dataclass(frozen=True, slots=True)
 class ModalHostCPUQualificationV1:
@@ -150,6 +179,7 @@ def qualify_modal_runtime_for_host(
             "dispatch_digest": dispatch.dispatch_digest,
         }),
     )
+    phase = "FIXTURE_STAGE"
     try:
         staged = _bounded(
             lambda: operator.stage_fixture_once(
@@ -159,6 +189,7 @@ def qualify_modal_runtime_for_host(
         )
         if staged != fixture:
             raise ValueError
+        phase = "DISPATCH_SUBMIT"
         outcome = _bounded(
             lambda: operator.submit_once(payload, expected_facts=deployment),
             deadline=time.monotonic() + 60,
@@ -167,6 +198,7 @@ def qualify_modal_runtime_for_host(
         if outcome.disposition != "found" or type(outcome.provider_call_id) is not str:
             raise ValueError
         call_id = outcome.provider_call_id
+        phase = "CALL_OBSERVE"
         deadline = time.monotonic() + 180
         while True:
             def poll():
@@ -195,6 +227,7 @@ def qualify_modal_runtime_for_host(
                     "status_code": "completed",
             }):
                 raise ValueError
+            phase = "RECEIPT_VERIFY"
             observed = _bounded(
                 lambda: reader.observe(dispatch, provider_call_id=call_id),
                 deadline=min(deadline, time.monotonic() + 30),
@@ -213,7 +246,7 @@ def qualify_modal_runtime_for_host(
                 deployment.facts_digest,
             )
     except Exception:
-        raise ModalHostQualificationUnavailable("modal_host_cpu_qualification_unavailable") from None
+        raise ModalHostQualificationUnavailable(phase) from None
 
 
 __all__ = [

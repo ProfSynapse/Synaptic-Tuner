@@ -37,7 +37,9 @@ from tuner.training.contracts import ResourceSpec
 from tuner.training.modal_host_reader import ModalPackagedCoordinatorReaderV1, ModalPackagedReadUnavailable
 from tuner.training.modal_host_runtime import ModalHostRuntimeV1
 from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
-from tuner.training.modal_host_qualification import ModalHostCPUQualificationV1
+from tuner.training.modal_host_qualification import (
+    ModalHostCPUQualificationV1, ModalHostQualificationUnavailable,
+)
 from tuner.training.modal_recipe import ModalSFTRecipePlanV1, load_modal_sft_recipe
 from tuner.training.packaged_compilation import (
     PACKAGED_SFT_WORKLOAD_SCHEMA, compile_packaged_sft_workload,
@@ -410,3 +412,29 @@ def test_unknown_bootstrap_exception_remains_generic(tmp_path, monkeypatch, caps
     output = capsys.readouterr().out
     assert "HF_TOKEN" not in output and "/home/owner" not in output
     assert "details" not in json.loads(output)["error"]
+
+
+@pytest.mark.parametrize("qualify_only", [True, False])
+def test_cpu_failure_surfaces_closed_stage_in_both_cli_modes(
+        tmp_path, monkeypatch, capsys, qualify_only):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+
+    def fail_cpu(**_kwargs):
+        events.append("cpu")
+        raise ModalHostQualificationUnavailable("DISPATCH_SUBMIT") from None
+
+    monkeypatch.setattr(runner, "qualify_modal_runtime_for_host", fail_cpu)
+    handler = ModalJobConfigHandler(Namespace(
+        modal_profile="explicit", modal_environment="main", json=True,
+    ), context)
+    assert (handler._qualify(plan) if qualify_only else handler._execute(plan)) == 2
+    output = capsys.readouterr().out
+    assert "HF_TOKEN" not in output
+    payload = json.loads(output)
+    assert payload["error"]["details"] == {
+        "phase": "DISPATCH_SUBMIT",
+        "failure_class": "INDETERMINATE",
+        "location": "modal_host_qualification.submit_once",
+        "retry_authorized": False,
+    }
+    assert events == ["bootstrap", "cpu"]

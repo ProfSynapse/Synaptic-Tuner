@@ -13,6 +13,7 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
     """Expose only reviewed, non-authorizing bootstrap diagnostics."""
     try:
         from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
+        from tuner.training.modal_host_qualification import ModalHostQualificationUnavailable
     except Exception:
         return None
 
@@ -44,6 +45,21 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
         admitted = closed.get(error.phase)
         if (admitted is not None and error.location == admitted[0]
                 and error.failure_class in admitted[1]):
+            return {
+                "phase": error.phase,
+                "failure_class": error.failure_class,
+                "location": error.location,
+                "retry_authorized": False,
+            }
+    qualification = {
+        "FIXTURE_STAGE": ("UNAVAILABLE", "modal_host_qualification.stage_fixture"),
+        "DISPATCH_SUBMIT": ("INDETERMINATE", "modal_host_qualification.submit_once"),
+        "CALL_OBSERVE": ("UNAVAILABLE", "modal_host_qualification.observe_call"),
+        "RECEIPT_VERIFY": ("UNAVAILABLE", "modal_host_qualification.verify_receipt"),
+    }
+    if type(error) is ModalHostQualificationUnavailable and error.retry_authorized is False:
+        admitted = qualification.get(error.phase)
+        if admitted == (error.failure_class, error.location):
             return {
                 "phase": error.phase,
                 "failure_class": error.failure_class,

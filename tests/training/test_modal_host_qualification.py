@@ -177,3 +177,85 @@ def test_cpu_gate_does_not_stage_when_claim_fails(monkeypatch):
             effect_id="cpu-qual-test", environment_name="production",
         )
     assert events == ["claim"]
+
+
+@pytest.mark.parametrize("failure_stage,expected_phase", (
+    ("fixture", "FIXTURE_STAGE"),
+    ("dispatch", "DISPATCH_SUBMIT"),
+    ("call", "CALL_OBSERVE"),
+    ("receipt", "RECEIPT_VERIFY"),
+))
+def test_cpu_gate_reports_only_closed_post_claim_stage(
+        monkeypatch, failure_stage, expected_phase):
+    runtime, client = _runtime()
+    events = []
+
+    class _Observer:
+        def __init__(self, **_kwargs):
+            pass
+
+    class _Operator:
+        def __init__(self, **_kwargs):
+            pass
+
+        def stage_fixture_once(self, *, effect_id, deployment_facts):
+            events.append("fixture")
+            if failure_stage == "fixture":
+                raise RuntimeError("HF_TOKEN=private")
+            artifact = next(item.volume_id for item in deployment_facts.volumes
+                            if item.spec.role == "artifacts")
+            return ModalRuntimeReleaseFixtureReceiptV1.create(
+                effect_id=effect_id, artifact_volume_id=artifact,
+            )
+
+        def submit_once(self, payload, *, expected_facts):
+            events.append("dispatch")
+            if failure_stage == "dispatch":
+                raise RuntimeError("HF_TOKEN=private")
+            return ModalRuntimeQualificationOutcome("found", "fc-cpu123")
+
+    class _Call:
+        is_hydrated = True
+        object_id = "fc-cpu123"
+
+        def hydrate(self, _client):
+            return self
+
+        def get(self, timeout):
+            events.append("call")
+            if failure_stage == "call":
+                raise RuntimeError("HF_TOKEN=private")
+            return {
+                "schema_version": "synaptic-modal-runtime-release-qualification-result/v1",
+                "status_code": "completed",
+            }
+
+    class _FunctionCall:
+        @staticmethod
+        def from_id(_call_id, **_kwargs):
+            return _Call()
+
+    class _Reader:
+        def __init__(self, **_kwargs):
+            pass
+
+        def observe(self, _dispatch, *, provider_call_id):
+            events.append("receipt")
+            raise RuntimeError("HF_TOKEN=private")
+
+    monkeypatch.setattr(SDK, "FunctionCall", _FunctionCall, raising=False)
+    monkeypatch.setattr(qualification, "_CurrentQualificationObserver", _Observer)
+    monkeypatch.setattr(qualification, "ModalRuntimeQualificationOperator", _Operator)
+    monkeypatch.setattr(qualification, "ModalRuntimeReleaseQualificationReader", _Reader)
+    with pytest.raises(qualification.ModalHostQualificationUnavailable) as caught:
+        qualification.qualify_modal_runtime_for_host(
+            sdk=SDK, client=client, client_binding=runtime.facts.client_binding,
+            runtime=runtime, private_storage=_Journal(events),
+            effect_id="cpu-qual-test", environment_name="production",
+        )
+    error = caught.value
+    assert error.phase == expected_phase
+    assert error.retry_authorized is False
+    assert "HF_TOKEN" not in str(error)
+    assert error.__cause__ is None
+    assert events[0] == "claim"

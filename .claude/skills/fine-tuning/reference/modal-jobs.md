@@ -679,6 +679,13 @@ also compares one read-only named Function hydration with the current layout.
 `FUNCTION_MATCH` is a current-state diagnostic only; it is not a call receipt,
 version-pinned invocation, or retry authority.
 
+After a qualification claim is consumed, the standalone JSON CLI projects only
+fixed, non-authorizing failure fields for `FIXTURE_STAGE`, `DISPATCH_SUBMIT`,
+`CALL_OBSERVE`, or `RECEIPT_VERIFY`. `DISPATCH_SUBMIT / INDETERMINATE` does not
+prove whether the remote Function spawned. Preserve its exact attempt journal
+and resources; diagnose read-only and use a fresh create-only attempt only
+after an independently reviewed correction.
+
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in
 `scripts/chat_model.py` command; do not rerun training to rebuild ephemeral host
