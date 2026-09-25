@@ -699,6 +699,27 @@ hydration, identity check, spawn and call-ID extraction. A timed-out provider
 worker may still spawn after the host reports ambiguity. Keep the consumed
 claim and never replay it or infer that no call exists from an empty catalog.
 
+If a fresh CPU attempt has an exact retained call ID but fails at
+`CALL_OBSERVE`, inspect only that consumed claim with the checked-in read-only
+diagnostic:
+
+```bash
+python3 scripts/inspect_modal_qualification_call.py \
+  --journal /absolute/private/attempt/modal-host.sqlite3 \
+  --claim-ref qualify-<exact-deployment-facts-digest> \
+  --call-id fc-<exact-retained-id> \
+  --modal-profile <named-profile>
+```
+
+The diagnostic authenticates the claim-to-catalog call binding before one
+bounded, retry-disabled raw status read and emits only a closed,
+non-authorizing result category. It does not deserialize the result body,
+print logs or provider exceptions, submit, cancel, or grant retry authority.
+`PROVIDER_SUCCESS` means only that an opaque result is available; the worker's
+`completed` versus `failed` status is inside that uninspected body. Preserve
+the attempt and investigate the worker boundary before a fresh, separately
+reviewed qualification.
+
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in
 `scripts/chat_model.py` command; do not rerun training to rebuild ephemeral host
