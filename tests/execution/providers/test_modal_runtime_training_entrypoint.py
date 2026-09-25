@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,20 @@ import pytest
 from tuner.runtime import runtime_release_modal_training as entrypoint
 from tuner.execution.providers.modal.runtime_release_deployment import ModalRuntimeReleaseDeployer
 from tests.execution.providers.test_modal_runtime_release_deployment import _plan
+
+
+def test_outer_entrypoint_failure_is_fixed_and_does_not_expose_exception(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "modal", SimpleNamespace())
+    def fail_setup(*args, **kwargs):
+        raise RuntimeError("private token and path")
+    monkeypatch.setattr(entrypoint, "_run_with_modal", fail_setup)
+    assert entrypoint.run_modal_packaged_training(b"signed-dispatch") == {
+        "schema_version": "synaptic-modal-packaged-worker-result/v2",
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+        "failure_stage": "ENTRYPOINT_SETUP",
+    }
 
 
 def test_training_callable_has_exact_installed_global_identity() -> None:

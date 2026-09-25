@@ -15,6 +15,8 @@ import pytest
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.training.modal_host_effects import _encode_binding
+from tuner.execution.providers.modal.packaged_worker import PACKAGED_WORKER_FAILURE_STAGES
+from tuner.training.modal_host_reader import _FIXED_WORKER_FAILURE_STAGES
 
 from tests.execution.providers.test_modal_packaged_binding import _binding
 from tests.execution.providers.test_modal_packaged_dispatch import _case
@@ -25,6 +27,11 @@ _SPEC = importlib.util.spec_from_file_location("inspect_modal_packaged_call", _S
 diagnostic = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(diagnostic)
 _CALL = "fc-packaged-call"
+
+
+def test_worker_failure_stage_allowlists_agree_across_all_readers():
+    assert PACKAGED_WORKER_FAILURE_STAGES == _FIXED_WORKER_FAILURE_STAGES
+    assert PACKAGED_WORKER_FAILURE_STAGES == frozenset(diagnostic._WORKER_FAILURE_STAGES)
 
 
 def _journal(tmp_path, *, binding=None, claim_override=None, call_override=None,
@@ -193,6 +200,54 @@ def test_only_exact_locally_serialized_failure_is_classified(monkeypatch):
     for data, options in ((b"untrusted", {}), (fixed, {"blob": "bl-opaque"}),
                           (fixed, {"data_format": 99})):
         assert classify(data, **options) == "PROVIDER_SUCCESS_UNKNOWN"
+
+
+@pytest.mark.parametrize("stage", diagnostic._WORKER_FAILURE_STAGES)
+def test_exact_v2_failure_bytes_report_only_fixed_stage(monkeypatch, stage):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
+    document = {
+        "schema_version": diagnostic._RESULT_SCHEMA_V2,
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+        "failure_stage": stage,
+    }
+    # This serializer is deterministic; the diagnostic still compares opaque
+    # bytes and never parses the returned provider payload.
+    serialize = canonical_bytes
+    output = SimpleNamespace(
+        data_format=_Proto.DATA_FORMAT_PICKLE,
+        result=_Result(_GenericResult.GENERIC_STATUS_SUCCESS,
+                       serialize(document)),
+    )
+    assert diagnostic._classify_fixed_failure(
+        output, _Proto, serialize,
+    ) == f"WORKER_{stage}"
+
+
+@pytest.mark.parametrize("mutation", [
+    {"effect_id": "other"}, {"status_code": "completed"},
+    {"completion_sha256": "a" * 64}, {"failure_stage": "SFT_OTHER"},
+    {"schema_version": "other"}, {"extra": "private data"},
+])
+def test_v2_result_near_misses_remain_unclassified(monkeypatch, mutation):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
+    document = {
+        "schema_version": diagnostic._RESULT_SCHEMA_V2,
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+        "failure_stage": "SFT_TRAINER",
+    }
+    document.update(mutation)
+    output = SimpleNamespace(
+        data_format=_Proto.DATA_FORMAT_PICKLE,
+        result=_Result(_GenericResult.GENERIC_STATUS_SUCCESS,
+                       canonical_bytes(document)),
+    )
+    assert diagnostic._classify_fixed_failure(
+        output, _Proto, canonical_bytes,
+    ) == "PROVIDER_SUCCESS_UNKNOWN"
 
 
 def test_invalid_journal_prevents_provider_import(tmp_path, monkeypatch, capsys):

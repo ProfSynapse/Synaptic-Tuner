@@ -14,6 +14,7 @@ import sys
 import pytest
 
 from synaptic_tuner.api.v1.training_facade import TrainingAPI
+from synaptic_tuner.api.v1.runs_facade import RunsAPI
 from tests.dataset_prep.test_context_messages_v2 import _config
 from tests.execution.providers.test_modal_runtime_build import _candidate
 from tuner.dataset_prep import prepare_dataset_v2
@@ -22,6 +23,7 @@ from tuner.execution.providers.modal.contracts import operation_path
 from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.coordinator_v1.model import WorkflowPhaseV1
 from tuner.execution.providers.modal.facade import ModalFunctionCallState
+from tuner.execution.providers.modal.packaged_worker import PACKAGED_WORKER_FAILURE_STAGES
 from tuner.execution.providers.modal.packaged_binding import (
     MODAL_PACKAGED_RUNTIME_FACTS_V2_SCHEMA, ModalPackagedRuntimeFactsV1,
 )
@@ -256,6 +258,36 @@ def test_cli_v2_failed_returned_job_is_closed_without_artifact_publication(tmp_p
     assert handler._execute(plan) == 2
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"]["code"] == "MODAL_TRAINING_UNAVAILABLE"
+    assert payload["error"]["details"] == {
+        "phase": "RUN_WORKER_FAILED",
+        "failure_class": "UNAVAILABLE",
+        "location": "modal_standalone_runner.worker_result",
+        "retry_authorized": False,
+    }
+    assert events == ["bootstrap", "cpu", "stage", "spawn"]
+    assert not list((tmp_path / "state" / "synaptic-training").glob("*-artifacts"))
+
+
+@pytest.mark.parametrize("stage", sorted(PACKAGED_WORKER_FAILURE_STAGES))
+def test_exact_worker_failure_stage_projects_closed_public_code(
+        tmp_path, monkeypatch, capsys, stage):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+
+    def failed(*_args, **_kwargs):
+        raise ModalPackagedReadUnavailable("modal_packaged_call_failed_" + stage)
+
+    monkeypatch.setattr(ModalPackagedCoordinatorReaderV1, "_poll_packaged_call", failed)
+    handler = ModalJobConfigHandler(Namespace(
+        modal_profile="explicit", modal_environment="main", json=True,
+    ), context)
+    assert handler._execute(plan) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"]["details"] == {
+        "phase": "RUN_WORKER_" + stage,
+        "failure_class": "UNAVAILABLE",
+        "location": "modal_standalone_runner.worker_result",
+        "retry_authorized": False,
+    }
     assert events == ["bootstrap", "cpu", "stage", "spawn"]
     assert not list((tmp_path / "state" / "synaptic-training").glob("*-artifacts"))
 
@@ -498,20 +530,59 @@ def test_post_cpu_host_failures_have_only_closed_non_retryable_diagnostics(
     assert events == ["bootstrap", "cpu"]
 
 
-def test_post_start_failure_remains_generic_without_private_details(tmp_path, monkeypatch):
+def test_post_start_workflow_lookup_failure_is_closed_without_private_details(tmp_path, monkeypatch):
     plan, context, events = _setup(tmp_path, monkeypatch)
     monkeypatch.setattr(
         TrainingAPI, "start", lambda *_args, **_kwargs: SimpleNamespace(
             accepted=True, run=SimpleNamespace(run_id="no-workflow"),
         ),
     )
-    with pytest.raises(runner.ModalStandaloneRunUnavailable) as caught:
+    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
         runner.run_modal_standalone_job(
             plan=plan, context=context, modal_profile="explicit",
             modal_environment="main",
         )
-    assert caught.value.args == ("modal_standalone_run_unavailable",)
+    assert (caught.value.phase, caught.value.failure_class,
+            caught.value.location, caught.value.retry_authorized) == (
+                "RUN_WORKFLOW_STATE", "UNAVAILABLE",
+                "modal_standalone_runner.workflow_state", False,
+            )
     assert events == ["bootstrap", "cpu"]
+
+
+@pytest.mark.parametrize("phase, failure_class, location", (
+    ("RUN_READ_BINDING", "UNAVAILABLE", "modal_standalone_runner.read_binding"),
+    ("RUN_OUTCOME", "UNAVAILABLE", "modal_standalone_runner.outcome"),
+    ("RUN_VERIFY", "UNAVAILABLE", "modal_standalone_runner.verify"),
+    ("RUN_ARTIFACT_DOWNLOAD", "UNAVAILABLE", "modal_standalone_runner.artifact_download"),
+))
+def test_post_submit_host_boundaries_are_closed_without_private_details(
+        tmp_path, monkeypatch, phase, failure_class, location):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+    secret = "HF_TOKEN=private-and-absolute-/home/private/customer"
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(secret)
+
+    if phase == "RUN_READ_BINDING":
+        monkeypatch.setattr(ModalPackagedCoordinatorReaderV1, "_binding", fail)
+    elif phase == "RUN_OUTCOME":
+        monkeypatch.setattr(RunsAPI, "outcome", fail)
+    elif phase == "RUN_VERIFY":
+        monkeypatch.setattr(RunsAPI, "verify", fail)
+    else:
+        monkeypatch.setattr(runner, "download_verified_modal_artifact", fail)
+    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
+        runner.run_modal_standalone_job(
+            plan=plan, context=context, modal_profile="explicit",
+            modal_environment="main",
+        )
+    assert (caught.value.phase, caught.value.failure_class,
+            caught.value.location, caught.value.retry_authorized) == (
+                phase, failure_class, location, False,
+            )
+    assert secret not in str(caught.value)
+    assert events == ["bootstrap", "cpu", "stage", "spawn"]
 
 
 def test_stage_failure_is_closed_and_never_submits(

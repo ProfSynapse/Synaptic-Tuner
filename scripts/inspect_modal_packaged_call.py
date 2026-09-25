@@ -37,6 +37,13 @@ _MAX_BINDING = 16 * 1024 * 1024
 _MAX_CALL = 1024
 _MAX_FIXED_RESULT = 512
 _RESULT_SCHEMA = "synaptic-modal-packaged-worker-result/v1"
+_RESULT_SCHEMA_V2 = "synaptic-modal-packaged-worker-result/v2"
+_WORKER_FAILURE_STAGES = (
+    "ENTRYPOINT_SETUP", "DISPATCH_AUTH", "STAGED_INPUT", "PATH_CLAIM",
+    "SFT_ADMISSION", "SFT_PREPARATION", "SFT_REVALIDATION",
+    "SFT_INVOCATION", "SFT_TRAINER", "SFT_EVIDENCE", "SFT_ARTIFACT",
+    "SFT_UNKNOWN", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
+)
 
 
 class DiagnosticUnavailable(RuntimeError):
@@ -146,7 +153,7 @@ def _pinned_python() -> bool:
 
 
 def _classify_fixed_failure(output: object, api_pb2: object, serialize: object) -> str:
-    """Only the worker's one fixed failure object has a known byte encoding."""
+    """Compare raw bytes to the fixed failure objects; never deserialize them."""
     try:
         result = output.result
         if (not _pinned_python() or output.data_format != api_pb2.DATA_FORMAT_PICKLE
@@ -163,6 +170,17 @@ def _classify_fixed_failure(output: object, api_pb2: object, serialize: object) 
         if (type(expected) is bytes and len(expected) <= _MAX_FIXED_RESULT
                 and hmac.compare_digest(result.data, expected)):
             return "WORKER_FAILED"
+        for stage in _WORKER_FAILURE_STAGES:
+            expected = serialize({
+                "schema_version": _RESULT_SCHEMA_V2,
+                "effect_id": "unavailable",
+                "status_code": "failed",
+                "completion_sha256": "0" * 64,
+                "failure_stage": stage,
+            })
+            if (type(expected) is bytes and len(expected) <= _MAX_FIXED_RESULT
+                    and hmac.compare_digest(result.data, expected)):
+                return f"WORKER_{stage}"
     except Exception:
         pass
     return "PROVIDER_SUCCESS_UNKNOWN"
@@ -249,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     }, sort_keys=True, separators=(",", ":")))
     return 0 if category in {
         "PENDING", "PROVIDER_SUCCESS_UNKNOWN", "WORKER_FAILED", "PROVIDER_FAILURE",
-    } else 1
+    } or category in {f"WORKER_{stage}" for stage in _WORKER_FAILURE_STAGES} else 1
 
 
 if __name__ == "__main__":

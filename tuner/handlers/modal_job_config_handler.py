@@ -15,6 +15,7 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
         from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
         from tuner.training.modal_host_qualification import ModalHostQualificationUnavailable
         from tuner.training.modal_standalone_runner import ModalStandalonePhaseUnavailable
+        from tuner.execution.providers.modal.packaged_worker import PACKAGED_WORKER_FAILURE_STAGES
     except Exception:
         return None
 
@@ -96,7 +97,18 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
         "RUN_SUBMIT_RECONCILE_REQUIRED": ("INDETERMINATE", "modal_standalone_runner.submit_reconcile"),
         "RUN_WORKFLOW_FAILED": ("UNAVAILABLE", "modal_standalone_runner.workflow_failed"),
         "RUN_WORKFLOW_CONTRADICTED": ("INDETERMINATE", "modal_standalone_runner.workflow_contradicted"),
+        "RUN_WORKFLOW_STATE": ("UNAVAILABLE", "modal_standalone_runner.workflow_state"),
+        "RUN_READ_BINDING": ("UNAVAILABLE", "modal_standalone_runner.read_binding"),
+        "RUN_CALL_OBSERVE": ("INDETERMINATE", "modal_standalone_runner.call_observe"),
+        "RUN_OUTCOME": ("UNAVAILABLE", "modal_standalone_runner.outcome"),
+        "RUN_VERIFY": ("UNAVAILABLE", "modal_standalone_runner.verify"),
+        "RUN_ARTIFACT_DOWNLOAD": ("UNAVAILABLE", "modal_standalone_runner.artifact_download"),
+        "RUN_WORKER_FAILED": ("UNAVAILABLE", "modal_standalone_runner.worker_result"),
     }
+    run_phase.update({
+        "RUN_WORKER_" + stage: ("UNAVAILABLE", "modal_standalone_runner.worker_result")
+        for stage in PACKAGED_WORKER_FAILURE_STAGES
+    })
     if type(error) is ModalStandalonePhaseUnavailable and error.retry_authorized is False:
         admitted = run_phase.get(error.phase)
         if admitted == (error.failure_class, error.location):

@@ -27,7 +27,9 @@ from tuner.execution.providers.modal.packaged_composition import (
 from tuner.execution.providers.modal.packaged_deployment import ModalPackagedDeploymentObserver
 from tuner.execution.providers.modal.packaged_reader import ModalPackagedReader
 from tuner.execution.providers.modal.packaged_staging import ModalPackagedInputStager
-from tuner.execution.providers.modal.packaged_worker import InstalledPackagedSFTTrainerExecutor
+from tuner.execution.providers.modal.packaged_worker import (
+    InstalledPackagedSFTTrainerExecutor, PACKAGED_WORKER_FAILURE_STAGES,
+)
 from tuner.execution.providers.modal.model_snapshot import prepare_model_snapshot
 from tuner.execution.providers.modal.runtime_release_qualification import ModalRuntimeReleaseQualificationReceiptV1
 from tuner.runtime.releases import PackagedExecutionBindingV1
@@ -86,7 +88,18 @@ _RUN_PHASE_DIAGNOSTICS = {
     "RUN_SUBMIT_RECONCILE_REQUIRED": ("INDETERMINATE", "modal_standalone_runner.submit_reconcile"),
     "RUN_WORKFLOW_FAILED": ("UNAVAILABLE", "modal_standalone_runner.workflow_failed"),
     "RUN_WORKFLOW_CONTRADICTED": ("INDETERMINATE", "modal_standalone_runner.workflow_contradicted"),
+    "RUN_WORKFLOW_STATE": ("UNAVAILABLE", "modal_standalone_runner.workflow_state"),
+    "RUN_READ_BINDING": ("UNAVAILABLE", "modal_standalone_runner.read_binding"),
+    "RUN_CALL_OBSERVE": ("INDETERMINATE", "modal_standalone_runner.call_observe"),
+    "RUN_OUTCOME": ("UNAVAILABLE", "modal_standalone_runner.outcome"),
+    "RUN_VERIFY": ("UNAVAILABLE", "modal_standalone_runner.verify"),
+    "RUN_ARTIFACT_DOWNLOAD": ("UNAVAILABLE", "modal_standalone_runner.artifact_download"),
+    "RUN_WORKER_FAILED": ("UNAVAILABLE", "modal_standalone_runner.worker_result"),
 }
+_RUN_PHASE_DIAGNOSTICS.update({
+    "RUN_WORKER_" + stage: ("UNAVAILABLE", "modal_standalone_runner.worker_result")
+    for stage in PACKAGED_WORKER_FAILURE_STAGES
+})
 
 _POST_START_PHASES = {
     WorkflowPhaseV1.STAGE_RECONCILE_REQUIRED: "RUN_STAGE_RECONCILE_REQUIRED",
@@ -451,19 +464,21 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             started = api.training.start(training_plan, preflight)
             if started.accepted is not True:
                 raise ValueError
-            phase = None
+            phase = "RUN_WORKFLOW_STATE"
             workflow = host.composition.stores.workflow_store.get(started.run)
             stopped_phase = _post_start_phase(workflow.phase)
             if stopped_phase is not None:
                 raise ModalStandalonePhaseUnavailable(stopped_phase)
             if workflow.phase is not WorkflowPhaseV1.QUEUED:
                 raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable")
+            phase = "RUN_READ_BINDING"
             read_request = host.composition.runs._request(
                 workflow, ProviderReadPurposeV1.OBSERVE,
             )
             binding = host.reader._binding(read_request, ProviderReadPurposeV1.OBSERVE)
             provider_job_ref = read_request.provider_run.reference.provider_job_ref
             deadline = time.monotonic() + recipe.timeout_seconds + 120
+            phase = "RUN_CALL_OBSERVE"
             while True:
                 try:
                     state, _ = host.reader._poll_packaged_call(
@@ -476,9 +491,14 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 if state is not ModalFunctionCallState.PENDING or time.monotonic() >= deadline:
                     raise ModalStandaloneRunUnavailable("modal_packaged_call_unavailable")
                 time.sleep(min(5, max(0, deadline - time.monotonic())))
+            phase = "RUN_OUTCOME"
             outcome = api.runs.outcome(started.run)
-            if outcome.state.value != "succeeded" or api.runs.verify(started.run).verified is not True:
+            if outcome.state.value != "succeeded":
                 raise ValueError
+            phase = "RUN_VERIFY"
+            if api.runs.verify(started.run).verified is not True:
+                raise ValueError
+            phase = "RUN_ARTIFACT_DOWNLOAD"
             artifact_root = root / (run_id + "-artifacts")
             artifact_paths = tuple(download_verified_modal_artifact(
                 api.runs, started.run, role=role, output_root=artifact_root,
@@ -495,6 +515,16 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
         raise
     except ModalStandalonePhaseUnavailable:
         raise
+    except ModalPackagedReadUnavailable as failure:
+        if phase == "RUN_CALL_OBSERVE" and type(failure) is ModalPackagedReadUnavailable:
+            if failure.args == ("modal_packaged_call_failed",):
+                raise ModalStandalonePhaseUnavailable("RUN_WORKER_FAILED") from None
+            for stage in PACKAGED_WORKER_FAILURE_STAGES:
+                if failure.args == ("modal_packaged_call_failed_" + stage,):
+                    raise ModalStandalonePhaseUnavailable("RUN_WORKER_" + stage) from None
+        if phase is not None:
+            raise ModalStandalonePhaseUnavailable(phase) from None
+        raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable") from None
     except ModalPackagedResolutionUnavailable as failure:
         if phase == "RUN_PUBLIC_RESOLVE" and type(failure) is ModalPackagedResolutionUnavailable:
             stage_phase = {

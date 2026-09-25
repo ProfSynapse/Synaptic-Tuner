@@ -779,6 +779,18 @@ failure result was returned; it does not disclose the failing operation,
 verify a run, or authorize replay. The public reader likewise recognizes only
 that exact failure dictionary; near misses stay unknown.
 
+New packaged workers return the same v1 success shape but a fixed v2 failure
+shape with one closed `failure_stage`: entrypoint setup, dispatch authentication,
+staged input, path claim, one of the generic SFT executor's admitted stages,
+completion, or a Volume commit. The read-only inspector reports `WORKER_<STAGE>`
+only for an exact locally serialized result; the public train command reports
+`RUN_WORKER_<STAGE>` only after an authenticated call. Legacy fixed failures
+remain `WORKER_FAILED` / `RUN_WORKER_FAILED`. These labels locate a boundary,
+not an exception, root cause, successful optimizer step, or retry grant. The
+runner also uses closed post-submit labels for workflow, read binding, call
+observation, outcome, verification, and artifact download; never infer remote
+state from one label alone.
+
 The first Qwen 3.5 4B smoke recipe selects `L40S` as a measured-rate but
 unqualified-fit candidate; `A100-80GB` remains a reviewed fallback. Both use
 the exact current scoped GPU rate key, and the operator estimate is not a

@@ -32,6 +32,12 @@ _FIXED_WORKER_FAILURE = {
     "status_code": "failed",
     "completion_sha256": "0" * 64,
 }
+_FIXED_WORKER_FAILURE_STAGES = frozenset({
+    "ENTRYPOINT_SETUP", "DISPATCH_AUTH", "STAGED_INPUT", "PATH_CLAIM",
+    "SFT_ADMISSION", "SFT_PREPARATION", "SFT_REVALIDATION",
+    "SFT_INVOCATION", "SFT_TRAINER", "SFT_EVIDENCE", "SFT_ARTIFACT",
+    "SFT_UNKNOWN", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
+})
 
 
 class ModalPackagedCoordinatorReaderV1:
@@ -143,6 +149,19 @@ class ModalPackagedCoordinatorReaderV1:
                 return ModalFunctionCallState.PENDING, None
             if type(result) is dict and result == _FIXED_WORKER_FAILURE:
                 raise ModalPackagedReadUnavailable("modal_packaged_call_failed")
+            if type(result) is dict and set(result) == {
+                    "schema_version", "effect_id", "status_code",
+                    "completion_sha256", "failure_stage",
+            } and type(result.get("failure_stage")) is str:
+                stage = result["failure_stage"]
+                if (stage in _FIXED_WORKER_FAILURE_STAGES and result == {
+                        **_FIXED_WORKER_FAILURE,
+                        "schema_version": "synaptic-modal-packaged-worker-result/v2",
+                        "failure_stage": stage,
+                }):
+                    raise ModalPackagedReadUnavailable(
+                        f"modal_packaged_call_failed_{stage}",
+                    )
             if (type(result) is not dict or set(result) != {
                     "schema_version", "effect_id", "status_code", "completion_sha256",
             } or result["schema_version"] != "synaptic-modal-packaged-worker-result/v1"

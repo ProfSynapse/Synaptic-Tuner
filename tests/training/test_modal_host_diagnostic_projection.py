@@ -2,6 +2,7 @@
 
 import pytest
 
+from tuner.execution.providers.modal.packaged_worker import PACKAGED_WORKER_FAILURE_STAGES
 from tuner.handlers.modal_job_config_handler import _closed_bootstrap_details
 from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
 from tuner.training.modal_host_qualification import ModalHostQualificationUnavailable
@@ -82,8 +83,10 @@ def test_cpu_qualification_diagnosis_projects_only_closed_fields(phase):
     "RUN_RESOLVE_REPARSE", "RUN_PUBLIC_PLAN", "RUN_PUBLIC_PREFLIGHT",
     "RUN_START_INDETERMINATE", "RUN_STAGE_RECONCILE_REQUIRED",
     "RUN_SUBMIT_RECONCILE_REQUIRED", "RUN_WORKFLOW_FAILED",
-    "RUN_WORKFLOW_CONTRADICTED",
-))
+    "RUN_WORKFLOW_CONTRADICTED", "RUN_WORKFLOW_STATE", "RUN_READ_BINDING",
+    "RUN_CALL_OBSERVE", "RUN_OUTCOME", "RUN_VERIFY", "RUN_ARTIFACT_DOWNLOAD",
+    "RUN_WORKER_FAILED",
+) + tuple("RUN_WORKER_" + stage for stage in sorted(PACKAGED_WORKER_FAILURE_STAGES)))
 def test_standalone_run_diagnosis_projects_only_closed_fields(phase):
     error = ModalStandalonePhaseUnavailable(phase)
     assert _closed_bootstrap_details(error) == {

@@ -5,13 +5,17 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
+import pytest
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.providers.modal.packaged_dispatch import build_modal_packaged_dispatch
 from tuner.execution.providers.modal.packaged_worker import (
     ModalPackagedWorker,
     ModalPackagedWorkerRoots,
+    PACKAGED_WORKER_FAILURE_STAGES,
+    packaged_worker_failure,
 )
+from tuner.runtime.packaged_sft_execution import PackagedSFTExecutionError
 
 from tests.execution.providers.test_modal_packaged_dispatch import Auth, _case
 
@@ -20,6 +24,16 @@ EXACT_ROLES = (
     "workload_record", "training_lineage", "training_metrics", "final_model",
     "tokenizer",
 )
+
+
+def _assert_failure(result, stage):
+    assert result == {
+        "schema_version": "synaptic-modal-packaged-worker-result/v2",
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+        "failure_stage": stage,
+    }
 
 
 class Signer:
@@ -119,6 +133,8 @@ def test_worker_calls_generic_trainer_once_without_modal_objects_or_provider_fac
         commit_control=lambda: events.append("control"),
     )
     assert result["status_code"] == "completed"
+    assert result["schema_version"] == "synaptic-modal-packaged-worker-result/v1"
+    assert "failure_stage" not in result
     assert result["effect_id"] == binding.command.operation.effect.effect_id
     assert len(executor.calls) == len(signer.calls) == 1
     assert events == ["artifacts", "control"]
@@ -142,11 +158,7 @@ def test_staged_input_mismatch_fails_closed_before_trainer_or_commits(tmp_path) 
         commit_artifacts=lambda: events.append("artifacts"),
         commit_control=lambda: events.append("control"),
     )
-    assert result == {
-        "schema_version": "synaptic-modal-packaged-worker-result/v1",
-        "effect_id": "unavailable", "status_code": "failed",
-        "completion_sha256": "0" * 64,
-    }
+    _assert_failure(result, "STAGED_INPUT")
     assert executor.calls == signer.calls == events == []
 
 
@@ -159,7 +171,7 @@ def test_trainer_failure_is_closed_and_never_commits_or_signs(tmp_path) -> None:
         commit_artifacts=lambda: events.append("artifacts"),
         commit_control=lambda: events.append("control"),
     )
-    assert result["status_code"] == "failed"
+    _assert_failure(result, "SFT_UNKNOWN")
     assert len(executor.calls) == 1
     assert signer.calls == events == []
 
@@ -248,3 +260,84 @@ def test_existing_operation_directories_prevent_automatic_replay(tmp_path) -> No
     assert second["status_code"] == "failed"
     assert len(executor.calls) == 1
     assert commits == ["artifacts", "control"]
+
+
+def test_failure_stage_contract_is_closed_and_rejects_dynamic_values() -> None:
+    assert len(PACKAGED_WORKER_FAILURE_STAGES) == 15
+    for stage in PACKAGED_WORKER_FAILURE_STAGES:
+        _assert_failure(packaged_worker_failure(stage), stage)
+    _assert_failure(packaged_worker_failure("secret/path"), "SFT_UNKNOWN")
+
+
+def test_dispatch_auth_failure_is_closed(tmp_path) -> None:
+    _, _, worker, executor, signer, _ = _worker(tmp_path)
+    _assert_failure(worker(
+        b"private malformed dispatch", "fc-1",
+        commit_artifacts=lambda: pytest.fail("unexpected artifact commit"),
+        commit_control=lambda: pytest.fail("unexpected control commit"),
+    ), "DISPATCH_AUTH")
+    assert executor.calls == signer.calls == []
+
+
+def test_path_claim_failure_is_closed(tmp_path, monkeypatch) -> None:
+    from tuner.execution.providers.modal import packaged_worker
+
+    _, dispatch, worker, executor, signer, _ = _worker(tmp_path)
+    def refuse_claim(*args):
+        raise OSError("private /mount/path")
+    monkeypatch.setattr(packaged_worker, "claim_directory", refuse_claim)
+    _assert_failure(worker(
+        dispatch, "fc-1",
+        commit_artifacts=lambda: pytest.fail("unexpected artifact commit"),
+        commit_control=lambda: pytest.fail("unexpected control commit"),
+    ), "PATH_CLAIM")
+    assert executor.calls == signer.calls == []
+
+
+@pytest.mark.parametrize("sft_stage", [
+    "ADMISSION", "PREPARATION", "REVALIDATION", "INVOCATION", "TRAINER",
+    "EVIDENCE", "ARTIFACT",
+])
+def test_generic_executor_exact_closed_stage_is_reported(tmp_path, sft_stage) -> None:
+    class StageExecutor:
+        def execute(self, **kwargs):
+            raise PackagedSFTExecutionError(sft_stage)
+
+    _, dispatch, worker, _, signer, _ = _worker(tmp_path, executor=StageExecutor())
+    _assert_failure(worker(
+        dispatch, "fc-1",
+        commit_artifacts=lambda: pytest.fail("unexpected artifact commit"),
+        commit_control=lambda: pytest.fail("unexpected control commit"),
+    ), "SFT_" + sft_stage)
+    assert signer.calls == []
+
+
+def test_completion_failure_is_closed(tmp_path) -> None:
+    _, dispatch, worker, _, signer, _ = _worker(
+        tmp_path, executor=Executor(bad_digest=True),
+    )
+    _assert_failure(worker(
+        dispatch, "fc-1",
+        commit_artifacts=lambda: pytest.fail("unexpected artifact commit"),
+        commit_control=lambda: pytest.fail("unexpected control commit"),
+    ), "COMPLETION")
+    assert signer.calls == []
+
+
+@pytest.mark.parametrize("failed_commit,stage", [
+    ("artifacts", "ARTIFACT_COMMIT"), ("control", "CONTROL_COMMIT"),
+])
+def test_commit_failure_is_closed(tmp_path, failed_commit, stage) -> None:
+    _, dispatch, worker, _, signer, _ = _worker(tmp_path)
+    events = []
+    def commit(role):
+        events.append(role)
+        if role == failed_commit:
+            raise OSError("private commit path")
+    _assert_failure(worker(
+        dispatch, "fc-1",
+        commit_artifacts=lambda: commit("artifacts"),
+        commit_control=lambda: commit("control"),
+    ), stage)
+    assert len(signer.calls) == 1
+    assert events == (["artifacts"] if failed_commit == "artifacts" else ["artifacts", "control"])

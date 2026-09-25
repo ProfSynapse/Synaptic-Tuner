@@ -14,10 +14,11 @@ _PRIVATE_SCRATCH_ROOT = Path("/tmp")
 def run_modal_packaged_training(dispatch_bytes: bytes) -> dict[str, object]:
     """Authenticate one dispatch and execute it in the captured image."""
     failed = {
-        "schema_version": "synaptic-modal-packaged-worker-result/v1",
+        "schema_version": "synaptic-modal-packaged-worker-result/v2",
         "effect_id": "unavailable",
         "status_code": "failed",
         "completion_sha256": "0" * 64,
+        "failure_stage": "ENTRYPOINT_SETUP",
     }
     try:
         import modal

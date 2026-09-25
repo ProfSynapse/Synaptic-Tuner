@@ -10,6 +10,7 @@ from typing import Protocol
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes, digest_text, safe_ref
 from tuner.runtime.packaged_sft_execution import (
+    PackagedSFTExecutionError,
     PackagedSFTPaths,
     admit_packaged_sft,
     execute_admitted_packaged_sft,
@@ -29,6 +30,31 @@ from .packaged_dispatch import (
     ModalPackagedDispatchVerifier,
     parse_modal_packaged_dispatch,
 )
+
+
+PACKAGED_WORKER_FAILURE_STAGES = frozenset({
+    "ENTRYPOINT_SETUP", "DISPATCH_AUTH", "STAGED_INPUT", "PATH_CLAIM",
+    "SFT_ADMISSION", "SFT_PREPARATION", "SFT_REVALIDATION",
+    "SFT_INVOCATION", "SFT_TRAINER", "SFT_EVIDENCE", "SFT_ARTIFACT",
+    "SFT_UNKNOWN", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
+})
+_SFT_FAILURE_STAGES = frozenset({
+    "ADMISSION", "PREPARATION", "REVALIDATION", "INVOCATION", "TRAINER",
+    "EVIDENCE", "ARTIFACT",
+})
+
+
+def packaged_worker_failure(stage: str) -> dict[str, object]:
+    """Return only a fixed, non-secret location for a failed worker boundary."""
+    if type(stage) is not str or stage not in PACKAGED_WORKER_FAILURE_STAGES:
+        stage = "SFT_UNKNOWN"
+    return {
+        "schema_version": "synaptic-modal-packaged-worker-result/v2",
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+        "failure_stage": stage,
+    }
 
 
 class PackagedTrainerExecutor(Protocol):
@@ -257,10 +283,12 @@ class ModalPackagedWorker:
         commit_artifacts,
         commit_control,
     ) -> dict[str, object]:
+        stage = "DISPATCH_AUTH"
         try:
             dispatch = parse_modal_packaged_dispatch(dispatch_bytes, self._verifier)
             if dispatch.provider_facts != self._facts:
                 raise ValueError("packaged dispatch targets another deployment")
+            stage = "STAGED_INPUT"
             size, digest = hash_regular(
                 self._roots.artifacts,
                 self._roots.artifacts / dispatch.stage_receipt.path,
@@ -271,7 +299,9 @@ class ModalPackagedWorker:
                 dispatch.stage_receipt.content_digest,
             ):
                 raise ValueError("staged packaged input differs")
+            stage = "PATH_CLAIM"
             paths = self._paths(dispatch)
+            stage = "SFT_ADMISSION"
             result = self._executor.execute(
                 runtime_release=dispatch.runtime_release,
                 provider_binding=dispatch.provider_binding,
@@ -281,8 +311,11 @@ class ModalPackagedWorker:
                 paths=paths,
                 environment=dispatch.environment,
             )
+            stage = "COMPLETION"
             completion = self._publish_completion(dispatch, result, provider_job_ref)
+            stage = "ARTIFACT_COMMIT"
             commit_artifacts()
+            stage = "CONTROL_COMMIT"
             commit_control()
             return {
                 "schema_version": "synaptic-modal-packaged-worker-result/v1",
@@ -290,13 +323,14 @@ class ModalPackagedWorker:
                 "status_code": "completed",
                 "completion_sha256": hashlib.sha256(completion).hexdigest(),
             }
-        except BaseException:
-            return {
-                "schema_version": "synaptic-modal-packaged-worker-result/v1",
-                "effect_id": "unavailable",
-                "status_code": "failed",
-                "completion_sha256": "0" * 64,
-            }
+        except BaseException as exc:
+            if stage == "SFT_ADMISSION":
+                stage = (
+                    "SFT_" + exc.stage
+                    if type(exc) is PackagedSFTExecutionError
+                    and exc.stage in _SFT_FAILURE_STAGES else "SFT_UNKNOWN"
+                )
+            return packaged_worker_failure(stage)
 
 
 __all__ = [
@@ -304,5 +338,7 @@ __all__ = [
     "ModalPackagedEvidenceSigner",
     "ModalPackagedWorker",
     "ModalPackagedWorkerRoots",
+    "PACKAGED_WORKER_FAILURE_STAGES",
     "PackagedTrainerExecutor",
+    "packaged_worker_failure",
 ]

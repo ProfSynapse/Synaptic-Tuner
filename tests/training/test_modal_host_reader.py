@@ -165,6 +165,43 @@ def test_failed_packaged_result_stops_with_fixed_failure_diagnostic():
         reader.observe(request)
 
 
+@pytest.mark.parametrize("stage", sorted(host_reader_module._FIXED_WORKER_FAILURE_STAGES))
+def test_v2_worker_failure_reports_only_fixed_stage(stage):
+    reader, request, _ = _reader("failed")
+    reader._facade.result = {
+        "schema_version": "synaptic-modal-packaged-worker-result/v2",
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+        "failure_stage": stage,
+    }
+    with pytest.raises(ModalPackagedReadUnavailable) as error:
+        reader.observe(request)
+    assert str(error.value) == f"modal_packaged_call_failed_{stage}"
+
+
+@pytest.mark.parametrize("change", [
+    {"effect_id": "other"}, {"status_code": "completed"},
+    {"completion_sha256": "a" * 64}, {"schema_version": "other"},
+    {"failure_stage": "SFT_OTHER"}, {"failure_stage": "sft_trainer"},
+    {"failure_stage": True}, {"extra": "untrusted"},
+])
+def test_v2_near_miss_worker_failures_remain_unknown(change):
+    reader, _request, _ = _reader("failed")
+    result = {
+        "schema_version": "synaptic-modal-packaged-worker-result/v2",
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+        "failure_stage": "SFT_TRAINER",
+    }
+    result.update(change)
+    reader._facade.result = result
+    with pytest.raises(ModalPackagedReadUnavailable) as error:
+        reader._poll_packaged_call(reader.binding, "fc-1")
+    assert str(error.value) == "modal_packaged_call_unknown"
+
+
 @pytest.mark.parametrize("change", [
     {"effect_id": "other"},
     {"status_code": "completed"},
