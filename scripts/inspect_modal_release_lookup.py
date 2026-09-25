@@ -155,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--claim-ref", required=True)
     parser.add_argument("--environment", required=True)
     parser.add_argument("--modal-profile", required=True)
+    parser.add_argument("--production-reader", action="store_true",
+                        help="Use the exact runtime reader instead of raw response classification")
     args = parser.parse_args(argv)
     result: dict[str, object]
     try:
@@ -177,9 +179,26 @@ def main(argv: list[str] | None = None) -> int:
                 from modal_proto import api_pb2
 
                 client = modal.Client.from_credentials(token_id, token_secret)
-                result = synchronizer.create_blocking(inspect_lookup)(
-                    client, name, environment, api_pb2,
-                )
+                if args.production_reader:
+                    from tuner.execution.providers.modal.runtime_release_deployment import (
+                        ExplicitModal154ReleaseDeploymentReader,
+                    )
+
+                    try:
+                        observation = ExplicitModal154ReleaseDeploymentReader(
+                            sdk=modal,
+                        ).observe(
+                            client=client, app_name=name,
+                            environment_name=environment,
+                        )
+                        result = {"result": "READER_ABSENT" if observation is None
+                                  else "READER_PRESENT"}
+                    except Exception:
+                        result = {"result": "READER_UNAVAILABLE"}
+                else:
+                    result = synchronizer.create_blocking(inspect_lookup)(
+                        client, name, environment, api_pb2,
+                    )
     except DiagnosticUnavailable as error:
         result = {"result": error.args[0].upper()}
     except Exception:
@@ -191,7 +210,9 @@ def main(argv: list[str] | None = None) -> int:
         **result,
     }
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
-    return 0 if result["result"] in {"ABSENT", "DEPLOYED", "STOPPED"} else 1
+    return 0 if result["result"] in {
+        "ABSENT", "DEPLOYED", "STOPPED", "READER_ABSENT", "READER_PRESENT",
+    } else 1
 
 
 if __name__ == "__main__":

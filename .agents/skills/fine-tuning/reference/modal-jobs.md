@@ -668,6 +668,13 @@ proof of never-deployment, shutdown, cleanup, or retry authority. Preserve the
 failed attempt and its resources. This diagnostic is not a public training API
 or a substitute for exact-source CPU qualification.
 
+If raw lookup reports a shape the production reader should admit but the
+attempt failed at readback, repeat the diagnostic with `--production-reader`.
+That mode performs one bounded logical read through the pinned runtime reader
+(one lookup when absent, up to three read-only RPCs when present) and emits
+only `READER_ABSENT`, `READER_PRESENT`, or `READER_UNAVAILABLE`; it remains
+non-authorizing and must not be used to replay the failed attempt.
+
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in
 `scripts/chat_model.py` command; do not rerun training to rebuild ephemeral host

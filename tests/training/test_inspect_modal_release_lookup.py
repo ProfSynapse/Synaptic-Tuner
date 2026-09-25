@@ -198,3 +198,57 @@ def test_main_missing_named_credentials_never_creates_client(monkeypatch, capsys
     ])
     assert code == 1
     assert json.loads(capsys.readouterr().out)["result"] == "CREDENTIAL_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("outcome,expected,exit_code", [
+    (None, "READER_ABSENT", 0),
+    (object(), "READER_PRESENT", 0),
+    (RuntimeError("secret provider payload"), "READER_UNAVAILABLE", 1),
+])
+def test_production_reader_mode_is_closed_and_single_read(
+    monkeypatch, capsys, outcome, expected, exit_code,
+):
+    monkeypatch.setattr(diagnostic, "read_deploy_claim", lambda *_: "exact-name")
+    modal = ModuleType("modal")
+    modal.__version__ = "1.5.4"
+    client = object()
+    modal.Client = SimpleNamespace(from_credentials=lambda *_: client)
+    config_module = ModuleType("modal.config")
+    config_module.config = SimpleNamespace(get=lambda *_args, **_kwargs: "credential")
+    utils_module = ModuleType("modal._utils")
+    async_module = ModuleType("modal._utils.async_utils")
+    async_module.synchronizer = SimpleNamespace(create_blocking=lambda fn: fn)
+    proto_module = ModuleType("modal_proto")
+    proto_module.api_pb2 = object()
+    reader_module = ModuleType("tuner.execution.providers.modal.runtime_release_deployment")
+    calls = []
+
+    class Reader:
+        def __init__(self, *, sdk):
+            assert sdk is modal
+
+        def observe(self, *, client, app_name, environment_name):
+            calls.append((client, app_name, environment_name))
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    reader_module.ExplicitModal154ReleaseDeploymentReader = Reader
+    for key, module in (
+        ("modal", modal), ("modal.config", config_module),
+        ("modal._utils", utils_module),
+        ("modal._utils.async_utils", async_module),
+        ("modal_proto", proto_module),
+        ("tuner.execution.providers.modal.runtime_release_deployment", reader_module),
+    ):
+        monkeypatch.setitem(sys.modules, key, module)
+    code = diagnostic.main([
+        "--journal", "/unused/private.sqlite3", "--claim-ref", _CLAIM_REF,
+        "--environment", "main", "--modal-profile", "synaptic-labs",
+        "--production-reader",
+    ])
+    result = json.loads(capsys.readouterr().out)
+    assert code == exit_code
+    assert result["result"] == expected
+    assert "secret" not in str(result)
+    assert calls == [(client, "exact-name", "main")]
