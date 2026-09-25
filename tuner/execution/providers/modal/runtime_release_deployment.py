@@ -170,9 +170,10 @@ class ModalRuntimeReleaseFunctionSpecV1:
             object.__setattr__(self, "gpu", safe_ref(self.gpu, "gpu"))
         if self.role == "self_check" and self.gpu is not None:
             raise ValueError("Modal release self-check must be CPU-only")
-        expected_modal_restriction = self.role != "self_check"
+        if type(self.restrict_modal_access) is not bool:
+            raise TypeError("restrict_modal_access must be an exact boolean")
         if self.retries != 0 \
-                or self.restrict_modal_access is not expected_modal_restriction \
+                or (self.role == "self_check" and self.restrict_modal_access is not False) \
                 or self.single_use_containers is not True \
                 or self.serialized is not False or self.include_source is not False:
             raise ValueError("Modal release function safety policy is not exact")
@@ -1125,6 +1126,21 @@ class ModalRuntimeReleaseDeployer:
             require_bounded_modal_deployment_host()
         if type(plan) is not ModalRuntimeReleaseDeploymentPlanV1:
             raise TypeError("exact Modal release deployment plan required")
+        training, self_check = plan.functions
+        if type(plan.release) is PackagedTrainingRuntimeReleaseV1:
+            if training.restrict_modal_access is not True:
+                raise ValueError("v1 Modal training deployment access policy is not exact")
+        else:
+            secrets = plan.secrets
+            if (
+                training.restrict_modal_access is not False
+                or len(secrets) != 2
+                or self_check.secret_names != (secrets[0].name,)
+                or training.secret_names != (secrets[0].name, secrets[1].name)
+                or secrets[0].required_keys != EXACT_QUALIFICATION_SECRET_REQUIRED_KEYS
+                or secrets[1].required_keys != ("HF_TOKEN",)
+            ):
+                raise ValueError("v2 Modal training deployment policy is not exact")
         if plan.environment_name != self._binding.environment_ref:
             raise ValueError("Modal release plan differs from the explicit client scope")
         if type(entrypoints) is not dict or set(entrypoints) != {"training", "self_check"}:

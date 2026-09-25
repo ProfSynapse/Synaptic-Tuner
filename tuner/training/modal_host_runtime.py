@@ -513,6 +513,7 @@ def prepare_modal_runtime_for_host(
                 (qualification_name, token_name),
                 1000, 4096, recipe_resource.timeout_seconds,
                 recipe_resource.accelerator, False,
+                restrict_modal_access=False,
             ),
             ModalRuntimeReleaseFunctionSpecV1(
                 "self_check", "packaged-self-check", EXACT_SELF_CHECK_MODULE,

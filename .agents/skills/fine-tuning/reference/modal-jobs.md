@@ -791,6 +791,23 @@ runner also uses closed post-submit labels for workflow, read binding, call
 observation, outcome, verification, and artifact download; never infer remote
 state from one label alone.
 
+The packaged training parent must explicitly hydrate the three exact mounted
+Volume identities and synchronously commit verified cache, artifact, then
+control writes before reporting success. Modal's `restrict_modal_access=True`
+blocks those internal Volume APIs; background or shutdown commits on v1 Volumes
+do not provide the same acknowledged order. New standalone training plans
+therefore set `restrict_modal_access=False` only for the trusted, signed training
+Function. This grants that parent broader Modal resource access and must be
+reviewed as a security policy choice. A compromised parent can reach other
+resources allowed by its Modal workspace; signed dispatch does not confine it
+after compromise. Prefer a dedicated least-privilege Modal environment/token
+where available. The offline trainer child receives a fresh credential-free
+environment, but its offline flags are not operating-system network isolation.
+The policy does not change the CPU self-check, exact Volume/Secret IDs, one-use
+dispatch, or artifact verification. Historical restricted plan/facts records
+remain parseable but are not a working recipe for this explicit-commit training path. A CPU receipt
+cannot prove this GPU-parent access boundary; only a fresh training call can.
+
 The first Qwen 3.5 4B smoke recipe selects `L40S` as a measured-rate but
 unqualified-fit candidate; `A100-80GB` remains a reviewed fallback. Both use
 the exact current scoped GPU rate key, and the operator estimate is not a

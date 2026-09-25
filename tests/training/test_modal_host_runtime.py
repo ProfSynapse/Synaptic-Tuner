@@ -342,6 +342,8 @@ def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkey
             assert tuple(v.role for v in plan.volumes) == ("control", "artifacts", "model_cache")
             assert plan.functions[0].volume_roles == ("control", "artifacts", "model_cache")
             assert plan.functions[0].gpu == accelerator
+            assert plan.functions[0].restrict_modal_access is False
+            assert plan.functions[1].restrict_modal_access is False
             assert kwargs["entrypoints"]["training"] is host.run_modal_packaged_training
             events.append("deploy")
             return SimpleNamespace(secrets=(

@@ -339,6 +339,7 @@ def _deployer(reader: Reader):
 def test_plan_and_acknowledged_facts_round_trip_and_project_to_adapter() -> None:
     plan = _plan()
     assert ModalRuntimeReleaseDeploymentPlanV1.parse(plan.canonical_bytes) == plan
+    assert plan.functions[0].restrict_modal_access is True
     deployer, client = _deployer(Reader([None, _observation(1)]))
 
     facts = deployer.deploy_once(
@@ -390,6 +391,26 @@ def test_plan_and_acknowledged_facts_round_trip_and_project_to_adapter() -> None
     })]
 
 
+def test_trusted_training_access_is_bound_by_plan_and_deployment_facts() -> None:
+    historical_plan = _plan()
+    trusted_training = replace(historical_plan.functions[0], restrict_modal_access=False)
+    plan = replace(historical_plan, functions=(trusted_training, historical_plan.functions[1]))
+    assert ModalRuntimeReleaseDeploymentPlanV1.parse(plan.canonical_bytes) == plan
+    assert plan.deployment_spec_digest != historical_plan.deployment_spec_digest
+
+    reader = Reader([])
+    deployer, _ = _deployer(reader)
+    with pytest.raises(ValueError, match="v1 Modal training deployment access policy"):
+        deployer.deploy_once(plan, entrypoints={
+            "training": packaged_training_entry,
+            "self_check": run_runtime_release_self_check,
+        })
+    assert reader.calls == [] and not FakeApp.instances
+
+    with pytest.raises(TypeError, match="exact boolean"):
+        replace(trusted_training, restrict_modal_access=0)
+
+
 def test_v2_published_oci_uses_exact_registry_branch_without_build_candidate() -> None:
     from tuner.execution.providers.modal.runtime_release_deployment import (
         MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA,
@@ -416,10 +437,14 @@ def test_v2_published_oci_uses_exact_registry_branch_without_build_candidate() -
     )
     training = replace(original.functions[0], volume_roles=("control", "artifacts", "model_cache"),
                        module="tuner.runtime.runtime_release_modal_training",
-                       qualname="run_modal_packaged_training")
+                       qualname="run_modal_packaged_training",
+                       secret_names=(original.secrets[0].name, "hf-token"),
+                       restrict_modal_access=False)
     cache = ModalRuntimeReleaseVolumeSpecV1("model_cache", "cache-volume", "/mnt/model-cache")
+    token_secret = ModalRuntimeReleaseSecretSpecV1("hf-token", ("HF_TOKEN",))
     plan = replace(original, release=release, functions=(training, original.functions[1]),
-                   volumes=(*original.volumes, cache), schema_version=MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA)
+                   volumes=(*original.volumes, cache), secrets=(*original.secrets, token_secret),
+                   schema_version=MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA)
     deployer, _ = _deployer(Reader([None, _observation(1)]))
     facts = deployer.deploy_once(plan, entrypoints={
         "training": run_modal_packaged_training,
@@ -429,8 +454,22 @@ def test_v2_published_oci_uses_exact_registry_branch_without_build_candidate() -
     assert facts.image_id == "im-release"
     assert facts.material_digest == release.material_digest
     assert {item.spec.role: item.volume_id for item in facts.volumes}["model_cache"] == "vo-cache"
+    assert [item.spec.restrict_modal_access for item in facts.functions] == [False, False]
+    assert [item[0].options["restrict_modal_access"] for item in FakeApp.instances[-1].functions] \
+        == [False, False]
+    assert [item.spec.name for item in facts.secrets] == ["release-evidence", "hf-token"]
+    assert [name for name, _ in FakeSecret.calls] == ["release-evidence", "hf-token"]
     assert FakeImage.calls == [source.image_ref]
     assert ModalRuntimeReleaseDeploymentFactsV1.parse(facts.canonical_bytes) == facts
+    historical_training = replace(training, restrict_modal_access=True)
+    historical_plan = replace(plan, functions=(historical_training, plan.functions[1]))
+    historical_facts = replace(
+        facts,
+        deployment_spec_digest=historical_plan.deployment_spec_digest,
+        functions=(replace(facts.functions[0], spec=historical_training), facts.functions[1]),
+    )
+    assert ModalRuntimeReleaseDeploymentPlanV1.parse(historical_plan.canonical_bytes) == historical_plan
+    assert ModalRuntimeReleaseDeploymentFactsV1.parse(historical_facts.canonical_bytes) == historical_facts
     packaged = ModalPackagedRuntimeFactsV1.from_release_deployment(facts)
     assert packaged.model_cache_volume_id == "vo-cache"
     assert ModalPackagedRuntimeFactsV1.parse(packaged.canonical_bytes) == packaged
@@ -449,14 +488,50 @@ def _modal_build_plan_and_candidate():
         original.functions[0], volume_roles=("control", "artifacts", "model_cache"),
         module="tuner.runtime.runtime_release_modal_training",
         qualname="run_modal_packaged_training",
+        secret_names=(original.secrets[0].name, "hf-token"),
+        restrict_modal_access=False,
     )
     cache = ModalRuntimeReleaseVolumeSpecV1("model_cache", "cache-volume", "/mnt/model-cache")
+    token_secret = ModalRuntimeReleaseSecretSpecV1("hf-token", ("HF_TOKEN",))
     plan = replace(
         original, release=release, functions=(training, original.functions[1]),
         volumes=(*original.volumes, cache),
+        secrets=(*original.secrets, token_secret),
         schema_version=MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA,
     )
     return plan, candidate
+
+
+@pytest.mark.parametrize("mutation", [
+    "restricted_training", "missing_training_token", "reversed_training_secrets",
+    "extra_secret", "reversed_declared_secrets", "wrong_token_key",
+])
+def test_v2_effectful_deployment_rejects_untrusted_policy_before_provider_reads(mutation):
+    plan, _ = _modal_build_plan_and_candidate()
+    training, self_check = plan.functions
+    qualification, token = plan.secrets
+    if mutation == "restricted_training":
+        plan = replace(plan, functions=(replace(training, restrict_modal_access=True), self_check))
+    elif mutation == "missing_training_token":
+        plan = replace(plan, functions=(replace(training, secret_names=(qualification.name,)), self_check))
+    elif mutation == "reversed_training_secrets":
+        plan = replace(plan, functions=(replace(training, secret_names=(token.name, qualification.name)), self_check))
+    elif mutation == "extra_secret":
+        plan = replace(plan, secrets=(*plan.secrets, ModalRuntimeReleaseSecretSpecV1("extra", ("OTHER_TOKEN",))))
+    elif mutation == "reversed_declared_secrets":
+        plan = replace(plan, secrets=(token, qualification))
+    else:
+        plan = replace(plan, secrets=(qualification, replace(token, required_keys=("OTHER_TOKEN",))))
+    assert ModalRuntimeReleaseDeploymentPlanV1.parse(plan.canonical_bytes) == plan
+    reader = Reader([])
+    deployer, _ = _deployer(reader)
+    with pytest.raises(ValueError, match="v2 Modal training deployment policy"):
+        deployer.deploy_once(plan, entrypoints={
+            "training": run_modal_packaged_training,
+            "self_check": run_runtime_release_self_check,
+        })
+    assert reader.calls == []
+    assert not FakeApp.instances and not FakeVolume.calls and not FakeSecret.calls
 
 
 @pytest.mark.parametrize("hydrated_image_id", ["im-exact", "im-other", None])
@@ -552,9 +627,13 @@ def test_v2_plan_rejects_missing_or_reused_cache_volume() -> None:
     cache = ModalRuntimeReleaseVolumeSpecV1("model_cache", "cache-volume", "/mnt/model-cache")
     training = replace(original.functions[0], volume_roles=("control", "artifacts", "model_cache"),
                        module="tuner.runtime.runtime_release_modal_training",
-                       qualname="run_modal_packaged_training")
+                       qualname="run_modal_packaged_training",
+                       secret_names=(original.secrets[0].name, "hf-token"),
+                       restrict_modal_access=False)
+    token_secret = ModalRuntimeReleaseSecretSpecV1("hf-token", ("HF_TOKEN",))
     plan = replace(original, release=release, functions=(training, original.functions[1]),
                    volumes=(*original.volumes, cache),
+                   secrets=(*original.secrets, token_secret),
                    schema_version=MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA)
     with pytest.raises(ValueError, match="distinct model-cache Volume"):
         replace(plan, functions=(replace(training, module=__name__,
