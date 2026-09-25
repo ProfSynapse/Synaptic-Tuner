@@ -685,6 +685,12 @@ fixed, non-authorizing failure fields for `FIXTURE_STAGE`, `DISPATCH_SUBMIT`,
 prove whether the remote Function spawned. Preserve its exact attempt journal
 and resources; diagnose read-only and use a fresh create-only attempt only
 after an independently reviewed correction.
+The dispatch result may narrow further to `DISPATCH_FUNCTION_IDENTITY`
+(pre-spawn hydration/ID check), `DISPATCH_SPAWN_INDETERMINATE` (spawn entered
+or returned without a valid call ID), or `DISPATCH_CATALOG_INDETERMINATE`
+(a call ID existed but durable catalog retention failed). The last two never
+grant replay authority. Other pre-spawn failures and bounded timeouts remain
+the conservative `DISPATCH_SUBMIT` result.
 
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in

@@ -12,6 +12,7 @@ import hashlib
 import time
 
 from tuner.cloud.modal_runtime_qualification_operator import ModalRuntimeQualificationOperator
+from tuner.cloud.modal_runtime_qualification_operator import ModalRuntimeQualificationOutcome
 from tuner.execution.foundation_v2.canonical import canonical_bytes, safe_ref
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
 from tuner.execution.providers.modal.runtime_build import _bounded
@@ -41,6 +42,12 @@ class ModalHostQualificationUnavailable(RuntimeError):
     _STAGES = {
         "FIXTURE_STAGE": ("UNAVAILABLE", "modal_host_qualification.stage_fixture"),
         "DISPATCH_SUBMIT": ("INDETERMINATE", "modal_host_qualification.submit_once"),
+        "DISPATCH_FUNCTION_IDENTITY": (
+            "UNAVAILABLE", "modal_runtime_qualification_operator.function_identity"),
+        "DISPATCH_SPAWN_INDETERMINATE": (
+            "INDETERMINATE", "modal_runtime_qualification_operator.spawn"),
+        "DISPATCH_CATALOG_INDETERMINATE": (
+            "INDETERMINATE", "modal_runtime_qualification_operator.call_catalog"),
         "CALL_OBSERVE": ("UNAVAILABLE", "modal_host_qualification.observe_call"),
         "RECEIPT_VERIFY": ("UNAVAILABLE", "modal_host_qualification.verify_receipt"),
     }
@@ -195,6 +202,16 @@ def qualify_modal_runtime_for_host(
             deadline=time.monotonic() + 60,
             code="modal_host_cpu_dispatch_indeterminate",
         )
+        failure_phases = {
+            "FUNCTION_IDENTITY": "DISPATCH_FUNCTION_IDENTITY",
+            "SPAWN_INDETERMINATE": "DISPATCH_SPAWN_INDETERMINATE",
+            "CATALOG_INDETERMINATE": "DISPATCH_CATALOG_INDETERMINATE",
+        }
+        failure_phase = failure_phases.get(
+            outcome.failure_stage if type(outcome) is ModalRuntimeQualificationOutcome else None
+        )
+        if failure_phase is not None and outcome.disposition == "indeterminate":
+            raise ModalHostQualificationUnavailable(failure_phase) from None
         if outcome.disposition != "found" or type(outcome.provider_call_id) is not str:
             raise ValueError
         call_id = outcome.provider_call_id
@@ -245,6 +262,8 @@ def qualify_modal_runtime_for_host(
                 call_id, runtime.release.manifest_digest,
                 deployment.facts_digest,
             )
+    except ModalHostQualificationUnavailable:
+        raise
     except Exception:
         raise ModalHostQualificationUnavailable(phase) from None
 

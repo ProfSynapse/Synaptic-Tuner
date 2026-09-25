@@ -414,14 +414,18 @@ def test_unknown_bootstrap_exception_remains_generic(tmp_path, monkeypatch, caps
     assert "details" not in json.loads(output)["error"]
 
 
+@pytest.mark.parametrize("phase", (
+    "DISPATCH_FUNCTION_IDENTITY", "DISPATCH_SPAWN_INDETERMINATE",
+    "DISPATCH_CATALOG_INDETERMINATE",
+))
 @pytest.mark.parametrize("qualify_only", [True, False])
 def test_cpu_failure_surfaces_closed_stage_in_both_cli_modes(
-        tmp_path, monkeypatch, capsys, qualify_only):
+        tmp_path, monkeypatch, capsys, qualify_only, phase):
     plan, context, events = _setup(tmp_path, monkeypatch)
 
     def fail_cpu(**_kwargs):
         events.append("cpu")
-        raise ModalHostQualificationUnavailable("DISPATCH_SUBMIT") from None
+        raise ModalHostQualificationUnavailable(phase) from None
 
     monkeypatch.setattr(runner, "qualify_modal_runtime_for_host", fail_cpu)
     handler = ModalJobConfigHandler(Namespace(
@@ -432,9 +436,9 @@ def test_cpu_failure_surfaces_closed_stage_in_both_cli_modes(
     assert "HF_TOKEN" not in output
     payload = json.loads(output)
     assert payload["error"]["details"] == {
-        "phase": "DISPATCH_SUBMIT",
-        "failure_class": "INDETERMINATE",
-        "location": "modal_host_qualification.submit_once",
+        "phase": phase,
+        "failure_class": ModalHostQualificationUnavailable(phase).failure_class,
+        "location": ModalHostQualificationUnavailable(phase).location,
         "retry_authorized": False,
     }
     assert events == ["bootstrap", "cpu"]

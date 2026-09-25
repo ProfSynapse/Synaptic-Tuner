@@ -59,7 +59,9 @@ def test_unknown_bootstrap_exception_has_no_details():
 
 
 @pytest.mark.parametrize("phase", (
-    "FIXTURE_STAGE", "DISPATCH_SUBMIT", "CALL_OBSERVE", "RECEIPT_VERIFY",
+    "FIXTURE_STAGE", "DISPATCH_SUBMIT", "DISPATCH_FUNCTION_IDENTITY",
+    "DISPATCH_SPAWN_INDETERMINATE", "DISPATCH_CATALOG_INDETERMINATE",
+    "CALL_OBSERVE", "RECEIPT_VERIFY",
 ))
 def test_cpu_qualification_diagnosis_projects_only_closed_fields(phase):
     error = ModalHostQualificationUnavailable(phase)

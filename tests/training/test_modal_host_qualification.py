@@ -259,3 +259,44 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
     assert "HF_TOKEN" not in str(error)
     assert error.__cause__ is None
     assert events[0] == "claim"
+
+
+@pytest.mark.parametrize("operator_stage,host_phase", (
+    ("FUNCTION_IDENTITY", "DISPATCH_FUNCTION_IDENTITY"),
+    ("SPAWN_INDETERMINATE", "DISPATCH_SPAWN_INDETERMINATE"),
+    ("CATALOG_INDETERMINATE", "DISPATCH_CATALOG_INDETERMINATE"),
+))
+def test_cpu_gate_projects_closed_operator_stage_only(
+        monkeypatch, operator_stage, host_phase):
+    runtime, client = _runtime()
+    events = []
+
+    class _Operator:
+        def __init__(self, **_kwargs):
+            pass
+
+        def stage_fixture_once(self, *, effect_id, deployment_facts):
+            artifact = next(item.volume_id for item in deployment_facts.volumes
+                            if item.spec.role == "artifacts")
+            return ModalRuntimeReleaseFixtureReceiptV1.create(
+                effect_id=effect_id, artifact_volume_id=artifact,
+            )
+
+        def submit_once(self, _payload, *, expected_facts):
+            events.append("submit")
+            return ModalRuntimeQualificationOutcome(
+                "indeterminate", failure_stage=operator_stage,
+            )
+
+    monkeypatch.setattr(qualification, "_CurrentQualificationObserver",
+                        lambda **_kwargs: SimpleNamespace(observe=lambda facts: facts))
+    monkeypatch.setattr(qualification, "ModalRuntimeQualificationOperator", _Operator)
+    with pytest.raises(qualification.ModalHostQualificationUnavailable) as caught:
+        qualification.qualify_modal_runtime_for_host(
+            sdk=SDK, client=client, client_binding=runtime.facts.client_binding,
+            runtime=runtime, private_storage=_Journal(events),
+            effect_id="cpu-qual-test", environment_name="production",
+        )
+    assert caught.value.phase == host_phase
+    assert caught.value.retry_authorized is False
+    assert events == ["claim", "submit"]

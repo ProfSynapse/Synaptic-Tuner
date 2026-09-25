@@ -54,6 +54,12 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
     qualification = {
         "FIXTURE_STAGE": ("UNAVAILABLE", "modal_host_qualification.stage_fixture"),
         "DISPATCH_SUBMIT": ("INDETERMINATE", "modal_host_qualification.submit_once"),
+        "DISPATCH_FUNCTION_IDENTITY": (
+            "UNAVAILABLE", "modal_runtime_qualification_operator.function_identity"),
+        "DISPATCH_SPAWN_INDETERMINATE": (
+            "INDETERMINATE", "modal_runtime_qualification_operator.spawn"),
+        "DISPATCH_CATALOG_INDETERMINATE": (
+            "INDETERMINATE", "modal_runtime_qualification_operator.call_catalog"),
         "CALL_OBSERVE": ("UNAVAILABLE", "modal_host_qualification.observe_call"),
         "RECEIPT_VERIFY": ("UNAVAILABLE", "modal_host_qualification.verify_receipt"),
     }

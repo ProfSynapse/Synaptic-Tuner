@@ -31,6 +31,7 @@ class ModalRuntimeQualificationCallCatalog(Protocol):
 class ModalRuntimeQualificationOutcome:
     disposition: str
     provider_call_id: str | None = None
+    failure_stage: str | None = None
 
     def __post_init__(self) -> None:
         if self.disposition not in {"found", "indeterminate"}:
@@ -39,6 +40,11 @@ class ModalRuntimeQualificationOutcome:
             raise ValueError("qualification outcome call identity is inconsistent")
         if self.provider_call_id is not None:
             safe_ref(self.provider_call_id, "provider_call_id")
+        if self.failure_stage not in {
+                None, "FUNCTION_IDENTITY", "SPAWN_INDETERMINATE",
+                "CATALOG_INDETERMINATE"} or (
+                self.disposition == "found" and self.failure_stage is not None):
+            raise ValueError("qualification outcome failure stage is closed")
 
 
 class ModalRuntimeQualificationOperator:
@@ -103,18 +109,23 @@ class ModalRuntimeQualificationOperator:
         function = self._facade._function(
             app_name=expected_facts.app_name, function_name=function_name,
         )
+        failure_stage = "FUNCTION_IDENTITY"
         try:
             function.hydrate(self._facade.client)
             if getattr(function, "is_hydrated", False) is not True \
                     or safe_ref(getattr(function, "object_id", None), "function_id") != expected_id:
                 raise ValueError
+            failure_stage = "SPAWN_INDETERMINATE"
             call = function.spawn(dispatch_bytes)
             call_id = safe_ref(getattr(call, "object_id", None), "provider_call_id")
+            failure_stage = "CATALOG_INDETERMINATE"
             if self._calls.publish_if_absent(dispatch.dispatch_digest, call_id) is not True \
                     or self._calls.resolve(dispatch.dispatch_digest) != call_id:
                 raise ValueError
         except Exception:
-            return ModalRuntimeQualificationOutcome("indeterminate")
+            return ModalRuntimeQualificationOutcome(
+                "indeterminate", failure_stage=failure_stage,
+            )
         return ModalRuntimeQualificationOutcome("found", call_id)
 
     def reconcile(self, dispatch_digest: str):

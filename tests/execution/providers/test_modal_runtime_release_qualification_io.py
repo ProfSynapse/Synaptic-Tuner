@@ -7,7 +7,7 @@ import pytest
 
 import tuner.execution.providers.modal.runtime_release_qualification as qualification
 from tuner.cloud.modal_runtime_qualification_operator import (
-    ModalRuntimeQualificationOperator,
+    ModalRuntimeQualificationOperator, ModalRuntimeQualificationOutcome,
 )
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
 from tuner.execution.providers.modal.runtime_release_qualification import (
@@ -35,6 +35,14 @@ class Catalog:
         self.publish_calls += 1
         if self.fail: raise RuntimeError("private catalog failure")
         return self.values.setdefault(digest, call_id) == call_id
+
+
+def test_outcome_stage_is_closed_and_legacy_indeterminate_remains_valid():
+    assert ModalRuntimeQualificationOutcome("indeterminate").failure_stage is None
+    with pytest.raises(ValueError):
+        ModalRuntimeQualificationOutcome("found", "fc-1", "SPAWN_INDETERMINATE")
+    with pytest.raises(ValueError):
+        ModalRuntimeQualificationOutcome("indeterminate", failure_stage="provider secret")
 
 
 @pytest.fixture(autouse=True)
@@ -94,9 +102,43 @@ def test_catalog_failure_after_spawn_is_indeterminate_and_never_auto_replayed() 
     raw = build_modal_runtime_release_qualification_dispatch(dispatch, auth)
     outcome = operator.submit_once(raw, expected_facts=facts)
     assert outcome.disposition == "indeterminate"
+    assert outcome.failure_stage == "CATALOG_INDETERMINATE"
     assert len(FakeFunction.spawn_calls) == 1
     assert operator.reconcile(dispatch.dispatch_digest).disposition == "indeterminate"
     assert len(FakeFunction.spawn_calls) == 1
+
+
+@pytest.mark.parametrize("failure,stage,spawn_count", (
+    ("hydrate", "FUNCTION_IDENTITY", 0),
+    ("spawn", "SPAWN_INDETERMINATE", 1),
+    ("missing_call_id", "SPAWN_INDETERMINATE", 1),
+))
+def test_submit_reports_only_closed_failure_stage_without_retry(
+        monkeypatch, failure, stage, spawn_count):
+    dispatch, facts = _case(); facade = _facade(facts); auth = Auth(); catalog = Catalog()
+    operator = ModalRuntimeQualificationOperator(
+        facade=facade, deployment_observer=Observer(facts), verifier=auth,
+        call_catalog=catalog,
+    )
+    if failure == "hydrate":
+        monkeypatch.setattr(FakeFunction, "hydrate", lambda *_: (_ for _ in ()).throw(
+            RuntimeError("private provider detail")))
+    elif failure == "spawn":
+        FakeFunction.fail = True
+    else:
+        def no_identity(self, *args):
+            type(self).spawn_calls.append(args)
+            return type("Call", (), {"object_id": None})()
+        monkeypatch.setattr(FakeFunction, "spawn", no_identity)
+    raw = build_modal_runtime_release_qualification_dispatch(dispatch, auth)
+    outcome = operator.submit_once(raw, expected_facts=facts)
+    assert outcome.disposition == "indeterminate"
+    assert outcome.failure_stage == stage
+    assert outcome.provider_call_id is None
+    assert len(FakeFunction.spawn_calls) == spawn_count
+    assert catalog.publish_calls == 0
+    assert operator.reconcile(dispatch.dispatch_digest).disposition == "indeterminate"
+    assert len(FakeFunction.spawn_calls) == spawn_count
 
 
 def test_reader_authenticates_rehashes_and_relists_one_authoritative_output(monkeypatch, tmp_path: Path) -> None:
