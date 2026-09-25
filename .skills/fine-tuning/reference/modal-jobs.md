@@ -715,10 +715,14 @@ The diagnostic authenticates the claim-to-catalog call binding before one
 bounded, retry-disabled raw status read and emits only a closed,
 non-authorizing result category. It does not deserialize the result body,
 print logs or provider exceptions, submit, cancel, or grant retry authority.
-`PROVIDER_SUCCESS` means only that an opaque result is available; the worker's
-`completed` versus `failed` status is inside that uninspected body. Preserve
-the attempt and investigate the worker boundary before a fresh, separately
-reviewed qualification.
+For the exact pinned CPython 3.11.14/Modal 1.5.4 pair, `WORKER_COMPLETED`
+and `WORKER_FAILED` mean the small inline provider bytes match one of the
+worker's two fixed serialized dictionaries exactly, without unpickling.
+`PROVIDER_SUCCESS_UNKNOWN` means an opaque result exists but did not meet
+those narrow comparison conditions; it is not evidence of failure. None of
+these categories authenticates the signed qualification receipt or permits
+GPU training or replay. Preserve the attempt and investigate the worker
+boundary before a fresh, separately reviewed qualification.
 
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in

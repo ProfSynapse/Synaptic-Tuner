@@ -7,7 +7,9 @@ import builtins
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import pickletools
 import sqlite3
 import sys
 from types import ModuleType, SimpleNamespace
@@ -103,8 +105,10 @@ def test_no_symlink_or_broad_permissions(tmp_path):
 
 
 class _OpaqueResult:
-    def __init__(self, status):
+    def __init__(self, status, data=b"opaque", data_blob_id=""):
         self.status = status
+        self.data = data
+        self.data_blob_id = data_blob_id
 
     def __getattr__(self, name):
         raise AssertionError("payload field must never be read: " + name)
@@ -130,6 +134,7 @@ class _GenericResult:
 class _Proto:
     GenericResult = _GenericResult
     FunctionGetOutputsResponse = _Response
+    DATA_FORMAT_PICKLE = 1
 
     @staticmethod
     def FunctionGetOutputsRequest(**kwargs):
@@ -139,11 +144,11 @@ class _Proto:
 @pytest.mark.parametrize("response,category", [
     (_Response([], 1), "PENDING"),
     (_Response([], 0), "OUTPUT_EXPIRED"),
-    (_Response([SimpleNamespace(idx=0, result=_OpaqueResult(1))], 0), "PROVIDER_SUCCESS"),
-    (_Response([SimpleNamespace(idx=0, result=_OpaqueResult(2))], 0), "PROVIDER_FAILURE"),
-    (_Response([SimpleNamespace(idx=0, result=_OpaqueResult(7))], 0), "PROVIDER_FAILURE"),
-    (_Response([SimpleNamespace(idx=0, result=_OpaqueResult(0))], 0), "INVALID_RESPONSE"),
-    (_Response([SimpleNamespace(idx=1, result=_OpaqueResult(1))], 0), "INVALID_RESPONSE"),
+    (_Response([SimpleNamespace(idx=0, data_format=1, result=_OpaqueResult(1))], 0), "PROVIDER_SUCCESS_UNKNOWN"),
+    (_Response([SimpleNamespace(idx=0, data_format=1, result=_OpaqueResult(2))], 0), "PROVIDER_FAILURE"),
+    (_Response([SimpleNamespace(idx=0, data_format=1, result=_OpaqueResult(7))], 0), "PROVIDER_FAILURE"),
+    (_Response([SimpleNamespace(idx=0, data_format=1, result=_OpaqueResult(0))], 0), "INVALID_RESPONSE"),
+    (_Response([SimpleNamespace(idx=1, data_format=1, result=_OpaqueResult(1))], 0), "INVALID_RESPONSE"),
     (_Response([], -1), "INVALID_RESPONSE"),
 ])
 def test_one_raw_metadata_request_only(response, category):
@@ -158,7 +163,9 @@ def test_one_raw_metadata_request_only(response, category):
             raise AssertionError("unexpected provider method: " + name)
 
     client = SimpleNamespace(stub=_Stub())
-    assert asyncio.run(diagnostic.inspect_call(client, _CALL, _Proto)) == category
+    assert asyncio.run(diagnostic.inspect_call(
+        client, _CALL, _Proto, lambda _value: b"fixed-local-result",
+    )) == category
     assert len(calls) == 1
     request, retry, timeout = calls[0]
     assert retry is None and timeout == 15
@@ -181,8 +188,120 @@ def test_raw_transport_error_is_closed():
 
     assert asyncio.run(diagnostic.inspect_call(
         SimpleNamespace(stub=_Stub()), _CALL, _Proto,
+        lambda _value: b"fixed-local-result",
     )) == "POLL_UNAVAILABLE"
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("status,expected", [
+    ("completed", "WORKER_COMPLETED"),
+    ("failed", "WORKER_FAILED"),
+])
+def test_exact_fixed_serialized_results_only(monkeypatch, status, expected):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
+    seen = []
+
+    def serialize(value):
+        seen.append(tuple(value.items()))
+        return ("fixed:" + value["status_code"]).encode("ascii")
+
+    output = SimpleNamespace(
+        idx=0, data_format=_Proto.DATA_FORMAT_PICKLE,
+        result=_OpaqueResult(1, data=("fixed:" + status).encode("ascii")),
+    )
+
+    class _Stub:
+        async def FunctionGetOutputs(self, _request, *, retry, timeout):
+            assert retry is None and timeout == 15
+            return _Response([output], 0)
+
+    result = asyncio.run(diagnostic.inspect_call(
+        SimpleNamespace(stub=_Stub()), _CALL, _Proto, serialize,
+    ))
+    assert result == expected
+    assert seen == [
+        (("schema_version", diagnostic.QUALIFICATION_RESULT_SCHEMA),
+         ("status_code", "completed")),
+        (("schema_version", diagnostic.QUALIFICATION_RESULT_SCHEMA),
+         ("status_code", "failed")),
+    ]
+
+
+@pytest.mark.parametrize("data_format,data,blob", [
+    (99, b"fixed:completed", ""),
+    (1, b"fixed:completed", "bl-private"),
+    (1, b"x" * (diagnostic._MAX_FIXED_RESULT + 1), ""),
+    (1, b"unrecognized", ""),
+])
+def test_unsupported_or_hostile_success_stays_unknown(
+    monkeypatch, data_format, data, blob,
+):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
+    output = SimpleNamespace(
+        idx=0, data_format=data_format,
+        result=_OpaqueResult(1, data=data, data_blob_id=blob),
+    )
+
+    class _Stub:
+        async def FunctionGetOutputs(self, _request, *, retry, timeout):
+            return _Response([output], 0)
+
+    result = asyncio.run(diagnostic.inspect_call(
+        SimpleNamespace(stub=_Stub()), _CALL, _Proto,
+        lambda value: ("fixed:" + value["status_code"]).encode("ascii"),
+    ))
+    assert result == "PROVIDER_SUCCESS_UNKNOWN"
+
+
+def test_hostile_pickle_is_never_deserialized(monkeypatch):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
+    executed = []
+    monkeypatch.setattr(os, "system", lambda command: executed.append(command) or 0)
+    hostile = b"cos\nsystem\n(S'echo should-not-run'\ntR."
+    assert "REDUCE" in {opcode.name for opcode, _argument, _position
+                        in pickletools.genops(hostile)}
+    output = SimpleNamespace(
+        idx=0, data_format=_Proto.DATA_FORMAT_PICKLE,
+        result=_OpaqueResult(1, data=hostile),
+    )
+
+    class _Stub:
+        async def FunctionGetOutputs(self, _request, *, retry, timeout):
+            return _Response([output], 0)
+
+    assert asyncio.run(diagnostic.inspect_call(
+        SimpleNamespace(stub=_Stub()), _CALL, _Proto,
+        lambda value: ("fixed:" + value["status_code"]).encode("ascii"),
+    )) == "PROVIDER_SUCCESS_UNKNOWN"
+    assert executed == []
+
+
+def test_other_python_cannot_classify_fixed_bytes(monkeypatch):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: False)
+    output = SimpleNamespace(
+        idx=0, data_format=_Proto.DATA_FORMAT_PICKLE,
+        result=_OpaqueResult(1, data=b"fixed:completed"),
+    )
+
+    class _Stub:
+        async def FunctionGetOutputs(self, _request, *, retry, timeout):
+            return _Response([output], 0)
+
+    assert asyncio.run(diagnostic.inspect_call(
+        SimpleNamespace(stub=_Stub()), _CALL, _Proto,
+        lambda _value: (_ for _ in ()).throw(AssertionError("must not serialize")),
+    )) == "PROVIDER_SUCCESS_UNKNOWN"
+
+
+def test_pinned_runtime_requires_cpython(monkeypatch):
+    monkeypatch.setattr(
+        diagnostic, "sys",
+        SimpleNamespace(
+            implementation=SimpleNamespace(name="pypy"),
+            version_info=(3, 11, 14),
+        ),
+    )
+    assert diagnostic._pinned_python() is False
 
 
 def test_invalid_journal_never_imports_modal(tmp_path, monkeypatch, capsys):
@@ -243,8 +362,12 @@ def test_main_closed_output_and_named_credentials(monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "modal.config", config_module)
     monkeypatch.setitem(sys.modules, "modal._utils", utils_module)
     monkeypatch.setitem(sys.modules, "modal._utils.async_utils", async_utils_module)
+    serializer_module = ModuleType("modal._serialization")
+    serializer = lambda _value: b"trusted-fixed-result"
+    serializer_module.serialize = serializer
+    monkeypatch.setitem(sys.modules, "modal._serialization", serializer_module)
     async def inspect_call(*_args):
-        return "PROVIDER_SUCCESS"
+        return "PROVIDER_SUCCESS_UNKNOWN"
 
     proto_module = ModuleType("modal_proto")
     proto_module.api_pb2 = _Proto
@@ -259,9 +382,9 @@ def test_main_closed_output_and_named_credentials(monkeypatch, capsys):
     assert json.loads(output.out) == {
         "schema_version": "synaptic-modal-qualification-call-diagnostic/v1",
         "authority": "DIAGNOSTIC_ONLY",
-        "result": "PROVIDER_SUCCESS",
+        "result": "PROVIDER_SUCCESS_UNKNOWN",
     }
     assert output.err == ""
     assert _CALL not in output.out and "private" not in output.out
     assert calls == [("private-credential", "private-credential")]
-    assert bridge_calls == [inspect_call, (client, _CALL, _Proto)]
+    assert bridge_calls == [inspect_call, (client, _CALL, _Proto, serializer)]

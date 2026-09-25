@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import contextlib
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -24,11 +25,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tuner.execution.foundation_v2.canonical import (
     canonical_bytes, parse_canonical_object, safe_ref,
 )
+from tuner.execution.providers.modal.runtime_release_qualification import (
+    QUALIFICATION_RESULT_SCHEMA,
+)
 _NAMESPACE = "standalone-training"
 _CATALOG = "modal-runtime-qualification-calls"
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_CLAIM = 16 * 1024
 _MAX_CALL_ID = 512
+_MAX_FIXED_RESULT = 512
 
 
 class DiagnosticUnavailable(RuntimeError):
@@ -122,7 +127,46 @@ def read_retained_call(database: Path, claim_ref: str, supplied_call_id: str) ->
             os.close(descriptor)
 
 
-async def inspect_call(client: object, call_id: str, api_pb2: object) -> str:
+def _pinned_python() -> bool:
+    return (sys.implementation.name == "cpython"
+            and sys.version_info[:3] == (3, 11, 14))
+
+
+def _classify_fixed_result(output: object, api_pb2: object, serialize: object) -> str:
+    """Compare opaque bytes with two locally serialized fixed worker results."""
+    unknown = "PROVIDER_SUCCESS_UNKNOWN"
+    try:
+        result = output.result
+        if (not _pinned_python()
+                or output.data_format != api_pb2.DATA_FORMAT_PICKLE
+                or type(result.data_blob_id) is not str or result.data_blob_id
+                or type(result.data) is not bytes
+                or not result.data or len(result.data) > _MAX_FIXED_RESULT
+                or not callable(serialize)):
+            return unknown
+        completed = serialize({
+            "schema_version": QUALIFICATION_RESULT_SCHEMA,
+            "status_code": "completed",
+        })
+        failed = serialize({
+            "schema_version": QUALIFICATION_RESULT_SCHEMA,
+            "status_code": "failed",
+        })
+        if (type(completed) is not bytes or type(failed) is not bytes
+                or len(completed) > _MAX_FIXED_RESULT
+                or len(failed) > _MAX_FIXED_RESULT):
+            return unknown
+        if hmac.compare_digest(result.data, completed):
+            return "WORKER_COMPLETED"
+        if hmac.compare_digest(result.data, failed):
+            return "WORKER_FAILED"
+    except Exception:
+        return unknown
+    return unknown
+
+
+async def inspect_call(client: object, call_id: str, api_pb2: object,
+                       serialize: object) -> str:
     """Read one raw response's status metadata; never deserialize its payload."""
     request = api_pb2.FunctionGetOutputsRequest(
         function_call_id=call_id,
@@ -152,9 +196,9 @@ async def inspect_call(client: object, call_id: str, api_pb2: object) -> str:
             return "INVALID_RESPONSE"
         status = response.outputs[0].result.status
         if status == api_pb2.GenericResult.GENERIC_STATUS_SUCCESS:
-            # Worker success/failure lives inside a pickled result. A provider
-            # success proves only that an opaque result is available.
-            return "PROVIDER_SUCCESS"
+            # The provider bytes are never deserialized. Equality to the two
+            # fixed local encodings is diagnostic only, not receipt authority.
+            return _classify_fixed_result(response.outputs[0], api_pb2, serialize)
         if status in {
                 api_pb2.GenericResult.GENERIC_STATUS_FAILURE,
                 api_pb2.GenericResult.GENERIC_STATUS_TERMINATED,
@@ -193,11 +237,12 @@ def main(argv: list[str] | None = None) -> int:
                        for value in (token_id, token_secret)):
                     raise DiagnosticUnavailable("CREDENTIAL_UNAVAILABLE")
                 from modal._utils.async_utils import synchronizer
+                from modal._serialization import serialize
                 client = modal.Client.from_credentials(token_id, token_secret)
                 from modal_proto import api_pb2
 
                 category = synchronizer.create_blocking(inspect_call)(
-                    client, call_id, api_pb2,
+                    client, call_id, api_pb2, serialize,
                 )
     except DiagnosticUnavailable as error:
         category = error.args[0]
@@ -208,7 +253,10 @@ def main(argv: list[str] | None = None) -> int:
         "authority": "DIAGNOSTIC_ONLY",
         "result": category,
     }, sort_keys=True, separators=(",", ":")))
-    return 0 if category in {"PENDING", "PROVIDER_SUCCESS", "PROVIDER_FAILURE"} else 1
+    return 0 if category in {
+        "PENDING", "PROVIDER_SUCCESS_UNKNOWN", "WORKER_COMPLETED",
+        "WORKER_FAILED", "PROVIDER_FAILURE",
+    } else 1
 
 
 if __name__ == "__main__":
