@@ -133,7 +133,7 @@ def _pinned_python() -> bool:
 
 
 def _classify_fixed_result(output: object, api_pb2: object, serialize: object) -> str:
-    """Compare opaque bytes with four locally serialized fixed worker results."""
+    """Compare opaque bytes with six locally serialized fixed worker results."""
     unknown = "PROVIDER_SUCCESS_UNKNOWN"
     try:
         result = output.result
@@ -153,6 +153,10 @@ def _classify_fixed_result(output: object, api_pb2: object, serialize: object) -
                                      "status_code": "failed", "failure_stage": "PARENT_SETUP"}),
             ("WORKER_INSTALLED_CHILD", {"schema_version": QUALIFICATION_RESULT_SCHEMA,
                                         "status_code": "failed", "failure_stage": "INSTALLED_CHILD"}),
+            ("WORKER_PARENT_RELEASE", {"schema_version": QUALIFICATION_RESULT_SCHEMA,
+                                       "status_code": "failed", "failure_stage": "PARENT_RELEASE"}),
+            ("WORKER_CHILD_RESULT", {"schema_version": QUALIFICATION_RESULT_SCHEMA,
+                                     "status_code": "failed", "failure_stage": "CHILD_RESULT"}),
         )
         for category, document in cases:
             expected = serialize(document)
@@ -196,7 +200,7 @@ async def inspect_call(client: object, call_id: str, api_pb2: object,
             return "INVALID_RESPONSE"
         status = response.outputs[0].result.status
         if status == api_pb2.GenericResult.GENERIC_STATUS_SUCCESS:
-            # The provider bytes are never deserialized. Equality to the four
+            # The provider bytes are never deserialized. Equality to the six
             # fixed local encodings is diagnostic only, not receipt authority.
             return _classify_fixed_result(response.outputs[0], api_pb2, serialize)
         if status in {
@@ -256,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if category in {
         "PENDING", "PROVIDER_SUCCESS_UNKNOWN", "WORKER_COMPLETED",
         "WORKER_FAILED", "WORKER_PARENT_SETUP", "WORKER_INSTALLED_CHILD",
+        "WORKER_PARENT_RELEASE", "WORKER_CHILD_RESULT",
         "PROVIDER_FAILURE",
     } else 1
 

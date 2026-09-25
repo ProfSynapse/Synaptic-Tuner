@@ -65,6 +65,10 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
             "UNAVAILABLE", "runtime_release_modal_self_check.parent_setup"),
         "CALL_INSTALLED_CHILD": (
             "UNAVAILABLE", "modal_runtime_release_qualification.installed_child"),
+        "CALL_PARENT_RELEASE": (
+            "UNAVAILABLE", "packaged_training_worker.parent_release"),
+        "CALL_CHILD_RESULT": (
+            "UNAVAILABLE", "packaged_training_worker.child_result"),
         "RECEIPT_VERIFY": ("UNAVAILABLE", "modal_host_qualification.verify_receipt"),
     }
     if type(error) is ModalHostQualificationUnavailable and error.retry_authorized is False:

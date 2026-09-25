@@ -716,12 +716,14 @@ bounded, retry-disabled raw status read and emits only a closed,
 non-authorizing result category. It does not deserialize the result body,
 print logs or provider exceptions, submit, cancel, or grant retry authority.
 For the exact pinned CPython 3.11.14/Modal 1.5.4 pair, `WORKER_COMPLETED`,
-`WORKER_FAILED`, `WORKER_PARENT_SETUP`, and `WORKER_INSTALLED_CHILD` mean
-the small inline provider bytes match one of four fixed serialized dictionaries
-exactly, without unpickling. The latter two name only the failed boundary,
-not an exception or proven root cause. Fresh host attempts project those
-two stages as closed, non-retryable `CALL_PARENT_SETUP` and
-`CALL_INSTALLED_CHILD` phases; all other worker failures remain generic.
+`WORKER_FAILED`, `WORKER_PARENT_SETUP`, `WORKER_INSTALLED_CHILD`,
+`WORKER_PARENT_RELEASE`, and `WORKER_CHILD_RESULT` mean the small inline
+provider bytes match one of six fixed serialized dictionaries exactly,
+without unpickling. The stage labels name only failed boundaries, not an
+exception or proven root cause. Fresh host attempts project them as closed,
+non-retryable `CALL_PARENT_SETUP`, `CALL_INSTALLED_CHILD`,
+`CALL_PARENT_RELEASE`, and `CALL_CHILD_RESULT` phases; all other worker
+failures remain generic.
 `PROVIDER_SUCCESS_UNKNOWN` means an opaque result exists but did not meet
 those narrow comparison conditions; it is not evidence of failure. None of
 these categories authenticates the signed qualification receipt or permits
@@ -734,6 +736,10 @@ isolation assertion, stripped child environment, sealed fixture and exact
 child-output verification. After changing the packaged worker, review and
 refresh only its packaged-worker closure; a fresh committed wheel and CPU
 qualification are required before a GPU smoke.
+`CALL_PARENT_RELEASE` means the parent failed installed-release inspection
+before the child launch; `CALL_CHILD_RESULT` covers child invocation, timeout,
+bounded output read, or a non-admitted result. Neither label warrants relaxing the child's exact
+interpreter or installed-package checks.
 
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in

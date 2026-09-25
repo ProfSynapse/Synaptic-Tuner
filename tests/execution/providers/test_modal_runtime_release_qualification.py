@@ -377,6 +377,38 @@ def test_worker_classifies_only_installed_child_exception(monkeypatch, tmp_path:
     }
 
 
+@pytest.mark.parametrize("stage", ("PARENT_RELEASE", "CHILD_RESULT"))
+def test_worker_projects_only_closed_local_cpu_stage(monkeypatch, tmp_path: Path, stage: str) -> None:
+    from tuner.runtime.packaged_training_worker import PackagedLocalCPUStageError
+
+    dispatch, facts = _case(); auth = Auth()
+    raw = build_modal_runtime_release_qualification_dispatch(dispatch, auth)
+    roots = ModalRuntimeReleaseQualificationRoots(
+        (tmp_path / "control").resolve(), (tmp_path / "artifacts").resolve(),
+    )
+    roots.control.mkdir(); roots.artifacts.mkdir()
+    staged = roots.artifacts / dispatch.fixture.path
+    staged.parent.mkdir(parents=True); staged.write_bytes(LOCAL_CPU_DATA)
+
+    def fail_installed_child(_release):
+        raise PackagedLocalCPUStageError(stage)
+
+    monkeypatch.setattr(
+        "tuner.runtime.packaged_training_worker.qualify_installed_child",
+        fail_installed_child,
+    )
+    worker = ModalRuntimeReleaseQualificationWorker(
+        expected_facts=facts, verifier=auth, signer=auth,
+        observer=Observer(facts), call_id_provider=lambda: "fc-qualification",
+        roots=roots,
+    )
+    assert worker(raw, commit_artifacts=lambda: None, commit_control=lambda: None) == {
+        "schema_version": "synaptic-modal-runtime-release-qualification-result/v1",
+        "status_code": "failed",
+        "failure_stage": stage,
+    }
+
+
 def test_training_receipt_and_qualification_receipt_are_mutually_rejected() -> None:
     dispatch, _ = _case()
     training = ModalPackagedStageReceipt(

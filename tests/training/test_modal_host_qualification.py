@@ -190,6 +190,8 @@ def test_cpu_gate_does_not_stage_when_claim_fails(monkeypatch):
     ("call", "CALL_OBSERVE"),
     ("parent_setup", "CALL_PARENT_SETUP"),
     ("installed_child", "CALL_INSTALLED_CHILD"),
+    ("parent_release", "CALL_PARENT_RELEASE"),
+    ("child_result", "CALL_CHILD_RESULT"),
     ("unknown_worker", "CALL_OBSERVE"),
     ("receipt", "RECEIPT_VERIFY"),
 ))
@@ -233,10 +235,12 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
             events.append("call")
             if failure_stage == "call":
                 raise RuntimeError("HF_TOKEN=private")
-            if failure_stage in {"parent_setup", "installed_child", "unknown_worker"}:
+            if failure_stage in {"parent_setup", "installed_child", "parent_release", "child_result", "unknown_worker"}:
                 stages = {
                     "parent_setup": "PARENT_SETUP",
                     "installed_child": "INSTALLED_CHILD",
+                    "parent_release": "PARENT_RELEASE",
+                    "child_result": "CHILD_RESULT",
                     "unknown_worker": "OTHER_STAGE",
                 }
                 return {
@@ -278,7 +282,7 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
     assert "HF_TOKEN" not in str(error)
     assert error.__cause__ is None
     assert events[0] == "claim"
-    if failure_stage in {"parent_setup", "installed_child", "unknown_worker"}:
+    if failure_stage in {"parent_setup", "installed_child", "parent_release", "child_result", "unknown_worker"}:
         assert "receipt" not in events
 
 

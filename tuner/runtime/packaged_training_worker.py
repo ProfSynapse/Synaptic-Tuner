@@ -36,6 +36,16 @@ class PackagedTrainingWorkerError(RuntimeError):
     """Fail-closed packaged-runtime admission rejection."""
 
 
+class PackagedLocalCPUStageError(PackagedTrainingWorkerError):
+    """Closed, non-authorizing boundary code for local CPU qualification."""
+
+    def __init__(self, stage: str) -> None:
+        if stage not in ("PARENT_RELEASE", "CHILD_RESULT"):
+            raise ValueError("invalid local CPU stage")
+        self.stage = stage
+        super().__init__("PACKAGED_LOCAL_CPU_REJECTED")
+
+
 def admit_packaged_training_release(
     payload: bytes, *, expected_release_digest: str
 ) -> PackagedRuntimeRelease:
@@ -126,7 +136,10 @@ def qualify_installed_child(release_document):
     from tuner.runtime.packaged_sft_execution import _canonical, _digest, _inspect_release, _HeldDirectory, _HeldModelFile
     release = parse_packaged_runtime_release(release_document)
     release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=release.manifest_digest)
-    trainer = _inspect_release(release)
+    try:
+        trainer = _inspect_release(release)
+    except BaseException:
+        raise PackagedLocalCPUStageError("PARENT_RELEASE") from None
     if os.name != "posix":
         raise ValueError
     fd = os.memfd_create("qualification-input", os.MFD_ALLOW_SEALING)
@@ -161,13 +174,17 @@ def qualify_installed_child(release_document):
                            "--qualify-local", str(root / "transport.json"), _digest(payload)]
                 # Output goes to bounded private tmpfs; never an unbounded PIPE allocation.
                 with tempfile.TemporaryFile(dir=root) as stdout, tempfile.TemporaryFile(dir=root) as stderr:
-                    child = subprocess.run(command, env=local_cpu_environment(release), cwd=root,
-                        pass_fds=(fd,), stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=60, check=False)
-                    stdout.seek(0); stderr.seek(0)
-                    raw, errors = stdout.read(16385), stderr.read(16385)
+                    try:
+                        child = subprocess.run(command, env=local_cpu_environment(release), cwd=root,
+                            pass_fds=(fd,), stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=60, check=False)
+                        stdout.seek(0); stderr.seek(0)
+                        raw, errors = stdout.read(16385), stderr.read(16385)
+                    except BaseException:
+                        raise PackagedLocalCPUStageError("CHILD_RESULT") from None
                 held.check(); leaf.check()
                 expected = local_cpu_result(release, _digest(stable_read(trainer)))
-                if child.returncode != 0 or errors or raw != _canonical(expected): raise ValueError
+                if child.returncode != 0 or errors or raw != _canonical(expected):
+                    raise PackagedLocalCPUStageError("CHILD_RESULT")
                 return expected
             finally:
                 if leaf is not None: leaf.close()
@@ -276,6 +293,7 @@ def inspect_installed_runtime(expected: dict) -> dict:
 
 __all__ = [
     "PACKAGED_TRAINING_WORKER_ENTRYPOINT",
+    "PackagedLocalCPUStageError",
     "PackagedTrainingWorkerError",
     "admit_packaged_training_release",
     "admit_packaged_sft",

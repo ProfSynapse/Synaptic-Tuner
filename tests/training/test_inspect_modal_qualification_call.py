@@ -198,6 +198,8 @@ def test_raw_transport_error_is_closed():
     ("failed", None, "WORKER_FAILED", 1),
     ("failed", "PARENT_SETUP", "WORKER_PARENT_SETUP", 2),
     ("failed", "INSTALLED_CHILD", "WORKER_INSTALLED_CHILD", 3),
+    ("failed", "PARENT_RELEASE", "WORKER_PARENT_RELEASE", 4),
+    ("failed", "CHILD_RESULT", "WORKER_CHILD_RESULT", 5),
 ])
 def test_exact_fixed_serialized_results_only(monkeypatch, status, stage, expected, index):
     monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
@@ -232,6 +234,10 @@ def test_exact_fixed_serialized_results_only(monkeypatch, status, stage, expecte
          ("status_code", "failed"), ("failure_stage", "PARENT_SETUP")),
         (("schema_version", diagnostic.QUALIFICATION_RESULT_SCHEMA),
          ("status_code", "failed"), ("failure_stage", "INSTALLED_CHILD")),
+        (("schema_version", diagnostic.QUALIFICATION_RESULT_SCHEMA),
+         ("status_code", "failed"), ("failure_stage", "PARENT_RELEASE")),
+        (("schema_version", diagnostic.QUALIFICATION_RESULT_SCHEMA),
+         ("status_code", "failed"), ("failure_stage", "CHILD_RESULT")),
     ][:index + 1]
 
 

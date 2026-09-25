@@ -53,6 +53,10 @@ class ModalHostQualificationUnavailable(RuntimeError):
             "UNAVAILABLE", "runtime_release_modal_self_check.parent_setup"),
         "CALL_INSTALLED_CHILD": (
             "UNAVAILABLE", "modal_runtime_release_qualification.installed_child"),
+        "CALL_PARENT_RELEASE": (
+            "UNAVAILABLE", "packaged_training_worker.parent_release"),
+        "CALL_CHILD_RESULT": (
+            "UNAVAILABLE", "packaged_training_worker.child_result"),
         "RECEIPT_VERIFY": ("UNAVAILABLE", "modal_host_qualification.verify_receipt"),
     }
 
@@ -253,6 +257,10 @@ def qualify_modal_runtime_for_host(
                 raise ModalHostQualificationUnavailable("CALL_PARENT_SETUP") from None
             if type(result) is dict and result == {**failed, "failure_stage": "INSTALLED_CHILD"}:
                 raise ModalHostQualificationUnavailable("CALL_INSTALLED_CHILD") from None
+            if type(result) is dict and result == {**failed, "failure_stage": "PARENT_RELEASE"}:
+                raise ModalHostQualificationUnavailable("CALL_PARENT_RELEASE") from None
+            if type(result) is dict and result == {**failed, "failure_stage": "CHILD_RESULT"}:
+                raise ModalHostQualificationUnavailable("CALL_CHILD_RESULT") from None
             if (type(result) is not dict or result != {
                 "schema_version": QUALIFICATION_RESULT_SCHEMA,
                 "status_code": "completed",

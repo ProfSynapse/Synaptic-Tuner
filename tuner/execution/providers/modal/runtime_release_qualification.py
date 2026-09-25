@@ -539,10 +539,20 @@ class ModalRuntimeReleaseQualificationWorker:
                         self._roots.artifacts, staged, dispatch.fixture.size_bytes,
                     ) != LOCAL_CPU_DATA:
                 raise ValueError
-            from tuner.runtime.packaged_training_worker import qualify_installed_child
+            from tuner.runtime.packaged_training_worker import (
+                PackagedLocalCPUStageError, qualify_installed_child,
+            )
             release_payload = dispatch.runtime_release.to_dict()
             try:
                 child = qualify_installed_child(release_payload)
+            except PackagedLocalCPUStageError as error:
+                if error.stage not in {"PARENT_RELEASE", "CHILD_RESULT"}:
+                    raise ValueError from None
+                return {
+                    "schema_version": QUALIFICATION_RESULT_SCHEMA,
+                    "status_code": "failed",
+                    "failure_stage": error.stage,
+                }
             except BaseException:
                 return {
                     "schema_version": QUALIFICATION_RESULT_SCHEMA,

@@ -10,6 +10,7 @@ import tuner.runtime.packaged_training_worker as worker
 from tuner.runtime.packaged_worker_closure import load_packaged_worker_closure
 from tuner.runtime.packaged_training_worker import (
     PACKAGED_TRAINING_WORKER_ENTRYPOINT,
+    PackagedLocalCPUStageError,
     PackagedTrainingWorkerError,
     admit_packaged_training_release,
 )
@@ -117,12 +118,63 @@ def test_qualification_from_nonisolated_parent_keeps_child_boundary(
 
     monkeypatch.setattr(subprocess, "run", inspect_child)
     if extra_output:
-        with pytest.raises(ValueError):
+        with pytest.raises(PackagedLocalCPUStageError) as rejected:
             worker.qualify_installed_child({})
+        assert rejected.value.stage == "CHILD_RESULT"
+        assert str(rejected.value) == "PACKAGED_LOCAL_CPU_REJECTED"
     else:
         assert worker.qualify_installed_child({}) == worker.local_cpu_result(
             release, execution._digest(trainer.read_bytes())
         )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="local CPU qualification requires Linux")
+def test_qualification_distinguishes_parent_release_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tuner.runtime import packaged_sft_execution as execution
+
+    release = SimpleNamespace(manifest_digest="a" * 64, canonical_bytes=lambda: b"release")
+    monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
+    monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
+    monkeypatch.setattr(execution, "_inspect_release", lambda _: (_ for _ in ()).throw(RuntimeError("PRIVATE_SENTINEL")))
+
+    with pytest.raises(PackagedLocalCPUStageError) as rejected:
+        worker.qualify_installed_child({})
+    assert rejected.value.stage == "PARENT_RELEASE"
+    assert str(rejected.value) == "PACKAGED_LOCAL_CPU_REJECTED"
+    assert rejected.value.__suppress_context__
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="local CPU qualification requires Linux")
+@pytest.mark.parametrize("returncode, stderr_bytes", [(2, b""), (0, b"PRIVATE_SENTINEL")])
+def test_qualification_collapses_child_exit_and_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, returncode: int, stderr_bytes: bytes
+) -> None:
+    import subprocess
+
+    from tuner.runtime import packaged_sft_execution as execution
+
+    release = SimpleNamespace(
+        manifest_digest="a" * 64, python_executable="/opt/python/bin/python",
+        canonical_bytes=lambda: b"release",
+    )
+    trainer = tmp_path / "trainer.py"
+    trainer.write_bytes(b"pass\n")
+    monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
+    monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
+    monkeypatch.setattr(execution, "_inspect_release", lambda _: trainer)
+
+    def fail_child(command, **kwargs):
+        kwargs["stdout"].write(execution._canonical(worker.local_cpu_result(release, execution._digest(trainer.read_bytes()))))
+        kwargs["stderr"].write(stderr_bytes)
+        return SimpleNamespace(returncode=returncode)
+
+    monkeypatch.setattr(subprocess, "run", fail_child)
+    with pytest.raises(PackagedLocalCPUStageError) as rejected:
+        worker.qualify_installed_child({})
+    assert rejected.value.stage == "CHILD_RESULT"
+    assert str(rejected.value) == "PACKAGED_LOCAL_CPU_REJECTED"
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="local CPU child requires Linux")
