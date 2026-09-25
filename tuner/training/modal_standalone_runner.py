@@ -72,6 +72,10 @@ class ModalStandaloneRunUnavailable(RuntimeError):
 
 _RUN_PHASE_DIAGNOSTICS = {
     "RUN_HOST_ASSEMBLY": ("UNAVAILABLE", "modal_standalone_runner.compose_host"),
+    "RUN_PUBLIC_PREPARE": ("UNAVAILABLE", "modal_standalone_runner.public_prepare"),
+    "RUN_PUBLIC_LOAD": ("UNAVAILABLE", "modal_standalone_runner.public_load"),
+    "RUN_PUBLIC_RESOLVE": ("UNAVAILABLE", "modal_standalone_runner.public_resolve"),
+    "RUN_PUBLIC_PLAN": ("UNAVAILABLE", "modal_standalone_runner.public_plan"),
     "RUN_PUBLIC_PREFLIGHT": ("UNAVAILABLE", "modal_standalone_runner.public_preflight"),
     "RUN_START_INDETERMINATE": ("INDETERMINATE", "modal_standalone_runner.training_start"),
 }
@@ -410,13 +414,17 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 maximum_cost_minor_units=recipe.maximum_cost_minor_units,
             )
             api = host.api
-            phase = "RUN_PUBLIC_PREFLIGHT"
+            phase = "RUN_PUBLIC_PREPARE"
             publicly_prepared = api.training.prepare(source_port, configuration)
             if publicly_prepared.prepared != prepared.prepared:
                 raise ValueError
+            phase = "RUN_PUBLIC_LOAD"
             request = api.training.load(publicly_prepared.prepared.request.canonical_json)
+            phase = "RUN_PUBLIC_RESOLVE"
             resolved = api.training.resolve(request)
+            phase = "RUN_PUBLIC_PLAN"
             training_plan = api.training.plan(resolved, ProviderRef("modal", recipe.runtime_profile))
+            phase = "RUN_PUBLIC_PREFLIGHT"
             preflight = api.training.preflight(training_plan)
             phase = "RUN_START_INDETERMINATE"
             started = api.training.start(training_plan, preflight)

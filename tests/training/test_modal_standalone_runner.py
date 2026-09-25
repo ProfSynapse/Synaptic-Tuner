@@ -446,13 +446,17 @@ def test_cpu_failure_surfaces_closed_stage_in_both_cli_modes(
     assert events == ["bootstrap", "cpu"]
 
 
-@pytest.mark.parametrize("phase, failure_class, location", (
-    ("RUN_HOST_ASSEMBLY", "UNAVAILABLE", "modal_standalone_runner.compose_host"),
-    ("RUN_PUBLIC_PREFLIGHT", "UNAVAILABLE", "modal_standalone_runner.public_preflight"),
-    ("RUN_START_INDETERMINATE", "INDETERMINATE", "modal_standalone_runner.training_start"),
+@pytest.mark.parametrize("phase, failure_class, location, method", (
+    ("RUN_HOST_ASSEMBLY", "UNAVAILABLE", "modal_standalone_runner.compose_host", None),
+    ("RUN_PUBLIC_PREPARE", "UNAVAILABLE", "modal_standalone_runner.public_prepare", "prepare"),
+    ("RUN_PUBLIC_LOAD", "UNAVAILABLE", "modal_standalone_runner.public_load", "load"),
+    ("RUN_PUBLIC_RESOLVE", "UNAVAILABLE", "modal_standalone_runner.public_resolve", "resolve"),
+    ("RUN_PUBLIC_PLAN", "UNAVAILABLE", "modal_standalone_runner.public_plan", "plan"),
+    ("RUN_PUBLIC_PREFLIGHT", "UNAVAILABLE", "modal_standalone_runner.public_preflight", "preflight"),
+    ("RUN_START_INDETERMINATE", "INDETERMINATE", "modal_standalone_runner.training_start", "start"),
 ))
 def test_post_cpu_host_failures_have_only_closed_non_retryable_diagnostics(
-        tmp_path, monkeypatch, phase, failure_class, location):
+        tmp_path, monkeypatch, phase, failure_class, location, method):
     plan, context, events = _setup(tmp_path, monkeypatch)
     secret = "HF_TOKEN=private-and-absolute-/home/private/customer"
 
@@ -461,10 +465,8 @@ def test_post_cpu_host_failures_have_only_closed_non_retryable_diagnostics(
 
     if phase == "RUN_HOST_ASSEMBLY":
         monkeypatch.setattr(runner, "compose_modal_packaged_reference_host", fail)
-    elif phase == "RUN_PUBLIC_PREFLIGHT":
-        monkeypatch.setattr(TrainingAPI, "preflight", fail)
     else:
-        monkeypatch.setattr(TrainingAPI, "start", fail)
+        monkeypatch.setattr(TrainingAPI, method, fail)
 
     with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
         runner.run_modal_standalone_job(
@@ -478,6 +480,22 @@ def test_post_cpu_host_failures_have_only_closed_non_retryable_diagnostics(
     assert diagnosis.args == ("modal_standalone_phase_unavailable",)
     assert secret not in str(diagnosis)
     assert "/home/private/customer" not in repr(diagnosis)
+    assert events == ["bootstrap", "cpu"]
+
+
+def test_post_start_failure_remains_generic_without_private_details(tmp_path, monkeypatch):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        TrainingAPI, "start", lambda *_args, **_kwargs: SimpleNamespace(
+            accepted=True, run=SimpleNamespace(run_id="no-workflow"),
+        ),
+    )
+    with pytest.raises(runner.ModalStandaloneRunUnavailable) as caught:
+        runner.run_modal_standalone_job(
+            plan=plan, context=context, modal_profile="explicit",
+            modal_environment="main",
+        )
+    assert caught.value.args == ("modal_standalone_run_unavailable",)
     assert events == ["bootstrap", "cpu"]
 
 

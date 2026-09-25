@@ -77,7 +77,9 @@ def test_cpu_qualification_diagnosis_projects_only_closed_fields(phase):
 
 
 @pytest.mark.parametrize("phase", (
-    "RUN_HOST_ASSEMBLY", "RUN_PUBLIC_PREFLIGHT", "RUN_START_INDETERMINATE",
+    "RUN_HOST_ASSEMBLY", "RUN_PUBLIC_PREPARE", "RUN_PUBLIC_LOAD",
+    "RUN_PUBLIC_RESOLVE", "RUN_PUBLIC_PLAN", "RUN_PUBLIC_PREFLIGHT",
+    "RUN_START_INDETERMINATE",
 ))
 def test_standalone_run_diagnosis_projects_only_closed_fields(phase):
     error = ModalStandalonePhaseUnavailable(phase)

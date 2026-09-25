@@ -83,6 +83,10 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
             }
     run_phase = {
         "RUN_HOST_ASSEMBLY": ("UNAVAILABLE", "modal_standalone_runner.compose_host"),
+        "RUN_PUBLIC_PREPARE": ("UNAVAILABLE", "modal_standalone_runner.public_prepare"),
+        "RUN_PUBLIC_LOAD": ("UNAVAILABLE", "modal_standalone_runner.public_load"),
+        "RUN_PUBLIC_RESOLVE": ("UNAVAILABLE", "modal_standalone_runner.public_resolve"),
+        "RUN_PUBLIC_PLAN": ("UNAVAILABLE", "modal_standalone_runner.public_plan"),
         "RUN_PUBLIC_PREFLIGHT": ("UNAVAILABLE", "modal_standalone_runner.public_preflight"),
         "RUN_START_INDETERMINATE": ("INDETERMINATE", "modal_standalone_runner.training_start"),
     }
