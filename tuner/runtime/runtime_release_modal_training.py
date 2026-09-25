@@ -13,6 +13,7 @@ _PRIVATE_SCRATCH_ROOT = Path("/tmp")
 
 def run_modal_packaged_training(dispatch_bytes: bytes) -> dict[str, object]:
     """Authenticate one dispatch and execute it in the captured image."""
+    stage = ["ENTRYPOINT_IMPORTS"]
     failed = {
         "schema_version": "synaptic-modal-packaged-worker-result/v2",
         "effect_id": "unavailable",
@@ -23,12 +24,17 @@ def run_modal_packaged_training(dispatch_bytes: bytes) -> dict[str, object]:
     try:
         import modal
 
-        return _run_with_modal(dispatch_bytes, sdk=modal)
+        stage[0] = "ENTRYPOINT_SETUP"
+        return _run_with_modal(dispatch_bytes, sdk=modal, _stage=stage)
     except BaseException:
+        failed["failure_stage"] = stage[0]
         return failed
 
 
-def _run_with_modal(dispatch_bytes: bytes, *, sdk: object) -> dict[str, object]:
+def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
+                    _stage: list[str] | None = None) -> dict[str, object]:
+    if _stage is not None:
+        _stage[0] = "ENTRYPOINT_IMPORTS"
     import base64
     import binascii
     import os
@@ -47,6 +53,8 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object) -> dict[str, object]:
         ModalRuntimeQualificationHmacAuthenticator,
     )
 
+    if _stage is not None:
+        _stage[0] = "ENTRYPOINT_DISPATCH_AUTH"
     if type(dispatch_bytes) is not bytes or not dispatch_bytes:
         raise ValueError("packaged training dispatch is invalid")
     encoded_key = os.environ.get(QUALIFICATION_HMAC_ENV_KEY)
@@ -61,11 +69,15 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object) -> dict[str, object]:
     authenticator = ModalRuntimeQualificationHmacAuthenticator(key)
     dispatch = parse_modal_packaged_dispatch(dispatch_bytes, authenticator)
     facts = dispatch.provider_facts
+    if _stage is not None:
+        _stage[0] = "ENTRYPOINT_PROVIDER_ID"
     if (getattr(sdk, "__version__", None) != EXACT_MODAL_SDK_VERSION
             or os.environ.get("MODAL_IS_REMOTE") != "1"
             or os.environ.get("MODAL_ENVIRONMENT") != facts.environment_ref
             or os.environ.get("MODAL_IMAGE_ID") != facts.image_id):
         raise ValueError("packaged training provider identity differs")
+    if _stage is not None:
+        _stage[0] = "ENTRYPOINT_VOLUME_ID"
     client = sdk.Client.from_env()
     handles = {}
     for role, identity in (("control", facts.control_volume_id),
@@ -76,6 +88,8 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object) -> dict[str, object]:
         if getattr(handle, "is_hydrated", False) is not True or getattr(handle, "object_id", None) != identity:
             raise ValueError("packaged training Volume identity differs")
         handles[role] = handle
+    if _stage is not None:
+        _stage[0] = "ENTRYPOINT_CALL_ID"
     call_id = sdk.current_function_call_id()
     if type(call_id) is not str or not call_id.startswith("fc-") or len(call_id) > 80:
         raise ValueError("packaged training call identity is unavailable")
@@ -83,6 +97,8 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object) -> dict[str, object]:
     control = _CONTROL_ROOT
     artifacts = _ARTIFACT_ROOT
     cache = _MODEL_CACHE_ROOT
+    if _stage is not None:
+        _stage[0] = "ENTRYPOINT_MOUNTS"
     if (not control.is_dir() or not artifacts.is_dir() or not cache.is_dir()
             or control.is_symlink() or artifacts.is_symlink() or cache.is_symlink()):
         raise ValueError("packaged training mounts differ")
@@ -90,6 +106,8 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object) -> dict[str, object]:
         raise ValueError("packaged training mounts are not distinct")
     token = os.environ.get("HF_TOKEN")
     credential = token if type(token) is str and token.strip() else None
+    if _stage is not None:
+        _stage[0] = "ENTRYPOINT_WORKER_SETUP"
     with tempfile.TemporaryDirectory(prefix="synaptic-model-", dir=_PRIVATE_SCRATCH_ROOT) as temporary:
         scratch = Path(temporary)
 
@@ -110,6 +128,8 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object) -> dict[str, object]:
             evidence_signer=authenticator,
             roots=ModalPackagedWorkerRoots(control, artifacts, cache),
         )
+        if _stage is not None:
+            _stage[0] = "ENTRYPOINT_SETUP"
         return worker(
             dispatch_bytes, call_id,
             commit_artifacts=handles["artifacts"].commit,

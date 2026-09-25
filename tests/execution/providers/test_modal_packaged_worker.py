@@ -263,7 +263,15 @@ def test_existing_operation_directories_prevent_automatic_replay(tmp_path) -> No
 
 
 def test_failure_stage_contract_is_closed_and_rejects_dynamic_values() -> None:
-    assert len(PACKAGED_WORKER_FAILURE_STAGES) == 15
+    assert PACKAGED_WORKER_FAILURE_STAGES == frozenset({
+        "ENTRYPOINT_SETUP", "ENTRYPOINT_IMPORTS", "ENTRYPOINT_DISPATCH_AUTH",
+        "ENTRYPOINT_PROVIDER_ID", "ENTRYPOINT_VOLUME_ID", "ENTRYPOINT_CALL_ID",
+        "ENTRYPOINT_MOUNTS", "ENTRYPOINT_WORKER_SETUP",
+        "DISPATCH_AUTH", "STAGED_INPUT", "PATH_CLAIM",
+        "SFT_ADMISSION", "SFT_PREPARATION", "SFT_REVALIDATION",
+        "SFT_INVOCATION", "SFT_TRAINER", "SFT_EVIDENCE", "SFT_ARTIFACT",
+        "SFT_UNKNOWN", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
+    })
     for stage in PACKAGED_WORKER_FAILURE_STAGES:
         _assert_failure(packaged_worker_failure(stage), stage)
     _assert_failure(packaged_worker_failure("secret/path"), "SFT_UNKNOWN")

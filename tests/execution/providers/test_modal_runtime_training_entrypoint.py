@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import builtins
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -11,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from tuner.runtime import runtime_release_modal_training as entrypoint
+from tuner.execution.providers.modal.packaged_worker import packaged_worker_failure
 from tuner.execution.providers.modal.runtime_release_deployment import ModalRuntimeReleaseDeployer
 from tests.execution.providers.test_modal_runtime_release_deployment import _plan
 
@@ -27,6 +29,99 @@ def test_outer_entrypoint_failure_is_fixed_and_does_not_expose_exception(monkeyp
         "completion_sha256": "0" * 64,
         "failure_stage": "ENTRYPOINT_SETUP",
     }
+
+
+@pytest.mark.parametrize("stage,failure_point", (
+    ("ENTRYPOINT_IMPORTS", "ENTRYPOINT_IMPORTS"),
+    ("ENTRYPOINT_DISPATCH_AUTH", "ENTRYPOINT_DISPATCH_AUTH"),
+    ("ENTRYPOINT_PROVIDER_ID", "ENTRYPOINT_PROVIDER_ID"),
+    ("ENTRYPOINT_VOLUME_ID", "ENTRYPOINT_VOLUME_ID"),
+    ("ENTRYPOINT_CALL_ID", "ENTRYPOINT_CALL_ID"),
+    ("ENTRYPOINT_MOUNTS", "ENTRYPOINT_MOUNTS"),
+    ("ENTRYPOINT_WORKER_SETUP", "scratch"),
+    ("ENTRYPOINT_WORKER_SETUP", "constructor"),
+))
+def test_entrypoint_failure_identifies_only_setup_operation(monkeypatch, tmp_path: Path,
+                                                            stage: str, failure_point: str) -> None:
+    from tuner.execution.providers.modal import packaged_dispatch, packaged_worker
+    from tuner.execution.providers.modal.runtime_release_qualification import QUALIFICATION_HMAC_ENV_KEY
+
+    secret = "private token, path, and provider response"
+    original_import = builtins.__import__
+    if failure_point == "ENTRYPOINT_IMPORTS":
+        def fail_import(name, *args, **kwargs):
+            if name == "tuner.execution.providers.modal.facade":
+                raise RuntimeError(secret)
+            return original_import(name, *args, **kwargs)
+        monkeypatch.setattr(builtins, "__import__", fail_import)
+
+    monkeypatch.setenv(QUALIFICATION_HMAC_ENV_KEY,
+                       base64.b64encode(b"k" * 32).decode("ascii"))
+    monkeypatch.setenv("MODAL_IS_REMOTE", "1")
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "production")
+    monkeypatch.setenv("MODAL_IMAGE_ID", "im-exact" if failure_point != "ENTRYPOINT_PROVIDER_ID" else "im-other")
+    facts = SimpleNamespace(environment_ref="production", image_id="im-exact",
+                            control_volume_id="vo-control", artifact_volume_id="vo-artifacts",
+                            model_cache_volume_id="vo-cache")
+
+    def parse_dispatch(payload, verifier):
+        if failure_point == "ENTRYPOINT_DISPATCH_AUTH":
+            raise RuntimeError(secret)
+        return SimpleNamespace(provider_facts=facts)
+
+    monkeypatch.setattr(packaged_dispatch, "parse_modal_packaged_dispatch", parse_dispatch)
+    mounts = [tmp_path / name for name in ("control", "artifacts", "cache")]
+    for mount in mounts:
+        mount.mkdir()
+    monkeypatch.setattr(entrypoint, "_CONTROL_ROOT", mounts[0])
+    monkeypatch.setattr(entrypoint, "_ARTIFACT_ROOT", mounts[1])
+    monkeypatch.setattr(entrypoint, "_MODEL_CACHE_ROOT",
+                        tmp_path / "absent" if failure_point == "ENTRYPOINT_MOUNTS" else mounts[2])
+    monkeypatch.setattr(entrypoint, "_PRIVATE_SCRATCH_ROOT",
+                        tmp_path / "missing-scratch" if failure_point == "scratch" else tmp_path)
+
+    class Volume:
+        is_hydrated = True
+
+        def __init__(self, identity):
+            self.object_id = identity
+
+        @classmethod
+        def from_id(cls, identity, *, client):
+            return cls(identity)
+
+        def hydrate(self, client):
+            if failure_point == "ENTRYPOINT_VOLUME_ID":
+                raise RuntimeError(secret)
+            return self
+
+    class SDK:
+        __version__ = "1.5.4"
+
+        class Client:
+            @staticmethod
+            def from_env():
+                return object()
+
+        @staticmethod
+        def current_function_call_id():
+            if failure_point == "ENTRYPOINT_CALL_ID":
+                raise RuntimeError(secret)
+            return "fc-test"
+
+    SDK.Volume = Volume
+
+    class Worker:
+        def __init__(self, **kwargs):
+            if failure_point == "constructor":
+                raise RuntimeError(secret)
+            raise AssertionError("unexpected worker construction")
+
+    monkeypatch.setattr(packaged_worker, "ModalPackagedWorker", Worker)
+    monkeypatch.setitem(sys.modules, "modal", SDK)
+    result = entrypoint.run_modal_packaged_training(b"signed-dispatch")
+    assert result == packaged_worker_failure(stage)
+    assert secret not in repr(result)
 
 
 def test_training_callable_has_exact_installed_global_identity() -> None:

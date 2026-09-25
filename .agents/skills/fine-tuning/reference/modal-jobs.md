@@ -791,6 +791,16 @@ runner also uses closed post-submit labels for workflow, read binding, call
 observation, outcome, verification, and artifact download; never infer remote
 state from one label alone.
 
+The installed training entrypoint additionally reports fixed setup substages:
+`ENTRYPOINT_IMPORTS`, `ENTRYPOINT_DISPATCH_AUTH`, `ENTRYPOINT_PROVIDER_ID`,
+`ENTRYPOINT_VOLUME_ID`, `ENTRYPOINT_CALL_ID`, `ENTRYPOINT_MOUNTS`, and
+`ENTRYPOINT_WORKER_SETUP` (private scratch and worker construction). The
+original `ENTRYPOINT_SETUP` remains a fallback for an unexpected escape after
+worker construction or an older result. Each
+label identifies only the operation boundary reached; none discloses the
+exception, establishes root cause, or authorizes replay. Use the exact
+claim-bound packaged-call inspector to confirm a host-projected label.
+
 The packaged training parent must explicitly hydrate the three exact mounted
 Volume identities and synchronously commit verified cache, artifact, then
 control writes before reporting success. Modal's `restrict_modal_access=True`
