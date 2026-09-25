@@ -105,6 +105,11 @@ def execute_admitted_packaged_sft(admitted, **kwargs):
 LOCAL_CPU_PROTOCOL = "synaptic-installed-child-cpu/v1"
 LOCAL_CPU_DATA = b'{"text":"local qualification only"}\n'
 LOCAL_CPU_MODEL = b'{"qualification_fixture":true}\n'
+_MAX_BUILD_INPUTS_BYTES = 128 * 1024
+_MAX_WHEEL_BYTES = 256 * 1024 * 1024
+_MAX_TRAINER_BYTES = 4 * 1024 * 1024
+_TRAINER_MEMBER = "Trainers/sft/train_sft.py"
+_WHEEL_BASENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]*\.whl\Z")
 
 
 def local_cpu_environment(release):
@@ -127,17 +132,52 @@ def local_cpu_result(release, trainer_digest):
             "training_executed": False, "gpu_qualified": False, "provider_qualified": False}
 
 
+def _parent_trainer_reference(release) -> str:
+    """Derive only the pinned trainer reference; installed admission belongs to -I child."""
+    raw = stable_read(Path("/opt/synaptic-runtime/build-inputs.json"), _MAX_BUILD_INPUTS_BYTES)
+    def reject_constant(_value):
+        raise ValueError
+    inputs = json.loads(raw, parse_constant=reject_constant)
+    if (type(inputs) is not dict
+            or (json.dumps(inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+                + "\n").encode("ascii") != raw):
+        raise ValueError
+    wheel = inputs.get("wheel")
+    if type(wheel) is not dict or set(wheel) != {"filename", "distribution", "version", "sha256"}:
+        raise ValueError
+    filename, digest = wheel["filename"], wheel["sha256"]
+    if (type(filename) is not str or len(filename) > 255
+            or _WHEEL_BASENAME.fullmatch(filename) is None
+            or type(digest) is not str or _DIGEST.fullmatch(digest) is None
+            or not hmac.compare_digest(digest, release.package_digest)):
+        raise ValueError
+    wheel_raw = stable_read(Path("/opt/synaptic-runtime") / filename, _MAX_WHEEL_BYTES)
+    if not hmac.compare_digest(hashlib.sha256(wheel_raw).hexdigest(), digest):
+        raise ValueError
+    with ZipFile(BytesIO(wheel_raw)) as archive:
+        members = archive.infolist()
+        if not members or len(members) > 10000:
+            raise ValueError
+        trainer = [member for member in members if member.filename == _TRAINER_MEMBER]
+        if len(trainer) != 1 or trainer[0].is_dir() or not 0 < trainer[0].file_size <= _MAX_TRAINER_BYTES:
+            raise ValueError
+        raw_trainer = archive.read(trainer[0])
+        if len(raw_trainer) != trainer[0].file_size:
+            raise ValueError
+    return hashlib.sha256(raw_trainer).hexdigest()
+
+
 def qualify_installed_child(release_document):
     """Diagnostic only: exercise the installed child, never synthesize training evidence."""
     import os
     import fcntl
     import subprocess
     import tempfile
-    from tuner.runtime.packaged_sft_execution import _canonical, _digest, _inspect_release, _HeldDirectory, _HeldModelFile
+    from tuner.runtime.packaged_sft_execution import _canonical, _digest, _HeldDirectory, _HeldModelFile
     release = parse_packaged_runtime_release(release_document)
     release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=release.manifest_digest)
     try:
-        trainer = _inspect_release(release)
+        trainer_digest = _parent_trainer_reference(release)
     except BaseException:
         raise PackagedLocalCPUStageError("PARENT_RELEASE") from None
     if os.name != "posix":
@@ -182,7 +222,7 @@ def qualify_installed_child(release_document):
                     except BaseException:
                         raise PackagedLocalCPUStageError("CHILD_RESULT") from None
                 held.check(); leaf.check()
-                expected = local_cpu_result(release, _digest(stable_read(trainer)))
+                expected = local_cpu_result(release, trainer_digest)
                 if child.returncode != 0 or errors or raw != _canonical(expected):
                     raise PackagedLocalCPUStageError("CHILD_RESULT")
                 return expected

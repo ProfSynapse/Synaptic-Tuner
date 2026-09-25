@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import sys
+import hashlib
+import json
+import warnings
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
 
@@ -72,6 +77,75 @@ def test_admission_collapses_manifest_loader_fault(monkeypatch: pytest.MonkeyPat
     assert "PRIVATE_SENTINEL" not in str(rejected.value)
 
 
+def _wheel_bytes(members: list[tuple[str, bytes]]) -> bytes:
+    output = BytesIO()
+    with ZipFile(output, "w") as archive, warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        for name, data in members:
+            archive.writestr(name, data)
+    return output.getvalue()
+
+
+def _reference_fixture(
+    monkeypatch: pytest.MonkeyPatch, wheel_raw: bytes, *, filename: str = "synaptic_tuner-1.2.3-py3-none-any.whl",
+    build_digest: str | None = None, release_digest: str | None = None,
+) -> SimpleNamespace:
+    wheel_digest = hashlib.sha256(wheel_raw).hexdigest()
+    inputs = {"wheel": {"filename": filename, "distribution": "synaptic-tuner",
+                        "version": "1.2.3", "sha256": build_digest or wheel_digest}}
+    inputs_raw = (json.dumps(inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
+
+    def read(path: Path, maximum: int = 1024 * 1024) -> bytes:
+        if path == Path("/opt/synaptic-runtime/build-inputs.json"):
+            assert maximum == worker._MAX_BUILD_INPUTS_BYTES
+            return inputs_raw
+        assert path == Path("/opt/synaptic-runtime") / filename
+        assert maximum == worker._MAX_WHEEL_BYTES
+        return wheel_raw
+
+    monkeypatch.setattr(worker, "stable_read", read)
+    return SimpleNamespace(package_digest=release_digest or wheel_digest)
+
+
+def test_parent_reference_uses_pinned_wheel_not_parent_interpreter(monkeypatch: pytest.MonkeyPatch) -> None:
+    trainer = b"print('installed child compiles this')\n"
+    release = _reference_fixture(monkeypatch, _wheel_bytes([("Trainers/sft/train_sft.py", trainer)]))
+    monkeypatch.setattr(worker.sys, "executable", "/unrelated/host/python")
+
+    assert worker._parent_trainer_reference(release) == hashlib.sha256(trainer).hexdigest()
+
+
+@pytest.mark.parametrize("wrong", ["build", "release", "wheel"])
+def test_parent_reference_rejects_wrong_wheel_hash(monkeypatch: pytest.MonkeyPatch, wrong: str) -> None:
+    wheel_raw = _wheel_bytes([("Trainers/sft/train_sft.py", b"pass\n")])
+    release = _reference_fixture(monkeypatch, wheel_raw,
+                                 build_digest="0" * 64 if wrong in {"build", "wheel"} else None,
+                                 release_digest="0" * 64 if wrong in {"release", "wheel"} else None)
+    with pytest.raises(ValueError):
+        worker._parent_trainer_reference(release)
+
+
+@pytest.mark.parametrize("filename", ["../escape.whl", "subdir/other.whl", "..\\other.whl", "/tmp/other.whl", "name.zip"])
+def test_parent_reference_rejects_unsafe_wheel_path(monkeypatch: pytest.MonkeyPatch, filename: str) -> None:
+    release = _reference_fixture(monkeypatch, _wheel_bytes([("Trainers/sft/train_sft.py", b"pass\n")]), filename=filename)
+    with pytest.raises(ValueError):
+        worker._parent_trainer_reference(release)
+
+
+@pytest.mark.parametrize("members", [
+    [],
+    [("Trainers/sft/not_train_sft.py", b"pass\n")],
+    [("Trainers/sft/train_sft.py", b"a"), ("Trainers/sft/train_sft.py", b"b")],
+    [("Trainers/sft/train_sft.py", b"a" * (4 * 1024 * 1024 + 1))],
+])
+def test_parent_reference_rejects_missing_duplicate_or_oversized_trainer(
+    monkeypatch: pytest.MonkeyPatch, members: list[tuple[str, bytes]]
+) -> None:
+    release = _reference_fixture(monkeypatch, _wheel_bytes(members))
+    with pytest.raises(ValueError):
+        worker._parent_trainer_reference(release)
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="sealed local CPU qualification requires Linux")
 @pytest.mark.parametrize("extra_output", [b"", b"\n"])
 def test_qualification_from_nonisolated_parent_keeps_child_boundary(
@@ -87,11 +161,10 @@ def test_qualification_from_nonisolated_parent_keeps_child_boundary(
         manifest_digest="a" * 64, python_executable="/opt/python/bin/python",
         canonical_bytes=lambda: b"release",
     )
-    trainer = tmp_path / "trainer.py"
-    trainer.write_bytes(b"pass\n")
+    trainer_digest = hashlib.sha256(b"pass\n").hexdigest()
     monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
     monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
-    monkeypatch.setattr(execution, "_inspect_release", lambda _: trainer)
+    monkeypatch.setattr(worker, "_parent_trainer_reference", lambda _: trainer_digest)
     original_flags = sys.flags
     class NonIsolatedFlags:
         isolated = 0
@@ -100,6 +173,7 @@ def test_qualification_from_nonisolated_parent_keeps_child_boundary(
             return getattr(original_flags, name)
 
     monkeypatch.setattr(worker.sys, "flags", NonIsolatedFlags())
+    assert sys.executable != release.python_executable
     monkeypatch.setenv("HF_TOKEN", "PRIVATE_CREDENTIAL_SENTINEL")
 
     def inspect_child(command, **kwargs):
@@ -112,7 +186,7 @@ def test_qualification_from_nonisolated_parent_keeps_child_boundary(
         seals = fcntl.fcntl(fd, fcntl.F_GET_SEALS)
         assert seals & fcntl.F_SEAL_WRITE
         assert os.pread(fd, len(worker.LOCAL_CPU_DATA), 0) == worker.LOCAL_CPU_DATA
-        expected = worker.local_cpu_result(release, execution._digest(trainer.read_bytes()))
+        expected = worker.local_cpu_result(release, trainer_digest)
         kwargs["stdout"].write(execution._canonical(expected) + extra_output)
         return SimpleNamespace(returncode=0)
 
@@ -124,7 +198,7 @@ def test_qualification_from_nonisolated_parent_keeps_child_boundary(
         assert str(rejected.value) == "PACKAGED_LOCAL_CPU_REJECTED"
     else:
         assert worker.qualify_installed_child({}) == worker.local_cpu_result(
-            release, execution._digest(trainer.read_bytes())
+            release, trainer_digest
         )
 
 
@@ -132,12 +206,10 @@ def test_qualification_from_nonisolated_parent_keeps_child_boundary(
 def test_qualification_distinguishes_parent_release_inspection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tuner.runtime import packaged_sft_execution as execution
-
     release = SimpleNamespace(manifest_digest="a" * 64, canonical_bytes=lambda: b"release")
     monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
     monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
-    monkeypatch.setattr(execution, "_inspect_release", lambda _: (_ for _ in ()).throw(RuntimeError("PRIVATE_SENTINEL")))
+    monkeypatch.setattr(worker, "_parent_trainer_reference", lambda _: (_ for _ in ()).throw(RuntimeError("PRIVATE_SENTINEL")))
 
     with pytest.raises(PackagedLocalCPUStageError) as rejected:
         worker.qualify_installed_child({})
@@ -159,14 +231,13 @@ def test_qualification_collapses_child_exit_and_stderr(
         manifest_digest="a" * 64, python_executable="/opt/python/bin/python",
         canonical_bytes=lambda: b"release",
     )
-    trainer = tmp_path / "trainer.py"
-    trainer.write_bytes(b"pass\n")
+    trainer_digest = hashlib.sha256(b"pass\n").hexdigest()
     monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
     monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
-    monkeypatch.setattr(execution, "_inspect_release", lambda _: trainer)
+    monkeypatch.setattr(worker, "_parent_trainer_reference", lambda _: trainer_digest)
 
     def fail_child(command, **kwargs):
-        kwargs["stdout"].write(execution._canonical(worker.local_cpu_result(release, execution._digest(trainer.read_bytes()))))
+        kwargs["stdout"].write(execution._canonical(worker.local_cpu_result(release, trainer_digest)))
         kwargs["stderr"].write(stderr_bytes)
         return SimpleNamespace(returncode=returncode)
 
