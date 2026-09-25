@@ -592,12 +592,14 @@ class ExplicitModal154ReleaseDeploymentReader:
             before.lifecycle.version, functions, classes,
         )
 
-    @classmethod
-    async def _bounded_read(cls, client, app_name, environment_name):
+    @staticmethod
+    async def _bounded_read(client, app_name, environment_name):
         import asyncio
 
         return await asyncio.wait_for(
-            cls._read(client, app_name, environment_name), timeout=30,
+            ExplicitModal154ReleaseDeploymentReader._read(
+                client, app_name, environment_name,
+            ), timeout=30,
         )
 
     def observe(self, *, client: object, app_name: str, environment_name: str):

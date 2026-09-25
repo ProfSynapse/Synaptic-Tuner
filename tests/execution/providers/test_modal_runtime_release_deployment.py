@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from types import ModuleType, SimpleNamespace
 import asyncio
+import inspect
 import os
 import signal
 import sys
@@ -41,7 +42,7 @@ from tests.execution.providers.test_modal_packaged_binding import _release_and_e
 from tests.execution.providers.test_modal_runtime_build import _candidate
 
 
-def _read_deployment_response(monkeypatch, response):
+def _read_deployment_response(monkeypatch, response, *, through_public_reader=False):
     """Exercise the pinned read without importing or contacting the real SDK."""
     modal = ModuleType("modal")
     modal.__path__ = []
@@ -54,8 +55,21 @@ def _read_deployment_response(monkeypatch, response):
     api_pb2.APP_STATE_STOPPED = 5
     api_pb2.AppLifecycle = lambda: SimpleNamespace(app_state=0, version=0, created_by="")
     api_pb2.AppGetByDeploymentNameRequest = lambda **kwargs: SimpleNamespace(**kwargs)
+    async_utils = ModuleType("modal._utils.async_utils")
+
+    class StrictSynchronizer:
+        @staticmethod
+        def create_blocking(value):
+            # Modal 1.5.4 wraps functions, not bound classmethod objects.
+            if not inspect.isfunction(value):
+                raise TypeError("not a function")
+            return lambda *args: asyncio.run(value(*args))
+
+    async_utils.synchronizer = StrictSynchronizer()
     monkeypatch.setitem(sys.modules, "modal", modal)
     monkeypatch.setitem(sys.modules, "modal.exception", exception)
+    monkeypatch.setitem(sys.modules, "modal._utils", ModuleType("modal._utils"))
+    monkeypatch.setitem(sys.modules, "modal._utils.async_utils", async_utils)
     monkeypatch.setitem(sys.modules, "modal_proto", proto)
     monkeypatch.setitem(sys.modules, "modal_proto.api_pb2", api_pb2)
 
@@ -72,9 +86,15 @@ def _read_deployment_response(monkeypatch, response):
 
     stub = Stub()
     client = SimpleNamespace(stub=stub)
-    return asyncio.run(
-        ExplicitModal154ReleaseDeploymentReader._read(client, "fresh-app", "production")
-    ), stub.lookup_count
+    if through_public_reader:
+        result = ExplicitModal154ReleaseDeploymentReader(sdk=SimpleNamespace(
+            __version__="1.5.4",
+        )).observe(client=client, app_name="fresh-app", environment_name="production")
+    else:
+        result = asyncio.run(
+            ExplicitModal154ReleaseDeploymentReader._read(client, "fresh-app", "production")
+        )
+    return result, stub.lookup_count
 
 
 def test_pinned_readback_accepts_exact_empty_response(monkeypatch):
@@ -83,6 +103,18 @@ def test_pinned_readback_accepts_exact_empty_response(monkeypatch):
         lifecycle=SimpleNamespace(app_state=0, version=0, created_by=""),
     )
     result, calls = _read_deployment_response(monkeypatch, response)
+    assert result is None
+    assert calls == 1
+
+
+def test_public_reader_wraps_unbound_async_function_before_lookup(monkeypatch):
+    response = SimpleNamespace(
+        environment_name="production", app_id="", previous_app_id="",
+        lifecycle=SimpleNamespace(app_state=0, version=0, created_by=""),
+    )
+    result, calls = _read_deployment_response(
+        monkeypatch, response, through_public_reader=True,
+    )
     assert result is None
     assert calls == 1
 
