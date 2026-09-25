@@ -715,14 +715,25 @@ The diagnostic authenticates the claim-to-catalog call binding before one
 bounded, retry-disabled raw status read and emits only a closed,
 non-authorizing result category. It does not deserialize the result body,
 print logs or provider exceptions, submit, cancel, or grant retry authority.
-For the exact pinned CPython 3.11.14/Modal 1.5.4 pair, `WORKER_COMPLETED`
-and `WORKER_FAILED` mean the small inline provider bytes match one of the
-worker's two fixed serialized dictionaries exactly, without unpickling.
+For the exact pinned CPython 3.11.14/Modal 1.5.4 pair, `WORKER_COMPLETED`,
+`WORKER_FAILED`, `WORKER_PARENT_SETUP`, and `WORKER_INSTALLED_CHILD` mean
+the small inline provider bytes match one of four fixed serialized dictionaries
+exactly, without unpickling. The latter two name only the failed boundary,
+not an exception or proven root cause. Fresh host attempts project those
+two stages as closed, non-retryable `CALL_PARENT_SETUP` and
+`CALL_INSTALLED_CHILD` phases; all other worker failures remain generic.
 `PROVIDER_SUCCESS_UNKNOWN` means an opaque result exists but did not meet
 those narrow comparison conditions; it is not evidence of failure. None of
 these categories authenticates the signed qualification receipt or permits
 GPU training or replay. Preserve the attempt and investigate the worker
 boundary before a fresh, separately reviewed qualification.
+
+The installed-child check must run under its own `-I` subprocess, not require
+the ambient Modal Function parent to have `sys.flags.isolated`. Keep the child
+isolation assertion, stripped child environment, sealed fixture and exact
+child-output verification. After changing the packaged worker, review and
+refresh only its packaged-worker closure; a fresh committed wheel and CPU
+qualification are required before a GPU smoke.
 
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in

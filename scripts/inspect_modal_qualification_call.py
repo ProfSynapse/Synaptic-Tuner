@@ -133,7 +133,7 @@ def _pinned_python() -> bool:
 
 
 def _classify_fixed_result(output: object, api_pb2: object, serialize: object) -> str:
-    """Compare opaque bytes with two locally serialized fixed worker results."""
+    """Compare opaque bytes with four locally serialized fixed worker results."""
     unknown = "PROVIDER_SUCCESS_UNKNOWN"
     try:
         result = output.result
@@ -144,22 +144,22 @@ def _classify_fixed_result(output: object, api_pb2: object, serialize: object) -
                 or not result.data or len(result.data) > _MAX_FIXED_RESULT
                 or not callable(serialize)):
             return unknown
-        completed = serialize({
-            "schema_version": QUALIFICATION_RESULT_SCHEMA,
-            "status_code": "completed",
-        })
-        failed = serialize({
-            "schema_version": QUALIFICATION_RESULT_SCHEMA,
-            "status_code": "failed",
-        })
-        if (type(completed) is not bytes or type(failed) is not bytes
-                or len(completed) > _MAX_FIXED_RESULT
-                or len(failed) > _MAX_FIXED_RESULT):
-            return unknown
-        if hmac.compare_digest(result.data, completed):
-            return "WORKER_COMPLETED"
-        if hmac.compare_digest(result.data, failed):
-            return "WORKER_FAILED"
+        cases = (
+            ("WORKER_COMPLETED", {"schema_version": QUALIFICATION_RESULT_SCHEMA,
+                                  "status_code": "completed"}),
+            ("WORKER_FAILED", {"schema_version": QUALIFICATION_RESULT_SCHEMA,
+                               "status_code": "failed"}),
+            ("WORKER_PARENT_SETUP", {"schema_version": QUALIFICATION_RESULT_SCHEMA,
+                                     "status_code": "failed", "failure_stage": "PARENT_SETUP"}),
+            ("WORKER_INSTALLED_CHILD", {"schema_version": QUALIFICATION_RESULT_SCHEMA,
+                                        "status_code": "failed", "failure_stage": "INSTALLED_CHILD"}),
+        )
+        for category, document in cases:
+            expected = serialize(document)
+            if type(expected) is not bytes or len(expected) > _MAX_FIXED_RESULT:
+                return unknown
+            if hmac.compare_digest(result.data, expected):
+                return category
     except Exception:
         return unknown
     return unknown
@@ -196,7 +196,7 @@ async def inspect_call(client: object, call_id: str, api_pb2: object,
             return "INVALID_RESPONSE"
         status = response.outputs[0].result.status
         if status == api_pb2.GenericResult.GENERIC_STATUS_SUCCESS:
-            # The provider bytes are never deserialized. Equality to the two
+            # The provider bytes are never deserialized. Equality to the four
             # fixed local encodings is diagnostic only, not receipt authority.
             return _classify_fixed_result(response.outputs[0], api_pb2, serialize)
         if status in {
@@ -255,7 +255,8 @@ def main(argv: list[str] | None = None) -> int:
     }, sort_keys=True, separators=(",", ":")))
     return 0 if category in {
         "PENDING", "PROVIDER_SUCCESS_UNKNOWN", "WORKER_COMPLETED",
-        "WORKER_FAILED", "PROVIDER_FAILURE",
+        "WORKER_FAILED", "WORKER_PARENT_SETUP", "WORKER_INSTALLED_CHILD",
+        "PROVIDER_FAILURE",
     } else 1
 
 

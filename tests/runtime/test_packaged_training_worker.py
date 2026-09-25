@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
 import tuner.runtime.packaged_training_worker as worker
@@ -65,3 +69,73 @@ def test_admission_collapses_manifest_loader_fault(monkeypatch: pytest.MonkeyPat
         )
     assert rejected.value.__suppress_context__
     assert "PRIVATE_SENTINEL" not in str(rejected.value)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="sealed local CPU qualification requires Linux")
+@pytest.mark.parametrize("extra_output", [b"", b"\n"])
+def test_qualification_from_nonisolated_parent_keeps_child_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra_output: bytes
+) -> None:
+    import fcntl
+    import os
+    import subprocess
+
+    from tuner.runtime import packaged_sft_execution as execution
+
+    release = SimpleNamespace(
+        manifest_digest="a" * 64, python_executable="/opt/python/bin/python",
+        canonical_bytes=lambda: b"release",
+    )
+    trainer = tmp_path / "trainer.py"
+    trainer.write_bytes(b"pass\n")
+    monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
+    monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
+    monkeypatch.setattr(execution, "_inspect_release", lambda _: trainer)
+    original_flags = sys.flags
+    class NonIsolatedFlags:
+        isolated = 0
+
+        def __getattr__(self, name):
+            return getattr(original_flags, name)
+
+    monkeypatch.setattr(worker.sys, "flags", NonIsolatedFlags())
+    monkeypatch.setenv("HF_TOKEN", "PRIVATE_CREDENTIAL_SENTINEL")
+
+    def inspect_child(command, **kwargs):
+        assert command[:4] == [release.python_executable, "-I", "-m", "tuner.runtime.packaged_sft_child"]
+        assert kwargs["env"] == worker.local_cpu_environment(release)
+        assert "PRIVATE_CREDENTIAL_SENTINEL" not in repr(kwargs["env"])
+        assert kwargs["stdin"] == subprocess.DEVNULL
+        assert len(kwargs["pass_fds"]) == 1
+        fd = kwargs["pass_fds"][0]
+        seals = fcntl.fcntl(fd, fcntl.F_GET_SEALS)
+        assert seals & fcntl.F_SEAL_WRITE
+        assert os.pread(fd, len(worker.LOCAL_CPU_DATA), 0) == worker.LOCAL_CPU_DATA
+        expected = worker.local_cpu_result(release, execution._digest(trainer.read_bytes()))
+        kwargs["stdout"].write(execution._canonical(expected) + extra_output)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", inspect_child)
+    if extra_output:
+        with pytest.raises(ValueError):
+            worker.qualify_installed_child({})
+    else:
+        assert worker.qualify_installed_child({}) == worker.local_cpu_result(
+            release, execution._digest(trainer.read_bytes())
+        )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="local CPU child requires Linux")
+def test_local_cpu_child_rejects_nonisolated_interpreter(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tuner.runtime import packaged_sft_child
+
+    original_flags = sys.flags
+    class NonIsolatedFlags:
+        isolated = 0
+
+        def __getattr__(self, name):
+            return getattr(original_flags, name)
+
+    monkeypatch.setattr(packaged_sft_child.sys, "flags", NonIsolatedFlags())
+    with pytest.raises(ValueError):
+        packaged_sft_child.run_local_cpu_child(["--qualify-local", "transport", "0" * 64])

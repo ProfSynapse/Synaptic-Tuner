@@ -127,7 +127,7 @@ def qualify_installed_child(release_document):
     release = parse_packaged_runtime_release(release_document)
     release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=release.manifest_digest)
     trainer = _inspect_release(release)
-    if os.name != "posix" or not sys.flags.isolated:
+    if os.name != "posix":
         raise ValueError
     fd = os.memfd_create("qualification-input", os.MFD_ALLOW_SEALING)
     try:

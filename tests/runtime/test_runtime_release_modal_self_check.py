@@ -136,7 +136,10 @@ def test_live_parent_has_exact_one_bytes_argument_and_wires_verified_resources(
         "dispatch_bytes",
     )
     result = run_runtime_release_self_check(raw)
-    assert result["status_code"] == "completed"
+    assert result == {
+        "schema_version": "synaptic-modal-runtime-release-qualification-result/v1",
+        "status_code": "completed",
+    }
     assert _Client.calls == 1
     assert events == ["vo-artifact", "vo-control"]
     assert [item[0] for item in _Volume.calls] == ["control-name", "artifact-name"]
@@ -164,6 +167,39 @@ def test_live_parent_fails_closed_before_worker_for_auth_or_resource_drift(
         monkeypatch.setenv("MODAL_IMAGE_ID", "im-other")
     result = run_runtime_release_self_check(raw)
     assert result == {
+        "schema_version": "synaptic-modal-runtime-release-qualification-result/v1",
+        "status_code": "failed",
+        "failure_stage": "PARENT_SETUP",
+    }
+
+
+def test_live_parent_keeps_worker_exception_unclassified(monkeypatch) -> None:
+    raw, _ = _case(monkeypatch)
+    _Volume.registry = {
+        "control-name": _VolumeHandle("vo-control", []),
+        "artifact-name": _VolumeHandle("vo-artifact", []),
+    }
+
+    class FailingWorker:
+        def __init__(self, **kwargs):
+            pass
+
+        def __call__(self, payload, *, commit_artifacts, commit_control):
+            raise RuntimeError("private worker detail")
+
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.runtime_release_qualification."
+        "ModalRuntimeReleaseQualificationWorker",
+        FailingWorker,
+    )
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.runtime_release_qualification."
+        "ModalRuntimeReleaseQualificationRoots",
+        lambda control, artifacts: SimpleNamespace(
+            control=control, artifacts=artifacts,
+        ),
+    )
+    assert run_runtime_release_self_check(raw) == {
         "schema_version": "synaptic-modal-runtime-release-qualification-result/v1",
         "status_code": "failed",
     }

@@ -416,7 +416,8 @@ def test_unknown_bootstrap_exception_remains_generic(tmp_path, monkeypatch, caps
 
 @pytest.mark.parametrize("phase", (
     "DISPATCH_FUNCTION_IDENTITY", "DISPATCH_SPAWN_INDETERMINATE",
-    "DISPATCH_CATALOG_INDETERMINATE",
+    "DISPATCH_CATALOG_INDETERMINATE", "CALL_PARENT_SETUP",
+    "CALL_INSTALLED_CHILD",
 ))
 @pytest.mark.parametrize("qualify_only", [True, False])
 def test_cpu_failure_surfaces_closed_stage_in_both_cli_modes(

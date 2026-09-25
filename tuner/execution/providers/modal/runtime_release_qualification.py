@@ -540,7 +540,15 @@ class ModalRuntimeReleaseQualificationWorker:
                     ) != LOCAL_CPU_DATA:
                 raise ValueError
             from tuner.runtime.packaged_training_worker import qualify_installed_child
-            child = qualify_installed_child(dispatch.runtime_release.to_dict())
+            release_payload = dispatch.runtime_release.to_dict()
+            try:
+                child = qualify_installed_child(release_payload)
+            except BaseException:
+                return {
+                    "schema_version": QUALIFICATION_RESULT_SCHEMA,
+                    "status_code": "failed",
+                    "failure_stage": "INSTALLED_CHILD",
+                }
             output = canonical_bytes({
                 "schema_version": QUALIFICATION_OUTPUT_SCHEMA,
                 "status": "passed", "effect_id": dispatch.effect_id,

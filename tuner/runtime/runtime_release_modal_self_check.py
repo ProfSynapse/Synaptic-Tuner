@@ -102,13 +102,16 @@ def run_runtime_release_self_check(dispatch_bytes: bytes) -> dict[str, object]:
                 roots["control"], roots["artifacts"],
             ),
         )
-        return worker(
-            dispatch_bytes,
-            commit_artifacts=handles["artifacts"].commit,
-            commit_control=handles["control"].commit,
-        )
+        try:
+            return worker(
+                dispatch_bytes,
+                commit_artifacts=handles["artifacts"].commit,
+                commit_control=handles["control"].commit,
+            )
+        except BaseException:
+            return failed
     except BaseException:
-        return failed
+        return {**failed, "failure_stage": "PARENT_SETUP"}
 
 
 __all__ = ["run_runtime_release_self_check"]

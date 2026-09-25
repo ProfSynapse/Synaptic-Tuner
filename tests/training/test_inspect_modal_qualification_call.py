@@ -193,21 +193,25 @@ def test_raw_transport_error_is_closed():
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("status,expected", [
-    ("completed", "WORKER_COMPLETED"),
-    ("failed", "WORKER_FAILED"),
+@pytest.mark.parametrize("status,stage,expected,index", [
+    ("completed", None, "WORKER_COMPLETED", 0),
+    ("failed", None, "WORKER_FAILED", 1),
+    ("failed", "PARENT_SETUP", "WORKER_PARENT_SETUP", 2),
+    ("failed", "INSTALLED_CHILD", "WORKER_INSTALLED_CHILD", 3),
 ])
-def test_exact_fixed_serialized_results_only(monkeypatch, status, expected):
+def test_exact_fixed_serialized_results_only(monkeypatch, status, stage, expected, index):
     monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
     seen = []
 
     def serialize(value):
         seen.append(tuple(value.items()))
-        return ("fixed:" + value["status_code"]).encode("ascii")
+        return ("fixed:" + value["status_code"] + ":"
+                + value.get("failure_stage", "")).encode("ascii")
 
     output = SimpleNamespace(
         idx=0, data_format=_Proto.DATA_FORMAT_PICKLE,
-        result=_OpaqueResult(1, data=("fixed:" + status).encode("ascii")),
+        result=_OpaqueResult(1, data=("fixed:" + status + ":"
+                                      + (stage or "")).encode("ascii")),
     )
 
     class _Stub:
@@ -224,7 +228,11 @@ def test_exact_fixed_serialized_results_only(monkeypatch, status, expected):
          ("status_code", "completed")),
         (("schema_version", diagnostic.QUALIFICATION_RESULT_SCHEMA),
          ("status_code", "failed")),
-    ]
+        (("schema_version", diagnostic.QUALIFICATION_RESULT_SCHEMA),
+         ("status_code", "failed"), ("failure_stage", "PARENT_SETUP")),
+        (("schema_version", diagnostic.QUALIFICATION_RESULT_SCHEMA),
+         ("status_code", "failed"), ("failure_stage", "INSTALLED_CHILD")),
+    ][:index + 1]
 
 
 @pytest.mark.parametrize("data_format,data,blob", [

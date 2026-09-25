@@ -49,6 +49,10 @@ class ModalHostQualificationUnavailable(RuntimeError):
         "DISPATCH_CATALOG_INDETERMINATE": (
             "INDETERMINATE", "modal_runtime_qualification_operator.call_catalog"),
         "CALL_OBSERVE": ("UNAVAILABLE", "modal_host_qualification.observe_call"),
+        "CALL_PARENT_SETUP": (
+            "UNAVAILABLE", "runtime_release_modal_self_check.parent_setup"),
+        "CALL_INSTALLED_CHILD": (
+            "UNAVAILABLE", "modal_runtime_release_qualification.installed_child"),
         "RECEIPT_VERIFY": ("UNAVAILABLE", "modal_host_qualification.verify_receipt"),
     }
 
@@ -241,9 +245,17 @@ def qualify_modal_runtime_for_host(
                     raise ValueError
                 time.sleep(1)
                 continue
+            failed = {
+                "schema_version": QUALIFICATION_RESULT_SCHEMA,
+                "status_code": "failed",
+            }
+            if type(result) is dict and result == {**failed, "failure_stage": "PARENT_SETUP"}:
+                raise ModalHostQualificationUnavailable("CALL_PARENT_SETUP") from None
+            if type(result) is dict and result == {**failed, "failure_stage": "INSTALLED_CHILD"}:
+                raise ModalHostQualificationUnavailable("CALL_INSTALLED_CHILD") from None
             if (type(result) is not dict or result != {
-                    "schema_version": QUALIFICATION_RESULT_SCHEMA,
-                    "status_code": "completed",
+                "schema_version": QUALIFICATION_RESULT_SCHEMA,
+                "status_code": "completed",
             }):
                 raise ValueError
             phase = "RECEIPT_VERIFY"

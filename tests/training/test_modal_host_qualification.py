@@ -188,6 +188,9 @@ def test_cpu_gate_does_not_stage_when_claim_fails(monkeypatch):
     ("fixture", "FIXTURE_STAGE"),
     ("dispatch", "DISPATCH_SUBMIT"),
     ("call", "CALL_OBSERVE"),
+    ("parent_setup", "CALL_PARENT_SETUP"),
+    ("installed_child", "CALL_INSTALLED_CHILD"),
+    ("unknown_worker", "CALL_OBSERVE"),
     ("receipt", "RECEIPT_VERIFY"),
 ))
 def test_cpu_gate_reports_only_closed_post_claim_stage(
@@ -230,6 +233,17 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
             events.append("call")
             if failure_stage == "call":
                 raise RuntimeError("HF_TOKEN=private")
+            if failure_stage in {"parent_setup", "installed_child", "unknown_worker"}:
+                stages = {
+                    "parent_setup": "PARENT_SETUP",
+                    "installed_child": "INSTALLED_CHILD",
+                    "unknown_worker": "OTHER_STAGE",
+                }
+                return {
+                    "schema_version": "synaptic-modal-runtime-release-qualification-result/v1",
+                    "status_code": "failed",
+                    "failure_stage": stages[failure_stage],
+                }
             return {
                 "schema_version": "synaptic-modal-runtime-release-qualification-result/v1",
                 "status_code": "completed",
@@ -264,6 +278,8 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
     assert "HF_TOKEN" not in str(error)
     assert error.__cause__ is None
     assert events[0] == "claim"
+    if failure_stage in {"parent_setup", "installed_child", "unknown_worker"}:
+        assert "receipt" not in events
 
 
 @pytest.mark.parametrize("operator_stage,host_phase", (
