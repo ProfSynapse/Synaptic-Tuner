@@ -1145,14 +1145,6 @@ class ModalRuntimeReleaseDeployer:
             else:
                 app = self._sdk.App(plan.app_name, include_source=False)
                 image = self._sdk.Image.from_id(candidate.image_id, client=self._client)
-                from .runtime_build import _bounded
-
-                image = _bounded(
-                    lambda: image.build(app), deadline=time.monotonic() + 600,
-                    code="modal_release_image_rebind_indeterminate",
-                )
-                if self._provider_identity(image, "object_id", "image_id") != candidate.image_id:
-                    raise ValueError("captured Modal image differs")
             function_objects: list[tuple[ModalRuntimeReleaseFunctionSpecV1, object]] = []
             for spec in plan.functions:
                 volumes = {
@@ -1193,6 +1185,10 @@ class ModalRuntimeReleaseDeployer:
         try:
             app_id = self._provider_identity(app, "app_id", "app_id")
             image_id = self._provider_identity(image, "object_id", "image_id")
+            if (type(plan.release) is PackagedTrainingRuntimeReleaseV2
+                    and plan.release.material["kind"] == "modal_build"
+                    and image_id != candidate.image_id):
+                raise ValueError("captured Modal image differs")
             function_facts = tuple(
                 ModalRuntimeReleaseFunctionFactV1(
                     spec, self._provider_identity(function, "object_id", "function_id"),

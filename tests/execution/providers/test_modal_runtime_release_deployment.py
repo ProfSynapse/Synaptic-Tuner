@@ -32,8 +32,10 @@ from tuner.runtime.runtime_release_modal_self_check import (
 from tuner.runtime.runtime_release_modal_training import run_modal_packaged_training
 from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV2
 from tuner.execution.providers.modal import runtime_release_deployment as deployment_module
+from tuner.execution.providers.modal.runtime_build import build_modal_runtime_release_v2
 
 from tests.execution.providers.test_modal_packaged_binding import _release_and_execution
+from tests.execution.providers.test_modal_runtime_build import _candidate
 
 
 def packaged_training_entry(payload: bytes):
@@ -330,6 +332,97 @@ def test_v2_published_oci_uses_exact_registry_branch_without_build_candidate() -
     packaged = ModalPackagedRuntimeFactsV1.from_release_deployment(facts)
     assert packaged.model_cache_volume_id == "vo-cache"
     assert ModalPackagedRuntimeFactsV1.parse(packaged.canonical_bytes) == packaged
+
+
+def _modal_build_plan_and_candidate():
+    from tuner.execution.providers.modal.runtime_release_deployment import (
+        MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA,
+    )
+
+    candidate = _candidate()
+    object.__setattr__(candidate, "_builder_attested", True)
+    release = build_modal_runtime_release_v2(candidate, release_ref="runtime:modal-test")
+    original = _plan()
+    training = replace(
+        original.functions[0], volume_roles=("control", "artifacts", "model_cache"),
+        module="tuner.runtime.runtime_release_modal_training",
+        qualname="run_modal_packaged_training",
+    )
+    cache = ModalRuntimeReleaseVolumeSpecV1("model_cache", "cache-volume", "/mnt/model-cache")
+    plan = replace(
+        original, release=release, functions=(training, original.functions[1]),
+        volumes=(*original.volumes, cache),
+        schema_version=MODAL_RUNTIME_RELEASE_DEPLOYMENT_PLAN_V2_SCHEMA,
+    )
+    return plan, candidate
+
+
+@pytest.mark.parametrize("hydrated_image_id", ["im-exact", "im-other", None])
+def test_modal_build_binds_image_during_deploy_and_checks_captured_id(
+        monkeypatch, hydrated_image_id) -> None:
+    class BuildImage:
+        instances = []
+
+        def __init__(self, image_id):
+            self.object_id = image_id
+            self.is_hydrated = False
+            self.build_calls = 0
+            type(self).instances.append(self)
+
+        @classmethod
+        def from_id(cls, image_id, *, client):
+            assert image_id == "im-exact"
+            assert client is not None
+            return cls(image_id)
+
+        def build(self, app):
+            self.build_calls += 1
+            raise AssertionError("Image.build requires a deployed app")
+
+    class BuildApp(FakeApp):
+        def __init__(self, name, **kwargs):
+            super().__init__(name, **kwargs)
+            self.app_id = None
+            self.is_hydrated = False
+
+        def deploy(self, **kwargs):
+            super().deploy(**kwargs)
+            self.app_id = "ap-release"
+            self.is_hydrated = True
+            image = self.functions[0][0].options["image"]
+            if hydrated_image_id is not None:
+                image.object_id = hydrated_image_id
+                image.is_hydrated = True
+            return self
+
+    monkeypatch.setattr(SDK, "Image", BuildImage)
+    monkeypatch.setattr(SDK, "App", BuildApp)
+    plan, candidate = _modal_build_plan_and_candidate()
+    deployer, _ = _deployer(Reader([None, _observation(1)]))
+    entrypoints = {
+        "training": run_modal_packaged_training,
+        "self_check": run_runtime_release_self_check,
+    }
+
+    if hydrated_image_id == candidate.image_id:
+        facts = deployer.deploy_once(plan, entrypoints=entrypoints, candidate=candidate)
+        assert facts.image_id == candidate.image_id
+    else:
+        with pytest.raises(ModalRuntimeReleaseDeploymentError) as caught:
+            deployer.deploy_once(plan, entrypoints=entrypoints, candidate=candidate)
+        assert str(caught.value) == "modal_release_acknowledgement_invalid"
+        assert caught.value.__cause__ is None
+
+    app = FakeApp.instances[-1]
+    assert app.app_id == "ap-release"
+    assert len(app.deploy_calls) == 1
+    assert app.kwargs == {"include_source": False}
+    assert all(function.options["image"] is BuildImage.instances[-1]
+               for function, _ in app.functions)
+    if hydrated_image_id is None:
+        assert BuildImage.instances[-1].object_id == candidate.image_id
+        assert BuildImage.instances[-1].is_hydrated is False
+    assert BuildImage.instances[-1].build_calls == 0
 
 
 def test_v2_plan_rejects_missing_or_reused_cache_volume() -> None:
