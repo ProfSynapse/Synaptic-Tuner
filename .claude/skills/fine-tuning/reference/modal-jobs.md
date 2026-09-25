@@ -745,7 +745,10 @@ After a signed CPU receipt, the standalone train path reports only fixed,
 non-secret host boundaries: `RUN_HOST_ASSEMBLY` during host composition;
 `RUN_PUBLIC_PREPARE`, `RUN_PUBLIC_LOAD`, `RUN_PUBLIC_RESOLVE`,
 `RUN_PUBLIC_PLAN`, and `RUN_PUBLIC_PREFLIGHT` at the five public planning
-calls; and `RUN_START_INDETERMINATE` once `start` is invoked. The last phase
+calls. Within public resolution, `RUN_RESOLVE_RICH`, `RUN_RESOLVE_DERIVE`,
+and `RUN_RESOLVE_REPARSE` identify only the fixed rich-resolution, coordinator
+material derivation, and independent reparse boundaries. `RUN_START_INDETERMINATE`
+begins once `start` is invoked. That last phase
 never proves that a remote job was not spawned, even if the local call catalog
 is empty. Every phase retains the consumed attempt and has
 `retry_authorized: false`; unknown and post-start failures remain generic.

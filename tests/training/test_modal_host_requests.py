@@ -15,7 +15,11 @@ from tuner.execution.foundation_v2.executors import ExecutorDescriptorV1
 from tuner.execution.foundation_v2.references import ExecutionScopeV1
 from tuner.project.context import ProjectContext
 from tuner.training.coordinator_service import CoordinatorTrainingService
-from tuner.training.modal_host_requests import ModalPackagedPlanPortsV1, ModalPackagedRequestsV1
+from tuner.training.modal_host_requests import (
+    ModalPackagedPlanPortsV1, ModalPackagedRequestsV1,
+    ModalPackagedResolutionUnavailable,
+)
+import tuner.training.modal_host_requests as requests_module
 from tests.training.test_packaged_execution_material import packaged_fixture
 
 
@@ -80,3 +84,32 @@ def test_packaged_request_uses_public_coordinator_ladder(tmp_path):
     assert service.preflight(plan).authorization[0].operation == "training.start"
     with pytest.raises(ValueError, match="prepared input"):
         bridge.load(public.canonical_json() + " ")
+
+
+@pytest.mark.parametrize("stage", ("RICH", "DERIVE", "REPARSE"))
+def test_packaged_resolution_failure_names_only_closed_stage(tmp_path, monkeypatch, stage):
+    public, components = packaged_fixture()
+    request = TrainingRequest("request", "project", public.canonical_json())
+    bridge = ModalPackagedRequestsV1(
+        prepared_request=request, run=TrainingRunRef("run-packaged", "project"),
+        components=components, context=ProjectContext.standalone(engine_root=tmp_path),
+    )
+    secret = "HF_TOKEN=private /home/owner/dataset.jsonl"
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(secret)
+
+    if stage == "RICH":
+        monkeypatch.setattr(type(bridge._service), "resolve_selected", fail)
+    elif stage == "DERIVE":
+        monkeypatch.setattr(requests_module, "derive_packaged_coordinator_material", fail)
+    else:
+        monkeypatch.setattr(requests_module, "parse_packaged_coordinator_material", fail)
+
+    with pytest.raises(ModalPackagedResolutionUnavailable) as caught:
+        bridge.resolve(request)
+    assert caught.value.stage == stage
+    assert caught.value.args == ("modal_packaged_resolution_unavailable",)
+    assert caught.value.__context__ is None
+    assert secret not in str(caught.value) and secret not in repr(caught.value)
+    assert bridge._material is None

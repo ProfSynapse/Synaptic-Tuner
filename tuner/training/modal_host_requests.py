@@ -26,6 +26,29 @@ from tuner.training.packaged_boundary import (
 )
 
 
+_RESOLUTION_STAGES = frozenset({"RICH", "DERIVE", "REPARSE"})
+
+
+class ModalPackagedResolutionUnavailable(RuntimeError):
+    """Closed local resolution boundary; never carries rejected material."""
+
+    def __init__(self, stage: str) -> None:
+        if stage not in _RESOLUTION_STAGES:
+            raise ValueError("invalid_modal_packaged_resolution_stage")
+        self.stage = stage
+        super().__init__("modal_packaged_resolution_unavailable")
+
+
+def _closed_resolution(stage: str, operation):
+    try:
+        return operation()
+    except Exception:
+        pass
+    # Raise outside the except block so the original exception is not retained
+    # as diagnostic context, even when the caller inspects this exception.
+    raise ModalPackagedResolutionUnavailable(stage)
+
+
 class _FixedPackagedResolver:
     def __init__(self, components: ResolvedTrainingComponents) -> None:
         self.components = components
@@ -64,15 +87,21 @@ class ModalPackagedRequestsV1:
     def resolve(self, request: TrainingRequest) -> ResolvedTrainingRequest:
         if type(request) is not TrainingRequest or request != self._request:
             raise ValueError("request differs from prepared input")
-        rich = self._service.resolve_selected(
-            self._service.load(CanonicalDocument(request.canonical_json))
+        rich = _closed_resolution(
+            "RICH", lambda: self._service.resolve_selected(
+                self._service.load(CanonicalDocument(request.canonical_json))
+            ),
         )
-        material = derive_packaged_coordinator_material(
-            rich, self._recipes, request_id=request.request_id,
-            project_ref=request.project_ref, run_id=self._run.run_id,
+        material = _closed_resolution(
+            "DERIVE", lambda: derive_packaged_coordinator_material(
+                rich, self._recipes, request_id=request.request_id,
+                project_ref=request.project_ref, run_id=self._run.run_id,
+            ),
         )
-        self._material = parse_packaged_coordinator_material(
-            material.canonical_bytes, self._recipes,
+        self._material = _closed_resolution(
+            "REPARSE", lambda: parse_packaged_coordinator_material(
+                material.canonical_bytes, self._recipes,
+            ),
         )
         return self._material.planning_request
 

@@ -36,6 +36,7 @@ from tuner.project.context import ProjectContext
 from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV2
 from tuner.training.contracts import ResourceSpec
 from tuner.training.modal_host_reader import ModalPackagedCoordinatorReaderV1, ModalPackagedReadUnavailable
+from tuner.training.modal_host_requests import ModalPackagedResolutionUnavailable
 from tuner.training.modal_host_runtime import ModalHostRuntimeV1
 from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
 from tuner.training.modal_host_qualification import (
@@ -496,6 +497,49 @@ def test_post_start_failure_remains_generic_without_private_details(tmp_path, mo
             modal_environment="main",
         )
     assert caught.value.args == ("modal_standalone_run_unavailable",)
+    assert events == ["bootstrap", "cpu"]
+
+
+@pytest.mark.parametrize("stage, phase, location", (
+    ("RICH", "RUN_RESOLVE_RICH", "modal_standalone_runner.resolve_rich"),
+    ("DERIVE", "RUN_RESOLVE_DERIVE", "modal_standalone_runner.resolve_derive"),
+    ("REPARSE", "RUN_RESOLVE_REPARSE", "modal_standalone_runner.resolve_reparse"),
+))
+def test_public_resolve_projects_only_closed_inner_stage(
+        tmp_path, monkeypatch, stage, phase, location):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+
+    def fail(*_args, **_kwargs):
+        raise ModalPackagedResolutionUnavailable(stage)
+
+    monkeypatch.setattr(TrainingAPI, "resolve", fail)
+    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
+        runner.run_modal_standalone_job(
+            plan=plan, context=context, modal_profile="explicit",
+            modal_environment="main",
+        )
+    assert (caught.value.phase, caught.value.failure_class,
+            caught.value.location, caught.value.retry_authorized) == (
+                phase, "UNAVAILABLE", location, False,
+            )
+    assert caught.value.args == ("modal_standalone_phase_unavailable",)
+    assert events == ["bootstrap", "cpu"]
+
+
+def test_closed_resolve_error_during_start_keeps_start_ambiguity(tmp_path, monkeypatch):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+
+    def fail(*_args, **_kwargs):
+        raise ModalPackagedResolutionUnavailable("RICH")
+
+    monkeypatch.setattr(TrainingAPI, "start", fail)
+    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
+        runner.run_modal_standalone_job(
+            plan=plan, context=context, modal_profile="explicit",
+            modal_environment="main",
+        )
+    assert caught.value.phase == "RUN_START_INDETERMINATE"
+    assert caught.value.retry_authorized is False
     assert events == ["bootstrap", "cpu"]
 
 

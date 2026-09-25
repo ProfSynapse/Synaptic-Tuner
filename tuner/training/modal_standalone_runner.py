@@ -43,6 +43,7 @@ from tuner.training.modal_host_authority import HMACAuthenticator, UTCClock
 from tuner.training.modal_host_composition import compose_modal_packaged_reference_host
 from tuner.training.modal_host_download import download_verified_modal_artifact
 from tuner.training.modal_host_reader import ModalPackagedReadUnavailable
+from tuner.training.modal_host_requests import ModalPackagedResolutionUnavailable
 from tuner.training.modal_host_effects import ModalPackagedHostEffectsV1
 from tuner.training.modal_host_prepared_copy import stage_published_modal_dataset
 from tuner.training.modal_host_qualification import (
@@ -75,6 +76,9 @@ _RUN_PHASE_DIAGNOSTICS = {
     "RUN_PUBLIC_PREPARE": ("UNAVAILABLE", "modal_standalone_runner.public_prepare"),
     "RUN_PUBLIC_LOAD": ("UNAVAILABLE", "modal_standalone_runner.public_load"),
     "RUN_PUBLIC_RESOLVE": ("UNAVAILABLE", "modal_standalone_runner.public_resolve"),
+    "RUN_RESOLVE_RICH": ("UNAVAILABLE", "modal_standalone_runner.resolve_rich"),
+    "RUN_RESOLVE_DERIVE": ("UNAVAILABLE", "modal_standalone_runner.resolve_derive"),
+    "RUN_RESOLVE_REPARSE": ("UNAVAILABLE", "modal_standalone_runner.resolve_reparse"),
     "RUN_PUBLIC_PLAN": ("UNAVAILABLE", "modal_standalone_runner.public_plan"),
     "RUN_PUBLIC_PREFLIGHT": ("UNAVAILABLE", "modal_standalone_runner.public_preflight"),
     "RUN_START_INDETERMINATE": ("INDETERMINATE", "modal_standalone_runner.training_start"),
@@ -467,6 +471,18 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             )
     except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable):
         raise
+    except ModalPackagedResolutionUnavailable as failure:
+        if phase == "RUN_PUBLIC_RESOLVE" and type(failure) is ModalPackagedResolutionUnavailable:
+            stage_phase = {
+                "RICH": "RUN_RESOLVE_RICH",
+                "DERIVE": "RUN_RESOLVE_DERIVE",
+                "REPARSE": "RUN_RESOLVE_REPARSE",
+            }.get(failure.stage)
+            if stage_phase is not None:
+                raise ModalStandalonePhaseUnavailable(stage_phase) from None
+        if phase is not None:
+            raise ModalStandalonePhaseUnavailable(phase) from None
+        raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable") from None
     except Exception:
         if phase is not None:
             raise ModalStandalonePhaseUnavailable(phase) from None
