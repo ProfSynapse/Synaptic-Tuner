@@ -26,6 +26,12 @@ class ModalPackagedReadUnavailable(RuntimeError):
 
 _ARTIFACT_READ_STEP_SECONDS = 60
 _ARTIFACT_READ_TOTAL_SECONDS = 300
+_FIXED_WORKER_FAILURE = {
+    "schema_version": "synaptic-modal-packaged-worker-result/v1",
+    "effect_id": "unavailable",
+    "status_code": "failed",
+    "completion_sha256": "0" * 64,
+}
 
 
 class ModalPackagedCoordinatorReaderV1:
@@ -135,6 +141,8 @@ class ModalPackagedCoordinatorReaderV1:
             )
             if result is None:
                 return ModalFunctionCallState.PENDING, None
+            if type(result) is dict and result == _FIXED_WORKER_FAILURE:
+                raise ModalPackagedReadUnavailable("modal_packaged_call_failed")
             if (type(result) is not dict or set(result) != {
                     "schema_version", "effect_id", "status_code", "completion_sha256",
             } or result["schema_version"] != "synaptic-modal-packaged-worker-result/v1"
@@ -143,8 +151,6 @@ class ModalPackagedCoordinatorReaderV1:
                     or len(result["completion_sha256"]) != 64
                     or any(c not in "0123456789abcdef" for c in result["completion_sha256"])):
                 raise ValueError
-            if result["status_code"] == "failed":
-                raise ModalPackagedReadUnavailable("modal_packaged_call_failed")
             if result["status_code"] != "completed":
                 raise ValueError
             return ModalFunctionCallState.RETURNED, result["completion_sha256"]

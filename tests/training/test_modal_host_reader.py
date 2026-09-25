@@ -32,8 +32,9 @@ from tests.execution.coordinator_v1.test_state_machine import (
 
 
 class _FakeFacade:
-    def __init__(self, state, effect_id, completion_digest):
+    def __init__(self, state, effect_id, completion_digest, result=None):
         self.state = state
+        self.result = result
         self.client = object()
         facade = self
 
@@ -49,6 +50,8 @@ class _FakeFacade:
                 assert timeout == 0
                 if facade.state is ModalFunctionCallState.PENDING:
                     raise TimeoutError()
+                if facade.result is not None:
+                    return facade.result
                 return {
                     "schema_version": "synaptic-modal-packaged-worker-result/v1",
                     "effect_id": effect_id,
@@ -152,8 +155,43 @@ def test_pending_call_does_not_manufacture_queued_or_running_state():
 
 def test_failed_packaged_result_stops_with_fixed_failure_diagnostic():
     reader, request, _ = _reader("failed")
+    reader._facade.result = {
+        "schema_version": "synaptic-modal-packaged-worker-result/v1",
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+    }
     with pytest.raises(ModalPackagedReadUnavailable, match="call_failed"):
         reader.observe(request)
+
+
+@pytest.mark.parametrize("change", [
+    {"effect_id": "other"},
+    {"status_code": "completed"},
+    {"completion_sha256": "a" * 64},
+    {"schema_version": "other"},
+    {"extra": "untrusted"},
+])
+def test_near_miss_worker_failures_remain_unknown(change):
+    reader, _request, _ = _reader("failed")
+    result = {
+        "schema_version": "synaptic-modal-packaged-worker-result/v1",
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+    }
+    result.update(change)
+    reader._facade.result = result
+    with pytest.raises(ModalPackagedReadUnavailable) as error:
+        reader._poll_packaged_call(reader.binding, "fc-1")
+    assert str(error.value) == "modal_packaged_call_unknown"
+
+
+def test_other_failed_result_with_bound_effect_id_remains_unknown():
+    reader, _request, _ = _reader("failed")
+    with pytest.raises(ModalPackagedReadUnavailable) as error:
+        reader._poll_packaged_call(reader.binding, "fc-1")
+    assert str(error.value) == "modal_packaged_call_unknown"
 
 
 def test_blocked_sdk_hydration_has_bounded_fixed_read_failure():

@@ -769,6 +769,16 @@ batch commit, and independently verify the uploaded object before returning a
 stage receipt. A failed stage may leave an indeterminate Foundation effect;
 preserve that attempt and use a fresh attempt after a reviewed fix.
 
+For a submitted packaged call that ended with a generic host result, use the
+checked-in `scripts/inspect_modal_packaged_call.py` only with the exact private
+journal, submit-command digest, retained call ID, and Modal profile. It
+authenticates the submit claim and binding before one read-only raw provider
+poll, does not unpickle or print provider output, and reports only fixed
+diagnostic categories. `WORKER_FAILED` means the exact packaged worker's fixed
+failure result was returned; it does not disclose the failing operation,
+verify a run, or authorize replay. The public reader likewise recognizes only
+that exact failure dictionary; near misses stay unknown.
+
 The first Qwen 3.5 4B smoke recipe selects `L40S` as a measured-rate but
 unqualified-fit candidate; `A100-80GB` remains a reviewed fallback. Both use
 the exact current scoped GPU rate key, and the operator estimate is not a
