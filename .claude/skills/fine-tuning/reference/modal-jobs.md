@@ -644,6 +644,30 @@ image construction.
 
 ## Failure diagnostics
 
+For a standalone CPU attempt that stops at `RELEASE_OBSERVE` before deployment,
+use the checked-in private maintenance diagnostic before another cost-incurring
+qualification attempt:
+
+```bash
+python scripts/inspect_modal_release_lookup.py \
+  --journal /absolute/private/attempt-<effect-id>/modal-host.sqlite3 \
+  --claim-ref deploy-<exact-release-digest> \
+  --environment <operator-selected-environment> \
+  --modal-profile <explicit-profile>
+```
+
+Select the exact consumed attempt and deploy-claim ref from its retained local
+state; never pick the latest attempt or infer the app name from resource names.
+The command checks one owner-private journal claim and makes one bounded,
+read-only `AppGetByDeploymentName` call. It emits only closed response-shape or
+failure categories, not names, IDs, credentials, provider payloads, or exception
+text. The profile and environment are operator selections, not authenticated
+by the claim; the journal hash detects corruption but is not a MAC against
+same-owner tampering. `ABSENT` is current scoped lookup evidence only, not
+proof of never-deployment, shutdown, cleanup, or retry authority. Preserve the
+failed attempt and its resources. This diagnostic is not a public training API
+or a substitute for exact-source CPU qualification.
+
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in
 `scripts/chat_model.py` command; do not rerun training to rebuild ephemeral host
