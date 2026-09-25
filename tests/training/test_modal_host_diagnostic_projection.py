@@ -80,7 +80,9 @@ def test_cpu_qualification_diagnosis_projects_only_closed_fields(phase):
     "RUN_HOST_ASSEMBLY", "RUN_PUBLIC_PREPARE", "RUN_PUBLIC_LOAD",
     "RUN_PUBLIC_RESOLVE", "RUN_RESOLVE_RICH", "RUN_RESOLVE_DERIVE",
     "RUN_RESOLVE_REPARSE", "RUN_PUBLIC_PLAN", "RUN_PUBLIC_PREFLIGHT",
-    "RUN_START_INDETERMINATE",
+    "RUN_START_INDETERMINATE", "RUN_STAGE_RECONCILE_REQUIRED",
+    "RUN_SUBMIT_RECONCILE_REQUIRED", "RUN_WORKFLOW_FAILED",
+    "RUN_WORKFLOW_CONTRADICTED",
 ))
 def test_standalone_run_diagnosis_projects_only_closed_fields(phase):
     error = ModalStandalonePhaseUnavailable(phase)

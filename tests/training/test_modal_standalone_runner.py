@@ -20,6 +20,7 @@ from tuner.dataset_prep import prepare_dataset_v2
 from tuner.execution.providers.modal.contracts import provider_entry_identity
 from tuner.execution.providers.modal.contracts import operation_path
 from tuner.execution.foundation_v2.canonical import canonical_bytes
+from tuner.execution.coordinator_v1.model import WorkflowPhaseV1
 from tuner.execution.providers.modal.facade import ModalFunctionCallState
 from tuner.execution.providers.modal.packaged_binding import (
     MODAL_PACKAGED_RUNTIME_FACTS_V2_SCHEMA, ModalPackagedRuntimeFactsV1,
@@ -511,6 +512,55 @@ def test_post_start_failure_remains_generic_without_private_details(tmp_path, mo
         )
     assert caught.value.args == ("modal_standalone_run_unavailable",)
     assert events == ["bootstrap", "cpu"]
+
+
+def test_stage_failure_is_closed_and_never_submits(
+        tmp_path, monkeypatch, capsys):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+    secret = "HF_TOKEN=private-and-absolute-/home/private/customer"
+
+    def fail_stage(*_args, **_kwargs):
+        events.append("stage")
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(ModalPackagedInputStager, "stage_once", fail_stage)
+    handler = ModalJobConfigHandler(Namespace(
+        modal_profile="explicit", modal_environment="main", json=True,
+    ), context)
+    assert handler._execute(plan) == 2
+    payload = json.loads(capsys.readouterr().out)
+    details = payload["error"]["details"]
+    assert details["phase"] in {
+        "RUN_START_INDETERMINATE", "RUN_STAGE_RECONCILE_REQUIRED",
+    }
+    assert details == {
+        "phase": details["phase"],
+        "failure_class": "INDETERMINATE",
+        "location": (
+            "modal_standalone_runner.training_start"
+            if details["phase"] == "RUN_START_INDETERMINATE"
+            else "modal_standalone_runner.stage_reconcile"
+        ),
+        "retry_authorized": False,
+    }
+    assert secret not in json.dumps(payload)
+    assert events == ["bootstrap", "cpu", "stage"]
+
+
+@pytest.mark.parametrize("workflow_phase, expected", (
+    (WorkflowPhaseV1.STAGE_RECONCILE_REQUIRED, "RUN_STAGE_RECONCILE_REQUIRED"),
+    (WorkflowPhaseV1.SUBMIT_RECONCILE_REQUIRED, "RUN_SUBMIT_RECONCILE_REQUIRED"),
+    (WorkflowPhaseV1.FAILED, "RUN_WORKFLOW_FAILED"),
+    (WorkflowPhaseV1.CONTRADICTED, "RUN_WORKFLOW_CONTRADICTED"),
+    (WorkflowPhaseV1.QUEUED, None),
+))
+def test_accepted_start_durable_phase_mapping_is_closed(workflow_phase, expected):
+    assert runner._post_start_phase(workflow_phase) == expected
+
+
+def test_accepted_start_phase_mapping_rejects_untyped_state():
+    with pytest.raises(ValueError, match="invalid_modal_workflow_phase"):
+        runner._post_start_phase("stage_reconcile_required")
 
 
 @pytest.mark.parametrize("stage, phase, location", (

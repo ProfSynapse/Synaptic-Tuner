@@ -751,9 +751,23 @@ material derivation, and independent reparse boundaries. `RUN_START_INDETERMINAT
 begins once `start` is invoked. That last phase
 never proves that a remote job was not spawned, even if the local call catalog
 is empty. Every phase retains the consumed attempt and has
-`retry_authorized: false`; unknown and post-start failures remain generic.
+`retry_authorized: false`. After an accepted start, the runner reads the
+durable workflow phase before trying a provider observation. A stage or submit
+reconciliation phase is reported as closed `RUN_STAGE_RECONCILE_REQUIRED` or
+`RUN_SUBMIT_RECONCILE_REQUIRED`; terminal failure or contradiction is likewise
+closed. These are state reports, not proof that a provider effect did or did
+not occur and never authorize retry. Unknown post-start failures remain generic.
 Do not replay or clean up a failed attempt based on an absent local catalog
 entry.
+
+The pinned Modal 1.5.4 Volume batch uploader seeks to the beginning and end
+of each file-like input while hashing/uploading it. A read-only stream is not
+an upload-compatible input even if its bytes are correct. The host stager must
+consume the retained one-use source into a bounded seekable private spool,
+verify its exact size and digest before the provider write, keep it open through
+batch commit, and independently verify the uploaded object before returning a
+stage receipt. A failed stage may leave an indeterminate Foundation effect;
+preserve that attempt and use a fresh attempt after a reviewed fix.
 
 The first Qwen 3.5 4B smoke recipe selects `L40S` as a measured-rate but
 unqualified-fit candidate; `A100-80GB` remains a reviewed fallback. Both use

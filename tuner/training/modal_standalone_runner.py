@@ -17,7 +17,7 @@ from synaptic_tuner.api.v1.training_sources import (
     LocalTrainingInputPathV1, TrainingPreparationConfigV1,
 )
 from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest
-from tuner.execution.coordinator_v1.model import ProviderReadPurposeV1
+from tuner.execution.coordinator_v1.model import ProviderReadPurposeV1, WorkflowPhaseV1
 from tuner.execution.providers.modal.facade import ModalFunctionCallState
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
 from tuner.execution.providers.modal.packaged_composition import (
@@ -82,7 +82,24 @@ _RUN_PHASE_DIAGNOSTICS = {
     "RUN_PUBLIC_PLAN": ("UNAVAILABLE", "modal_standalone_runner.public_plan"),
     "RUN_PUBLIC_PREFLIGHT": ("UNAVAILABLE", "modal_standalone_runner.public_preflight"),
     "RUN_START_INDETERMINATE": ("INDETERMINATE", "modal_standalone_runner.training_start"),
+    "RUN_STAGE_RECONCILE_REQUIRED": ("INDETERMINATE", "modal_standalone_runner.stage_reconcile"),
+    "RUN_SUBMIT_RECONCILE_REQUIRED": ("INDETERMINATE", "modal_standalone_runner.submit_reconcile"),
+    "RUN_WORKFLOW_FAILED": ("UNAVAILABLE", "modal_standalone_runner.workflow_failed"),
+    "RUN_WORKFLOW_CONTRADICTED": ("INDETERMINATE", "modal_standalone_runner.workflow_contradicted"),
 }
+
+_POST_START_PHASES = {
+    WorkflowPhaseV1.STAGE_RECONCILE_REQUIRED: "RUN_STAGE_RECONCILE_REQUIRED",
+    WorkflowPhaseV1.SUBMIT_RECONCILE_REQUIRED: "RUN_SUBMIT_RECONCILE_REQUIRED",
+    WorkflowPhaseV1.FAILED: "RUN_WORKFLOW_FAILED",
+    WorkflowPhaseV1.CONTRADICTED: "RUN_WORKFLOW_CONTRADICTED",
+}
+
+
+def _post_start_phase(workflow_phase: WorkflowPhaseV1) -> str | None:
+    if type(workflow_phase) is not WorkflowPhaseV1:
+        raise ValueError("invalid_modal_workflow_phase")
+    return _POST_START_PHASES.get(workflow_phase)
 
 
 class ModalStandalonePhaseUnavailable(RuntimeError):
@@ -436,6 +453,11 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 raise ValueError
             phase = None
             workflow = host.composition.stores.workflow_store.get(started.run)
+            stopped_phase = _post_start_phase(workflow.phase)
+            if stopped_phase is not None:
+                raise ModalStandalonePhaseUnavailable(stopped_phase)
+            if workflow.phase is not WorkflowPhaseV1.QUEUED:
+                raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable")
             read_request = host.composition.runs._request(
                 workflow, ProviderReadPurposeV1.OBSERVE,
             )
@@ -470,6 +492,8 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 recipe.maximum_cost_minor_units,
             )
     except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable):
+        raise
+    except ModalStandalonePhaseUnavailable:
         raise
     except ModalPackagedResolutionUnavailable as failure:
         if phase == "RUN_PUBLIC_RESOLVE" and type(failure) is ModalPackagedResolutionUnavailable:

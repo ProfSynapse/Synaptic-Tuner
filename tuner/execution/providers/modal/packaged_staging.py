@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import hashlib
+from tempfile import TemporaryFile
 from typing import BinaryIO
 
 from synaptic_tuner.api.v1._contract import PreparedTrainingInputIdentity
@@ -160,21 +161,22 @@ class ModalPackagedStageReceipt:
         )  # type: ignore[arg-type]
 
 
-class _HashingReader:
-    def __init__(self, stream: BinaryIO, maximum: int) -> None:
-        self._stream, self._maximum = stream, maximum
-        self.size = 0
-        self.digest = hashlib.sha256()
-
-    def read(self, size: int = -1) -> bytes:
-        chunk = self._stream.read(size)
-        if type(chunk) is not bytes:
-            raise ValueError("prepared-input stream returned non-bytes")
-        self.size += len(chunk)
-        if self.size > self._maximum:
-            raise ValueError("prepared-input stream exceeds its declared size")
-        self.digest.update(chunk)
-        return chunk
+def _spool_verified_input(stream: BinaryIO, spool: BinaryIO, *, size: int, digest: str) -> None:
+    """Bound and authenticate a one-use stream before any provider write."""
+    actual = hashlib.sha256()
+    remaining = size
+    while remaining:
+        requested = min(1024 * 1024, remaining)
+        chunk = stream.read(requested)
+        if type(chunk) is not bytes or not chunk or len(chunk) > requested:
+            raise ValueError("prepared-input stream differs from its declared size")
+        if spool.write(chunk) != len(chunk):
+            raise ValueError("prepared-input spool was not written completely")
+        actual.update(chunk)
+        remaining -= len(chunk)
+    if stream.read(1) != b"" or actual.hexdigest() != digest:
+        raise ValueError("prepared-input stream differs from its declared identity")
+    spool.seek(0)
 
 
 def prepare_modal_packaged_stage(
@@ -193,7 +195,7 @@ def prepare_modal_packaged_stage(
 
 
 class ModalPackagedInputStager:
-    """Consume one retained stream directly into one collision-failing object."""
+    """Verify one retained stream before a collision-failing provider upload."""
 
     def __init__(self, facade: ExplicitModal154ReadFacade) -> None:
         if type(facade) is not ExplicitModal154ReadFacade:
@@ -210,19 +212,15 @@ class ModalPackagedInputStager:
         ):
             raise ModalFacadeError("modal_packaged_stage_collision")
         stream = material.lease.take_stream()
-        reader = _HashingReader(stream, descriptor.identity.size_bytes)
         try:
-            volume = self._facade._volume(descriptor.artifact_volume_id)
-            with volume.batch_upload(force=False) as batch:
-                batch.put_file(reader, descriptor.relative_path)
-            if reader.read(1) != b"" or (
-                reader.size,
-                reader.digest.hexdigest(),
-            ) != (
-                descriptor.identity.size_bytes,
-                descriptor.identity.content_digest,
-            ):
-                raise ValueError("prepared-input upload did not consume exact bytes")
+            with TemporaryFile(mode="w+b") as spool:
+                _spool_verified_input(
+                    stream, spool, size=descriptor.identity.size_bytes,
+                    digest=descriptor.identity.content_digest,
+                )
+                volume = self._facade._volume(descriptor.artifact_volume_id)
+                with volume.batch_upload(force=False) as batch:
+                    batch.put_file(spool, descriptor.relative_path)
         except ModalFacadeError:
             raise
         except Exception:

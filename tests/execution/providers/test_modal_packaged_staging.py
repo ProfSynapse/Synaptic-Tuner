@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from io import BytesIO
 import hashlib
+import os
+import tempfile
 
 import pytest
 
@@ -19,6 +21,7 @@ from tuner.execution.providers.modal.packaged_staging import (
     ModalPackagedStageReceipt,
     prepare_modal_packaged_stage,
 )
+import tuner.execution.providers.modal.packaged_staging as packaged_staging
 from tuner.runtime.releases import PackagedExecutionBindingV1
 from tuner.training.contracts import RetainedTrainingInputStreamLease
 
@@ -26,6 +29,7 @@ from tests.execution.providers.test_modal_packaged_binding import _release_and_e
 from tests.execution.providers.test_modal_sdk154_adapter import (
     Entry,
     FakeVolume,
+    Upload,
     make_facade,
 )
 
@@ -104,6 +108,52 @@ def test_stage_uploads_once_then_streams_exact_readback_and_lists_exact_member(
     assert stream.closed
 
 
+def test_large_stage_supports_sdk_seek_and_repeat_reads(monkeypatch) -> None:
+    payload = b"prepared-input" * (2 * 1024 * 1024 // len(b"prepared-input") + 3)
+    facade, execution, material, original_stream, _ = _case(payload)
+    original_stream.close()
+
+    class ReadOnlySource:
+        def __init__(self, data: bytes) -> None:
+            self._stream = BytesIO(data)
+
+        @property
+        def closed(self) -> bool:
+            return self._stream.closed
+
+        def read(self, size: int = -1) -> bytes:
+            return self._stream.read(size)
+
+        def close(self) -> None:
+            self._stream.close()
+
+    source = ReadOnlySource(payload)
+    material = prepare_modal_packaged_stage(
+        execution, RetainedTrainingInputStreamLease(material.descriptor.identity, source),
+        stage_effect_id="stage-effect", artifact_volume_id="av",
+    )
+    volume = FakeVolume.registry["artifact-name"]
+    probes: list[tuple[int, str]] = []
+
+    class SeekingUpload(Upload):
+        def put_file(self, fileobj, path):
+            fileobj.seek(0, os.SEEK_END)
+            probes.append((fileobj.tell(), path))
+            fileobj.seek(0)
+            assert hashlib.sha256(fileobj.read()).hexdigest() == hashlib.sha256(payload).hexdigest()
+            fileobj.seek(0)
+            super().put_file(fileobj, path)
+
+    monkeypatch.setattr(
+        volume, "batch_upload", lambda *, force=False: SeekingUpload(volume, force),
+    )
+    receipt = ModalPackagedInputStager(facade).stage_once(material)
+    assert probes == [(len(payload), material.descriptor.relative_path)]
+    assert receipt.size_bytes == len(payload)
+    assert volume.files[receipt.path] == payload
+    assert source.closed
+
+
 def test_collision_fails_before_upload_without_overwrite(monkeypatch) -> None:
     facade, _, material, stream, _ = _case()
     volume = FakeVolume.registry["artifact-name"]
@@ -144,6 +194,57 @@ def test_stream_mismatch_fails_closed_and_consumes_lease(mode: str) -> None:
     with pytest.raises(ModalFacadeError, match="write_failed"):
         ModalPackagedInputStager(facade).stage_once(rebound)
     assert hostile.closed
+
+
+def test_stream_identity_is_checked_before_provider_write(monkeypatch) -> None:
+    facade, execution, material, original_stream, payload = _case()
+    original_stream.close()
+    volume = FakeVolume.registry["artifact-name"]
+    writes: list[object] = []
+    monkeypatch.setattr(
+        volume, "batch_upload", lambda **kwargs: writes.append(kwargs),
+    )
+    source = BytesIO(payload[:-1] + b"x")
+    rebound = prepare_modal_packaged_stage(
+        execution, RetainedTrainingInputStreamLease(material.descriptor.identity, source),
+        stage_effect_id="stage-effect", artifact_volume_id="av",
+    )
+    with pytest.raises(ModalFacadeError, match="write_failed"):
+        ModalPackagedInputStager(facade).stage_once(rebound)
+    assert writes == []
+    assert volume.files == {}
+    assert source.closed
+
+
+def test_upload_failure_closes_private_spool_and_source(monkeypatch) -> None:
+    facade, _, material, source, _ = _case()
+    volume = FakeVolume.registry["artifact-name"]
+    spools = []
+    make_spool = tempfile.TemporaryFile
+
+    def tracked_spool(*args, **kwargs):
+        spool = make_spool(*args, **kwargs)
+        spools.append(spool)
+        return spool
+
+    class FailingUpload:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def put_file(self, fileobj, _path):
+            fileobj.seek(0, os.SEEK_END)
+            raise RuntimeError("provider detail")
+
+    monkeypatch.setattr(packaged_staging, "TemporaryFile", tracked_spool)
+    monkeypatch.setattr(volume, "batch_upload", lambda *, force=False: FailingUpload())
+    with pytest.raises(ModalFacadeError, match="write_failed"):
+        ModalPackagedInputStager(facade).stage_once(material)
+    assert len(spools) == 1 and spools[0].closed
+    assert source.closed
+    assert volume.files == {}
 
 
 def test_readback_mismatch_never_returns_receipt(monkeypatch) -> None:

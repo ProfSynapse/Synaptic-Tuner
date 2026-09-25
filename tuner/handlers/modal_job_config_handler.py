@@ -92,6 +92,10 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
         "RUN_PUBLIC_PLAN": ("UNAVAILABLE", "modal_standalone_runner.public_plan"),
         "RUN_PUBLIC_PREFLIGHT": ("UNAVAILABLE", "modal_standalone_runner.public_preflight"),
         "RUN_START_INDETERMINATE": ("INDETERMINATE", "modal_standalone_runner.training_start"),
+        "RUN_STAGE_RECONCILE_REQUIRED": ("INDETERMINATE", "modal_standalone_runner.stage_reconcile"),
+        "RUN_SUBMIT_RECONCILE_REQUIRED": ("INDETERMINATE", "modal_standalone_runner.submit_reconcile"),
+        "RUN_WORKFLOW_FAILED": ("UNAVAILABLE", "modal_standalone_runner.workflow_failed"),
+        "RUN_WORKFLOW_CONTRADICTED": ("INDETERMINATE", "modal_standalone_runner.workflow_contradicted"),
     }
     if type(error) is ModalStandalonePhaseUnavailable and error.retry_authorized is False:
         admitted = run_phase.get(error.phase)
