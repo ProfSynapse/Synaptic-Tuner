@@ -60,7 +60,7 @@ def test_recipe_maps_to_exact_public_and_packaged_sft_controls():
     assert public.hyperparameters.lora_rank == 32
     assert public.hyperparameters.duration.max_steps == 2
     assert (recipe.accelerator, recipe.accelerator_count, recipe.timeout_seconds) == (
-        "A100-80GB", 1, 1800,
+        "L40S", 1, 1800,
     )
     assert recipe.maximum_cost_minor_units == 200
     assert workload.fingerprint
@@ -70,6 +70,9 @@ def test_recipe_maps_to_exact_public_and_packaged_sft_controls():
     lambda data: data["job"].update(image="arbitrary/image"),
     lambda data: data["job"].update(runtime_profile="unknown"),
     lambda data: data["job"].update(accelerator_count=2),
+    lambda data: data["job"].update(accelerator_count=True),
+    lambda data: data["job"].update(accelerator="T4"),
+    lambda data: data["job"].update(accelerator="l40s"),
     lambda data: data["job"].update(timeout_seconds=0),
     lambda data: data["job"].update(maximum_cost_minor_units=0),
     lambda data: data["job"].update(maximum_cost_minor_units="100"),
@@ -83,6 +86,11 @@ def test_recipe_maps_to_exact_public_and_packaged_sft_controls():
 def test_recipe_rejects_unapproved_authority_and_incompatible_controls(monkeypatch, mutation):
     with pytest.raises((TypeError, ValueError)):
         _load(monkeypatch, mutation)
+
+
+def test_recipe_accepts_reviewed_a100_option(monkeypatch):
+    recipe = _load(monkeypatch, lambda data: data["job"].update(accelerator="A100-80GB"))
+    assert recipe.accelerator == "A100-80GB"
 
 
 def test_existing_v2_publication_is_prepared_without_changing_identity(tmp_path):
@@ -167,7 +175,7 @@ def test_plan_verifies_publication_without_network_or_provider_effects(tmp_path,
     assert plan.prepared_identity.revision == semantic.dataset_digest
     assert plan.workload_digest
     assert plan.to_dict()["resource_request"] == {
-        "accelerator": "A100-80GB", "accelerator_count": 1,
+        "accelerator": "L40S", "accelerator_count": 1,
         "timeout_seconds": 1800,
     }
     assert plan.to_dict()["operator_maximum_cost"] == {

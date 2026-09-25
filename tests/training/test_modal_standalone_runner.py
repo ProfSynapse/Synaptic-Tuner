@@ -47,6 +47,7 @@ from tuner.training.packaged_compilation import (
     PACKAGED_SFT_WORKLOAD_SCHEMA, compile_packaged_sft_workload,
     packaged_configuration_digest,
 )
+from tuner.cloud.derived_training_image import load_profile
 from tuner.handlers.modal_job_config_handler import ModalJobConfigHandler
 from tuner.cli.router import route_command
 import tuner.training.modal_standalone_runner as runner
@@ -54,6 +55,18 @@ import tuner.training.modal_standalone_runner as runner
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="first live host is POSIX-only")
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_real_modal_image_profile_admits_current_packaged_workload():
+    profile = load_profile(
+        ROOT / "Trainers" / "image_profiles"
+        / "qwen35_4b_packaged_sft_3360351c" / "profile.yaml"
+    )
+    assert profile.packaged_runtime is not None
+    assert (
+        profile.packaged_runtime["capabilities"]["contracts"]["workload_schema"]
+        == PACKAGED_SFT_WORKLOAD_SCHEMA
+    )
 
 
 def _release(recipe):

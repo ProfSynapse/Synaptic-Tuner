@@ -71,6 +71,6 @@ packaged_runtime:
       dataset_formats:
         - syntunia-sft-row/v2
     contracts:
-      workload_schema: synaptic-sft-workload/v1
+      workload_schema: synaptic-packaged-sft-workload/v1
       prepared_input_schema: synaptic-prepared-training-input/v1
       artifact_contract_schema: synaptic-sft-artifacts/v1

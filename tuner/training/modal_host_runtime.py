@@ -1,8 +1,4 @@
-"""Scoped Modal runtime quotation and one-shot host preparation.
-
-The exact A100-80GB billing key is intentionally unset until a reviewed,
-scoped read-only observation establishes Modal's provider-returned field.
-"""
+"""Scoped Modal runtime quotation and one-shot host preparation."""
 
 from __future__ import annotations
 
@@ -41,11 +37,12 @@ from tuner.execution.providers.modal.runtime_release_deployment import (
 from tuner.runtime.runtime_release_modal_training import run_modal_packaged_training
 from tuner.runtime.runtime_release_modal_self_check import run_runtime_release_self_check
 from tuner.training.contracts import ResourceSpec
+from tuner.training.modal_recipe import MODAL_SFT_ACCELERATOR_RATE_KEYS
 
 
-# Observed read-only in the selected Modal 1.5.4 workspace/environment on
-# 2026-09-22; the value itself is always fetched afresh from scoped billing.
-_A100_80GB_RATE_KEY = "gpu_hour_cost_a100_80gb"
+# Keys observed read-only in the selected Modal 1.5.4 workspace/environment;
+# the value itself is always fetched afresh from scoped billing.
+# A100-80GB: 2026-09-22; L40S: 2026-09-25.
 _RATE_KEY = re.compile(r"^gpu_hour_cost_[a-z0-9_]+$")
 _T = TypeVar("_T")
 _CLOSED_BOOTSTRAP_DIAGNOSTICS = {
@@ -241,21 +238,22 @@ def quote_modal_runtime_for_host(
 ) -> ModalRuntimeQuoteV1:
     """Bounded GPU-only nominal quote, never a provider billing cap."""
     if (type(recipe_resource) is not ResourceSpec
-            or recipe_resource.accelerator != "A100-80GB"
+            or recipe_resource.accelerator not in MODAL_SFT_ACCELERATOR_RATE_KEYS
+            or type(recipe_resource.accelerator_count) is not int
             or recipe_resource.accelerator_count != 1
             or not 1 <= recipe_resource.timeout_seconds <= 86400
             or type(maximum_cost_minor_units) is not int
             or maximum_cost_minor_units < 1):
         raise ValueError("Modal runtime resource or operator ceiling is unsupported")
-    key = _A100_80GB_RATE_KEY
+    key = MODAL_SFT_ACCELERATOR_RATE_KEYS[recipe_resource.accelerator]
     if type(key) is not str or _RATE_KEY.fullmatch(key) is None:
-        raise ValueError("A100-80GB scoped rate key is not independently verified")
+        raise ValueError("selected GPU scoped rate key is not independently verified")
     rates = _scoped_rates(sdk=sdk, client=client, client_binding=client_binding)
     value = rates.get(key)
     if (type(value) is not Decimal or not value.is_finite() or value <= 0
             or not -6 <= value.adjusted() <= 5
             or len(value.as_tuple().digits) > 12):
-        raise ValueError("A100-80GB scoped rate is invalid")
+        raise ValueError("selected GPU scoped rate is invalid")
     estimate = value * Decimal(recipe_resource.timeout_seconds) / Decimal(3600)
     minor = int((estimate * 100).to_integral_value(rounding=ROUND_CEILING))
     if minor < 1 or minor > maximum_cost_minor_units:

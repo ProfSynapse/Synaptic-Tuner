@@ -153,7 +153,9 @@ def _binding():
 
 
 def test_scoped_quote_reports_exclusions_and_enforces_ceiling(monkeypatch):
-    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
     client = object()
     rates = host.observe_scoped_modal_gpu_rates(sdk=_SDK, client=client, client_binding=_binding())
     assert rates == {"gpu_hour_cost_a100_80gb_fixture": "2.50"}
@@ -191,6 +193,33 @@ def test_observed_a100_key_quotes_gpu_only_initial_smoke():
     assert quote.maximum_cost_minor_units == 200
 
 
+def test_l40s_quote_uses_exact_live_key_and_never_falls_back_to_a100():
+    _Workspace.rates = {
+        "gpu_hour_cost_l40s": Decimal("1.95000"),
+        "gpu_hour_cost_a100_80gb": Decimal("2.50000"),
+    }
+    resource = ResourceSpec("L40S", 1, 1800)
+    quote = host.quote_modal_runtime_for_host(
+        sdk=_SDK, client=object(), client_binding=_binding(),
+        recipe_resource=resource, maximum_cost_minor_units=200,
+    )
+    assert quote.rate_key == "gpu_hour_cost_l40s"
+    assert quote.gpu_only_timeout_estimate_minor_units == 98
+    assert quote.resource == resource
+    with pytest.raises(ValueError, match="ceiling"):
+        host.quote_modal_runtime_for_host(
+            sdk=_SDK, client=object(), client_binding=_binding(),
+            recipe_resource=resource, maximum_cost_minor_units=97,
+        )
+    _Workspace.rates.pop("gpu_hour_cost_l40s")
+    with pytest.raises(ValueError, match="scoped rate is invalid"):
+        host.quote_modal_runtime_for_host(
+            sdk=_SDK, client=object(), client_binding=_binding(),
+            recipe_resource=resource, maximum_cost_minor_units=200,
+        )
+    assert not _Volume.created and not _Secret.created and not _App.created
+
+
 def test_scoped_quote_rejects_extreme_decimal_rate(monkeypatch):
     _Workspace.rates = {"gpu_hour_cost_a100_80gb": Decimal("1E-999999")}
     with pytest.raises(ValueError, match="scoped rate is invalid"):
@@ -203,7 +232,9 @@ def test_scoped_quote_rejects_extreme_decimal_rate(monkeypatch):
 
 
 def test_unverified_rate_key_fails_closed_before_effect(monkeypatch):
-    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", None)
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": None, "L40S": "gpu_hour_cost_l40s",
+    })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
     storage = _Storage(_Attempts([]))
     with pytest.raises(ValueError, match="not independently verified"):
@@ -219,7 +250,9 @@ def test_unverified_rate_key_fails_closed_before_effect(monkeypatch):
 
 
 def test_runner_default_resource_names_pass_real_preclaim_validator(monkeypatch):
-    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
     storage = _Storage(_Attempts([]))
 
@@ -267,8 +300,12 @@ def test_provider_rate_error_is_closed(monkeypatch):
     assert "must-not-escape" not in str(caught.value)
 
 
-def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkeypatch):
-    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+@pytest.mark.parametrize("accelerator", ["A100-80GB", "L40S"])
+def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkeypatch, accelerator):
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
+    _Workspace.rates["gpu_hour_cost_l40s"] = Decimal("1.95")
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
     events = []
     original_create = _Volume.create.__func__
@@ -304,7 +341,7 @@ def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkey
         def deploy_once(self, plan, **kwargs):
             assert tuple(v.role for v in plan.volumes) == ("control", "artifacts", "model_cache")
             assert plan.functions[0].volume_roles == ("control", "artifacts", "model_cache")
-            assert plan.functions[0].gpu == "A100-80GB"
+            assert plan.functions[0].gpu == accelerator
             assert kwargs["entrypoints"]["training"] is host.run_modal_packaged_training
             events.append("deploy")
             return SimpleNamespace(secrets=(
@@ -329,7 +366,7 @@ def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkey
     storage.attempts.claim = claim
     result = host.prepare_modal_runtime_for_host(
         sdk=_SDK, client=object(), client_binding=_binding(), profile_path=Path("profile.json"),
-        runtime_material_intent_digest="a" * 64, recipe_resource=ResourceSpec("A100-80GB"),
+        runtime_material_intent_digest="a" * 64, recipe_resource=ResourceSpec(accelerator),
         maximum_cost_minor_units=1000, private_storage=storage, secret_resolver=_Resolver(),
         hf_token_ref=SecretRef("env", "HF_TOKEN"), qualification_secret_name="qualify",
         hf_token_secret_name="hf", app_name="training", environment_name="production",
@@ -344,7 +381,9 @@ def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkey
 def test_source_archive_failure_projects_only_fixed_nonretryable_diagnosis(monkeypatch):
     from tuner.execution.providers.modal.runtime_build import SourceArchiveInvalid
 
-    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
 
     def fail_capture(**_kwargs):
@@ -379,7 +418,9 @@ def test_closed_build_stage_projection_never_leaks_hostile_error(
         monkeypatch, stage, reason, location):
     from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
 
-    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
 
     def fail_capture(**_kwargs):
@@ -413,7 +454,9 @@ def test_closed_build_stage_constructor_rejects_unreviewed_reason():
 ])
 def test_release_failure_after_claim_is_closed_without_second_deploy(
         monkeypatch, boundary, code, phase, failure_class):
-    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
     monkeypatch.setattr(host, "capture_modal_build_candidate",
                         lambda **kw: SimpleNamespace(capture_digest="b" * 64))
@@ -474,7 +517,9 @@ def test_release_error_requires_exact_class_single_known_code():
 def test_build_app_cleanup_does_not_hide_prior_capture_failure(monkeypatch, capture_fails):
     from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
 
-    monkeypatch.setattr(host, "_A100_80GB_RATE_KEY", "gpu_hour_cost_a100_80gb_fixture")
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
 
     class BrokenContext:

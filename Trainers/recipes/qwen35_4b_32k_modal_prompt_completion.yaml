@@ -6,7 +6,7 @@ provider: modal
 
 job:
   runtime_profile: qwen35-sft-v1
-  accelerator: A100-80GB
+  accelerator: L40S
   accelerator_count: 1
   timeout_seconds: 1800
   maximum_cost_minor_units: 200  # USD GPU-estimate authorization, not a provider billing cap.

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from types import MappingProxyType
 
 from synaptic_tuner.api.v1._contract import PreparedTrainingInputIdentity
 from synaptic_tuner.api.v1.training_input import (
@@ -23,6 +24,10 @@ from tuner.training.packaged_compilation import (
 
 _PROFILE = "qwen35-sft-v1"
 _ROLES = ("final_model", "tokenizer", "training_lineage", "training_metrics", "workload_record")
+MODAL_SFT_ACCELERATOR_RATE_KEYS = MappingProxyType({
+    "A100-80GB": "gpu_hour_cost_a100_80gb",
+    "L40S": "gpu_hour_cost_l40s",
+})
 
 
 def _section(value: object, allowed: set[str], name: str) -> dict:
@@ -176,10 +181,13 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
     }, "job")
     if job.get("runtime_profile") != _PROFILE:
         raise ValueError("runtime profile is not admitted for Modal SFT")
-    if (job.get("accelerator") != "A100-80GB" or job.get("accelerator_count") != 1
+    if (type(job.get("accelerator")) is not str
+            or job["accelerator"] not in MODAL_SFT_ACCELERATOR_RATE_KEYS
+            or type(job.get("accelerator_count")) is not int
+            or job["accelerator_count"] != 1
             or type(job.get("timeout_seconds")) is not int
             or not 1 <= job["timeout_seconds"] <= 3600):
-        raise ValueError("first Modal Qwen smoke requires one bounded A100-80GB request")
+        raise ValueError("Modal Qwen SFT requires one supported bounded GPU request")
     maximum_cost = job.get("maximum_cost_minor_units")
     if maximum_cost is not None and (type(maximum_cost) is not int or maximum_cost < 1):
         raise ValueError("operator maximum cost must be positive USD minor units")

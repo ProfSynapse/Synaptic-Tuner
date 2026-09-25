@@ -755,6 +755,16 @@ is empty. Every phase retains the consumed attempt and has
 Do not replay or clean up a failed attempt based on an absent local catalog
 entry.
 
+The first Qwen 3.5 4B smoke recipe selects `L40S` as a measured-rate but
+unqualified-fit candidate; `A100-80GB` remains a reviewed fallback. Both use
+the exact current scoped GPU rate key, and the operator estimate is not a
+provider billing cap. Do not infer 32K training fit from the local Docker dry
+smoke. The packaged image profile must advertise the same workload schema as
+`PACKAGED_SFT_WORKLOAD_SCHEMA`; the earlier `synaptic-sft-workload/v1` value
+disagreed with the packaged compiler and would fail public rich resolution
+before GPU start. Preserve that profile-to-compiler assertion in provider-free
+tests rather than overriding the profile value in a fake release alone.
+
 Model-first correction: training and chat are independent processes. For chat
 development, start from `examples/model_chat/README.md` and the checked-in
 `scripts/chat_model.py` command; do not rerun training to rebuild ephemeral host
