@@ -267,6 +267,9 @@ def test_failure_stage_contract_is_closed_and_rejects_dynamic_values() -> None:
         "ENTRYPOINT_SETUP", "ENTRYPOINT_IMPORTS", "ENTRYPOINT_DISPATCH_AUTH",
         "ENTRYPOINT_PROVIDER_ID", "ENTRYPOINT_VOLUME_ID", "ENTRYPOINT_CALL_ID",
         "ENTRYPOINT_MOUNTS", "ENTRYPOINT_WORKER_SETUP",
+        "ENTRYPOINT_MOUNT_CONTROL_DIR", "ENTRYPOINT_MOUNT_CONTROL_LINK",
+        "ENTRYPOINT_MOUNT_ARTIFACTS_DIR", "ENTRYPOINT_MOUNT_ARTIFACTS_LINK",
+        "ENTRYPOINT_MOUNT_MODEL_CACHE_DIR", "ENTRYPOINT_MOUNT_MODEL_CACHE_LINK",
         "DISPATCH_AUTH", "STAGED_INPUT", "PATH_CLAIM",
         "SFT_ADMISSION", "SFT_PREPARATION", "SFT_REVALIDATION",
         "SFT_INVOCATION", "SFT_TRAINER", "SFT_EVIDENCE", "SFT_ARTIFACT",
@@ -275,6 +278,7 @@ def test_failure_stage_contract_is_closed_and_rejects_dynamic_values() -> None:
     for stage in PACKAGED_WORKER_FAILURE_STAGES:
         _assert_failure(packaged_worker_failure(stage), stage)
     _assert_failure(packaged_worker_failure("secret/path"), "SFT_UNKNOWN")
+    _assert_failure(packaged_worker_failure("ENTRYPOINT_MOUNT_CONTROL_DIR_EXTRA"), "SFT_UNKNOWN")
 
 
 def test_dispatch_auth_failure_is_closed(tmp_path) -> None:

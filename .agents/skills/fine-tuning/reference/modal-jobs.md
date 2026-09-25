@@ -800,6 +800,11 @@ worker construction or an older result. Each
 label identifies only the operation boundary reached; none discloses the
 exception, establishes root cause, or authorizes replay. Use the exact
 claim-bound packaged-call inspector to confirm a host-projected label.
+If `ENTRYPOINT_MOUNTS` recurs, the fixed role-and-predicate labels
+`ENTRYPOINT_MOUNT_{CONTROL,ARTIFACTS,MODEL_CACHE}_{DIR,LINK}` identify which
+mount's directory or no-symlink check failed; the original label remains for
+distinctness and other failures before worker setup. `DIR` does not prove absence, and
+`LINK` does not authorize relaxing the hostile-path guard.
 
 The packaged training parent must explicitly hydrate the three exact mounted
 Volume identities and synchronously commit verified cache, artifact, then

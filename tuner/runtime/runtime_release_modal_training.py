@@ -99,9 +99,20 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
     cache = _MODEL_CACHE_ROOT
     if _stage is not None:
         _stage[0] = "ENTRYPOINT_MOUNTS"
-    if (not control.is_dir() or not artifacts.is_dir() or not cache.is_dir()
-            or control.is_symlink() or artifacts.is_symlink() or cache.is_symlink()):
-        raise ValueError("packaged training mounts differ")
+    for role, root in (("CONTROL", control), ("ARTIFACTS", artifacts),
+                       ("MODEL_CACHE", cache)):
+        if _stage is not None:
+            _stage[0] = "ENTRYPOINT_MOUNT_" + role + "_DIR"
+        if not root.is_dir():
+            raise ValueError("packaged training mounts differ")
+    for role, root in (("CONTROL", control), ("ARTIFACTS", artifacts),
+                       ("MODEL_CACHE", cache)):
+        if _stage is not None:
+            _stage[0] = "ENTRYPOINT_MOUNT_" + role + "_LINK"
+        if root.is_symlink():
+            raise ValueError("packaged training mounts differ")
+    if _stage is not None:
+        _stage[0] = "ENTRYPOINT_MOUNTS"
     if len({control, artifacts, cache}) != 3:
         raise ValueError("packaged training mounts are not distinct")
     token = os.environ.get("HF_TOKEN")

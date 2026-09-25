@@ -228,6 +228,7 @@ def test_exact_v2_failure_bytes_report_only_fixed_stage(monkeypatch, stage):
 @pytest.mark.parametrize("mutation", [
     {"effect_id": "other"}, {"status_code": "completed"},
     {"completion_sha256": "a" * 64}, {"failure_stage": "SFT_OTHER"},
+    {"failure_stage": "ENTRYPOINT_MOUNT_CONTROL_DIR_EXTRA"},
     {"schema_version": "other"}, {"extra": "private data"},
 ])
 def test_v2_result_near_misses_remain_unclassified(monkeypatch, mutation):

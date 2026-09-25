@@ -184,6 +184,7 @@ def test_v2_worker_failure_reports_only_fixed_stage(stage):
     {"effect_id": "other"}, {"status_code": "completed"},
     {"completion_sha256": "a" * 64}, {"schema_version": "other"},
     {"failure_stage": "SFT_OTHER"}, {"failure_stage": "sft_trainer"},
+    {"failure_stage": "ENTRYPOINT_MOUNT_CONTROL_DIR_EXTRA"},
     {"failure_stage": True}, {"extra": "untrusted"},
 ])
 def test_v2_near_miss_worker_failures_remain_unknown(change):

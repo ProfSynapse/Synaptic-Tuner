@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import builtins
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -38,6 +39,12 @@ def test_outer_entrypoint_failure_is_fixed_and_does_not_expose_exception(monkeyp
     ("ENTRYPOINT_VOLUME_ID", "ENTRYPOINT_VOLUME_ID"),
     ("ENTRYPOINT_CALL_ID", "ENTRYPOINT_CALL_ID"),
     ("ENTRYPOINT_MOUNTS", "ENTRYPOINT_MOUNTS"),
+    ("ENTRYPOINT_MOUNT_CONTROL_DIR", "ENTRYPOINT_MOUNT_CONTROL_DIR"),
+    ("ENTRYPOINT_MOUNT_ARTIFACTS_DIR", "ENTRYPOINT_MOUNT_ARTIFACTS_DIR"),
+    ("ENTRYPOINT_MOUNT_MODEL_CACHE_DIR", "ENTRYPOINT_MOUNT_MODEL_CACHE_DIR"),
+    ("ENTRYPOINT_MOUNT_CONTROL_LINK", "ENTRYPOINT_MOUNT_CONTROL_LINK"),
+    ("ENTRYPOINT_MOUNT_ARTIFACTS_LINK", "ENTRYPOINT_MOUNT_ARTIFACTS_LINK"),
+    ("ENTRYPOINT_MOUNT_MODEL_CACHE_LINK", "ENTRYPOINT_MOUNT_MODEL_CACHE_LINK"),
     ("ENTRYPOINT_WORKER_SETUP", "scratch"),
     ("ENTRYPOINT_WORKER_SETUP", "constructor"),
 ))
@@ -73,10 +80,21 @@ def test_entrypoint_failure_identifies_only_setup_operation(monkeypatch, tmp_pat
     mounts = [tmp_path / name for name in ("control", "artifacts", "cache")]
     for mount in mounts:
         mount.mkdir()
+    mount_roles = {"CONTROL": 0, "ARTIFACTS": 1, "MODEL_CACHE": 2}
+    if failure_point.startswith("ENTRYPOINT_MOUNT_"):
+        role, predicate = failure_point.removeprefix("ENTRYPOINT_MOUNT_").rsplit("_", 1)
+        index = mount_roles[role]
+        if predicate == "DIR":
+            mounts[index] = tmp_path / "absent"
+        else:
+            if os.name != "posix":
+                pytest.skip("directory symlink fault injection requires POSIX")
+            mounts[index].rmdir()
+            mounts[index].symlink_to(tmp_path)
     monkeypatch.setattr(entrypoint, "_CONTROL_ROOT", mounts[0])
-    monkeypatch.setattr(entrypoint, "_ARTIFACT_ROOT", mounts[1])
-    monkeypatch.setattr(entrypoint, "_MODEL_CACHE_ROOT",
-                        tmp_path / "absent" if failure_point == "ENTRYPOINT_MOUNTS" else mounts[2])
+    monkeypatch.setattr(entrypoint, "_ARTIFACT_ROOT",
+                        mounts[0] if failure_point == "ENTRYPOINT_MOUNTS" else mounts[1])
+    monkeypatch.setattr(entrypoint, "_MODEL_CACHE_ROOT", mounts[2])
     monkeypatch.setattr(entrypoint, "_PRIVATE_SCRATCH_ROOT",
                         tmp_path / "missing-scratch" if failure_point == "scratch" else tmp_path)
 
