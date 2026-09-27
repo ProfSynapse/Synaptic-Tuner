@@ -822,6 +822,11 @@ does not authorize following the link, changing `mounted_io`, or training;
 a different result is also inconclusive because the diagnostic Function's
 Secret/access policy differs. Preserve all attempt and probe resources for
 later review.
+For a newly constructed App, pinned Modal 1.5.4 `Image.build(app)` requires an
+initialized app ID and fails before deployment. The probe instead performs a
+bounded read-only `ImageFromId` equality check before resource creation, then
+requires the deployed image handle to be hydrated with that exact ID before
+spawning. Never retry a consumed probe claim after a pre-deployment failure.
 
 The packaged training parent must explicitly hydrate the three exact mounted
 Volume identities and synchronously commit verified cache, artifact, then

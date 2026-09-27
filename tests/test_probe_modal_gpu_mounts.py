@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import asyncio
 from contextlib import nullcontext
 import os
 from pathlib import Path
@@ -57,6 +58,31 @@ def test_raw_result_requires_exact_serialized_closed_payload() -> None:
     assert probe._classify_raw(output, api, pickle.dumps) == "OUTPUT_UNCLASSIFIED"
 
 
+def test_image_read_requires_exact_returned_id() -> None:
+    class Request:
+        def __init__(self, *, image_id):
+            self.image_id = image_id
+
+    class Response:
+        def __init__(self, image_id):
+            self.image_id = image_id
+
+    class Stub:
+        returned = "im-EXACT"
+
+        async def ImageFromId(self, request, *, retry, timeout):
+            assert request.image_id == "im-EXACT"
+            assert retry is None and timeout == 15
+            return Response(self.returned)
+
+    api = SimpleNamespace(ImageFromIdRequest=Request, ImageFromIdResponse=Response)
+    stub = Stub()
+    client = SimpleNamespace(stub=stub)
+    assert asyncio.run(probe._read_image_identity(client, "im-EXACT", api)) is True
+    stub.returned = "im-OTHER"
+    assert asyncio.run(probe._read_image_identity(client, "im-EXACT", api)) is False
+
+
 @pytest.mark.skipif(os.name != "posix", reason="Linux descriptor semantics")
 def test_remote_probe_never_reads_symlink_target(monkeypatch) -> None:
     import os
@@ -86,7 +112,10 @@ def test_remote_probe_never_reads_symlink_target(monkeypatch) -> None:
     ]
 
 
-def test_execute_creates_exact_resources_then_spawns_once(monkeypatch) -> None:
+@pytest.mark.parametrize("hydrate_after_deploy", [True, False])
+def test_execute_creates_exact_resources_then_spawns_once(
+    monkeypatch, hydrate_after_deploy: bool,
+) -> None:
     events: list[tuple[str, object]] = []
     ids = iter(("vo-C", "vo-A", "vo-M"))
 
@@ -109,17 +138,16 @@ def test_execute_creates_exact_resources_then_spawns_once(monkeypatch) -> None:
         ))
 
     class Image:
-        is_hydrated = True
+        latest = None
 
         def __init__(self, identity):
             self.object_id = identity
-
-        def build(self, app):
-            events.append(("build_image", self.object_id))
-            return self
+            self.is_hydrated = False
+            Image.latest = self
 
         @staticmethod
         def from_id(identity, **kwargs):
+            events.append(("image_handle", identity))
             return Image(identity)
 
     class Function:
@@ -143,6 +171,8 @@ def test_execute_creates_exact_resources_then_spawns_once(monkeypatch) -> None:
             return lambda fn: Function()
 
         def deploy(self, **kwargs):
+            assert Image.latest is not None
+            Image.latest.is_hydrated = hydrate_after_deploy
             events.append(("deploy", None))
 
     sdk = SimpleNamespace(App=App, Volume=Volume, Image=Image)
@@ -154,6 +184,7 @@ def test_execute_creates_exact_resources_then_spawns_once(monkeypatch) -> None:
     async_utils.synchronizer = SimpleNamespace(
         create_blocking=lambda fn: (
             (lambda *args: True) if fn is probe._read_app_absence
+            else (lambda *args: True) if fn is probe._read_image_identity
             else (lambda *args: {"control": "LINK"})
         ),
     )
@@ -172,8 +203,15 @@ def test_execute_creates_exact_resources_then_spawns_once(monkeypatch) -> None:
         app="probe-test", environment="default", image_id="im-EXACT",
         volume_names=("probe-control", "probe-artifacts", "probe-cache"), claim_fd=17,
     )
-    assert probe.execute(args, sdk, object()) == {"control": "LINK"}
+    if hydrate_after_deploy:
+        assert probe.execute(args, sdk, object()) == {"control": "LINK"}
+    else:
+        with pytest.raises(probe.ProbeUnavailable, match="IMAGE_IDENTITY_INVALID"):
+            probe.execute(args, sdk, object())
+        assert [name for name, _ in events].count("spawn") == 0
+        return
     assert [name for name, _ in events].count("spawn") == 1
+    assert [name for name, _ in events].index("image_handle") < [name for name, _ in events].index("deploy")
     assert [value[1] for name, value in events if name == "create_volume"] == [False] * 3
     assert [name for name, _ in events].index("deploy") < [name for name, _ in events].index("spawn")
     assert [name for name, _ in events].index("spawn") < [name for name, _ in events].index("record_call")

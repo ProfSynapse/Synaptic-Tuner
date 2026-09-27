@@ -255,6 +255,19 @@ async def _read_app_absence(client: object, app_name: str,
     )
 
 
+async def _read_image_identity(client: object, image_id: str,
+                               api_pb2: object) -> bool:
+    """Read the selected existing Image ID before an app ID exists."""
+    import asyncio
+
+    request = api_pb2.ImageFromIdRequest(image_id=image_id)
+    response = await asyncio.wait_for(
+        client.stub.ImageFromId(request, retry=None, timeout=15), timeout=16,
+    )
+    return (type(response) is api_pb2.ImageFromIdResponse
+            and response.image_id == image_id)
+
+
 def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict[str, str]:
     """One app deployment and one Function spawn after an exclusive claim."""
     from modal._utils.async_utils import synchronizer
@@ -268,6 +281,14 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
         raise ProbeUnavailable("APP_ABSENCE_UNAVAILABLE") from None
     if not absent:
         raise ProbeUnavailable("APP_NOT_FRESH")
+    try:
+        image_matches = synchronizer.create_blocking(_read_image_identity)(
+            client, args.image_id, api_pb2,
+        )
+    except Exception:
+        raise ProbeUnavailable("IMAGE_READ_UNAVAILABLE") from None
+    if not image_matches:
+        raise ProbeUnavailable("IMAGE_IDENTITY_INVALID")
     app = sdk.App(args.app, include_source=False)
     volumes = {}
     for role, name in zip(_ROLES, args.volume_names):
@@ -288,11 +309,7 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
             raise ProbeUnavailable("VOLUME_IDENTITY_INVALID")
         volumes[role] = volume
     image = sdk.Image.from_id(args.image_id, client=client)
-    with _deadline(300):
-        resolved_image = image.build(app)
-    if (resolved_image is not image
-            or getattr(image, "is_hydrated", False) is not True
-            or getattr(image, "object_id", None) != args.image_id):
+    if getattr(image, "object_id", None) != args.image_id:
         raise ProbeUnavailable("IMAGE_IDENTITY_INVALID")
     function = app.function(
         name="mount-probe", image=image, cpu=1, memory=4096, gpu="L40S",
@@ -309,6 +326,9 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
                 app.deploy(environment_name=args.environment, client=client)
         finally:
             os.chdir(original)
+    if (getattr(image, "is_hydrated", False) is not True
+            or getattr(image, "object_id", None) != args.image_id):
+        raise ProbeUnavailable("IMAGE_IDENTITY_INVALID")
     with _deadline(60):
         call = function.spawn()
     call_id = getattr(call, "object_id", None)
@@ -377,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
             "CLAIM_ALREADY_CONSUMED", "CLAIM_INDETERMINATE", "INPUT_INVALID",
             "SDK_INCOMPATIBLE", "CREDENTIAL_UNAVAILABLE",
             "APP_ABSENCE_UNAVAILABLE", "APP_NOT_FRESH",
-            "VOLUME_IDENTITY_INVALID", "IMAGE_IDENTITY_INVALID",
+            "VOLUME_IDENTITY_INVALID", "IMAGE_READ_UNAVAILABLE", "IMAGE_IDENTITY_INVALID",
             "CALL_ID_INDETERMINATE", "PROVIDER_INDETERMINATE",
         } else "LOCAL_UNAVAILABLE"
     except Exception:
