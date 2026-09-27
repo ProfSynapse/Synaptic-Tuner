@@ -389,7 +389,8 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             signer = HMACAuthenticator(
                 {signer_ref: runtime.qualification_key},
                 allowed_purposes=frozenset({
-                    "modal-packaged-dispatch/v1", "modal-packaged-completion/v1",
+                    "modal-packaged-dispatch/v1", "modal-packaged-dispatch/v2",
+                    "modal-packaged-completion/v1",
                 }),
             )
             effects = ModalPackagedHostEffectsV1(
@@ -429,7 +430,9 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 catalogs=ModalPackagedCatalogPorts(
                     effects.bindings, effects.stage_receipts, effects.calls,
                 ),
-                sources=ModalPackagedSourcePorts(effects.stages, effects.dispatches),
+                sources=ModalPackagedSourcePorts(
+                    effects.stages, effects.dispatches, effects.marker_materials,
+                ),
                 authorities=ModalPackagedAuthorityPorts(effects, signer),
                 clock=UTCClock(),
                 trainer=InstalledPackagedSFTTrainerExecutor(model_preparer=prepare_model_snapshot),

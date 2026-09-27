@@ -8,7 +8,9 @@ from types import SimpleNamespace
 import pytest
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes
-from tuner.execution.providers.modal.packaged_dispatch import build_modal_packaged_dispatch
+from tuner.execution.providers.modal.packaged_dispatch import (
+    ModalPackagedVolumeMarker, build_modal_packaged_dispatch,
+)
 from tuner.execution.providers.modal.packaged_worker import (
     ModalPackagedWorker,
     ModalPackagedWorkerRoots,
@@ -122,6 +124,102 @@ def _worker(tmp_path: Path, *, executor=None):
         roots=roots,
     )
     return binding, dispatch, worker, executor, signer, roots
+
+
+class _BoundVolume:
+    def __init__(self, marker: ModalPackagedVolumeMarker):
+        self.volume_id = marker.volume_id
+        self.marker_name = marker.marker_name
+        self.marker_sha256 = marker.value_sha256
+        self.files: dict[str, bytes] = {}
+        self.claims: set[str] = set()
+
+    def read_regular(self, path, maximum):
+        data = self.files[path]
+        assert len(data) <= maximum
+        return data
+
+    def claim_directory(self, path):
+        assert path not in self.claims
+        self.claims.add(path)
+
+    def copy_in_exclusive(self, path, source, *, expected_size, expected_sha256, maximum):
+        data = source.read_bytes()
+        assert len(data) == expected_size <= maximum
+        assert hashlib.sha256(data).hexdigest() == expected_sha256
+        assert path not in self.files
+        self.files[path] = data
+
+    def list_regular(self, path, maximum_entries):
+        prefix = path + "/"
+        return tuple(sorted((name[len(prefix):], len(data)) for name, data in self.files.items()
+                            if name.startswith(prefix) and "/" not in name[len(prefix):]))
+
+    def write_exclusive(self, path, content, maximum):
+        assert len(content) <= maximum and path not in self.files
+        self.files[path] = content
+
+
+def test_bound_v2_worker_runs_offline_trainer_in_private_scratch_and_publishes_exclusively(tmp_path) -> None:
+    binding, receipt, workload, policy = _case()
+    facts = binding.provider_facts
+    roles = (("control", facts.control_volume_id), ("artifacts", facts.artifact_volume_id))
+    if facts.model_cache_volume_id is not None:
+        roles += (("model_cache", facts.model_cache_volume_id),)
+    markers = tuple(ModalPackagedVolumeMarker(role, volume_id,
+                                              ".synaptic-volume-marker-" + hashlib.md5(role.encode()).hexdigest(),
+                                              hashlib.sha256(role.encode()).hexdigest())
+                    for role, volume_id in roles)
+    auth, signer, executor = Auth(), Signer(), Executor()
+    dispatch = build_modal_packaged_dispatch(
+        binding, receipt, workload, policy, auth, key_ref="dispatch-key",
+        environment=(("PATH", "/usr/bin:/bin"),), volume_markers=markers,
+    )
+    bound = {marker.role: _BoundVolume(marker) for marker in markers}
+    bound["artifacts"].files[receipt.path] = b"packaged-prepared-input"
+    roots = ModalPackagedWorkerRoots(tmp_path / "control", tmp_path / "artifacts", tmp_path / "cache")
+    private = tmp_path / "private"
+    private.mkdir()
+    worker = ModalPackagedWorker(
+        expected_facts=facts, dispatch_verifier=auth, trainer_executor=executor,
+        evidence_signer=signer, roots=roots, volume_bindings=bound,
+        private_root=private,
+    )
+    commits = []
+    result = worker(dispatch, "fc-1", commit_artifacts=lambda: commits.append("artifacts"),
+                    commit_control=lambda: commits.append("control"))
+    assert result["status_code"] == "completed"
+    assert commits == ["artifacts", "control"]
+    paths = executor.calls[0]["paths"]
+    assert all(path.is_relative_to(private) for path in (
+        paths.prepared_input, paths.artifacts, paths.state, paths.tracking, paths.cache, paths.tmp,
+    ))
+    effect = binding.command.operation.effect.effect_id
+    assert len(bound["artifacts"].list_regular(f"operations/{effect}/output", 6)) == 5
+    assert f"operations/{effect}/evidence/packaged-completion.json" in bound["control"].files
+
+
+def test_bound_worker_rejects_unsigned_v1_before_staged_read(tmp_path) -> None:
+    binding, dispatch, _, executor, signer, roots = _worker(tmp_path)
+    facts = binding.provider_facts
+    markers = (ModalPackagedVolumeMarker("control", facts.control_volume_id,
+                                         ".synaptic-volume-marker-" + "1" * 32, "1" * 64),
+               ModalPackagedVolumeMarker("artifacts", facts.artifact_volume_id,
+                                         ".synaptic-volume-marker-" + "2" * 32, "2" * 64))
+    if facts.model_cache_volume_id is not None:
+        markers += (ModalPackagedVolumeMarker("model_cache", facts.model_cache_volume_id,
+                                             ".synaptic-volume-marker-" + "3" * 32, "3" * 64),)
+    private = tmp_path / "private"
+    private.mkdir()
+    worker = ModalPackagedWorker(
+        expected_facts=facts, dispatch_verifier=Auth(), trainer_executor=executor,
+        evidence_signer=signer, roots=roots,
+        volume_bindings={marker.role: _BoundVolume(marker) for marker in markers},
+        private_root=private,
+    )
+    result = worker(dispatch, "fc-1", commit_artifacts=lambda: None, commit_control=lambda: None)
+    _assert_failure(result, "DISPATCH_AUTH")
+    assert executor.calls == []
 
 
 def test_worker_calls_generic_trainer_once_without_modal_objects_or_provider_facts(tmp_path) -> None:

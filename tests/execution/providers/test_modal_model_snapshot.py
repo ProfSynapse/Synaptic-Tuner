@@ -118,6 +118,81 @@ def prepare(fixture, **overrides):
     )
 
 
+class _BoundCache:
+    def __init__(self, root: Path):
+        self.root = root
+        self.published = []
+
+    def claim_directory(self, relative_path: str) -> None:
+        (self.root / relative_path).mkdir()
+
+    def copy_in_exclusive(
+        self, relative_path: str, source_path: str, *,
+        expected_size: int, expected_sha256: str, maximum: int,
+    ) -> None:
+        source = Path(source_path)
+        content = source.read_bytes()
+        assert len(content) == expected_size <= maximum
+        assert hashlib.sha256(content).hexdigest() == expected_sha256
+        destination = self.root / relative_path
+        with destination.open("xb") as output:
+            output.write(content)
+        self.published.append((relative_path, expected_sha256))
+
+
+def test_bound_cache_publishes_every_verified_member_from_private_scratch(
+    fixture, tmp_path
+):
+    cache = _BoundCache(tmp_path / "bound-cache")
+    cache.root.mkdir()
+    result = prepare(fixture, persistent_binding=cache)
+    assert {p.name: p.read_bytes() for p in result.iterdir()} == fixture.files
+    assert sorted(path for path, _ in cache.published) == [
+        f"models--fixture--tiny/snapshots/{REVISION}/{name}"
+        for name in sorted(fixture.files)
+    ]
+    for path, digest in cache.published:
+        assert hashlib.sha256((cache.root / path).read_bytes()).hexdigest() == digest
+    assert [args["allow_patterns"] for name, args in fixture.calls if name == "download"] == [
+        list(fixture.files)
+    ]
+
+
+def test_bound_cache_never_opens_provider_symlink_path(fixture, tmp_path):
+    cache = _BoundCache(tmp_path / "bound-cache")
+    cache.root.mkdir()
+    mounted = tmp_path / "modal-mounted-cache"
+    mounted.symlink_to(cache.root, target_is_directory=True)
+    result = prepare(fixture, persistent_root=mounted, persistent_binding=cache)
+    assert {p.name: p.read_bytes() for p in result.iterdir()} == fixture.files
+    assert len(cache.published) == len(fixture.files)
+    assert list(fixture.roots["persistent_root"].iterdir()) == []
+    assert list(fixture.roots["scratch_root"].iterdir()) == []
+
+
+def test_bound_cache_collision_fails_without_adopting_existing_files(fixture, tmp_path):
+    cache = _BoundCache(tmp_path / "bound-cache")
+    existing = cache.root / "models--fixture--tiny" / "snapshots" / REVISION
+    existing.mkdir(parents=True)
+    (existing / "config.json").write_bytes(fixture.files["config.json"])
+    with pytest.raises(ValueError, match="^model preparation failed$"):
+        prepare(fixture, persistent_binding=cache)
+    assert cache.published == []
+    assert (existing / "config.json").read_bytes() == fixture.files["config.json"]
+    assert list(fixture.roots["destination_root"].iterdir()) == []
+
+
+def test_bound_cache_rejects_wrong_git_blob_before_any_volume_write(fixture, tmp_path):
+    cache = _BoundCache(tmp_path / "bound-cache")
+    cache.root.mkdir()
+    fixture.info.siblings[0].blob_id = "b" * 40
+    with pytest.raises(ValueError, match="^model preparation failed$"):
+        prepare(fixture, persistent_binding=cache)
+    assert list(cache.root.iterdir()) == []
+    assert cache.published == []
+    assert list(fixture.roots["destination_root"].iterdir()) == []
+
+
 def test_cache_miss_downloads_privately_then_reuses_verified_files(fixture, tmp_path):
     result = prepare(fixture)
     assert {p.name: p.read_bytes() for p in result.iterdir()} == fixture.files

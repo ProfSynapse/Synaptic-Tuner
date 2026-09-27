@@ -27,6 +27,7 @@ from .mounted_io import (
 )
 from .packaged_binding import EXACT_ARTIFACT_ROLES, ModalPackagedRuntimeFactsV1
 from .packaged_dispatch import (
+    MODAL_PACKAGED_DISPATCH_V2_SCHEMA,
     ModalPackagedDispatchVerifier,
     parse_modal_packaged_dispatch,
 )
@@ -136,7 +137,7 @@ class ModalPackagedWorkerRoots:
 class ModalPackagedWorker:
     """Admit one signed dispatch, run once, and publish signed completion."""
 
-    __slots__ = ("_facts", "_verifier", "_executor", "_signer", "_roots")
+    __slots__ = ("_facts", "_verifier", "_executor", "_signer", "_roots", "_bindings", "_private_root")
 
     def __init__(
         self,
@@ -146,6 +147,8 @@ class ModalPackagedWorker:
         trainer_executor: PackagedTrainerExecutor,
         evidence_signer: ModalPackagedEvidenceSigner,
         roots: ModalPackagedWorkerRoots,
+        volume_bindings: dict[str, object] | None = None,
+        private_root: Path | None = None,
     ) -> None:
         if type(expected_facts) is not ModalPackagedRuntimeFactsV1:
             raise TypeError("exact packaged Modal facts required")
@@ -155,11 +158,32 @@ class ModalPackagedWorker:
             raise TypeError("complete packaged worker collaborators required")
         if type(roots) is not ModalPackagedWorkerRoots:
             raise TypeError("exact packaged worker roots required")
+        if (volume_bindings is None) != (private_root is None):
+            raise ValueError("bound packaged worker requires private scratch")
+        if private_root is not None and (not isinstance(private_root, Path) or not private_root.is_absolute()):
+            raise ValueError("bound packaged worker scratch is invalid")
         self._facts, self._verifier = expected_facts, dispatch_verifier
         self._executor, self._signer, self._roots = trainer_executor, evidence_signer, roots
+        self._bindings, self._private_root = volume_bindings, private_root
 
     def _paths(self, dispatch) -> PackagedSFTPaths:
         effect_id = dispatch.submit_command.operation.effect.effect_id
+        if self._bindings is not None:
+            assert self._private_root is not None
+            operation = self._private_root / "operation"
+            operation.mkdir(mode=0o700)
+            prepared = operation / "payload.bin"
+            raw = self._bindings["artifacts"].read_regular(
+                dispatch.stage_receipt.path, dispatch.stage_receipt.size_bytes,
+            )
+            if len(raw) != dispatch.stage_receipt.size_bytes or hashlib.sha256(raw).hexdigest() != dispatch.stage_receipt.content_digest:
+                raise ValueError("staged packaged input differs")
+            with prepared.open("xb") as stream:
+                stream.write(raw)
+            paths = {name: operation / name for name in ("artifacts", "state", "tracking", "cache", "tmp")}
+            for path in paths.values():
+                path.mkdir(mode=0o700)
+            return PackagedSFTPaths(prepared, **paths)
         prepared = self._roots.artifacts / dispatch.stage_receipt.path
         paths = {
             "artifacts": self._roots.artifacts / operation_path(effect_id, "output"),
@@ -175,15 +199,18 @@ class ModalPackagedWorker:
             claim_directory(root, path)
         return PackagedSFTPaths(prepared, **paths)
 
-    def _publish_completion(self, dispatch, result, job_ref: str) -> bytes:
+    def _publish_completion(self, dispatch, result, job_ref: str, paths: PackagedSFTPaths) -> bytes:
         effect_id = dispatch.submit_command.operation.effect.effect_id
+        bound = self._bindings is not None
+        control_root = paths.state.parent if bound else self._roots.control
+        artifact_root = paths.artifacts.parent if bound else self._roots.artifacts
         inventory = read_regular(
-            self._roots.control,
+            control_root,
             result.inventory_path,
             4 * 1024 * 1024,
         )
         terminal = read_regular(
-            self._roots.control,
+            control_root,
             result.terminal_path,
             4 * 1024 * 1024,
         )
@@ -228,15 +255,15 @@ class ModalPackagedWorker:
             (name, size) for name, size, _, _ in inventory_members
         ))
         if list_regular_sizes(
-            self._roots.artifacts,
-            self._roots.artifacts / operation_path(effect_id, "output"),
+            artifact_root,
+            paths.artifacts if bound else self._roots.artifacts / operation_path(effect_id, "output"),
             6,
         ) != expected_listing:
             raise ValueError("packaged trainer artifact inventory is not exact")
         for name, size, digest, role in inventory_members:
-            path = self._roots.artifacts / operation_path(effect_id, "output", name)
+            path = paths.artifacts / name if bound else self._roots.artifacts / operation_path(effect_id, "output", name)
             if hash_regular(
-                self._roots.artifacts, path,
+                artifact_root, path,
                 MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes,
             ) != (size, digest):
                 raise ValueError("packaged trainer artifact differs from inventory")
@@ -248,6 +275,24 @@ class ModalPackagedWorker:
                     self._facts.artifact_volume_id, relative, size,
                 ),
             })
+        if bound:
+            assert self._bindings is not None
+            artifacts_binding = self._bindings["artifacts"]
+            artifacts_binding.claim_directory(operation_path(effect_id, "output"))
+            for name, size, digest, _ in inventory_members:
+                artifacts_binding.copy_in_exclusive(
+                    operation_path(effect_id, "output", name), paths.artifacts / name,
+                    expected_size=size, expected_sha256=digest,
+                    maximum=MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes,
+                )
+            if artifacts_binding.list_regular(operation_path(effect_id, "output"), 6) != expected_listing:
+                raise ValueError("published packaged artifacts differ")
+            control_binding = self._bindings["control"]
+            control_binding.claim_directory(operation_path(effect_id, "state"))
+            for name, source in (("runtime-v1-inventory.json", result.inventory_path),
+                                 ("packaged-terminal.json", result.terminal_path)):
+                raw = inventory if name == "runtime-v1-inventory.json" else terminal
+                control_binding.write_exclusive(operation_path(effect_id, "state", name), raw, 4 * 1024 * 1024)
         completion = canonical_bytes({
             "schema_version": "synaptic-modal-packaged-completion/v1",
             "effect_id": effect_id,
@@ -271,14 +316,17 @@ class ModalPackagedWorker:
             raise ValueError("packaged completion authentication unavailable") from None
         if type(tag) is not bytes or not tag or len(tag) > 128:
             raise ValueError("packaged completion authentication is invalid")
-        evidence = self._roots.control / operation_path(effect_id, "evidence")
-        claim_directory(self._roots.control, evidence)
-        write_exclusive(
-            self._roots.control, evidence / "packaged-completion.json", completion,
-        )
-        write_exclusive(
-            self._roots.control, evidence / "packaged-completion.mac", tag,
-        )
+        evidence_path = operation_path(effect_id, "evidence")
+        if bound:
+            control_binding = self._bindings["control"]
+            control_binding.claim_directory(evidence_path)
+            control_binding.write_exclusive(evidence_path + "/packaged-completion.json", completion, 4 * 1024 * 1024)
+            control_binding.write_exclusive(evidence_path + "/packaged-completion.mac", tag, 128)
+        else:
+            evidence = self._roots.control / evidence_path
+            claim_directory(self._roots.control, evidence)
+            write_exclusive(self._roots.control, evidence / "packaged-completion.json", completion)
+            write_exclusive(self._roots.control, evidence / "packaged-completion.mac", tag)
         return completion
 
     def __call__(
@@ -294,17 +342,31 @@ class ModalPackagedWorker:
             dispatch = parse_modal_packaged_dispatch(dispatch_bytes, self._verifier)
             if dispatch.provider_facts != self._facts:
                 raise ValueError("packaged dispatch targets another deployment")
+            if self._bindings is not None:
+                if dispatch.schema_version != MODAL_PACKAGED_DISPATCH_V2_SCHEMA:
+                    raise ValueError("bound packaged worker requires signed markers")
+                if set(self._bindings) != {marker.role for marker in dispatch.volume_markers} or any(
+                    (self._bindings[marker.role].volume_id,
+                     self._bindings[marker.role].marker_name,
+                     self._bindings[marker.role].marker_sha256)
+                    != (marker.volume_id, marker.marker_name, marker.value_sha256)
+                    for marker in dispatch.volume_markers
+                ):
+                    raise ValueError("bound packaged worker marker mismatch")
+            elif dispatch.schema_version == MODAL_PACKAGED_DISPATCH_V2_SCHEMA:
+                raise ValueError("packaged worker lacks bound Volume roots")
             stage = "STAGED_INPUT"
-            size, digest = hash_regular(
-                self._roots.artifacts,
-                self._roots.artifacts / dispatch.stage_receipt.path,
-                dispatch.stage_receipt.size_bytes,
-            )
-            if (size, digest) != (
-                dispatch.stage_receipt.size_bytes,
-                dispatch.stage_receipt.content_digest,
-            ):
-                raise ValueError("staged packaged input differs")
+            if self._bindings is None:
+                size, digest = hash_regular(
+                    self._roots.artifacts,
+                    self._roots.artifacts / dispatch.stage_receipt.path,
+                    dispatch.stage_receipt.size_bytes,
+                )
+                if (size, digest) != (
+                    dispatch.stage_receipt.size_bytes,
+                    dispatch.stage_receipt.content_digest,
+                ):
+                    raise ValueError("staged packaged input differs")
             stage = "PATH_CLAIM"
             paths = self._paths(dispatch)
             stage = "SFT_ADMISSION"
@@ -318,7 +380,7 @@ class ModalPackagedWorker:
                 environment=dispatch.environment,
             )
             stage = "COMPLETION"
-            completion = self._publish_completion(dispatch, result, provider_job_ref)
+            completion = self._publish_completion(dispatch, result, provider_job_ref, paths)
             stage = "ARTIFACT_COMMIT"
             commit_artifacts()
             stage = "CONTROL_COMMIT"

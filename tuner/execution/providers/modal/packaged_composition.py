@@ -32,6 +32,7 @@ from .packaged_transport import (
     ModalPackagedCallCatalog,
     ModalPackagedDispatchSource,
     ModalPackagedHostTransport,
+    ModalPackagedMarkerMaterialSource,
     ModalPackagedStageReceiptCatalog,
     ModalPackagedStageSource,
 )
@@ -68,10 +69,13 @@ class ModalPackagedSourcePorts:
 
     stages: ModalPackagedStageSource
     dispatches: ModalPackagedDispatchSource
+    marker_materials: ModalPackagedMarkerMaterialSource | None = None
 
     def __post_init__(self) -> None:
         _requires(self.stages, "resolve")
         _requires(self.dispatches, "resolve")
+        if self.marker_materials is not None:
+            _requires(self.marker_materials, "resolve")
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +177,7 @@ def compose_modal_packaged_adapter(
         stage_receipts=catalogs.stage_receipts,
         call_catalog=catalogs.calls,
         dispatch_verifier=authorities.dispatches,
+        marker_materials=sources.marker_materials,
     )
     effect_executor = ModalPackagedFoundationEffectExecutor(
         profile_ref=profile,

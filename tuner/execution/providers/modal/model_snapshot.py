@@ -14,9 +14,21 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 import tempfile
+from typing import Protocol
 import unicodedata
 
 from .mounted_io import copy_regular
+
+
+class PersistentSnapshotPublisher(Protocol):
+    """Create-only publication port; the model preparer need not know its backend."""
+
+    def claim_directory(self, path: str) -> None: ...
+
+    def copy_in_exclusive(
+        self, relative_path: str, source_path: str, *,
+        expected_size: int, expected_sha256: str, maximum: int,
+    ) -> None: ...
 
 _ENDPOINT = "https://huggingface.co"
 _MAX_FILES = 20_000
@@ -70,29 +82,34 @@ def _present(root: Path, relative: Path) -> bool:
     return True
 
 
-def _verify(path: Path, size: int, kind: str, expected: str) -> None:
+def _verify(path: Path, size: int, kind: str, expected: str) -> str:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or path.is_symlink() or info.st_size != size:
         raise ValueError("model member size mismatch")
     digest = hashlib.sha256() if kind == "lfs" else hashlib.sha1()
+    content_sha256 = hashlib.sha256()
     if kind == "git":
         digest.update(f"blob {size}\0".encode("ascii"))
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
+            content_sha256.update(chunk)
     if digest.hexdigest() != expected:
         raise ValueError("model member digest mismatch")
+    return content_sha256.hexdigest()
 
 
 def prepare_model_snapshot(
     *, model_ref: str, revision: str, token: str | None,
     persistent_root: Path, destination_root: Path, scratch_root: Path,
+    persistent_binding: PersistentSnapshotPublisher | None = None,
 ) -> Path:
     """Reuse verified files, download misses remotely, then hand off offline.
 
-    Roots are physical canonical directories supplied by the provider. The
-    destination is a fresh run cache. Credentials are used only by SDK calls
-    and no SDK output or exception text is allowed out of this boundary.
+    The destination and scratch are physical private directories. When a
+    publisher is supplied, the persistent Volume path is never opened here;
+    its retained binding owns publication. Credentials are used only by SDK
+    calls and no SDK output or exception text leaves this boundary.
     """
     try:
         # Suppress output without accumulating SDK diagnostics in memory.
@@ -100,13 +117,14 @@ def prepare_model_snapshot(
             return _prepare(
                 model_ref=model_ref, revision=revision, token=token,
                 persistent_root=persistent_root, destination_root=destination_root,
-                scratch_root=scratch_root,
+                scratch_root=scratch_root, persistent_binding=persistent_binding,
             )
     except Exception:
         raise ValueError("model preparation failed") from None
 
 
-def _prepare(*, model_ref, revision, token, persistent_root, destination_root, scratch_root):
+def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
+             scratch_root, persistent_binding):
     from huggingface_hub import HfApi, snapshot_download
     _bind_hub_api(HfApi, snapshot_download)
 
@@ -117,8 +135,10 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root, s
         for part in parts
     ) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise ValueError("model identity is not pinned")
-    for root in (persistent_root, destination_root, scratch_root):
+    for root in (destination_root, scratch_root):
         _directory(root)
+    if persistent_binding is None:
+        _directory(persistent_root)
     credential = token if isinstance(token, str) and token.strip() else False
     info = HfApi(endpoint=_ENDPOINT, token=credential).model_info(
         model_ref, revision=revision, files_metadata=True, token=credential,
@@ -165,12 +185,13 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root, s
         repository.mkdir()
         missing = []
         for name, (size, kind, expected) in members.items():
-            cached = relative / name
-            if _present(persistent_root, cached):
-                copy_regular(persistent_root, persistent_root / cached, repository, repository / name, maximum=size)
-                _verify(repository / name, size, kind, expected)
-            else:
-                missing.append(name)
+            if persistent_binding is None:
+                cached = relative / name
+                if _present(persistent_root, cached):
+                    copy_regular(persistent_root, persistent_root / cached, repository, repository / name, maximum=size)
+                    _verify(repository / name, size, kind, expected)
+                    continue
+            missing.append(name)
         if missing:
             result = snapshot_download(
                 repo_id=model_ref, revision=revision, token=credential,
@@ -180,12 +201,31 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root, s
             )
             if Path(result) != repository:
                 raise ValueError("SDK snapshot location differs")
+        content_hashes = {}
         for name, (size, kind, expected) in members.items():
             _directory((repository / name).parent)
-            _verify(repository / name, size, kind, expected)
+            content_hashes[name] = _verify(repository / name, size, kind, expected)
+        if persistent_binding is not None:
+            # A fresh cache Volume is create-only. Every pinned member is
+            # verified privately before descriptor-root publication, including
+            # small Git blob members whose upstream identity uses SHA-1.
+            directories = set()
+            for name in members:
+                path = relative / name
+                for parent in reversed(path.parents):
+                    if parent != Path("."):
+                        directories.add(parent.as_posix())
+            for directory in sorted(directories, key=lambda path: (path.count("/"), path)):
+                persistent_binding.claim_directory(directory)
         for name, (size, kind, expected) in members.items():
-            # Exclusive descriptor-relative writes cannot follow cache links.
-            if name in missing:
+            if persistent_binding is not None:
+                persistent_binding.copy_in_exclusive(
+                    (relative / name).as_posix(), str(repository / name),
+                    expected_size=size, expected_sha256=content_hashes[name],
+                    maximum=size,
+                )
+            elif name in missing:
+                # Exclusive descriptor-relative writes cannot follow cache links.
                 try:
                     copy_regular(repository, repository / name, persistent_root, persistent_root / relative / name, maximum=size)
                 except FileExistsError:

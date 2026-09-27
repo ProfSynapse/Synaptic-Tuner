@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from hashlib import sha256
 
 from tuner.execution.foundation_v2.observations import ObservationDisposition
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
@@ -10,10 +11,11 @@ from tuner.execution.providers.modal.packaged_deployment import (
     ModalPackagedDeploymentObserver,
 )
 from tuner.execution.providers.modal.packaged_dispatch import (
-    build_modal_packaged_dispatch,
+    ModalPackagedVolumeMarker, build_modal_packaged_dispatch,
 )
 from tuner.execution.providers.modal.packaged_staging import ModalPackagedInputStager
 from tuner.execution.providers.modal.packaged_transport import ModalPackagedHostTransport
+from tuner.training.modal_host_effects import ModalPackagedMarkerMaterial
 
 from tests.execution.providers.test_modal_packaged_deployment import Reader
 from tests.execution.providers.test_modal_packaged_binding import _binding
@@ -55,19 +57,48 @@ class Catalog:
         return self.values.get(digest)
 
 
-def _transport():
+def _transport(monkeypatch):
     binding, receipt, workload, policy = _case()
     auth = Auth()
+    facts = binding.provider_facts
+    roles = [("control", facts.control_volume_id), ("artifacts", facts.artifact_volume_id)]
+    if facts.model_cache_volume_id is not None:
+        roles.append(("model_cache", facts.model_cache_volume_id))
+    materials = tuple(
+        ModalPackagedMarkerMaterial(
+            ModalPackagedVolumeMarker(
+                role, volume_id, ".synaptic-volume-marker-" + format(index, "032x"),
+                sha256(bytes([index]) * 32).hexdigest(),
+            ),
+            bytes([index]) * 32,
+        ) for index, (role, volume_id) in enumerate(roles, 1)
+    )
     dispatch = build_modal_packaged_dispatch(
         binding, receipt, workload, policy, auth, key_ref="dispatch-key",
+        volume_markers=tuple(item.commitment for item in materials),
     )
-    facts = binding.provider_facts
     client = object()
     FakeVolume.calls = []
     FakeVolume.registry = {
         "control-name": FakeVolume(facts.control_volume_id),
         "artifact-name": FakeVolume(facts.artifact_volume_id),
     }
+    if facts.model_cache_volume_id is not None:
+        FakeVolume.registry["cache-name"] = FakeVolume(facts.model_cache_volume_id)
+    committed = []
+    monkeypatch.setattr(FakeVolume, "commit", lambda self: committed.append(self.object_id), raising=False)
+    class ExactReader:
+        def __init__(self, *, sdk, client):
+            assert sdk is SDK and client is not None
+        async def read_exact(self, *, volume_id, path, expected_size, expected_sha256, max_bytes):
+            assert expected_size == max_bytes == 32
+            assert volume_id in committed
+            value = next(volume.files[path] for volume in FakeVolume.registry.values()
+                         if volume.object_id == volume_id)
+            assert len(value) == expected_size
+            assert sha256(value).hexdigest() == expected_sha256
+            return value
+    monkeypatch.setattr("tuner.execution.providers.modal.packaged_transport.BoundedModalVolumeReader", ExactReader)
     FakeFunction.calls = []
     FakeFunction.spawn_calls = []
     FakeFunction.fail = False
@@ -82,6 +113,8 @@ def _transport():
         volume_names={
             facts.control_volume_id: "control-name",
             facts.artifact_volume_id: "artifact-name",
+            **({facts.model_cache_volume_id: "cache-name"}
+               if facts.model_cache_volume_id is not None else {}),
         },
     )
     reader = Reader(facts)
@@ -98,31 +131,34 @@ def _transport():
         stager=ModalPackagedInputStager(facade),
         stage_source=Source(None, events, "stage_source"),
         dispatch_source=Source(dispatch, events, "dispatch_source"),
+        marker_materials=Source(materials, events, "marker_materials"),
         stage_receipts=stage_receipts, call_catalog=calls,
         dispatch_verifier=auth,
     )
-    return binding, transport, calls, events, reader
+    return binding, transport, calls, events, reader, materials, committed
 
 
-def test_submit_observes_binding_then_spawns_once_and_retains_exact_call_id() -> None:
-    binding, transport, calls, events, reader = _transport()
+def test_submit_observes_binding_then_spawns_once_and_retains_exact_call_id(monkeypatch) -> None:
+    binding, transport, calls, events, reader, materials, committed = _transport(monkeypatch)
     command = binding.command
     outcome = transport.execute_once(binding, command)
     assert outcome.disposition is ObservationDisposition.FOUND
     assert outcome.provider_ref == "fc-1"
     assert len(reader.calls) == 1
     assert len(FakeFunction.spawn_calls) == 1
+    assert committed == [item.commitment.volume_id for item in materials]
     assert FakeFunction.spawn_calls[0] == (transport._dispatch_source.value,)
     assert calls.values == {command.digest: "fc-1"}
     assert events == [
         ("dispatch_source", command.digest),
+        ("marker_materials", command.digest),
         ("call.publish", command.digest, "fc-1"),
         ("call.resolve", command.digest),
     ]
 
 
-def test_spawn_failure_is_indeterminate_after_exactly_one_attempt() -> None:
-    binding, transport, calls, _, _ = _transport()
+def test_spawn_failure_is_indeterminate_after_exactly_one_attempt(monkeypatch) -> None:
+    binding, transport, calls, _, _, _, _ = _transport(monkeypatch)
     FakeFunction.fail = True
     outcome = transport.execute_once(binding, binding.command)
     assert outcome.disposition is ObservationDisposition.INDETERMINATE
@@ -130,8 +166,8 @@ def test_spawn_failure_is_indeterminate_after_exactly_one_attempt() -> None:
     assert calls.values == {}
 
 
-def test_call_catalog_failure_after_spawn_is_ambiguous_and_never_replayed() -> None:
-    binding, transport, calls, _, _ = _transport()
+def test_call_catalog_failure_after_spawn_is_ambiguous_and_never_replayed(monkeypatch) -> None:
+    binding, transport, calls, _, _, _, _ = _transport(monkeypatch)
     calls.fail_publish = True
     outcome = transport.execute_once(binding, binding.command)
     assert outcome.disposition is ObservationDisposition.INDETERMINATE
@@ -139,8 +175,60 @@ def test_call_catalog_failure_after_spawn_is_ambiguous_and_never_replayed() -> N
     assert calls.values == {}
 
 
-def test_reconciliation_uses_only_retained_call_id_without_spawn() -> None:
-    binding, transport, calls, _, _ = _transport()
+def test_substituted_private_marker_material_stops_before_any_write_or_spawn(monkeypatch) -> None:
+    binding, transport, calls, events, _, materials, committed = _transport(monkeypatch)
+    transport._marker_materials.value = tuple(reversed(materials))
+    outcome = transport.execute_once(binding, binding.command)
+    assert outcome.disposition is ObservationDisposition.INDETERMINATE
+    assert committed == []
+    assert all(volume.files == {} for volume in FakeVolume.registry.values())
+    assert FakeFunction.spawn_calls == []
+    assert calls.values == {}
+    assert ("marker_materials", binding.command.digest) in events
+
+
+def test_marker_upload_collision_is_indeterminate_without_spawn(monkeypatch) -> None:
+    binding, transport, calls, _, _, materials, committed = _transport(monkeypatch)
+    first = materials[0].commitment
+    volume = next(value for value in FakeVolume.registry.values()
+                  if value.object_id == first.volume_id)
+    volume.files[first.marker_name] = b"existing-file"
+    outcome = transport.execute_once(binding, binding.command)
+    assert outcome.disposition is ObservationDisposition.INDETERMINATE
+    assert volume.files[first.marker_name] == b"existing-file"
+    assert committed == []
+    assert FakeFunction.spawn_calls == []
+    assert calls.values == {}
+
+
+def test_marker_commit_failure_is_indeterminate_without_spawn(monkeypatch) -> None:
+    binding, transport, calls, _, _, _, _ = _transport(monkeypatch)
+    def fail_commit(self):
+        raise RuntimeError("provider detail must not escape")
+    monkeypatch.setattr(FakeVolume, "commit", fail_commit)
+    outcome = transport.execute_once(binding, binding.command)
+    assert outcome.disposition is ObservationDisposition.INDETERMINATE
+    assert FakeFunction.spawn_calls == []
+    assert calls.values == {}
+
+
+def test_marker_upload_deadline_is_indeterminate_without_spawn(monkeypatch) -> None:
+    binding, transport, calls, _, _, _, _ = _transport(monkeypatch)
+    def deadline(operation, *, timeout_seconds=30.0):
+        assert timeout_seconds == 60.0
+        raise TimeoutError("test deadline")
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.packaged_transport._bounded_provider_call",
+        deadline,
+    )
+    outcome = transport.execute_once(binding, binding.command)
+    assert outcome.disposition is ObservationDisposition.INDETERMINATE
+    assert FakeFunction.spawn_calls == []
+    assert calls.values == {}
+
+
+def test_reconciliation_uses_only_retained_call_id_without_spawn(monkeypatch) -> None:
+    binding, transport, calls, _, _, _, _ = _transport(monkeypatch)
     calls.values[binding.command_digest] = "fc-retained"
     outcome = transport.lookup_once(binding, binding.command)
     assert outcome.disposition is ObservationDisposition.FOUND
@@ -149,8 +237,8 @@ def test_reconciliation_uses_only_retained_call_id_without_spawn() -> None:
     assert FakeFunctionCall.calls == []
 
 
-def test_operational_binding_substitution_stops_before_function_lookup() -> None:
-    binding, transport, _, _, _ = _transport()
+def test_operational_binding_substitution_stops_before_function_lookup(monkeypatch) -> None:
+    binding, transport, _, _, _, _, _ = _transport(monkeypatch)
     other = _case()[0]
     # The separately parsed commands are semantically identical, so use a
     # stage command to prove effect-type substitution is rejected pre-provider.

@@ -45,6 +45,7 @@ from tests.execution.providers.test_modal_packaged_composition import _component
 from tests.execution.providers.test_modal_packaged_binding import _binding
 from tests.execution.providers.test_modal_packaged_dispatch import Auth
 from tests.execution.providers.test_modal_packaged_deployment import Reader
+from tests.execution.providers.test_modal_sdk154_adapter import FakeVolume
 from tests.training.test_modal_host_effects import _Storage
 from tests.training.test_packaged_execution_material import packaged_fixture
 from tests.training.test_input_preparation import _ExplicitTestRootAuthority
@@ -200,10 +201,30 @@ def test_public_training_api_stages_and_submits_once_with_fake_modal(tmp_path, m
         )
 
     monkeypatch.setattr(ModalPackagedInputStager, "stage_once", stage_once)
+    FakeVolume.registry = {
+        "control-name": FakeVolume(effects_binding.provider_facts.control_volume_id),
+        "artifact-name": FakeVolume(effects_binding.provider_facts.artifact_volume_id),
+    }
+    monkeypatch.setattr(FakeVolume, "commit", lambda self: None, raising=False)
+    class ExactReader:
+        def __init__(self, *, sdk, client):
+            assert sdk is arguments["sdk"] and client is arguments["client"]
+        async def read_exact(self, *, volume_id, path, expected_size, expected_sha256, max_bytes):
+            assert expected_size == max_bytes == 32
+            value = next(volume.files[path] for volume in FakeVolume.registry.values()
+                         if volume.object_id == volume_id)
+            assert len(value) == 32 and sha256(value).hexdigest() == expected_sha256
+            return value
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.packaged_transport.BoundedModalVolumeReader",
+        ExactReader,
+    )
     arguments["catalogs"] = ModalPackagedCatalogPorts(
         effects.bindings, effects.stage_receipts, effects.calls,
     )
-    arguments["sources"] = ModalPackagedSourcePorts(effects.stages, effects.dispatches)
+    arguments["sources"] = ModalPackagedSourcePorts(
+        effects.stages, effects.dispatches, effects.marker_materials,
+    )
     arguments["authorities"] = ModalPackagedAuthorityPorts(effects, signer)
     adapter = compose_modal_packaged_adapter(**arguments)
     host = compose_modal_packaged_reference_host(

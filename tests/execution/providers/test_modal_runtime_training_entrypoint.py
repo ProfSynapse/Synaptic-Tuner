@@ -271,3 +271,219 @@ def test_image_substitution_fails_before_client_or_storage(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="provider identity differs"):
         entrypoint._run_with_modal(b"signed-dispatch", sdk=SDK)
+
+
+def test_v2_entrypoint_binds_signed_volume_markers_and_private_model_cache(monkeypatch, tmp_path: Path) -> None:
+    from tuner.execution.providers.modal import model_snapshot, packaged_dispatch, packaged_worker
+    from tuner.execution.providers.modal import volume_root_binding
+    from tuner.execution.providers.modal.packaged_dispatch import MODAL_PACKAGED_DISPATCH_V2_SCHEMA
+    from tuner.execution.providers.modal.runtime_release_qualification import QUALIFICATION_HMAC_ENV_KEY
+
+    roots = {role: tmp_path / role for role in ("control", "artifacts", "model_cache")}
+    for root in roots.values():
+        root.mkdir()
+    monkeypatch.setattr(entrypoint, "_CONTROL_ROOT", roots["control"])
+    monkeypatch.setattr(entrypoint, "_ARTIFACT_ROOT", roots["artifacts"])
+    monkeypatch.setattr(entrypoint, "_MODEL_CACHE_ROOT", roots["model_cache"])
+    monkeypatch.setattr(entrypoint, "_PRIVATE_SCRATCH_ROOT", tmp_path)
+    monkeypatch.setenv(QUALIFICATION_HMAC_ENV_KEY, base64.b64encode(b"k" * 32).decode())
+    monkeypatch.setenv("MODAL_IS_REMOTE", "1")
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "production")
+    monkeypatch.setenv("MODAL_IMAGE_ID", "im-exact")
+    facts = SimpleNamespace(environment_ref="production", image_id="im-exact",
+                            control_volume_id="vo-control", artifact_volume_id="vo-artifacts",
+                            model_cache_volume_id="vo-cache")
+    ids = {"control": "vo-control", "artifacts": "vo-artifacts", "model_cache": "vo-cache"}
+    markers = tuple(SimpleNamespace(role=role, volume_id=volume_id,
+                                    marker_name=".synaptic-volume-marker-" + str(index) * 32,
+                                    value_sha256=str(index) * 64)
+                    for index, (role, volume_id) in enumerate(ids.items(), 1))
+    dispatch = SimpleNamespace(provider_facts=facts, schema_version=MODAL_PACKAGED_DISPATCH_V2_SCHEMA,
+                               volume_markers=markers)
+    monkeypatch.setattr(packaged_dispatch, "parse_modal_packaged_dispatch", lambda *_: dispatch)
+    events = []
+
+    class Bound:
+        def __init__(self, marker):
+            self.marker = marker
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            events.append("close:" + self.marker.role)
+
+    def bind(*, root_path, volume_id, marker_name, marker_sha256):
+        marker = next(marker for marker in markers if marker.volume_id == volume_id)
+        assert root_path == str(roots[marker.role])
+        assert (marker_name, marker_sha256) == (marker.marker_name, marker.value_sha256)
+        events.append("bind:" + marker.role)
+        return Bound(marker)
+
+    monkeypatch.setattr(volume_root_binding.VolumeRootBinding, "bind", bind)
+
+    class Volume:
+        is_hydrated = True
+
+        def __init__(self, identity):
+            self.object_id = identity
+
+        @classmethod
+        def from_id(cls, identity, *, client):
+            assert identity in ids.values()
+            return cls(identity)
+
+        def hydrate(self, client):
+            return self
+
+        def commit(self):
+            events.append("commit:" + self.object_id)
+
+    class SDK:
+        __version__ = "1.5.4"
+
+        class Client:
+            @staticmethod
+            def from_env():
+                return object()
+
+        @staticmethod
+        def current_function_call_id():
+            return "fc-test"
+
+    SDK.Volume = Volume
+
+    def prepare_model_snapshot(**kwargs):
+        assert kwargs["persistent_binding"].marker.role == "model_cache"
+        assert kwargs["persistent_root"].is_relative_to(tmp_path)
+        assert kwargs["persistent_root"] != roots["model_cache"]
+        assert kwargs["destination_root"].is_relative_to(tmp_path)
+        return kwargs["destination_root"]
+
+    monkeypatch.setattr(model_snapshot, "prepare_model_snapshot", prepare_model_snapshot)
+
+    class Worker:
+        def __init__(self, **kwargs):
+            assert set(kwargs["volume_bindings"]) == set(ids)
+            assert kwargs["private_root"].is_relative_to(tmp_path)
+            self.prepare = kwargs["trainer_executor"]._model_preparer
+
+        def __call__(self, payload, call_id, *, commit_artifacts, commit_control):
+            self.prepare({"ref": "Qwen/Qwen3.5-4B", "revision": "1" * 40}, tmp_path / "model")
+            commit_artifacts()
+            commit_control()
+            return {"status_code": "completed"}
+
+    monkeypatch.setattr(packaged_worker, "ModalPackagedWorker", Worker)
+    result = entrypoint._run_with_modal(b"signed-dispatch", sdk=SDK)
+    assert result["status_code"] == "completed"
+    assert events[:3] == ["bind:control", "bind:artifacts", "bind:model_cache"]
+    assert events[3:6] == ["commit:vo-cache", "commit:vo-artifacts", "commit:vo-control"]
+
+
+def test_v2_entrypoint_binds_signed_volume_markers_and_private_model_cache(monkeypatch, tmp_path: Path) -> None:
+    from tuner.execution.providers.modal import model_snapshot, packaged_dispatch, packaged_worker
+    from tuner.execution.providers.modal import volume_root_binding
+    from tuner.execution.providers.modal.packaged_dispatch import MODAL_PACKAGED_DISPATCH_V2_SCHEMA
+    from tuner.execution.providers.modal.runtime_release_qualification import QUALIFICATION_HMAC_ENV_KEY
+
+    roots = {role: tmp_path / role for role in ("control", "artifacts", "model_cache")}
+    for root in roots.values():
+        root.mkdir()
+    monkeypatch.setattr(entrypoint, "_CONTROL_ROOT", roots["control"])
+    monkeypatch.setattr(entrypoint, "_ARTIFACT_ROOT", roots["artifacts"])
+    monkeypatch.setattr(entrypoint, "_MODEL_CACHE_ROOT", roots["model_cache"])
+    monkeypatch.setattr(entrypoint, "_PRIVATE_SCRATCH_ROOT", tmp_path)
+    monkeypatch.setenv(QUALIFICATION_HMAC_ENV_KEY, base64.b64encode(b"k" * 32).decode())
+    monkeypatch.setenv("MODAL_IS_REMOTE", "1")
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "production")
+    monkeypatch.setenv("MODAL_IMAGE_ID", "im-exact")
+    facts = SimpleNamespace(environment_ref="production", image_id="im-exact",
+                            control_volume_id="vo-control", artifact_volume_id="vo-artifacts",
+                            model_cache_volume_id="vo-cache")
+    ids = {"control": "vo-control", "artifacts": "vo-artifacts", "model_cache": "vo-cache"}
+    markers = tuple(SimpleNamespace(role=role, volume_id=volume_id,
+                                    marker_name=".synaptic-volume-marker-" + str(index) * 32,
+                                    value_sha256=str(index) * 64)
+                    for index, (role, volume_id) in enumerate(ids.items(), 1))
+    dispatch = SimpleNamespace(provider_facts=facts, schema_version=MODAL_PACKAGED_DISPATCH_V2_SCHEMA,
+                               volume_markers=markers)
+    monkeypatch.setattr(packaged_dispatch, "parse_modal_packaged_dispatch", lambda *_: dispatch)
+    events = []
+
+    class Bound:
+        def __init__(self, marker):
+            self.marker = marker
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            events.append("close:" + self.marker.role)
+
+    def bind(*, root_path, volume_id, marker_name, marker_sha256):
+        marker = next(marker for marker in markers if marker.volume_id == volume_id)
+        assert root_path == str(roots[marker.role])
+        assert (marker_name, marker_sha256) == (marker.marker_name, marker.value_sha256)
+        events.append("bind:" + marker.role)
+        return Bound(marker)
+
+    monkeypatch.setattr(volume_root_binding.VolumeRootBinding, "bind", bind)
+
+    class Volume:
+        is_hydrated = True
+
+        def __init__(self, identity):
+            self.object_id = identity
+
+        @classmethod
+        def from_id(cls, identity, *, client):
+            assert identity in ids.values()
+            return cls(identity)
+
+        def hydrate(self, client):
+            return self
+
+        def commit(self):
+            events.append("commit:" + self.object_id)
+
+    class SDK:
+        __version__ = "1.5.4"
+
+        class Client:
+            @staticmethod
+            def from_env():
+                return object()
+
+        @staticmethod
+        def current_function_call_id():
+            return "fc-test"
+
+    SDK.Volume = Volume
+
+    def prepare_model_snapshot(**kwargs):
+        assert kwargs["persistent_binding"].marker.role == "model_cache"
+        assert kwargs["persistent_root"].is_relative_to(tmp_path)
+        assert kwargs["persistent_root"] != roots["model_cache"]
+        assert kwargs["destination_root"].is_relative_to(tmp_path)
+        return kwargs["destination_root"]
+
+    monkeypatch.setattr(model_snapshot, "prepare_model_snapshot", prepare_model_snapshot)
+
+    class Worker:
+        def __init__(self, **kwargs):
+            assert set(kwargs["volume_bindings"]) == set(ids)
+            assert kwargs["private_root"].is_relative_to(tmp_path)
+            self.prepare = kwargs["trainer_executor"]._model_preparer
+
+        def __call__(self, payload, call_id, *, commit_artifacts, commit_control):
+            self.prepare({"ref": "Qwen/Qwen3.5-4B", "revision": "1" * 40}, tmp_path / "model")
+            commit_artifacts()
+            commit_control()
+            return {"status_code": "completed"}
+
+    monkeypatch.setattr(packaged_worker, "ModalPackagedWorker", Worker)
+    result = entrypoint._run_with_modal(b"signed-dispatch", sdk=SDK)
+    assert result["status_code"] == "completed"
+    assert events[:3] == ["bind:control", "bind:artifacts", "bind:model_cache"]
+    assert events[3:6] == ["commit:vo-cache", "commit:vo-artifacts", "commit:vo-control"]

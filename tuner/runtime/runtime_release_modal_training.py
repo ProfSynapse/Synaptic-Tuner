@@ -39,10 +39,13 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
     import binascii
     import os
     import tempfile
+    from contextlib import ExitStack
 
     from tuner.execution.providers.modal.facade import EXACT_MODAL_SDK_VERSION
     from tuner.execution.providers.modal.model_snapshot import prepare_model_snapshot
-    from tuner.execution.providers.modal.packaged_dispatch import parse_modal_packaged_dispatch
+    from tuner.execution.providers.modal.packaged_dispatch import (
+        MODAL_PACKAGED_DISPATCH_V2_SCHEMA, parse_modal_packaged_dispatch,
+    )
     from tuner.execution.providers.modal.packaged_worker import (
         InstalledPackagedSFTTrainerExecutor,
         ModalPackagedWorker,
@@ -52,6 +55,7 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
         QUALIFICATION_HMAC_ENV_KEY,
         ModalRuntimeQualificationHmacAuthenticator,
     )
+    from tuner.execution.providers.modal.volume_root_binding import VolumeRootBinding
 
     if _stage is not None:
         _stage[0] = "ENTRYPOINT_DISPATCH_AUTH"
@@ -105,12 +109,13 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
             _stage[0] = "ENTRYPOINT_MOUNT_" + role + "_DIR"
         if not root.is_dir():
             raise ValueError("packaged training mounts differ")
-    for role, root in (("CONTROL", control), ("ARTIFACTS", artifacts),
-                       ("MODEL_CACHE", cache)):
-        if _stage is not None:
-            _stage[0] = "ENTRYPOINT_MOUNT_" + role + "_LINK"
-        if root.is_symlink():
-            raise ValueError("packaged training mounts differ")
+    if getattr(dispatch, "schema_version", None) != MODAL_PACKAGED_DISPATCH_V2_SCHEMA:
+        for role, root in (("CONTROL", control), ("ARTIFACTS", artifacts),
+                           ("MODEL_CACHE", cache)):
+            if _stage is not None:
+                _stage[0] = "ENTRYPOINT_MOUNT_" + role + "_LINK"
+            if root.is_symlink():
+                raise ValueError("packaged training mounts differ")
     if _stage is not None:
         _stage[0] = "ENTRYPOINT_MOUNTS"
     if len({control, artifacts, cache}) != 3:
@@ -119,15 +124,37 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
     credential = token if type(token) is str and token.strip() else None
     if _stage is not None:
         _stage[0] = "ENTRYPOINT_WORKER_SETUP"
-    with tempfile.TemporaryDirectory(prefix="synaptic-model-", dir=_PRIVATE_SCRATCH_ROOT) as temporary:
+    with ExitStack() as stack, tempfile.TemporaryDirectory(prefix="synaptic-model-", dir=_PRIVATE_SCRATCH_ROOT) as temporary:
         scratch = Path(temporary)
+        bindings = None
+        if getattr(dispatch, "schema_version", None) == MODAL_PACKAGED_DISPATCH_V2_SCHEMA:
+            if _stage is not None:
+                _stage[0] = "ENTRYPOINT_MOUNTS"
+            roots = {"control": control, "artifacts": artifacts, "model_cache": cache}
+            expected = {"control": facts.control_volume_id,
+                        "artifacts": facts.artifact_volume_id,
+                        "model_cache": facts.model_cache_volume_id}
+            bindings = {}
+            for marker in dispatch.volume_markers:
+                if marker.volume_id != expected[marker.role]:
+                    raise ValueError("packaged training marker identity differs")
+                bindings[marker.role] = stack.enter_context(VolumeRootBinding.bind(
+                    root_path=str(roots[marker.role]), volume_id=marker.volume_id,
+                    marker_name=marker.marker_name,
+                    marker_sha256=marker.value_sha256,
+                ))
+            if set(bindings) != set(expected):
+                raise ValueError("packaged training marker roles differ")
+        persistent = scratch / "persistent-cache"
+        persistent.mkdir(mode=0o700)
 
         def prepare(model: dict[str, object], destination: Path) -> Path:
-            snapshot = prepare_model_snapshot(
-                model_ref=model["ref"], revision=model["revision"], token=credential,
-                persistent_root=cache, destination_root=destination,
-                scratch_root=scratch,
-            )
+            args = dict(model_ref=model["ref"], revision=model["revision"], token=credential,
+                        persistent_root=persistent if bindings is not None else cache,
+                        destination_root=destination, scratch_root=scratch)
+            if bindings is not None:
+                args["persistent_binding"] = bindings["model_cache"]
+            snapshot = prepare_model_snapshot(**args)
             # Persist verified reusable files before the credential-free child.
             handles["model_cache"].commit()
             return snapshot
@@ -138,6 +165,8 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
             trainer_executor=InstalledPackagedSFTTrainerExecutor(model_preparer=prepare),
             evidence_signer=authenticator,
             roots=ModalPackagedWorkerRoots(control, artifacts, cache),
+            **({"volume_bindings": bindings, "private_root": scratch}
+               if bindings is not None else {}),
         )
         if _stage is not None:
             _stage[0] = "ENTRYPOINT_SETUP"

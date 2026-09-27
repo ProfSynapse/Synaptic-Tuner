@@ -20,6 +20,7 @@ from tests.execution.providers.test_modal_runtime_build import _candidate
 from tuner.dataset_prep import prepare_dataset_v2
 from tuner.execution.providers.modal.contracts import provider_entry_identity
 from tuner.execution.providers.modal.contracts import operation_path
+from tuner.execution.providers.modal.bounded_volume_read import BoundedModalVolumeReader
 from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.coordinator_v1.model import WorkflowPhaseV1
 from tuner.execution.providers.modal.facade import ModalFunctionCallState
@@ -142,8 +143,71 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
     release = _release(recipe)
     facts = _facts(release)
     facts.validate_release(release)
-    client = object()
+    client = SimpleNamespace(stub=object())
     events = []
+
+    class _Volume:
+        ids = {"control": "vo-control", "artifacts": "vo-artifacts", "cache": "vo-cache"}
+        committed = {}
+        commits = []
+        readbacks = []
+
+        def __init__(self, volume_id):
+            self.object_id = volume_id
+            self.is_hydrated = False
+            self.pending = {}
+
+        @classmethod
+        def from_name(cls, name, *, environment_name, create_if_missing, version, client):
+            assert environment_name == "main"
+            assert create_if_missing is False
+            assert version == 1
+            assert client is modal_client
+            return cls(cls.ids[name])
+
+        def hydrate(self, client):
+            assert client is modal_client
+            self.is_hydrated = True
+
+        def batch_upload(self, *, force):
+            assert force is False
+            volume = self
+
+            class _Batch:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+                def put_file(self, source, path):
+                    assert path not in volume.pending
+                    volume.pending[path] = source.read()
+
+            return _Batch()
+
+        def commit(self):
+            assert len(self.pending) == 1
+            for path, value in self.pending.items():
+                key = (self.object_id, path)
+                assert key not in self.committed
+                self.committed[key] = value
+                self.commits.append(key)
+            self.pending.clear()
+
+    modal_client = client
+
+    async def read_marker(_reader, *, volume_id, path, expected_size, expected_sha256, max_bytes):
+        assert volume_id in _Volume.ids.values()
+        assert path.startswith(".synaptic-volume-marker-")
+        assert expected_size == max_bytes == 32
+        key = (volume_id, path)
+        value = _Volume.committed[key]
+        assert sha256(value).hexdigest() == expected_sha256
+        _Volume.readbacks.append(key)
+        return value
+
+    monkeypatch.setattr(BoundedModalVolumeReader, "read_exact", read_marker)
 
     class _Function:
         @staticmethod
@@ -151,11 +215,16 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
             class _Call:
                 object_id = "fc-owned"
 
-            return SimpleNamespace(spawn=lambda payload: events.append("spawn") or _Call())
+            return SimpleNamespace(
+                hydrate=lambda bound_client: None,
+                is_hydrated=True,
+                spawn=lambda payload: events.append("spawn") or _Call(),
+            )
 
     class _SDK:
         __version__ = "1.5.4"
         Function = _Function
+        Volume = _Volume
 
     monkeypatch.setitem(sys.modules, "modal", _SDK)
     monkeypatch.setattr(runner, "open_modal_host_scope", lambda **kw: (client, facts.client_binding))
@@ -248,6 +317,58 @@ def test_cli_v2_fake_transcript_prepares_submits_verifies_and_downloads(tmp_path
     assert len(payload["data"]["verified_artifacts"]) == 5
     assert all(Path(path).read_bytes() == b"data" for path in payload["data"]["verified_artifacts"])
     assert events == ["bootstrap", "cpu", "stage", "spawn"]
+    volume = sys.modules["modal"].Volume
+    assert len(volume.commits) == 3
+    assert volume.readbacks == volume.commits
+    assert {volume_id for volume_id, _ in volume.commits} == {
+        "vo-control", "vo-artifacts", "vo-cache",
+    }
+    assert all(len(value) == 32 for value in volume.committed.values())
+
+
+def test_cli_v2_marker_readback_mismatch_keeps_submit_claim_without_spawning(
+        tmp_path, monkeypatch):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+
+    async def wrong_readback(_reader, **_kwargs):
+        return b"x" * 32
+
+    monkeypatch.setattr(BoundedModalVolumeReader, "read_exact", wrong_readback)
+    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
+        runner.run_modal_standalone_job(
+            plan=plan, context=context, modal_profile="explicit",
+            modal_environment="main",
+        )
+    assert caught.value.phase == "RUN_SUBMIT_RECONCILE_REQUIRED"
+    assert caught.value.retry_authorized is False
+    assert events == ["bootstrap", "cpu", "stage"]
+    assert len(sys.modules["modal"].Volume.commits) == 1
+    volume = sys.modules["modal"].Volume
+    assert len(volume.commits) == 3
+    assert volume.readbacks == volume.commits
+    assert {volume_id for volume_id, _ in volume.commits} == {
+        "vo-control", "vo-artifacts", "vo-cache",
+    }
+    assert all(len(value) == 32 for value in volume.committed.values())
+
+
+def test_cli_v2_marker_readback_mismatch_keeps_submit_claim_without_spawning(
+        tmp_path, monkeypatch):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+
+    async def wrong_readback(_reader, **_kwargs):
+        return b"x" * 32
+
+    monkeypatch.setattr(BoundedModalVolumeReader, "read_exact", wrong_readback)
+    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
+        runner.run_modal_standalone_job(
+            plan=plan, context=context, modal_profile="explicit",
+            modal_environment="main",
+        )
+    assert caught.value.phase == "RUN_SUBMIT_RECONCILE_REQUIRED"
+    assert caught.value.retry_authorized is False
+    assert events == ["bootstrap", "cpu", "stage"]
+    assert len(sys.modules["modal"].Volume.commits) == 1
 
 
 def test_cli_v2_failed_returned_job_is_closed_without_artifact_publication(tmp_path, monkeypatch, capsys):

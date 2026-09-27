@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field
 import json
+import re
 from typing import Protocol
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes, parse_canonical_object, safe_ref
@@ -31,8 +32,12 @@ from .packaged_staging import ModalPackagedStageReceipt
 
 
 MODAL_PACKAGED_DISPATCH_SCHEMA = "synaptic-modal-packaged-dispatch/v1"
+MODAL_PACKAGED_DISPATCH_V2_SCHEMA = "synaptic-modal-packaged-dispatch/v2"
 MAX_MODAL_PACKAGED_DISPATCH_BYTES = 1024 * 1024
 _PURPOSE = "modal-packaged-dispatch/v1"
+_V2_PURPOSE = "modal-packaged-dispatch/v2"
+_MARKER_NAME = re.compile(r"^\.synaptic-volume-marker-[0-9a-f]{32}$")
+_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _canonical(value: object) -> bytes:
@@ -107,6 +112,52 @@ def _policy_dict(policy: ArtifactPolicy) -> dict[str, object]:
 
 
 @dataclass(frozen=True, slots=True)
+class ModalPackagedVolumeMarker:
+    role: str
+    volume_id: str
+    marker_name: str
+    value_sha256: str
+
+    def __post_init__(self) -> None:
+        if self.role not in ("control", "artifacts", "model_cache"):
+            raise ValueError("unsupported packaged marker role")
+        if type(self.volume_id) is not str or re.fullmatch(r"vo-[A-Za-z0-9]{1,64}", self.volume_id) is None:
+            raise ValueError("invalid packaged marker Volume ID")
+        if type(self.marker_name) is not str or _MARKER_NAME.fullmatch(self.marker_name) is None:
+            raise ValueError("invalid packaged marker filename")
+        if type(self.value_sha256) is not str or _DIGEST.fullmatch(self.value_sha256) is None:
+            raise ValueError("invalid packaged marker digest")
+
+    def to_dict(self) -> dict[str, str]:
+        return {"role": self.role, "volume_id": self.volume_id,
+                "marker_name": self.marker_name, "value_sha256": self.value_sha256}
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ModalPackagedVolumeMarker":
+        if type(value) is not dict or set(value) != {"role", "volume_id", "marker_name", "value_sha256"}:
+            raise ValueError("invalid packaged marker commitment")
+        return cls(value["role"], value["volume_id"], value["marker_name"], value["value_sha256"])
+
+
+def _validate_markers(markers: tuple[ModalPackagedVolumeMarker, ...], facts: ModalPackagedRuntimeFactsV1) -> None:
+    expected = {"control": facts.control_volume_id, "artifacts": facts.artifact_volume_id}
+    if facts.model_cache_volume_id is not None:
+        expected["model_cache"] = facts.model_cache_volume_id
+    if type(markers) is not tuple or len(markers) != len(expected):
+        raise ValueError("packaged markers differ from mounted Volume roles")
+    if any(type(marker) is not ModalPackagedVolumeMarker for marker in markers):
+        raise TypeError("exact packaged marker commitments required")
+    if [marker.role for marker in markers] != list(expected):
+        raise ValueError("packaged markers differ from mounted Volume roles")
+    if any(marker.volume_id != expected[marker.role] for marker in markers):
+        raise ValueError("packaged marker Volume ID differs from runtime facts")
+    if (len({marker.volume_id for marker in markers}) != len(markers)
+            or len({marker.marker_name for marker in markers}) != len(markers)
+            or len({marker.value_sha256 for marker in markers}) != len(markers)):
+        raise ValueError("packaged marker commitments must be distinct")
+
+
+@dataclass(frozen=True, slots=True)
 class ModalPackagedDispatch:
     submit_command_bytes: bytes = field(repr=False)
     runtime_release: PackagedRuntimeRelease
@@ -118,6 +169,8 @@ class ModalPackagedDispatch:
     artifact_policy: ArtifactPolicy
     environment: tuple[tuple[str, str], ...]
     key_ref: str
+    volume_markers: tuple[ModalPackagedVolumeMarker, ...] = ()
+    schema_version: str = MODAL_PACKAGED_DISPATCH_SCHEMA
 
     def __post_init__(self) -> None:
         command = parse_exact_command(self.submit_command_bytes)
@@ -138,6 +191,10 @@ class ModalPackagedDispatch:
         if type(self.workload_bytes) is not bytes or not self.workload_bytes:
             raise TypeError("exact canonical workload bytes required")
         safe_ref(self.key_ref, "key_ref")
+        if self.schema_version == MODAL_PACKAGED_DISPATCH_V2_SCHEMA:
+            _validate_markers(self.volume_markers, self.provider_facts)
+        elif self.schema_version != MODAL_PACKAGED_DISPATCH_SCHEMA or self.volume_markers != ():
+            raise ValueError("unsupported packaged dispatch markers")
         values = dict(self.environment)
         allowed = {
             "PATH", "LD_LIBRARY_PATH", "CUDA_VISIBLE_DEVICES",
@@ -198,7 +255,7 @@ class ModalPackagedDispatch:
 
     def unsigned_dict(self) -> dict[str, object]:
         return {
-            "schema_version": MODAL_PACKAGED_DISPATCH_SCHEMA,
+            "schema_version": self.schema_version,
             "submit_command": self.submit_command.to_dict(),
             "runtime_release": self.runtime_release.to_dict(),
             "provider_binding": self.provider_binding.to_dict(),
@@ -209,6 +266,8 @@ class ModalPackagedDispatch:
             "artifact_policy": _policy_dict(self.artifact_policy),
             "environment": dict(self.environment),
             "key_ref": self.key_ref,
+            **({"volume_markers": [marker.to_dict() for marker in self.volume_markers]}
+               if self.schema_version == MODAL_PACKAGED_DISPATCH_V2_SCHEMA else {}),
         }
 
     @property
@@ -228,6 +287,7 @@ def build_modal_packaged_dispatch(
     *,
     key_ref: str,
     environment: tuple[tuple[str, str], ...] = (),
+    volume_markers: tuple[ModalPackagedVolumeMarker, ...] = (),
 ) -> bytes:
     if type(binding) is not ModalPackagedCommandBinding:
         raise TypeError("exact Modal packaged command binding required")
@@ -237,10 +297,13 @@ def build_modal_packaged_dispatch(
         binding.command_bytes, binding.runtime_release, binding.provider_binding,
         binding.provider_facts, binding.execution_binding, stage_receipt,
         workload_bytes, artifact_policy, environment, key_ref,
+        volume_markers,
+        MODAL_PACKAGED_DISPATCH_V2_SCHEMA if volume_markers else MODAL_PACKAGED_DISPATCH_SCHEMA,
     )
     unsigned = dispatch.unsigned_bytes
+    purpose = _V2_PURPOSE if dispatch.schema_version == MODAL_PACKAGED_DISPATCH_V2_SCHEMA else _PURPOSE
     try:
-        tag = signer.sign(_PURPOSE, unsigned, dispatch.key_ref)
+        tag = signer.sign(purpose, unsigned, dispatch.key_ref)
     except Exception:
         raise ValueError("packaged dispatch authentication unavailable") from None
     if type(tag) is not bytes or not tag or len(tag) > 128:
@@ -248,7 +311,7 @@ def build_modal_packaged_dispatch(
     payload = _canonical({
         **dispatch.unsigned_dict(),
         "authentication": {
-            "purpose": _PURPOSE,
+            "purpose": purpose,
             "tag": base64.urlsafe_b64encode(tag).decode("ascii"),
         },
     })
@@ -269,11 +332,19 @@ def parse_modal_packaged_dispatch(
         "provider_facts", "execution_binding", "stage_receipt", "workload_b64",
         "artifact_policy", "environment", "key_ref", "authentication",
     }
-    if set(document) != fields or document.get("schema_version") != MODAL_PACKAGED_DISPATCH_SCHEMA:
+    schema = document.get("schema_version")
+    if schema == MODAL_PACKAGED_DISPATCH_V2_SCHEMA:
+        fields.add("volume_markers")
+        purpose = _V2_PURPOSE
+    elif schema == MODAL_PACKAGED_DISPATCH_SCHEMA:
+        purpose = _PURPOSE
+    else:
+        raise ValueError("packaged dispatch has unknown fields")
+    if set(document) != fields:
         raise ValueError("packaged dispatch has unknown fields")
     authentication = document.pop("authentication")
     if type(authentication) is not dict or set(authentication) != {"purpose", "tag"} \
-            or authentication.get("purpose") != _PURPOSE:
+            or authentication.get("purpose") != purpose:
         raise ValueError("packaged dispatch authentication is invalid")
     try:
         tag_text = authentication["tag"]
@@ -281,7 +352,7 @@ def parse_modal_packaged_dispatch(
             raise ValueError
         tag = base64.b64decode(tag_text, altchars=b"-_", validate=True)
         unsigned = _canonical(document)
-        valid = verifier.verify(_PURPOSE, unsigned, tag, document["key_ref"])
+        valid = verifier.verify(purpose, unsigned, tag, document["key_ref"])
     except Exception:
         raise ValueError("packaged dispatch authentication unavailable") from None
     if valid is not True:
@@ -293,6 +364,9 @@ def parse_modal_packaged_dispatch(
     environment = document["environment"]
     if type(environment) is not dict:
         raise ValueError("packaged environment is invalid")
+    markers = document.get("volume_markers", [])
+    if type(markers) is not list:
+        raise ValueError("packaged markers are invalid")
     workload_b64 = document["workload_b64"]
     try:
         if type(workload_b64) is not str:
@@ -311,6 +385,8 @@ def parse_modal_packaged_dispatch(
         ArtifactPolicy(tuple(policy["required_kinds"]), policy["retain_checkpoints"]),
         tuple(environment.items()),
         document["key_ref"],
+        tuple(ModalPackagedVolumeMarker.from_dict(marker) for marker in markers),
+        schema,
     )
     _packaged_workload(result.workload_bytes)
     if _canonical({
@@ -324,7 +400,9 @@ def parse_modal_packaged_dispatch(
 __all__ = [
     "MAX_MODAL_PACKAGED_DISPATCH_BYTES",
     "MODAL_PACKAGED_DISPATCH_SCHEMA",
+    "MODAL_PACKAGED_DISPATCH_V2_SCHEMA",
     "ModalPackagedDispatch",
+    "ModalPackagedVolumeMarker",
     "ModalPackagedDispatchSigner",
     "ModalPackagedDispatchVerifier",
     "build_modal_packaged_dispatch",

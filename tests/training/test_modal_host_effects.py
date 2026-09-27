@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 
 import pytest
 
@@ -93,7 +94,15 @@ def test_one_shot_claim_precedes_stage_and_submit_sources_and_rejects_response_l
     submit = submit_binding.command
     effects.bind(grant, operation=submit, requirements=requirements)
     payload = effects.dispatches.resolve(submit.digest)
-    assert parse_modal_packaged_dispatch(payload, signer).submit_command_bytes == submit.canonical_bytes
+    dispatch = parse_modal_packaged_dispatch(payload, signer)
+    assert dispatch.submit_command_bytes == submit.canonical_bytes
+    assert dispatch.schema_version == "synaptic-modal-packaged-dispatch/v2"
+    materials = effects.marker_materials.resolve(submit.digest)
+    assert tuple(item.commitment for item in materials) == dispatch.volume_markers
+    assert [item.commitment.role for item in materials] == ["control", "artifacts"]
+    assert all(len(item.value) == 32 and hashlib.sha256(item.value).hexdigest() == item.commitment.value_sha256
+               for item in materials)
+    assert all(item.value not in payload for item in materials)
     assert submit.digest in storage.attempts.claimed
     with pytest.raises(ValueError, match="already claimed"):
         effects.bind(grant, operation=submit, requirements=requirements)

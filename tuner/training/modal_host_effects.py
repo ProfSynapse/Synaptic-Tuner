@@ -8,13 +8,18 @@ local attempt claim before either provider effect can run.
 from __future__ import annotations
 
 import json
+import hashlib
+import secrets
+from dataclasses import dataclass, field
 from threading import RLock
 
 from synaptic_tuner.api.v1.execution import ExecutionGrant
 from tuner.execution.foundation_v2.canonical import canonical_bytes, parse_canonical_object
 from tuner.execution.foundation_v2.commands import StageCommandV2, SubmitCommandV2
 from tuner.execution.providers.modal.packaged_binding import ModalPackagedCommandBinding
-from tuner.execution.providers.modal.packaged_dispatch import build_modal_packaged_dispatch
+from tuner.execution.providers.modal.packaged_dispatch import (
+    ModalPackagedVolumeMarker, build_modal_packaged_dispatch,
+)
 from tuner.execution.providers.modal.packaged_staging import (
     ModalPackagedStageReceipt, prepare_modal_packaged_stage,
 )
@@ -24,6 +29,72 @@ _BINDING_FIELDS = (
     "command_bytes", "runtime_release_bytes", "provider_binding_bytes",
     "provider_facts_bytes", "execution_binding_bytes",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ModalPackagedMarkerMaterial:
+    commitment: ModalPackagedVolumeMarker
+    value: bytes = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if type(self.commitment) is not ModalPackagedVolumeMarker:
+            raise TypeError("exact packaged marker commitment required")
+        if type(self.value) is not bytes or len(self.value) != 32:
+            raise ValueError("packaged marker value must have 32 bytes")
+        if hashlib.sha256(self.value).hexdigest() != self.commitment.value_sha256:
+            raise ValueError("packaged marker value differs from commitment")
+
+
+def _encode_marker_materials(items: tuple[ModalPackagedMarkerMaterial, ...]) -> bytes:
+    if type(items) is not tuple or not items or any(type(item) is not ModalPackagedMarkerMaterial for item in items):
+        raise ValueError("exact packaged marker material required")
+    return canonical_bytes({"schema_version": "synaptic-modal-packaged-marker-material/v1",
+                            "items": [{**item.commitment.to_dict(), "value_hex": item.value.hex()}
+                                      for item in items]})
+
+
+def _decode_marker_materials(payload: bytes) -> tuple[ModalPackagedMarkerMaterial, ...]:
+    document = parse_canonical_object(payload, name="packaged marker material")
+    if (set(document) != {"schema_version", "items"}
+            or document["schema_version"] != "synaptic-modal-packaged-marker-material/v1"
+            or type(document["items"]) is not list):
+        raise ValueError("packaged marker catalog is invalid")
+    result = []
+    for item in document["items"]:
+        if type(item) is not dict or set(item) != {"role", "volume_id", "marker_name", "value_sha256", "value_hex"}:
+            raise ValueError("packaged marker catalog is invalid")
+        value_hex = item["value_hex"]
+        if type(value_hex) is not str or len(value_hex) != 64 or any(c not in "0123456789abcdef" for c in value_hex):
+            raise ValueError("packaged marker catalog is invalid")
+        result.append(ModalPackagedMarkerMaterial(
+            ModalPackagedVolumeMarker.from_dict({key: item[key] for key in
+                                                 ("role", "volume_id", "marker_name", "value_sha256")}),
+            bytes.fromhex(value_hex),
+        ))
+    result = tuple(result)
+    if _encode_marker_materials(result) != payload:
+        raise ValueError("packaged marker catalog is not canonical")
+    return result
+
+
+def _new_marker_materials(facts: object) -> tuple[ModalPackagedMarkerMaterial, ...]:
+    roles = (("control", facts.control_volume_id), ("artifacts", facts.artifact_volume_id))
+    if facts.model_cache_volume_id is not None:
+        roles += (("model_cache", facts.model_cache_volume_id),)
+    materials = tuple(
+        ModalPackagedMarkerMaterial(
+            ModalPackagedVolumeMarker(role, volume_id,
+                                      ".synaptic-volume-marker-" + secrets.token_hex(16),
+                                      hashlib.sha256(value).hexdigest()),
+            value,
+        )
+        for role, volume_id in roles
+        for value in (secrets.token_bytes(32),)
+    )
+    if (len({item.commitment.marker_name for item in materials}) != len(materials)
+            or len({item.commitment.value_sha256 for item in materials}) != len(materials)):
+        raise ValueError("packaged marker material collision")
+    return materials
 
 
 def _encode_binding(value: ModalPackagedCommandBinding) -> bytes:
@@ -120,6 +191,10 @@ class ModalPackagedHostEffectsV1:
         self.calls = storage.catalog(
             "packaged-calls-v1", encode=_encode_call, decode=_decode_call,
         )
+        self.marker_materials = storage.catalog(
+            "packaged-marker-materials-v1", encode=_encode_marker_materials,
+            decode=_decode_marker_materials,
+        )
         self.stages, self.dispatches = _OneUseSource(), _OneUseSource()
         self._storage = storage
         self._release = runtime_release
@@ -192,8 +267,11 @@ class ModalPackagedHostEffectsV1:
             ))
             self._stage_effects[operation.operation.effect.effect_id] = operation.digest
         else:
+            materials = _new_marker_materials(self._facts)
+            self.marker_materials.publish_if_absent(operation.digest, materials)
             self.dispatches.publish(operation.digest, build_modal_packaged_dispatch(
                 binding, stage_receipt, self._workload, self._policy,
                 self._signer, key_ref=self._key_ref,
+                volume_markers=tuple(item.commitment for item in materials),
             ))
         return binding
