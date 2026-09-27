@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import asyncio
 import hashlib
+import itertools
 import json
 from contextlib import nullcontext
 import os
@@ -58,6 +59,23 @@ def test_raw_result_requires_exact_serialized_closed_payload() -> None:
     assert probe._classify_raw(output, api, pickle.dumps) == "OUTPUT_UNCLASSIFIED"
     output.result.data_blob_id = "blob"
     assert probe._classify_raw(output, api, pickle.dumps) == "OUTPUT_UNCLASSIFIED"
+    output.result.data_blob_id = ""
+    output.result.data = pickle.dumps({
+        "schema_version": probe._SCHEMA,
+        "links": ("ABS_TARGET_OWNER_ROOT", "REL_TRAVERSAL", "NOT_LINK"),
+    })
+    assert probe._classify_raw(output, api, pickle.dumps, True) == {
+        "control": "ABS_TARGET_OWNER_ROOT",
+        "artifacts": "REL_TRAVERSAL",
+        "model_cache": "NOT_LINK",
+    }
+    assert probe._classify_raw(output, api, pickle.dumps) == "OUTPUT_UNCLASSIFIED"
+
+
+def test_link_result_inventory_fits_inline_pickle_cap() -> None:
+    assert max(len(pickle.dumps({
+        "schema_version": probe._SCHEMA, "links": values,
+    })) for values in itertools.product(probe._LINK_CATEGORIES, repeat=3)) <= 512
 
 
 def test_image_read_requires_exact_returned_id() -> None:
@@ -125,8 +143,10 @@ def test_remote_probe_never_reads_symlink_target(monkeypatch, mount_parent) -> N
     [(True, False), (False, False), (True, True)],
 )
 @pytest.mark.parametrize("mount_parent", ["/mnt", "/workspace"])
+@pytest.mark.parametrize("inspect_links", [False, True])
 def test_execute_creates_exact_resources_then_spawns_once(
-    monkeypatch, hydrate_after_deploy: bool, deploy_fails: bool, mount_parent: str,
+    monkeypatch, hydrate_after_deploy: bool, deploy_fails: bool,
+    mount_parent: str, inspect_links: bool,
 ) -> None:
     events: list[tuple[str, object]] = []
     ids = iter(("vo-C", "vo-A", "vo-M"))
@@ -163,8 +183,8 @@ def test_execute_creates_exact_resources_then_spawns_once(
             return Image(identity)
 
     class Function:
-        def spawn(self, parent):
-            events.append(("spawn", parent))
+        def spawn(self, parent, inspect):
+            events.append(("spawn", (parent, inspect)))
             return SimpleNamespace(object_id="fc-EXACT")
 
     class App:
@@ -218,7 +238,7 @@ def test_execute_creates_exact_resources_then_spawns_once(
     args = SimpleNamespace(
         app="probe-test", environment="default", image_id="im-EXACT",
         volume_names=("probe-control", "probe-artifacts", "probe-cache"), claim_fd=17,
-        mount_parent=mount_parent,
+        mount_parent=mount_parent, inspect_links=inspect_links,
     )
     if deploy_fails:
         with pytest.raises(probe.ProbeUnavailable, match="APP_DEPLOY_UNAVAILABLE") as caught:
@@ -234,7 +254,7 @@ def test_execute_creates_exact_resources_then_spawns_once(
         assert [name for name, _ in events].count("spawn") == 0
         return
     assert [name for name, _ in events].count("spawn") == 1
-    assert ("spawn", mount_parent) in events
+    assert ("spawn", (mount_parent, inspect_links)) in events
     assert [name for name, _ in events].index("image_handle") < [name for name, _ in events].index("deploy")
     assert [value[1] for name, value in events if name == "create_volume"] == [False] * 3
     assert [name for name, _ in events].index("deploy") < [name for name, _ in events].index("spawn")
@@ -242,8 +262,10 @@ def test_execute_creates_exact_resources_then_spawns_once(
 
 
 @pytest.mark.parametrize("mount_parent", ["/mnt", "/workspace"])
+@pytest.mark.parametrize("inspect_links", [False, True])
 def test_main_claims_generated_selection_before_provider_use(monkeypatch, capsys,
-                                                              mount_parent) -> None:
+                                                              mount_parent,
+                                                              inspect_links) -> None:
     events = []
     fake_modal = ModuleType("modal")
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
@@ -272,12 +294,14 @@ def test_main_claims_generated_selection_before_provider_use(monkeypatch, capsys
         "--claim-dir", "/private/probe", "--name-prefix", "probe",
         "--environment", "default", "--modal-profile", "test",
         "--image-id", "im-EXACT", "--mount-parent", mount_parent,
+        *(["--inspect-links"] if inspect_links else []),
     ])
     assert exit_code == 0
     assert [name for name, _ in events] == ["claim", "client", "execute"]
     assert events[0][1]["app"] == "probe-probe-" + "a" * 32
     assert events[0][1]["mount_parent"] == mount_parent
     assert events[0][1]["mount_paths"] == probe._mount_paths(mount_parent)
+    assert events[0][1]["inspect_links"] is inspect_links
     claim = dict(events[0][1])
     digest = claim.pop("selection_sha256")
     assert digest == hashlib.sha256(
@@ -293,12 +317,51 @@ def test_mount_parent_rejects_unlisted_path() -> None:
         probe._mount_paths("/workspace/../mnt")
 
 
-def test_remote_probe_rejects_unlisted_parent_before_io(monkeypatch) -> None:
+@pytest.mark.parametrize("inspect_links", [False, True])
+def test_remote_probe_rejects_unlisted_parent_before_io(monkeypatch, inspect_links) -> None:
     monkeypatch.setattr(probe.os, "open", lambda *args, **kwargs: pytest.fail("unexpected open"))
-    assert probe._remote_probe("/root") == {
+    assert probe._remote_probe("/root", inspect_links) == {
         "schema_version": probe._SCHEMA,
-        "roots": ("UNAVAILABLE", "UNAVAILABLE", "UNAVAILABLE"),
+        "links" if inspect_links else "roots":
+            ("UNAVAILABLE", "UNAVAILABLE", "UNAVAILABLE"),
     }
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Linux descriptor semantics")
+def test_link_metadata_opens_only_directory_roots(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "target"
+    target.mkdir(mode=0o700)
+    (target / "secret.txt").write_text("never read this")
+    (tmp_path / "control").symlink_to("target", target_is_directory=True)
+    original_open = os.open
+    opened = []
+
+    def checked_open(path, flags, *args, **kwargs):
+        opened.append(path)
+        assert path != "secret.txt"
+        assert flags & os.O_NOFOLLOW
+        return original_open(path, flags, *args, **kwargs)
+
+    parent = original_open(tmp_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        monkeypatch.setattr(os, "open", checked_open)
+        monkeypatch.setattr(os, "listdir", lambda *args, **kwargs: pytest.fail("listed contents"))
+        monkeypatch.setattr(os, "scandir", lambda *args, **kwargs: pytest.fail("scanned contents"))
+        assert probe._inspect_root_link(parent, "control") == "REL_TARGET_OWNER_SELF"
+        assert opened == ["target"]
+    finally:
+        os.close(parent)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Linux descriptor semantics")
+def test_link_metadata_stops_on_parent_traversal(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "control").symlink_to("../elsewhere", target_is_directory=True)
+    parent = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        monkeypatch.setattr(os, "open", lambda *args, **kwargs: pytest.fail("opened target"))
+        assert probe._inspect_root_link(parent, "control") == "REL_TRAVERSAL"
+    finally:
+        os.close(parent)
 
 
 def test_provider_stage_and_output_do_not_expose_exception_text(monkeypatch, capsys) -> None:

@@ -34,6 +34,15 @@ _ROLES = ("control", "artifacts", "model_cache")
 _MOUNT_PARENTS = ("/mnt", "/workspace")
 _MOUNT_LEAVES = ("control", "artifacts", "model-cache")
 _CATEGORIES = ("DIRECTORY", "LINK", "ABSENT", "OTHER", "UNAVAILABLE")
+_LINK_SUFFIXES = (
+    "TRAVERSAL", "MISSING", "ANCESTOR_LINK", "ANCESTOR_OTHER",
+    "TARGET_LINK", "TARGET_OTHER", "ANCESTOR_UNTRUSTED",
+    "TARGET_WRITABLE", "TARGET_OWNER_SELF", "TARGET_OWNER_ROOT",
+    "TARGET_OWNER_OTHER", "UNSTABLE", "UNAVAILABLE",
+)
+_LINK_CATEGORIES = ("NOT_LINK", "ABSENT", "UNAVAILABLE") + tuple(
+    prefix + "_" + suffix for prefix in ("ABS", "REL") for suffix in _LINK_SUFFIXES
+)
 _SCHEMA = "synaptic-modal-gpu-mount-probe/v1"
 _TIMEOUT = 120
 _STAGE_FAILURES = frozenset({
@@ -168,7 +177,92 @@ def _mount_paths(parent: str) -> tuple[str, ...]:
     return tuple(parent + "/" + leaf for leaf in _MOUNT_LEAVES)
 
 
-def _remote_probe(mount_parent: str = "/mnt") -> dict[str, object]:
+def _same_file(first: object, second: object) -> bool:
+    return all(getattr(first, name) == getattr(second, name) for name in (
+        "st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_ctime_ns",
+    ))
+
+
+def _link_target_status(parent: int, target: str) -> str:
+    """Walk only target directory metadata, stopping at any linked component."""
+    absolute = target.startswith("/")
+    parts = target[1:].split("/") if absolute else target.split("/")
+    if (len(target) > 1024 or not parts or len(parts) > 16
+            or any(part in ("", ".", "..") for part in parts)):
+        return "TRAVERSAL"
+    descriptor = None
+    ancestor_untrusted = False
+    try:
+        descriptor = (os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                      if absolute else os.dup(parent))
+        final_info = None
+        for index, part in enumerate(parts):
+            final = index == len(parts) - 1
+            try:
+                info = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                return "MISSING"
+            if stat.S_ISLNK(info.st_mode):
+                return "TARGET_LINK" if final else "ANCESTOR_LINK"
+            if not stat.S_ISDIR(info.st_mode):
+                return "TARGET_OTHER" if final else "ANCESTOR_OTHER"
+            opened = os.open(
+                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=descriptor,
+            )
+            try:
+                if not _same_file(info, os.fstat(opened)):
+                    os.close(opened)
+                    return "UNSTABLE"
+            except BaseException:
+                os.close(opened)
+                raise
+            os.close(descriptor)
+            descriptor = opened
+            if final:
+                final_info = info
+            elif info.st_uid not in (0, os.geteuid()) or stat.S_IMODE(info.st_mode) & 0o022:
+                ancestor_untrusted = True
+        if not _same_file(final_info, os.fstat(descriptor)):
+            return "UNSTABLE"
+        if ancestor_untrusted:
+            return "ANCESTOR_UNTRUSTED"
+        if stat.S_IMODE(final_info.st_mode) & 0o022:
+            return "TARGET_WRITABLE"
+        if final_info.st_uid == os.geteuid():
+            return "TARGET_OWNER_SELF"
+        return "TARGET_OWNER_ROOT" if final_info.st_uid == 0 else "TARGET_OWNER_OTHER"
+    except BaseException:
+        return "UNAVAILABLE"
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _inspect_root_link(parent: int, leaf: str) -> str:
+    try:
+        before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+    except FileNotFoundError:
+        return "ABSENT"
+    except BaseException:
+        return "UNAVAILABLE"
+    if not stat.S_ISLNK(before.st_mode):
+        return "NOT_LINK"
+    try:
+        target = os.readlink(leaf, dir_fd=parent)
+        if type(target) is not str:
+            return "UNAVAILABLE"
+        prefix = "ABS" if target.startswith("/") else "REL"
+        status = _link_target_status(parent, target)
+        after = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if not _same_file(before, after):
+            status = "UNSTABLE"
+        return prefix + "_" + status
+    except BaseException:
+        return "UNAVAILABLE"
+
+
+def _remote_probe(mount_parent: str = "/mnt", inspect_links: bool = False) -> dict[str, object]:
     """Inspect only selected mount roots through one retained parent descriptor."""
     import os
     import stat
@@ -179,7 +273,13 @@ def _remote_probe(mount_parent: str = "/mnt") -> dict[str, object]:
         if type(mount_parent) is not str or mount_parent not in _MOUNT_PARENTS:
             raise ValueError
         parent = os.open(mount_parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        if type(inspect_links) is not bool:
+            raise ValueError
+        parent_info = os.fstat(parent) if inspect_links else None
         for leaf in _MOUNT_LEAVES:
+            if inspect_links:
+                categories.append(_inspect_root_link(parent, leaf))
+                continue
             try:
                 info = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
             except FileNotFoundError:
@@ -209,12 +309,17 @@ def _remote_probe(mount_parent: str = "/mnt") -> dict[str, object]:
                         os.close(descriptor)
             else:
                 categories.append("OTHER")
+        if inspect_links and not _same_file(
+            parent_info, os.stat(mount_parent, follow_symlinks=False),
+        ):
+            categories = ["UNAVAILABLE"] * 3
     except BaseException:
         categories = ["UNAVAILABLE"] * 3
     finally:
         if parent is not None:
             os.close(parent)
-    return {"schema_version": _SCHEMA, "roots": tuple(categories)}
+    return {"schema_version": _SCHEMA,
+            "links" if inspect_links else "roots": tuple(categories)}
 
 
 def _exact(value: str, pattern: re.Pattern[str]) -> str:
@@ -307,7 +412,8 @@ def _deadline(seconds: int):
         signal.signal(signal.SIGALRM, former)
 
 
-def _classify_raw(output: object, api_pb2: object, serialize: object) -> str | dict[str, str]:
+def _classify_raw(output: object, api_pb2: object, serialize: object,
+                  inspect_links: bool = False) -> str | dict[str, str]:
     """Compare only pinned small inline pickle bytes; never deserialize them."""
     try:
         if output.result.status != api_pb2.GenericResult.GENERIC_STATUS_SUCCESS:
@@ -317,8 +423,12 @@ def _classify_raw(output: object, api_pb2: object, serialize: object) -> str | d
                 or len(output.result.data) > 512):
             return "OUTPUT_UNCLASSIFIED"
         raw = output.result.data
-        for values in itertools.product(_CATEGORIES, repeat=3):
-            expected = serialize({"schema_version": _SCHEMA, "roots": values})
+        if type(inspect_links) is not bool:
+            return "OUTPUT_UNCLASSIFIED"
+        categories = _LINK_CATEGORIES if inspect_links else _CATEGORIES
+        key = "links" if inspect_links else "roots"
+        for values in itertools.product(categories, repeat=3):
+            expected = serialize({"schema_version": _SCHEMA, key: values})
             if type(expected) is bytes and hmac.compare_digest(raw, expected):
                 return dict(zip(_ROLES, values))
     except Exception:
@@ -327,7 +437,7 @@ def _classify_raw(output: object, api_pb2: object, serialize: object) -> str | d
 
 
 async def _poll_raw(client: object, call_id: str, api_pb2: object,
-                    serialize: object) -> str | dict[str, str]:
+                    serialize: object, inspect_links: bool = False) -> str | dict[str, str]:
     import asyncio
 
     request = api_pb2.FunctionGetOutputsRequest(
@@ -343,7 +453,7 @@ async def _poll_raw(client: object, call_id: str, api_pb2: object,
             return "PENDING" if response.num_unfinished_inputs > 0 else "OUTPUT_EXPIRED"
         if len(response.outputs) != 1 or response.outputs[0].idx != 0:
             return "OUTPUT_UNCLASSIFIED"
-        return _classify_raw(response.outputs[0], api_pb2, serialize)
+        return _classify_raw(response.outputs[0], api_pb2, serialize, inspect_links)
     except Exception:
         return "POLL_UNAVAILABLE"
 
@@ -468,7 +578,7 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
         raise ProbeUnavailable("POSTDEPLOY_IMAGE_INVALID")
     with _provider_stage("FUNCTION_SPAWN_UNAVAILABLE"):
         with _deadline(60):
-            call = function.spawn(args.mount_parent)
+            call = function.spawn(args.mount_parent, args.inspect_links)
     call_id = getattr(call, "object_id", None)
     if type(call_id) is not str or _CALL.fullmatch(call_id) is None:
         raise ProbeUnavailable("CALL_ID_INDETERMINATE")
@@ -483,6 +593,7 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
         with _provider_stage("POLL_UNAVAILABLE"):
             result = synchronizer.create_blocking(_poll_raw)(
                 client, call_id, api_pb2, serialize,
+                args.inspect_links,
             )
         if result != "PENDING":
             return result
@@ -498,6 +609,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--modal-profile", required=True)
     parser.add_argument("--image-id", required=True)
     parser.add_argument("--mount-parent", default="/mnt")
+    parser.add_argument("--inspect-links", action="store_true")
     args = parser.parse_args(argv)
     result: str | dict[str, str] = "LOCAL_UNAVAILABLE"
     failure_class = None
@@ -528,6 +640,7 @@ def main(argv: list[str] | None = None) -> int:
             "image_id": args.image_id,
             "mount_parent": args.mount_parent,
             "mount_paths": mount_paths,
+            "inspect_links": args.inspect_links,
             "volume_names": args.volume_names,
         }
         claim["selection_sha256"] = hashlib.sha256(
