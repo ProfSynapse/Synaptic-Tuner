@@ -45,7 +45,8 @@ _LINK_CATEGORIES = ("NOT_LINK", "ABSENT", "UNAVAILABLE") + tuple(
     prefix + "_" + suffix for prefix in ("ABS", "REL") for suffix in _LINK_SUFFIXES
 )
 _MAPPING_CATEGORIES = (
-    "MATCH", "MISMATCH", "MARKER_MISSING", "MARKER_UNSAFE",
+    "MATCH", "MATCH_MODAL_ID", "MATCH_MODAL_ID_DESCENDANT",
+    "MISMATCH", "MARKER_MISSING", "MARKER_UNSAFE",
     "ROOT_UNSAFE", "UNSTABLE", "UNAVAILABLE",
 )
 _SCHEMA = "synaptic-modal-gpu-mount-probe/v1"
@@ -326,7 +327,21 @@ def _open_mapping_root(parent: int, leaf: str) -> tuple[int | None, object | Non
             os.close(descriptor)
 
 
-def _verify_mapping_root(parent: int, leaf: str, name: str, digest: str) -> str:
+def _mapping_target_category(target: str, volume_id: str) -> str:
+    """Classify an opaque provider target without emitting its path."""
+    if (type(target) is not str or type(volume_id) is not str
+            or _VOLUME.fullmatch(volume_id) is None):
+        return "UNAVAILABLE"
+    expected = "/__modal/volumes/" + volume_id
+    if target == expected:
+        return "MATCH_MODAL_ID"
+    if target.startswith(expected + "/"):
+        return "MATCH_MODAL_ID_DESCENDANT"
+    return "MATCH"
+
+
+def _verify_mapping_root(parent: int, leaf: str, name: str, digest: str,
+                         volume_id: str = "") -> str:
     root = None
     marker = None
     try:
@@ -361,6 +376,13 @@ def _verify_mapping_root(parent: int, leaf: str, name: str, digest: str) -> str:
             return "UNSTABLE"
         if len(data) != 32 or not hmac.compare_digest(hashlib.sha256(data).hexdigest(), digest):
             return "MISMATCH"
+        if volume_id:
+            target = os.readlink(leaf, dir_fd=parent)
+            if not _same_file(link_info, os.stat(
+                leaf, dir_fd=parent, follow_symlinks=False,
+            )):
+                return "UNSTABLE"
+            return _mapping_target_category(target, volume_id)
         return "MATCH"
     except BaseException:
         return "UNAVAILABLE"
@@ -378,7 +400,8 @@ def _canonical_link_category(value: str) -> str:
 
 def _remote_probe(mount_parent: str = "/mnt", inspect_links: bool = False,
                   verify_mapping: bool = False, marker_names: tuple[str, ...] = (),
-                  marker_digests: tuple[str, ...] = ()) -> dict[str, object]:
+                  marker_digests: tuple[str, ...] = (),
+                  volume_ids: tuple[str, ...] = ()) -> dict[str, object]:
     """Inspect only selected mount roots through one retained parent descriptor."""
     import os
     import stat
@@ -393,13 +416,15 @@ def _remote_probe(mount_parent: str = "/mnt", inspect_links: bool = False,
                 or (inspect_links and verify_mapping)):
             raise ValueError
         if verify_mapping and (type(marker_names) is not tuple or len(marker_names) != 3
-                               or type(marker_digests) is not tuple or len(marker_digests) != 3):
+                               or type(marker_digests) is not tuple or len(marker_digests) != 3
+                               or type(volume_ids) is not tuple or len(volume_ids) not in (0, 3)):
             raise ValueError
         parent_info = os.fstat(parent) if (inspect_links or verify_mapping) else None
         for index, leaf in enumerate(_MOUNT_LEAVES):
             if verify_mapping:
                 value = _verify_mapping_root(
                     parent, leaf, marker_names[index], marker_digests[index],
+                    volume_ids[index] if volume_ids else "",
                 )
                 categories.append(next((item for item in _MAPPING_CATEGORIES
                                         if item == value), "UNAVAILABLE"))
@@ -683,6 +708,7 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
                 or identity in [item.object_id for item in volumes.values()]):
             raise ProbeUnavailable("VOLUME_IDENTITY_INVALID")
         volumes[role] = volume
+    volume_ids = tuple(volumes[role].object_id for role in _ROLES)
     if args.verify_mapping:
         for index, role in enumerate(_ROLES):
             if not _prepare_marker(
@@ -695,7 +721,7 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
                 "selection_sha256": args.selection_sha256,
                 "marker_names": args.marker_names,
                 "marker_sha256": args.marker_digests,
-                "volume_ids": tuple(volumes[role].object_id for role in _ROLES),
+                "volume_ids": volume_ids,
                 "marker_upload": "accepted_create_only_no_host_readback",
             })
     with _provider_stage("IMAGE_HANDLE_UNAVAILABLE"):
@@ -723,11 +749,14 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
     if (getattr(image, "is_hydrated", False) is not True
             or getattr(image, "object_id", None) != args.image_id):
         raise ProbeUnavailable("POSTDEPLOY_IMAGE_INVALID")
+    if tuple(getattr(volumes[role], "object_id", None) for role in _ROLES) != volume_ids:
+        raise ProbeUnavailable("VOLUME_IDENTITY_INVALID")
     with _provider_stage("FUNCTION_SPAWN_UNAVAILABLE"):
         with _deadline(60):
             call = function.spawn(
                 args.mount_parent, args.inspect_links, args.verify_mapping,
                 args.marker_names, args.marker_digests,
+                volume_ids if args.verify_mapping else (),
             )
     call_id = getattr(call, "object_id", None)
     if type(call_id) is not str or _CALL.fullmatch(call_id) is None:

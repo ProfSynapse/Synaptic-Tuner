@@ -93,6 +93,15 @@ def test_mapping_result_inventory_fits_inline_pickle_cap() -> None:
     })) for values in itertools.product(probe._MAPPING_CATEGORIES, repeat=3)) <= 512
 
 
+def test_mapping_target_category_never_emits_path() -> None:
+    identity = "vo-Exact123"
+    assert probe._mapping_target_category("/__modal/volumes/" + identity, identity) == "MATCH_MODAL_ID"
+    assert probe._mapping_target_category("/__modal/volumes/" + identity + "/data", identity) == "MATCH_MODAL_ID_DESCENDANT"
+    assert probe._mapping_target_category("/__modal/volumes/" + identity + "-other", identity) == "MATCH"
+    assert probe._mapping_target_category("/other/private/path", identity) == "MATCH"
+    assert probe._mapping_target_category("/other/private/path", "bad") == "UNAVAILABLE"
+
+
 def test_prepare_marker_submits_only_create_only_upload(monkeypatch) -> None:
     monkeypatch.setattr(probe, "_deadline", lambda seconds: nullcontext())
     name = "probe-" + "a" * 32 + ".bin"
@@ -253,8 +262,9 @@ def test_remote_probe_never_reads_symlink_target(monkeypatch, mount_parent) -> N
 
 
 @pytest.mark.parametrize(
-    ("hydrate_after_deploy", "deploy_fails"),
-    [(True, False), (False, False), (True, True)],
+    ("hydrate_after_deploy", "deploy_fails", "mutate_volume_after_deploy"),
+    [(True, False, False), (False, False, False),
+     (True, True, False), (True, False, True)],
 )
 @pytest.mark.parametrize("mount_parent", ["/mnt", "/workspace"])
 @pytest.mark.parametrize(
@@ -263,16 +273,19 @@ def test_remote_probe_never_reads_symlink_target(monkeypatch, mount_parent) -> N
 )
 def test_execute_creates_exact_resources_then_spawns_once(
     monkeypatch, hydrate_after_deploy: bool, deploy_fails: bool,
-    mount_parent: str, inspect_links: bool, verify_mapping: bool,
+    mutate_volume_after_deploy: bool, mount_parent: str,
+    inspect_links: bool, verify_mapping: bool,
 ) -> None:
     events: list[tuple[str, object]] = []
     ids = iter(("vo-C", "vo-A", "vo-M"))
 
     class Volume:
         is_hydrated = True
+        instances = []
 
         def __init__(self):
             self.object_id = next(ids)
+            Volume.instances.append(self)
 
         def hydrate(self, client):
             events.append(("hydrate_volume", self.object_id))
@@ -300,8 +313,8 @@ def test_execute_creates_exact_resources_then_spawns_once(
             return Image(identity)
 
     class Function:
-        def spawn(self, parent, inspect, verify, names, digests):
-            events.append(("spawn", (parent, inspect, verify, names, digests)))
+        def spawn(self, parent, inspect, verify, names, digests, ids):
+            events.append(("spawn", (parent, inspect, verify, names, digests, ids)))
             return SimpleNamespace(object_id="fc-EXACT")
 
     class App:
@@ -326,6 +339,8 @@ def test_execute_creates_exact_resources_then_spawns_once(
                 raise ValueError("secret provider payload")
             assert Image.latest is not None
             Image.latest.is_hydrated = hydrate_after_deploy
+            if mutate_volume_after_deploy:
+                Volume.instances[0].object_id = "vo-Changed"
             events.append(("deploy", None))
 
     sdk = SimpleNamespace(App=App, Volume=Volume, Image=Image)
@@ -378,6 +393,11 @@ def test_execute_creates_exact_resources_then_spawns_once(
         assert caught.value.failure_class == "ValueError"
         assert [name for name, _ in events].count("spawn") == 0
         return
+    if mutate_volume_after_deploy:
+        with pytest.raises(probe.ProbeUnavailable, match="VOLUME_IDENTITY_INVALID"):
+            probe.execute(args, sdk, object())
+        assert [name for name, _ in events].count("spawn") == 0
+        return
     if hydrate_after_deploy:
         assert probe.execute(args, sdk, object()) == {"control": "LINK"}
     else:
@@ -386,13 +406,14 @@ def test_execute_creates_exact_resources_then_spawns_once(
         assert [name for name, _ in events].count("spawn") == 0
         return
     assert [name for name, _ in events].count("spawn") == 1
+    expected_ids = ("vo-C", "vo-A", "vo-M") if verify_mapping else ()
     assert ("spawn", (mount_parent, inspect_links, verify_mapping,
-                      args.marker_names, args.marker_digests)) in events
+                      args.marker_names, args.marker_digests, expected_ids)) in events
     assert [name for name, _ in events].index("image_handle") < [name for name, _ in events].index("deploy")
     assert [value[1] for name, value in events if name == "create_volume"] == [False] * 3
     assert [name for name, _ in events].index("deploy") < [name for name, _ in events].index("spawn")
     assert events.index(("spawn", (mount_parent, inspect_links, verify_mapping,
-                                   args.marker_names, args.marker_digests))) < \
+                                   args.marker_names, args.marker_digests, expected_ids))) < \
         events.index(("record", "call.json"))
     if verify_mapping:
         assert [value for name, value in events if name == "marker"] == ["vo-C", "vo-A", "vo-M"]
