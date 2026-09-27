@@ -442,7 +442,7 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
             timeout=_TIMEOUT, retries=0,
             volumes=dict(zip(_MOUNTS, (volumes[role] for role in _ROLES))),
             secrets=[], block_network=True, restrict_modal_access=True,
-            single_use_containers=True, serialized=True, include_source=False,
+            single_use_containers=True, serialized=False, include_source=True,
         )(_remote_probe)
     with tempfile.TemporaryDirectory(prefix="synaptic-modal-mount-probe-") as directory:
         original = os.getcwd()

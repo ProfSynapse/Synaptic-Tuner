@@ -170,7 +170,8 @@ def test_execute_creates_exact_resources_then_spawns_once(
             assert kwargs["block_network"] is True
             assert kwargs["restrict_modal_access"] is True
             assert kwargs["retries"] == 0
-            assert kwargs["serialized"] is True
+            assert kwargs["serialized"] is False
+            assert kwargs["include_source"] is True
             events.append(("configure_function", None))
             return lambda fn: Function()
 
