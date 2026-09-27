@@ -395,7 +395,7 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
         raise ProbeUnavailable("IMAGE_IDENTITY_INVALID")
     with _provider_stage("FUNCTION_CONSTRUCT_UNAVAILABLE"):
         function = app.function(
-            name="mount-probe", image=image, cpu=1, memory=4096, gpu="L40S",
+            name="mount_probe", image=image, cpu=1, memory=4096, gpu="L40S",
             timeout=_TIMEOUT, retries=0,
             volumes=dict(zip(_MOUNTS, (volumes[role] for role in _ROLES))),
             secrets=[], block_network=True, restrict_modal_access=True,

@@ -163,6 +163,7 @@ def test_execute_creates_exact_resources_then_spawns_once(
             events.append(("construct_app", name))
 
         def function(self, **kwargs):
+            assert kwargs["name"] == "mount_probe"
             assert kwargs["gpu"] == "L40S"
             assert kwargs["volumes"].keys() == set(probe._MOUNTS)
             assert kwargs["secrets"] == []
