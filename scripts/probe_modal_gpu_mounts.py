@@ -52,16 +52,41 @@ _SDK_ORIGIN_MODULES = {
     "modal.mount": "mount.py",
     "modal.client": "client.py",
 }
+_FUNCTION_CREATE_TOPICS = (
+    ("VOLUME", frozenset({"volume", "volumes"})),
+    ("MOUNT", frozenset({"mount", "mounts"})),
+    ("IMAGE", frozenset({"image", "images"})),
+    ("GPU", frozenset({"gpu", "gpus"})),
+    ("SECRET", frozenset({"secret", "secrets"})),
+    ("NETWORK", frozenset({"network", "networks"})),
+    ("MEMORY", frozenset({"memory"})),
+    ("CPU", frozenset({"cpu", "cpus"})),
+    ("TIMEOUT", frozenset({"timeout"})),
+    ("FUNCTION", frozenset({"function", "functions"})),
+)
+_FUNCTION_CREATE_ACTIONS = (
+    ("UNSUPPORTED", frozenset({"unsupported"})),
+    ("INVALID", frozenset({"invalid"})),
+    ("MISSING", frozenset({"missing", "required"})),
+    ("DUPLICATE", frozenset({"duplicate"})),
+    ("LIMIT", frozenset({"limit", "exceeded"})),
+    ("PERMISSION", frozenset({"permission", "forbidden"})),
+    ("CONFLICT", frozenset({"conflict"})),
+)
 
 
 class ProbeUnavailable(RuntimeError):
     """Closed diagnostic failure whose underlying details must stay private."""
 
     def __init__(self, code: str, *, failure_class: str | None = None,
-                 failure_origin: str | None = None):
+                 failure_origin: str | None = None,
+                 failure_topics: tuple[str, ...] = (),
+                 failure_action: str | None = None):
         super().__init__(code)
         self.failure_class = failure_class
         self.failure_origin = failure_origin
+        self.failure_topics = failure_topics
+        self.failure_action = failure_action
 
 
 def _failure_class(error: BaseException) -> str:
@@ -102,6 +127,17 @@ def _failure_origin(error: BaseException) -> str | None:
     return origin
 
 
+def _function_create_topics(error: BaseException) -> tuple[tuple[str, ...], str | None]:
+    """Return advisory keyword hints, not causes; never emit provider text."""
+    try:
+        words = set(re.findall(r"[a-z_]{2,32}", str(error)[:2048].lower()))
+    except Exception:
+        return (), None
+    topics = tuple(label for label, names in _FUNCTION_CREATE_TOPICS if words & names)[:4]
+    action = next((label for label, names in _FUNCTION_CREATE_ACTIONS if words & names), None)
+    return topics, action
+
+
 @contextlib.contextmanager
 def _provider_stage(code: str):
     assert code in _STAGE_FAILURES
@@ -112,9 +148,16 @@ def _provider_stage(code: str):
                          else "OTHER")
         raise ProbeUnavailable(code, failure_class=failure_class) from None
     except Exception as error:
+        failure_class = _failure_class(error)
+        failure_origin = _failure_origin(error)
+        topics, action = ((), None)
+        if (code == "APP_DEPLOY_UNAVAILABLE" and failure_class == "InvalidError"
+                and type(error).__module__ == "modal.exception"
+                and failure_origin == "_functions.py:1148"):
+            topics, action = _function_create_topics(error)
         raise ProbeUnavailable(
-            code, failure_class=_failure_class(error),
-            failure_origin=_failure_origin(error),
+            code, failure_class=failure_class, failure_origin=failure_origin,
+            failure_topics=topics, failure_action=action,
         ) from None
 
 
@@ -448,6 +491,8 @@ def main(argv: list[str] | None = None) -> int:
     result: str | dict[str, str] = "LOCAL_UNAVAILABLE"
     failure_class = None
     failure_origin = None
+    failure_topics = ()
+    failure_action = None
     claim_fd = None
     try:
         _require_host()
@@ -483,6 +528,8 @@ def main(argv: list[str] | None = None) -> int:
     except ProbeUnavailable as error:
         failure_class = error.failure_class
         failure_origin = error.failure_origin
+        failure_topics = error.failure_topics
+        failure_action = error.failure_action
         result = str(error) if str(error) in {
             "HOST_INCOMPATIBLE", "CLAIM_PATH_INVALID", "CLAIM_INVALID",
             "CLAIM_ALREADY_CONSUMED", "CLAIM_INDETERMINATE", "INPUT_INVALID",
@@ -505,6 +552,10 @@ def main(argv: list[str] | None = None) -> int:
         output["failure_class"] = failure_class
     if failure_origin is not None and result in _STAGE_FAILURES:
         output["failure_origin"] = failure_origin
+    if failure_topics and result == "APP_DEPLOY_UNAVAILABLE":
+        output["message_topic_hints"] = failure_topics
+    if failure_action is not None and result == "APP_DEPLOY_UNAVAILABLE":
+        output["message_action_hint"] = failure_action
     print(json.dumps(output, sort_keys=True, separators=(",", ":")))
     return 0 if isinstance(result, dict) else 1
 

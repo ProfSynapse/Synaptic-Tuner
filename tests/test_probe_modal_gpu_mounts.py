@@ -266,18 +266,21 @@ def test_main_claims_generated_selection_before_provider_use(monkeypatch, capsys
 
 
 def test_provider_stage_and_output_do_not_expose_exception_text(monkeypatch, capsys) -> None:
-    sdk_frame = {"__name__": "modal.runner"}
-    exec(compile(
-        "def fail():\n    raise ValueError('private provider detail')\n",
-        "/private/secret/modal/runner.py", "exec",
-    ), sdk_frame)
+    InvalidError = type("InvalidError", (Exception,), {"__module__": "modal.exception"})
+    sdk_frame = {"__name__": "modal._functions", "InvalidError": InvalidError}
 
     with pytest.raises(probe.ProbeUnavailable) as caught:
         with probe._provider_stage("APP_DEPLOY_UNAVAILABLE"):
-            sdk_frame["fail"]()
+            exec(compile(
+                "\n" * 1147 +
+                "raise InvalidError('volumes mounts unsupported private provider detail')\n",
+                "/private/secret/modal/_functions.py", "exec",
+            ), sdk_frame)
     assert str(caught.value) == "APP_DEPLOY_UNAVAILABLE"
-    assert caught.value.failure_class == "ValueError"
-    assert caught.value.failure_origin == "runner.py:2"
+    assert caught.value.failure_class == "InvalidError"
+    assert caught.value.failure_origin == "_functions.py:1148"
+    assert caught.value.failure_topics == ("VOLUME", "MOUNT")
+    assert caught.value.failure_action == "UNSUPPORTED"
 
     untrusted_frame = {"__name__": "untrusted.runner"}
     exec(compile(
@@ -303,7 +306,35 @@ def test_provider_stage_and_output_do_not_expose_exception_text(monkeypatch, cap
     ]) == 1
     output = capsys.readouterr().out
     assert '"result":"APP_DEPLOY_UNAVAILABLE"' in output
-    assert '"failure_class":"ValueError"' in output
-    assert '"failure_origin":"runner.py:2"' in output
+    assert '"failure_class":"InvalidError"' in output
+    assert '"failure_origin":"_functions.py:1148"' in output
+    assert '"message_topic_hints":["VOLUME","MOUNT"]' in output
+    assert '"message_action_hint":"UNSUPPORTED"' in output
     assert "private provider detail" not in output
     assert "/private/secret" not in output
+
+
+def test_function_create_topics_absent_for_unmatched_or_other_stage() -> None:
+    InvalidError = type("InvalidError", (Exception,), {"__module__": "modal.exception"})
+    sdk_frame = {"__name__": "modal._functions", "InvalidError": InvalidError}
+    source = "\n" * 1147 + "raise InvalidError('opaque provider value')\n"
+    with pytest.raises(probe.ProbeUnavailable) as caught:
+        with probe._provider_stage("APP_DEPLOY_UNAVAILABLE"):
+            exec(compile(source, "/private/modal/_functions.py", "exec"), sdk_frame)
+    assert caught.value.failure_origin == "_functions.py:1148"
+    assert caught.value.failure_topics == ()
+    assert caught.value.failure_action is None
+
+    source = "\n" * 1147 + "raise InvalidError('volumes unsupported')\n"
+    with pytest.raises(probe.ProbeUnavailable) as wrong_stage:
+        with probe._provider_stage("FUNCTION_CONSTRUCT_UNAVAILABLE"):
+            exec(compile(source, "/private/modal/_functions.py", "exec"), sdk_frame)
+    assert wrong_stage.value.failure_topics == ()
+    assert wrong_stage.value.failure_action is None
+
+    with pytest.raises(probe.ProbeUnavailable) as wrong_origin:
+        with probe._provider_stage("APP_DEPLOY_UNAVAILABLE"):
+            exec(compile("\n" + source, "/private/modal/_functions.py", "exec"), sdk_frame)
+    assert wrong_origin.value.failure_origin == "_functions.py:1149"
+    assert wrong_origin.value.failure_topics == ()
+    assert wrong_origin.value.failure_action is None
