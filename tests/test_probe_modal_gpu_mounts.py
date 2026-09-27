@@ -7,7 +7,7 @@ import asyncio
 import hashlib
 import itertools
 import json
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import os
 from pathlib import Path
 import pickle
@@ -57,6 +57,15 @@ def test_raw_result_requires_exact_serialized_closed_payload() -> None:
         "extra": "untrusted",
     })
     assert probe._classify_raw(output, api, pickle.dumps) == "OUTPUT_UNCLASSIFIED"
+    output.result.data = pickle.dumps({
+        "schema_version": probe._SCHEMA,
+        "mapping": ("MATCH", "MARKER_MISSING", "ROOT_UNSAFE"),
+    })
+    assert probe._classify_raw(output, api, pickle.dumps, False, True) == {
+        "control": "MATCH", "artifacts": "MARKER_MISSING",
+        "model_cache": "ROOT_UNSAFE",
+    }
+    assert probe._classify_raw(output, api, pickle.dumps, True) == "OUTPUT_UNCLASSIFIED"
     output.result.data_blob_id = "blob"
     assert probe._classify_raw(output, api, pickle.dumps) == "OUTPUT_UNCLASSIFIED"
     output.result.data_blob_id = ""
@@ -76,6 +85,76 @@ def test_link_result_inventory_fits_inline_pickle_cap() -> None:
     assert max(len(pickle.dumps({
         "schema_version": probe._SCHEMA, "links": values,
     })) for values in itertools.product(probe._LINK_CATEGORIES, repeat=3)) <= 512
+
+
+def test_mapping_result_inventory_fits_inline_pickle_cap() -> None:
+    assert max(len(pickle.dumps({
+        "schema_version": probe._SCHEMA, "mapping": values,
+    })) for values in itertools.product(probe._MAPPING_CATEGORIES, repeat=3)) <= 512
+
+
+def test_prepare_marker_submits_only_create_only_upload(monkeypatch) -> None:
+    monkeypatch.setattr(probe, "_deadline", lambda seconds: nullcontext())
+    name = "probe-" + "a" * 32 + ".bin"
+    raw = b"x" * 32
+    events = []
+
+    class Volume:
+        stored = None
+
+        @contextmanager
+        def batch_upload(self, *, force):
+            assert force is False
+            events.append("upload")
+            yield self
+
+        def put_file(self, spool, path, *, mode):
+            assert path == name and mode == 0o600
+            assert spool.seekable()
+            self.stored = spool.read()
+
+        def read_file(self, path):
+            pytest.fail("host read is not bounded by the Modal SDK")
+
+        def iterdir(self, path, *, recursive):
+            pytest.fail("host listing is not bounded by the Modal SDK")
+
+    volume = Volume()
+    assert probe._prepare_marker(volume, name, raw) is True
+    assert events == ["upload"]
+    assert volume.stored == raw
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Linux descriptor semantics")
+def test_mapping_probe_reads_only_role_markers(tmp_path: Path, monkeypatch) -> None:
+    names = tuple("probe-" + f"{index:032x}" + ".bin" for index in range(3))
+    raw = tuple(bytes([index + 1]) * 32 for index in range(3))
+    digests = tuple(hashlib.sha256(value).hexdigest() for value in raw)
+    for index, leaf in enumerate(probe._MOUNT_LEAVES):
+        target = tmp_path / f"target-{index}"
+        target.mkdir(mode=0o700)
+        (target / names[index]).write_bytes(raw[index])
+        (target / "other-data").write_text("must remain unread")
+        (tmp_path / leaf).symlink_to(target.name, target_is_directory=True)
+    monkeypatch.setattr(probe, "_MOUNT_PARENTS", (str(tmp_path),))
+    original_open = os.open
+    def checked_open(path, flags, *args, **kwargs):
+        assert path != "other-data"
+        assert flags & os.O_NOFOLLOW
+        if path.startswith("probe-"):
+            assert flags & os.O_NONBLOCK
+        return original_open(path, flags, *args, **kwargs)
+    monkeypatch.setattr(os, "open", checked_open)
+    monkeypatch.setattr(os, "listdir", lambda *args, **kwargs: pytest.fail("listed contents"))
+    monkeypatch.setattr(os, "scandir", lambda *args, **kwargs: pytest.fail("scanned contents"))
+    result = probe._remote_probe(str(tmp_path), False, True, names, digests)
+    assert result == {"schema_version": probe._SCHEMA, "mapping": ("MATCH",) * 3}
+    switched = probe._remote_probe(str(tmp_path), False, True, names, digests[::-1])
+    assert switched["mapping"] == ("MISMATCH", "MATCH", "MISMATCH")
+    (tmp_path / "control").unlink()
+    (tmp_path / "control").symlink_to("target-1", target_is_directory=True)
+    remapped = probe._remote_probe(str(tmp_path), False, True, names, digests)
+    assert remapped["mapping"] == ("MARKER_MISSING", "MATCH", "MATCH")
 
 
 def test_repeated_dynamic_link_labels_match_closed_pickle_inventory() -> None:
@@ -178,10 +257,13 @@ def test_remote_probe_never_reads_symlink_target(monkeypatch, mount_parent) -> N
     [(True, False), (False, False), (True, True)],
 )
 @pytest.mark.parametrize("mount_parent", ["/mnt", "/workspace"])
-@pytest.mark.parametrize("inspect_links", [False, True])
+@pytest.mark.parametrize(
+    ("inspect_links", "verify_mapping"),
+    [(False, False), (True, False), (False, True)],
+)
 def test_execute_creates_exact_resources_then_spawns_once(
     monkeypatch, hydrate_after_deploy: bool, deploy_fails: bool,
-    mount_parent: str, inspect_links: bool,
+    mount_parent: str, inspect_links: bool, verify_mapping: bool,
 ) -> None:
     events: list[tuple[str, object]] = []
     ids = iter(("vo-C", "vo-A", "vo-M"))
@@ -218,8 +300,8 @@ def test_execute_creates_exact_resources_then_spawns_once(
             return Image(identity)
 
     class Function:
-        def spawn(self, parent, inspect):
-            events.append(("spawn", (parent, inspect)))
+        def spawn(self, parent, inspect, verify, names, digests):
+            events.append(("spawn", (parent, inspect, verify, names, digests)))
             return SimpleNamespace(object_id="fc-EXACT")
 
     class App:
@@ -269,11 +351,26 @@ def test_execute_creates_exact_resources_then_spawns_once(
     monkeypatch.setitem(sys.modules, "modal._serialization", serialization)
     monkeypatch.setitem(sys.modules, "modal_proto", proto)
     monkeypatch.setattr(probe, "_deadline", lambda seconds: nullcontext())
-    monkeypatch.setattr(probe, "_exclusive_record", lambda *args: events.append(("record_call", None)))
+    records = {}
+    def fake_record(fd, leaf, value):
+        records[leaf] = value
+        events.append(("record", leaf))
+    monkeypatch.setattr(probe, "_exclusive_record", fake_record)
+    monkeypatch.setattr(probe, "_prepare_marker", lambda volume, name, raw: (
+        events.append(("marker", volume.object_id)) or True
+    ))
+    marker_names = tuple("probe-" + f"{index:032x}" + ".bin" for index in range(3))
+    marker_bytes = tuple(bytes([index + 1]) * 32 for index in range(3))
+    marker_digests = tuple(hashlib.sha256(value).hexdigest() for value in marker_bytes)
     args = SimpleNamespace(
         app="probe-test", environment="default", image_id="im-EXACT",
         volume_names=("probe-control", "probe-artifacts", "probe-cache"), claim_fd=17,
         mount_parent=mount_parent, inspect_links=inspect_links,
+        verify_mapping=verify_mapping,
+        marker_names=marker_names if verify_mapping else (),
+        marker_digests=marker_digests if verify_mapping else (),
+        marker_bytes=marker_bytes if verify_mapping else (),
+        selection_sha256="a" * 64,
     )
     if deploy_fails:
         with pytest.raises(probe.ProbeUnavailable, match="APP_DEPLOY_UNAVAILABLE") as caught:
@@ -289,11 +386,26 @@ def test_execute_creates_exact_resources_then_spawns_once(
         assert [name for name, _ in events].count("spawn") == 0
         return
     assert [name for name, _ in events].count("spawn") == 1
-    assert ("spawn", (mount_parent, inspect_links)) in events
+    assert ("spawn", (mount_parent, inspect_links, verify_mapping,
+                      args.marker_names, args.marker_digests)) in events
     assert [name for name, _ in events].index("image_handle") < [name for name, _ in events].index("deploy")
     assert [value[1] for name, value in events if name == "create_volume"] == [False] * 3
     assert [name for name, _ in events].index("deploy") < [name for name, _ in events].index("spawn")
-    assert [name for name, _ in events].index("spawn") < [name for name, _ in events].index("record_call")
+    assert events.index(("spawn", (mount_parent, inspect_links, verify_mapping,
+                                   args.marker_names, args.marker_digests))) < \
+        events.index(("record", "call.json"))
+    if verify_mapping:
+        assert [value for name, value in events if name == "marker"] == ["vo-C", "vo-A", "vo-M"]
+        assert events.index(("record", "marker-receipt.json")) < \
+            [name for name, _ in events].index("deploy")
+        assert records["marker-receipt.json"] == {
+            "schema_version": probe._SCHEMA,
+            "selection_sha256": "a" * 64,
+            "marker_names": marker_names,
+            "marker_sha256": marker_digests,
+            "volume_ids": ("vo-C", "vo-A", "vo-M"),
+            "marker_upload": "accepted_create_only_no_host_readback",
+        }
 
 
 @pytest.mark.parametrize("mount_parent", ["/mnt", "/workspace"])
@@ -337,12 +449,71 @@ def test_main_claims_generated_selection_before_provider_use(monkeypatch, capsys
     assert events[0][1]["mount_parent"] == mount_parent
     assert events[0][1]["mount_paths"] == probe._mount_paths(mount_parent)
     assert events[0][1]["inspect_links"] is inspect_links
+    assert events[0][1]["verify_mapping"] is False
+    assert events[0][1]["marker_names"] == ()
+    assert events[0][1]["marker_sha256"] == ()
     claim = dict(events[0][1])
     digest = claim.pop("selection_sha256")
     assert digest == hashlib.sha256(
         json.dumps(claim, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     assert "DIAGNOSTIC_ONLY" in capsys.readouterr().out
+
+
+def test_mapping_claim_binds_distinct_markers_before_provider_use(monkeypatch, capsys) -> None:
+    events = []
+    fake_modal = ModuleType("modal")
+    monkeypatch.setitem(sys.modules, "modal", fake_modal)
+    monkeypatch.setattr(probe, "_require_host", lambda: None)
+    monkeypatch.setattr(probe, "_private_directory", lambda path: 71)
+    monkeypatch.setattr(probe.os, "close", lambda descriptor: None)
+    names = iter(("a" * 32, "b" * 32, "c" * 32, "d" * 32))
+    monkeypatch.setattr(probe.secrets, "token_hex", lambda count: next(names))
+    marker_bytes = tuple(bytes([index + 1]) * 32 for index in range(3))
+    values = iter(marker_bytes)
+    monkeypatch.setattr(probe.secrets, "token_bytes", lambda count: next(values))
+    monkeypatch.setattr(probe, "_exclusive_record", lambda *args: events.append(("claim", args[2])))
+    monkeypatch.setattr(probe, "_client", lambda sdk, profile: events.append(("client", profile)) or object())
+
+    def fake_execute(args, sdk, client):
+        events.append(("execute", args.app))
+        assert args.marker_bytes == marker_bytes
+        return {"control": "MATCH"}
+
+    monkeypatch.setattr(probe, "execute", fake_execute)
+    assert probe.main([
+        "--claim-dir", "/private/probe", "--name-prefix", "probe",
+        "--environment", "default", "--modal-profile", "test",
+        "--image-id", "im-EXACT", "--verify-mapping",
+    ]) == 0
+    assert [name for name, _ in events] == ["claim", "client", "execute"]
+    claim = dict(events[0][1])
+    assert claim["verify_mapping"] is True
+    assert claim["inspect_links"] is False
+    assert claim["marker_names"] == tuple(
+        "probe-" + char * 32 + ".bin" for char in "abc"
+    )
+    assert claim["marker_sha256"] == tuple(hashlib.sha256(value).hexdigest()
+                                            for value in marker_bytes)
+    assert not any(value.hex() in json.dumps(claim) for value in marker_bytes)
+    digest = claim.pop("selection_sha256")
+    assert digest == hashlib.sha256(json.dumps(
+        claim, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    assert '"result":{"control":"MATCH"}' in capsys.readouterr().out
+
+
+def test_mapping_mode_rejects_combination_before_claim(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(probe, "_require_host", lambda: None)
+    monkeypatch.setattr(probe, "_private_directory", lambda path: 71)
+    monkeypatch.setattr(probe.os, "close", lambda descriptor: None)
+    monkeypatch.setattr(probe, "_exclusive_record", lambda *args: pytest.fail("claim written"))
+    assert probe.main([
+        "--claim-dir", "/private/probe", "--name-prefix", "probe",
+        "--environment", "default", "--modal-profile", "test",
+        "--image-id", "im-EXACT", "--verify-mapping", "--inspect-links",
+    ]) == 1
+    assert '"result":"INPUT_INVALID"' in capsys.readouterr().out
 
 
 def test_mount_parent_rejects_unlisted_path() -> None:
