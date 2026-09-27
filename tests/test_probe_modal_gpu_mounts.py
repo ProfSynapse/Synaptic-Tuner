@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import asyncio
+import hashlib
+import json
 from contextlib import nullcontext
 import os
 from pathlib import Path
@@ -84,12 +86,17 @@ def test_image_read_requires_exact_returned_id() -> None:
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Linux descriptor semantics")
-def test_remote_probe_never_reads_symlink_target(monkeypatch) -> None:
+@pytest.mark.parametrize("mount_parent", ["/mnt", "/workspace"])
+def test_remote_probe_never_reads_symlink_target(monkeypatch, mount_parent) -> None:
     import os
     import stat
 
     calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(os, "open", lambda *args, **kwargs: 17)
+    opens = []
+    def fake_open(*args, **kwargs):
+        opens.append((args, kwargs))
+        return 17
+    monkeypatch.setattr(os, "open", fake_open)
     monkeypatch.setattr(os, "close", lambda descriptor: None)
 
     def fake_stat(leaf, *, dir_fd=None, follow_symlinks=True):
@@ -101,10 +108,11 @@ def test_remote_probe_never_reads_symlink_target(monkeypatch) -> None:
         raise FileNotFoundError
 
     monkeypatch.setattr(os, "stat", fake_stat)
-    assert probe._remote_probe() == {
+    assert probe._remote_probe(mount_parent) == {
         "schema_version": probe._SCHEMA,
         "roots": ("LINK", "OTHER", "ABSENT"),
     }
+    assert opens == [((mount_parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW), {})]
     assert calls == [
         ("control", "nofollow"),
         ("artifacts", "nofollow"),
@@ -116,8 +124,9 @@ def test_remote_probe_never_reads_symlink_target(monkeypatch) -> None:
     ("hydrate_after_deploy", "deploy_fails"),
     [(True, False), (False, False), (True, True)],
 )
+@pytest.mark.parametrize("mount_parent", ["/mnt", "/workspace"])
 def test_execute_creates_exact_resources_then_spawns_once(
-    monkeypatch, hydrate_after_deploy: bool, deploy_fails: bool,
+    monkeypatch, hydrate_after_deploy: bool, deploy_fails: bool, mount_parent: str,
 ) -> None:
     events: list[tuple[str, object]] = []
     ids = iter(("vo-C", "vo-A", "vo-M"))
@@ -154,8 +163,8 @@ def test_execute_creates_exact_resources_then_spawns_once(
             return Image(identity)
 
     class Function:
-        def spawn(self):
-            events.append(("spawn", None))
+        def spawn(self, parent):
+            events.append(("spawn", parent))
             return SimpleNamespace(object_id="fc-EXACT")
 
     class App:
@@ -165,7 +174,7 @@ def test_execute_creates_exact_resources_then_spawns_once(
         def function(self, **kwargs):
             assert kwargs["name"] == "mount_probe"
             assert kwargs["gpu"] == "L40S"
-            assert kwargs["volumes"].keys() == set(probe._MOUNTS)
+            assert kwargs["volumes"].keys() == set(probe._mount_paths(mount_parent))
             assert kwargs["secrets"] == []
             assert kwargs["block_network"] is True
             assert kwargs["restrict_modal_access"] is True
@@ -209,6 +218,7 @@ def test_execute_creates_exact_resources_then_spawns_once(
     args = SimpleNamespace(
         app="probe-test", environment="default", image_id="im-EXACT",
         volume_names=("probe-control", "probe-artifacts", "probe-cache"), claim_fd=17,
+        mount_parent=mount_parent,
     )
     if deploy_fails:
         with pytest.raises(probe.ProbeUnavailable, match="APP_DEPLOY_UNAVAILABLE") as caught:
@@ -224,13 +234,16 @@ def test_execute_creates_exact_resources_then_spawns_once(
         assert [name for name, _ in events].count("spawn") == 0
         return
     assert [name for name, _ in events].count("spawn") == 1
+    assert ("spawn", mount_parent) in events
     assert [name for name, _ in events].index("image_handle") < [name for name, _ in events].index("deploy")
     assert [value[1] for name, value in events if name == "create_volume"] == [False] * 3
     assert [name for name, _ in events].index("deploy") < [name for name, _ in events].index("spawn")
     assert [name for name, _ in events].index("spawn") < [name for name, _ in events].index("record_call")
 
 
-def test_main_claims_generated_selection_before_provider_use(monkeypatch, capsys) -> None:
+@pytest.mark.parametrize("mount_parent", ["/mnt", "/workspace"])
+def test_main_claims_generated_selection_before_provider_use(monkeypatch, capsys,
+                                                              mount_parent) -> None:
     events = []
     fake_modal = ModuleType("modal")
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
@@ -258,12 +271,34 @@ def test_main_claims_generated_selection_before_provider_use(monkeypatch, capsys
     exit_code = probe.main([
         "--claim-dir", "/private/probe", "--name-prefix", "probe",
         "--environment", "default", "--modal-profile", "test",
-        "--image-id", "im-EXACT",
+        "--image-id", "im-EXACT", "--mount-parent", mount_parent,
     ])
     assert exit_code == 0
     assert [name for name, _ in events] == ["claim", "client", "execute"]
     assert events[0][1]["app"] == "probe-probe-" + "a" * 32
+    assert events[0][1]["mount_parent"] == mount_parent
+    assert events[0][1]["mount_paths"] == probe._mount_paths(mount_parent)
+    claim = dict(events[0][1])
+    digest = claim.pop("selection_sha256")
+    assert digest == hashlib.sha256(
+        json.dumps(claim, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     assert "DIAGNOSTIC_ONLY" in capsys.readouterr().out
+
+
+def test_mount_parent_rejects_unlisted_path() -> None:
+    with pytest.raises(probe.ProbeUnavailable, match="INPUT_INVALID"):
+        probe._mount_paths("/root")
+    with pytest.raises(probe.ProbeUnavailable, match="INPUT_INVALID"):
+        probe._mount_paths("/workspace/../mnt")
+
+
+def test_remote_probe_rejects_unlisted_parent_before_io(monkeypatch) -> None:
+    monkeypatch.setattr(probe.os, "open", lambda *args, **kwargs: pytest.fail("unexpected open"))
+    assert probe._remote_probe("/root") == {
+        "schema_version": probe._SCHEMA,
+        "roots": ("UNAVAILABLE", "UNAVAILABLE", "UNAVAILABLE"),
+    }
 
 
 def test_provider_stage_and_output_do_not_expose_exception_text(monkeypatch, capsys) -> None:

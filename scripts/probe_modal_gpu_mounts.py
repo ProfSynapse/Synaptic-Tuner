@@ -31,7 +31,8 @@ _IMAGE = re.compile(r"im-[A-Za-z0-9]{1,64}\Z")
 _VOLUME = re.compile(r"vo-[A-Za-z0-9]{1,64}\Z")
 _CALL = re.compile(r"fc-[A-Za-z0-9]{1,77}\Z")
 _ROLES = ("control", "artifacts", "model_cache")
-_MOUNTS = ("/mnt/control", "/mnt/artifacts", "/mnt/model-cache")
+_MOUNT_PARENTS = ("/mnt", "/workspace")
+_MOUNT_LEAVES = ("control", "artifacts", "model-cache")
 _CATEGORIES = ("DIRECTORY", "LINK", "ABSENT", "OTHER", "UNAVAILABLE")
 _SCHEMA = "synaptic-modal-gpu-mount-probe/v1"
 _TIMEOUT = 120
@@ -161,16 +162,24 @@ def _provider_stage(code: str):
         ) from None
 
 
-def _remote_probe() -> dict[str, object]:
-    """Inspect only the mount roots through one retained /mnt descriptor."""
+def _mount_paths(parent: str) -> tuple[str, ...]:
+    if type(parent) is not str or parent not in _MOUNT_PARENTS:
+        raise ProbeUnavailable("INPUT_INVALID")
+    return tuple(parent + "/" + leaf for leaf in _MOUNT_LEAVES)
+
+
+def _remote_probe(mount_parent: str = "/mnt") -> dict[str, object]:
+    """Inspect only selected mount roots through one retained parent descriptor."""
     import os
     import stat
 
     categories = []
     parent = None
     try:
-        parent = os.open("/mnt", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        for leaf in ("control", "artifacts", "model-cache"):
+        if type(mount_parent) is not str or mount_parent not in _MOUNT_PARENTS:
+            raise ValueError
+        parent = os.open(mount_parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        for leaf in _MOUNT_LEAVES:
             try:
                 info = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
             except FileNotFoundError:
@@ -440,7 +449,8 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
         function = app.function(
             name="mount_probe", image=image, cpu=1, memory=4096, gpu="L40S",
             timeout=_TIMEOUT, retries=0,
-            volumes=dict(zip(_MOUNTS, (volumes[role] for role in _ROLES))),
+            volumes=dict(zip(_mount_paths(args.mount_parent),
+                             (volumes[role] for role in _ROLES))),
             secrets=[], block_network=True, restrict_modal_access=True,
             single_use_containers=True, serialized=False, include_source=True,
         )(_remote_probe)
@@ -458,7 +468,7 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
         raise ProbeUnavailable("POSTDEPLOY_IMAGE_INVALID")
     with _provider_stage("FUNCTION_SPAWN_UNAVAILABLE"):
         with _deadline(60):
-            call = function.spawn()
+            call = function.spawn(args.mount_parent)
     call_id = getattr(call, "object_id", None)
     if type(call_id) is not str or _CALL.fullmatch(call_id) is None:
         raise ProbeUnavailable("CALL_ID_INDETERMINATE")
@@ -487,6 +497,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--environment", required=True)
     parser.add_argument("--modal-profile", required=True)
     parser.add_argument("--image-id", required=True)
+    parser.add_argument("--mount-parent", default="/mnt")
     args = parser.parse_args(argv)
     result: str | dict[str, str] = "LOCAL_UNAVAILABLE"
     failure_class = None
@@ -502,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
         args.environment = _exact(args.environment, _NAME)
         args.modal_profile = _exact(args.modal_profile, _NAME)
         args.image_id = _exact(args.image_id, _IMAGE)
+        mount_paths = _mount_paths(args.mount_parent)
         nonce = secrets.token_hex(16)
         args.app = prefix + "-probe-" + nonce
         args.volume_names = tuple(prefix + "-" + role.replace("_", "-")
@@ -514,6 +526,8 @@ def main(argv: list[str] | None = None) -> int:
             "app": args.app,
             "environment": args.environment,
             "image_id": args.image_id,
+            "mount_parent": args.mount_parent,
+            "mount_paths": mount_paths,
             "volume_names": args.volume_names,
         }
         claim["selection_sha256"] = hashlib.sha256(
