@@ -35,10 +35,53 @@ _MOUNTS = ("/mnt/control", "/mnt/artifacts", "/mnt/model-cache")
 _CATEGORIES = ("DIRECTORY", "LINK", "ABSENT", "OTHER", "UNAVAILABLE")
 _SCHEMA = "synaptic-modal-gpu-mount-probe/v1"
 _TIMEOUT = 120
+_STAGE_FAILURES = frozenset({
+    "APP_CONSTRUCT_UNAVAILABLE",
+    "VOLUME_CREATE_UNAVAILABLE", "VOLUME_HYDRATE_UNAVAILABLE",
+    "IMAGE_HANDLE_UNAVAILABLE", "FUNCTION_CONSTRUCT_UNAVAILABLE",
+    "APP_DEPLOY_UNAVAILABLE", "FUNCTION_SPAWN_UNAVAILABLE",
+    "CALL_RETENTION_UNAVAILABLE", "POLL_UNAVAILABLE",
+})
 
 
 class ProbeUnavailable(RuntimeError):
     """Closed diagnostic failure whose underlying details must stay private."""
+
+    def __init__(self, code: str, *, failure_class: str | None = None):
+        super().__init__(code)
+        self.failure_class = failure_class
+
+
+def _failure_class(error: BaseException) -> str:
+    kind = type(error)
+    admitted = {
+        TypeError, ValueError, RuntimeError, TimeoutError, PermissionError,
+        AttributeError, ImportError, ModuleNotFoundError, OSError,
+    }
+    if kind in admitted:
+        return kind.__name__
+    module = getattr(kind, "__module__", "")
+    name = getattr(kind, "__name__", "")
+    if module.startswith("modal.") and name in {
+        "InvalidError", "ExecutionError", "SerializationError", "NotFoundError",
+    }:
+        return name
+    if module.startswith("grpclib.") and name == "GRPCError":
+        return name
+    return "OTHER"
+
+
+@contextlib.contextmanager
+def _provider_stage(code: str):
+    assert code in _STAGE_FAILURES
+    try:
+        yield
+    except ProbeUnavailable as error:
+        failure_class = ("TimeoutError" if str(error) == "PROVIDER_INDETERMINATE"
+                         else "OTHER")
+        raise ProbeUnavailable(code, failure_class=failure_class) from None
+    except Exception as error:
+        raise ProbeUnavailable(code, failure_class=_failure_class(error)) from None
 
 
 def _remote_probe() -> dict[str, object]:
@@ -289,61 +332,71 @@ def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict
         raise ProbeUnavailable("IMAGE_READ_UNAVAILABLE") from None
     if not image_matches:
         raise ProbeUnavailable("IMAGE_IDENTITY_INVALID")
-    app = sdk.App(args.app, include_source=False)
+    with _provider_stage("APP_CONSTRUCT_UNAVAILABLE"):
+        app = sdk.App(args.app, include_source=False)
     volumes = {}
     for role, name in zip(_ROLES, args.volume_names):
-        with _deadline(60):
-            sdk.Volume.objects.create(
-                name, version=1, allow_existing=False,
-                environment_name=args.environment, client=client,
-            )
-            volume = sdk.Volume.from_name(
-                name, environment_name=args.environment,
-                create_if_missing=False, version=1, client=client,
-            )
-            volume.hydrate(client)
+        with _provider_stage("VOLUME_CREATE_UNAVAILABLE"):
+            with _deadline(60):
+                sdk.Volume.objects.create(
+                    name, version=1, allow_existing=False,
+                    environment_name=args.environment, client=client,
+                )
+        with _provider_stage("VOLUME_HYDRATE_UNAVAILABLE"):
+            with _deadline(60):
+                volume = sdk.Volume.from_name(
+                    name, environment_name=args.environment,
+                    create_if_missing=False, version=1, client=client,
+                )
+                volume.hydrate(client)
         identity = getattr(volume, "object_id", None)
         if (getattr(volume, "is_hydrated", False) is not True
                 or type(identity) is not str or _VOLUME.fullmatch(identity) is None
                 or identity in [item.object_id for item in volumes.values()]):
             raise ProbeUnavailable("VOLUME_IDENTITY_INVALID")
         volumes[role] = volume
-    image = sdk.Image.from_id(args.image_id, client=client)
+    with _provider_stage("IMAGE_HANDLE_UNAVAILABLE"):
+        image = sdk.Image.from_id(args.image_id, client=client)
     if getattr(image, "object_id", None) != args.image_id:
         raise ProbeUnavailable("IMAGE_IDENTITY_INVALID")
-    function = app.function(
-        name="mount-probe", image=image, cpu=1, memory=4096, gpu="L40S",
-        timeout=_TIMEOUT, retries=0,
-        volumes=dict(zip(_MOUNTS, (volumes[role] for role in _ROLES))),
-        secrets=[], block_network=True, restrict_modal_access=True,
-        single_use_containers=True, serialized=True, include_source=False,
-    )(_remote_probe)
+    with _provider_stage("FUNCTION_CONSTRUCT_UNAVAILABLE"):
+        function = app.function(
+            name="mount-probe", image=image, cpu=1, memory=4096, gpu="L40S",
+            timeout=_TIMEOUT, retries=0,
+            volumes=dict(zip(_MOUNTS, (volumes[role] for role in _ROLES))),
+            secrets=[], block_network=True, restrict_modal_access=True,
+            single_use_containers=True, serialized=True, include_source=False,
+        )(_remote_probe)
     with tempfile.TemporaryDirectory(prefix="synaptic-modal-mount-probe-") as directory:
         original = os.getcwd()
         try:
             os.chdir(directory)
-            with _deadline(300):
-                app.deploy(environment_name=args.environment, client=client)
+            with _provider_stage("APP_DEPLOY_UNAVAILABLE"):
+                with _deadline(300):
+                    app.deploy(environment_name=args.environment, client=client)
         finally:
             os.chdir(original)
     if (getattr(image, "is_hydrated", False) is not True
             or getattr(image, "object_id", None) != args.image_id):
-        raise ProbeUnavailable("IMAGE_IDENTITY_INVALID")
-    with _deadline(60):
-        call = function.spawn()
+        raise ProbeUnavailable("POSTDEPLOY_IMAGE_INVALID")
+    with _provider_stage("FUNCTION_SPAWN_UNAVAILABLE"):
+        with _deadline(60):
+            call = function.spawn()
     call_id = getattr(call, "object_id", None)
     if type(call_id) is not str or _CALL.fullmatch(call_id) is None:
         raise ProbeUnavailable("CALL_ID_INDETERMINATE")
-    _exclusive_record(args.claim_fd, "call.json", {
-        "schema_version": _SCHEMA, "call_id": call_id,
-    })
+    with _provider_stage("CALL_RETENTION_UNAVAILABLE"):
+        _exclusive_record(args.claim_fd, "call.json", {
+            "schema_version": _SCHEMA, "call_id": call_id,
+        })
     from modal._serialization import serialize
 
     until = time.monotonic() + 180
     while time.monotonic() < until:
-        result = synchronizer.create_blocking(_poll_raw)(
-            client, call_id, api_pb2, serialize,
-        )
+        with _provider_stage("POLL_UNAVAILABLE"):
+            result = synchronizer.create_blocking(_poll_raw)(
+                client, call_id, api_pb2, serialize,
+            )
         if result != "PENDING":
             return result
         time.sleep(min(2, max(0, until - time.monotonic())))
@@ -359,6 +412,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--image-id", required=True)
     args = parser.parse_args(argv)
     result: str | dict[str, str] = "LOCAL_UNAVAILABLE"
+    failure_class = None
     claim_fd = None
     try:
         _require_host()
@@ -392,6 +446,7 @@ def main(argv: list[str] | None = None) -> int:
                 client = _client(modal, args.modal_profile)
                 result = execute(args, modal, client)
     except ProbeUnavailable as error:
+        failure_class = error.failure_class
         result = str(error) if str(error) in {
             "HOST_INCOMPATIBLE", "CLAIM_PATH_INVALID", "CLAIM_INVALID",
             "CLAIM_ALREADY_CONSUMED", "CLAIM_INDETERMINATE", "INPUT_INVALID",
@@ -399,16 +454,20 @@ def main(argv: list[str] | None = None) -> int:
             "APP_ABSENCE_UNAVAILABLE", "APP_NOT_FRESH",
             "VOLUME_IDENTITY_INVALID", "IMAGE_READ_UNAVAILABLE", "IMAGE_IDENTITY_INVALID",
             "CALL_ID_INDETERMINATE", "PROVIDER_INDETERMINATE",
+            "POSTDEPLOY_IMAGE_INVALID", *_STAGE_FAILURES,
         } else "LOCAL_UNAVAILABLE"
     except Exception:
         result = "PROVIDER_INDETERMINATE"
     finally:
         if claim_fd is not None:
             os.close(claim_fd)
-    print(json.dumps({
+    output = {
         "schema_version": _SCHEMA, "authority": "DIAGNOSTIC_ONLY",
         "result": result,
-    }, sort_keys=True, separators=(",", ":")))
+    }
+    if failure_class is not None and result in _STAGE_FAILURES:
+        output["failure_class"] = failure_class
+    print(json.dumps(output, sort_keys=True, separators=(",", ":")))
     return 0 if isinstance(result, dict) else 1
 
 

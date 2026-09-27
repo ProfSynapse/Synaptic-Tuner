@@ -112,9 +112,12 @@ def test_remote_probe_never_reads_symlink_target(monkeypatch) -> None:
     ]
 
 
-@pytest.mark.parametrize("hydrate_after_deploy", [True, False])
+@pytest.mark.parametrize(
+    ("hydrate_after_deploy", "deploy_fails"),
+    [(True, False), (False, False), (True, True)],
+)
 def test_execute_creates_exact_resources_then_spawns_once(
-    monkeypatch, hydrate_after_deploy: bool,
+    monkeypatch, hydrate_after_deploy: bool, deploy_fails: bool,
 ) -> None:
     events: list[tuple[str, object]] = []
     ids = iter(("vo-C", "vo-A", "vo-M"))
@@ -171,6 +174,8 @@ def test_execute_creates_exact_resources_then_spawns_once(
             return lambda fn: Function()
 
         def deploy(self, **kwargs):
+            if deploy_fails:
+                raise ValueError("secret provider payload")
             assert Image.latest is not None
             Image.latest.is_hydrated = hydrate_after_deploy
             events.append(("deploy", None))
@@ -203,10 +208,16 @@ def test_execute_creates_exact_resources_then_spawns_once(
         app="probe-test", environment="default", image_id="im-EXACT",
         volume_names=("probe-control", "probe-artifacts", "probe-cache"), claim_fd=17,
     )
+    if deploy_fails:
+        with pytest.raises(probe.ProbeUnavailable, match="APP_DEPLOY_UNAVAILABLE") as caught:
+            probe.execute(args, sdk, object())
+        assert caught.value.failure_class == "ValueError"
+        assert [name for name, _ in events].count("spawn") == 0
+        return
     if hydrate_after_deploy:
         assert probe.execute(args, sdk, object()) == {"control": "LINK"}
     else:
-        with pytest.raises(probe.ProbeUnavailable, match="IMAGE_IDENTITY_INVALID"):
+        with pytest.raises(probe.ProbeUnavailable, match="POSTDEPLOY_IMAGE_INVALID"):
             probe.execute(args, sdk, object())
         assert [name for name, _ in events].count("spawn") == 0
         return
@@ -251,3 +262,32 @@ def test_main_claims_generated_selection_before_provider_use(monkeypatch, capsys
     assert [name for name, _ in events] == ["claim", "client", "execute"]
     assert events[0][1]["app"] == "probe-probe-" + "a" * 32
     assert "DIAGNOSTIC_ONLY" in capsys.readouterr().out
+
+
+def test_provider_stage_and_output_do_not_expose_exception_text(monkeypatch, capsys) -> None:
+    class PrivateFailure(Exception):
+        pass
+
+    with pytest.raises(probe.ProbeUnavailable) as caught:
+        with probe._provider_stage("APP_DEPLOY_UNAVAILABLE"):
+            raise PrivateFailure("private provider detail")
+    assert str(caught.value) == "APP_DEPLOY_UNAVAILABLE"
+    assert caught.value.failure_class == "OTHER"
+
+    fake_modal = ModuleType("modal")
+    monkeypatch.setitem(sys.modules, "modal", fake_modal)
+    monkeypatch.setattr(probe, "_require_host", lambda: None)
+    monkeypatch.setattr(probe, "_private_directory", lambda path: 71)
+    monkeypatch.setattr(probe.os, "close", lambda descriptor: None)
+    monkeypatch.setattr(probe, "_exclusive_record", lambda *args: None)
+    monkeypatch.setattr(probe, "_client", lambda sdk, profile: object())
+    monkeypatch.setattr(probe, "execute", lambda *args: (_ for _ in ()).throw(caught.value))
+    assert probe.main([
+        "--claim-dir", "/private/probe", "--name-prefix", "probe",
+        "--environment", "default", "--modal-profile", "test",
+        "--image-id", "im-EXACT",
+    ]) == 1
+    output = capsys.readouterr().out
+    assert '"result":"APP_DEPLOY_UNAVAILABLE"' in output
+    assert '"failure_class":"OTHER"' in output
+    assert "private provider detail" not in output
