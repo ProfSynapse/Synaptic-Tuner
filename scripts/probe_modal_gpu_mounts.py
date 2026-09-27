@@ -262,6 +262,11 @@ def _inspect_root_link(parent: int, leaf: str) -> str:
         return "UNAVAILABLE"
 
 
+def _canonical_link_category(value: str) -> str:
+    """Reuse the admitted string object so exact pickle matching is stable."""
+    return next((item for item in _LINK_CATEGORIES if item == value), "UNAVAILABLE")
+
+
 def _remote_probe(mount_parent: str = "/mnt", inspect_links: bool = False) -> dict[str, object]:
     """Inspect only selected mount roots through one retained parent descriptor."""
     import os
@@ -278,7 +283,7 @@ def _remote_probe(mount_parent: str = "/mnt", inspect_links: bool = False) -> di
         parent_info = os.fstat(parent) if inspect_links else None
         for leaf in _MOUNT_LEAVES:
             if inspect_links:
-                categories.append(_inspect_root_link(parent, leaf))
+                categories.append(_canonical_link_category(_inspect_root_link(parent, leaf)))
                 continue
             try:
                 info = os.stat(leaf, dir_fd=parent, follow_symlinks=False)

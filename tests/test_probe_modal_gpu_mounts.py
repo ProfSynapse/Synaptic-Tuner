@@ -78,6 +78,41 @@ def test_link_result_inventory_fits_inline_pickle_cap() -> None:
     })) for values in itertools.product(probe._LINK_CATEGORIES, repeat=3)) <= 512
 
 
+def test_repeated_dynamic_link_labels_match_closed_pickle_inventory() -> None:
+    dynamic = tuple("".join(("ABS_", "TARGET_OWNER_ROOT")) for _ in range(3))
+    assert dynamic[0] is not dynamic[1]
+    canonical = tuple(probe._canonical_link_category(value) for value in dynamic)
+    expected = (probe._LINK_CATEGORIES[probe._LINK_CATEGORIES.index(
+        "ABS_TARGET_OWNER_ROOT")],) * 3
+    assert canonical == expected
+    assert canonical[0] is canonical[1]
+    assert pickle.dumps({"schema_version": probe._SCHEMA, "links": canonical}) == \
+        pickle.dumps({"schema_version": probe._SCHEMA, "links": expected})
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Linux descriptor semantics")
+def test_remote_repeated_link_result_matches_closed_raw_inventory(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    (tmp_path / "target").mkdir(mode=0o700)
+    for leaf in probe._MOUNT_LEAVES:
+        (tmp_path / leaf).symlink_to("target", target_is_directory=True)
+    monkeypatch.setattr(probe, "_MOUNT_PARENTS", (str(tmp_path),))
+    result = probe._remote_probe(str(tmp_path), True)
+    assert result["links"] == ("REL_TARGET_OWNER_SELF",) * 3
+    api = SimpleNamespace(GenericResult=SimpleNamespace(GENERIC_STATUS_SUCCESS=1),
+                          DATA_FORMAT_PICKLE=2)
+    output = SimpleNamespace(
+        result=SimpleNamespace(status=1, data_blob_id="", data=pickle.dumps(result)),
+        data_format=2,
+    )
+    assert probe._classify_raw(output, api, pickle.dumps, True) == {
+        "control": "REL_TARGET_OWNER_SELF",
+        "artifacts": "REL_TARGET_OWNER_SELF",
+        "model_cache": "REL_TARGET_OWNER_SELF",
+    }
+
+
 def test_image_read_requires_exact_returned_id() -> None:
     class Request:
         def __init__(self, *, image_id):
