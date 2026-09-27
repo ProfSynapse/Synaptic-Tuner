@@ -808,20 +808,35 @@ distinctness and other failures before worker setup. `DIR` does not prove absenc
 
 For a `MOUNT_*_LINK` boundary that remains unexplained, the checked-in private
 `scripts/probe_modal_gpu_mounts.py` is a **diagnostic-only** L40S topology
-probe. Run its provider-free tests and review the exact script before the one
-separately approved paid invocation; use the pinned CPython 3.11.14/Modal
-1.5.4 launcher and an owner-private claim directory. The command creates a
-fresh app and three fresh empty v1 Volumes mounted at the training paths, then
-executes one no-training Function without Secrets, dataset/model access or
-network. It retains a one-shot claim and does not retry, cancel, delete or
-replay ambiguous effects. Only fixed root categories are admitted from bounded
-raw result bytes; neither target paths nor provider exceptions are reported.
+probe. Run its provider-free tests and review the exact script before each
+separately authorized paid invocation; use the pinned CPython 3.11.14/Modal
+1.5.4 launcher and a new owner-private claim directory every time. The command
+creates a fresh app and three fresh empty v1 Volumes, then executes one
+no-training Function without Secrets, dataset/model access or network. The
+Function must be non-serialized with only its own script source mounted:
+`serialized=True` was rejected at `FunctionCreate`, while
+`serialized=False, include_source=True` deployed and returned a result with
+the same pinned image ID. The probe retains a one-shot claim and does not
+retry, cancel, delete or replay ambiguous effects. Only fixed categories are
+admitted from bounded raw result bytes; neither raw link targets nor provider
+exceptions are reported. The optional `/workspace` mount parent and
+`--inspect-links` mode are claim-bound diagnostics, not production settings.
 Fresh empty Volumes deliberately protect prior attempt data, so this is not
 proof of the failed Function's exact Volume-to-path binding. A symlink result
 does not authorize following the link, changing `mounted_io`, or training;
 a different result is also inconclusive because the diagnostic Function's
 Secret/access policy differs. Preserve all attempt and probe resources for
 later review.
+Live L40S probes of fresh Volumes returned `LINK` for all three roots under
+both `/mnt` and `/workspace`; changing the mount parent alone is not a fix.
+The metadata-only link probe returned `ABS_TARGET_OWNER_SELF` for all three
+`/mnt` roots. This observes an absolute directory target owned by the Function's
+effective UID with no group/world write mode bits; it does **not** authenticate
+the target against a Volume ID or prove safety against replacement, ACLs, or
+child-process pathname access. Do not follow the links or relax `mounted_io`
+from these observations. Exact raw-result matching requires canonicalizing
+repeated category string objects before pickle serialization; value equality
+alone is insufficient because pickle memoization can change the bytes.
 For a newly constructed App, pinned Modal 1.5.4 `Image.build(app)` requires an
 initialized app ID and fails before deployment. The probe instead performs a
 bounded read-only `ImageFromId` equality check before resource creation, then
