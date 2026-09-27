@@ -42,14 +42,26 @@ _STAGE_FAILURES = frozenset({
     "APP_DEPLOY_UNAVAILABLE", "FUNCTION_SPAWN_UNAVAILABLE",
     "CALL_RETENTION_UNAVAILABLE", "POLL_UNAVAILABLE",
 })
+_SDK_ORIGIN_MODULES = {
+    "modal.app": "app.py",
+    "modal.runner": "runner.py",
+    "modal._functions": "_functions.py",
+    "modal.image": "image.py",
+    "modal._resolver": "_resolver.py",
+    "modal._object": "_object.py",
+    "modal.mount": "mount.py",
+    "modal.client": "client.py",
+}
 
 
 class ProbeUnavailable(RuntimeError):
     """Closed diagnostic failure whose underlying details must stay private."""
 
-    def __init__(self, code: str, *, failure_class: str | None = None):
+    def __init__(self, code: str, *, failure_class: str | None = None,
+                 failure_origin: str | None = None):
         super().__init__(code)
         self.failure_class = failure_class
+        self.failure_origin = failure_origin
 
 
 def _failure_class(error: BaseException) -> str:
@@ -71,6 +83,25 @@ def _failure_class(error: BaseException) -> str:
     return "OTHER"
 
 
+def _failure_origin(error: BaseException) -> str | None:
+    """Expose one admitted SDK source site, never a traceback path or message."""
+    trace = error.__traceback__
+    origin = None
+    for _ in range(64):
+        if trace is None:
+            break
+        frame = trace.tb_frame
+        module = frame.f_globals.get("__name__")
+        filename = _SDK_ORIGIN_MODULES.get(module) if type(module) is str else None
+        path = frame.f_code.co_filename.replace("\\", "/")
+        line = trace.tb_lineno
+        if (filename is not None and path.endswith("/modal/" + filename)
+                and type(line) is int and 0 < line <= 10000):
+            origin = f"{filename}:{line}"
+        trace = trace.tb_next
+    return origin
+
+
 @contextlib.contextmanager
 def _provider_stage(code: str):
     assert code in _STAGE_FAILURES
@@ -81,7 +112,10 @@ def _provider_stage(code: str):
                          else "OTHER")
         raise ProbeUnavailable(code, failure_class=failure_class) from None
     except Exception as error:
-        raise ProbeUnavailable(code, failure_class=_failure_class(error)) from None
+        raise ProbeUnavailable(
+            code, failure_class=_failure_class(error),
+            failure_origin=_failure_origin(error),
+        ) from None
 
 
 def _remote_probe() -> dict[str, object]:
@@ -413,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     result: str | dict[str, str] = "LOCAL_UNAVAILABLE"
     failure_class = None
+    failure_origin = None
     claim_fd = None
     try:
         _require_host()
@@ -447,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = execute(args, modal, client)
     except ProbeUnavailable as error:
         failure_class = error.failure_class
+        failure_origin = error.failure_origin
         result = str(error) if str(error) in {
             "HOST_INCOMPATIBLE", "CLAIM_PATH_INVALID", "CLAIM_INVALID",
             "CLAIM_ALREADY_CONSUMED", "CLAIM_INDETERMINATE", "INPUT_INVALID",
@@ -467,6 +503,8 @@ def main(argv: list[str] | None = None) -> int:
     }
     if failure_class is not None and result in _STAGE_FAILURES:
         output["failure_class"] = failure_class
+    if failure_origin is not None and result in _STAGE_FAILURES:
+        output["failure_origin"] = failure_origin
     print(json.dumps(output, sort_keys=True, separators=(",", ":")))
     return 0 if isinstance(result, dict) else 1
 

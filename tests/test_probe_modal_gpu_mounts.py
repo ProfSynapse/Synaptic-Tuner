@@ -265,14 +265,27 @@ def test_main_claims_generated_selection_before_provider_use(monkeypatch, capsys
 
 
 def test_provider_stage_and_output_do_not_expose_exception_text(monkeypatch, capsys) -> None:
-    class PrivateFailure(Exception):
-        pass
+    sdk_frame = {"__name__": "modal.runner"}
+    exec(compile(
+        "def fail():\n    raise ValueError('private provider detail')\n",
+        "/private/secret/modal/runner.py", "exec",
+    ), sdk_frame)
 
     with pytest.raises(probe.ProbeUnavailable) as caught:
         with probe._provider_stage("APP_DEPLOY_UNAVAILABLE"):
-            raise PrivateFailure("private provider detail")
+            sdk_frame["fail"]()
     assert str(caught.value) == "APP_DEPLOY_UNAVAILABLE"
-    assert caught.value.failure_class == "OTHER"
+    assert caught.value.failure_class == "ValueError"
+    assert caught.value.failure_origin == "runner.py:2"
+
+    untrusted_frame = {"__name__": "untrusted.runner"}
+    exec(compile(
+        "def fail():\n    raise ValueError('another secret')\n",
+        "/private/secret/modal/runner.py", "exec",
+    ), untrusted_frame)
+    with pytest.raises(ValueError) as untrusted:
+        untrusted_frame["fail"]()
+    assert probe._failure_origin(untrusted.value) is None
 
     fake_modal = ModuleType("modal")
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
@@ -289,5 +302,7 @@ def test_provider_stage_and_output_do_not_expose_exception_text(monkeypatch, cap
     ]) == 1
     output = capsys.readouterr().out
     assert '"result":"APP_DEPLOY_UNAVAILABLE"' in output
-    assert '"failure_class":"OTHER"' in output
+    assert '"failure_class":"ValueError"' in output
+    assert '"failure_origin":"runner.py:2"' in output
     assert "private provider detail" not in output
+    assert "/private/secret" not in output
