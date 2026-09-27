@@ -806,6 +806,23 @@ mount's directory or no-symlink check failed; the original label remains for
 distinctness and other failures before worker setup. `DIR` does not prove absence, and
 `LINK` does not authorize relaxing the hostile-path guard.
 
+For a `MOUNT_*_LINK` boundary that remains unexplained, the checked-in private
+`scripts/probe_modal_gpu_mounts.py` is a **diagnostic-only** L40S topology
+probe. Run its provider-free tests and review the exact script before the one
+separately approved paid invocation; use the pinned CPython 3.11.14/Modal
+1.5.4 launcher and an owner-private claim directory. The command creates a
+fresh app and three fresh empty v1 Volumes mounted at the training paths, then
+executes one no-training Function without Secrets, dataset/model access or
+network. It retains a one-shot claim and does not retry, cancel, delete or
+replay ambiguous effects. Only fixed root categories are admitted from bounded
+raw result bytes; neither target paths nor provider exceptions are reported.
+Fresh empty Volumes deliberately protect prior attempt data, so this is not
+proof of the failed Function's exact Volume-to-path binding. A symlink result
+does not authorize following the link, changing `mounted_io`, or training;
+a different result is also inconclusive because the diagnostic Function's
+Secret/access policy differs. Preserve all attempt and probe resources for
+later review.
+
 The packaged training parent must explicitly hydrate the three exact mounted
 Volume identities and synchronously commit verified cache, artifact, then
 control writes before reporting success. Modal's `restrict_modal_access=True`
