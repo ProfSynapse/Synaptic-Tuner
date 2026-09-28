@@ -360,8 +360,30 @@ under the pinned CPython 3.11.14 launcher test harness after reviewed five-membe
 closure hash refresh. Independent review approved a fresh CPU-only qualification.
 Both Modal source locks remain CURRENT and canonical skill copies match. No
 physical-repeat cause or GPU qualification is inferred from the local tests.
-The frozen conditional identity adaptation passed 406/406 provider-free tests
-under the pinned CPython 3.11.14 launcher test harness after reviewed five-member
-closure hash refresh. Independent review approved a fresh CPU-only qualification.
-Both Modal source locks remain CURRENT and canonical skill copies match. No
-physical-repeat cause or GPU qualification is inferred from the local tests.
+
+CPU attempt `cpu-qual-a1a525ac11de0a232a9a7e6e` on
+`573ad7b7e098772d64974500841e51450f91dc58` still returned
+`CALL_PARENT_RUNTIME_INSTALLED_INVENTORY_DUPLICATE` at
+`2026-09-28T14:13:54.573947`. Exact-call inspection confirmed it for
+`fc-01M3MKHW04GDR3BHGB4XP7YD2P`, claim
+`qualify-06a32437b2e7845f443f420830706a3db894fd49ba4ae53601b02b5d689570f6`.
+The physical-repeat candidate did not resolve this failure. The next diagnostic
+must distinguish duplicate reason, authenticated main/bootstrap/other category,
+and inside/outside the authenticated Python library roots in one fixed result.
+It remains rejection-only: no raw metadata, paths, package names, versions, or
+exception text; no parent inventory scope change and no GPU qualification.
+The [Modal SDK release notes](https://modal.com/docs/sdk/py/releases) describe
+changes to client-dependency inclusion with the 2025.06 image builder; the
+[existing-image guide](https://modal.com/docs/guide/existing-images) also
+distinguishes Function-compatible Python from arbitrary image use. These are
+hypothesis context, not evidence of this attempt's duplicate origin. Repository
+review establishes that the build capture and actual trainer use isolated Python,
+whereas the Function parent performs privileged model preparation and storage
+coordination. Any eventual inventory-scope correction must account for that
+privileged parent's imports rather than simply removing its checks.
+The diagnostic-only first-pair classifier passed 660/660 focused tests under
+the pinned CPython 3.11.14 harness after reviewed fixed five-member closure
+refresh. Both separate Modal locks remain CURRENT and skill copies match.
+Independent static review found no admission or inventory-equality change; actual
+pinned Modal 1.5.4 serialization of all 78 parent-stage results measured at most
+224 bytes, below the existing 512-byte diagnostic bound (network-free check).

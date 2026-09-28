@@ -12,10 +12,12 @@ import hmac
 import hashlib
 import importlib.metadata
 import json
+import os
 import platform
 import re
 import stat
 import sys
+import sysconfig
 from pathlib import Path
 from zipfile import ZipFile
 from io import BytesIO
@@ -245,11 +247,23 @@ def local_cpu_main(release_document):
         return 2
 
 
+_DUPLICATE_REASONS = (
+    "IDENTITY_UNPROVEN", "DISTINCT_PHYSICAL", "VERSION_MISMATCH",
+    "PHYSICAL_METADATA_MISMATCH",
+)
+_DUPLICATE_PACKAGES = ("MAIN", "BOOTSTRAP", "OTHER")
+_DUPLICATE_LOCATIONS = ("BOTH_IN", "CROSS_ROOT", "BOTH_OUT", "UNKNOWN")
+_DUPLICATE_STAGES = frozenset(
+    "INVENTORY_DUPLICATE_" + reason + "_" + package + "_" + location
+    for reason in _DUPLICATE_REASONS
+    for package in _DUPLICATE_PACKAGES
+    for location in _DUPLICATE_LOCATIONS
+)
 INSTALLED_RUNTIME_INSPECTION_STAGES = frozenset({
     "INPUTS", "WHEEL_BYTES", "DISTRIBUTION", "BOOTSTRAP_DEPENDENCIES",
     "PROVENANCE", "MEMBERS", "CLOSURE", "INVENTORY_ENUMERATION",
     "INVENTORY_BOUNDS", "INVENTORY_DUPLICATE",
-})
+}) | _DUPLICATE_STAGES
 
 
 class PackagedInstalledRuntimeInspectionError(ValueError):
@@ -276,6 +290,73 @@ def _metadata_identity(distribution: object) -> tuple[int, ...] | None:
         return None
     return (stat.S_IFMT(info.st_mode), info.st_dev, info.st_ino,
             info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _reviewed_package_roots(expected: dict) -> tuple[tuple[Path, Path, tuple[int, int]], ...] | None:
+    try:
+        python = expected["python"]
+        executable = python["executable"]
+        if type(executable) is not str or not Path(executable).is_absolute():
+            return None
+        prefix = str(Path(executable).parent.parent)
+        if sys.prefix != prefix:
+            return None
+        paths = sysconfig.get_paths(scheme="venv", vars={"base": prefix, "platbase": prefix})
+        roots = []
+        for key in ("purelib", "platlib"):
+            raw = python[key]
+            if (type(raw) is not str or not Path(raw).is_absolute()
+                    or os.path.normpath(raw) != raw or paths[key] != raw):
+                return None
+            selected = Path(raw)
+            root = selected.resolve(strict=True)
+            info = root.stat()
+            if not stat.S_ISDIR(info.st_mode):
+                return None
+            roots.append((selected, root, (info.st_dev, info.st_ino)))
+        return tuple(roots)
+    except BaseException:
+        return None
+
+
+def _roots_stable(roots: tuple[tuple[Path, Path, tuple[int, int]], ...]) -> bool:
+    for selected, resolved, identity in roots:
+        if selected.resolve(strict=True) != resolved:
+            return False
+        info = selected.stat()
+        if not stat.S_ISDIR(info.st_mode) or (info.st_dev, info.st_ino) != identity:
+            return False
+    return True
+
+
+def _metadata_within_roots(
+    distribution: object, identity: tuple[int, ...] | None,
+    roots: tuple[tuple[Path, Path, tuple[int, int]], ...] | None,
+) -> bool | None:
+    if identity is None or roots is None:
+        return None
+    try:
+        path = distribution._path
+        if not _roots_stable(roots) or _metadata_identity(distribution) != identity:
+            return None
+        resolved = path.resolve(strict=True)
+        info = resolved.stat()
+        observed = (stat.S_IFMT(info.st_mode), info.st_dev, info.st_ino,
+                    info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        if (observed != identity or path.resolve(strict=True) != resolved
+                or not _roots_stable(roots)
+                or _metadata_identity(distribution) != identity):
+            return None
+        return any(resolved == root or root in resolved.parents for _selected, root, _identity in roots)
+    except BaseException:
+        return None
+
+
+def _duplicate_stage(reason: str, package: str, first: bool | None, second: bool | None) -> str:
+    location = ("UNKNOWN" if first is None or second is None else
+                "BOTH_IN" if first and second else
+                "BOTH_OUT" if not first and not second else "CROSS_ROOT")
+    return "INVENTORY_DUPLICATE_" + reason + "_" + package + "_" + location
 
 
 def inspect_installed_runtime(expected: dict) -> dict:
@@ -366,7 +447,17 @@ def inspect_installed_runtime(expected: dict) -> dict:
         raise PackagedInstalledRuntimeInspectionError("CLOSURE") from None
     inventory_by_name = {}
     identities = {}
+    locations = {}
     physical = {}
+    roots = _reviewed_package_roots(expected)
+    main_package = re.sub(r"[-_.]+", "-", expected["wheel"]["distribution"].lower())
+    bootstrap_packages = {
+        re.sub(r"[-_.]+", "-", wheel["distribution"].lower())
+        for wheel in expected["bootstrap"]
+    }
+    def category(*names):
+        return ("MAIN" if main_package in names else
+                "BOOTSTRAP" if any(name in bootstrap_packages for name in names) else "OTHER")
     try:
         for occurrence, item in enumerate(importlib.metadata.distributions(), 1):
             if occurrence > 4096:
@@ -378,18 +469,29 @@ def inspect_installed_runtime(expected: dict) -> dict:
             if before != after and (before is not None or after is not None):
                 raise PackagedInstalledRuntimeInspectionError("INVENTORY_ENUMERATION")
             identity = before if before is not None and before == after else None
+            location = _metadata_within_roots(item, identity, roots)
             previous = inventory_by_name.get(name)
             if previous is not None:
-                if (identity is None or identities.get(name) != identity
-                        or previous["version"] != version):
-                    raise PackagedInstalledRuntimeInspectionError("INVENTORY_DUPLICATE")
-                continue
+                if previous["version"] != version:
+                    reason = "VERSION_MISMATCH"
+                elif identity is None or identities.get(name) is None:
+                    reason = "IDENTITY_UNPROVEN"
+                elif identities[name] != identity:
+                    reason = "DISTINCT_PHYSICAL"
+                else:
+                    continue
+                raise PackagedInstalledRuntimeInspectionError(
+                    _duplicate_stage(reason, category(name), locations[name], location))
             if identity is not None:
                 prior_physical = physical.get(identity)
-                if prior_physical is not None and prior_physical != (name, version):
-                    raise PackagedInstalledRuntimeInspectionError("INVENTORY_DUPLICATE")
-                physical[identity] = (name, version)
+                if prior_physical is not None and prior_physical[:2] != (name, version):
+                    raise PackagedInstalledRuntimeInspectionError(
+                        _duplicate_stage("PHYSICAL_METADATA_MISMATCH",
+                                         category(name, prior_physical[0]),
+                                         prior_physical[2], location))
+                physical[identity] = (name, version, location)
                 identities[name] = identity
+            locations[name] = location
             inventory_by_name[name] = {"name": name, "version": version}
     except PackagedInstalledRuntimeInspectionError:
         raise

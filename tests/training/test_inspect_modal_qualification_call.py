@@ -250,6 +250,7 @@ def test_parent_runtime_result_is_exact_and_closed(monkeypatch, stage):
     )
     serialize = lambda value: ("fixed:" + value["status_code"] + ":"
                                + value.get("failure_stage", "")).encode("ascii")
+    assert len(serialize({"status_code": "failed", "failure_stage": stage})) <= diagnostic._MAX_FIXED_RESULT
     assert diagnostic._classify_fixed_result(output, _Proto, serialize) == "WORKER_" + stage
     output.result = _OpaqueResult(1, data=b"fixed:failed:PARENT_RUNTIME_PRIVATE_SENTINEL")
     assert diagnostic._classify_fixed_result(output, _Proto, serialize) == "PROVIDER_SUCCESS_UNKNOWN"

@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from typing import Mapping, Protocol
 
 from tuner.runtime.packaged_worker_closure import stable_read, stable_file_digest
+from tuner.runtime.packaged_training_worker import INSTALLED_RUNTIME_INSPECTION_STAGES
 from tuner.runtime.releases import (
     PackagedExecutionBindingV1, PackagedRuntimeRelease,
     PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2,
@@ -202,7 +203,8 @@ RELEASE_INSPECTION_STAGES = (
     "PACKAGE", "PYTHON", "INSTALLED_DISTRIBUTIONS", "WORKER",
     "CONTRACTS", "PLATFORM_RECORD", "COMPATIBILITY", "PLATFORM",
     "WHEEL", "TRAINER_ASSETS",
-)
+) + tuple(sorted("INSTALLED_" + stage for stage in INSTALLED_RUNTIME_INSPECTION_STAGES
+               if stage.startswith("INVENTORY_DUPLICATE_")))
 
 
 class PackagedReleaseInspectionError(ValueError):
@@ -262,7 +264,6 @@ def _executable_mismatch_stage(release) -> str:
 def _inspect_release(release, *, allow_equivalent_executable: bool = False):
     """Measure the installed wheel graph, never a source checkout or Git tree."""
     from tuner.runtime.packaged_training_worker import (
-        INSTALLED_RUNTIME_INSPECTION_STAGES,
         PackagedInstalledRuntimeInspectionError,
         inspect_installed_runtime,
     )

@@ -4,6 +4,7 @@ import hashlib
 import importlib.metadata
 import itertools
 import json
+import sysconfig
 from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZipFile
@@ -95,7 +96,7 @@ def test_installed_provenance_and_members_are_authenticated(installed, mutation,
 @pytest.mark.parametrize("kind,stage", [
     ("distribution", "DISTRIBUTION"), ("closure", "CLOSURE"),
     ("enumeration", "INVENTORY_ENUMERATION"), ("empty", "INVENTORY_BOUNDS"),
-    ("duplicate", "INVENTORY_DUPLICATE"),
+    ("duplicate", "INVENTORY_DUPLICATE_IDENTITY_UNPROVEN_MAIN_UNKNOWN"),
 ])
 def test_installed_inspection_substages_are_closed(installed, monkeypatch, kind, stage):
     expected, _retained, _packages, distributions = installed
@@ -145,9 +146,9 @@ def test_repeated_same_physical_metadata_preserves_inventory(installed, monkeypa
 
 
 @pytest.mark.parametrize("variant,stage", [
-    ("distinct", "INVENTORY_DUPLICATE"),
-    ("changed", "INVENTORY_DUPLICATE"),
-    ("replaced", "INVENTORY_DUPLICATE"),
+    ("distinct", "INVENTORY_DUPLICATE_DISTINCT_PHYSICAL_OTHER_UNKNOWN"),
+    ("changed", "INVENTORY_DUPLICATE_VERSION_MISMATCH_OTHER_UNKNOWN"),
+    ("replaced", "INVENTORY_DUPLICATE_DISTINCT_PHYSICAL_OTHER_UNKNOWN"),
     ("raw-bound", "INVENTORY_BOUNDS"),
 ])
 def test_physical_metadata_dedup_fails_closed(installed, monkeypatch, tmp_path, variant, stage):
@@ -175,6 +176,73 @@ def test_physical_metadata_dedup_fails_closed(installed, monkeypatch, tmp_path, 
         worker.inspect_installed_runtime(expected)
     assert rejected.value.stage == stage
     assert str(rejected.value) == "PACKAGED_INSTALLED_RUNTIME_INSPECTION_REJECTED"
+
+
+def test_reviewed_package_roots_require_pinned_venv_paths(monkeypatch, tmp_path):
+    prefix = tmp_path / "venv"
+    package_root = prefix / "lib" / "python3.12" / "site-packages"
+    package_root.mkdir(parents=True)
+    expected = {"python": {
+        "executable": str(prefix / "bin" / "python3"),
+        "purelib": str(package_root), "platlib": str(package_root),
+    }}
+    monkeypatch.setattr(worker.sys, "prefix", str(prefix))
+    monkeypatch.setattr(worker.sysconfig, "get_paths", lambda **_kwargs: {
+        "purelib": str(package_root), "platlib": str(package_root)})
+    roots = worker._reviewed_package_roots(expected)
+    assert roots is not None and worker._roots_stable(roots)
+    assert roots[0][1] == package_root
+    expected["python"]["purelib"] = str(tmp_path / "unreviewed")
+    assert worker._reviewed_package_roots(expected) is None
+
+
+@pytest.mark.parametrize("package", ("MAIN", "BOOTSTRAP", "OTHER"))
+@pytest.mark.parametrize("location", ("BOTH_IN", "CROSS_ROOT", "BOTH_OUT", "UNKNOWN"))
+def test_distinct_metadata_pair_reports_closed_role_and_location(
+    installed, monkeypatch, tmp_path, package, location,
+):
+    expected, _retained, _packages, _distributions = installed
+    root = tmp_path / "reviewed-site"
+    root.mkdir()
+    outside = tmp_path / "outside-site"
+    outside.mkdir()
+    first_parent = root if location in ("BOTH_IN", "CROSS_ROOT") else outside
+    second_parent = root if location == "BOTH_IN" else outside
+    name = (expected["wheel"]["distribution"] if package == "MAIN" else
+            expected["bootstrap"][0]["distribution"] if package == "BOOTSTRAP" else
+            "unreviewed-package")
+    first = _path_distribution(first_parent / "first.dist-info", name=name)
+    second = _path_distribution(second_parent / "second.dist-info", name=name)
+    info = root.stat()
+    roots = ((root, root, (info.st_dev, info.st_ino)),)
+    monkeypatch.setattr(worker, "_reviewed_package_roots",
+                        lambda _expected: None if location == "UNKNOWN" else roots)
+    monkeypatch.setattr(worker.importlib.metadata, "distributions", lambda: [first, second])
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
+        worker.inspect_installed_runtime(expected)
+    assert rejected.value.stage == (
+        "INVENTORY_DUPLICATE_DISTINCT_PHYSICAL_" + package + "_" + location)
+
+
+def test_same_physical_metadata_changed_name_is_closed(installed, monkeypatch, tmp_path):
+    expected, _retained, _packages, _distributions = installed
+    root = tmp_path / "reviewed-site"
+    root.mkdir()
+    directory = root / "shared.dist-info"
+    first = _path_distribution(directory, name=expected["wheel"]["distribution"])
+    info = root.stat()
+    monkeypatch.setattr(worker, "_reviewed_package_roots",
+                        lambda _expected: ((root, root, (info.st_dev, info.st_ino)),))
+    def found():
+        yield first
+        (directory / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: unrelated-package\nVersion: 1.0.0\n")
+        yield importlib.metadata.PathDistribution(directory)
+    monkeypatch.setattr(worker.importlib.metadata, "distributions", found)
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
+        worker.inspect_installed_runtime(expected)
+    assert rejected.value.stage == (
+        "INVENTORY_DUPLICATE_PHYSICAL_METADATA_MISMATCH_MAIN_BOTH_IN")
 
 
 def test_closure_verifies_members_not_manifest_hash_only(tmp_path, monkeypatch):

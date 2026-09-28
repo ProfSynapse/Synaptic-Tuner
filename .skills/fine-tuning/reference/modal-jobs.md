@@ -773,9 +773,14 @@ Repeated distribution enumeration may collapse only proven stable physical
 metadata identities with matching normalized name and version. Distinct or
 unproven duplicate names must still reject. Preserve the 4096 raw-occurrence
 bound, unique-inventory cap, and exact final release inventory digest/count;
-never deduplicate by name/version or ignore an extra installation. These closed
-labels preserve the predicates and disclose neither actual values nor exception
-text. Use a fresh ordinary `train --qualify --fresh-attempt` with the same
+never deduplicate by name/version or ignore an extra installation. Duplicate
+diagnostics may classify the first offending pair by fixed reason, authenticated
+main/bootstrap/other role, and whether metadata is inside or outside the pinned
+purelib/platlib roots. Unprovable origins remain unknown; an outside entry alone
+does not prove provider injection. These closed labels preserve rejection and
+disclose no package names, paths, versions, or exception text. Do not narrow the
+parent inventory from this observation without reviewing the execution boundary.
+Use a fresh ordinary `train --qualify --fresh-attempt` with the same
 recipe to measure this boundary on CPU before another GPU smoke; prior
 child-only receipts do not establish the new parent check. Parent admission and
 revalidation may accept a different executable spelling only through the measured
