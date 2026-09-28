@@ -412,4 +412,29 @@ after reviewed worker-closure hash refresh. Both other Modal source locks remain
 CURRENT and skill copies match. Actual Modal 1.5.4 serialization of all 84 fixed
 parent failure documents remained at most 224 bytes. Independent source review
 confirmed the exact-stage trigger, unchanged normal admission, and no receipt
-signing or output commit for any of the six probe outcomes.
+signing or output commit for all six probe outcomes.
+
+CPU attempt `cpu-qual-2d0ee360c4466b02eb1a80c2` on
+`0d7ff127b6033d8080fd5ffc1020e79c02bb3428` returned
+`CALL_PARENT_RUNTIME_AMBIENT_ROOT_MATCH_CHILD_PASS` at
+`2026-09-28T14:45:47.737633`. Exact read-only inspection confirmed the result
+for call `fc-01M3MNCARNZK50RRFPB67VHSBA`, claim
+`qualify-bb9290cb432c9ae58cfa801dcada1cbf717c6f916dba665a0b1fd12e35ec26c4`.
+Both the complete reviewed-root metadata inventory and the strict isolated child
+match the saved release. The diagnostic intentionally issued no success receipt.
+
+Independent review recommends an explicit policy decision before changing parent
+admission. A parent-only reviewed-root inventory check would preserve Python,
+main/bootstrap wheel bytes, provenance, installed members, closure and trainer
+assets, plus the exact release inventory under proved image roots. The child
+would retain full strict ambient inventory in isolated mode. However, the parent
+would stop blanket rejection of outside-root metadata overlays, which could
+supply its model-preparation or provider dependencies. Neither metadata inventory
+nor current installed-wheel checks attest already-loaded module origins. The
+outside copy is not proven unrelated or provider-owned. Obtain explicit operator
+acceptance of that parent trust trade-off, or review a narrow critical-import
+safeguard, before implementing the scope change. No corrective admission code
+has been written; no cloud job is active and no GPU/LoRA success is claimed.
+
+Current disk check: F: has approximately 324 GiB free; WSL root approximately
+231 GiB available. Disk pressure is not the current blocker.
