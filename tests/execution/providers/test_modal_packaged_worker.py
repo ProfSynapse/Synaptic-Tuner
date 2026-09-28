@@ -17,7 +17,7 @@ from tuner.execution.providers.modal.packaged_worker import (
     PACKAGED_WORKER_FAILURE_STAGES,
     packaged_worker_failure,
 )
-from tuner.runtime.packaged_sft_execution import PackagedSFTExecutionError
+from tuner.runtime.packaged_sft_execution import PackagedSFTExecutionError, PREPARATION_FAILURE_STAGES
 
 from tests.execution.providers.test_modal_packaged_dispatch import Auth, _case
 
@@ -372,7 +372,15 @@ def test_failure_stage_contract_is_closed_and_rejects_dynamic_values() -> None:
         "SFT_ADMISSION", "SFT_ADMISSION_CONTRACTS", "SFT_ADMISSION_RELEASE",
         "SFT_ADMISSION_PATHS", "SFT_ADMISSION_INPUT", "SFT_ADMISSION_ENVIRONMENT",
         "SFT_ADMISSION_INVOCATION", "SFT_ADMISSION_COMMITMENT",
-        "SFT_PREPARATION", "SFT_REVALIDATION",
+        "SFT_PREPARATION", "SFT_PREPARATION_MODEL_UNAVAILABLE",
+        "SFT_PREPARATION_MODEL_SDK_ADMISSION", "SFT_PREPARATION_MODEL_INPUT",
+        "SFT_PREPARATION_MODEL_WORKSPACE_SETUP", "SFT_PREPARATION_MODEL_METADATA_FETCH",
+        "SFT_PREPARATION_MODEL_METADATA_VALIDATION", "SFT_PREPARATION_MODEL_DOWNLOAD",
+        "SFT_PREPARATION_MODEL_VERIFICATION", "SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION",
+        "SFT_PREPARATION_MODEL_DESTINATION_COPY",
+        "SFT_PREPARATION_MODEL_DESTINATION_VERIFICATION", "SFT_PREPARATION_CACHE_COMMIT",
+        "SFT_PREPARATION_PATH", "SFT_PREPARATION_SNAPSHOT_INVENTORY",
+        "SFT_REVALIDATION",
         "SFT_INVOCATION", "SFT_TRAINER", "SFT_EVIDENCE", "SFT_ARTIFACT",
         "SFT_UNKNOWN", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
     })
@@ -412,7 +420,7 @@ def test_path_claim_failure_is_closed(tmp_path, monkeypatch) -> None:
     "ADMISSION_INPUT", "ADMISSION_ENVIRONMENT", "ADMISSION_INVOCATION",
     "ADMISSION_COMMITMENT", "PREPARATION", "REVALIDATION", "INVOCATION", "TRAINER",
     "EVIDENCE", "ARTIFACT",
-])
+] + ["PREPARATION_" + stage for stage in sorted(PREPARATION_FAILURE_STAGES)])
 def test_generic_executor_exact_closed_stage_is_reported(tmp_path, sft_stage) -> None:
     class StageExecutor:
         def execute(self, **kwargs):

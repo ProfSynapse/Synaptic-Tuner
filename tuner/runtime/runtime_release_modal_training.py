@@ -42,7 +42,12 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
     from contextlib import ExitStack
 
     from tuner.execution.providers.modal.facade import EXACT_MODAL_SDK_VERSION
-    from tuner.execution.providers.modal.model_snapshot import prepare_model_snapshot
+    from tuner.execution.providers.modal.model_snapshot import (
+        MODEL_SNAPSHOT_PREPARATION_STAGES,
+        ModelSnapshotPreparationError,
+        prepare_model_snapshot,
+    )
+    from tuner.runtime.packaged_sft_execution import PackagedPreparationError
     from tuner.execution.providers.modal.packaged_dispatch import (
         MODAL_PACKAGED_DISPATCH_V2_SCHEMA, parse_modal_packaged_dispatch,
     )
@@ -154,9 +159,18 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
                         destination_root=destination, scratch_root=scratch)
             if bindings is not None:
                 args["persistent_binding"] = bindings["model_cache"]
-            snapshot = prepare_model_snapshot(**args)
+            try:
+                snapshot = prepare_model_snapshot(**args)
+            except ModelSnapshotPreparationError as error:
+                suffix = (error.stage if type(error) is ModelSnapshotPreparationError
+                          and error.stage in MODEL_SNAPSHOT_PREPARATION_STAGES else None)
+                raise PackagedPreparationError("MODEL_" + suffix if suffix is not None
+                                               else "MODEL_UNAVAILABLE") from None
             # Persist verified reusable files before the credential-free child.
-            handles["model_cache"].commit()
+            try:
+                handles["model_cache"].commit()
+            except Exception:
+                raise PackagedPreparationError("CACHE_COMMIT") from None
             return snapshot
 
         worker = ModalPackagedWorker(

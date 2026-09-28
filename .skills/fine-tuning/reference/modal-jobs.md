@@ -883,6 +883,18 @@ not an exception, root cause, successful optimizer step, or retry grant. The
 runner also uses closed post-submit labels for workflow, read binding, call
 observation, outcome, verification, and artifact download; never infer remote
 state from a single label.
+`SFT_PREPARATION` spans model preparation, the model-cache commit, expected
+snapshot location, and initial inventory. If the exact retained call exposes
+only that broad stage, do not infer a Hub, download, filesystem, or commit cause.
+New workers report `SFT_PREPARATION_MODEL_{UNAVAILABLE,SDK_ADMISSION,INPUT,WORKSPACE_SETUP,METADATA_FETCH,METADATA_VALIDATION,DOWNLOAD,VERIFICATION,PERSISTENT_PUBLICATION,DESTINATION_COPY,DESTINATION_VERIFICATION}`
+or `SFT_PREPARATION_{CACHE_COMMIT,PATH,SNAPSHOT_INVENTORY}`. The legacy broad
+stage remains accepted. Use these fixed substages in a fresh reviewed attempt;
+keep SDK text, credential-derived details, model paths, and arbitrary exception
+messages out of diagnostics. A substage identifies an operation, not a cause.
+Preserve consumed attempts and all existing source, model, snapshot,
+cache-publication, and artifact checks. Shared model preparation must remain
+independent of the packaged SFT module so inference does not acquire a new
+training-only dependency through diagnostic exception types.
 For new workers, `SFT_ADMISSION_{CONTRACTS,RELEASE,PATHS,INPUT,ENVIRONMENT,INVOCATION,COMMITMENT}`
 identifies the existing admission subcheck; legacy `SFT_ADMISSION` remains
 accepted. Replay exact retained pure contracts locally before changing a recipe.

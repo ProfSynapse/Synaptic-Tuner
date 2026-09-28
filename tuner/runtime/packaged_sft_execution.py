@@ -39,7 +39,15 @@ _CODES = frozenset({
     "ADMISSION_INPUT", "ADMISSION_ENVIRONMENT", "ADMISSION_INVOCATION",
     "ADMISSION_COMMITMENT", "PREPARATION", "REVALIDATION", "INVOCATION",
     "TRAINER", "EVIDENCE", "ARTIFACT",
-})
+}) | frozenset("PREPARATION_" + stage for stage in (
+    "MODEL_UNAVAILABLE", "MODEL_SDK_ADMISSION", "MODEL_INPUT", "MODEL_WORKSPACE_SETUP",
+    "MODEL_METADATA_FETCH", "MODEL_METADATA_VALIDATION",
+    "MODEL_DOWNLOAD", "MODEL_VERIFICATION", "MODEL_PERSISTENT_PUBLICATION",
+    "MODEL_DESTINATION_COPY", "MODEL_DESTINATION_VERIFICATION",
+    "CACHE_COMMIT", "PATH", "SNAPSHOT_INVENTORY",
+))
+PREPARATION_FAILURE_STAGES = frozenset(stage.removeprefix("PREPARATION_") for stage in _CODES
+                                        if stage.startswith("PREPARATION_"))
 _TOKEN = object()
 _MAX_MODEL_MEMBER_BYTES = 32 * 1024 * 1024 * 1024
 _MAX_MODEL_BYTES = 512 * 1024 * 1024 * 1024
@@ -64,6 +72,16 @@ class PackagedSFTExecutionError(RuntimeError):
             stage = "ADMISSION"
         self.stage = stage
         super().__init__("PACKAGED_SFT_" + stage + "_REJECTED")
+
+
+class PackagedPreparationError(ValueError):
+    """Closed preparation substage shared by the model preparer and executor."""
+
+    def __init__(self, stage: str):
+        if type(stage) is not str or stage not in PREPARATION_FAILURE_STAGES:
+            raise ValueError("invalid preparation stage")
+        self.stage = stage
+        super().__init__("model preparation failed")
 
 
 class PackagedModelPreparer(Protocol):
@@ -932,11 +950,18 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
         for directory in admitted._directories:
             directory.check()
         _input(admitted.paths, admitted.execution)
-        stage = "PREPARATION"
+        stage = "PREPARATION_MODEL_UNAVAILABLE"
         model = compiled.document["configuration"]["document"]["model"]
-        snapshot = model_preparer(dict(model), admitted.paths.cache)
+        try:
+            snapshot = model_preparer(dict(model), admitted.paths.cache)
+        except PackagedPreparationError as error:
+            if type(error) is PackagedPreparationError and error.stage in PREPARATION_FAILURE_STAGES:
+                stage = "PREPARATION_" + error.stage
+            raise
+        stage = "PREPARATION_PATH"
         if snapshot != core._model_snapshot_path(model, admitted.paths.cache):
             raise ValueError
+        stage = "PREPARATION_SNAPSHOT_INVENTORY"
         snapshots, inventory = _snapshot_inventory(snapshot, admitted.paths.cache)
         stage = "REVALIDATION"
         for directory in (*admitted._directories, *snapshots):

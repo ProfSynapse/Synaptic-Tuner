@@ -21,7 +21,9 @@ from tuner.training.modal_host_effects import (
 )
 from tuner.execution.providers.modal.packaged_dispatch import ModalPackagedVolumeMarker
 from tuner.execution.providers.modal.bounded_volume_read import BoundedVolumeReadError
-from tuner.execution.providers.modal.packaged_worker import PACKAGED_WORKER_FAILURE_STAGES
+from tuner.execution.providers.modal.packaged_worker import (
+    PACKAGED_WORKER_FAILURE_STAGES, packaged_worker_failure,
+)
 from tuner.training.modal_host_reader import _FIXED_WORKER_FAILURE_STAGES
 
 from tests.execution.providers.test_modal_packaged_binding import _binding
@@ -38,6 +40,13 @@ _CALL = "fc-packaged-call"
 def test_worker_failure_stage_allowlists_agree_across_all_readers():
     assert PACKAGED_WORKER_FAILURE_STAGES == _FIXED_WORKER_FAILURE_STAGES
     assert PACKAGED_WORKER_FAILURE_STAGES == frozenset(diagnostic._WORKER_FAILURE_STAGES)
+
+
+def test_fixed_worker_failure_results_fit_pinned_modal_serializer():
+    serialize = pytest.importorskip("modal._serialization").serialize
+    sizes = [len(serialize(packaged_worker_failure(stage)))
+             for stage in PACKAGED_WORKER_FAILURE_STAGES]
+    assert max(sizes) <= diagnostic._MAX_FIXED_RESULT
 
 
 def _journal(tmp_path, *, binding=None, claim_override=None, call_override=None,

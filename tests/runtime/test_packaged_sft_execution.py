@@ -234,8 +234,28 @@ def test_raw_exception_details_are_suppressed(material):
         raise RuntimeError("secret-token-and-private-path")
     with pytest.raises(seam.PackagedSFTExecutionError) as caught:
         seam.execute_admitted_packaged_sft(admitted, model_preparer=fail)
+    assert caught.value.stage == "PREPARATION_MODEL_UNAVAILABLE"
     assert caught.value.__suppress_context__
     assert "secret" not in str(caught.value)
+
+
+@pytest.mark.parametrize("inner", sorted(seam.PREPARATION_FAILURE_STAGES))
+def test_closed_model_preparation_stage_projects_without_details(material, inner):
+    admitted = seam.admit_packaged_sft(**material)
+    def fail(*_args):
+        raise seam.PackagedPreparationError(inner) from RuntimeError("PRIVATE_SENTINEL")
+    with pytest.raises(seam.PackagedSFTExecutionError) as caught:
+        seam.execute_admitted_packaged_sft(admitted, model_preparer=fail)
+    assert caught.value.stage == "PREPARATION_" + inner
+    assert "PRIVATE_SENTINEL" not in str(caught.value)
+
+
+def test_prepared_snapshot_path_mismatch_is_closed(material):
+    admitted = seam.admit_packaged_sft(**material)
+    with pytest.raises(seam.PackagedSFTExecutionError) as caught:
+        seam.execute_admitted_packaged_sft(
+            admitted, model_preparer=lambda _model, cache: cache / "other")
+    assert caught.value.stage == "PREPARATION_PATH"
 
 
 @pytest.mark.parametrize("target", ["projection", "argv", "environment", "extra_field", "extra_role"])
@@ -306,7 +326,7 @@ def test_snapshot_hardlink_rejected(material):
         snapshot = prepare(model, cache)
         os.link(snapshot / "config.json", snapshot / "linked.json")
         return snapshot
-    with pytest.raises(seam.PackagedSFTExecutionError, match="PREPARATION"):
+    with pytest.raises(seam.PackagedSFTExecutionError, match="PREPARATION_SNAPSHOT_INVENTORY"):
         seam.execute_admitted_packaged_sft(admitted, model_preparer=hardlink)
 
 

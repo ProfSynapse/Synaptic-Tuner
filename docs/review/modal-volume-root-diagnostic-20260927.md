@@ -456,4 +456,49 @@ expanded pinned-launcher run was 721 passed / 4 failed solely at its known
 missing `os.memfd_create`; no production workaround or interpreter pin change
 was made. Independent review approved the frozen change. The fixed five-member
 closure was hash-refreshed; both other Modal locks remain CURRENT and canonical
-skills match their synced copies. A fresh exact-source CPU qualification is next.
+skills match their synced copies. The resulting pushed source is
+`07ae159a77b65b3a1cf3a24d8f420efe0e82af66`.
+
+CPU attempt `cpu-qual-8fc201ecf8edfae5a34350b5` succeeded at
+`2026-09-28T15:15:52.705483`. This is an actual signed CPU qualification,
+not the earlier diagnostic-only root/child probe. The runtime release digest is
+`d2aaa0adf764129dc06d94c48de7995aad814c88c334f3070856947d80e7e4b1`;
+qualification output SHA-256 is
+`3d426c9ee3c4925d4e88905911531c417e016a18ab89d0a672229387cc2399fc`.
+It does not establish GPU execution or saved adapters.
+
+Fresh L40S attempt `modal-13bf59329010166ee092513c` stopped at
+`RUN_WORKER_SFT_PREPARATION` at `2026-09-28T15:21:10.516836`.
+The authenticated exact-call inspector confirmed `WORKER_SFT_PREPARATION`
+for call `fc-01M3MQBKGA17WZ65YYW499MRQ0`, submit claim
+`5d06f4be0793807f2a51af72f7729b8ab0b97956fef2c441a7c6fe80cb4828a9`.
+This passed the prior runtime boundary but does not establish successful model
+download, cache commit, optimizer steps, or durable LoRA artifacts. The attempt
+is consumed and will not be replayed.
+
+Independent read-only diagnosis found that this closed stage combines Hub API
+admission, pinned metadata, private download/verification, persistent cache
+publication, cache commit, exact snapshot path, and initial snapshot inventory.
+Existing retained records and inspectors do not distinguish these operations;
+the model preparer deliberately suppresses raw SDK output and exceptions.
+The next targeted experiment adds only finite non-secret substages across these
+boundaries, with regression tests and independent review before a fresh run.
+No underlying cause is inferred from the broad failure phase alone.
+
+The preparation diagnostic patch preserves the model-preparation predicates,
+cache/artifact/control commit order, credential handling, and one-shot claims.
+Shared model preparation owns its finite exception locally; only the packaged
+Modal wrapper translates it, avoiding a new training dependency in inference.
+Independent source review approved the change. Worker, host and exact-call
+inspector allowlists agree on all 49 fixed stages; actual pinned Modal 1.5.4
+serialization measured at most 277 bytes against the unchanged 512-byte bound.
+Existing inventories remain fixed: worker closure five members, Modal runtime
+98 members, inference 119 members. Only reviewed source hashes were refreshed.
+The root regression gate passed 980/980 on pinned CPython 3.11.14; generic worker
+and isolated-child tests passed 64/64 on the existing memfd-capable WSL Python.
+The additional wrapper-translation gate passed 22/22 on pinned CPython 3.11.14,
+including exact model-stage translation, subclass fallback, cache-commit failure,
+no artifact/control commit after preparation failure, and unchanged success
+ordering. All source commitments remain CURRENT. Independent final review
+approved a diagnostic commit and fresh CPU/GPU attempt, not a cause or training
+success. The journal and roadmap retain the failed attempt without replay.

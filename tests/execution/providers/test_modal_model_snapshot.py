@@ -7,7 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from tuner.execution.providers.modal.model_snapshot import prepare_model_snapshot
+from tuner.execution.providers.modal import model_snapshot
+from tuner.execution.providers.modal.model_snapshot import (
+    ModelSnapshotPreparationError, prepare_model_snapshot,
+)
 from tuner.project.execution_source import ExecutionSourceV1
 from tests.training.test_training_service import _execution_source
 
@@ -111,10 +114,8 @@ def fixture(tmp_path, monkeypatch):
 
 def prepare(fixture, **overrides):
     return prepare_model_snapshot(
-        model_ref=MODEL,
-        revision=REVISION,
-        token="fixture-credential",
-        **(fixture.roots | overrides),
+        **({"model_ref": MODEL, "revision": REVISION, "token": "fixture-credential"}
+           | fixture.roots | overrides),
     )
 
 
@@ -138,6 +139,42 @@ class _BoundCache:
         with destination.open("xb") as output:
             output.write(content)
         self.published.append((relative_path, expected_sha256))
+
+
+@pytest.mark.parametrize("stage", sorted(model_snapshot.MODEL_SNAPSHOT_PREPARATION_STAGES))
+def test_model_preparation_stages_are_fixed_and_private(fixture, monkeypatch, tmp_path, stage):
+    kwargs = {}
+    if stage == "SDK_ADMISSION":
+        monkeypatch.setattr(model_snapshot, "_bind_hub_api", lambda *_: (_ for _ in ()).throw(RuntimeError("PRIVATE_SENTINEL")))
+    elif stage == "INPUT":
+        kwargs["model_ref"] = "invalid/three/parts"
+    elif stage == "WORKSPACE_SETUP":
+        kwargs["destination_root"] = tmp_path / "absent"
+    elif stage == "METADATA_FETCH":
+        monkeypatch.setattr(sys.modules["huggingface_hub"].HfApi, "model_info",
+                            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("PRIVATE_SENTINEL")))
+    elif stage == "METADATA_VALIDATION":
+        fixture.info.sha = "b" * 40
+    elif stage == "DOWNLOAD":
+        monkeypatch.setattr(sys.modules["huggingface_hub"], "snapshot_download",
+                            lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("PRIVATE_SENTINEL")))
+    elif stage == "VERIFICATION":
+        fixture.info.siblings[0].blob_id = "b" * 40
+    elif stage == "PERSISTENT_PUBLICATION":
+        kwargs["persistent_binding"] = _BoundCache(tmp_path / "absent-cache")
+    else:
+        original = model_snapshot.copy_regular
+        def reject_at_boundary(source_root, source, destination_root, destination, **options):
+            if ((stage == "DESTINATION_COPY" and destination_root == fixture.roots["destination_root"])
+                    or (stage == "DESTINATION_VERIFICATION" and destination_root.name == "verification")):
+                raise RuntimeError("PRIVATE_SENTINEL")
+            return original(source_root, source, destination_root, destination, **options)
+        monkeypatch.setattr(model_snapshot, "copy_regular", reject_at_boundary)
+    with pytest.raises(ModelSnapshotPreparationError) as caught:
+        prepare(fixture, **kwargs)
+    assert caught.value.stage == stage
+    assert str(caught.value) == "model preparation failed"
+    assert caught.value.__cause__ is None
 
 
 def test_bound_cache_publishes_every_verified_member_from_private_scratch(

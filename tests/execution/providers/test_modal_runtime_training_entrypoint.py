@@ -153,7 +153,13 @@ def test_training_callable_has_exact_installed_global_identity() -> None:
     ) is entrypoint.run_modal_packaged_training
 
 
-def test_remote_entrypoint_binds_image_volumes_and_model_cache_before_worker(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("failure,stage", (
+    (None, None), ("model", "MODEL_METADATA_FETCH"),
+    ("model_subclass", "MODEL_UNAVAILABLE"), ("commit", "CACHE_COMMIT"),
+))
+def test_remote_entrypoint_binds_image_volumes_and_model_cache_before_worker(
+    monkeypatch, tmp_path: Path, failure, stage,
+) -> None:
     from tuner.execution.providers.modal import model_snapshot, packaged_dispatch, packaged_worker
     from tuner.execution.providers.modal.runtime_release_qualification import QUALIFICATION_HMAC_ENV_KEY
 
@@ -198,6 +204,8 @@ def test_remote_entrypoint_binds_image_volumes_and_model_cache_before_worker(mon
 
         def commit(self):
             events.append("commit:" + self.object_id)
+            if failure == "commit" and self.object_id == "vo-cache":
+                raise RuntimeError("PRIVATE_SENTINEL")
 
     client_value = client
 
@@ -223,6 +231,12 @@ def test_remote_entrypoint_binds_image_volumes_and_model_cache_before_worker(mon
         assert kwargs["token"] == "test-token-not-logged"
         assert kwargs["persistent_root"] == model_cache
         assert kwargs["scratch_root"].is_relative_to(private)
+        if failure == "model":
+            raise model_snapshot.ModelSnapshotPreparationError("METADATA_FETCH")
+        if failure == "model_subclass":
+            class Unsupported(model_snapshot.ModelSnapshotPreparationError):
+                pass
+            raise Unsupported("METADATA_FETCH")
         return kwargs["destination_root"]
 
     monkeypatch.setattr(model_snapshot, "prepare_model_snapshot", prepare_model_snapshot)
@@ -236,6 +250,14 @@ def test_remote_entrypoint_binds_image_volumes_and_model_cache_before_worker(mon
 
         def __call__(self, payload, call_id, *, commit_artifacts, commit_control):
             assert payload == b"signed-dispatch" and call_id == "fc-test"
+            if failure is not None:
+                from tuner.runtime.packaged_sft_execution import PackagedPreparationError
+                with pytest.raises(PackagedPreparationError) as caught:
+                    self.executor._model_preparer(
+                        {"ref": "Qwen/Qwen3.5-4B", "revision": "1" * 40}, model_cache / "run")
+                assert caught.value.stage == stage
+                assert "PRIVATE_SENTINEL" not in str(caught.value)
+                return packaged_worker_failure("SFT_PREPARATION_" + stage)
             self.executor._model_preparer({"ref": "Qwen/Qwen3.5-4B", "revision": "1" * 40}, model_cache / "run")
             commit_artifacts()
             commit_control()
@@ -244,9 +266,14 @@ def test_remote_entrypoint_binds_image_volumes_and_model_cache_before_worker(mon
 
     monkeypatch.setattr(packaged_worker, "ModalPackagedWorker", Worker)
     result = entrypoint._run_with_modal(b"signed-dispatch", sdk=SDK)
-    assert result["status_code"] == "completed"
-    assert events == ["client", "volume:vo-control", "volume:vo-artifacts", "volume:vo-cache", "model",
-                      "commit:vo-cache", "commit:vo-artifacts", "commit:vo-control"]
+    if failure is None:
+        assert result["status_code"] == "completed"
+        assert events == ["client", "volume:vo-control", "volume:vo-artifacts", "volume:vo-cache", "model",
+                          "commit:vo-cache", "commit:vo-artifacts", "commit:vo-control"]
+    else:
+        assert result == packaged_worker_failure("SFT_PREPARATION_" + stage)
+        assert events == (["client", "volume:vo-control", "volume:vo-artifacts", "volume:vo-cache", "model"]
+                          + (["commit:vo-cache"] if failure == "commit" else []))
 
 
 def test_image_substitution_fails_before_client_or_storage(monkeypatch) -> None:

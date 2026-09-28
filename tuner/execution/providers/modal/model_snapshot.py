@@ -19,6 +19,22 @@ import unicodedata
 
 from .mounted_io import copy_regular
 
+MODEL_SNAPSHOT_PREPARATION_STAGES = frozenset({
+    "SDK_ADMISSION", "INPUT", "WORKSPACE_SETUP", "METADATA_FETCH",
+    "METADATA_VALIDATION", "DOWNLOAD", "VERIFICATION",
+    "PERSISTENT_PUBLICATION", "DESTINATION_COPY", "DESTINATION_VERIFICATION",
+})
+
+
+class ModelSnapshotPreparationError(ValueError):
+    """Fixed model-preparation predicate without SDK or filesystem details."""
+
+    def __init__(self, stage: str):
+        if type(stage) is not str or stage not in MODEL_SNAPSHOT_PREPARATION_STAGES:
+            raise ValueError("invalid model snapshot preparation stage")
+        self.stage = stage
+        super().__init__("model preparation failed")
+
 
 class PersistentSnapshotPublisher(Protocol):
     """Create-only publication port; the model preparer need not know its backend."""
@@ -111,6 +127,7 @@ def prepare_model_snapshot(
     its retained binding owns publication. Credentials are used only by SDK
     calls and no SDK output or exception text leaves this boundary.
     """
+    stage = ["SDK_ADMISSION"]
     try:
         # Suppress output without accumulating SDK diagnostics in memory.
         with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
@@ -118,16 +135,18 @@ def prepare_model_snapshot(
                 model_ref=model_ref, revision=revision, token=token,
                 persistent_root=persistent_root, destination_root=destination_root,
                 scratch_root=scratch_root, persistent_binding=persistent_binding,
+                stage=stage,
             )
     except Exception:
-        raise ValueError("model preparation failed") from None
+        raise ModelSnapshotPreparationError(stage[0]) from None
 
 
 def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
-             scratch_root, persistent_binding):
+             scratch_root, persistent_binding, stage):
     from huggingface_hub import HfApi, snapshot_download
     _bind_hub_api(HfApi, snapshot_download)
 
+    stage[0] = "INPUT"
     parts = model_ref.split("/")
     if len(parts) not in (1, 2) or any(
         re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", part) is None
@@ -135,14 +154,17 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
         for part in parts
     ) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise ValueError("model identity is not pinned")
+    stage[0] = "WORKSPACE_SETUP"
     for root in (destination_root, scratch_root):
         _directory(root)
     if persistent_binding is None:
         _directory(persistent_root)
     credential = token if isinstance(token, str) and token.strip() else False
+    stage[0] = "METADATA_FETCH"
     info = HfApi(endpoint=_ENDPOINT, token=credential).model_info(
         model_ref, revision=revision, files_metadata=True, token=credential,
     )
+    stage[0] = "METADATA_VALIDATION"
     if info.sha != revision or not info.siblings or len(info.siblings) > _MAX_FILES:
         raise ValueError("model metadata is not exact")
     members = {}
@@ -175,6 +197,7 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
             raise ValueError("model metadata digest is missing")
         members[name] = (size, kind, expected)
 
+    stage[0] = "WORKSPACE_SETUP"
     relative = Path("models--" + "--".join(parts)) / "snapshots" / revision
     destination = destination_root / "model" / relative
     if destination.exists() or destination.is_symlink():
@@ -184,6 +207,7 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
         repository = private / "repository"
         repository.mkdir()
         missing = []
+        stage[0] = "VERIFICATION"
         for name, (size, kind, expected) in members.items():
             if persistent_binding is None:
                 cached = relative / name
@@ -193,6 +217,7 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
                     continue
             missing.append(name)
         if missing:
+            stage[0] = "DOWNLOAD"
             result = snapshot_download(
                 repo_id=model_ref, revision=revision, token=credential,
                 endpoint=_ENDPOINT, local_dir=repository,
@@ -202,10 +227,12 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
             if Path(result) != repository:
                 raise ValueError("SDK snapshot location differs")
         content_hashes = {}
+        stage[0] = "VERIFICATION"
         for name, (size, kind, expected) in members.items():
             _directory((repository / name).parent)
             content_hashes[name] = _verify(repository / name, size, kind, expected)
         if persistent_binding is not None:
+            stage[0] = "PERSISTENT_PUBLICATION"
             # A fresh cache Volume is create-only. Every pinned member is
             # verified privately before descriptor-root publication, including
             # small Git blob members whose upstream identity uses SHA-1.
@@ -218,6 +245,7 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
             for directory in sorted(directories, key=lambda path: (path.count("/"), path)):
                 persistent_binding.claim_directory(directory)
         for name, (size, kind, expected) in members.items():
+            stage[0] = "PERSISTENT_PUBLICATION"
             if persistent_binding is not None:
                 persistent_binding.copy_in_exclusive(
                     (relative / name).as_posix(), str(repository / name),
@@ -235,10 +263,12 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
                     check.mkdir(exist_ok=True)
                     copy_regular(persistent_root, persistent_root / relative / name, check, check / name, maximum=size)
                     _verify(check / name, size, kind, expected)
+            stage[0] = "DESTINATION_COPY"
             copy_regular(repository, repository / name, destination_root, destination / name, maximum=size)
         # Re-read the shared destination through retained descriptors. Never
         # hash a Volume file by opening a path that can redirect mid-read.
         verification = private / "verification"
+        stage[0] = "DESTINATION_VERIFICATION"
         verification.mkdir()
         for name, (size, kind, expected) in members.items():
             copy_regular(destination_root, destination / name, verification, verification / name, maximum=size)
