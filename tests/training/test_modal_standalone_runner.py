@@ -6,10 +6,11 @@ from argparse import Namespace
 from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import json
 import os
 import sys
+import asyncio
 
 import pytest
 
@@ -148,8 +149,8 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
 
     class _Volume:
         ids = {"control": "vo-control", "artifacts": "vo-artifacts", "cache": "vo-cache"}
-        committed = {}
-        commits = []
+        published = {}
+        publications = []
         readbacks = []
 
         def __init__(self, volume_id):
@@ -178,6 +179,14 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
                     return self
 
                 def __exit__(self, exc_type, exc, tb):
+                    if exc_type is None:
+                        assert len(volume.pending) == 1
+                        for path, value in volume.pending.items():
+                            key = (volume.object_id, path)
+                            assert key not in _Volume.published
+                            _Volume.published[key] = value
+                            _Volume.publications.append(key)
+                        volume.pending.clear()
                     return False
 
                 def put_file(self, source, path):
@@ -187,13 +196,7 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
             return _Batch()
 
         def commit(self):
-            assert len(self.pending) == 1
-            for path, value in self.pending.items():
-                key = (self.object_id, path)
-                assert key not in self.committed
-                self.committed[key] = value
-                self.commits.append(key)
-            self.pending.clear()
+            pytest.fail("host commit is redundant")
 
     modal_client = client
 
@@ -202,7 +205,7 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
         assert path.startswith(".synaptic-volume-marker-")
         assert expected_size == max_bytes == 32
         key = (volume_id, path)
-        value = _Volume.committed[key]
+        value = _Volume.published[key]
         assert sha256(value).hexdigest() == expected_sha256
         _Volume.readbacks.append(key)
         return value
@@ -226,7 +229,19 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
         Function = _Function
         Volume = _Volume
 
+    def init_fake_reader(_reader, *, sdk, client, http_session_factory=None):
+        assert sdk is _SDK and client is modal_client
+        assert http_session_factory is None
+
+    monkeypatch.setattr(BoundedModalVolumeReader, "__init__", init_fake_reader)
+
     monkeypatch.setitem(sys.modules, "modal", _SDK)
+    async_utils = ModuleType("modal._utils.async_utils")
+    async_utils.synchronizer = SimpleNamespace(
+        create_blocking=lambda operation: lambda **kwargs: asyncio.run(operation(**kwargs)),
+    )
+    monkeypatch.setitem(sys.modules, "modal._utils", ModuleType("modal._utils"))
+    monkeypatch.setitem(sys.modules, "modal._utils.async_utils", async_utils)
     monkeypatch.setattr(runner, "open_modal_host_scope", lambda **kw: (client, facts.client_binding))
     monkeypatch.setattr(runner, "observe_modal_host_scope", lambda **kw: (
         facts.account_ref, facts.workspace_ref, facts.environment_ref, facts.client_ref,
@@ -318,12 +333,12 @@ def test_cli_v2_fake_transcript_prepares_submits_verifies_and_downloads(tmp_path
     assert all(Path(path).read_bytes() == b"data" for path in payload["data"]["verified_artifacts"])
     assert events == ["bootstrap", "cpu", "stage", "spawn"]
     volume = sys.modules["modal"].Volume
-    assert len(volume.commits) == 3
-    assert volume.readbacks == volume.commits
-    assert {volume_id for volume_id, _ in volume.commits} == {
+    assert len(volume.publications) == 3
+    assert volume.readbacks == volume.publications
+    assert {volume_id for volume_id, _ in volume.publications} == {
         "vo-control", "vo-artifacts", "vo-cache",
     }
-    assert all(len(value) == 32 for value in volume.committed.values())
+    assert all(len(value) == 32 for value in volume.published.values())
 
 
 def test_cli_v2_marker_readback_mismatch_keeps_submit_claim_without_spawning(
@@ -342,33 +357,9 @@ def test_cli_v2_marker_readback_mismatch_keeps_submit_claim_without_spawning(
     assert caught.value.phase == "RUN_SUBMIT_RECONCILE_REQUIRED"
     assert caught.value.retry_authorized is False
     assert events == ["bootstrap", "cpu", "stage"]
-    assert len(sys.modules["modal"].Volume.commits) == 1
     volume = sys.modules["modal"].Volume
-    assert len(volume.commits) == 3
-    assert volume.readbacks == volume.commits
-    assert {volume_id for volume_id, _ in volume.commits} == {
-        "vo-control", "vo-artifacts", "vo-cache",
-    }
-    assert all(len(value) == 32 for value in volume.committed.values())
-
-
-def test_cli_v2_marker_readback_mismatch_keeps_submit_claim_without_spawning(
-        tmp_path, monkeypatch):
-    plan, context, events = _setup(tmp_path, monkeypatch)
-
-    async def wrong_readback(_reader, **_kwargs):
-        return b"x" * 32
-
-    monkeypatch.setattr(BoundedModalVolumeReader, "read_exact", wrong_readback)
-    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
-        runner.run_modal_standalone_job(
-            plan=plan, context=context, modal_profile="explicit",
-            modal_environment="main",
-        )
-    assert caught.value.phase == "RUN_SUBMIT_RECONCILE_REQUIRED"
-    assert caught.value.retry_authorized is False
-    assert events == ["bootstrap", "cpu", "stage"]
-    assert len(sys.modules["modal"].Volume.commits) == 1
+    assert len(volume.publications) == 1
+    assert len(volume.published) == 1
 
 
 def test_cli_v2_failed_returned_job_is_closed_without_artifact_publication(tmp_path, monkeypatch, capsys):

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import sys
 from dataclasses import replace
 from io import BytesIO
 from hashlib import sha256
+from types import ModuleType, SimpleNamespace
 
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from synaptic_tuner.api.v1.runs_facade import RunArtifactRequest
@@ -205,7 +208,16 @@ def test_public_training_api_stages_and_submits_once_with_fake_modal(tmp_path, m
         "control-name": FakeVolume(effects_binding.provider_facts.control_volume_id),
         "artifact-name": FakeVolume(effects_binding.provider_facts.artifact_volume_id),
     }
-    monkeypatch.setattr(FakeVolume, "commit", lambda self: None, raising=False)
+    def unexpected_commit(_volume):
+        raise AssertionError("host commit is redundant")
+    monkeypatch.setattr(FakeVolume, "commit", unexpected_commit, raising=False)
+    async_utils = ModuleType("modal._utils.async_utils")
+    async_utils.synchronizer = SimpleNamespace(
+        create_blocking=lambda operation: lambda **kwargs: asyncio.run(operation(**kwargs)),
+    )
+    monkeypatch.setitem(sys.modules, "modal", ModuleType("modal"))
+    monkeypatch.setitem(sys.modules, "modal._utils", ModuleType("modal._utils"))
+    monkeypatch.setitem(sys.modules, "modal._utils.async_utils", async_utils)
     class ExactReader:
         def __init__(self, *, sdk, client):
             assert sdk is arguments["sdk"] and client is arguments["client"]

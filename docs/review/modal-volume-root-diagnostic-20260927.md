@@ -63,9 +63,69 @@ an attempted pathname inspection of the provider symlink in bound mode.
 The combined provider-free release and security suite now passes 345 Linux
 tests, and both lock checks are current after the final model-source change.
 
-This is still not GPU authority. The exact source wheel has not been built and
-CPU-qualified, and no optimizer step or LoRA artifact has been verified.
+At that checkpoint the exact source wheel had not yet been built and
+CPU-qualified. No optimizer step or LoRA artifact had been verified.
 Partial failed create-only writes remain as collision evidence. A floating
 named Function can also be replaced by an external administrator between
 reobservation and spawn; this existing provider
 race is outside the caller's guarantee.
+
+## Exact-source CPU pass and host submit diagnosis
+
+Commit `dc92d41cf67945b1b7b7623c14981bd630937f14` subsequently passed exact-wheel
+CPU qualification and was pushed on the existing branch. That receipt proved
+package/runtime admission, not GPU execution or a saved adapter. A fresh source
+attempt stopped at `SOURCE_WHEEL`; variable WSL Git-status latency was observed,
+but no retained exception establishes a timeout as its cause.
+
+The next fresh attempt, `modal-97004f9fded403570b1a7ac2`, passed source preparation,
+CPU qualification, and input staging, then returned `RUN_SUBMIT_RECONCILE_REQUIRED`.
+Its private journal retains the submit claim, binding, and marker material but
+no call-catalog row. The deployment reported zero current tasks when inspected;
+neither observation proves that a call was never spawned. The claim remains
+consumed and is not replayable.
+
+Inspection of pinned Modal 1.5.4 source and the
+[official Volume guide](https://modal.com/docs/guide/volumes) found two host-side
+contract mismatches. Exiting `batch_upload(force=False)` sends `VolumePutFiles`
+with overwrite disabled; the extra `commit()` is documented for mounted
+container filesystem changes, not host batch uploads. Separately, raw marker
+readback used `asyncio.run` despite the client's channel belonging to Modal's
+synchronizer loop. A network-free pinned-dependency reproduction raised the
+cross-loop Future error. The existing successful marker inspector already used
+`synchronizer.create_blocking`. These establish a redundant operation and an
+event-loop defect, but do not establish the exact historical failing call.
+
+The existing packaged-call inspector now has a read-only `--inspect-markers`
+mode. It authenticates the exact private claim, binding, and marker catalog
+before bounded exact-ID reads; 59 focused POSIX tests passed. Against the failed
+attempt it returned control `MATCH`, artifacts `UNAVAILABLE`, and model-cache
+`UNAVAILABLE`. Thus the first marker upload succeeded. The latter two results
+are inconclusive, not proof of absence. No Volume write, commit, spawn, or
+attempt replay occurred during this diagnostic.
+
+The corrective candidate removes the redundant host commit and bridges raw
+reads onto Modal's loop. Provider test doubles must publish at batch-context
+exit rather than requiring the same extra commit as production. Independent
+review, provider-free tests, exact-source CPU qualification, and a fresh bounded
+GPU attempt remain necessary; the failed claim and its partial effects stay
+untouched.
+
+## September 28 validation after storage recovery
+
+The final provider-free validation passed 592 tests: 185 adjacent packaged
+provider/worker tests and 407 combined host, standalone CLI, inspector, and
+transport tests. The standalone fake reader avoids importing optional HTTP
+dependencies from the test interpreter when its read method is replaced; it
+still verifies publication order, exact bytes/digests, and no spawn on mismatch.
+The host-composition fake now supplies the SDK loop bridge. Duplicate shadowed
+test definitions were removed, and host `commit()` is an explicit test failure.
+A separate network-free probe under CPython 3.11.14 and Modal 1.5.4 successfully
+bridged an asynchronous operation from a worker thread through the real SDK
+synchronizer. This tests the loop bridge, not live Volume behavior.
+
+Both runtime lock checks remain CURRENT without changing locked pins or remote
+source. Canonical skill copies are synchronized. The recipe plan still resolves
+all 220 rows (181 train, 39 validation), the same model revision and runtime
+profile, one L40S, and two optimizer steps. The live read-only L40S rate remains
+USD 1.95/hour. No new CPU or GPU call is claimed by these local checks.

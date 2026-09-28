@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
+import logging
 from io import BytesIO
 from queue import Empty, Queue
 from threading import Thread
@@ -35,6 +35,9 @@ from .packaged_staging import (
     ModalPackagedStageMaterial,
     ModalPackagedStageReceipt,
 )
+
+
+_LOG = logging.getLogger(__name__)
 
 
 class ModalPackagedStageSource(Protocol):
@@ -149,22 +152,37 @@ class ModalPackagedHostTransport:
         for item in materials:
             marker = item.commitment
 
-            def upload_and_commit() -> None:
+            def upload() -> None:
                 volume = self._facade._volume(marker.volume_id)
                 with volume.batch_upload(force=False) as batch:
                     batch.put_file(BytesIO(item.value), marker.marker_name)
-                volume.commit()
 
             # The consumed submit claim is never replayed, including if this
             # provider operation completes after its local deadline.
-            _bounded_provider_call(upload_and_commit, timeout_seconds=60.0)
-            readback = asyncio.run(reader.read_exact(
-                volume_id=marker.volume_id, path=marker.marker_name,
-                expected_size=32, expected_sha256=marker.value_sha256,
-                max_bytes=32,
-            ))
-            if readback != item.value or hashlib.sha256(readback).hexdigest() != marker.value_sha256:
-                raise ValueError("packaged marker readback mismatch")
+            try:
+                _bounded_provider_call(upload, timeout_seconds=60.0)
+            except Exception:
+                _LOG.warning("modal packaged submit indeterminate at marker_upload")
+                raise
+
+            def read_on_sdk_loop() -> bytes:
+                # The explicit client's raw stub belongs to Modal's event loop.
+                from modal._utils.async_utils import synchronizer
+
+                return synchronizer.create_blocking(reader.read_exact)(
+                    volume_id=marker.volume_id, path=marker.marker_name,
+                    expected_size=32, expected_sha256=marker.value_sha256,
+                    max_bytes=32,
+                )
+
+            try:
+                readback = _bounded_provider_call(read_on_sdk_loop, timeout_seconds=60.0)
+                if (readback != item.value
+                        or hashlib.sha256(readback).hexdigest() != marker.value_sha256):
+                    raise ValueError("packaged marker readback mismatch")
+            except Exception:
+                _LOG.warning("modal packaged submit indeterminate at marker_readback")
+                raise
 
     def _spawn_id(self, facts: object, payload: bytes) -> str:
         def provider_operation() -> str:
@@ -270,12 +288,17 @@ class ModalPackagedHostTransport:
                 raise ValueError("packaged marker dispatch required")
             facts = rebuilt.provider_facts
             try:
+                failure_stage = None
                 self._upload_markers(command.digest, dispatch)
+                failure_stage = "spawn"
                 provider_ref = self._spawn_id(facts, payload)
+                failure_stage = "catalog"
                 self._calls.publish_if_absent(command.digest, provider_ref)
                 if self._calls.resolve(command.digest) != provider_ref:
                     raise ValueError
             except Exception:
+                if failure_stage is not None:
+                    _LOG.warning("modal packaged submit indeterminate at %s", failure_stage)
                 return ModalEffectOutcome(ObservationDisposition.INDETERMINATE)
             return ModalEffectOutcome(ObservationDisposition.FOUND, provider_ref)
         if type(command) is CancelCommandV2:

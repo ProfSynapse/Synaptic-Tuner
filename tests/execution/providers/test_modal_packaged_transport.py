@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import sys
+from threading import Thread
+from types import ModuleType, SimpleNamespace
 import pytest
 from hashlib import sha256
 
@@ -85,14 +89,29 @@ def _transport(monkeypatch):
     }
     if facts.model_cache_volume_id is not None:
         FakeVolume.registry["cache-name"] = FakeVolume(facts.model_cache_volume_id)
-    committed = []
-    monkeypatch.setattr(FakeVolume, "commit", lambda self: committed.append(self.object_id), raising=False)
+    published = []
+    from tests.execution.providers.test_modal_sdk154_adapter import Upload
+    original_exit = Upload.__exit__
+    def publish(self, exc_type, exc, tb):
+        result = original_exit(self, exc_type, exc, tb)
+        if exc_type is None:
+            published.append(self.volume.object_id)
+        return result
+    monkeypatch.setattr(Upload, "__exit__", publish)
+    monkeypatch.setattr(FakeVolume, "commit", lambda self: pytest.fail("host commit is redundant"), raising=False)
+    async_utils = ModuleType("modal._utils.async_utils")
+    async_utils.synchronizer = SimpleNamespace(
+        create_blocking=lambda operation: lambda **kwargs: asyncio.run(operation(**kwargs)),
+    )
+    monkeypatch.setitem(sys.modules, "modal", ModuleType("modal"))
+    monkeypatch.setitem(sys.modules, "modal._utils", ModuleType("modal._utils"))
+    monkeypatch.setitem(sys.modules, "modal._utils.async_utils", async_utils)
     class ExactReader:
         def __init__(self, *, sdk, client):
             assert sdk is SDK and client is not None
         async def read_exact(self, *, volume_id, path, expected_size, expected_sha256, max_bytes):
             assert expected_size == max_bytes == 32
-            assert volume_id in committed
+            assert volume_id in published
             value = next(volume.files[path] for volume in FakeVolume.registry.values()
                          if volume.object_id == volume_id)
             assert len(value) == expected_size
@@ -135,18 +154,18 @@ def _transport(monkeypatch):
         stage_receipts=stage_receipts, call_catalog=calls,
         dispatch_verifier=auth,
     )
-    return binding, transport, calls, events, reader, materials, committed
+    return binding, transport, calls, events, reader, materials, published
 
 
 def test_submit_observes_binding_then_spawns_once_and_retains_exact_call_id(monkeypatch) -> None:
-    binding, transport, calls, events, reader, materials, committed = _transport(monkeypatch)
+    binding, transport, calls, events, reader, materials, published = _transport(monkeypatch)
     command = binding.command
     outcome = transport.execute_once(binding, command)
     assert outcome.disposition is ObservationDisposition.FOUND
     assert outcome.provider_ref == "fc-1"
     assert len(reader.calls) == 1
     assert len(FakeFunction.spawn_calls) == 1
-    assert committed == [item.commitment.volume_id for item in materials]
+    assert published == [item.commitment.volume_id for item in materials]
     assert FakeFunction.spawn_calls[0] == (transport._dispatch_source.value,)
     assert calls.values == {command.digest: "fc-1"}
     assert events == [
@@ -157,38 +176,72 @@ def test_submit_observes_binding_then_spawns_once_and_retains_exact_call_id(monk
     ]
 
 
-def test_spawn_failure_is_indeterminate_after_exactly_one_attempt(monkeypatch) -> None:
+def test_marker_readback_runs_on_sdk_loop(monkeypatch) -> None:
+    binding, transport, _, _, _, _, published = _transport(monkeypatch)
+    loop = asyncio.new_event_loop()
+    thread = Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    try:
+        from tuner.execution.providers.modal import packaged_transport
+        reader_type = packaged_transport.BoundedModalVolumeReader
+        original_read = reader_type.read_exact
+        seen = []
+
+        async def read_on_bound_loop(self, **kwargs):
+            seen.append(asyncio.get_running_loop() is loop)
+            return await original_read(self, **kwargs)
+
+        monkeypatch.setattr(reader_type, "read_exact", read_on_bound_loop)
+        bridge = sys.modules["modal._utils.async_utils"].synchronizer
+        bridge.create_blocking = lambda operation: (
+            lambda **kwargs: asyncio.run_coroutine_threadsafe(
+                operation(**kwargs), loop,
+            ).result(timeout=5)
+        )
+        outcome = transport.execute_once(binding, binding.command)
+        assert outcome.disposition is ObservationDisposition.FOUND
+        assert seen == [True] * len(published)
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=5)
+        loop.close()
+
+
+def test_spawn_failure_is_indeterminate_after_exactly_one_attempt(monkeypatch, caplog) -> None:
     binding, transport, calls, _, _, _, _ = _transport(monkeypatch)
     FakeFunction.fail = True
     outcome = transport.execute_once(binding, binding.command)
     assert outcome.disposition is ObservationDisposition.INDETERMINATE
     assert len(FakeFunction.spawn_calls) == 1
     assert calls.values == {}
+    assert "modal packaged submit indeterminate at spawn" in caplog.text
 
 
-def test_call_catalog_failure_after_spawn_is_ambiguous_and_never_replayed(monkeypatch) -> None:
+def test_call_catalog_failure_after_spawn_is_ambiguous_and_never_replayed(monkeypatch, caplog) -> None:
     binding, transport, calls, _, _, _, _ = _transport(monkeypatch)
     calls.fail_publish = True
     outcome = transport.execute_once(binding, binding.command)
     assert outcome.disposition is ObservationDisposition.INDETERMINATE
     assert len(FakeFunction.spawn_calls) == 1
     assert calls.values == {}
+    assert "modal packaged submit indeterminate at catalog" in caplog.text
+    assert "private catalog failure" not in caplog.text
 
 
 def test_substituted_private_marker_material_stops_before_any_write_or_spawn(monkeypatch) -> None:
-    binding, transport, calls, events, _, materials, committed = _transport(monkeypatch)
+    binding, transport, calls, events, _, materials, published = _transport(monkeypatch)
     transport._marker_materials.value = tuple(reversed(materials))
     outcome = transport.execute_once(binding, binding.command)
     assert outcome.disposition is ObservationDisposition.INDETERMINATE
-    assert committed == []
+    assert published == []
     assert all(volume.files == {} for volume in FakeVolume.registry.values())
     assert FakeFunction.spawn_calls == []
     assert calls.values == {}
     assert ("marker_materials", binding.command.digest) in events
 
 
-def test_marker_upload_collision_is_indeterminate_without_spawn(monkeypatch) -> None:
-    binding, transport, calls, _, _, materials, committed = _transport(monkeypatch)
+def test_marker_upload_collision_is_indeterminate_without_spawn(monkeypatch, caplog) -> None:
+    binding, transport, calls, _, _, materials, published = _transport(monkeypatch)
     first = materials[0].commitment
     volume = next(value for value in FakeVolume.registry.values()
                   if value.object_id == first.volume_id)
@@ -196,16 +249,37 @@ def test_marker_upload_collision_is_indeterminate_without_spawn(monkeypatch) -> 
     outcome = transport.execute_once(binding, binding.command)
     assert outcome.disposition is ObservationDisposition.INDETERMINATE
     assert volume.files[first.marker_name] == b"existing-file"
-    assert committed == []
+    assert published == []
     assert FakeFunction.spawn_calls == []
     assert calls.values == {}
+    assert "modal packaged submit indeterminate at marker_upload" in caplog.text
 
 
-def test_marker_commit_failure_is_indeterminate_without_spawn(monkeypatch) -> None:
+def test_marker_readback_mismatch_is_indeterminate_without_spawn(monkeypatch, caplog) -> None:
+    binding, transport, calls, _, _, _, published = _transport(monkeypatch)
+    reader_type = __import__(
+        "tuner.execution.providers.modal.packaged_transport",
+        fromlist=["BoundedModalVolumeReader"],
+    ).BoundedModalVolumeReader
+
+    async def wrong_readback(self, **_kwargs):
+        return b"x" * 32
+
+    monkeypatch.setattr(reader_type, "read_exact", wrong_readback)
+    outcome = transport.execute_once(binding, binding.command)
+    assert outcome.disposition is ObservationDisposition.INDETERMINATE
+    assert len(published) == 1
+    assert FakeFunction.spawn_calls == []
+    assert calls.values == {}
+    assert "modal packaged submit indeterminate at marker_readback" in caplog.text
+
+
+def test_marker_batch_publication_failure_is_indeterminate_without_spawn(monkeypatch) -> None:
     binding, transport, calls, _, _, _, _ = _transport(monkeypatch)
-    def fail_commit(self):
+    from tests.execution.providers.test_modal_sdk154_adapter import Upload
+    def fail_publish(self, *_args):
         raise RuntimeError("provider detail must not escape")
-    monkeypatch.setattr(FakeVolume, "commit", fail_commit)
+    monkeypatch.setattr(Upload, "__exit__", fail_publish)
     outcome = transport.execute_once(binding, binding.command)
     assert outcome.disposition is ObservationDisposition.INDETERMINATE
     assert FakeFunction.spawn_calls == []

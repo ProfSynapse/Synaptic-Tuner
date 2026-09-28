@@ -9,12 +9,18 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import sys
 from types import SimpleNamespace
+from types import ModuleType
 
 import pytest
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes
-from tuner.training.modal_host_effects import _encode_binding
+from tuner.training.modal_host_effects import (
+    ModalPackagedMarkerMaterial, _encode_binding, _encode_marker_materials,
+)
+from tuner.execution.providers.modal.packaged_dispatch import ModalPackagedVolumeMarker
+from tuner.execution.providers.modal.bounded_volume_read import BoundedVolumeReadError
 from tuner.execution.providers.modal.packaged_worker import PACKAGED_WORKER_FAILURE_STAGES
 from tuner.training.modal_host_reader import _FIXED_WORKER_FAILURE_STAGES
 
@@ -35,7 +41,7 @@ def test_worker_failure_stage_allowlists_agree_across_all_readers():
 
 
 def _journal(tmp_path, *, binding=None, claim_override=None, call_override=None,
-             catalog_name=None):
+             catalog_name=None, marker_rows=False):
     binding = binding or _case()[0]
     command_digest = binding.command_digest
     private = tmp_path / "private"
@@ -61,8 +67,30 @@ def _journal(tmp_path, *, binding=None, claim_override=None, call_override=None,
                 diagnostic._NAMESPACE, name, command_digest, raw,
                 hashlib.sha256(raw).hexdigest(),
             ))
+        if marker_rows:
+            raw = _encode_marker_materials(_materials(binding))
+            db.execute("INSERT INTO catalogs VALUES(?,?,?,?,?)", (
+                diagnostic._NAMESPACE, diagnostic._MARKERS, command_digest,
+                raw, hashlib.sha256(raw).hexdigest(),
+            ))
     path.chmod(0o600)
     return path, command_digest
+
+
+def _materials(binding):
+    facts = binding.provider_facts
+    roles = (("control", facts.control_volume_id),
+             ("artifacts", facts.artifact_volume_id))
+    if facts.model_cache_volume_id is not None:
+        roles += (("model_cache", facts.model_cache_volume_id),)
+    return tuple(
+        ModalPackagedMarkerMaterial(
+            ModalPackagedVolumeMarker(role, volume_id,
+                                      ".synaptic-volume-marker-" + f"{index:032x}",
+                                      hashlib.sha256(bytes([index]) * 32).hexdigest()),
+            bytes([index]) * 32,
+        ) for index, (role, volume_id) in enumerate(roles, 1)
+    )
 
 
 @pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
@@ -273,3 +301,126 @@ def test_invalid_journal_prevents_provider_import(tmp_path, monkeypatch, capsys)
         "authority": "DIAGNOSTIC_ONLY", "result": "JOURNAL_INVALID",
     }
     assert imported == []
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+def test_markers_need_no_call_and_leave_journal_untouched(tmp_path):
+    path, ref = _journal(tmp_path, marker_rows=True)
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM catalogs WHERE catalog_ref=?", (diagnostic._CALLS,))
+    before = path.read_bytes()
+    expected = _materials(_case()[0])
+    assert diagnostic.read_retained_markers(path, ref) == expected
+    assert path.read_bytes() == before
+    assert tuple(path.parent.iterdir()) == (path,)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+@pytest.mark.parametrize("mutation", ["wrong_role", "wrong_volume", "duplicate_name",
+                                      "wrong_value", "wrong_digest", "missing_catalog"])
+def test_marker_catalog_tampering_fails_closed(tmp_path, mutation):
+    path, ref = _journal(tmp_path, marker_rows=True)
+    with sqlite3.connect(path) as db:
+        if mutation == "missing_catalog":
+            db.execute("DELETE FROM catalogs WHERE catalog_ref=?", (diagnostic._MARKERS,))
+        else:
+            raw = db.execute("SELECT payload FROM catalogs WHERE catalog_ref=?",
+                             (diagnostic._MARKERS,)).fetchone()[0]
+            document = json.loads(raw)
+            items = document["items"]
+            if mutation == "wrong_role":
+                items[0]["role"] = "artifacts"
+            elif mutation == "wrong_volume":
+                items[0]["volume_id"] = "vo-other"
+            elif mutation == "duplicate_name":
+                items[1]["marker_name"] = items[0]["marker_name"]
+            elif mutation == "wrong_value":
+                items[0]["value_hex"] = "00" * 32
+            else:
+                items[0]["value_sha256"] = "a" * 64
+            raw = canonical_bytes(document)
+            db.execute("UPDATE catalogs SET payload=?,digest=? WHERE catalog_ref=?",
+                       (raw, hashlib.sha256(raw).hexdigest(), diagnostic._MARKERS))
+    with pytest.raises(diagnostic.DiagnosticUnavailable, match="JOURNAL_INVALID"):
+        diagnostic.read_retained_markers(path, ref)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+def test_invalid_marker_journal_prevents_provider_import(tmp_path, monkeypatch, capsys):
+    imported = []
+    original = __import__("builtins").__import__
+
+    def guarded(name, *args, **kwargs):
+        if name == "modal" or name.startswith("modal."):
+            imported.append(name)
+            raise AssertionError("provider imported before marker admission")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", guarded)
+    code = diagnostic.main([
+        "--journal", str(tmp_path / "missing.sqlite3"),
+        "--claim-ref", "a" * 64, "--inspect-markers",
+        "--modal-profile", "named-profile",
+    ])
+    assert code == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "schema_version": "synaptic-modal-packaged-marker-diagnostic/v1",
+        "authority": "DIAGNOSTIC_ONLY", "result": "JOURNAL_INVALID",
+    }
+    assert imported == []
+
+
+def test_marker_reads_are_exact_and_classified_without_payloads():
+    materials = _materials(_case()[0])
+    calls = []
+
+    class Reader:
+        async def read_exact(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 2:
+                raise BoundedVolumeReadError("modal_volume_digest_mismatch")
+            return b"opaque bytes are never reported"
+
+    results = asyncio.run(diagnostic.inspect_markers(Reader(), materials))
+    assert results == {"control": "MATCH", "artifacts": "UNAVAILABLE"}
+    for call, material in zip(calls, materials):
+        assert call == {"volume_id": material.commitment.volume_id,
+                        "path": material.commitment.marker_name,
+                        "expected_size": 32,
+                        "expected_sha256": material.commitment.value_sha256,
+                        "max_bytes": 32}
+
+
+def test_not_found_requires_exact_grpc_cause(monkeypatch):
+    class Status:
+        NOT_FOUND = object()
+        INTERNAL = object()
+
+    class GRPCError(Exception):
+        def __init__(self, status):
+            self.status = status
+
+    package = ModuleType("grpclib")
+    package.__path__ = []
+    constants = ModuleType("grpclib.const")
+    constants.Status = Status
+    exceptions = ModuleType("grpclib.exceptions")
+    exceptions.GRPCError = GRPCError
+    for name, module in (("grpclib", package), ("grpclib.const", constants),
+                         ("grpclib.exceptions", exceptions)):
+        monkeypatch.setitem(sys.modules, name, module)
+
+    def failure(cause):
+        try:
+            raise cause
+        except Exception:
+            try:
+                raise BoundedVolumeReadError("modal_volume_range_unavailable") from None
+            except BoundedVolumeReadError as error:
+                return error
+
+    assert diagnostic._proven_not_found(failure(GRPCError(Status.NOT_FOUND)))
+    assert not diagnostic._proven_not_found(failure(GRPCError(Status.INTERNAL)))
+    assert not diagnostic._proven_not_found(failure(ValueError("untrusted")))
+    assert not diagnostic._proven_not_found(
+        BoundedVolumeReadError("modal_volume_digest_mismatch"))

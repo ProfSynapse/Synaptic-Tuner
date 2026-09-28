@@ -25,16 +25,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes, parse_canonical_object, safe_ref
 from tuner.execution.foundation_v2.commands import SubmitCommandV2
-from tuner.training.modal_host_effects import _decode_binding, _encode_binding
+from tuner.training.modal_host_effects import (
+    ModalPackagedMarkerMaterial, _decode_binding, _decode_marker_materials,
+    _encode_binding, _encode_marker_materials,
+)
+from tuner.execution.providers.modal.bounded_volume_read import (
+    BoundedModalVolumeReader, BoundedVolumeReadError,
+)
 
 
 _NAMESPACE = "standalone-training"
 _BINDINGS = "packaged-bindings-v1"
 _CALLS = "packaged-calls-v1"
+_MARKERS = "packaged-marker-materials-v1"
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_CLAIM = 16 * 1024
 _MAX_BINDING = 16 * 1024 * 1024
 _MAX_CALL = 1024
+_MAX_MARKERS = 4096
 _MAX_FIXED_RESULT = 512
 _RESULT_SCHEMA = "synaptic-modal-packaged-worker-result/v1"
 _RESULT_SCHEMA_V2 = "synaptic-modal-packaged-worker-result/v2"
@@ -78,16 +86,18 @@ def _catalog_bytes(connection, catalog: str, item: str, maximum: int) -> bytes:
     return payload
 
 
-def read_retained_call(database: Path, claim_ref: str, supplied_call_id: str) -> str:
-    """Authenticate one submit claim, full binding and exact call without writes."""
+def _read_retained(database: Path, claim_ref: str,
+                   supplied_call_id: str | None) -> str | tuple[ModalPackagedMarkerMaterial, ...]:
+    """Authenticate a submit claim and exactly one diagnostic catalog read-only."""
     descriptor = None
     try:
         if (os.name != "posix" or not database.is_absolute()
                 or type(claim_ref) is not str or _HEX.fullmatch(claim_ref) is None
-                or type(supplied_call_id) is not str
-                or not supplied_call_id.startswith("fc-")
-                or len(supplied_call_id) > _MAX_CALL
-                or safe_ref(supplied_call_id, "provider_job_ref") != supplied_call_id):
+                or (supplied_call_id is not None and (
+                    type(supplied_call_id) is not str
+                    or not supplied_call_id.startswith("fc-")
+                    or len(supplied_call_id) > _MAX_CALL
+                    or safe_ref(supplied_call_id, "provider_job_ref") != supplied_call_id))):
             raise ValueError
         parent = database.parent
         parent_info = parent.lstat()
@@ -133,24 +143,56 @@ def read_retained_call(database: Path, claim_ref: str, supplied_call_id: str) ->
                     or binding.command_digest != claim_ref
                     or binding.authenticated_binding_digest != claim["binding_digest"]):
                 raise ValueError
-            raw_call = _catalog_bytes(connection, _CALLS, claim_ref, _MAX_CALL)
-            call = parse_canonical_object(raw_call, name="packaged call")
-            if (canonical_bytes(call) != raw_call or set(call) != {"provider_job_ref"}
-                    or type(call["provider_job_ref"]) is not str
-                    or call["provider_job_ref"] != supplied_call_id):
-                raise ValueError
+            if supplied_call_id is None:
+                raw_markers = _catalog_bytes(connection, _MARKERS, claim_ref, _MAX_MARKERS)
+                materials = _decode_marker_materials(raw_markers)
+                facts = binding.provider_facts
+                expected = {"control": facts.control_volume_id,
+                            "artifacts": facts.artifact_volume_id}
+                if facts.model_cache_volume_id is not None:
+                    expected["model_cache"] = facts.model_cache_volume_id
+                commitments = tuple(item.commitment for item in materials)
+                if (_encode_marker_materials(materials) != raw_markers
+                        or tuple(item.role for item in commitments) != tuple(expected)
+                        or any(item.volume_id != expected[item.role]
+                               for item in commitments)
+                        or len({item.volume_id for item in commitments}) != len(expected)
+                        or len({item.marker_name for item in commitments}) != len(expected)
+                        or len({item.value_sha256 for item in commitments}) != len(expected)):
+                    raise ValueError
+            else:
+                raw_call = _catalog_bytes(connection, _CALLS, claim_ref, _MAX_CALL)
+                call = parse_canonical_object(raw_call, name="packaged call")
+                if (canonical_bytes(call) != raw_call or set(call) != {"provider_job_ref"}
+                        or type(call["provider_job_ref"]) is not str
+                        or call["provider_job_ref"] != supplied_call_id):
+                    raise ValueError
         retained = os.fstat(descriptor)
         current = database.lstat()
         if ((retained.st_dev, retained.st_ino) != (info.st_dev, info.st_ino)
                 or (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino)
                 or not _private_regular(current)):
             raise ValueError
-        return supplied_call_id
+        return materials if supplied_call_id is None else supplied_call_id
     except Exception:
         raise DiagnosticUnavailable("JOURNAL_INVALID") from None
     finally:
         if descriptor is not None:
             os.close(descriptor)
+
+
+def read_retained_call(database: Path, claim_ref: str, supplied_call_id: str) -> str:
+    """Authenticate one submit claim, full binding and exact call without writes."""
+    result = _read_retained(database, claim_ref, supplied_call_id)
+    assert type(result) is str
+    return result
+
+
+def read_retained_markers(database: Path, claim_ref: str) -> tuple[ModalPackagedMarkerMaterial, ...]:
+    """Authenticate exact marker material against the submitted Volume facts."""
+    result = _read_retained(database, claim_ref, None)
+    assert type(result) is tuple
+    return result
 
 
 def _pinned_python() -> bool:
@@ -233,15 +275,51 @@ async def inspect_call(client: object, call_id: str, api_pb2: object,
         return "INVALID_RESPONSE"
 
 
+def _proven_not_found(error: BoundedVolumeReadError) -> bool:
+    if error.args != ("modal_volume_range_unavailable",):
+        return False
+    try:
+        from grpclib.const import Status
+        from grpclib.exceptions import GRPCError
+        cause = error.__context__
+        return type(cause) is GRPCError and cause.status is Status.NOT_FOUND
+    except Exception:
+        return False
+
+
+async def inspect_markers(reader: BoundedModalVolumeReader,
+                          materials: tuple[ModalPackagedMarkerMaterial, ...]) -> dict[str, str]:
+    """Read only the exact claim-bound 32-byte files; report fixed categories."""
+    results = {}
+    for material in materials:
+        commitment = material.commitment
+        try:
+            await asyncio.wait_for(reader.read_exact(
+                volume_id=commitment.volume_id, path=commitment.marker_name,
+                expected_size=32, expected_sha256=commitment.value_sha256,
+                max_bytes=32,
+            ), timeout=50)
+            results[commitment.role] = "MATCH"
+        except BoundedVolumeReadError as error:
+            results[commitment.role] = "NOT_FOUND" if _proven_not_found(error) else "UNAVAILABLE"
+        except Exception:
+            results[commitment.role] = "UNAVAILABLE"
+    return results
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--journal", required=True, type=Path)
     parser.add_argument("--claim-ref", required=True)
-    parser.add_argument("--call-id", required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--call-id")
+    selection.add_argument("--inspect-markers", action="store_true")
     parser.add_argument("--modal-profile", required=True)
     args = parser.parse_args(argv)
     try:
-        call_id = read_retained_call(args.journal, args.claim_ref, args.call_id)
+        retained = (read_retained_markers(args.journal, args.claim_ref)
+                    if args.inspect_markers else
+                    read_retained_call(args.journal, args.claim_ref, args.call_id))
         profile = safe_ref(args.modal_profile, "modal_profile")
         with open(os.devnull, "w") as sink:
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
@@ -256,21 +334,30 @@ def main(argv: list[str] | None = None) -> int:
                        for value in (token_id, token_secret)):
                     raise DiagnosticUnavailable("CREDENTIAL_UNAVAILABLE")
                 from modal._utils.async_utils import synchronizer
-                from modal._serialization import serialize
                 client = modal.Client.from_credentials(token_id, token_secret)
-                from modal_proto import api_pb2
-
-                category = synchronizer.create_blocking(inspect_call)(
-                    client, call_id, api_pb2, serialize,
-                )
+                if args.inspect_markers:
+                    reader = BoundedModalVolumeReader(sdk=modal, client=client)
+                    category = synchronizer.create_blocking(inspect_markers)(reader, retained)
+                else:
+                    from modal._serialization import serialize
+                    from modal_proto import api_pb2
+                    category = synchronizer.create_blocking(inspect_call)(
+                        client, retained, api_pb2, serialize,
+                    )
     except DiagnosticUnavailable as error:
         category = error.args[0]
     except Exception:
         category = "LOCAL_UNAVAILABLE"
-    print(json.dumps({
-        "schema_version": "synaptic-modal-packaged-call-diagnostic/v1",
-        "authority": "DIAGNOSTIC_ONLY", "result": category,
-    }, sort_keys=True, separators=(",", ":")))
+    if args.inspect_markers:
+        payload = {"schema_version": "synaptic-modal-packaged-marker-diagnostic/v1",
+                   "authority": "DIAGNOSTIC_ONLY", "result": category}
+    else:
+        payload = {"schema_version": "synaptic-modal-packaged-call-diagnostic/v1",
+                   "authority": "DIAGNOSTIC_ONLY", "result": category}
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    if args.inspect_markers:
+        return 0 if type(category) is dict and all(
+            value == "MATCH" for value in category.values()) else 1
     return 0 if category in {
         "PENDING", "PROVIDER_SUCCESS_UNKNOWN", "WORKER_FAILED", "PROVIDER_FAILURE",
     } or category in {f"WORKER_{stage}" for stage in _WORKER_FAILURE_STAGES} else 1

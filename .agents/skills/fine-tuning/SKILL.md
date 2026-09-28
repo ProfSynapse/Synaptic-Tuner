@@ -101,6 +101,8 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - Never cancel a job, delete bucket artifacts, remove files, or relaunch a cost-incurring cloud run unless the user has explicitly approved that exact action in the current conversation.
 - Treat cancel/delete/relaunch as irreversible or materially destructive operator actions. Do not infer permission from surrounding context or from a user's broader goal.
 - Do not guess command names or flags from memory.
+- Diagnose from the exact attempt's retained records and logs, pinned SDK source, and provider documentation. Search relevant issue/forum reports for hypotheses and test them with a narrowly scoped experiment; do not promote a phase label or timing coincidence into a root-cause claim.
+- Simplify redundant orchestration when evidence shows it adds no useful guarantee for the supported workflow. Keep source/model pins, credential isolation, verified artifacts, and no replay of uncertain submissions; make provider fakes reflect documented SDK behavior.
 - Before giving command guidance, check `tuner/cli/parser.py`, `tuner/cli/router.py`, or the real `--help` output.
 - Prefer repo CLIs and checked-in scripts over ad hoc Python snippets.
 - After benchmark runs complete, treat the checked-in benchmark ledger as part of the workflow:

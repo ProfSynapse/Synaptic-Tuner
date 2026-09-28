@@ -779,6 +779,23 @@ failure result was returned; it does not disclose the failing operation,
 verify a run, or authorize replay. The public reader likewise recognizes only
 that exact failure dictionary; near misses stay unknown.
 
+When that exact submit has marker material but no retained call ID, use the same
+inspector with `--inspect-markers` instead of `--call-id`. Supply the exact
+`--journal`, submit-command `--claim-ref`, and named `--modal-profile`. This
+authenticates the private claim, binding, and facts-matched marker catalog before
+bounded 32-byte reads. It reports only role-level `MATCH`, `NOT_FOUND` (an exact
+provider not-found status), or `UNAVAILABLE`; the last is inconclusive. It never
+lists, writes, commits, spawns, or authorizes replay. Marker presence/absence and
+an empty call catalog alone do not establish historical call execution.
+
+Host marker uploads use `batch_upload(force=False)`; context exit publishes the
+upload. Do not append `Volume.commit()`, which is for mounted-container changes.
+Raw async reads using the persistent Modal client must run on its SDK
+synchronizer loop, as the checked-in inspectors do, not on a new `asyncio.run`
+loop. Test doubles must model batch publication and loop affinity rather than
+merely mirroring the host implementation. This does not remove the worker's
+required mounted cache/artifact/control commits.
+
 New packaged workers return the same v1 success shape but a fixed v2 failure
 shape with one closed `failure_stage`: entrypoint setup, dispatch authentication,
 staged input, path claim, one of the generic SFT executor's admitted stages,
