@@ -779,7 +779,15 @@ main/bootstrap/other role, and whether metadata is inside or outside the pinned
 purelib/platlib roots. Unprovable origins remain unknown; an outside entry alone
 does not prove provider injection. These closed labels preserve rejection and
 disclose no package names, paths, versions, or exception text. Do not narrow the
-parent inventory from this observation without reviewing the execution boundary.
+parent inventory from this observation without an execution-boundary review.
+For the measured `VERSION_MISMATCH_OTHER_CROSS_ROOT` parent-only rejection, a
+CPU diagnostic may compare the complete stably proven reviewed-root inventory
+against the release digest/count and run the existing strict isolated child
+qualifier. This exact-stage continuation must always return failure, never sign
+a qualification receipt or commit outputs, and never authorize GPU execution.
+Use only fixed match/mismatch/unproven and child-pass/fail labels; an unproven
+root or entry cannot be treated as an inventory match. Even child success does
+not independently approve dropping the privileged parent's overlay detection.
 Use a fresh ordinary `train --qualify --fresh-attempt` with the same
 recipe to measure this boundary on CPU before another GPU smoke; prior
 child-only receipts do not establish the new parent check. Parent admission and

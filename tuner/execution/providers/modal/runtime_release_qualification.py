@@ -45,9 +45,17 @@ QUALIFICATION_HMAC_KEY_REF = "modal-runtime-release-qualification-hmac-v1"
 MAX_DISPATCH_BYTES = 512 * 1024
 MAX_EVIDENCE_BYTES = 64 * 1024
 from tuner.runtime.packaged_sft_execution import RELEASE_INSPECTION_STAGES
+_AMBIENT_PROBE_TRIGGER = (
+    "PARENT_RUNTIME_INSTALLED_INVENTORY_DUPLICATE_VERSION_MISMATCH_OTHER_CROSS_ROOT"
+)
+_AMBIENT_PROBE_STAGES = frozenset(
+    "PARENT_RUNTIME_AMBIENT_ROOT_" + root + "_CHILD_" + child
+    for root in ("MATCH", "MISMATCH", "UNPROVEN")
+    for child in ("PASS", "FAIL")
+)
 PARENT_RUNTIME_FAILURE_STAGES = frozenset(
     "PARENT_RUNTIME_" + stage for stage in RELEASE_INSPECTION_STAGES
-) | {"PARENT_RUNTIME_UNAVAILABLE"}
+) | {"PARENT_RUNTIME_UNAVAILABLE"} | _AMBIENT_PROBE_STAGES
 
 
 def _qualification_facts_type():
@@ -544,7 +552,8 @@ class ModalRuntimeReleaseQualificationWorker:
                     ) != LOCAL_CPU_DATA:
                 raise ValueError
             from tuner.runtime.packaged_training_worker import (
-                PackagedLocalCPUStageError, qualify_installed_child,
+                PackagedLocalCPUStageError, inspect_reviewed_root_inventory,
+                qualify_installed_child,
             )
             release_payload = dispatch.runtime_release.to_dict()
             from tuner.runtime.packaged_sft_execution import (
@@ -556,6 +565,25 @@ class ModalRuntimeReleaseQualificationWorker:
                 stage = "PARENT_RUNTIME_" + error.stage if type(error.stage) is str else ""
                 if type(error) is not PackagedReleaseInspectionError or stage not in PARENT_RUNTIME_FAILURE_STAGES:
                     stage = "PARENT_RUNTIME_UNAVAILABLE"
+                if stage == _AMBIENT_PROBE_TRIGGER:
+                    try:
+                        measured = inspect_reviewed_root_inventory(dispatch.runtime_release)
+                    except BaseException:
+                        measured = None
+                    root = "UNPROVEN"
+                    if (type(measured) is dict and set(measured) == {"digest", "count"}
+                            and type(measured["digest"]) is str and len(measured["digest"]) == 64
+                            and all(character in "0123456789abcdef" for character in measured["digest"])
+                            and type(measured["count"]) is int and 1 <= measured["count"] <= 4096):
+                        root = ("MATCH" if measured["digest"] == dispatch.runtime_release.installed_distributions_digest
+                                and measured["count"] == dispatch.runtime_release.installed_distribution_count
+                                else "MISMATCH")
+                    try:
+                        qualify_installed_child(release_payload)
+                        child = "PASS"
+                    except BaseException:
+                        child = "FAIL"
+                    stage = "PARENT_RUNTIME_AMBIENT_ROOT_" + root + "_CHILD_" + child
                 return {
                     "schema_version": QUALIFICATION_RESULT_SCHEMA,
                     "status_code": "failed",

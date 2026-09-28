@@ -359,6 +359,70 @@ def _duplicate_stage(reason: str, package: str, first: bool | None, second: bool
     return "INVENTORY_DUPLICATE_" + reason + "_" + package + "_" + location
 
 
+def inspect_reviewed_root_inventory(release: PackagedRuntimeRelease) -> dict[str, object] | None:
+    """Diagnostic-only inventory of proved metadata in reviewed venv roots."""
+    try:
+        retained = stable_read(Path("/opt/synaptic-runtime/build-inputs.json"))
+        expected = json.loads(retained)
+        if (type(expected) is not dict
+                or retained != (json.dumps(expected, sort_keys=True, separators=(",", ":"),
+                                           ensure_ascii=True, allow_nan=False) + "\n").encode("ascii")):
+            return None
+        python = expected["python"]
+        if (python["implementation"] != release.python_implementation
+                or python["version"] != release.python_version
+                or python["executable"] != release.python_executable
+                or python["executable_digest"] != release.python_executable_digest):
+            return None
+        roots = _reviewed_package_roots(expected)
+        if roots is None or not _roots_stable(roots):
+            return None
+        paths = tuple(dict.fromkeys(str(selected) for selected, _resolved, _identity in roots))
+        context = importlib.metadata.DistributionFinder.Context(path=paths)
+        iterator = importlib.metadata.MetadataPathFinder.find_distributions(context)
+        by_name = {}
+        identities = {}
+        physical = {}
+        observations = []
+        for occurrence, item in enumerate(iterator, 1):
+            if occurrence > 4096:
+                return None
+            identity = _metadata_identity(item)
+            if identity is None or _metadata_within_roots(item, identity, roots) is not True:
+                return None
+            raw_name, version = item.metadata["Name"], item.version
+            if type(raw_name) is not str or not raw_name or type(version) is not str or not version:
+                return None
+            name = re.sub(r"[-_.]+", "-", raw_name.lower())
+            if _metadata_identity(item) != identity:
+                return None
+            prior_physical = physical.get(identity)
+            if prior_physical is not None and prior_physical != (name, version):
+                return None
+            physical[identity] = (name, version)
+            observations.append((item, identity, name, version))
+            previous = by_name.get(name)
+            if previous is not None:
+                if previous["version"] != version or identities[name] != identity:
+                    return None
+                continue
+            by_name[name] = {"name": name, "version": version}
+            identities[name] = identity
+        if not by_name or len(by_name) > 4096 or not _roots_stable(roots):
+            return None
+        for item, identity, name, version in observations:
+            if (_metadata_identity(item) != identity
+                    or _metadata_within_roots(item, identity, roots) is not True
+                    or re.sub(r"[-_.]+", "-", item.metadata["Name"].lower()) != name
+                    or item.version != version):
+                return None
+        inventory = sorted(by_name.values(), key=lambda item: item["name"])
+        return {"digest": hashlib.sha256(json.dumps(inventory, separators=(",", ":")).encode()).hexdigest(),
+                "count": len(inventory)}
+    except BaseException:
+        return None
+
+
 def inspect_installed_runtime(expected: dict) -> dict:
     """Measure reviewed wheel bytes, installed members and worker closure.
 

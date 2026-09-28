@@ -287,8 +287,8 @@ def _fake_parent_runtime_inspection(monkeypatch):
 
 
 @pytest.mark.parametrize("predicate", sorted(
-    stage.removeprefix("PARENT_RUNTIME_") for stage in qualification.PARENT_RUNTIME_FAILURE_STAGES
-    if stage != "PARENT_RUNTIME_UNAVAILABLE"
+    stage for stage in qualification.RELEASE_INSPECTION_STAGES
+    if stage != "INSTALLED_INVENTORY_DUPLICATE_VERSION_MISMATCH_OTHER_CROSS_ROOT"
 ))
 def test_modal_parent_inspection_fails_before_child(monkeypatch, tmp_path: Path, predicate: str) -> None:
     from tuner.runtime.packaged_sft_execution import PackagedReleaseInspectionError
@@ -316,6 +316,63 @@ def test_modal_parent_inspection_fails_before_child(monkeypatch, tmp_path: Path,
         "status_code": "failed", "failure_stage": "PARENT_RUNTIME_" + predicate,
     }
     assert calls == []
+
+
+@pytest.mark.parametrize("root,projected", (
+    ("MATCH", "MATCH"), ("MISMATCH", "MISMATCH"),
+    ("UNPROVEN", "UNPROVEN"), ("MALFORMED", "UNPROVEN"),
+))
+@pytest.mark.parametrize("child", ("PASS", "FAIL"))
+def test_exact_ambient_conflict_probe_never_authorizes(
+    monkeypatch, tmp_path: Path, root: str, projected: str, child: str,
+) -> None:
+    from tuner.runtime.packaged_sft_execution import PackagedReleaseInspectionError
+    from tuner.runtime.packaged_training_worker import PackagedLocalCPUStageError
+    dispatch, facts = _case(); auth = Auth()
+    raw = build_modal_runtime_release_qualification_dispatch(dispatch, auth)
+    signed_before = len(auth.signed)
+    roots = ModalRuntimeReleaseQualificationRoots(
+        (tmp_path / "control").resolve(), (tmp_path / "artifacts").resolve(),
+    )
+    roots.control.mkdir(); roots.artifacts.mkdir()
+    staged = roots.artifacts / dispatch.fixture.path
+    staged.parent.mkdir(parents=True); staged.write_bytes(LOCAL_CPU_DATA)
+    events = []
+    def reject(_release):
+        raise PackagedReleaseInspectionError(
+            "INSTALLED_INVENTORY_DUPLICATE_VERSION_MISMATCH_OTHER_CROSS_ROOT") from None
+    monkeypatch.setattr("tuner.runtime.packaged_sft_execution._inspect_parent_release", reject)
+    def measure(_release):
+        events.append("root")
+        if root == "UNPROVEN":
+            return None
+        if root == "MALFORMED":
+            return {"digest": "PRIVATE_SENTINEL", "count": 0}
+        return {"digest": dispatch.runtime_release.installed_distributions_digest
+                if root == "MATCH" else "0" * 64,
+                "count": dispatch.runtime_release.installed_distribution_count}
+    monkeypatch.setattr("tuner.runtime.packaged_training_worker.inspect_reviewed_root_inventory", measure)
+    def inspect_child(_release):
+        events.append("child")
+        if child == "FAIL":
+            raise PackagedLocalCPUStageError("CHILD_RESULT") from None
+        return {"isolated": True}
+    monkeypatch.setattr("tuner.runtime.packaged_training_worker.qualify_installed_child", inspect_child)
+    worker = ModalRuntimeReleaseQualificationWorker(
+        expected_facts=facts, verifier=auth, signer=auth,
+        observer=Observer(facts), call_id_provider=lambda: events.append("call-id"), roots=roots,
+    )
+    assert worker(raw, commit_artifacts=lambda: events.append("artifact"),
+                  commit_control=lambda: events.append("control")) == {
+        "schema_version": qualification.QUALIFICATION_RESULT_SCHEMA,
+        "status_code": "failed",
+        "failure_stage": "PARENT_RUNTIME_AMBIENT_ROOT_" + projected + "_CHILD_" + child,
+    }
+    assert events == ["root", "child"]
+    assert len(auth.signed) == signed_before
+    assert not list(roots.control.iterdir())
+    assert not (roots.artifacts / qualification.operation_path(
+        dispatch.effect_id, "runtime-release-qualification", "output", "evidence.json")).exists()
 
 
 def test_worker_runs_one_self_check_and_commits_artifact_before_control(monkeypatch, tmp_path: Path) -> None:

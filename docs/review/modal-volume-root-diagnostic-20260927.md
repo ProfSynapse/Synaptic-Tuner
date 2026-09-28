@@ -386,4 +386,30 @@ the pinned CPython 3.11.14 harness after reviewed fixed five-member closure
 refresh. Both separate Modal locks remain CURRENT and skill copies match.
 Independent static review found no admission or inventory-equality change; actual
 pinned Modal 1.5.4 serialization of all 78 parent-stage results measured at most
-224 bytes, below the existing 512-byte diagnostic bound (network-free check).
+224 bytes, below the unchanged 512-byte diagnostic bound (network-free check).
+
+CPU attempt `cpu-qual-24769c0aab0773e729a8cde9` on
+`56cb974ac8c906bf5c2d9bd46c8a779bde47828b` returned
+`CALL_PARENT_RUNTIME_INSTALLED_INVENTORY_DUPLICATE_VERSION_MISMATCH_OTHER_CROSS_ROOT`
+at `2026-09-28T14:28:55.318997`. Exact read-only inspection confirmed the result
+for call `fc-01M3MMDDEPD1YSJK3MA9P55MPZ`, claim
+`qualify-a508561d9096e5e1ceb21bd9cd6692a7ce2aed3c774631c8db5f7def362f33c8`.
+The first offending pair is version-mismatched and spans the authenticated
+library-root boundary; neither name belongs to the main/bootstrap wheel list.
+The result does not identify the package or prove who supplied the outside copy.
+No GPU ran. Review a proportional parent/child inventory correction before edits;
+retain parent source/bootstrap/closure checks and strict isolated child pins.
+The selected next experiment is diagnostic-only: on that exact measured stage,
+compare a bounded direct stdlib metadata scan of authenticated, stable library
+roots with the release digest/count and run the existing strict isolated child
+qualifier. Every included metadata object must be proven in-root; uncertainty
+is UNPROVEN, never MATCH. Return one fixed combined failed result regardless of
+both outcomes, before signing or committing any qualification receipt. This
+measures installed directory metadata and isolated execution, not parent-loaded
+module provenance; normal admission and GPU authority remain unchanged.
+The frozen probe passed 688/688 focused tests under pinned CPython 3.11.14
+after reviewed worker-closure hash refresh. Both other Modal source locks remain
+CURRENT and skill copies match. Actual Modal 1.5.4 serialization of all 84 fixed
+parent failure documents remained at most 224 bytes. Independent source review
+confirmed the exact-stage trigger, unchanged normal admission, and no receipt
+signing or output commit for any of the six probe outcomes.

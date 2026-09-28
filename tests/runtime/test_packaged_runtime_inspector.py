@@ -245,6 +245,70 @@ def test_same_physical_metadata_changed_name_is_closed(installed, monkeypatch, t
         "INVENTORY_DUPLICATE_PHYSICAL_METADATA_MISMATCH_MAIN_BOTH_IN")
 
 
+@pytest.fixture
+def reviewed_root_inventory(installed, monkeypatch, tmp_path):
+    expected, retained, _packages, _distributions = installed
+    prefix = tmp_path / "venv"
+    site = prefix / "lib" / "python3.12" / "site-packages"
+    site.mkdir(parents=True)
+    expected["python"].update({"executable": str(prefix / "bin" / "python3"),
+                               "purelib": str(site), "platlib": str(site)})
+    (retained / "build-inputs.json").write_bytes(
+        (json.dumps(expected, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode())
+    monkeypatch.setattr(worker.sys, "prefix", str(prefix))
+    monkeypatch.setattr(worker.sysconfig, "get_paths", lambda **_kwargs: {
+        "purelib": str(site), "platlib": str(site)})
+    release = SimpleNamespace(
+        python_implementation=expected["python"]["implementation"],
+        python_version=expected["python"]["version"],
+        python_executable=expected["python"]["executable"],
+        python_executable_digest=expected["python"]["executable_digest"],
+    )
+    return expected, retained, site, release
+
+
+def test_reviewed_root_inventory_matches_only_proved_metadata(reviewed_root_inventory):
+    _expected, _retained, site, release = reviewed_root_inventory
+    _path_distribution(site / "alpha-1.0.0.dist-info", name="alpha")
+    _path_distribution(site / "beta-2.0.0.dist-info", name="beta", version="2.0.0")
+    inventory = [{"name": "alpha", "version": "1.0.0"},
+                 {"name": "beta", "version": "2.0.0"}]
+    assert worker.inspect_reviewed_root_inventory(release) == {
+        "digest": hashlib.sha256(json.dumps(inventory, separators=(",", ":")).encode()).hexdigest(),
+        "count": 2,
+    }
+
+
+def test_reviewed_root_inventory_rejects_unbound_or_unproved_input(reviewed_root_inventory, monkeypatch, tmp_path):
+    _expected, retained, site, release = reviewed_root_inventory
+    first = _path_distribution(site / "alpha-1.0.0.dist-info", name="alpha")
+    assert worker.inspect_reviewed_root_inventory(release) is not None
+    unbound = SimpleNamespace(**vars(release))
+    unbound.python_executable = str(tmp_path / "other-python")
+    assert worker.inspect_reviewed_root_inventory(unbound) is None
+    outside = _path_distribution(tmp_path / "outside" / "beta-1.0.0.dist-info", name="beta")
+    monkeypatch.setattr(worker.importlib.metadata.MetadataPathFinder, "find_distributions",
+                        lambda _context: [first, outside])
+    assert worker.inspect_reviewed_root_inventory(release) is None
+    (retained / "build-inputs.json").write_bytes(b"{}")
+    assert worker.inspect_reviewed_root_inventory(release) is None
+
+
+def test_reviewed_root_inventory_rejects_ambiguous_metadata(reviewed_root_inventory, monkeypatch):
+    _expected, _retained, site, release = reviewed_root_inventory
+    first = _path_distribution(site / "alpha-1.0.0.dist-info", name="alpha")
+    def changed_name(_context):
+        yield first
+        (site / "alpha-1.0.0.dist-info" / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: beta\nVersion: 1.0.0\n")
+        yield importlib.metadata.PathDistribution(site / "alpha-1.0.0.dist-info")
+    monkeypatch.setattr(worker.importlib.metadata.MetadataPathFinder, "find_distributions", changed_name)
+    assert worker.inspect_reviewed_root_inventory(release) is None
+    monkeypatch.setattr(worker.importlib.metadata.MetadataPathFinder, "find_distributions",
+                        lambda _context: itertools.repeat(first, 4097))
+    assert worker.inspect_reviewed_root_inventory(release) is None
+
+
 def test_closure_verifies_members_not_manifest_hash_only(tmp_path, monkeypatch):
     source = Path(closure.__file__).parent
     manifest = tmp_path / "manifests"
