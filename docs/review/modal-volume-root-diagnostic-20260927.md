@@ -129,3 +129,37 @@ source. Canonical skill copies are synchronized. The recipe plan still resolves
 all 220 rows (181 train, 39 validation), the same model revision and runtime
 profile, one L40S, and two optimizer steps. The live read-only L40S rate remains
 USD 1.95/hour. No new CPU or GPU call is claimed by these local checks.
+
+## September 28 source-wheel gate
+
+The reviewed SDK correction was committed and pushed as
+`02d5ce826c73e0130be65e13d3714fc833acd87e`. Fresh attempt
+`modal-cc7f2aefda52a13d86f7d7c3` then stopped at
+`SOURCE_WHEEL / SOURCE_STATE_INVALID`, before CPU qualification or GPU submission.
+Its immutable read-only journal inspection found one build claim and no catalog
+rows. The authenticated claim binds the intended commit above; the current WSL
+HEAD and source root agree. The consumed attempt and resources remain preserved.
+This boundary is not zero cloud effects: host provisioning creates Volumes and
+Secrets and enters a build App before preparing the source wheel. No CPU
+qualification or GPU training ran; no cleanup or resource reuse is authorized
+by this diagnosis.
+
+A read-only repetition of the source-check sequence passed: HEAD checks matched,
+both tracked-status checks returned no stdout or stderr, and the commit archive
+contained 17,530,880 bytes. Five subsequent status checks took 2.30–3.05 seconds.
+An earlier slow shell invocation included WSL startup and does not prove the
+internal 30-second Git timeout was exceeded. The historical failing subcheck is
+not recoverable from the retained broad category; timeout remains a hypothesis,
+not a diagnosis. The next small change distinguishes fixed source-check failure
+categories while preserving validation, deadlines, and non-replay behavior. It
+does not change the recipe and is not itself a training fix.
+
+The diagnostic-only patch passed independent static review. The first combined
+regression run had 296 passes and one failure in the existing standalone
+`SFT_UNKNOWN` simulated-start case; the exact case passed in isolation and a
+complete repeated run passed all 297 tests. That unexplained intermittency is
+retained here, not reclassified as a source-wheel failure. Source-wheel, host,
+and CLI projection tests passed in both runs. Runtime and inference locks remain
+CURRENT without changed pins, and canonical skills are synchronized. These
+results support a new exact-source qualification attempt, not a claim that the
+historical failure is fixed or a GPU run has succeeded.

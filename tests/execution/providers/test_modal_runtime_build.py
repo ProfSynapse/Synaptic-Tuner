@@ -339,6 +339,81 @@ def test_capture_output_reports_only_fixed_inspector_reason(output, returncode, 
     assert (caught.value.reason, str(caught.value)) == (reason, "modal_training_capture_failed")
 
 
+@pytest.mark.parametrize("phase,fault,reason", [
+    ("HEAD_BEFORE", "unavailable", "HEAD_BEFORE_UNAVAILABLE"),
+    ("HEAD_BEFORE", "mismatch", "HEAD_BEFORE_MISMATCH"),
+    ("STATUS_BEFORE", "timeout", "STATUS_BEFORE_TIMEOUT"),
+    ("STATUS_BEFORE", "unavailable", "STATUS_BEFORE_UNAVAILABLE"),
+    ("STATUS_BEFORE", "dirty", "STATUS_BEFORE_DIRTY"),
+    ("HEAD_AFTER", "unavailable", "HEAD_AFTER_UNAVAILABLE"),
+    ("HEAD_AFTER", "mismatch", "HEAD_AFTER_MISMATCH"),
+    ("STATUS_AFTER", "timeout", "STATUS_AFTER_TIMEOUT"),
+    ("STATUS_AFTER", "unavailable", "STATUS_AFTER_UNAVAILABLE"),
+    ("STATUS_AFTER", "dirty", "STATUS_AFTER_DIRTY"),
+])
+def test_source_state_substages_are_closed(monkeypatch, tmp_path, phase, fault, reason) -> None:
+    from tuner.execution.providers.modal import runtime_build
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text("[build-system]\n", encoding="ascii")
+    output = tmp_path / "output"
+    output.mkdir()
+    commit = "a" * 40
+    counts = {"HEAD": 0, "STATUS": 0}
+
+    def run(command, **_kwargs):
+        if "rev-parse" in command:
+            counts["HEAD"] += 1
+            current = "HEAD_BEFORE" if counts["HEAD"] == 1 else "HEAD_AFTER"
+            if phase == current and fault == "unavailable":
+                raise subprocess.TimeoutExpired(command, 30, stderr=b"token=must-not-escape")
+            observed = "b" * 40 if phase == current and fault == "mismatch" else commit
+            return subprocess.CompletedProcess(command, 0, observed.encode() + b"\n", b"")
+        if "status" in command:
+            counts["STATUS"] += 1
+            current = "STATUS_BEFORE" if counts["STATUS"] == 1 else "STATUS_AFTER"
+            if phase == current and fault == "timeout":
+                raise subprocess.TimeoutExpired(command, 30, stderr=b"token=must-not-escape")
+            if phase == current and fault == "unavailable":
+                return subprocess.CompletedProcess(command, 2, b"", b"token=must-not-escape")
+            dirty = b" M token=must-not-escape\n" if phase == current and fault == "dirty" else b""
+            return subprocess.CompletedProcess(command, 0, dirty, b"")
+        if "archive" in command:
+            return subprocess.CompletedProcess(command, 0, b"not-needed", b"")
+        pytest.fail("wheel build must not start after source-state failure")
+
+    monkeypatch.setattr(runtime_build.subprocess, "run", run)
+    with pytest.raises(runtime_build.SourceWheelFailure) as caught:
+        runtime_build.prepare_current_source_wheel(
+            source, output, expected_source_commit=commit,
+        )
+    assert caught.value.reason == reason
+    assert str(caught.value) == "source_wheel_unavailable"
+    assert caught.value.__cause__ is None
+    assert "must-not-escape" not in str(caught.value)
+
+
+def test_source_state_invalid_input_is_closed_before_git(monkeypatch, tmp_path) -> None:
+    from tuner.execution.providers.modal import runtime_build
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text("[build-system]\n", encoding="ascii")
+    output = tmp_path / "output"
+    output.mkdir()
+    monkeypatch.setattr(runtime_build.subprocess, "run",
+                        lambda *_args, **_kwargs: pytest.fail("git must not start"))
+    with pytest.raises(runtime_build.SourceWheelFailure) as caught:
+        runtime_build.prepare_current_source_wheel(
+            source, output, expected_source_commit="invalid-commit",
+        )
+    assert (caught.value.reason, str(caught.value)) == (
+        "INPUT_INVALID", "source_wheel_unavailable",
+    )
+    assert caught.value.__cause__ is None
+
+
 def test_wheel_archive_rejects_head_change_before_builder(monkeypatch, tmp_path) -> None:
     from tuner.execution.providers.modal import runtime_build
 
@@ -372,7 +447,7 @@ def test_wheel_archive_rejects_head_change_before_builder(monkeypatch, tmp_path)
         runtime_build.prepare_current_source_wheel(
             source, output, expected_source_commit=first,
         )
-    assert caught.value.reason == "SOURCE_STATE_INVALID"
+    assert caught.value.reason == "HEAD_AFTER_MISMATCH"
     assert sum("rev-parse" in call for call in calls) == 2
 
 
@@ -427,7 +502,7 @@ def test_wheel_archive_rejects_tracked_dirty_source(monkeypatch, tmp_path) -> No
         runtime_build.prepare_current_source_wheel(
             source, output, expected_source_commit=commit,
         )
-    assert caught.value.reason == "SOURCE_STATE_INVALID"
+    assert caught.value.reason == "STATUS_BEFORE_DIRTY"
     assert len(calls) == 2
 
 

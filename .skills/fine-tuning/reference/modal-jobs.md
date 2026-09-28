@@ -644,7 +644,16 @@ image construction.
 
 ## Failure diagnostics
 
-For a standalone CPU attempt that stops at `RELEASE_OBSERVE` before deployment,
+The local source-wheel gate reports fixed input, HEAD, and tracked-status
+categories. Before/after labels refer to the commit-archive boundary;
+`STATUS_*_TIMEOUT` identifies a subprocess timeout, `STATUS_*_DIRTY` identifies
+nonempty successful status output, and `*_UNAVAILABLE` does not establish a
+cause. No Git output, path, or exception text is projected. Preserve the exact
+failed claim and diagnose read-only; neither a later clean check nor the older
+`SOURCE_STATE_INVALID` category proves a historical timeout. Do not change the
+model recipe, relax clean-source admission, or replay a claim on that inference.
+
+For a CPU-only standalone attempt that stops at `RELEASE_OBSERVE` before deployment,
 use the checked-in private maintenance diagnostic before another cost-incurring
 qualification attempt:
 

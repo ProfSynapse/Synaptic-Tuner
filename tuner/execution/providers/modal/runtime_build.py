@@ -41,6 +41,12 @@ _WHEEL_SOURCE_PATHS = (
     "tuner", "synaptic_tuner", "shared", "SynthChat", "Evaluator",
     "MechInterp", "Trainers",
 )
+_SOURCE_STATE_REASONS = (
+    "INPUT_INVALID", "HEAD_BEFORE_UNAVAILABLE", "HEAD_BEFORE_MISMATCH",
+    "STATUS_BEFORE_TIMEOUT", "STATUS_BEFORE_UNAVAILABLE", "STATUS_BEFORE_DIRTY",
+    "HEAD_AFTER_UNAVAILABLE", "HEAD_AFTER_MISMATCH",
+    "STATUS_AFTER_TIMEOUT", "STATUS_AFTER_UNAVAILABLE", "STATUS_AFTER_DIRTY",
+)
 
 
 class SourceArchiveInvalid(ValueError):
@@ -52,7 +58,8 @@ class SourceWheelFailure(ValueError):
 
     __slots__ = ("reason",)
     _REASONS = frozenset({
-        "SOURCE_STATE_INVALID", "BUILDER_SETUP_FAILED", "OFFLINE_WHEEL_TIMEOUT",
+        "SOURCE_STATE_INVALID", *_SOURCE_STATE_REASONS,
+        "BUILDER_SETUP_FAILED", "OFFLINE_WHEEL_TIMEOUT",
         "OFFLINE_WHEEL_FAILED", "WHEEL_INVENTORY_INVALID",
     })
 
@@ -81,7 +88,8 @@ class ModalBuildStageFailure(RuntimeError):
     __slots__ = ("stage", "reason")
     _REASONS = {
         "SOURCE_WHEEL": frozenset({
-            "LOCAL_BUILD_FAILED", "SOURCE_STATE_INVALID", "BUILDER_SETUP_FAILED",
+            "LOCAL_BUILD_FAILED", "SOURCE_STATE_INVALID", *_SOURCE_STATE_REASONS,
+            "BUILDER_SETUP_FAILED",
             "OFFLINE_WHEEL_TIMEOUT", "OFFLINE_WHEEL_FAILED", "WHEEL_INVENTORY_INVALID",
         }),
         "BUILD_INPUTS": frozenset({"INVALID"}),
@@ -162,35 +170,47 @@ def prepare_current_source_wheel(source_root: Path, output_dir: Path, *,
                 or re.fullmatch(r"[0-9a-f]{40}", expected_source_commit) is None):
             raise ValueError
     except Exception:
-        raise SourceWheelFailure("SOURCE_STATE_INVALID") from None
+        raise SourceWheelFailure("INPUT_INVALID") from None
     try:
         if not output_dir.is_dir():
             raise ValueError
     except Exception:
         raise SourceWheelFailure("BUILDER_SETUP_FAILED") from None
 
-    def bound_head() -> None:
+    def bound_head(phase: str) -> None:
         try:
             head = subprocess.run(
                 ["git", "-C", str(root), "rev-parse", "HEAD"],
                 capture_output=True, timeout=30, check=False,
             )
-            if (head.returncode != 0 or head.stdout.decode("ascii", "strict").strip()
-                    != expected_source_commit):
+            if head.returncode != 0 or type(head.stdout) is not bytes:
+                raise ValueError
+            observed = head.stdout.decode("ascii", "strict").strip()
+            if re.fullmatch(r"[0-9a-f]{40}", observed) is None:
                 raise ValueError
         except Exception:
-            raise SourceWheelFailure("SOURCE_STATE_INVALID") from None
+            raise SourceWheelFailure("HEAD_" + phase + "_UNAVAILABLE") from None
+        if observed != expected_source_commit:
+            raise SourceWheelFailure("HEAD_" + phase + "_MISMATCH")
 
-    bound_head()
-    try:
-        status = subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
-            capture_output=True, timeout=30, check=False,
-        )
-        if status.returncode != 0 or status.stdout or status.stderr:
-            raise ValueError
-    except Exception:
-        raise SourceWheelFailure("SOURCE_STATE_INVALID") from None
+    def clean_status(phase: str) -> None:
+        try:
+            status = subprocess.run(
+                ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+                capture_output=True, timeout=30, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise SourceWheelFailure("STATUS_" + phase + "_TIMEOUT") from None
+        except Exception:
+            raise SourceWheelFailure("STATUS_" + phase + "_UNAVAILABLE") from None
+        if (status.returncode != 0 or type(status.stdout) is not bytes
+                or type(status.stderr) is not bytes or status.stderr):
+            raise SourceWheelFailure("STATUS_" + phase + "_UNAVAILABLE")
+        if status.stdout:
+            raise SourceWheelFailure("STATUS_" + phase + "_DIRTY")
+
+    bound_head("BEFORE")
+    clean_status("BEFORE")
     try:
         archive = subprocess.run(
             ["git", "-C", str(root), "archive", "--format=tar",
@@ -199,16 +219,8 @@ def prepare_current_source_wheel(source_root: Path, output_dir: Path, *,
         )
     except Exception:
         raise SourceArchiveInvalid("accepted engine source archive failed") from None
-    bound_head()
-    try:
-        status_after = subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
-            capture_output=True, timeout=30, check=False,
-        )
-        if status_after.returncode != 0 or status_after.stdout or status_after.stderr:
-            raise ValueError
-    except Exception:
-        raise SourceWheelFailure("SOURCE_STATE_INVALID") from None
+    bound_head("AFTER")
+    clean_status("AFTER")
     if archive.returncode != 0 or not archive.stdout or len(archive.stdout) > 512 * 1024 * 1024:
         raise SourceArchiveInvalid("accepted engine source archive failed")
     try:

@@ -409,6 +409,18 @@ def test_source_archive_failure_projects_only_fixed_nonretryable_diagnosis(monke
 
 
 @pytest.mark.parametrize("stage,reason,location", [
+    ("SOURCE_WHEEL", "SOURCE_STATE_INVALID", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "INPUT_INVALID", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "HEAD_BEFORE_UNAVAILABLE", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "HEAD_BEFORE_MISMATCH", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "STATUS_BEFORE_TIMEOUT", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "STATUS_BEFORE_UNAVAILABLE", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "STATUS_BEFORE_DIRTY", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "HEAD_AFTER_UNAVAILABLE", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "HEAD_AFTER_MISMATCH", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "STATUS_AFTER_TIMEOUT", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "STATUS_AFTER_UNAVAILABLE", "runtime_build.prepare_current_source_wheel"),
+    ("SOURCE_WHEEL", "STATUS_AFTER_DIRTY", "runtime_build.prepare_current_source_wheel"),
     ("SOURCE_WHEEL", "BUILDER_SETUP_FAILED", "runtime_build.prepare_current_source_wheel"),
     ("SOURCE_WHEEL", "OFFLINE_WHEEL_TIMEOUT", "runtime_build.prepare_current_source_wheel"),
     ("BUILD_INPUTS", "INVALID", "runtime_build.prepare_build_inputs"),
