@@ -35,6 +35,7 @@ from tuner.execution.providers.modal.modal_wheel_builder import (
 _IMAGE_ID = re.compile(r"^im-[A-Za-z0-9]{1,64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_CAPTURE_BODY_BYTES = 128 * 1024
+_SOURCE_STATUS_TIMEOUT_SECONDS = 120
 _BUILDER_ATTESTATION = object()
 _WHEEL_SOURCE_PATHS = (
     "pyproject.toml", "README.md", "LICENSE",
@@ -197,7 +198,7 @@ def prepare_current_source_wheel(source_root: Path, output_dir: Path, *,
         try:
             status = subprocess.run(
                 ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
-                capture_output=True, timeout=30, check=False,
+                capture_output=True, timeout=_SOURCE_STATUS_TIMEOUT_SECONDS, check=False,
             )
         except subprocess.TimeoutExpired:
             raise SourceWheelFailure("STATUS_" + phase + "_TIMEOUT") from None

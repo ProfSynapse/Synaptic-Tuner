@@ -364,6 +364,7 @@ def test_source_state_substages_are_closed(monkeypatch, tmp_path, phase, fault, 
 
     def run(command, **_kwargs):
         if "rev-parse" in command:
+            assert _kwargs["timeout"] == 30
             counts["HEAD"] += 1
             current = "HEAD_BEFORE" if counts["HEAD"] == 1 else "HEAD_AFTER"
             if phase == current and fault == "unavailable":
@@ -371,10 +372,11 @@ def test_source_state_substages_are_closed(monkeypatch, tmp_path, phase, fault, 
             observed = "b" * 40 if phase == current and fault == "mismatch" else commit
             return subprocess.CompletedProcess(command, 0, observed.encode() + b"\n", b"")
         if "status" in command:
+            assert _kwargs["timeout"] == 120
             counts["STATUS"] += 1
             current = "STATUS_BEFORE" if counts["STATUS"] == 1 else "STATUS_AFTER"
             if phase == current and fault == "timeout":
-                raise subprocess.TimeoutExpired(command, 30, stderr=b"token=must-not-escape")
+                raise subprocess.TimeoutExpired(command, 120, stderr=b"token=must-not-escape")
             if phase == current and fault == "unavailable":
                 return subprocess.CompletedProcess(command, 2, b"", b"token=must-not-escape")
             dirty = b" M token=must-not-escape\n" if phase == current and fault == "dirty" else b""

@@ -651,7 +651,10 @@ nonempty successful status output, and `*_UNAVAILABLE` does not establish a
 cause. No Git output, path, or exception text is projected. Preserve the exact
 failed claim and diagnose read-only; neither a later clean check nor the older
 `SOURCE_STATE_INVALID` category proves a historical timeout. Do not change the
-model recipe, relax clean-source admission, or replay a claim on that inference.
+model recipe, relax clean-source admission, or replay a claim based on that inference.
+Tracked-status checks have a 120-second bound to accommodate slow mounted
+filesystems; HEAD checks remain bounded at 30 seconds. A timeout still fails
+closed rather than skipping the check or retrying the attempt.
 
 For a CPU-only standalone attempt that stops at `RELEASE_OBSERVE` before deployment,
 use the checked-in private maintenance diagnostic before another cost-incurring

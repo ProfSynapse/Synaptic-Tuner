@@ -162,4 +162,22 @@ retained here, not reclassified as a source-wheel failure. Source-wheel, host,
 and CLI projection tests passed in both runs. Runtime and inference locks remain
 CURRENT without changed pins, and canonical skills are synchronized. These
 results support a new exact-source qualification attempt, not a claim that the
-historical failure is fixed or a GPU run has succeeded.
+historical failure is resolved or a GPU run has succeeded.
+
+### Measured status timeout on the diagnostic commit
+
+Fresh attempt `modal-b8a4284c42e45ea6593e6093`, authenticated against pushed
+`022bedf24a9f5fb5080281abd7517341c0da72c7`, returned
+`SOURCE_WHEEL / STATUS_BEFORE_TIMEOUT` at `2026-09-28T12:06:19.384887`.
+This establishes that the pre-archive tracked-status subprocess exceeded its
+30-second deadline in this attempt. It does not retrospectively classify the
+older failure or establish why this filesystem check was slow.
+[Microsoft's filesystem guidance](https://learn.microsoft.com/en-us/windows/wsl/filesystems)
+documents slower cross-filesystem work under `/mnt`, which is relevant context
+for this checkout, not a measured root cause. The small corrective experiment
+allows 120 seconds for each tracked-status check, retaining HEAD's 30-second
+limit, exact-commit archive, clean-source rejection, and no replay. No repository
+move or change to the model settings or provider workflow is introduced.
+Independent review approved the adjustment; 33 source-wheel tests and 150
+host/projection tests passed. Skills are synchronized, no locked source or pins
+changed, and a fresh live attempt must still demonstrate the check completes.
