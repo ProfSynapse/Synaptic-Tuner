@@ -100,9 +100,10 @@ def _transport(monkeypatch):
     monkeypatch.setattr(Upload, "__exit__", publish)
     monkeypatch.setattr(FakeVolume, "commit", lambda self: pytest.fail("host commit is redundant"), raising=False)
     async_utils = ModuleType("modal._utils.async_utils")
-    async_utils.synchronizer = SimpleNamespace(
-        create_blocking=lambda operation: lambda **kwargs: asyncio.run(operation(**kwargs)),
-    )
+    def create_blocking(operation):
+        assert getattr(operation, "__self__", None) is None
+        return lambda *args, **kwargs: asyncio.run(operation(*args, **kwargs))
+    async_utils.synchronizer = SimpleNamespace(create_blocking=create_blocking)
     monkeypatch.setitem(sys.modules, "modal", ModuleType("modal"))
     monkeypatch.setitem(sys.modules, "modal._utils", ModuleType("modal._utils"))
     monkeypatch.setitem(sys.modules, "modal._utils.async_utils", async_utils)
@@ -193,11 +194,12 @@ def test_marker_readback_runs_on_sdk_loop(monkeypatch) -> None:
 
         monkeypatch.setattr(reader_type, "read_exact", read_on_bound_loop)
         bridge = sys.modules["modal._utils.async_utils"].synchronizer
-        bridge.create_blocking = lambda operation: (
-            lambda **kwargs: asyncio.run_coroutine_threadsafe(
-                operation(**kwargs), loop,
+        def create_blocking(operation):
+            assert getattr(operation, "__self__", None) is None
+            return lambda *args, **kwargs: asyncio.run_coroutine_threadsafe(
+                operation(*args, **kwargs), loop,
             ).result(timeout=5)
-        )
+        bridge.create_blocking = create_blocking
         outcome = transport.execute_once(binding, binding.command)
         assert outcome.disposition is ObservationDisposition.FOUND
         assert seen == [True] * len(published)

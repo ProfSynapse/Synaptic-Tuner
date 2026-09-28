@@ -803,8 +803,12 @@ an empty call catalog alone do not establish historical call execution.
 Host marker uploads use `batch_upload(force=False)`; context exit publishes the
 upload. Do not append `Volume.commit()`, which is for mounted-container changes.
 Raw async reads using the persistent Modal client must run on its SDK
-synchronizer loop, as the checked-in inspectors do, not on a new `asyncio.run`
-loop. Test doubles must model batch publication and loop affinity rather than
+synchronizer loop, following the checked-in inspectors, not a new `asyncio.run`
+loop. Pass a free async function to `synchronizer.create_blocking`, with the
+reader supplied explicitly: the pinned bridge rejects ordinary bound methods.
+Qualify the actual production bridge using pinned dependencies without network
+effects; testing a different free-function shape misses this failure. Test
+doubles must model batch publication, accepted call shapes, and loop affinity rather than
 merely mirroring the host implementation. This does not remove the worker's
 required mounted cache/artifact/control commits.
 

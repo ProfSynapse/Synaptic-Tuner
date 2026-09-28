@@ -52,6 +52,11 @@ class ModalPackagedMarkerMaterialSource(Protocol):
     def resolve(self, command_digest: str) -> tuple[object, ...] | None: ...
 
 
+async def _read_marker_on_sdk_loop(reader: BoundedModalVolumeReader, **kwargs) -> bytes:
+    """Bridge a free coroutine; Modal's synchronizer rejects bound methods."""
+    return await reader.read_exact(**kwargs)
+
+
 def _bounded_provider_call(operation, *, timeout_seconds: float = 30.0):
     """Bound provider call-ID capture; a late spawn keeps the claim consumed."""
     result: Queue[tuple[bool, object]] = Queue(maxsize=1)
@@ -169,7 +174,8 @@ class ModalPackagedHostTransport:
                 # The explicit client's raw stub belongs to Modal's event loop.
                 from modal._utils.async_utils import synchronizer
 
-                return synchronizer.create_blocking(reader.read_exact)(
+                return synchronizer.create_blocking(_read_marker_on_sdk_loop)(
+                    reader,
                     volume_id=marker.volume_id, path=marker.marker_name,
                     expected_size=32, expected_sha256=marker.value_sha256,
                     max_bytes=32,

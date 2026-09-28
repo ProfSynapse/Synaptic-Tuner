@@ -212,9 +212,10 @@ def test_public_training_api_stages_and_submits_once_with_fake_modal(tmp_path, m
         raise AssertionError("host commit is redundant")
     monkeypatch.setattr(FakeVolume, "commit", unexpected_commit, raising=False)
     async_utils = ModuleType("modal._utils.async_utils")
-    async_utils.synchronizer = SimpleNamespace(
-        create_blocking=lambda operation: lambda **kwargs: asyncio.run(operation(**kwargs)),
-    )
+    def create_blocking(operation):
+        assert getattr(operation, "__self__", None) is None
+        return lambda *args, **kwargs: asyncio.run(operation(*args, **kwargs))
+    async_utils.synchronizer = SimpleNamespace(create_blocking=create_blocking)
     monkeypatch.setitem(sys.modules, "modal", ModuleType("modal"))
     monkeypatch.setitem(sys.modules, "modal._utils", ModuleType("modal._utils"))
     monkeypatch.setitem(sys.modules, "modal._utils.async_utils", async_utils)

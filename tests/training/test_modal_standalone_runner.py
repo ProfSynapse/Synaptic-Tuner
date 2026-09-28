@@ -237,9 +237,10 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
 
     monkeypatch.setitem(sys.modules, "modal", _SDK)
     async_utils = ModuleType("modal._utils.async_utils")
-    async_utils.synchronizer = SimpleNamespace(
-        create_blocking=lambda operation: lambda **kwargs: asyncio.run(operation(**kwargs)),
-    )
+    def create_blocking(operation):
+        assert getattr(operation, "__self__", None) is None
+        return lambda *args, **kwargs: asyncio.run(operation(*args, **kwargs))
+    async_utils.synchronizer = SimpleNamespace(create_blocking=create_blocking)
     monkeypatch.setitem(sys.modules, "modal._utils", ModuleType("modal._utils"))
     monkeypatch.setitem(sys.modules, "modal._utils.async_utils", async_utils)
     monkeypatch.setattr(runner, "open_modal_host_scope", lambda **kw: (client, facts.client_binding))

@@ -180,4 +180,34 @@ limit, exact-commit archive, clean-source rejection, and no replay. No repositor
 move or change to the model settings or provider workflow is introduced.
 Independent review approved the adjustment; 33 source-wheel tests and 150
 host/projection tests passed. Skills are synchronized, no locked source or pins
-changed, and a fresh live attempt must still demonstrate the check completes.
+changed; the next fresh live attempt was required to demonstrate completion.
+
+### CPU qualification passed; marker invocation shape failed
+
+Attempt `modal-848bad657119228d331ec45e` authenticated source `a8f102ad` and
+advanced through build and CPU qualification into staged submission. The host
+reported `marker_readback` and `RUN_SUBMIT_RECONCILE_REQUIRED`. Its exact submit
+claim is `4e5ad1b4e6d2fe4bd19c18317a27831e34f11952b343a3897015e4064dc6ef4d`;
+there is no retained packaged-call row. Preserve the claim and resources rather
+than interpreting that absence as replay authority.
+
+The checked-in read-only marker inspector returned control `MATCH`, artifacts
+`UNAVAILABLE`, and model-cache `UNAVAILABLE`. The first marker is present and
+readable at inspection time; the other results are inconclusive. A network-free
+probe with the pinned Modal 1.5.4 launcher reproduced rejection of
+`synchronizer.create_blocking(reader.read_exact)` for a bound async method,
+the invocation shape used by the host. The inspector instead wraps a free async
+function. This establishes an invocation defect; the retained stage alone does
+not independently prove the historical exception. Provider test doubles must
+reject that unsupported shape, and the corrected production path needs a real
+pinned-dependency, network-free probe before promotion.
+
+The corrected production helper passed that pinned Modal 1.5.4 worker-thread
+probe. Root's integrated transport/composition/standalone/inspector gate passed
+183/183 tests. A parallel worker suite had 123 passes and one different
+standalone simulated-start case (`STAGED_INPUT`) fail before the mocked worker
+poll, again projecting `RUN_START_INDETERMINATE`. This recurring test
+intermittency remains unresolved and must not be hidden by the clean root run;
+no production change was made on an unproven explanation. The bridge fix has
+independent static review, both source locks are CURRENT, and skill copies match.
+Only a fresh attempt can establish the corrected live submission and training.
