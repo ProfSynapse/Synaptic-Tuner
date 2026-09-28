@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -193,6 +194,46 @@ def test_bound_cache_publishes_every_verified_member_from_private_scratch(
     assert [args["allow_patterns"] for name, args in fixture.calls if name == "download"] == [
         list(fixture.files)
     ]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux descriptor-relative mount semantics")
+@pytest.mark.parametrize("umask", (0o022, 0o002))
+def test_real_volume_binding_publishes_verified_model_fixture(fixture, monkeypatch, tmp_path, umask):
+    from tuner.execution.providers.modal import volume_root_binding as bound
+    nested_name, nested_content = "nested/config.json", b"nested verified bytes"
+    fixture.files[nested_name] = nested_content
+    fixture.info.siblings.append(SimpleNamespace(
+        rfilename=nested_name, size=len(nested_content), lfs=None,
+        blob_id=hashlib.sha1(f"blob {len(nested_content)}\0".encode() + nested_content).hexdigest(),
+    ))
+    target_parent = tmp_path / "__modal" / "volumes"
+    target = target_parent / "vo-test"
+    target.mkdir(parents=True)
+    mount = tmp_path / "mnt" / "model-cache"
+    mount.parent.mkdir()
+    mount.symlink_to(target, target_is_directory=True)
+    marker_name = ".synaptic-test-marker"
+    marker = b"m" * 32
+    (target / marker_name).write_bytes(marker)
+    monkeypatch.setattr(bound, "_PROVIDER_VOLUME_ROOT", str(target_parent))
+    original_trust = bound._trusted_dir
+    def allow_test_tmp(info):
+        if info.st_uid == 0 and info.st_mode & 0o1000:
+            return
+        original_trust(info)
+    monkeypatch.setattr(bound, "_trusted_dir", allow_test_tmp)
+    original_umask = os.umask(umask)
+    try:
+        with bound.VolumeRootBinding.bind(
+            root_path=str(mount), volume_id="vo-test", marker_name=marker_name,
+            marker_sha256=hashlib.sha256(marker).hexdigest(),
+        ) as binding:
+            snapshot = prepare(fixture, persistent_root=mount, persistent_binding=binding)
+            assert all((snapshot / name).read_bytes() == content for name, content in fixture.files.items())
+    finally:
+        os.umask(original_umask)
+    published = target / "models--fixture--tiny" / "snapshots" / REVISION
+    assert all((published / name).read_bytes() == content for name, content in fixture.files.items())
 
 
 def test_bound_cache_never_opens_provider_symlink_path(fixture, tmp_path):

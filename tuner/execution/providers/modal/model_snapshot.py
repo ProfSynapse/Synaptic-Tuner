@@ -205,7 +205,15 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
     with tempfile.TemporaryDirectory(prefix="model-prepare-", dir=scratch_root) as temporary:
         private = Path(temporary)
         repository = private / "repository"
-        repository.mkdir()
+        repository.mkdir(mode=0o700)
+        # Pre-create reviewed member parents privately, independent of umask.
+        # Both the publisher and destination copy require safe source paths.
+        parents = {parent for name in members for parent in PurePosixPath(name).parents
+                   if parent != PurePosixPath(".")}
+        for parent in sorted(parents, key=lambda path: (len(path.parts), path.as_posix())):
+            directory = repository.joinpath(*parent.parts)
+            directory.mkdir(mode=0o700)
+            _directory(directory)
         missing = []
         stage[0] = "VERIFICATION"
         for name, (size, kind, expected) in members.items():

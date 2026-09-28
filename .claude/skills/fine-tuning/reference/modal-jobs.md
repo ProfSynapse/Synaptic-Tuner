@@ -894,7 +894,13 @@ messages out of diagnostics. A substage identifies an operation, not a cause.
 Preserve consumed attempts and all existing source, model, snapshot,
 cache-publication, and artifact checks. Shared model preparation must remain
 independent of the packaged SFT module so inference does not acquire a new
-training-only dependency through diagnostic exception types.
+training-only dependency through diagnostic exception types. Private model
+preparation must create the repository and every validated member-parent
+directory explicitly at 0700 before SDK writes. Create parents depth-first;
+`mkdir(parents=True, mode=0o700)` alone leaves intermediate modes dependent on
+ambient umask. Preserve descriptor-bound publication checks and process-global
+umask. Cover nested members with the real binding under umask 022 and 002; a
+locally reproduced permission mismatch does not establish a remote failure cause.
 For new workers, `SFT_ADMISSION_{CONTRACTS,RELEASE,PATHS,INPUT,ENVIRONMENT,INVOCATION,COMMITMENT}`
 identifies the existing admission subcheck; legacy `SFT_ADMISSION` remains
 accepted. Replay exact retained pure contracts locally before changing a recipe.

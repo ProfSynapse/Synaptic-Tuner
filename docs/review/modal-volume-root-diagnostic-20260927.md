@@ -502,3 +502,44 @@ no artifact/control commit after preparation failure, and unchanged success
 ordering. All source commitments remain CURRENT. Independent final review
 approved a diagnostic commit and fresh CPU/GPU attempt, not a cause or training
 success. The journal and roadmap retain the failed attempt without replay.
+
+Diagnostic source `c0ac2f96c6700913be482540e31db1b79a093061` was pushed.
+Fresh CPU qualification `cpu-qual-a74cd731e39467cada8d3fdd` passed at
+`2026-09-28T15:49:02.503499`, runtime release
+`78556634e53bca8d42307593b881e9d8f0ae7dca36da5f24edcc02c48d6ef039`,
+qualification output `294911a2b701ce16bf147affe9a0bb0da512824fa94263b9285d7703537ceec7`.
+The fresh L40S attempt `modal-206e29eaaf07fd37b054a48a` stopped at
+`RUN_WORKER_SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION` at
+`2026-09-28T15:55:51.704447`. Exact-call inspection confirmed the corresponding
+`WORKER_` result for call `fc-01M3MSAE0V6QADGKKABEPZXFJ1`, claim
+`31994bb43760cf64089bf509ffd3305cd987a45af5a7cdc8196e89511fb7efbb`.
+Hub metadata, private download and initial file verification reached publication;
+the explicit cache commit and trainer were not reached. Modal background commits
+mean failure before explicit commit does not imply no persistent effects.
+
+Publication still combines create-only directory claims and exact file copies.
+Existing model-preparer and entrypoint tests substitute a simple bound-cache
+fake rather than exercising the actual descriptor-bound publication operations.
+The real Linux binding/model-preparer integration passed under umask 022 but
+failed at persistent publication under umask 002. Default-created repository
+and SDK directories can be 0775; the existing private-chain guard rejects their
+group-write bit. This proves a local compatibility bug, not Modal's remote umask
+or the cause of the retained remote failure.
+
+Independent review approved explicitly creating the private repository and
+validated member-parent directories at 0700 before SDK writes. Create each parent
+depth-first; `mkdir(parents=True, mode=0o700)` does not constrain intermediate
+parents. Do not change process-global umask or relax private-chain/Volume guards.
+The corrected real-binding test passes under both umasks, including nested
+members. To keep the workflow proportional, defer the broader binding diagnostic
+draft and promote only this small permission correction with its regressions.
+The existing closed `PERSISTENT_PUBLICATION` label is sufficient for the next
+experiment; finer diagnostics remain available if the failure persists. No path,
+raw errno, SDK text, credential, or arbitrary exception may escape. Retain every
+validation, immutable inventory, commit order, and consumed attempt. The fresh
+remote experiment is still required for attribution.
+The root regression gate passed 666/666 under pinned CPython 3.11.14, including
+real publication, mounted I/O, inference model/worker integration, packaged SFT,
+entrypoint, qualification, and host diagnostic checks. The generic worker closure
+remains unchanged and CURRENT; both fixed Modal source inventories received only
+reviewed model-preparer hash refreshes. Canonical skill copies match.
