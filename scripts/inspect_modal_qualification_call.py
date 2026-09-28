@@ -26,7 +26,7 @@ from tuner.execution.foundation_v2.canonical import (
     canonical_bytes, parse_canonical_object, safe_ref,
 )
 from tuner.execution.providers.modal.runtime_release_qualification import (
-    QUALIFICATION_RESULT_SCHEMA,
+    QUALIFICATION_RESULT_SCHEMA, PARENT_RUNTIME_FAILURE_STAGES,
 )
 _NAMESPACE = "standalone-training"
 _CATALOG = "modal-runtime-qualification-calls"
@@ -133,7 +133,7 @@ def _pinned_python() -> bool:
 
 
 def _classify_fixed_result(output: object, api_pb2: object, serialize: object) -> str:
-    """Compare opaque bytes with six locally serialized fixed worker results."""
+    """Compare opaque bytes with locally serialized fixed worker results."""
     unknown = "PROVIDER_SUCCESS_UNKNOWN"
     try:
         result = output.result
@@ -157,6 +157,10 @@ def _classify_fixed_result(output: object, api_pb2: object, serialize: object) -
                                        "status_code": "failed", "failure_stage": "PARENT_RELEASE"}),
             ("WORKER_CHILD_RESULT", {"schema_version": QUALIFICATION_RESULT_SCHEMA,
                                      "status_code": "failed", "failure_stage": "CHILD_RESULT"}),
+        ) + tuple(
+            ("WORKER_" + stage, {"schema_version": QUALIFICATION_RESULT_SCHEMA,
+                                  "status_code": "failed", "failure_stage": stage})
+            for stage in sorted(PARENT_RUNTIME_FAILURE_STAGES)
         )
         for category, document in cases:
             expected = serialize(document)
@@ -257,12 +261,12 @@ def main(argv: list[str] | None = None) -> int:
         "authority": "DIAGNOSTIC_ONLY",
         "result": category,
     }, sort_keys=True, separators=(",", ":")))
-    return 0 if category in {
+    return 0 if category in ({
         "PENDING", "PROVIDER_SUCCESS_UNKNOWN", "WORKER_COMPLETED",
         "WORKER_FAILED", "WORKER_PARENT_SETUP", "WORKER_INSTALLED_CHILD",
         "WORKER_PARENT_RELEASE", "WORKER_CHILD_RESULT",
         "PROVIDER_FAILURE",
-    } else 1
+    } | {"WORKER_" + stage for stage in PARENT_RUNTIME_FAILURE_STAGES}) else 1
 
 
 if __name__ == "__main__":

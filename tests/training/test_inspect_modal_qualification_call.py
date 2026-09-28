@@ -241,13 +241,27 @@ def test_exact_fixed_serialized_results_only(monkeypatch, status, stage, expecte
     ][:index + 1]
 
 
+@pytest.mark.parametrize("stage", sorted(diagnostic.PARENT_RUNTIME_FAILURE_STAGES))
+def test_parent_runtime_result_is_exact_and_closed(monkeypatch, stage):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
+    output = SimpleNamespace(
+        data_format=_Proto.DATA_FORMAT_PICKLE,
+        result=_OpaqueResult(1, data=("fixed:failed:" + stage).encode("ascii")),
+    )
+    serialize = lambda value: ("fixed:" + value["status_code"] + ":"
+                               + value.get("failure_stage", "")).encode("ascii")
+    assert diagnostic._classify_fixed_result(output, _Proto, serialize) == "WORKER_" + stage
+    output.result = _OpaqueResult(1, data=b"fixed:failed:PARENT_RUNTIME_PRIVATE_SENTINEL")
+    assert diagnostic._classify_fixed_result(output, _Proto, serialize) == "PROVIDER_SUCCESS_UNKNOWN"
+
+
 @pytest.mark.parametrize("data_format,data,blob", [
     (99, b"fixed:completed", ""),
     (1, b"fixed:completed", "bl-private"),
     (1, b"x" * (diagnostic._MAX_FIXED_RESULT + 1), ""),
     (1, b"unrecognized", ""),
 ])
-def test_unsupported_or_hostile_success_stays_unknown(
+def test_unsupported_or_hostile_success_stays_unknown_closed(
     monkeypatch, data_format, data, blob,
 ):
     monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)

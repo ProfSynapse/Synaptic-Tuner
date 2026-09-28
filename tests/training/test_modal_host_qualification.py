@@ -194,7 +194,8 @@ def test_cpu_gate_does_not_stage_when_claim_fails(monkeypatch):
     ("child_result", "CALL_CHILD_RESULT"),
     ("unknown_worker", "CALL_OBSERVE"),
     ("receipt", "RECEIPT_VERIFY"),
-))
+) + tuple(("parent_runtime_" + stage.removeprefix("PARENT_RUNTIME_").lower(), "CALL_" + stage)
+          for stage in sorted(qualification.PARENT_RUNTIME_FAILURE_STAGES)))
 def test_cpu_gate_reports_only_closed_post_claim_stage(
         monkeypatch, failure_stage, expected_phase):
     runtime, client = _runtime()
@@ -235,7 +236,7 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
             events.append("call")
             if failure_stage == "call":
                 raise RuntimeError("HF_TOKEN=private")
-            if failure_stage in {"parent_setup", "installed_child", "parent_release", "child_result", "unknown_worker"}:
+            if failure_stage in {"parent_setup", "installed_child", "parent_release", "child_result", "unknown_worker"} or failure_stage.startswith("parent_runtime_"):
                 stages = {
                     "parent_setup": "PARENT_SETUP",
                     "installed_child": "INSTALLED_CHILD",
@@ -243,6 +244,8 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
                     "child_result": "CHILD_RESULT",
                     "unknown_worker": "OTHER_STAGE",
                 }
+                if failure_stage.startswith("parent_runtime_"):
+                    stages[failure_stage] = "PARENT_RUNTIME_" + failure_stage.removeprefix("parent_runtime_").upper()
                 return {
                     "schema_version": "synaptic-modal-runtime-release-qualification-result/v1",
                     "status_code": "failed",
@@ -282,7 +285,7 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
     assert "HF_TOKEN" not in str(error)
     assert error.__cause__ is None
     assert events[0] == "claim"
-    if failure_stage in {"parent_setup", "installed_child", "parent_release", "child_result", "unknown_worker"}:
+    if failure_stage in {"parent_setup", "installed_child", "parent_release", "child_result", "unknown_worker"} or failure_stage.startswith("parent_runtime_"):
         assert "receipt" not in events
 
 

@@ -14,6 +14,7 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
     try:
         from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
         from tuner.training.modal_host_qualification import ModalHostQualificationUnavailable
+        from tuner.execution.providers.modal.runtime_release_qualification import PARENT_RUNTIME_FAILURE_STAGES
         from tuner.training.modal_standalone_runner import ModalStandalonePhaseUnavailable
         from tuner.execution.providers.modal.packaged_worker import PACKAGED_WORKER_FAILURE_STAGES
     except Exception:
@@ -73,6 +74,8 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
             "UNAVAILABLE", "modal_runtime_release_qualification.installed_child"),
         "CALL_PARENT_RELEASE": (
             "UNAVAILABLE", "packaged_training_worker.parent_release"),
+        **{"CALL_" + stage: ("UNAVAILABLE", "modal_runtime_release_qualification.parent_runtime")
+           for stage in PARENT_RUNTIME_FAILURE_STAGES},
         "CALL_CHILD_RESULT": (
             "UNAVAILABLE", "packaged_training_worker.child_result"),
         "RECEIPT_VERIFY": ("UNAVAILABLE", "modal_host_qualification.verify_receipt"),

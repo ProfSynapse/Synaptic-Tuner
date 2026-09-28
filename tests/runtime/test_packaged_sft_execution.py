@@ -342,8 +342,9 @@ def test_exact_python_version_rejected_before_inventory_inspection(monkeypatch):
     calls = []
     monkeypatch.setattr(seam, "stable_read", lambda *args, **kwargs: b"{}")
     monkeypatch.setattr(worker, "inspect_installed_runtime", lambda *args: calls.append(args))
-    with pytest.raises(ValueError):
+    with pytest.raises(seam.PackagedReleaseInspectionError) as rejected:
         seam._inspect_release(_release(python_version="0.0.1"))
+    assert rejected.value.stage == "PYTHON_VERSION"
     assert not calls
 
 

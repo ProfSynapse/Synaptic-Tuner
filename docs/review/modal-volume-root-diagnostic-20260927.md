@@ -247,4 +247,33 @@ explains the local test failures, not the remote admission failure. The final
 worker/inspector/host-reader/standalone projection gate passed 267/267 under
 the same 3.11 interpreter without flakes. Packaged worker, Modal runtime (98
 members), and inference (119 members) checks all report CURRENT; skill trees
-match. These gates approve fresh exact-source qualification, not GPU success.
+match. These gates approved fresh exact-source qualification, not GPU success.
+
+### Installed-runtime boundary isolated on the diagnostic commit
+
+Attempt `modal-4f928f2247331ab8aaaa0f29`, source
+`37d7b1f6a26445871373ad7d73f04d53dcd6e55e`, passed CPU qualification and
+returned `RUN_WORKER_SFT_ADMISSION_RELEASE` at `2026-09-28T12:57:53.228552`.
+The exact claim-bound inspector confirmed `WORKER_SFT_ADMISSION_RELEASE` for
+call `fc-01M3MF6HQXRRHXMZ2G6YE6KQNP` and submit digest
+`0fe95ea4c651227c6988a9b3d0018636736954e5cb9db6c93f792fe84eb3adc0`.
+This identifies the installed-runtime check, not its failing predicate.
+
+The retained release pins CPython 3.12.3 at
+`/opt/unsloth-venv/bin/python3`, matching the Qwen packaged image profile.
+The operator launcher's CPython 3.11.14 is a distinct runtime, not evidence of
+the remote parent interpreter. The CPU child explicitly invokes the pinned
+release executable; its parent only checks the pinned wheel/trainer reference.
+Training also invokes `_inspect_release` in the Function parent. Commit
+`c5257031` intentionally made the generic child qualifier parent-process-agnostic;
+retain that property. The next targeted change adds the same runtime inspection
+to the authenticated Modal CPU parent and reports finite predicate codes before
+another GPU attempt. No interpreter mismatch, inventory mismatch, or other
+specific cause is established yet; no pins or validation were relaxed. The
+Modal-only parent precheck and finite predicate projections passed 310/310
+provider-free tests under the pinned CPython 3.11.14 test harness. Coverage
+includes no child invocation or artifact/control commits after parent failure,
+all finite host/CLI/inspector projections, and unchanged generic runtime checks.
+The five-member packaged closure was reviewed and refreshed; both Modal source
+locks remain CURRENT (98 and 119 members) and skill copies are synchronized.
+The next live operation is CPU-only qualification, not a GPU training retry.

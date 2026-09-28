@@ -21,6 +21,7 @@ from tuner.execution.providers.modal.runtime_release_deployment import (
 )
 from tuner.execution.providers.modal.runtime_release_qualification import (
     QUALIFICATION_HMAC_KEY_REF, QUALIFICATION_RESULT_SCHEMA,
+    PARENT_RUNTIME_FAILURE_STAGES,
     ModalRuntimeQualificationHmacAuthenticator,
     ModalRuntimeReleaseFixtureReceiptV1,
     ModalRuntimeReleaseQualificationDispatchV1,
@@ -58,6 +59,8 @@ class ModalHostQualificationUnavailable(RuntimeError):
         "CALL_CHILD_RESULT": (
             "UNAVAILABLE", "packaged_training_worker.child_result"),
         "RECEIPT_VERIFY": ("UNAVAILABLE", "modal_host_qualification.verify_receipt"),
+        **{"CALL_" + stage: ("UNAVAILABLE", "modal_runtime_release_qualification.parent_runtime")
+           for stage in PARENT_RUNTIME_FAILURE_STAGES},
     }
 
     def __init__(self, phase: str) -> None:
@@ -259,6 +262,9 @@ def qualify_modal_runtime_for_host(
                 raise ModalHostQualificationUnavailable("CALL_INSTALLED_CHILD") from None
             if type(result) is dict and result == {**failed, "failure_stage": "PARENT_RELEASE"}:
                 raise ModalHostQualificationUnavailable("CALL_PARENT_RELEASE") from None
+            if (type(result) is dict and result.get("failure_stage") in PARENT_RUNTIME_FAILURE_STAGES
+                    and result == {**failed, "failure_stage": result["failure_stage"]}):
+                raise ModalHostQualificationUnavailable("CALL_" + result["failure_stage"]) from None
             if type(result) is dict and result == {**failed, "failure_stage": "CHILD_RESULT"}:
                 raise ModalHostQualificationUnavailable("CALL_CHILD_RESULT") from None
             if (type(result) is not dict or result != {

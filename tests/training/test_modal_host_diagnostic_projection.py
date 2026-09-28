@@ -3,6 +3,7 @@
 import pytest
 
 from tuner.execution.providers.modal.packaged_worker import PACKAGED_WORKER_FAILURE_STAGES
+from tuner.execution.providers.modal.runtime_release_qualification import PARENT_RUNTIME_FAILURE_STAGES
 from tuner.handlers.modal_job_config_handler import _closed_bootstrap_details
 from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
 from tuner.training.modal_host_qualification import ModalHostQualificationUnavailable
@@ -72,7 +73,7 @@ def test_unknown_bootstrap_exception_has_no_details():
     "CALL_OBSERVE", "CALL_PARENT_SETUP", "CALL_INSTALLED_CHILD",
     "CALL_PARENT_RELEASE", "CALL_CHILD_RESULT",
     "RECEIPT_VERIFY",
-))
+) + tuple("CALL_" + stage for stage in sorted(PARENT_RUNTIME_FAILURE_STAGES)))
 def test_cpu_qualification_diagnosis_projects_only_closed_fields(phase):
     error = ModalHostQualificationUnavailable(phase)
     assert _closed_bootstrap_details(error) == {

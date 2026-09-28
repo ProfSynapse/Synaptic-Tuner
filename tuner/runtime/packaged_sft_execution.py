@@ -190,41 +190,75 @@ def _installed_python_digest(executable: str) -> str:
     return _digest(stable_read(physical_python, 256 * 1024 * 1024))
 
 
+RELEASE_INSPECTION_STAGES = (
+    "INPUT", "PYTHON_IMPLEMENTATION", "PYTHON_VERSION", "PYTHON_EXECUTABLE",
+    "PYTHON_DIGEST", "INSTALLED_RUNTIME",
+    "PACKAGE", "PYTHON", "INSTALLED_DISTRIBUTIONS", "WORKER",
+    "CONTRACTS", "PLATFORM_RECORD", "COMPATIBILITY", "PLATFORM",
+    "WHEEL", "TRAINER_ASSETS",
+)
+
+
+class PackagedReleaseInspectionError(ValueError):
+    """Fixed predicate, without details from the inspected installation."""
+
+    def __init__(self, stage: str) -> None:
+        if stage not in RELEASE_INSPECTION_STAGES:
+            raise ValueError("invalid release inspection stage")
+        self.stage = stage
+        super().__init__("PACKAGED_RELEASE_INSPECTION_REJECTED")
+
+
 def _inspect_release(release):
     """Measure the installed wheel graph, never a source checkout or Git tree."""
     from tuner.runtime.packaged_training_worker import inspect_installed_runtime
-    expected = json.loads(stable_read(Path("/opt/synaptic-runtime/build-inputs.json")))
-    if (sys.implementation.name != release.python_implementation
-            or platform.python_version() != release.python_version
-            or str(Path(sys.executable)) != release.python_executable):
-        raise ValueError
-    # A venv executable may be a symlink to the immutable image's physical
-    # interpreter. Keep the configured invocation path exact, then hash the
-    # resolved regular file through the no-follow stable reader.
-    if _installed_python_digest(release.python_executable) != release.python_executable_digest:
-        raise ValueError
-    measured = inspect_installed_runtime(expected)
-    document = release.to_dict()
-    for name in ("package", "python", "installed_distributions", "worker", "contracts", "platform"):
-        actual = measured[name]
-        locked = document[name]
-        if name == "installed_distributions":
-            actual = {key: actual[key] for key in ("digest", "count")}
-        if _canonical(actual) != _canonical(locked):
+    stage = "INPUT"
+    try:
+        expected = json.loads(stable_read(Path("/opt/synaptic-runtime/build-inputs.json")))
+        stage = "PYTHON_IMPLEMENTATION"
+        if sys.implementation.name != release.python_implementation:
             raise ValueError
-    if _canonical(measured["capabilities"]["compatibility"]) != _canonical(document["compatibility"]):
-        raise ValueError
-    if (platform.system().lower() != release.platform_system
-            or platform.machine().lower() != release.platform_machine):
-        raise ValueError
-    distribution = importlib.metadata.distribution(release.package_name)
-    from io import BytesIO
-    from zipfile import ZipFile
-    wheel_raw = stable_read(Path("/opt/synaptic-runtime") / expected["wheel"]["filename"], 256 * 1024 * 1024)
-    if _digest(wheel_raw) != release.package_digest:
-        raise ValueError
-    with ZipFile(BytesIO(wheel_raw)) as wheel:
-        return _require_trainer_assets(distribution, wheel)
+        stage = "PYTHON_VERSION"
+        if platform.python_version() != release.python_version:
+            raise ValueError
+        stage = "PYTHON_EXECUTABLE"
+        if str(Path(sys.executable)) != release.python_executable:
+            raise ValueError
+        # The configured invocation path stays exact, while the resolved
+        # regular interpreter file is hashed through the stable reader.
+        stage = "PYTHON_DIGEST"
+        if _installed_python_digest(release.python_executable) != release.python_executable_digest:
+            raise ValueError
+        stage = "INSTALLED_RUNTIME"
+        measured = inspect_installed_runtime(expected)
+        document = release.to_dict()
+        for name in ("package", "python", "installed_distributions", "worker", "contracts", "platform"):
+            stage = "PLATFORM_RECORD" if name == "platform" else name.upper()
+            actual = measured[name]
+            locked = document[name]
+            if name == "installed_distributions":
+                actual = {key: actual[key] for key in ("digest", "count")}
+            if _canonical(actual) != _canonical(locked):
+                raise ValueError
+        stage = "COMPATIBILITY"
+        if _canonical(measured["capabilities"]["compatibility"]) != _canonical(document["compatibility"]):
+            raise ValueError
+        stage = "PLATFORM"
+        if (platform.system().lower() != release.platform_system
+                or platform.machine().lower() != release.platform_machine):
+            raise ValueError
+        stage = "WHEEL"
+        distribution = importlib.metadata.distribution(release.package_name)
+        from io import BytesIO
+        from zipfile import ZipFile
+        wheel_raw = stable_read(Path("/opt/synaptic-runtime") / expected["wheel"]["filename"], 256 * 1024 * 1024)
+        if _digest(wheel_raw) != release.package_digest:
+            raise ValueError
+        stage = "TRAINER_ASSETS"
+        with ZipFile(BytesIO(wheel_raw)) as wheel:
+            return _require_trainer_assets(distribution, wheel)
+    except BaseException:
+        raise PackagedReleaseInspectionError(stage) from None
 
 
 def _require_trainer_assets(distribution, wheel):

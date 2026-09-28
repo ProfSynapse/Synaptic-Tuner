@@ -44,6 +44,10 @@ QUALIFICATION_HMAC_ENV_KEY = "SYNAPTIC_MODAL_QUALIFICATION_HMAC_KEY"
 QUALIFICATION_HMAC_KEY_REF = "modal-runtime-release-qualification-hmac-v1"
 MAX_DISPATCH_BYTES = 512 * 1024
 MAX_EVIDENCE_BYTES = 64 * 1024
+from tuner.runtime.packaged_sft_execution import RELEASE_INSPECTION_STAGES
+PARENT_RUNTIME_FAILURE_STAGES = frozenset(
+    "PARENT_RUNTIME_" + stage for stage in RELEASE_INSPECTION_STAGES
+) | {"PARENT_RUNTIME_UNAVAILABLE"}
 
 
 def _qualification_facts_type():
@@ -543,6 +547,26 @@ class ModalRuntimeReleaseQualificationWorker:
                 PackagedLocalCPUStageError, qualify_installed_child,
             )
             release_payload = dispatch.runtime_release.to_dict()
+            from tuner.runtime.packaged_sft_execution import (
+                PackagedReleaseInspectionError, _inspect_release,
+            )
+            try:
+                _inspect_release(dispatch.runtime_release)
+            except PackagedReleaseInspectionError as error:
+                stage = "PARENT_RUNTIME_" + error.stage if type(error.stage) is str else ""
+                if type(error) is not PackagedReleaseInspectionError or stage not in PARENT_RUNTIME_FAILURE_STAGES:
+                    stage = "PARENT_RUNTIME_UNAVAILABLE"
+                return {
+                    "schema_version": QUALIFICATION_RESULT_SCHEMA,
+                    "status_code": "failed",
+                    "failure_stage": stage,
+                }
+            except BaseException:
+                return {
+                    "schema_version": QUALIFICATION_RESULT_SCHEMA,
+                    "status_code": "failed",
+                    "failure_stage": "PARENT_RUNTIME_UNAVAILABLE",
+                }
             try:
                 child = qualify_installed_child(release_payload)
             except PackagedLocalCPUStageError as error:

@@ -281,6 +281,43 @@ def test_cross_binding_or_non_cpu_policy_is_rejected(fault: str) -> None:
             ModalRuntimeReleaseQualificationPolicyV1(gpu=True)
 
 
+@pytest.fixture(autouse=True)
+def _fake_parent_runtime_inspection(monkeypatch):
+    monkeypatch.setattr("tuner.runtime.packaged_sft_execution._inspect_release", lambda _release: None)
+
+
+@pytest.mark.parametrize("predicate", sorted(
+    stage.removeprefix("PARENT_RUNTIME_") for stage in qualification.PARENT_RUNTIME_FAILURE_STAGES
+    if stage != "PARENT_RUNTIME_UNAVAILABLE"
+))
+def test_modal_parent_inspection_fails_before_child(monkeypatch, tmp_path: Path, predicate: str) -> None:
+    from tuner.runtime.packaged_sft_execution import PackagedReleaseInspectionError
+    dispatch, facts = _case(); auth = Auth()
+    raw = build_modal_runtime_release_qualification_dispatch(dispatch, auth)
+    roots = ModalRuntimeReleaseQualificationRoots(
+        (tmp_path / "control").resolve(), (tmp_path / "artifacts").resolve(),
+    )
+    roots.control.mkdir(); roots.artifacts.mkdir()
+    staged = roots.artifacts / dispatch.fixture.path
+    staged.parent.mkdir(parents=True); staged.write_bytes(LOCAL_CPU_DATA)
+    calls = []
+    def reject(_release):
+        raise PackagedReleaseInspectionError(predicate) from None
+    monkeypatch.setattr("tuner.runtime.packaged_sft_execution._inspect_release", reject)
+    monkeypatch.setattr("tuner.runtime.packaged_training_worker.qualify_installed_child",
+                        lambda _release: calls.append("child"))
+    worker = ModalRuntimeReleaseQualificationWorker(
+        expected_facts=facts, verifier=auth, signer=auth,
+        observer=Observer(facts), call_id_provider=lambda: "fc-qualification", roots=roots,
+    )
+    assert worker(raw, commit_artifacts=lambda: calls.append("artifact"),
+                  commit_control=lambda: calls.append("control")) == {
+        "schema_version": "synaptic-modal-runtime-release-qualification-result/v1",
+        "status_code": "failed", "failure_stage": "PARENT_RUNTIME_" + predicate,
+    }
+    assert calls == []
+
+
 def test_worker_runs_one_self_check_and_commits_artifact_before_control(monkeypatch, tmp_path: Path) -> None:
     dispatch, facts = _case(); auth = Auth()
     raw = build_modal_runtime_release_qualification_dispatch(dispatch, auth)
