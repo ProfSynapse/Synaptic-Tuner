@@ -147,7 +147,7 @@ def test_real_diagnostic_dispatch_checks_devices_before_and_after_compile(tmp_pa
     from contextlib import nullcontext
     from tuner.runtime import packaged_training_worker as worker
     from tuner.runtime import packaged_sft_execution as seam
-    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1
+    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1, PACKAGED_RUNTIME_RELEASE_SCHEMA
     events = []
     release = SimpleNamespace(manifest_digest="a" * 64, python_executable="/opt/python/bin/python",
                               canonical_bytes=lambda: b"release")
@@ -160,7 +160,8 @@ def test_real_diagnostic_dispatch_checks_devices_before_and_after_compile(tmp_pa
     monkeypatch.setattr(child, "_installed_import_guard", lambda *a: child._OwnedImportGuard({trainer: digest}))
     root = Path("/tmp/qualification-fixture")
     transport = root / "transport.json"
-    payload = {"schema_version": worker.LOCAL_CPU_PROTOCOL, "release": {}, "input_fd": 3,
+    payload = {"schema_version": worker.LOCAL_CPU_PROTOCOL,
+        "release": {"schema_version": PACKAGED_RUNTIME_RELEASE_SCHEMA}, "input_fd": 3,
         "root": str(root), "root_identity": [1, 2], "member": {"path": "fixture.json",
         "size_bytes": len(worker.LOCAL_CPU_MODEL), "sha256": _digest(worker.LOCAL_CPU_MODEL), "device": 1, "inode": 4}}
     raw = seam._canonical(payload)
@@ -226,7 +227,7 @@ def test_native_local_child_diagnostic_authenticates_without_executing_ml(monkey
     from types import SimpleNamespace
     from tuner.runtime import packaged_training_worker as worker
     from tuner.runtime import packaged_sft_execution as seam
-    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1
+    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1, PACKAGED_RUNTIME_RELEASE_SCHEMA
     release = SimpleNamespace(manifest_digest="a" * 64, python_executable=sys.executable,
                               canonical_bytes=lambda: b"release")
     monkeypatch.setattr(PackagedTrainingRuntimeReleaseV1, "from_dict", lambda _: release)
@@ -253,7 +254,8 @@ def test_native_local_child_diagnostic_authenticates_without_executing_ml(monkey
             fixture.write_bytes(worker.LOCAL_CPU_MODEL if mutation != "snapshot" else b"substitution")
             fixture.chmod(0o400)
             info = fixture.stat()
-            payload = {"schema_version": worker.LOCAL_CPU_PROTOCOL, "release": {}, "input_fd": fd,
+            payload = {"schema_version": worker.LOCAL_CPU_PROTOCOL,
+                "release": {"schema_version": PACKAGED_RUNTIME_RELEASE_SCHEMA}, "input_fd": fd,
                 "root": str(root), "root_identity": [root.stat().st_dev, root.stat().st_ino],
                 "member": {"path": "fixture.json", "size_bytes": len(worker.LOCAL_CPU_MODEL),
                     "sha256": _digest(worker.LOCAL_CPU_MODEL), "device": info.st_dev, "inode": info.st_ino}}

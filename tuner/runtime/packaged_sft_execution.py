@@ -255,7 +255,7 @@ def _executable_mismatch_stage(release) -> str:
         return "PYTHON_EXECUTABLE_UNAVAILABLE"
 
 
-def _inspect_release(release):
+def _inspect_release(release, *, allow_equivalent_executable: bool = False):
     """Measure the installed wheel graph, never a source checkout or Git tree."""
     from tuner.runtime.packaged_training_worker import inspect_installed_runtime
     stage = "INPUT"
@@ -269,7 +269,9 @@ def _inspect_release(release):
             raise ValueError
         stage = "PYTHON_EXECUTABLE"
         if str(Path(sys.executable)) != release.python_executable:
-            raise PackagedReleaseInspectionError(_executable_mismatch_stage(release)) from None
+            mismatch = _executable_mismatch_stage(release)
+            if allow_equivalent_executable is not True or mismatch != "PYTHON_EXECUTABLE_EQUIVALENT":
+                raise PackagedReleaseInspectionError(mismatch) from None
         # The configured invocation path stays exact, while the resolved
         # regular interpreter file is hashed through the stable reader.
         stage = "PYTHON_DIGEST"
@@ -307,6 +309,11 @@ def _inspect_release(release):
         raise
     except BaseException:
         raise PackagedReleaseInspectionError(stage) from None
+
+
+def _inspect_parent_release(release):
+    """Admit a proven interpreter alias only in the invoking parent process."""
+    return _inspect_release(release, allow_equivalent_executable=True)
 
 
 def _require_trainer_assets(distribution, wheel):
@@ -403,7 +410,7 @@ def admit_packaged_sft(*, runtime_release: PackagedTrainingRuntimeReleaseV1,
     try:
         compiled = _admit_contracts(runtime_release, provider_binding, execution_binding, workload_bytes, artifact_policy)
         stage = "ADMISSION_RELEASE"
-        _inspect_release(runtime_release)
+        _inspect_parent_release(runtime_release)
         stage = "ADMISSION_PATHS"
         directories = _hold_paths(paths)
         stage = "ADMISSION_INPUT"
@@ -902,7 +909,7 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
         admitted._used.append(True)
         compiled = _admit_contracts(admitted.release, admitted.provider_binding, admitted.execution,
                                    admitted.workload_bytes, admitted.artifact_policy)
-        _inspect_release(admitted.release)
+        _inspect_parent_release(admitted.release)
         for directory in admitted._directories:
             directory.check()
         _input(admitted.paths, admitted.execution)
@@ -916,7 +923,7 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
         for directory in (*admitted._directories, *snapshots):
             directory.check()
         dataset_bytes = _input(admitted.paths, admitted.execution)
-        _inspect_release(admitted.release)
+        _inspect_parent_release(admitted.release)
         confirm, second = _snapshot_inventory(snapshot, admitted.paths.cache)
         try:
             if second != inventory:

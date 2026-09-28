@@ -296,3 +296,28 @@ diagnostic-only delta passed 328/328 focused tests, including equivalent aliases
 wrong prefix/digest/running inode, symlink retargeting, and unavailable reads.
 The fixed packaged-worker manifest was reviewed and refreshed; Modal runtime
 and inference locks remain CURRENT, and canonical skill copies match.
+
+CPU probe `cpu-qual-d52e111cd6d5caefb5e1f821` on
+`17815f4d196d9ef731dc5cf3969c8f0bde38aad0` returned
+`CALL_PARENT_RUNTIME_PYTHON_EXECUTABLE_EQUIVALENT` at
+`2026-09-28T13:31:28.874449`. The exact read-only inspector confirmed the
+same category for call `fc-01M3MH490KYMCWTA4F7QRJNSPT`, claim
+`qualify-ba46be7c4b79a9e15572722452aa4a4717b101980543f12bb16c8f79333493c5`.
+This establishes the strict interpreter-equivalence proof for that CPU parent;
+the literal spelling check still rejected it before inventory or child checks.
+It does not retroactively prove the earlier GPU parent's physical state.
+The resulting correction admits only that proven equivalence in parent checks,
+retaining strict child executable admission, exact child invocation, and every
+subsequent runtime/wheel/inventory predicate. Fresh CPU qualification must pass
+before a new bounded GPU attempt. The parent correction's established five-suite
+gate passed 336/336 under the pinned launcher interpreter. An expanded child
+suite exposed two pre-existing verification limitations: that launcher's build
+lacks `os.memfd_create`, and two synthetic child fixtures supplied `release: {}`
+despite the parser's required schema discriminator. System Python 3.10 exercised
+the memfd path and isolated five stale-fixture failures (32 passed); independent
+review traced all five to that missing schema before the intended callbacks.
+Repair only the test records, retain child parser strictness, and rerun that
+suite under the existing memfd-capable interpreter. The corrected child-only
+suite passed 37/37 under system Python 3.10. No production child/parser or
+training pins changed. The packaged-worker manifest and both Modal source
+locks are CURRENT; the canonical skill copies match.

@@ -548,10 +548,10 @@ class ModalRuntimeReleaseQualificationWorker:
             )
             release_payload = dispatch.runtime_release.to_dict()
             from tuner.runtime.packaged_sft_execution import (
-                PackagedReleaseInspectionError, _inspect_release,
+                PackagedReleaseInspectionError, _inspect_parent_release,
             )
             try:
-                _inspect_release(dispatch.runtime_release)
+                _inspect_parent_release(dispatch.runtime_release)
             except PackagedReleaseInspectionError as error:
                 stage = "PARENT_RUNTIME_" + error.stage if type(error.stage) is str else ""
                 if type(error) is not PackagedReleaseInspectionError or stage not in PARENT_RUNTIME_FAILURE_STAGES:

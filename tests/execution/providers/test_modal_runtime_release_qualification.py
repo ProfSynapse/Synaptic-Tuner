@@ -283,7 +283,7 @@ def test_cross_binding_or_non_cpu_policy_is_rejected(fault: str) -> None:
 
 @pytest.fixture(autouse=True)
 def _fake_parent_runtime_inspection(monkeypatch):
-    monkeypatch.setattr("tuner.runtime.packaged_sft_execution._inspect_release", lambda _release: None)
+    monkeypatch.setattr("tuner.runtime.packaged_sft_execution._inspect_parent_release", lambda _release: None)
 
 
 @pytest.mark.parametrize("predicate", sorted(
@@ -303,7 +303,7 @@ def test_modal_parent_inspection_fails_before_child(monkeypatch, tmp_path: Path,
     calls = []
     def reject(_release):
         raise PackagedReleaseInspectionError(predicate) from None
-    monkeypatch.setattr("tuner.runtime.packaged_sft_execution._inspect_release", reject)
+    monkeypatch.setattr("tuner.runtime.packaged_sft_execution._inspect_parent_release", reject)
     monkeypatch.setattr("tuner.runtime.packaged_training_worker.qualify_installed_child",
                         lambda _release: calls.append("child"))
     worker = ModalRuntimeReleaseQualificationWorker(

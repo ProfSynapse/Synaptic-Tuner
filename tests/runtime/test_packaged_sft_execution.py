@@ -48,7 +48,7 @@ def material(tmp_path, monkeypatch):
     paths.prepared_input.write_bytes(raw)
     for name in ("artifacts", "state", "tracking", "cache", "tmp"):
         getattr(paths, name).mkdir()
-    monkeypatch.setattr(seam, "_inspect_release", lambda release: Path("/installed/Trainers/sft/train_sft.py"))
+    monkeypatch.setattr(seam, "_inspect_parent_release", lambda release: Path("/installed/Trainers/sft/train_sft.py"))
     return dict(runtime_release=release, provider_binding=provider, execution_binding=binding,
         workload_bytes=compiled.canonical_bytes, artifact_policy=components.artifact_policy, paths=paths)
 
@@ -65,7 +65,7 @@ def test_admission_is_read_only_and_path_free(material):
 
 @pytest.mark.parametrize("boundary,stage", [
     ("_admit_contracts", "ADMISSION_CONTRACTS"),
-    ("_inspect_release", "ADMISSION_RELEASE"),
+    ("_inspect_parent_release", "ADMISSION_RELEASE"),
     ("_hold_paths", "ADMISSION_PATHS"),
     ("_input", "ADMISSION_INPUT"),
     ("environment", "ADMISSION_ENVIRONMENT"),
@@ -205,6 +205,17 @@ def test_fake_execution_emits_five_bound_roles_and_terminal(material, seal):
     assert seam.verify_packaged_sft_artifacts(admitted=admitted, inventory_bytes=result.inventory_path.read_bytes(), terminal_bytes=result.terminal_path.read_bytes())
     with pytest.raises(seam.PackagedSFTExecutionError, match="REVALIDATION"):
         seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare)
+
+
+def test_parent_release_checked_at_admission_and_both_revalidations(material, seal, monkeypatch):
+    checks = []
+    def inspect(release):
+        checks.append(release)
+        return Path("/installed/Trainers/sft/train_sft.py")
+    monkeypatch.setattr(seam, "_inspect_parent_release", inspect)
+    admitted = seam.admit_packaged_sft(**material)
+    seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare, runner=FakeRunner())
+    assert checks == [admitted.release] * 3
 
 
 def test_terminal_substitution_rejected(material, seal):
@@ -351,6 +362,7 @@ def test_exact_python_version_rejected_before_inventory_inspection(monkeypatch):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="requires Linux process executable identity")
+@pytest.mark.parametrize("parent", (False, True))
 @pytest.mark.parametrize("variant,expected", (
     ("alias", "PYTHON_EXECUTABLE_EQUIVALENT"),
     ("prefix", "PYTHON_EXECUTABLE_NOT_EQUIVALENT"),
@@ -359,7 +371,7 @@ def test_exact_python_version_rejected_before_inventory_inspection(monkeypatch):
     ("retarget", "PYTHON_EXECUTABLE_NOT_EQUIVALENT"),
     ("unavailable", "PYTHON_EXECUTABLE_UNAVAILABLE"),
 ))
-def test_executable_alias_probe_never_admits_parent(tmp_path, monkeypatch, variant, expected):
+def test_executable_alias_probe_preserves_parent_child_boundary(tmp_path, monkeypatch, parent, variant, expected):
     import tuner.runtime.packaged_training_worker as worker
     venv = tmp_path / "venv"
     bin_dir = venv / "bin"
@@ -400,12 +412,25 @@ def test_executable_alias_probe_never_admits_parent(tmp_path, monkeypatch, varia
     monkeypatch.setattr(seam, "stable_read", lambda path, *args: (
         b"{}" if path == Path("/opt/synaptic-runtime/build-inputs.json") else original_read(path, *args)))
     calls = []
-    monkeypatch.setattr(worker, "inspect_installed_runtime", lambda *_: calls.append("inventory"))
+    def inspect_inventory(*_):
+        calls.append("inventory")
+        raise RuntimeError("PRIVATE_SENTINEL")
+    monkeypatch.setattr(worker, "inspect_installed_runtime", inspect_inventory)
+    inspection = seam._inspect_parent_release if parent else seam._inspect_release
     with pytest.raises(seam.PackagedReleaseInspectionError) as rejected:
-        seam._inspect_release(release)
-    assert rejected.value.stage == expected
+        inspection(release)
+    assert rejected.value.stage == ("INSTALLED_RUNTIME" if parent and variant == "alias" else expected)
     assert "PRIVATE_SENTINEL" not in str(rejected.value)
-    assert calls == []
+    assert calls == (["inventory"] if parent and variant == "alias" else [])
+
+
+def test_equivalent_alias_opt_in_requires_exact_true(monkeypatch):
+    monkeypatch.setattr(seam, "stable_read", lambda *_args, **_kwargs: b"{}")
+    monkeypatch.setattr(seam, "_executable_mismatch_stage", lambda _release: "PYTHON_EXECUTABLE_EQUIVALENT")
+    release = _release(python_version=platform.python_version(), python_executable="/not-current/python")
+    with pytest.raises(seam.PackagedReleaseInspectionError) as rejected:
+        seam._inspect_release(release, allow_equivalent_executable=1)
+    assert rejected.value.stage == "PYTHON_EXECUTABLE_EQUIVALENT"
 
 
 def test_installed_python_digest_resolves_pinned_venv_symlink(tmp_path):
@@ -436,7 +461,7 @@ def test_baseexception_diagnostics_never_disclose_text(material, seal, monkeypat
     def fail(*args):
         raise exception("PRIVATE_SENTINEL_DO_NOT_DISCLOSE")
     if boundary == "admission":
-        monkeypatch.setattr(seam, "_inspect_release", fail)
+        monkeypatch.setattr(seam, "_inspect_parent_release", fail)
         operation = lambda: seam.admit_packaged_sft(**material)
     else:
         admitted = seam.admit_packaged_sft(**material)
