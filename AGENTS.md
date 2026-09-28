@@ -50,7 +50,17 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
-- The standalone host's SQLite attempt journal and call catalogs are thread-affine.
+- The approved packaged-runtime policy separates hosted-parent inventory from the
+  isolated trainer: parent admission/revalidation checks the complete inventory
+  under authenticated, stable Python library roots against the exact release,
+  while the isolated child and default inspector retain full ambient inventory
+  checks. Preserve parent Python, wheel/bootstrap bytes, provenance, members,
+  closure and trainer assets; unproven roots or mismatched inventories reject.
+  This explicitly accepts extra outside-root dependencies in the privileged
+  parent and does not attest loaded-module origins. Do not extend that allowance
+  to the isolated trainer or use a failed check as a scope-switching fallback.
+
+- The standalone host uses a thread-affine SQLite attempt journal and call catalogs.
   Do not pass catalog resolve/publish through `_bounded`'s worker thread. Keep
   journal operations on their owning thread and bound only the provider
   hydrate/spawn/call-ID closure. A timed-out worker may still spawn later;

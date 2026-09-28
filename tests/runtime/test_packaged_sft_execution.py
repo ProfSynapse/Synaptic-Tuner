@@ -362,11 +362,47 @@ def test_exact_python_version_rejected_before_inventory_inspection(monkeypatch):
     assert not calls
 
 
+def test_child_release_inspection_keeps_ambient_inventory(monkeypatch):
+    import tuner.runtime.packaged_training_worker as worker
+    monkeypatch.setattr(seam, "stable_read", lambda *_args, **_kwargs: b"{}")
+    monkeypatch.setattr(seam, "_installed_python_digest", lambda *_args: "a" * 64)
+    scopes = []
+    def inspected(_expected, *, inventory_scope):
+        scopes.append(inventory_scope)
+        raise RuntimeError("PRIVATE_SENTINEL")
+    monkeypatch.setattr(worker, "inspect_installed_runtime", inspected)
+    release = _release(python_version=platform.python_version(),
+                       python_executable=sys.executable, python_executable_digest="a" * 64)
+    with pytest.raises(seam.PackagedReleaseInspectionError) as rejected:
+        seam._inspect_release(release)
+    assert rejected.value.stage == "INSTALLED_RUNTIME"
+    assert scopes == ["ambient"]
+
+
+def test_parent_release_rejects_changed_reviewed_root_digest(monkeypatch):
+    import tuner.runtime.packaged_training_worker as worker
+    monkeypatch.setattr(seam, "stable_read", lambda *_args, **_kwargs: b"{}")
+    monkeypatch.setattr(seam, "_installed_python_digest", lambda *_args: "a" * 64)
+    scopes = []
+    release = _release(python_version=platform.python_version(),
+                       python_executable=sys.executable, python_executable_digest="a" * 64)
+    def inspected(_expected, *, inventory_scope):
+        scopes.append(inventory_scope)
+        measured = release.to_dict()
+        measured["installed_distributions"] = {"digest": "0" * 64, "count": 1}
+        return measured
+    monkeypatch.setattr(worker, "inspect_installed_runtime", inspected)
+    with pytest.raises(seam.PackagedReleaseInspectionError) as rejected:
+        seam._inspect_parent_release(release)
+    assert rejected.value.stage == "INSTALLED_DISTRIBUTIONS"
+    assert scopes == ["reviewed_roots"]
+
+
 @pytest.mark.parametrize("inner", sorted(worker.INSTALLED_RUNTIME_INSPECTION_STAGES))
 def test_installed_runtime_substage_projects_without_private_details(monkeypatch, inner):
     monkeypatch.setattr(seam, "stable_read", lambda *_args, **_kwargs: b"{}")
     monkeypatch.setattr(seam, "_installed_python_digest", lambda *_args: "a" * 64)
-    def rejected(_expected):
+    def rejected(_expected, **_kwargs):
         raise worker.PackagedInstalledRuntimeInspectionError(inner)
     monkeypatch.setattr(worker, "inspect_installed_runtime", rejected)
     release = _release(python_version=platform.python_version(),
@@ -428,8 +464,8 @@ def test_executable_alias_probe_preserves_parent_child_boundary(tmp_path, monkey
     monkeypatch.setattr(seam, "stable_read", lambda path, *args: (
         b"{}" if path == Path("/opt/synaptic-runtime/build-inputs.json") else original_read(path, *args)))
     calls = []
-    def inspect_inventory(*_):
-        calls.append("inventory")
+    def inspect_inventory(*_, **kwargs):
+        calls.append(kwargs["inventory_scope"])
         raise RuntimeError("PRIVATE_SENTINEL")
     monkeypatch.setattr(worker, "inspect_installed_runtime", inspect_inventory)
     inspection = seam._inspect_parent_release if parent else seam._inspect_release
@@ -437,7 +473,7 @@ def test_executable_alias_probe_preserves_parent_child_boundary(tmp_path, monkey
         inspection(release)
     assert rejected.value.stage == ("INSTALLED_RUNTIME" if parent and variant == "alias" else expected)
     assert "PRIVATE_SENTINEL" not in str(rejected.value)
-    assert calls == (["inventory"] if parent and variant == "alias" else [])
+    assert calls == (["reviewed_roots"] if parent and variant == "alias" else [])
 
 
 def test_equivalent_alias_opt_in_requires_exact_true(monkeypatch):

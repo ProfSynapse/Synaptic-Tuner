@@ -200,6 +200,7 @@ RELEASE_INSPECTION_STAGES = (
     "INSTALLED_BOOTSTRAP_DEPENDENCIES", "INSTALLED_PROVENANCE", "INSTALLED_MEMBERS",
     "INSTALLED_CLOSURE", "INSTALLED_INVENTORY_ENUMERATION",
     "INSTALLED_INVENTORY_BOUNDS", "INSTALLED_INVENTORY_DUPLICATE",
+    "INSTALLED_INVENTORY_ROOT_UNPROVEN",
     "PACKAGE", "PYTHON", "INSTALLED_DISTRIBUTIONS", "WORKER",
     "CONTRACTS", "PLATFORM_RECORD", "COMPATIBILITY", "PLATFORM",
     "WHEEL", "TRAINER_ASSETS",
@@ -261,7 +262,8 @@ def _executable_mismatch_stage(release) -> str:
         return "PYTHON_EXECUTABLE_UNAVAILABLE"
 
 
-def _inspect_release(release, *, allow_equivalent_executable: bool = False):
+def _inspect_release(release, *, allow_equivalent_executable: bool = False,
+                     inventory_scope: str = "ambient"):
     """Measure the installed wheel graph, never a source checkout or Git tree."""
     from tuner.runtime.packaged_training_worker import (
         PackagedInstalledRuntimeInspectionError,
@@ -288,7 +290,7 @@ def _inspect_release(release, *, allow_equivalent_executable: bool = False):
             raise ValueError
         stage = "INSTALLED_RUNTIME"
         try:
-            measured = inspect_installed_runtime(expected)
+            measured = inspect_installed_runtime(expected, inventory_scope=inventory_scope)
         except PackagedInstalledRuntimeInspectionError as error:
             if (type(error) is PackagedInstalledRuntimeInspectionError
                     and type(error.stage) is str
@@ -328,8 +330,9 @@ def _inspect_release(release, *, allow_equivalent_executable: bool = False):
 
 
 def _inspect_parent_release(release):
-    """Admit a proven interpreter alias only in the invoking parent process."""
-    return _inspect_release(release, allow_equivalent_executable=True)
+    """Inspect the authenticated image roots in the invoking parent process."""
+    return _inspect_release(release, allow_equivalent_executable=True,
+                            inventory_scope="reviewed_roots")
 
 
 def _require_trainer_assets(distribution, wheel):

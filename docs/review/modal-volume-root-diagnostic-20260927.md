@@ -437,4 +437,23 @@ safeguard, before implementing the scope change. No corrective admission code
 has been written; no cloud job is active and no GPU/LoRA success is claimed.
 
 Current disk check: F: has approximately 324 GiB free; WSL root approximately
-231 GiB available. Disk pressure is not the current blocker.
+231 GiB available. Disk pressure is no longer the current blocker.
+
+Operator approval (2026-09-28): Joseph explicitly approved the disclosed
+parent-only inventory scope correction, regression tests, CPU qualification and
+L40S smoke. The accepted policy permits extra outside-root dependencies in the
+privileged parent; it does not attest loaded-module origins. Implement explicit
+reviewed-root inventory selection at `_inspect_parent_release` only, retain
+full ambient selection by default and in the isolated child, and preserve all
+other Python/wheel/bootstrap/provenance/member/closure/trainer checks and exact
+release digest/count equality. Unproven roots and in-root drift remain failures.
+The implementation and independent review are delegated separately to Sol;
+the orchestrator owns source commitments, live runs, policy docs and journal updates.
+The approved correction passed 698/698 supported focused tests under the pinned
+CPython 3.11.14 launcher harness, plus 64/64 generic worker and isolated-child
+tests under the existing WSL Python 3.10 interpreter with memfd support. The
+expanded pinned-launcher run was 721 passed / 4 failed solely at its known
+missing `os.memfd_create`; no production workaround or interpreter pin change
+was made. Independent review approved the frozen change. The fixed five-member
+closure was hash-refreshed; both other Modal locks remain CURRENT and canonical
+skills match their synced copies. A fresh exact-source CPU qualification is next.

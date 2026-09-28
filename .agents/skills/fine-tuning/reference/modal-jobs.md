@@ -787,7 +787,20 @@ qualifier. This exact-stage continuation must always return failure, never sign
 a qualification receipt or commit outputs, and never authorize GPU execution.
 Use only fixed match/mismatch/unproven and child-pass/fail labels; an unproven
 root or entry cannot be treated as an inventory match. Even child success does
-not independently approve dropping the privileged parent's overlay detection.
+not independently authorize dropping the privileged parent's overlay detection.
+
+Approved policy (2026-09-28): after the exact `ROOT_MATCH_CHILD_PASS` measurement
+and explicit operator acceptance, hosted-parent admission/revalidation selects
+the complete inventory under authenticated, stable purelib/platlib roots and
+compares its exact digest/count with the release. Python identity, main/bootstrap
+wheel bytes, provenance, installed members, closure and trainer assets remain
+checked. Unproven root/metadata identities and inventory mismatches reject.
+The default inspector and isolated child retain full ambient inventory checks;
+scope is explicit at the parent boundary, never a catch-and-retry fallback.
+This policy accepts outside-root dependencies in the privileged parent rather
+than detecting all overlays; it is not loaded-module-origin attestation. It does
+not relax the trainer's model, image, dependency, credential or artifact pins.
+
 Use a fresh ordinary `train --qualify --fresh-attempt` with the same
 recipe to measure this boundary on CPU before another GPU smoke; prior
 child-only receipts do not establish the new parent check. Parent admission and

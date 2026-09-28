@@ -279,6 +279,46 @@ def test_reviewed_root_inventory_matches_only_proved_metadata(reviewed_root_inve
     }
 
 
+def test_parent_scope_selects_only_authenticated_roots(reviewed_root_inventory, monkeypatch):
+    expected, _retained, site, _release = reviewed_root_inventory
+    _path_distribution(site / "alpha-1.0.0.dist-info", name="alpha")
+    outside = _path_distribution(site.parent / "outside.dist-info", name="alpha", version="9.0.0")
+    distinct = _path_distribution(site.parent / "other.dist-info", name="alpha", version="8.0.0")
+    monkeypatch.setattr(worker.importlib.metadata, "distributions", lambda: [outside, distinct])
+    measured = worker.inspect_installed_runtime(expected, inventory_scope="reviewed_roots")
+    assert measured["installed_distributions"]["inventory"] == [{"name": "alpha", "version": "1.0.0"}]
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
+        worker.inspect_installed_runtime(expected)
+    assert rejected.value.stage.startswith("INVENTORY_DUPLICATE_")
+
+
+def test_parent_scope_rejects_unproved_or_mutated_root(reviewed_root_inventory, monkeypatch, tmp_path):
+    expected, retained, site, _release = reviewed_root_inventory
+    directory = site / "alpha-1.0.0.dist-info"
+    _path_distribution(directory, name="alpha")
+    original = worker.inspect_installed_runtime(expected, inventory_scope="reviewed_roots")
+    (directory / "METADATA").write_text("Metadata-Version: 2.1\nName: alpha\nVersion: 2.0.0\n")
+    changed = worker.inspect_installed_runtime(expected, inventory_scope="reviewed_roots")
+    assert changed["installed_distributions"]["digest"] != original["installed_distributions"]["digest"]
+    outside = _path_distribution(tmp_path / "outside" / "beta.dist-info", name="beta")
+    monkeypatch.setattr(worker.importlib.metadata.MetadataPathFinder, "find_distributions",
+                        lambda _context: [importlib.metadata.PathDistribution(directory), outside])
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
+        worker.inspect_installed_runtime(expected, inventory_scope="reviewed_roots")
+    assert rejected.value.stage == "INVENTORY_ROOT_UNPROVEN"
+    assert str(rejected.value) == "PACKAGED_INSTALLED_RUNTIME_INSPECTION_REJECTED"
+    (retained / "build-inputs.json").write_bytes(b"{}")
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
+        worker.inspect_installed_runtime(expected, inventory_scope="reviewed_roots")
+    assert rejected.value.stage == "INPUTS"
+
+
+def test_inventory_scope_is_closed(installed):
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
+        worker.inspect_installed_runtime(installed[0], inventory_scope="unreviewed")
+    assert rejected.value.stage == "INPUTS"
+
+
 def test_reviewed_root_inventory_rejects_unbound_or_unproved_input(reviewed_root_inventory, monkeypatch, tmp_path):
     _expected, retained, site, release = reviewed_root_inventory
     first = _path_distribution(site / "alpha-1.0.0.dist-info", name="alpha")

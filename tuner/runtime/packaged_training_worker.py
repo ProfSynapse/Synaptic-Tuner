@@ -262,7 +262,7 @@ _DUPLICATE_STAGES = frozenset(
 INSTALLED_RUNTIME_INSPECTION_STAGES = frozenset({
     "INPUTS", "WHEEL_BYTES", "DISTRIBUTION", "BOOTSTRAP_DEPENDENCIES",
     "PROVENANCE", "MEMBERS", "CLOSURE", "INVENTORY_ENUMERATION",
-    "INVENTORY_BOUNDS", "INVENTORY_DUPLICATE",
+    "INVENTORY_BOUNDS", "INVENTORY_DUPLICATE", "INVENTORY_ROOT_UNPROVEN",
 }) | _DUPLICATE_STAGES
 
 
@@ -359,21 +359,9 @@ def _duplicate_stage(reason: str, package: str, first: bool | None, second: bool
     return "INVENTORY_DUPLICATE_" + reason + "_" + package + "_" + location
 
 
-def inspect_reviewed_root_inventory(release: PackagedRuntimeRelease) -> dict[str, object] | None:
-    """Diagnostic-only inventory of proved metadata in reviewed venv roots."""
+def _reviewed_root_inventory(expected: dict) -> list[dict[str, str]] | None:
+    """Select only metadata proved inside the retained venv library roots."""
     try:
-        retained = stable_read(Path("/opt/synaptic-runtime/build-inputs.json"))
-        expected = json.loads(retained)
-        if (type(expected) is not dict
-                or retained != (json.dumps(expected, sort_keys=True, separators=(",", ":"),
-                                           ensure_ascii=True, allow_nan=False) + "\n").encode("ascii")):
-            return None
-        python = expected["python"]
-        if (python["implementation"] != release.python_implementation
-                or python["version"] != release.python_version
-                or python["executable"] != release.python_executable
-                or python["executable_digest"] != release.python_executable_digest):
-            return None
         roots = _reviewed_package_roots(expected)
         if roots is None or not _roots_stable(roots):
             return None
@@ -416,19 +404,102 @@ def inspect_reviewed_root_inventory(release: PackagedRuntimeRelease) -> dict[str
                     or re.sub(r"[-_.]+", "-", item.metadata["Name"].lower()) != name
                     or item.version != version):
                 return None
-        inventory = sorted(by_name.values(), key=lambda item: item["name"])
+        return sorted(by_name.values(), key=lambda item: item["name"])
+    except BaseException:
+        return None
+
+
+def inspect_reviewed_root_inventory(release: PackagedRuntimeRelease) -> dict[str, object] | None:
+    """Diagnostic-only digest of proved metadata in reviewed venv roots."""
+    try:
+        retained = stable_read(Path("/opt/synaptic-runtime/build-inputs.json"))
+        expected = json.loads(retained)
+        if (type(expected) is not dict
+                or retained != (json.dumps(expected, sort_keys=True, separators=(",", ":"),
+                                           ensure_ascii=True, allow_nan=False) + "\n").encode("ascii")):
+            return None
+        python = expected["python"]
+        if (python["implementation"] != release.python_implementation
+                or python["version"] != release.python_version
+                or python["executable"] != release.python_executable
+                or python["executable_digest"] != release.python_executable_digest):
+            return None
+        inventory = _reviewed_root_inventory(expected)
+        if inventory is None:
+            return None
         return {"digest": hashlib.sha256(json.dumps(inventory, separators=(",", ":")).encode()).hexdigest(),
                 "count": len(inventory)}
     except BaseException:
         return None
 
 
-def inspect_installed_runtime(expected: dict) -> dict:
+def _ambient_inventory(expected: dict) -> list[dict[str, str]]:
+    inventory_by_name = {}
+    identities = {}
+    locations = {}
+    physical = {}
+    roots = _reviewed_package_roots(expected)
+    main_package = re.sub(r"[-_.]+", "-", expected["wheel"]["distribution"].lower())
+    bootstrap_packages = {
+        re.sub(r"[-_.]+", "-", wheel["distribution"].lower())
+        for wheel in expected["bootstrap"]
+    }
+    def category(*names):
+        return ("MAIN" if main_package in names else
+                "BOOTSTRAP" if any(name in bootstrap_packages for name in names) else "OTHER")
+    try:
+        for occurrence, item in enumerate(importlib.metadata.distributions(), 1):
+            if occurrence > 4096:
+                raise PackagedInstalledRuntimeInspectionError("INVENTORY_BOUNDS")
+            before = _metadata_identity(item)
+            name = re.sub(r"[-_.]+", "-", item.metadata["Name"].lower())
+            version = item.version
+            after = _metadata_identity(item)
+            if before != after and (before is not None or after is not None):
+                raise PackagedInstalledRuntimeInspectionError("INVENTORY_ENUMERATION")
+            identity = before if before is not None and before == after else None
+            location = _metadata_within_roots(item, identity, roots)
+            previous = inventory_by_name.get(name)
+            if previous is not None:
+                if previous["version"] != version:
+                    reason = "VERSION_MISMATCH"
+                elif identity is None or identities.get(name) is None:
+                    reason = "IDENTITY_UNPROVEN"
+                elif identities[name] != identity:
+                    reason = "DISTINCT_PHYSICAL"
+                else:
+                    continue
+                raise PackagedInstalledRuntimeInspectionError(
+                    _duplicate_stage(reason, category(name), locations[name], location))
+            if identity is not None:
+                prior_physical = physical.get(identity)
+                if prior_physical is not None and prior_physical[:2] != (name, version):
+                    raise PackagedInstalledRuntimeInspectionError(
+                        _duplicate_stage("PHYSICAL_METADATA_MISMATCH",
+                                         category(name, prior_physical[0]),
+                                         prior_physical[2], location))
+                physical[identity] = (name, version, location)
+                identities[name] = identity
+            locations[name] = location
+            inventory_by_name[name] = {"name": name, "version": version}
+    except PackagedInstalledRuntimeInspectionError:
+        raise
+    except BaseException:
+        raise PackagedInstalledRuntimeInspectionError("INVENTORY_ENUMERATION") from None
+    inventory = sorted(inventory_by_name.values(), key=lambda item: item["name"])
+    if not inventory or len(inventory) > 4096:
+        raise PackagedInstalledRuntimeInspectionError("INVENTORY_BOUNDS") from None
+    return inventory
+
+
+def inspect_installed_runtime(expected: dict, *, inventory_scope: str = "ambient") -> dict:
     """Measure reviewed wheel bytes, installed members and worker closure.
 
     Called only by the fixed image inspector after exact-interpreter admission.
     Inputs are build-bound profile data; there is no release digest circularity.
     """
+    if type(inventory_scope) is not str or inventory_scope not in {"ambient", "reviewed_roots"}:
+        raise PackagedInstalledRuntimeInspectionError("INPUTS") from None
     def canonical(value):
         return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
     try:
@@ -509,61 +580,12 @@ def inspect_installed_runtime(expected: dict) -> dict:
         closure = load_packaged_worker_closure()
     except BaseException:
         raise PackagedInstalledRuntimeInspectionError("CLOSURE") from None
-    inventory_by_name = {}
-    identities = {}
-    locations = {}
-    physical = {}
-    roots = _reviewed_package_roots(expected)
-    main_package = re.sub(r"[-_.]+", "-", expected["wheel"]["distribution"].lower())
-    bootstrap_packages = {
-        re.sub(r"[-_.]+", "-", wheel["distribution"].lower())
-        for wheel in expected["bootstrap"]
-    }
-    def category(*names):
-        return ("MAIN" if main_package in names else
-                "BOOTSTRAP" if any(name in bootstrap_packages for name in names) else "OTHER")
-    try:
-        for occurrence, item in enumerate(importlib.metadata.distributions(), 1):
-            if occurrence > 4096:
-                raise PackagedInstalledRuntimeInspectionError("INVENTORY_BOUNDS")
-            before = _metadata_identity(item)
-            name = re.sub(r"[-_.]+", "-", item.metadata["Name"].lower())
-            version = item.version
-            after = _metadata_identity(item)
-            if before != after and (before is not None or after is not None):
-                raise PackagedInstalledRuntimeInspectionError("INVENTORY_ENUMERATION")
-            identity = before if before is not None and before == after else None
-            location = _metadata_within_roots(item, identity, roots)
-            previous = inventory_by_name.get(name)
-            if previous is not None:
-                if previous["version"] != version:
-                    reason = "VERSION_MISMATCH"
-                elif identity is None or identities.get(name) is None:
-                    reason = "IDENTITY_UNPROVEN"
-                elif identities[name] != identity:
-                    reason = "DISTINCT_PHYSICAL"
-                else:
-                    continue
-                raise PackagedInstalledRuntimeInspectionError(
-                    _duplicate_stage(reason, category(name), locations[name], location))
-            if identity is not None:
-                prior_physical = physical.get(identity)
-                if prior_physical is not None and prior_physical[:2] != (name, version):
-                    raise PackagedInstalledRuntimeInspectionError(
-                        _duplicate_stage("PHYSICAL_METADATA_MISMATCH",
-                                         category(name, prior_physical[0]),
-                                         prior_physical[2], location))
-                physical[identity] = (name, version, location)
-                identities[name] = identity
-            locations[name] = location
-            inventory_by_name[name] = {"name": name, "version": version}
-    except PackagedInstalledRuntimeInspectionError:
-        raise
-    except BaseException:
-        raise PackagedInstalledRuntimeInspectionError("INVENTORY_ENUMERATION") from None
-    inventory = sorted(inventory_by_name.values(), key=lambda item: item["name"])
-    if not inventory or len(inventory) > 4096:
-        raise PackagedInstalledRuntimeInspectionError("INVENTORY_BOUNDS") from None
+    if inventory_scope == "ambient":
+        inventory = _ambient_inventory(expected)
+    else:
+        inventory = _reviewed_root_inventory(expected)
+        if inventory is None:
+            raise PackagedInstalledRuntimeInspectionError("INVENTORY_ROOT_UNPROVEN") from None
     python = {key: expected["python"][key] for key in ("implementation", "version", "executable", "executable_digest")}
     return {
         "schema_version": "synaptic-packaged-runtime-inspector/v1",
