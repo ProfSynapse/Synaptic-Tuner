@@ -765,7 +765,13 @@ runtime inspection; locked record comparisons; and wheel/trainer assets.
 labels preserve the predicates and disclose neither actual values nor exception
 text. Use a fresh ordinary `train --qualify --fresh-attempt` with the same
 recipe to measure this boundary on CPU before another GPU smoke; prior
-child-only receipts do not establish the new parent check.
+child-only receipts do not establish the new parent check. At an executable-path
+mismatch, physical-equivalence diagnostics remain failures: a matching binary
+does not itself qualify the remaining installed-runtime checks. Measure the
+same venv bin/prefix, resolved regular-file identity and locked digest, and
+Linux running-executable identity before considering an alias policy. Never
+replace the configured child invocation path or infer equivalence from matching
+Python versions alone.
 
 After a signed CPU receipt, the standalone train path reports only fixed,
 non-secret host boundaries: `RUN_HOST_ASSEMBLY` during host composition;

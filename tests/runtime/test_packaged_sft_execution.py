@@ -2,9 +2,11 @@ from dataclasses import replace
 import hashlib
 import json
 import os
+import platform
 import secrets
 import shutil
 import stat
+import sys
 import traceback
 from pathlib import Path, PurePosixPath
 
@@ -346,6 +348,64 @@ def test_exact_python_version_rejected_before_inventory_inspection(monkeypatch):
         seam._inspect_release(_release(python_version="0.0.1"))
     assert rejected.value.stage == "PYTHON_VERSION"
     assert not calls
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux process executable identity")
+@pytest.mark.parametrize("variant,expected", (
+    ("alias", "PYTHON_EXECUTABLE_EQUIVALENT"),
+    ("prefix", "PYTHON_EXECUTABLE_NOT_EQUIVALENT"),
+    ("digest", "PYTHON_EXECUTABLE_NOT_EQUIVALENT"),
+    ("proc", "PYTHON_EXECUTABLE_NOT_EQUIVALENT"),
+    ("retarget", "PYTHON_EXECUTABLE_NOT_EQUIVALENT"),
+    ("unavailable", "PYTHON_EXECUTABLE_UNAVAILABLE"),
+))
+def test_executable_alias_probe_never_admits_parent(tmp_path, monkeypatch, variant, expected):
+    import tuner.runtime.packaged_training_worker as worker
+    venv = tmp_path / "venv"
+    bin_dir = venv / "bin"
+    bin_dir.mkdir(parents=True)
+    physical = tmp_path / "physical-python"
+    physical.write_bytes(b"reviewed binary fixture")
+    configured = bin_dir / "python3"
+    current = bin_dir / "python"
+    configured.symlink_to(physical)
+    current.symlink_to(physical)
+    info = physical.stat()
+    monkeypatch.setattr(seam.sys, "executable", str(current))
+    monkeypatch.setattr(seam.sys, "prefix", str(venv) if variant != "prefix" else str(tmp_path))
+    if variant == "proc":
+        monkeypatch.setattr(seam, "_running_python_identity", lambda: (info.st_dev, info.st_ino + 1))
+    elif variant == "unavailable":
+        def unavailable():
+            raise OSError("PRIVATE_SENTINEL")
+        monkeypatch.setattr(seam, "_running_python_identity", unavailable)
+    else:
+        monkeypatch.setattr(seam, "_running_python_identity", lambda: (info.st_dev, info.st_ino))
+    digest = seam._digest(physical.read_bytes())
+    if variant == "digest":
+        digest = "0" * 64
+    if variant == "retarget":
+        original_digest = seam._installed_python_digest
+        def retarget(path):
+            value = original_digest(path)
+            replacement = tmp_path / "replacement-python"
+            replacement.write_bytes(b"other binary fixture")
+            current.unlink()
+            current.symlink_to(replacement)
+            return value
+        monkeypatch.setattr(seam, "_installed_python_digest", retarget)
+    release = _release(python_version=platform.python_version(),
+                       python_executable=str(configured), python_executable_digest=digest)
+    original_read = seam.stable_read
+    monkeypatch.setattr(seam, "stable_read", lambda path, *args: (
+        b"{}" if path == Path("/opt/synaptic-runtime/build-inputs.json") else original_read(path, *args)))
+    calls = []
+    monkeypatch.setattr(worker, "inspect_installed_runtime", lambda *_: calls.append("inventory"))
+    with pytest.raises(seam.PackagedReleaseInspectionError) as rejected:
+        seam._inspect_release(release)
+    assert rejected.value.stage == expected
+    assert "PRIVATE_SENTINEL" not in str(rejected.value)
+    assert calls == []
 
 
 def test_installed_python_digest_resolves_pinned_venv_symlink(tmp_path):

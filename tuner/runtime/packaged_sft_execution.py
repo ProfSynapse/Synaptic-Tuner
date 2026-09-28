@@ -192,6 +192,8 @@ def _installed_python_digest(executable: str) -> str:
 
 RELEASE_INSPECTION_STAGES = (
     "INPUT", "PYTHON_IMPLEMENTATION", "PYTHON_VERSION", "PYTHON_EXECUTABLE",
+    "PYTHON_EXECUTABLE_EQUIVALENT", "PYTHON_EXECUTABLE_NOT_EQUIVALENT",
+    "PYTHON_EXECUTABLE_UNAVAILABLE",
     "PYTHON_DIGEST", "INSTALLED_RUNTIME",
     "PACKAGE", "PYTHON", "INSTALLED_DISTRIBUTIONS", "WORKER",
     "CONTRACTS", "PLATFORM_RECORD", "COMPATIBILITY", "PLATFORM",
@@ -209,6 +211,50 @@ class PackagedReleaseInspectionError(ValueError):
         super().__init__("PACKAGED_RELEASE_INSPECTION_REJECTED")
 
 
+def _running_python_identity() -> tuple[int, int]:
+    info = os.stat("/proc/self/exe")
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError
+    return info.st_dev, info.st_ino
+
+
+def _executable_mismatch_stage(release) -> str:
+    """Classify an alias without admitting a mismatched Function parent."""
+    configured = release.python_executable
+    current = sys.executable
+    if (os.name != "posix" or platform.system().lower() != "linux"
+            or type(configured) is not str or type(current) is not str
+            or not Path(configured).is_absolute() or not Path(current).is_absolute()
+            or os.path.normpath(configured) != configured
+            or os.path.normpath(current) != current
+            or Path(current).parent != Path(configured).parent
+            or sys.prefix != str(Path(configured).parent.parent)):
+        return "PYTHON_EXECUTABLE_NOT_EQUIVALENT"
+    try:
+        expected = Path(configured).resolve(strict=True)
+        observed = Path(current).resolve(strict=True)
+        expected_info = expected.stat()
+        observed_info = observed.stat()
+        identity = (expected_info.st_dev, expected_info.st_ino)
+        if (not stat.S_ISREG(expected_info.st_mode)
+                or not stat.S_ISREG(observed_info.st_mode)
+                or identity != (observed_info.st_dev, observed_info.st_ino)
+                or identity != _running_python_identity()):
+            return "PYTHON_EXECUTABLE_NOT_EQUIVALENT"
+        if _installed_python_digest(configured) != release.python_executable_digest:
+            return "PYTHON_EXECUTABLE_NOT_EQUIVALENT"
+        final_expected = Path(configured).resolve(strict=True)
+        final_observed = Path(current).resolve(strict=True)
+        if (final_expected != expected or final_observed != observed
+                or identity != (final_expected.stat().st_dev, final_expected.stat().st_ino)
+                or identity != (final_observed.stat().st_dev, final_observed.stat().st_ino)
+                or identity != _running_python_identity()):
+            return "PYTHON_EXECUTABLE_NOT_EQUIVALENT"
+        return "PYTHON_EXECUTABLE_EQUIVALENT"
+    except BaseException:
+        return "PYTHON_EXECUTABLE_UNAVAILABLE"
+
+
 def _inspect_release(release):
     """Measure the installed wheel graph, never a source checkout or Git tree."""
     from tuner.runtime.packaged_training_worker import inspect_installed_runtime
@@ -223,7 +269,7 @@ def _inspect_release(release):
             raise ValueError
         stage = "PYTHON_EXECUTABLE"
         if str(Path(sys.executable)) != release.python_executable:
-            raise ValueError
+            raise PackagedReleaseInspectionError(_executable_mismatch_stage(release)) from None
         # The configured invocation path stays exact, while the resolved
         # regular interpreter file is hashed through the stable reader.
         stage = "PYTHON_DIGEST"
@@ -257,6 +303,8 @@ def _inspect_release(release):
         stage = "TRAINER_ASSETS"
         with ZipFile(BytesIO(wheel_raw)) as wheel:
             return _require_trainer_assets(distribution, wheel)
+    except PackagedReleaseInspectionError:
+        raise
     except BaseException:
         raise PackagedReleaseInspectionError(stage) from None
 

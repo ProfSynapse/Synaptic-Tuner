@@ -276,4 +276,23 @@ includes no child invocation or artifact/control commits after parent failure,
 all finite host/CLI/inspector projections, and unchanged generic runtime checks.
 The five-member packaged closure was reviewed and refreshed; both Modal source
 locks remain CURRENT (98 and 119 members) and skill copies are synchronized.
-The next live operation is CPU-only qualification, not a GPU training retry.
+The ensuing live operation was CPU-only qualification, not a GPU training retry.
+
+CPU attempt `cpu-qual-0cda3ea8806cf7eb2788ab4e` on
+`b3d1f809963eba8150a1135491009fc6f1f890e4` returned
+`CALL_PARENT_RUNTIME_PYTHON_EXECUTABLE` at `2026-09-28T13:19:29.101886`.
+The read-only inspector independently matched the same fixed failure on call
+`fc-01M3MGECABKF2SJQCDK3KS9BJ1`, claim
+`qualify-743bb87bc907af78838822e2272b304917904bb9393a20295dce22f75b88d229`.
+Implementation and version checks passed before this literal-path mismatch;
+physical interpreter identity and subsequent runtime checks were not reached.
+Modal's existing-image documentation and pinned SDK expect `python` on PATH,
+but do not establish the actual parent executable or equivalence with `python3`.
+The next CPU-only experiment classifies physical equivalence without accepting
+the mismatch: same reviewed venv bin and prefix, same regular binary identity
+and locked digest, plus Linux running-executable identity. Every result remains
+failed with no child or receipt, pending a separately reviewed correction. The
+diagnostic-only delta passed 328/328 focused tests, including equivalent aliases,
+wrong prefix/digest/running inode, symlink retargeting, and unavailable reads.
+The fixed packaged-worker manifest was reviewed and refreshed; Modal runtime
+and inference locks remain CURRENT, and canonical skill copies match.
