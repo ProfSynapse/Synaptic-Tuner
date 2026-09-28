@@ -33,7 +33,12 @@ from tuner.training.packaged_compilation import (
 LINEAGE_SCHEMA = "synaptic-packaged-sft-training-lineage/v1"
 TERMINAL_SCHEMA = "synaptic-packaged-sft-terminal/v1"
 _ROLES = ("workload_record", "training_lineage", "training_metrics", "final_model", "tokenizer")
-_CODES = frozenset({"ADMISSION", "PREPARATION", "REVALIDATION", "INVOCATION", "TRAINER", "EVIDENCE", "ARTIFACT"})
+_CODES = frozenset({
+    "ADMISSION", "ADMISSION_CONTRACTS", "ADMISSION_RELEASE", "ADMISSION_PATHS",
+    "ADMISSION_INPUT", "ADMISSION_ENVIRONMENT", "ADMISSION_INVOCATION",
+    "ADMISSION_COMMITMENT", "PREPARATION", "REVALIDATION", "INVOCATION",
+    "TRAINER", "EVIDENCE", "ARTIFACT",
+})
 _TOKEN = object()
 _MAX_MODEL_MEMBER_BYTES = 32 * 1024 * 1024 * 1024
 _MAX_MODEL_BYTES = 512 * 1024 * 1024 * 1024
@@ -312,17 +317,23 @@ def admit_packaged_sft(*, runtime_release: PackagedTrainingRuntimeReleaseV1,
                        paths: PackagedSFTPaths, environment=()) -> AdmittedPackagedSFT:
     """Read-only admission. No model preparer or trainer is called here."""
     directories = ()
+    stage = "ADMISSION_CONTRACTS"
     try:
         compiled = _admit_contracts(runtime_release, provider_binding, execution_binding, workload_bytes, artifact_policy)
+        stage = "ADMISSION_RELEASE"
         _inspect_release(runtime_release)
+        stage = "ADMISSION_PATHS"
         directories = _hold_paths(paths)
+        stage = "ADMISSION_INPUT"
         _input(paths, execution_binding)
         # Ambient environment is never inherited, even for allowed keys.
+        stage = "ADMISSION_ENVIRONMENT"
         values = dict(environment)
         allowed = {"CUDA_VISIBLE_DEVICES", "NVIDIA_VISIBLE_DEVICES", "LANG", "LC_ALL"}
         if len(values) != len(environment) or not set(values) <= allowed or any(type(value) is not str or "\0" in value for value in values.values()):
             raise ValueError
         environment = tuple(sorted(values.items()))
+        stage = "ADMISSION_INVOCATION"
         from Trainers.sft import runtime_v1 as core
         from pathlib import PurePosixPath
         physical = SimpleNamespace(release=runtime_release, provider_binding=provider_binding,
@@ -331,12 +342,13 @@ def admit_packaged_sft(*, runtime_release: PackagedTrainingRuntimeReleaseV1,
         _invocation_spec(physical, _runtime_projection(compiled),
             core._model_snapshot_path(compiled.document["configuration"]["document"]["model"], paths.cache),
             PurePosixPath("/proc/self/fd/2147483647"))
+        stage = "ADMISSION_COMMITMENT"
         commitment = _physical_commitment(paths, environment)
         return AdmittedPackagedSFT(runtime_release, provider_binding, execution_binding,
             workload_bytes, artifact_policy, paths, environment, directories, _TOKEN, commitment)
     except BaseException:
         _close_resources(directories)
-        raise PackagedSFTExecutionError("ADMISSION") from None
+        raise PackagedSFTExecutionError(stage) from None
 
 
 def _physical_commitment(paths, environment):

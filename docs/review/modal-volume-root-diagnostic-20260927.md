@@ -210,4 +210,41 @@ poll, again projecting `RUN_START_INDETERMINATE`. This recurring test
 intermittency remains unresolved and must not be hidden by the clean root run;
 no production change was made on an unproven explanation. The bridge fix has
 independent static review, both source locks are CURRENT, and skill copies match.
-Only a fresh attempt can establish the corrected live submission and training.
+A fresh attempt was required to establish live submission and training.
+
+### Remote admission reached on the free-wrapper commit
+
+Attempt `modal-5dd7b5227af66dc4e0d16863` authenticates pushed source
+`794792cde6da7f8c36cb98f5311a83403b7ceef8`. Its retained submit digest is
+`e4f7b06282822e1be39b20fc97af6c52aeb94d7bcada048fb83d54dfe1fde5ba`
+and packaged call is `fc-01M3MDMESQVC8JRG6N51ZWWF9H`. The ordinary train
+command returned `RUN_WORKER_SFT_ADMISSION`; the exact claim-bound read-only
+inspector independently returned `WORKER_SFT_ADMISSION`. Thus host markers,
+dispatch, Volume binding, and private input/path setup advanced to the generic
+SFT admission boundary. No optimizer steps or adapter are evidenced.
+
+A provider-free replay authenticated the retained binding and source, matched
+the compiled workload and artifact-policy digests to the execution binding,
+and passed `_admit_contracts`. The remaining ordered admission checks inspect
+the installed release, hold physical directories, validate prepared bytes,
+admit the environment, construct the invocation, and bind physical state. CPU
+qualification exercises installed-release inspection in its child but does not
+prove the training parent's checks or attempt-specific data/paths. The broad
+admission label cannot select a failing subcheck. The next correction adds
+closed substage labels without relaxing admission or exposing exception text;
+the existing attempt is preserved and cannot be replayed.
+
+The seven admission substage labels passed their injected-boundary tests and
+independent review. The fixed five-member packaged-worker manifest was refreshed
+for the reviewed source hash without changing its inventory or runtime pins.
+An initial broader test run under local CPython 3.10.12 had 47 passes and 20
+artifact-evidence failures: targeted instrumentation located the unchanged
+archive helper's use of `hashlib.file_digest`, available from Python 3.11.
+The full runtime file then passed 67/67 under the pinned CPython 3.11.14 with
+the existing pytest harness imported read-only; no packages were installed and
+no trainer code was changed to accommodate the older test interpreter. This
+explains the local test failures, not the remote admission failure. The final
+worker/inspector/host-reader/standalone projection gate passed 267/267 under
+the same 3.11 interpreter without flakes. Packaged worker, Modal runtime (98
+members), and inference (119 members) checks all report CURRENT; skill trees
+match. These gates approve fresh exact-source qualification, not GPU success.

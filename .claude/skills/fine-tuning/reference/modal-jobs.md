@@ -822,7 +822,14 @@ remain `WORKER_FAILED` / `RUN_WORKER_FAILED`. These labels locate a boundary,
 not an exception, root cause, successful optimizer step, or retry grant. The
 runner also uses closed post-submit labels for workflow, read binding, call
 observation, outcome, verification, and artifact download; never infer remote
-state from one label alone.
+state from a single label.
+For new workers, `SFT_ADMISSION_{CONTRACTS,RELEASE,PATHS,INPUT,ENVIRONMENT,INVOCATION,COMMITMENT}`
+identifies the existing admission subcheck; legacy `SFT_ADMISSION` remains
+accepted. Replay exact retained pure contracts locally before changing a recipe.
+CPU qualification's installed-runtime check does not prove every training-parent
+or attempt-specific admission check. New labels disclose no exception text and
+do not authorize replay; review the runtime/worker/inference source commitments
+after changing code in their existing inventories.
 
 The installed training entrypoint additionally reports fixed setup substages:
 `ENTRYPOINT_IMPORTS`, `ENTRYPOINT_DISPATCH_AUTH`, `ENTRYPOINT_PROVIDER_ID`,

@@ -61,6 +61,30 @@ def test_admission_is_read_only_and_path_free(material):
         admitted.close()
 
 
+@pytest.mark.parametrize("boundary,stage", [
+    ("_admit_contracts", "ADMISSION_CONTRACTS"),
+    ("_inspect_release", "ADMISSION_RELEASE"),
+    ("_hold_paths", "ADMISSION_PATHS"),
+    ("_input", "ADMISSION_INPUT"),
+    ("environment", "ADMISSION_ENVIRONMENT"),
+    ("_invocation_spec", "ADMISSION_INVOCATION"),
+    ("_physical_commitment", "ADMISSION_COMMITMENT"),
+])
+def test_admission_substage_is_fixed_and_private(material, monkeypatch, boundary, stage):
+    if boundary == "environment":
+        material["environment"] = (("HF_TOKEN", "PRIVATE_SENTINEL"),)
+    else:
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("PRIVATE_SENTINEL")
+        monkeypatch.setattr(seam, boundary, fail)
+    with pytest.raises(seam.PackagedSFTExecutionError) as caught:
+        seam.admit_packaged_sft(**material)
+    assert caught.value.stage == stage
+    assert str(caught.value) == "PACKAGED_SFT_" + stage + "_REJECTED"
+    assert caught.value.__suppress_context__
+    assert "PRIVATE_SENTINEL" not in "".join(traceback.format_exception(caught.value))
+
+
 @pytest.mark.parametrize("field", ["workload_digest", "configuration_digest", "prepared_input", "artifact_policy_digest", "runtime_release_digest", "provider_runtime_binding_digest"])
 def test_cross_binding_rejected_before_preparation(material, field):
     changes = {field: "0" * 64}
