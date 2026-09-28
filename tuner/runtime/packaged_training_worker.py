@@ -14,6 +14,7 @@ import importlib.metadata
 import json
 import platform
 import re
+import stat
 import sys
 from pathlib import Path
 from zipfile import ZipFile
@@ -261,6 +262,22 @@ class PackagedInstalledRuntimeInspectionError(ValueError):
         super().__init__("PACKAGED_INSTALLED_RUNTIME_INSPECTION_REJECTED")
 
 
+def _metadata_identity(distribution: object) -> tuple[int, ...] | None:
+    if type(distribution) is not importlib.metadata.PathDistribution:
+        return None
+    path = getattr(distribution, "_path", None)
+    if type(path) is not type(Path()):
+        return None
+    try:
+        info = path.stat()
+    except (OSError, OverflowError, ValueError):
+        return None
+    if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+        return None
+    return (stat.S_IFMT(info.st_mode), info.st_dev, info.st_ino,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
 def inspect_installed_runtime(expected: dict) -> dict:
     """Measure reviewed wheel bytes, installed members and worker closure.
 
@@ -347,15 +364,40 @@ def inspect_installed_runtime(expected: dict) -> dict:
         closure = load_packaged_worker_closure()
     except BaseException:
         raise PackagedInstalledRuntimeInspectionError("CLOSURE") from None
+    inventory_by_name = {}
+    identities = {}
+    physical = {}
     try:
-        inventory = sorted([{"name": re.sub(r"[-_.]+", "-", item.metadata["Name"].lower()), "version": item.version}
-                            for item in importlib.metadata.distributions()], key=lambda item: item["name"])
+        for occurrence, item in enumerate(importlib.metadata.distributions(), 1):
+            if occurrence > 4096:
+                raise PackagedInstalledRuntimeInspectionError("INVENTORY_BOUNDS")
+            before = _metadata_identity(item)
+            name = re.sub(r"[-_.]+", "-", item.metadata["Name"].lower())
+            version = item.version
+            after = _metadata_identity(item)
+            if before != after and (before is not None or after is not None):
+                raise PackagedInstalledRuntimeInspectionError("INVENTORY_ENUMERATION")
+            identity = before if before is not None and before == after else None
+            previous = inventory_by_name.get(name)
+            if previous is not None:
+                if (identity is None or identities.get(name) != identity
+                        or previous["version"] != version):
+                    raise PackagedInstalledRuntimeInspectionError("INVENTORY_DUPLICATE")
+                continue
+            if identity is not None:
+                prior_physical = physical.get(identity)
+                if prior_physical is not None and prior_physical != (name, version):
+                    raise PackagedInstalledRuntimeInspectionError("INVENTORY_DUPLICATE")
+                physical[identity] = (name, version)
+                identities[name] = identity
+            inventory_by_name[name] = {"name": name, "version": version}
+    except PackagedInstalledRuntimeInspectionError:
+        raise
     except BaseException:
         raise PackagedInstalledRuntimeInspectionError("INVENTORY_ENUMERATION") from None
+    inventory = sorted(inventory_by_name.values(), key=lambda item: item["name"])
     if not inventory or len(inventory) > 4096:
         raise PackagedInstalledRuntimeInspectionError("INVENTORY_BOUNDS") from None
-    if len({item["name"] for item in inventory}) != len(inventory):
-        raise PackagedInstalledRuntimeInspectionError("INVENTORY_DUPLICATE") from None
     python = {key: expected["python"][key] for key in ("implementation", "version", "executable", "executable_digest")}
     return {
         "schema_version": "synaptic-packaged-runtime-inspector/v1",

@@ -339,4 +339,29 @@ The diagnostic-only inner-stage change passed 401/401 focused tests under the
 pinned launcher test harness. Independent static review confirmed original
 predicates and order are preserved. Both changed runtime files remain in the
 same reviewed five-member manifest; hashes were refreshed, both Modal source
-locks remain CURRENT, and skill copies match. Next qualification is CPU-only.
+locks remained CURRENT, and skill copies matched for CPU-only qualification.
+
+CPU attempt `cpu-qual-7773054a7c332b42104f9c7b` on
+`c83b17c411d122f0cdd1f8c337bc61c42cdcd56b` returned
+`CALL_PARENT_RUNTIME_INSTALLED_INVENTORY_DUPLICATE` at
+`2026-09-28T14:01:23.752802`. Exact-call inspection confirmed it for
+`fc-01M3MJV27EX2JCPTN5FE7KF8KT`, claim
+`qualify-9a3d8aea7cb3049d9da4c643565dccb1aeebc0d3626e9827953cb99e24fc587b`.
+All preceding wheel/version/dependency/provenance/member/closure checks passed.
+This establishes duplicated normalized names, not yet their physical identity.
+The existing inference inspector provides a reusable strict identity pattern:
+collapse only repeated stable physical metadata objects with identical normalized
+name/version; reject separate or unproven duplicates. Adapt that inside the
+training inspector while retaining both raw and unique 4096 bounds and the final
+exact inventory digest/count. A fresh CPU candidate must prove the behavior on
+the actual parent; no package removal, pin change, or name-only dedup is allowed.
+The frozen conditional identity adaptation passed 406/406 provider-free tests
+under the pinned CPython 3.11.14 launcher test harness after reviewed five-member
+closure hash refresh. Independent review approved a fresh CPU-only qualification.
+Both Modal source locks remain CURRENT and canonical skill copies match. No
+physical-repeat cause or GPU qualification is inferred from the local tests.
+The frozen conditional identity adaptation passed 406/406 provider-free tests
+under the pinned CPython 3.11.14 launcher test harness after reviewed five-member
+closure hash refresh. Independent review approved a fresh CPU-only qualification.
+Both Modal source locks remain CURRENT and canonical skill copies match. No
+physical-repeat cause or GPU qualification is inferred from the local tests.

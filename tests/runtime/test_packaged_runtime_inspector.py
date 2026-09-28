@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
+import itertools
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -117,6 +119,62 @@ def test_installed_inspection_substages_are_closed(installed, monkeypatch, kind,
     assert rejected.value.stage == stage
     assert str(rejected.value) == "PACKAGED_INSTALLED_RUNTIME_INSPECTION_REJECTED"
     assert "PRIVATE_SENTINEL" not in str(rejected.value)
+
+
+def _path_distribution(directory, name="shared-alias", version="1.0.0"):
+    directory.mkdir(parents=True)
+    (directory / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
+    return importlib.metadata.PathDistribution(directory)
+
+
+def test_repeated_same_physical_metadata_preserves_inventory(installed, monkeypatch, tmp_path):
+    expected, _retained, _packages, distributions = installed
+    original = worker.inspect_installed_runtime(expected)["installed_distributions"]
+    directory = tmp_path / "shared-alias-1.0.0.dist-info"
+    first = _path_distribution(directory)
+    second = importlib.metadata.PathDistribution(directory)
+    monkeypatch.setattr(worker.importlib.metadata, "distributions",
+                        lambda: [*distributions.values(), first, second])
+    measured = worker.inspect_installed_runtime(expected)["installed_distributions"]
+    assert measured["count"] == original["count"] + 1
+    assert measured["inventory"].count({"name": "shared-alias", "version": "1.0.0"}) == 1
+    monkeypatch.setattr(worker.importlib.metadata, "distributions",
+                        lambda: [*distributions.values(), first])
+    assert worker.inspect_installed_runtime(expected)["installed_distributions"] == measured
+
+
+@pytest.mark.parametrize("variant,stage", [
+    ("distinct", "INVENTORY_DUPLICATE"),
+    ("changed", "INVENTORY_DUPLICATE"),
+    ("replaced", "INVENTORY_DUPLICATE"),
+    ("raw-bound", "INVENTORY_BOUNDS"),
+])
+def test_physical_metadata_dedup_fails_closed(installed, monkeypatch, tmp_path, variant, stage):
+    expected, _retained, _packages, distributions = installed
+    directory = tmp_path / "shared-alias-1.0.0.dist-info"
+    first = _path_distribution(directory)
+    if variant == "distinct":
+        second = _path_distribution(tmp_path / "other" / "shared-alias-1.0.0.dist-info")
+        found = lambda: [*distributions.values(), first, second]
+    elif variant == "raw-bound":
+        found = lambda: itertools.chain(distributions.values(), itertools.repeat(first, 4095))
+    else:
+        def found():
+            yield from distributions.values()
+            yield first
+            if variant == "changed":
+                (directory / "METADATA").write_text(
+                    "Metadata-Version: 2.1\nName: shared-alias\nVersion: 2.0.0\n")
+            else:
+                directory.rename(tmp_path / "original-metadata")
+                _path_distribution(directory)
+            yield importlib.metadata.PathDistribution(directory)
+    monkeypatch.setattr(worker.importlib.metadata, "distributions", found)
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
+        worker.inspect_installed_runtime(expected)
+    assert rejected.value.stage == stage
+    assert str(rejected.value) == "PACKAGED_INSTALLED_RUNTIME_INSPECTION_REJECTED"
 
 
 def test_closure_verifies_members_not_manifest_hash_only(tmp_path, monkeypatch):

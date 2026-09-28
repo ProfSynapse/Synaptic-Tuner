@@ -768,7 +768,12 @@ worker closure, and inventory enumeration/bounds/duplicates. Legacy
 `INSTALLED_RUNTIME` remains a broad fallback; it cannot establish a duplicate
 or provenance cause. The isolated child and Function parent can have different
 metadata search contexts, so child success alone does not justify removing
-parent inspection or copying an inference-image workaround. These closed
+parent inspection or copying an inference-image workaround without measurement.
+Repeated distribution enumeration may collapse only proven stable physical
+metadata identities with matching normalized name and version. Distinct or
+unproven duplicate names must still reject. Preserve the 4096 raw-occurrence
+bound, unique-inventory cap, and exact final release inventory digest/count;
+never deduplicate by name/version or ignore an extra installation. These closed
 labels preserve the predicates and disclose neither actual values nor exception
 text. Use a fresh ordinary `train --qualify --fresh-attempt` with the same
 recipe to measure this boundary on CPU before another GPU smoke; prior
