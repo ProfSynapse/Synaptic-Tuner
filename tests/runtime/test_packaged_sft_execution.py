@@ -14,6 +14,7 @@ import pytest
 
 from Trainers.sft import runtime_v1 as core
 from tuner.runtime import packaged_sft_execution as seam
+from tuner.runtime import packaged_training_worker as worker
 from tuner.runtime.packaged_worker_closure import load_packaged_worker_closure
 from tuner.runtime.releases import PackagedExecutionBindingV1
 from tuner.training.contracts import CanonicalDocument
@@ -359,6 +360,21 @@ def test_exact_python_version_rejected_before_inventory_inspection(monkeypatch):
         seam._inspect_release(_release(python_version="0.0.1"))
     assert rejected.value.stage == "PYTHON_VERSION"
     assert not calls
+
+
+@pytest.mark.parametrize("inner", sorted(worker.INSTALLED_RUNTIME_INSPECTION_STAGES))
+def test_installed_runtime_substage_projects_without_private_details(monkeypatch, inner):
+    monkeypatch.setattr(seam, "stable_read", lambda *_args, **_kwargs: b"{}")
+    monkeypatch.setattr(seam, "_installed_python_digest", lambda *_args: "a" * 64)
+    def rejected(_expected):
+        raise worker.PackagedInstalledRuntimeInspectionError(inner)
+    monkeypatch.setattr(worker, "inspect_installed_runtime", rejected)
+    release = _release(python_version=platform.python_version(),
+                       python_executable=sys.executable, python_executable_digest="a" * 64)
+    with pytest.raises(seam.PackagedReleaseInspectionError) as error:
+        seam._inspect_release(release)
+    assert error.value.stage == "INSTALLED_" + inner
+    assert str(error.value) == "PACKAGED_RELEASE_INSPECTION_REJECTED"
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="requires Linux process executable identity")

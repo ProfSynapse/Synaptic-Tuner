@@ -761,7 +761,14 @@ self-checks report `CALL_PARENT_RUNTIME_<PREDICATE>` (or the inspector's
 `WORKER_PARENT_RUNTIME_<PREDICATE>`) for the shared release check, distinguishing
 Python implementation, version and executable path; executable digest; installed
 runtime inspection; locked record comparisons; and wheel/trainer assets.
-`PARENT_RUNTIME_UNAVAILABLE` is the unexpected-fault fallback. These closed
+`PARENT_RUNTIME_UNAVAILABLE` is the unexpected-fault fallback. Inner
+`PARENT_RUNTIME_INSTALLED_*` labels separate retained inputs, wheel bytes,
+distribution metadata, bootstrap dependencies, provenance, installed members,
+worker closure, and inventory enumeration/bounds/duplicates. Legacy
+`INSTALLED_RUNTIME` remains a broad fallback; it cannot establish a duplicate
+or provenance cause. The isolated child and Function parent can have different
+metadata search contexts, so child success alone does not justify removing
+parent inspection or copying an inference-image workaround. These closed
 labels preserve the predicates and disclose neither actual values nor exception
 text. Use a fresh ordinary `train --qualify --fresh-attempt` with the same
 recipe to measure this boundary on CPU before another GPU smoke; prior

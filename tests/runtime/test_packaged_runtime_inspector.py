@@ -65,12 +65,17 @@ def test_bootstrap_can_use_matching_dependency_from_pinned_base(installed):
         "synaptic-tuner", "bootstrap", "base-dependency",
     }
     distributions["base-dependency"].version = "3.0.0"
-    with pytest.raises(ValueError, match="bootstrap transitive closure incomplete"):
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
         worker.inspect_installed_runtime(expected)
+    assert rejected.value.stage == "BOOTSTRAP_DEPENDENCIES"
 
 
-@pytest.mark.parametrize("mutation", ["missing-provenance", "wrong-provenance", "member", "wheel", "capability", "bootstrap-dependency"])
-def test_installed_provenance_and_members_are_authenticated(installed, mutation):
+@pytest.mark.parametrize("mutation,stage", [
+    ("missing-provenance", "PROVENANCE"), ("wrong-provenance", "PROVENANCE"),
+    ("member", "MEMBERS"), ("wheel", "WHEEL_BYTES"),
+    ("capability", "INPUTS"), ("bootstrap-dependency", "BOOTSTRAP_DEPENDENCIES"),
+])
+def test_installed_provenance_and_members_are_authenticated(installed, mutation, stage):
     expected, retained, packages, distributions = installed
     if mutation == "missing-provenance": distributions["synaptic-tuner"].files = []
     elif mutation == "wrong-provenance": (packages / "synaptic_tuner.dist-info" / "direct_url.json").write_text('{}')
@@ -78,7 +83,40 @@ def test_installed_provenance_and_members_are_authenticated(installed, mutation)
     elif mutation == "wheel": (retained / expected["wheel"]["filename"]).write_bytes(b"substituted")
     elif mutation == "capability": (retained / "build-inputs.json").write_bytes(b"{}")
     else: distributions["bootstrap"].requires = ["unreviewed>=1"]
-    with pytest.raises(ValueError): worker.inspect_installed_runtime(expected)
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
+        worker.inspect_installed_runtime(expected)
+    assert rejected.value.stage == stage
+    assert str(rejected.value) == "PACKAGED_INSTALLED_RUNTIME_INSPECTION_REJECTED"
+    assert rejected.value.__cause__ is None
+
+
+@pytest.mark.parametrize("kind,stage", [
+    ("distribution", "DISTRIBUTION"), ("closure", "CLOSURE"),
+    ("enumeration", "INVENTORY_ENUMERATION"), ("empty", "INVENTORY_BOUNDS"),
+    ("duplicate", "INVENTORY_DUPLICATE"),
+])
+def test_installed_inspection_substages_are_closed(installed, monkeypatch, kind, stage):
+    expected, _retained, _packages, distributions = installed
+    if kind == "distribution":
+        distributions["synaptic-tuner"].version = "0.0.0"
+    elif kind == "closure":
+        def broken_closure():
+            raise RuntimeError("PRIVATE_SENTINEL")
+        monkeypatch.setattr(worker, "load_packaged_worker_closure", broken_closure)
+    elif kind == "enumeration":
+        def broken_enumeration():
+            raise RuntimeError("PRIVATE_SENTINEL")
+        monkeypatch.setattr(worker.importlib.metadata, "distributions", broken_enumeration)
+    elif kind == "empty":
+        monkeypatch.setattr(worker.importlib.metadata, "distributions", lambda: [])
+    else:
+        monkeypatch.setattr(worker.importlib.metadata, "distributions", lambda: [
+            distributions["synaptic-tuner"], distributions["synaptic-tuner"]])
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
+        worker.inspect_installed_runtime(expected)
+    assert rejected.value.stage == stage
+    assert str(rejected.value) == "PACKAGED_INSTALLED_RUNTIME_INSPECTION_REJECTED"
+    assert "PRIVATE_SENTINEL" not in str(rejected.value)
 
 
 def test_closure_verifies_members_not_manifest_hash_only(tmp_path, monkeypatch):

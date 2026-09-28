@@ -195,6 +195,10 @@ RELEASE_INSPECTION_STAGES = (
     "PYTHON_EXECUTABLE_EQUIVALENT", "PYTHON_EXECUTABLE_NOT_EQUIVALENT",
     "PYTHON_EXECUTABLE_UNAVAILABLE",
     "PYTHON_DIGEST", "INSTALLED_RUNTIME",
+    "INSTALLED_INPUTS", "INSTALLED_WHEEL_BYTES", "INSTALLED_DISTRIBUTION",
+    "INSTALLED_BOOTSTRAP_DEPENDENCIES", "INSTALLED_PROVENANCE", "INSTALLED_MEMBERS",
+    "INSTALLED_CLOSURE", "INSTALLED_INVENTORY_ENUMERATION",
+    "INSTALLED_INVENTORY_BOUNDS", "INSTALLED_INVENTORY_DUPLICATE",
     "PACKAGE", "PYTHON", "INSTALLED_DISTRIBUTIONS", "WORKER",
     "CONTRACTS", "PLATFORM_RECORD", "COMPATIBILITY", "PLATFORM",
     "WHEEL", "TRAINER_ASSETS",
@@ -257,7 +261,11 @@ def _executable_mismatch_stage(release) -> str:
 
 def _inspect_release(release, *, allow_equivalent_executable: bool = False):
     """Measure the installed wheel graph, never a source checkout or Git tree."""
-    from tuner.runtime.packaged_training_worker import inspect_installed_runtime
+    from tuner.runtime.packaged_training_worker import (
+        INSTALLED_RUNTIME_INSPECTION_STAGES,
+        PackagedInstalledRuntimeInspectionError,
+        inspect_installed_runtime,
+    )
     stage = "INPUT"
     try:
         expected = json.loads(stable_read(Path("/opt/synaptic-runtime/build-inputs.json")))
@@ -278,7 +286,14 @@ def _inspect_release(release, *, allow_equivalent_executable: bool = False):
         if _installed_python_digest(release.python_executable) != release.python_executable_digest:
             raise ValueError
         stage = "INSTALLED_RUNTIME"
-        measured = inspect_installed_runtime(expected)
+        try:
+            measured = inspect_installed_runtime(expected)
+        except PackagedInstalledRuntimeInspectionError as error:
+            if (type(error) is PackagedInstalledRuntimeInspectionError
+                    and type(error.stage) is str
+                    and error.stage in INSTALLED_RUNTIME_INSPECTION_STAGES):
+                raise PackagedReleaseInspectionError("INSTALLED_" + error.stage) from None
+            raise PackagedReleaseInspectionError("INSTALLED_RUNTIME") from None
         document = release.to_dict()
         for name in ("package", "python", "installed_distributions", "worker", "contracts", "platform"):
             stage = "PLATFORM_RECORD" if name == "platform" else name.upper()

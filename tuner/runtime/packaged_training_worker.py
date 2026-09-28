@@ -244,6 +244,23 @@ def local_cpu_main(release_document):
         return 2
 
 
+INSTALLED_RUNTIME_INSPECTION_STAGES = frozenset({
+    "INPUTS", "WHEEL_BYTES", "DISTRIBUTION", "BOOTSTRAP_DEPENDENCIES",
+    "PROVENANCE", "MEMBERS", "CLOSURE", "INVENTORY_ENUMERATION",
+    "INVENTORY_BOUNDS", "INVENTORY_DUPLICATE",
+})
+
+
+class PackagedInstalledRuntimeInspectionError(ValueError):
+    """Fixed inner predicate for installed-runtime inspection."""
+
+    def __init__(self, stage: str) -> None:
+        if stage not in INSTALLED_RUNTIME_INSPECTION_STAGES:
+            raise ValueError("invalid installed runtime inspection stage")
+        self.stage = stage
+        super().__init__("PACKAGED_INSTALLED_RUNTIME_INSPECTION_REJECTED")
+
+
 def inspect_installed_runtime(expected: dict) -> dict:
     """Measure reviewed wheel bytes, installed members and worker closure.
 
@@ -252,69 +269,93 @@ def inspect_installed_runtime(expected: dict) -> dict:
     """
     def canonical(value):
         return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
-    retained = stable_read(Path("/opt/synaptic-runtime/build-inputs.json"))
-    if retained != canonical(expected):
-        raise ValueError("build inputs differ")
+    try:
+        retained = stable_read(Path("/opt/synaptic-runtime/build-inputs.json"))
+        if retained != canonical(expected):
+            raise ValueError
+    except BaseException:
+        raise PackagedInstalledRuntimeInspectionError("INPUTS") from None
     provenance = {}
-    from packaging.requirements import Requirement
-    bootstrap_versions = {item["distribution"]: item["version"] for item in expected["bootstrap"]}
+    try:
+        from packaging.requirements import Requirement
+        bootstrap_versions = {item["distribution"]: item["version"] for item in expected["bootstrap"]}
+    except BaseException:
+        raise PackagedInstalledRuntimeInspectionError("INPUTS") from None
     for wheel in [expected["wheel"], *expected["bootstrap"]]:
-        wheel_raw = stable_read(Path("/opt/synaptic-runtime") / wheel["filename"], 256 * 1024 * 1024)
-        if hashlib.sha256(wheel_raw).hexdigest() != wheel["sha256"]:
-            raise ValueError("wheel differs")
-        distribution = importlib.metadata.distribution(wheel["distribution"])
-        if distribution.version != wheel["version"]:
-            raise ValueError("installed version differs")
-        if wheel["distribution"] in bootstrap_versions:
-            for text in distribution.requires or ():
-                requirement = Requirement(text)
-                if requirement.marker is not None and not requirement.marker.evaluate({"extra": ""}):
-                    continue
-                name = re.sub(r"[-_.]+", "-", requirement.name.lower())
-                version = bootstrap_versions.get(name)
-                if version is None:
-                    # The digest-pinned base may already provide a dependency.
-                    # It is included in the complete final distribution
-                    # inventory; no additional wheel needs to replace it.
-                    try:
+        try:
+            wheel_raw = stable_read(Path("/opt/synaptic-runtime") / wheel["filename"], 256 * 1024 * 1024)
+            if hashlib.sha256(wheel_raw).hexdigest() != wheel["sha256"]:
+                raise ValueError
+        except BaseException:
+            raise PackagedInstalledRuntimeInspectionError("WHEEL_BYTES") from None
+        try:
+            distribution = importlib.metadata.distribution(wheel["distribution"])
+            if distribution.version != wheel["version"]:
+                raise ValueError
+        except BaseException:
+            raise PackagedInstalledRuntimeInspectionError("DISTRIBUTION") from None
+        try:
+            if wheel["distribution"] in bootstrap_versions:
+                for text in distribution.requires or ():
+                    requirement = Requirement(text)
+                    if requirement.marker is not None and not requirement.marker.evaluate({"extra": ""}):
+                        continue
+                    name = re.sub(r"[-_.]+", "-", requirement.name.lower())
+                    version = bootstrap_versions.get(name)
+                    if version is None:
+                        # The pinned base may already provide a dependency.
                         version = importlib.metadata.distribution(requirement.name).version
-                    except (importlib.metadata.PackageNotFoundError, KeyError) as exc:
-                        raise ValueError("bootstrap transitive closure incomplete") from exc
-                if requirement.url or requirement.extras or version not in requirement.specifier:
-                    raise ValueError("bootstrap transitive closure incomplete")
-        direct_file = next((item for item in distribution.files or () if str(item).replace("\\", "/").endswith(".dist-info/direct_url.json")), None)
-        if direct_file is None:
-            raise ValueError("missing wheel provenance")
-        direct_raw = stable_read(Path(distribution.locate_file(direct_file)))
-        direct = json.loads(direct_raw)
-        if (direct.get("url") != "file:///opt/synaptic-runtime/" + wheel["filename"]
-                or direct.get("archive_info", {}).get("hashes", {}).get("sha256") != wheel["sha256"]):
-            raise ValueError("wheel provenance differs")
-        provenance[wheel["distribution"]] = hashlib.sha256(direct_raw).hexdigest()
-        with ZipFile(BytesIO(wheel_raw)) as archive:
-            members = archive.infolist()
-            if not members or len(members) > 10000 or sum(member.file_size for member in members) > 256 * 1024 * 1024:
-                raise ValueError("wheel inventory limit")
-            seen = set()
-            for member in members:
-                name = member.filename
-                if member.is_dir(): continue
-                if (name in seen or name.startswith("/") or "\\" in name or ".." in name.split("/")
-                        or any(part.endswith(".data") for part in name.split("/"))
-                        or member.file_size > 64 * 1024 * 1024):
-                    raise ValueError("unsupported wheel member")
-                seen.add(name)
-                # pip rewrites RECORD with installation-generated files.
-                if name.endswith(".dist-info/RECORD"): continue
-                installed = Path(distribution.locate_file(name))
-                payload = stable_read(installed, max(1, member.file_size))
-                if payload != archive.read(member):
-                    raise ValueError("installed wheel member differs")
-    closure = load_packaged_worker_closure()
-    inventory = sorted([{"name": re.sub(r"[-_.]+", "-", item.metadata["Name"].lower()), "version": item.version}
-                        for item in importlib.metadata.distributions()], key=lambda item: item["name"])
-    if not inventory or len(inventory) > 4096 or len({item["name"] for item in inventory}) != len(inventory):
-        raise ValueError("distribution inventory invalid")
+                    if requirement.url or requirement.extras or version not in requirement.specifier:
+                        raise ValueError
+        except BaseException:
+            raise PackagedInstalledRuntimeInspectionError("BOOTSTRAP_DEPENDENCIES") from None
+        try:
+            direct_file = next((item for item in distribution.files or () if str(item).replace("\\", "/").endswith(".dist-info/direct_url.json")), None)
+            if direct_file is None:
+                raise ValueError
+            direct_raw = stable_read(Path(distribution.locate_file(direct_file)))
+            direct = json.loads(direct_raw)
+            if (direct.get("url") != "file:///opt/synaptic-runtime/" + wheel["filename"]
+                    or direct.get("archive_info", {}).get("hashes", {}).get("sha256") != wheel["sha256"]):
+                raise ValueError
+            provenance[wheel["distribution"]] = hashlib.sha256(direct_raw).hexdigest()
+        except BaseException:
+            raise PackagedInstalledRuntimeInspectionError("PROVENANCE") from None
+        try:
+            with ZipFile(BytesIO(wheel_raw)) as archive:
+                members = archive.infolist()
+                if not members or len(members) > 10000 or sum(member.file_size for member in members) > 256 * 1024 * 1024:
+                    raise ValueError
+                seen = set()
+                for member in members:
+                    name = member.filename
+                    if member.is_dir(): continue
+                    if (name in seen or name.startswith("/") or "\\" in name or ".." in name.split("/")
+                            or any(part.endswith(".data") for part in name.split("/"))
+                            or member.file_size > 64 * 1024 * 1024):
+                        raise ValueError
+                    seen.add(name)
+                    # pip rewrites RECORD with installation-generated files.
+                    if name.endswith(".dist-info/RECORD"): continue
+                    installed = Path(distribution.locate_file(name))
+                    payload = stable_read(installed, max(1, member.file_size))
+                    if payload != archive.read(member):
+                        raise ValueError
+        except BaseException:
+            raise PackagedInstalledRuntimeInspectionError("MEMBERS") from None
+    try:
+        closure = load_packaged_worker_closure()
+    except BaseException:
+        raise PackagedInstalledRuntimeInspectionError("CLOSURE") from None
+    try:
+        inventory = sorted([{"name": re.sub(r"[-_.]+", "-", item.metadata["Name"].lower()), "version": item.version}
+                            for item in importlib.metadata.distributions()], key=lambda item: item["name"])
+    except BaseException:
+        raise PackagedInstalledRuntimeInspectionError("INVENTORY_ENUMERATION") from None
+    if not inventory or len(inventory) > 4096:
+        raise PackagedInstalledRuntimeInspectionError("INVENTORY_BOUNDS") from None
+    if len({item["name"] for item in inventory}) != len(inventory):
+        raise PackagedInstalledRuntimeInspectionError("INVENTORY_DUPLICATE") from None
     python = {key: expected["python"][key] for key in ("implementation", "version", "executable", "executable_digest")}
     return {
         "schema_version": "synaptic-packaged-runtime-inspector/v1",

@@ -320,4 +320,23 @@ Repair only the test records, retain child parser strictness, and rerun that
 suite under the existing memfd-capable interpreter. The corrected child-only
 suite passed 37/37 under system Python 3.10. No production child/parser or
 training pins changed. The packaged-worker manifest and both Modal source
-locks are CURRENT; the canonical skill copies match.
+locks are CURRENT; the canonical skill copies matched at promotion.
+
+CPU qualification `cpu-qual-75c4a5d815211fdbb8bc99e2` on
+`29faf9d3fa88f7e2f1bad01912d2eddf06003947` returned
+`CALL_PARENT_RUNTIME_INSTALLED_RUNTIME` at `2026-09-28T13:47:15.222113`.
+The exact read-only inspector confirmed the boundary for
+`fc-01M3MJ17ZR1N14RQFZAZ0F1HFD`, claim
+`qualify-96b6c97c9a33fd6a19f7a16ba0c5675386e8f544bba87a7c32fa822ebe1ae068`.
+Thus parent interpreter equivalence and locked binary digest passed, while the
+inner installed-runtime inspection failed before outer measured-record comparisons.
+No wheel, provenance, or duplicate-distribution cause is established yet.
+The same isolated-child inspection cannot prove the separate Function parent's
+metadata/import graph. Add finite inner predicate diagnostics to the existing
+inspector and CPU workflow, preserving its wheel/member/closure/inventory checks;
+do not remove parent verification or reuse inference-image evidence as a fix.
+The diagnostic-only inner-stage change passed 401/401 focused tests under the
+pinned launcher test harness. Independent static review confirmed original
+predicates and order are preserved. Both changed runtime files remain in the
+same reviewed five-member manifest; hashes were refreshed, both Modal source
+locks remain CURRENT, and skill copies match. Next qualification is CPU-only.
