@@ -606,4 +606,31 @@ The next diagnostic retains every rejection and separates `TMP_OWNER` from
 group/other write bits (`mode & 0022`), not the owner's access or sticky-bit
 state. This probe still admits only root-owned 01777 `/tmp`. Independent review
 approved the diagnostic-only change; 837 focused regressions and four exact TMP
-public-CLI projection cases passed. All fixed source commitments are CURRENT.
+public-CLI projection cases passed; all fixed source commitments were CURRENT.
+
+Source `63fae284647943a2a733f90e78c0e6fb03705242` was pushed. Attempt
+`modal-5ea9662614bfb8cfc464f9a6` failed at `SOURCE_CHAIN_TMP_MODE_WRITABLE`
+at `2026-09-29T10:06:08.387925`. Exact claim
+`0fa0ceb24ee9d3d97db6473fb219202e1cf9713b02a03c26bcd6cc097a383e1b`
+and call `fc-01M3PQQ8SSRW6Q9WS3F0Q6XK33` were independently read back by
+the claim-bound inspector. `/tmp` was therefore a root-owned directory with
+group/other write bits and a mode other than 01777; exact mode/sticky state
+remains unknown. Do not relax this guard or chmod the shared parent. Relocate
+per-call 0700 staging to a parent that satisfies the existing private-chain
+checks, preserving every model, descriptor, publication and no-replay check.
+
+Independent review selected the existing container root as the scratch parent:
+the exact failed call already passed its retained root-descriptor trust check.
+Unlike `/root`, it introduces no unmeasured intermediate ancestor. Only the
+fixed parent selection changes from `/tmp` to `/`; `TemporaryDirectory` still
+creates an unpredictable 0700 child and cleans up only that child. There is no
+fallback, shared-parent chmod or private-chain relaxation. Rootfs writability is
+consistent with [Modal's local filesystem example](https://modal.com/docs/guide/volumes),
+but an exact-image run remains necessary to prove preparation and training.
+
+The selected-root real binding copy passed under WSL root (one test). The pinned
+unprivileged launcher passed 370 focused regressions with the root-only test
+skipped; that skip is covered by the separate privileged execution, not counted
+as a pass. Independent review approved the minimal change. All three fixed
+source-commitment checks remained CURRENT without hash, inventory or pin changes.
+Proceed with one fresh normal train invocation and its integrated CPU gate.

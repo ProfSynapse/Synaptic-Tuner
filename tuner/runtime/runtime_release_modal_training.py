@@ -8,7 +8,8 @@ from pathlib import Path
 _CONTROL_ROOT = Path("/mnt/control")
 _ARTIFACT_ROOT = Path("/mnt/artifacts")
 _MODEL_CACHE_ROOT = Path("/mnt/model-cache")
-_PRIVATE_SCRATCH_ROOT = Path("/tmp")
+# TemporaryDirectory creates one unpredictable 0700 child below this root.
+_PRIVATE_SCRATCH_ROOT = Path("/")
 
 
 def run_modal_packaged_training(dispatch_bytes: bytes) -> dict[str, object]:

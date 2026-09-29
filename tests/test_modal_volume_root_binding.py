@@ -320,6 +320,27 @@ def test_copy_accepts_private_scratch_under_sticky_tmp(layout):
         assert (target / "scratch.bin").read_bytes() == b"scratch"
 
 
+def test_selected_root_child_is_private_and_admitted_for_publication(layout):
+    from tuner.runtime import runtime_release_modal_training as entrypoint
+
+    parent = entrypoint._PRIVATE_SCRATCH_ROOT
+    assert parent == Path("/")
+    if not os.access(parent, os.W_OK):
+        pytest.skip("selected scratch parent requires a privileged local fixture")
+    _, _, target, _ = layout
+    with tempfile.TemporaryDirectory(prefix="synaptic-model-", dir=parent) as directory:
+        scratch = Path(directory)
+        assert stat.S_IMODE(scratch.stat().st_mode) == 0o700
+        source = scratch / "source.bin"
+        source.write_bytes(b"source")
+        with _bind(layout) as bound:
+            bound.copy_in_exclusive(
+                "root-child.bin", str(source), expected_size=6,
+                expected_sha256=hashlib.sha256(b"source").hexdigest(), maximum=6,
+            )
+    assert (target / "root-child.bin").read_bytes() == b"source"
+
+
 @pytest.mark.parametrize("owner,mode,code", (
     (1, stat.S_IFDIR | 0o1777, "SOURCE_CHAIN_TMP_OWNER"),
     (0, stat.S_IFDIR | 0o0755, "SOURCE_CHAIN_TMP_MODE_NONWRITABLE"),
