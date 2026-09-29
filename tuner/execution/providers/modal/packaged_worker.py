@@ -307,16 +307,18 @@ class ModalPackagedWorker:
         if bound:
             assert self._bindings is not None
             artifacts_binding = self._bindings["artifacts"]
+            artifacts_binding.claim_directory(operation_path(effect_id))
             artifacts_binding.claim_directory(operation_path(effect_id, "output"))
             for name, size, digest, _ in inventory_members:
                 artifacts_binding.copy_in_exclusive(
-                    operation_path(effect_id, "output", name), paths.artifacts / name,
+                    operation_path(effect_id, "output", name), str(paths.artifacts / name),
                     expected_size=size, expected_sha256=digest,
                     maximum=MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes,
                 )
             if artifacts_binding.list_regular(operation_path(effect_id, "output"), 6) != expected_listing:
                 raise ValueError("published packaged artifacts differ")
             control_binding = self._bindings["control"]
+            control_binding.claim_directory(operation_path(effect_id))
             control_binding.claim_directory(operation_path(effect_id, "state"))
             for name, source in (("runtime-v1-inventory.json", result.inventory_path),
                                  ("packaged-terminal.json", result.terminal_path)):

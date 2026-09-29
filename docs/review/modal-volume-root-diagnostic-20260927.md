@@ -870,4 +870,52 @@ modality sidecars. Independent review found no issues. The fixed offline
 66-member manifest refresh changes only `train_sft.py`; the bootstrap lock
 refresh changes only the offline-manifest hash. All four commitments are CURRENT
 and skill trees are synchronized. The live candidate still requires one fresh
-ordinary run; prior consumed attempts are not reused.
+ordinary run; prior consumed attempts remain unavailable for reuse.
+
+Pushed source `bf45fbad8682f438404f6fd8c6b344ba64716fd8` passed integrated CPU
+qualification for `modal-28aa1415ea52a99893c5e3bb`. Submit claim
+`612d843569b3bdcda1da2913079493b45f4cd2d5aaf45e4f8a99c21b438a2aaa` produced
+GPU call `fc-01M3Q5AG88G6ZH5X64G3XMB98N`. Public CLI and exact-call inspector
+agreed on `WORKER_COMPLETION` at `2026-09-29T14:11:34.698948`.
+This stage is entered after the packaged executor returns from trainer and
+artifact verification, so the former SFT_EVIDENCE boundary has been cleared.
+It does not establish the exact final step count or durable Volume publication.
+Read-only diagnosis now separates the completion inventory/contract from bound
+Volume copying. This consumed attempt is preserved; no verified LoRA is claimed.
+
+Provider-free reproduction with real `VolumeRootBinding` found a concrete
+publication-layout mismatch. Authenticated staging uploads and reads back files
+under `operations/<stage-effect>/input` (artifacts) and
+`operations/<stage-effect>/control` (control); both shared `operations` roots
+therefore exist. Stage and submit effects are distinct. Bound worker setup
+creates only private scratch, while completion initially claims
+`operations/<submit-effect>/output` without creating its submit parent.
+Production `claim_directory` opens existing parents and creates only the leaf.
+The exact staged-layout reproduction fails `CLAIM_PARENT` on both Volumes;
+claiming only each submit parent first permits the current child claims, while
+re-claiming that parent fails `CLAIM_CREATE_EXISTS`.
+
+The minimal candidate adds one exclusive submit-parent claim per bound Volume,
+leaving inventory, copy, signature, commit and collision checks intact. It does
+not create/adopt the shared operations roots or recurse through missing parents.
+Control-stage evidence is in `coordinator_staging.py` claim-path construction,
+upload, and exact readback before receipt. The earlier nonsticky `/tmp` cause
+does not recur: this worker's private scratch is explicitly created beneath `/`.
+Actual artifact sizes and the exact remote failing operation remain unobserved;
+the layout defect is locally proven and the next fresh run must verify durability.
+
+The real-binding completion regression exposed a second caller-contract defect:
+publication passed `paths.artifacts / name` as a `Path` to `copy_in_exclusive`,
+whose `_copy_exact` path parser requires an exact string. The candidate converts
+that source argument with `str(...)`; the strict path validator is unchanged.
+Control publication writes already-validated bytes and needs no such conversion.
+Both defects were previously hidden by the permissive fake binding. Success and
+collision coverage now exercise the production descriptor-bound filesystem API.
+The frozen worker suite passes all 133 cases on pinned CPython 3.11.14 and system
+Linux 3.10.12. Fresh publication succeeds; either Volume's existing submit parent
+fails without signing or committing and preserves its sentinel. The fake also
+requires an exact string copy source. Independent review is clear, bootstrap
+lock is CURRENT, all four commitments remain unchanged, and skill sync passes.
+The live L40S observation at 2026-09-29T14:27:27.514219 is $1.95/hour, excluding
+other resources and not a billing cap. Next: push exact source and use one fresh
+ordinary TrainingAPI attempt with its integrated CPU gate, not a separate gate.

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import hashlib
 from pathlib import Path
+import sys
+import tempfile
 from types import SimpleNamespace
 import pytest
 
@@ -18,7 +21,11 @@ from tuner.execution.providers.modal.packaged_worker import (
     packaged_worker_failure,
 )
 from tuner.execution.providers.modal.model_snapshot import PERSISTENT_PUBLICATION_DIAGNOSTICS
-from tuner.execution.providers.modal.volume_root_binding import PUBLICATION_DIAGNOSTICS
+from tuner.execution.providers.modal.contracts import operation_path
+from tuner.execution.providers.modal import volume_root_binding as binding_module
+from tuner.execution.providers.modal.volume_root_binding import (
+    PUBLICATION_DIAGNOSTICS, VolumeRootBinding,
+)
 from tuner.runtime.packaged_sft_execution import (
     CHILD_FAILURE_STAGES, PackagedSFTExecutionError, PREPARATION_FAILURE_STAGES,
 )
@@ -148,7 +155,8 @@ class _BoundVolume:
         self.claims.add(path)
 
     def copy_in_exclusive(self, path, source, *, expected_size, expected_sha256, maximum):
-        data = source.read_bytes()
+        assert type(source) is str
+        data = Path(source).read_bytes()
         assert len(data) == expected_size <= maximum
         assert hashlib.sha256(data).hexdigest() == expected_sha256
         assert path not in self.files
@@ -201,6 +209,102 @@ def test_bound_v2_worker_runs_offline_trainer_in_private_scratch_and_publishes_e
     effect = binding.command.operation.effect.effect_id
     assert len(bound["artifacts"].list_regular(f"operations/{effect}/output", 6)) == 5
     assert f"operations/{effect}/evidence/packaged-completion.json" in bound["control"].files
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux descriptor-bound Volume operations")
+@pytest.mark.parametrize("preexisting_parent_role", [None, "artifacts", "control"])
+def test_real_bound_completion_claims_only_fresh_submit_parent(
+    monkeypatch, preexisting_parent_role: str | None,
+) -> None:
+    binding, receipt, workload, policy = _case()
+    facts = binding.provider_facts
+    roles = (("control", facts.control_volume_id), ("artifacts", facts.artifact_volume_id))
+    if facts.model_cache_volume_id is not None:
+        roles += (("model_cache", facts.model_cache_volume_id),)
+    auth, signer, executor = Auth(), Signer(), Executor()
+    with ExitStack() as stack:
+        base = Path(stack.enter_context(tempfile.TemporaryDirectory(
+            prefix="modal-packaged-completion-", dir=Path.home(),
+        )))
+        base.chmod(0o700)
+        mount_root = base / "mounts"
+        volume_root = base / "volumes"
+        mount_root.mkdir(mode=0o700)
+        volume_root.mkdir(mode=0o700)
+        monkeypatch.setattr(binding_module, "_PROVIDER_VOLUME_ROOT", str(volume_root))
+        markers = []
+        targets = {}
+        roots_by_role = {}
+        bindings = {}
+        for role, volume_id in roles:
+            target = volume_root / volume_id
+            target.mkdir(mode=0o700)
+            targets[role] = target
+            marker_value = (role.encode() * 32)[:32]
+            marker_name = ".synaptic-volume-marker-" + hashlib.md5(role.encode()).hexdigest()
+            (target / marker_name).write_bytes(marker_value)
+            marker = ModalPackagedVolumeMarker(
+                role, volume_id, marker_name, hashlib.sha256(marker_value).hexdigest(),
+            )
+            markers.append(marker)
+            mounted = mount_root / role
+            mounted.symlink_to(target, target_is_directory=True)
+            roots_by_role[role] = mounted
+            bindings[role] = stack.enter_context(VolumeRootBinding.bind(
+                root_path=str(mounted), volume_id=volume_id,
+                marker_name=marker_name, marker_sha256=marker.value_sha256,
+            ))
+        staged_input = targets["artifacts"] / receipt.path
+        staged_input.parent.mkdir(parents=True)
+        staged_input.write_bytes(b"packaged-prepared-input")
+        stage_control = targets["control"] / operation_path(
+            receipt.stage_effect_id, "control", "stage-claim.v2.json",
+        )
+        stage_control.parent.mkdir(parents=True)
+        stage_control.write_bytes(b"stage-claim")
+        submit_effect = binding.command.operation.effect.effect_id
+        assert submit_effect != receipt.stage_effect_id
+        prior = targets["artifacts"] / operation_path(submit_effect)
+        existing = (
+            targets[preexisting_parent_role] / operation_path(submit_effect)
+            if preexisting_parent_role is not None else None
+        )
+        if existing is not None:
+            existing.mkdir(mode=0o700)
+            (existing / "sentinel").write_bytes(b"existing")
+        dispatch = build_modal_packaged_dispatch(
+            binding, receipt, workload, policy, auth, key_ref="dispatch-key",
+            environment=(("PATH", "/usr/bin:/bin"),), volume_markers=tuple(markers),
+        )
+        private = base / "private"
+        private.mkdir(mode=0o700)
+        roots = ModalPackagedWorkerRoots(
+            roots_by_role["control"], roots_by_role["artifacts"],
+            roots_by_role.get("model_cache", base / "unused-cache"),
+        )
+        worker = ModalPackagedWorker(
+            expected_facts=facts, dispatch_verifier=auth, trainer_executor=executor,
+            evidence_signer=signer, roots=roots, volume_bindings=bindings,
+            private_root=private,
+        )
+        commits = []
+        result = worker(
+            dispatch, "fc-1", commit_artifacts=lambda: commits.append("artifacts"),
+            commit_control=lambda: commits.append("control"),
+        )
+        if existing is not None:
+            _assert_failure(result, "COMPLETION")
+            assert commits == signer.calls == []
+            assert (existing / "sentinel").read_bytes() == b"existing"
+            assert not (existing / ("output" if preexisting_parent_role == "artifacts" else "state")).exists()
+        else:
+            assert result["status_code"] == "completed", result
+            assert commits == ["artifacts", "control"]
+            assert len(signer.calls) == 1
+            assert len(list((prior / "output").iterdir())) == 5
+            control_submit = targets["control"] / operation_path(submit_effect)
+            assert (control_submit / "state" / "runtime-v1-inventory.json").is_file()
+            assert (control_submit / "evidence" / "packaged-completion.json").is_file()
 
 
 def test_bound_worker_rejects_unsigned_v1_before_staged_read(tmp_path) -> None:
