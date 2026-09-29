@@ -58,7 +58,10 @@ _CODES = frozenset({
     "ADMISSION", "ADMISSION_CONTRACTS", "ADMISSION_RELEASE", "ADMISSION_PATHS",
     "ADMISSION_INPUT", "ADMISSION_ENVIRONMENT", "ADMISSION_INVOCATION",
     "ADMISSION_COMMITMENT", "PREPARATION", "REVALIDATION", "INVOCATION",
-    "TRAINER", "EVIDENCE", "ARTIFACT",
+    "TRAINER", "EVIDENCE", "EVIDENCE_PRIVATE_COPY", "EVIDENCE_DIRECTORIES",
+    "EVIDENCE_OUTPUT_BINDING", "EVIDENCE_OUTPUT_INVENTORY",
+    "EVIDENCE_DATASET_BINDING", "EVIDENCE_PROJECTION_BINDING",
+    "EVIDENCE_OUTPUT_DIRECTORY", "EVIDENCE_METRICS", "ARTIFACT",
 }) | CHILD_FAILURE_STAGES | frozenset("PREPARATION_" + stage for stage in (
     "MODEL_UNAVAILABLE", "MODEL_SDK_ADMISSION", "MODEL_INPUT", "MODEL_WORKSPACE_SETUP",
     "MODEL_METADATA_FETCH", "MODEL_METADATA_VALIDATION",
@@ -1064,16 +1067,20 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
                 evidence = (runner or core.SubprocessTrainerRunner()).run(invocation)
                 if type(evidence) is core.TrainerEvidence and type(evidence.exit_code) is int:
                     child_failure_stage = CHILD_EXIT_STAGES.get(evidence.exit_code)
-                stage = "EVIDENCE"
+                stage = "EVIDENCE_PRIVATE_COPY"
                 private_copy.check()
+                stage = "EVIDENCE_DIRECTORIES"
                 for directory in admitted._directories:
                     directory.check()
                 if type(evidence) is core.TrainerEvidence and evidence.exit_code == 0:
+                    stage = "EVIDENCE_OUTPUT_BINDING"
                     if evidence.final_model_dir != invocation.final_model_dir or evidence.tokenizer_dir != invocation.tokenizer_dir:
                         raise ValueError
+                    stage = "EVIDENCE_OUTPUT_INVENTORY"
                     for path in set((evidence.final_model_dir, evidence.tokenizer_dir)):
                         held, _ = _snapshot_inventory(path, admitted.paths.state)
                         artifact_directories.extend(held)
+                stage = "EVIDENCE"
                 return evidence
         result = core.execute_compiled_sft(admitted.workload_bytes, workload=projection, roots=admitted.paths,
             environment={}, runner=RevalidatingRunner(), invocation_builder=build, lineage_builder=lineage)
@@ -1099,6 +1106,10 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
             if core is not None and isinstance(error, core.RuntimeV1Error):
                 code = getattr(error, "diagnostic_code", "")
                 stage = {"runtime_trainer_failed": child_failure_stage or "TRAINER", "runtime_evidence_rejected": "EVIDENCE",
+                         "runtime_evidence_dataset_binding": "EVIDENCE_DATASET_BINDING",
+                         "runtime_evidence_projection_binding": "EVIDENCE_PROJECTION_BINDING",
+                         "runtime_evidence_output_directory": "EVIDENCE_OUTPUT_DIRECTORY",
+                         "runtime_evidence_metrics": "EVIDENCE_METRICS",
                          "runtime_artifact_rejected": "ARTIFACT"}.get(code, stage)
         except BaseException:
             pass

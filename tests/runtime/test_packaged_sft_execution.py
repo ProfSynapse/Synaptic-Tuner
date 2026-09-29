@@ -625,8 +625,105 @@ def test_same_size_private_copy_mutation_rejects_results(material, seal):
             private.write_bytes(b"[]")
             private.chmod(stat.S_IREAD)
             return super().run(invocation)
-    with pytest.raises(seam.PackagedSFTExecutionError, match="EVIDENCE"):
+    with pytest.raises(seam.PackagedSFTExecutionError, match="EVIDENCE_PRIVATE_COPY"):
         seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare, runner=TamperPrivateCopy())
+    assert not list(admitted.paths.artifacts.iterdir())
+    assert not (admitted.paths.state / "packaged-terminal.json").exists()
+
+
+@pytest.mark.parametrize("boundary,expected", (
+    ("directories", "EVIDENCE_DIRECTORIES"),
+    ("output_binding", "EVIDENCE_OUTPUT_BINDING"),
+    ("output_inventory", "EVIDENCE_OUTPUT_INVENTORY"),
+))
+def test_post_trainer_evidence_boundaries_are_closed_and_do_not_publish(
+        material, seal, monkeypatch, boundary, expected):
+    admitted = seam.admit_packaged_sft(**material)
+    completed = []
+
+    class EvidenceRunner(FakeRunner):
+        def run(self, invocation):
+            evidence = super().run(invocation)
+            completed.append(True)
+            if boundary == "output_binding":
+                return replace(evidence, final_model_dir=invocation.run_dir / "foreign")
+            return evidence
+
+    if boundary == "directories":
+        original_check = seam._HeldDirectory.check
+        def check(directory):
+            if completed and directory.path == admitted.paths.state:
+                raise ValueError("PRIVATE_SENTINEL")
+            return original_check(directory)
+        monkeypatch.setattr(seam._HeldDirectory, "check", check)
+    elif boundary == "output_inventory":
+        original_inventory = seam._snapshot_inventory
+        def inventory(snapshot, cache):
+            if completed and cache == admitted.paths.state:
+                raise ValueError("PRIVATE_SENTINEL")
+            return original_inventory(snapshot, cache)
+        monkeypatch.setattr(seam, "_snapshot_inventory", inventory)
+
+    with pytest.raises(seam.PackagedSFTExecutionError) as caught:
+        seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare, runner=EvidenceRunner())
+    assert caught.value.stage == expected
+    assert caught.value.__suppress_context__
+    assert "PRIVATE_SENTINEL" not in "".join(traceback.format_exception(caught.value))
+    assert completed
+    assert not list(admitted.paths.artifacts.iterdir())
+    assert not (admitted.paths.state / "packaged-terminal.json").exists()
+
+
+@pytest.mark.parametrize("code,expected", (
+    ("runtime_evidence_dataset_binding", "EVIDENCE_DATASET_BINDING"),
+    ("runtime_evidence_projection_binding", "EVIDENCE_PROJECTION_BINDING"),
+    ("runtime_evidence_output_directory", "EVIDENCE_OUTPUT_DIRECTORY"),
+    ("runtime_evidence_metrics", "EVIDENCE_METRICS"),
+    ("runtime_evidence_rejected", "EVIDENCE"),
+))
+def test_core_evidence_codes_project_through_existing_closed_stage(
+        material, seal, monkeypatch, code, expected):
+    admitted = seam.admit_packaged_sft(**material)
+    def reject(*_args, **_kwargs):
+        error = core.RuntimeV1Error("PRIVATE_SENTINEL")
+        error.diagnostic_code = code
+        raise error
+    monkeypatch.setattr(core, "execute_compiled_sft", reject)
+    with pytest.raises(seam.PackagedSFTExecutionError) as caught:
+        seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare, runner=FakeRunner())
+    assert caught.value.stage == expected
+    assert caught.value.__suppress_context__
+    assert "PRIVATE_SENTINEL" not in "".join(traceback.format_exception(caught.value))
+    assert not list(admitted.paths.artifacts.iterdir())
+    assert not (admitted.paths.state / "packaged-terminal.json").exists()
+
+
+def test_unclassified_post_runner_evidence_error_uses_generic_stage(material, seal, monkeypatch):
+    admitted = seam.admit_packaged_sft(**material)
+    def reject(*_args, **_kwargs):
+        raise TypeError("PRIVATE_SENTINEL")
+    monkeypatch.setattr(core, "_validate_trainer_evidence", reject)
+    with pytest.raises(seam.PackagedSFTExecutionError) as caught:
+        seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare, runner=FakeRunner())
+    assert caught.value.stage == "EVIDENCE"
+    assert caught.value.__suppress_context__
+    assert "PRIVATE_SENTINEL" not in "".join(traceback.format_exception(caught.value))
+    assert not list(admitted.paths.artifacts.iterdir())
+    assert not (admitted.paths.state / "packaged-terminal.json").exists()
+
+
+def test_nonzero_child_can_be_masked_by_post_child_copy_rejection(material, seal):
+    admitted = seam.admit_packaged_sft(**material)
+    class FailedAndTampered:
+        def run(self, invocation):
+            private = Path(invocation.argv[invocation.argv.index("--model-snapshot") + 1]) / "config.json"
+            private.chmod(stat.S_IREAD | stat.S_IWRITE)
+            private.write_bytes(b"[]")
+            private.chmod(stat.S_IREAD)
+            return core.TrainerEvidence(40, invocation.final_model_dir, invocation.tokenizer_dir, {}, {}, {})
+    with pytest.raises(seam.PackagedSFTExecutionError) as caught:
+        seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare, runner=FailedAndTampered())
+    assert caught.value.stage == "EVIDENCE_PRIVATE_COPY"
     assert not list(admitted.paths.artifacts.iterdir())
     assert not (admitted.paths.state / "packaged-terminal.json").exists()
 

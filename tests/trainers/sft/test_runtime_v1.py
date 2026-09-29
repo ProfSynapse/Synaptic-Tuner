@@ -12,7 +12,7 @@ import tarfile
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -1593,13 +1593,14 @@ def test_runtime_rejects_lineage_not_bound_to_invocation(tmp_path: Path) -> None
                 evidence.metrics,
             )
 
-    with pytest.raises(RuntimeV1Error, match="lineage"):
+    with pytest.raises(RuntimeV1Error, match="lineage") as failure:
         execute_runtime(
             workload.canonical_bytes,
             environment=environment,
             runner=DriftedLineage(),
             engine_file=engine_file,
         )
+    assert failure.value.diagnostic_code == "runtime_evidence_projection_binding"
 
 
 def test_runtime_projection_comparison_is_json_type_strict(tmp_path: Path) -> None:
@@ -1640,13 +1641,14 @@ def test_runtime_rejects_unexpected_child_directory(tmp_path: Path) -> None:
             (nested / "ignored.bin").write_bytes(b"must not be ignored")
             return evidence
 
-    with pytest.raises(RuntimeV1Error, match="nested"):
+    with pytest.raises(RuntimeV1Error, match="nested") as failure:
         execute_runtime(
             workload.canonical_bytes,
             environment=environment,
             runner=NestedOutput(),
             engine_file=engine_file,
         )
+    assert failure.value.diagnostic_code == "runtime_evidence_output_directory"
 
 
 def test_runtime_detects_artifact_mutation_during_snapshot(
@@ -1843,14 +1845,32 @@ def test_runtime_propagates_trainer_failure_without_artifacts(tmp_path: Path) ->
 
 def test_runtime_rejects_nonfinite_metrics(tmp_path: Path) -> None:
     workload, environment, engine_file, roots, _ = _fixture(tmp_path)
-    with pytest.raises(RuntimeV1Error, match="finite"):
+    with pytest.raises(RuntimeV1Error, match="finite") as failure:
         execute_runtime(
             workload.canonical_bytes,
             environment=environment,
-            runner=FakeRunner(metrics={"loss": float("nan")}),
+            runner=FakeRunner(metrics={"PRIVATE_SENTINEL": float("nan")}),
             engine_file=engine_file,
         )
+    assert failure.value.diagnostic_code == "runtime_evidence_metrics"
+    assert "PRIVATE_SENTINEL" not in str(failure.value)
     assert not tuple(roots["artifacts"].iterdir())
+
+
+def test_runtime_evidence_dataset_binding_has_closed_code(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    invocation = SimpleNamespace(
+        argv=("--local-file", "/wrong"), retained_fds=(9,),
+        final_model_dir=model, tokenizer_dir=model, expected_projection={},
+    )
+    workload = SimpleNamespace(document={"configuration": {"document": {
+        "dataset": {"ref": "prepared://sha256/" + "a" * 64},
+    }}})
+    evidence = TrainerEvidence(0, model, model, {}, {}, {})
+    with pytest.raises(RuntimeV1Error) as failure:
+        runtime_v1._validate_trainer_evidence(evidence, invocation, workload)
+    assert failure.value.diagnostic_code == "runtime_evidence_dataset_binding"
+    assert runtime_v1._RUNTIME_STAGE_EXITS[failure.value.diagnostic_code] == 36
 
 
 def test_bounded_stdin_rejects_one_byte_over_limit() -> None:

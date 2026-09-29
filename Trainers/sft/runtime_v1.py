@@ -168,6 +168,10 @@ _RUNTIME_STAGE_EXITS = {
     "runtime_workload_reconstruction_rejected": 33,
     "runtime_workload_fingerprint_rejected": 34,
     "runtime_workload_roots_rejected": 35,
+    "runtime_evidence_dataset_binding": 36,
+    "runtime_evidence_projection_binding": 37,
+    "runtime_evidence_output_directory": 38,
+    "runtime_evidence_metrics": 39,
 }
 
 
@@ -1729,12 +1733,21 @@ def execute_compiled_sft(
             TrainerFailed("trainer process failed"), "runtime_trainer_failed"
         )
     try:
-        _validate_trainer_evidence(evidence, invocation, workload)
-        execution_evidence = _build_execution_evidence(workload, invocation, evidence)
-        execution_evidence_bytes = _canonical_json(execution_evidence)
-        for directory in (evidence.final_model_dir, evidence.tokenizer_dir):
-            _validate_artifact_directory(directory, roots.state)
-        metrics = _normalize_metrics(evidence.metrics)
+        try:
+            _validate_trainer_evidence(evidence, invocation, workload)
+            execution_evidence = _build_execution_evidence(workload, invocation, evidence)
+            execution_evidence_bytes = _canonical_json(execution_evidence)
+        except RuntimeV1Error as error:
+            raise _mark_runtime_stage(error, "runtime_evidence_projection_binding")
+        try:
+            for directory in (evidence.final_model_dir, evidence.tokenizer_dir):
+                _validate_artifact_directory(directory, roots.state)
+        except RuntimeV1Error as error:
+            raise _mark_runtime_stage(error, "runtime_evidence_output_directory")
+        try:
+            metrics = _normalize_metrics(evidence.metrics)
+        except RuntimeV1Error as error:
+            raise _mark_runtime_stage(error, "runtime_evidence_metrics")
     except RuntimeV1Error as error:
         raise _mark_runtime_stage(error, "runtime_evidence_rejected")
     artifacts: list[dict[str, object]] = []
@@ -1917,17 +1930,20 @@ def _validate_trainer_evidence(
     invocation: TrainerInvocation,
     workload: object,
 ) -> None:
-    dataset_ref = workload.document["configuration"]["document"]["dataset"]["ref"]
-    dataset_path = invocation.argv[invocation.argv.index("--local-file") + 1]
-    prepared = isinstance(dataset_ref, str) and _PREPARED_DATASET_REF_RE.fullmatch(dataset_ref)
-    if prepared is not None:
-        if (
-            len(invocation.retained_fds) != 1
-            or dataset_path != f"/proc/self/fd/{invocation.retained_fds[0]}"
-        ):
-            raise RuntimeV1Error("trainer evidence lost the immutable dataset binding")
-    elif invocation.retained_fds:
-        raise RuntimeV1Error("project dataset unexpectedly retained a private descriptor")
+    try:
+        dataset_ref = workload.document["configuration"]["document"]["dataset"]["ref"]
+        dataset_path = invocation.argv[invocation.argv.index("--local-file") + 1]
+        prepared = isinstance(dataset_ref, str) and _PREPARED_DATASET_REF_RE.fullmatch(dataset_ref)
+        if prepared is not None:
+            if (
+                len(invocation.retained_fds) != 1
+                or dataset_path != f"/proc/self/fd/{invocation.retained_fds[0]}"
+            ):
+                raise RuntimeV1Error("trainer evidence lost the immutable dataset binding")
+        elif invocation.retained_fds:
+            raise RuntimeV1Error("project dataset unexpectedly retained a private descriptor")
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_evidence_dataset_binding")
     if (
         evidence.final_model_dir != invocation.final_model_dir
         or evidence.tokenizer_dir != invocation.tokenizer_dir

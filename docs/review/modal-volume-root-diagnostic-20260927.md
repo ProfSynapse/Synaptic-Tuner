@@ -798,4 +798,39 @@ All four source commitments are CURRENT and skill trees remain synchronized.
 Only the model-loader hash in the fixed 66-member offline closure and that
 manifest's hash in the fixed 98-member bootstrap lock changed; no inventory,
 dependency pin, model revision or training parameter changed. The next proof
-is one fresh ordinary TrainingAPI run with its integrated CPU qualification.
+was one fresh ordinary TrainingAPI run with its integrated CPU qualification.
+
+Pushed source `25b07cff9e72c8b0780bca63a66bbfa1a17ccfd7` launched attempt
+`modal-38a213ad45839fdb6e9d62fb`, passed integrated CPU qualification, and
+submitted claim `8e52e8b5332ef0495b29ff9ae3644e987eb85716620f4182f851431ecd5b29f9`
+as call `fc-01M3Q1RP38V7Z0TTWX27ZRZ254`. Both exact-call inspector and public
+CLI reported `WORKER_SFT_EVIDENCE` at `2026-09-29T13:07:44.798030`.
+This stage does not identify a cause or prove successful optimizer steps:
+post-child snapshot/directory revalidation can fail before the core examines
+the returned exit status, and successful child output must still pass the
+projection, lineage, directory and metric checks. Preserve this consumed attempt.
+Read-only diagnosis separates packaged post-child checks from core evidence
+validation; a provider-free actual-producer projection comparison precedes any
+new paid probe. No guard is bypassed; no successful artifact is claimed.
+
+The provider-free comparison exercised the actual AST-isolated trainer
+projection producer and the packaged messages fixture with the production
+sealed-dataset helper. Its type-sensitive expected/actual comparison matched.
+This rules out a structural mismatch for that fixture, not the live attempt.
+The next diagnostic adds eight fixed labels at existing evidence checks:
+private-copy identity, held directories, output binding, output inventory,
+dataset binding, projection binding, output directory shape, and metrics.
+It adds no checks, I/O, result fields, resources, or raw diagnostic content.
+An independent reviewer caught and corrected a stale specific label after
+successful inventory; the generic EVIDENCE fallback remains for unclassified
+later errors. Nonzero child results can still be masked by a failing recheck,
+so no label alone establishes training success.
+
+Verification passed 215 packaged-execution tests, four focused core evidence
+tests, 338 host/inspector tests (including bounded serializer/parity checks),
+nine fixed-closure tests, and 142 public CLI diagnostic projections. All four
+commitments are CURRENT; only hashes within existing inventories changed.
+The isolated core tests require pinned CPython 3.11.14; native 3.10 rejected
+its version contract before evidence, not a diagnostic assertion failure.
+The independent Modal-worker allowed-stage inventory was updated by exactly
+the eight reviewed labels. Skill trees remain synchronized.
