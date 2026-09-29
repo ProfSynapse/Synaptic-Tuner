@@ -22,6 +22,7 @@ from tests.execution.providers.test_modal_runtime_build import _candidate
 from tuner.dataset_prep import prepare_dataset_v2
 from tuner.execution.providers.modal.contracts import provider_entry_identity
 from tuner.execution.providers.modal.contracts import operation_path
+from tuner.execution.providers.modal.coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
 from tuner.execution.providers.modal.bounded_volume_read import BoundedModalVolumeReader
 from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.coordinator_v1.model import WorkflowPhaseV1
@@ -306,7 +307,11 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
         )
 
     monkeypatch.setattr(ModalPackagedReader, "observe_completion", completion)
-    monkeypatch.setattr(ModalPackagedReader, "iter_artifact", lambda *_a, **_kw: iter((b"data",)))
+    def stream_artifact(_reader, *_args, maximum_bytes, **_kwargs):
+        assert maximum_bytes <= MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes
+        return iter((b"data",))
+
+    monkeypatch.setattr(ModalPackagedReader, "iter_artifact", stream_artifact)
     if failed:
         def poll(_self, _binding, _ref, **_kwargs):
             raise ModalPackagedReadUnavailable("modal_packaged_call_failed")
@@ -319,6 +324,14 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
 
 def test_cli_v2_fake_transcript_prepares_submits_verifies_and_downloads(tmp_path, monkeypatch, capsys):
     plan, context, events = _setup(tmp_path, monkeypatch)
+    download_maxima = []
+    original_download = runner.download_verified_modal_artifact
+
+    def observe_download(*args, **kwargs):
+        download_maxima.append(kwargs["maximum_bytes"])
+        return original_download(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "download_verified_modal_artifact", observe_download)
     monkeypatch.setattr(
         "tuner.training.modal_recipe.plan_modal_sft_recipe",
         lambda *_args, **_kwargs: plan,
@@ -333,6 +346,7 @@ def test_cli_v2_fake_transcript_prepares_submits_verifies_and_downloads(tmp_path
     assert payload["data"]["operator_maximum_cost_minor_units"] == 200
     assert len(payload["data"]["verified_artifacts"]) == 5
     assert all(Path(path).read_bytes() == b"data" for path in payload["data"]["verified_artifacts"])
+    assert download_maxima == [MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes] * 5
     assert events == ["bootstrap", "cpu", "stage", "spawn"]
     volume = sys.modules["modal"].Volume
     assert len(volume.publications) == 3
@@ -716,6 +730,20 @@ def test_post_submit_host_boundaries_are_closed_without_private_details(
 def test_stage_failure_is_closed_and_never_submits(
         tmp_path, monkeypatch, capsys):
     plan, context, events = _setup(tmp_path, monkeypatch)
+    frozen_now = runner.UTCClock().now()
+    frozen_epoch = int(datetime.fromisoformat(frozen_now.replace("Z", "+00:00")).timestamp())
+
+    class FrozenUTCClock:
+        def now(self):
+            return frozen_now
+
+        def now_iso(self):
+            return frozen_now
+
+        def now_epoch(self):
+            return frozen_epoch
+
+    monkeypatch.setattr(runner, "UTCClock", FrozenUTCClock)
     secret = "HF_TOKEN=private-and-absolute-/home/private/customer"
 
     def fail_stage(*_args, **_kwargs):

@@ -919,3 +919,47 @@ lock is CURRENT, all four commitments remain unchanged, and skill sync passes.
 The live L40S observation at 2026-09-29T14:27:27.514219 is $1.95/hour, excluding
 other resources and not a billing cap. Next: push exact source and use one fresh
 ordinary TrainingAPI attempt with its integrated CPU gate, not a separate gate.
+
+### Completion cleared; host download boundary (2026-09-29)
+
+Pushed source `847fc8b15a8e5777854d01ef8ff46baae9269616` passed integrated CPU
+qualification for `modal-400d57c5277e47106382e875`. Submit claim
+`9b1f780fc66285f3e9bf8c51a20f1d4e159660b6849ac23d2cbf3896b307ad3c` produced
+call `fc-01M3Q72KV17MY461RE5XZWK7G7`. The public command stopped at
+`RUN_ARTIFACT_DOWNLOAD` at `2026-09-29T14:56:32.632797`, after public outcome
+succeeded and RunsAPI verification returned true. This clears the remote
+completion publication boundary. The exact inspector returned
+`PROVIDER_SUCCESS_UNKNOWN`, which alone is not artifact or trainer proof.
+
+The exact local artifact directory contains only a zero-byte final-model
+partial file. Download metadata was admitted and the private file created,
+but no first nonempty chunk was written. Source tracing identifies a concrete
+candidate: the downloader requests 256 MiB, while the lazy packaged reader
+requires a maximum no greater than the existing 192 MiB per-artifact policy.
+Provider-free reproduction against the real packaged reader confirms that a
+10-byte authenticated member streams at the policy maximum but rejects a
+256 MiB request before reading its body. The minimal correction passes the
+existing policy maximum from the standalone caller; the generic downloader
+and strict reader guard stay unchanged.
+
+The attempt and partial are preserved. The standalone CLI has no download-only
+resume mode, and its coordinator/Foundation stores are process-local. Repeating
+the consumed attempt is not recovery. A general recovery capability is deferred
+rather than expanded into this smoke. Following tests and independent review,
+a genuinely fresh normal run may verify the corrected end-to-end path under the
+existing approval; this is not recovery of the prior job. Exact final-step and
+local LoRA contents remain unread. Deferred recovery is tracked privately as
+`215f03d9-51e0-41e7-83e0-a1348cd95494`, dependent on this smoke milestone.
+
+Verification so far: actual packaged-reader suite 12/12, download helper 3/3,
+changed public CLI success 1/1. A broader 223-case gate stopped after 208 passes
+when its stage-negative test failed before calling the injected stage failure.
+That observation does not establish a clock cause. The test now uses the same
+local frozen-clock pattern as the existing worker-projection test, keeping all
+secret/no-submit/no-retry assertions intact. Its focused rerun passes 1/1.
+Independent review approves the caller-bound and test-only changes; production
+clock/auth policy is unchanged. The subsequent pinned CPython 3.11.14 gate
+passes all 223 standalone/download cases in 138.53 seconds, in addition to the
+12 reader cases. All four commitments are CURRENT and skills are synchronized.
+This establishes the provider-free regression barrier, not recovery of the
+prior process-local workflow or a live end-to-end success for the new source.

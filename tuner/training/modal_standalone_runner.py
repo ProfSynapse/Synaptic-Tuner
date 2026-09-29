@@ -27,6 +27,7 @@ from tuner.execution.providers.modal.packaged_composition import (
 from tuner.execution.providers.modal.packaged_deployment import ModalPackagedDeploymentObserver
 from tuner.execution.providers.modal.packaged_reader import ModalPackagedReader
 from tuner.execution.providers.modal.packaged_staging import ModalPackagedInputStager
+from tuner.execution.providers.modal.coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
 from tuner.execution.providers.modal.packaged_worker import (
     InstalledPackagedSFTTrainerExecutor, PACKAGED_WORKER_FAILURE_STAGES,
 )
@@ -505,6 +506,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             artifact_root = root / (run_id + "-artifacts")
             artifact_paths = tuple(download_verified_modal_artifact(
                 api.runs, started.run, role=role, output_root=artifact_root,
+                maximum_bytes=MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes,
             ) for role in sorted((
                 "workload_record", "training_lineage", "training_metrics",
                 "final_model", "tokenizer",

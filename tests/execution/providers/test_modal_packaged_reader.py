@@ -12,6 +12,7 @@ from tuner.execution.providers.modal.contracts import operation_path, provider_e
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
 from tuner.execution.providers.modal.packaged_deployment import ModalPackagedDeploymentObserver
 from tuner.execution.providers.modal.packaged_reader import ModalPackagedReader
+from tuner.execution.providers.modal.coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
 
 from tests.execution.providers.test_modal_packaged_deployment import Reader
 from tests.execution.providers.test_modal_packaged_dispatch import _case
@@ -117,6 +118,22 @@ def test_streams_bounded_artifact_then_rechecks_inventory() -> None:
         maximum_bytes=len(expected),
     ))
     assert b"".join(chunks) == expected
+
+
+def test_packaged_stream_accepts_policy_limit_but_rejects_old_download_default() -> None:
+    binding, reader, _, _, artifacts, _ = _reader()
+    observed = reader.observe_completion(binding, provider_job_ref="fc-1")
+    member = observed.members[0]
+    expected = artifacts.files[member.path]
+    assert b"".join(reader.iter_artifact(
+        binding, observed, role=member.role,
+        maximum_bytes=MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes,
+    )) == expected
+    with pytest.raises(ValueError, match="bound"):
+        list(reader.iter_artifact(
+            binding, observed, role=member.role,
+            maximum_bytes=256 * 1024 * 1024,
+        ))
 
 
 @pytest.mark.parametrize("fault", ("job", "command", "binding", "mac"))
