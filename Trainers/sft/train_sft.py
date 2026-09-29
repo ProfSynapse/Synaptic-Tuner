@@ -27,6 +27,12 @@ _SHA256_VALUE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IMMUTABLE_IMAGE_VALUE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 
 
+def _mark_packaged_runtime_phase(phase: str) -> None:
+    marker = globals().get("__packaged_runtime_phase__")
+    if marker is not None:
+        marker(phase)
+
+
 def runtime_profile_metadata(args: argparse.Namespace) -> dict[str, str] | None:
     """Validate the all-or-none runtime profile inputs forwarded by local-run."""
 
@@ -188,17 +194,21 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Environment bootstrap — must run before importing torch/unsloth/transformers
+_mark_packaged_runtime_phase("BOOTSTRAP_ENV")
 from shared.env_bootstrap import init_trainer_env, suppress_transformers_logging
 
 init_trainer_env()
 
+_mark_packaged_runtime_phase("TORCH_IMPORT")
 import torch  # noqa: E402
 
+_mark_packaged_runtime_phase("UNSLOTH_IMPORT")
 from unsloth import is_bfloat16_supported  # noqa: E402
 
 # Suppress transformers library-level logging after import
 suppress_transformers_logging()
 
+_mark_packaged_runtime_phase("TRAINER_IMPORT")
 from transformers import Trainer
 from trl import SFTConfig
 
@@ -829,6 +839,7 @@ def parse_args(argv=None):
 
 def run(args: argparse.Namespace):
     """Execute training with the provided CLI arguments."""
+    _mark_packaged_runtime_phase("CONFIG")
     runtime_v1_requested = _runtime_v1_projection_requested(args)
     resolved_runtime_profile = runtime_profile_metadata(args)
     if runtime_v1_requested and (
@@ -1170,6 +1181,7 @@ def run(args: argparse.Namespace):
     )
 
     # Load model and tokenizer FIRST (needed for packing preprocessing)
+    _mark_packaged_runtime_phase("MODEL_SNAPSHOT")
     model, tokenizer = load_model_and_tokenizer(
         model_name=config.model.model_name,
         max_seq_length=config.model.max_seq_length,
@@ -1183,14 +1195,17 @@ def run(args: argparse.Namespace):
         require_resolved_revision=bool(args.protected_smoke_evidence),
         model_snapshot=args.model_snapshot,
         require_local_snapshot=args.model_snapshot is not None,
+        _diagnostic_mark=_mark_packaged_runtime_phase,
     )
     if config.training.require_memory_efficient_loss:
+        _mark_packaged_runtime_phase("LOSS_GUARD")
         from src.model_loader import require_unsloth_memory_efficient_loss
 
         require_unsloth_memory_efficient_loss(model)
 
     # Prefer the pretrained chat template when available; otherwise, apply a
     # family-specific fallback via Unsloth.
+    _mark_packaged_runtime_phase("DATA_PREP")
     from unsloth.chat_templates import get_chat_template
 
     model_name_lower = config.model.model_name.lower()
@@ -1302,6 +1317,7 @@ def run(args: argparse.Namespace):
     print_dataset_samples(train_dataset, num_samples=2)
 
     # Apply LoRA adapters
+    _mark_packaged_runtime_phase("LORA_ATTACH")
     model = apply_lora_adapters(
         model,
         r=config.lora.r,
@@ -1330,6 +1346,7 @@ def run(args: argparse.Namespace):
                 "runtime-v1 run has no usable model ref to stamp into adapter_config.json"
             )
 
+    _mark_packaged_runtime_phase("TRAINER_SETUP")
     protected_before = None
     protected_callback = None
     if args.protected_smoke_evidence:
@@ -1577,8 +1594,10 @@ def run(args: argparse.Namespace):
     failure_message = None
     try:
         if evo_wrapper:
+            _mark_packaged_runtime_phase("TRAIN_CALL")
             evo_wrapper.train(resume_from_checkpoint=args.resume_from_checkpoint)
         else:
+            _mark_packaged_runtime_phase("TRAIN_CALL")
             trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     except Exception as exc:
         training_failed = True
@@ -1618,6 +1637,7 @@ def run(args: argparse.Namespace):
     print("TRAINING COMPLETED")
     print("=" * 60)
 
+    _mark_packaged_runtime_phase("SAVE")
     # Save final model
     print(f"\nSaving final model to: {final_model_path}")
     trainer.save_model(str(final_model_path))
@@ -1682,6 +1702,7 @@ def run(args: argparse.Namespace):
     print(f"  Model saved to: {final_model_path}")
     print(f"  Logs saved to: {logs_dir}/")
 
+    _mark_packaged_runtime_phase("POST_SAVE")
     runtime_projection = build_runtime_v1_projection(
         args=args,
         config=config,

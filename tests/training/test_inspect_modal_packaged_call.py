@@ -40,6 +40,15 @@ _CALL = "fc-packaged-call"
 def test_worker_failure_stage_allowlists_agree_across_all_readers():
     assert PACKAGED_WORKER_FAILURE_STAGES == _FIXED_WORKER_FAILURE_STAGES
     assert PACKAGED_WORKER_FAILURE_STAGES == frozenset(diagnostic._WORKER_FAILURE_STAGES)
+    runtime_phases = (
+        "CONFIG", "MODEL_SNAPSHOT", "MODEL_LIBRARY_LOAD", "MODEL_SOURCE",
+        "TOKENIZER_SOURCE", "MODEL_FINALIZE", "LOSS_GUARD", "DATA_PREP",
+        "LORA_ATTACH", "TRAINER_SETUP", "TRAIN_CALL", "SAVE", "POST_SAVE", "BOOTSTRAP_ENV",
+        "TORCH_IMPORT", "UNSLOTH_IMPORT", "TRAINER_IMPORT",
+    )
+    assert {
+        f"SFT_TRAINER_CHILD_EXEC_RUNTIME_{phase}" for phase in runtime_phases
+    } <= PACKAGED_WORKER_FAILURE_STAGES
 
 
 def test_fixed_worker_failure_results_fit_pinned_modal_serializer():

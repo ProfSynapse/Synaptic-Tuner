@@ -28,6 +28,7 @@ def _load(monkeypatch, revision: str | None, snapshot: Path):
             return model, tokenizer
 
     monkeypatch.setitem(sys.modules, "unsloth", SimpleNamespace(FastLanguageModel=Fast, is_bfloat16_supported=lambda: True))
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
     monkeypatch.setitem(
         sys.modules, "huggingface_hub",
         SimpleNamespace(snapshot_download=lambda **kwargs: str(snapshot)),
@@ -99,6 +100,44 @@ def test_runtime_loader_consumes_only_the_exact_local_snapshot(
             "local_files_only": True,
         }
     ]
+
+
+def test_runtime_loader_marks_exact_model_boundaries_without_changing_load(monkeypatch, tmp_path: Path) -> None:
+    revision = "a" * 40
+    cache = (tmp_path / "cache" / "model").resolve()
+    snapshot = cache / "models--owner--model" / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+    module, calls = _load(monkeypatch, revision, snapshot)
+    stages = []
+    module.load_model_and_tokenizer(
+        "owner/model", model_revision=revision, cache_dir=str(cache),
+        model_snapshot=str(snapshot), require_local_snapshot=True,
+        _diagnostic_mark=stages.append,
+    )
+    assert len(calls) == 1
+    assert stages == ["MODEL_SNAPSHOT", "MODEL_LIBRARY_LOAD", "MODEL_SOURCE", "TOKENIZER_SOURCE", "MODEL_FINALIZE"]
+
+
+def test_runtime_loader_processor_without_top_level_source_still_rejects(monkeypatch, tmp_path: Path) -> None:
+    revision = "a" * 40
+    cache = (tmp_path / "cache" / "model").resolve()
+    snapshot = cache / "models--owner--model" / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+    module, _ = _load(monkeypatch, revision, snapshot)
+    def processor(**kwargs):
+        return (SimpleNamespace(config=SimpleNamespace(_name_or_path=kwargs["model_name"])),
+                SimpleNamespace(chat_template="x", tokenizer=SimpleNamespace(name_or_path=kwargs["model_name"])))
+    monkeypatch.setattr(module.FastLanguageModel, "from_pretrained", processor)
+    stages = []
+    with pytest.raises(RuntimeError, match="Loaded tokenizer snapshot"):
+        module.load_model_and_tokenizer(
+            "owner/model", model_revision=revision, cache_dir=str(cache),
+            model_snapshot=str(snapshot), require_local_snapshot=True,
+            _diagnostic_mark=stages.append,
+        )
+    assert stages[-1] == "TOKENIZER_SOURCE"
 
 
 def test_runtime_loader_rejects_foreign_snapshot_binding(

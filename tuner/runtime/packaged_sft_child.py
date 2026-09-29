@@ -16,7 +16,13 @@ _OWNED_PREFIXES = frozenset({"tuner", "synaptic_tuner", "shared", "Trainers", "S
 _FAILURE_PHASES = ("TRANSPORT", "RELEASE", "INPUT", "IMPORT", "EXEC", "POSTCHECK")
 _FAILURE_CATEGORIES = ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER")
 _EXEC_EXTRA_TYPES = (RuntimeError, TypeError, AttributeError, KeyError, MemoryError)
-_FAILURE_EXIT_CODES = frozenset(range(40, 75))
+_EXEC_RUNTIME_MILESTONES = (
+    "CONFIG", "MODEL_SNAPSHOT", "MODEL_LIBRARY_LOAD", "MODEL_SOURCE",
+    "TOKENIZER_SOURCE", "MODEL_FINALIZE", "LOSS_GUARD", "DATA_PREP",
+    "LORA_ATTACH", "TRAINER_SETUP", "TRAIN_CALL", "SAVE", "POST_SAVE",
+    "BOOTSTRAP_ENV", "TORCH_IMPORT", "UNSLOTH_IMPORT", "TRAINER_IMPORT",
+)
+_FAILURE_EXIT_CODES = frozenset((*range(40, 75), *range(80, 97)))
 
 
 class _ChildFailure(Exception):
@@ -28,7 +34,10 @@ def _zero_exit(error):
     return type(error) is SystemExit and (error.code is None or (type(error.code) is int and error.code == 0))
 
 
-def _classified_failure(phase, error):
+def _classified_failure(phase, error, runtime_milestone=None):
+    if (phase == "EXEC" and type(error) is RuntimeError and type(runtime_milestone) is str
+            and runtime_milestone in _EXEC_RUNTIME_MILESTONES):
+        return _ChildFailure(80 + _EXEC_RUNTIME_MILESTONES.index(runtime_milestone))
     if phase == "EXEC" and type(error) in _EXEC_EXTRA_TYPES:
         return _ChildFailure(70 + _EXEC_EXTRA_TYPES.index(type(error)))
     if isinstance(error, OSError):
@@ -216,6 +225,9 @@ def _run_packaged_child(argv, phase):
 
 def _run_private_trainer(code, trainer, manifest, paths, model, *, classify=False):
     from tuner.runtime.packaged_sft_execution import _retain_private_snapshot
+    runtime_milestone = [None]
+    def mark_runtime_milestone(value):
+        runtime_milestone[0] = value if type(value) is str and value in _EXEC_RUNTIME_MILESTONES else None
     try:
         private_copy = _retain_private_snapshot(manifest, paths, model)
     except BaseException as error:
@@ -230,10 +242,13 @@ def _run_private_trainer(code, trainer, manifest, paths, model, *, classify=Fals
                 raise _classified_failure("INPUT", error) from None
             raise
         try:
-            exec(code, {"__name__": "__main__", "__file__": str(trainer), "__package__": None})
+            namespace = {"__name__": "__main__", "__file__": str(trainer), "__package__": None}
+            if classify:
+                namespace["__packaged_runtime_phase__"] = mark_runtime_milestone
+            exec(code, namespace)
         except BaseException as error:
             if classify and not _zero_exit(error):
-                raise _classified_failure("EXEC", error) from None
+                raise _classified_failure("EXEC", error, runtime_milestone[0]) from None
             raise
     finally:
         try:

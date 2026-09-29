@@ -192,6 +192,7 @@ def load_model_and_tokenizer(
     require_resolved_revision: bool = False,
     model_snapshot: Optional[str] = None,
     require_local_snapshot: bool = False,
+    _diagnostic_mark=None,
 ) -> Tuple:
     """
     Load model and tokenizer with Unsloth optimizations.
@@ -218,6 +219,8 @@ def load_model_and_tokenizer(
     # local snapshot before handing control to Unsloth. Unsloth may otherwise
     # rewrite a Hub model name to an optimized mirror whose commit identity is
     # different from the approved source revision.
+    if _diagnostic_mark is not None:
+        _diagnostic_mark("MODEL_SNAPSHOT")
     protected_snapshot: Path | None = None
     if require_local_snapshot:
         if (
@@ -267,17 +270,25 @@ def load_model_and_tokenizer(
         load_kwargs["cache_dir"] = cache_dir
     if require_local_snapshot:
         load_kwargs["local_files_only"] = True
+    if _diagnostic_mark is not None:
+        _diagnostic_mark("MODEL_LIBRARY_LOAD")
     model, tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
 
     if require_resolved_revision or require_local_snapshot:
         assert protected_snapshot is not None
+        if _diagnostic_mark is not None:
+            _diagnostic_mark("MODEL_SOURCE")
         model_source = getattr(getattr(model, "config", None), "_name_or_path", None)
-        tokenizer_source = getattr(tokenizer, "name_or_path", None)
         if not isinstance(model_source, str) or Path(model_source).resolve() != protected_snapshot:
             raise RuntimeError("Loaded model snapshot does not match the protected revision")
+        if _diagnostic_mark is not None:
+            _diagnostic_mark("TOKENIZER_SOURCE")
+        tokenizer_source = getattr(tokenizer, "name_or_path", None)
         if not isinstance(tokenizer_source, str) or Path(tokenizer_source).resolve() != protected_snapshot:
             raise RuntimeError("Loaded tokenizer snapshot does not match the protected revision")
 
+    if _diagnostic_mark is not None:
+        _diagnostic_mark("MODEL_FINALIZE")
     # Note: Chat template is now applied via Unsloth's get_chat_template() in train_sft.py
     # This ensures proper handling for all model types including VL models
     if tokenizer.chat_template is not None:

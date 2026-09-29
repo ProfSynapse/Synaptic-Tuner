@@ -683,3 +683,42 @@ test tracing was removed with no remaining diff in that test file. Skill trees
 are synchronized and diff checks are clean. The unresolved pre-submit risk is
 tracked in the private project as `T-22a498d3`; conditional review clears one
 fresh normal-train diagnostic attempt, with mandatory integrated CPU proof.
+
+Pushed source `bc22dfdb` passed its integrated CPU qualification. Attempt
+`modal-fe9e13ba3f821d9e3ce35364` returned
+`WORKER_SFT_TRAINER_CHILD_EXEC_RUNTIME` at `2026-09-29T11:19:42.776996`.
+Exact claim `5d9000a79ced83f40377217e386a18611ea5619e57bd79ab5734313f744d7972`
+and call `fc-01M3PVN2SXGWXAYSQY71GBW24D` were confirmed by the claim-bound
+inspector. This identifies an exact built-in RuntimeError during trainer exec,
+not its operation, message, or cause; it is not evidence of an OOM. No optimizer
+step or saved adapter has been proved for this exact path. Preserve the attempt.
+
+The next diagnostic refines only that RuntimeError through a child-owned finite
+in-memory operation marker. It distinguishes model snapshot validation, library
+load, model and tokenizer source checks, loss guard, dataset preparation, LoRA,
+trainer setup, training and saving. It introduces no diagnostic file, raw log,
+traceback, result field, or guard fallback. Ordinary trainer calls without the
+hook retain their behavior. The suspected processor/tokenizer source mismatch
+and memory-efficient-loss guard remain hypotheses pending measurement.
+
+The frozen diagnostic includes 17 operation/import milestones (reserved exits
+80–96); the prior 35 diagnostics remain unchanged. Independent static review
+approved child-only callback injection, exact-RuntimeError specialization,
+unknown-marker fallback, and unchanged source guards. Focused verification
+passed 137 child/loader checks, 205 execution checks, 322 reader/inspector checks
+including the pinned 512-byte serializer bound, and 16 trainer-source checks.
+Hash-only refreshes updated the two trainer members in the fixed 66-member
+offline closure, two diagnostic members in the five-member packaged closure,
+and the offline-manifest hash in the 98-member bootstrap lock. Inference's
+119-member commitment stayed unchanged. No model or dependency pins changed.
+
+A broader isolated-runtime test cannot run in the current test interpreters:
+the pinned launcher lacks isolated jsonschema, and system Python lacks isolated
+referencing. Two older source-string tests also assert names already absent at
+HEAD; they are not made green by changing the trainer. These limits are separate
+from the focused passing suites and are not reported as passes.
+
+Paid promotion remains held after the local public-CLI stage test again returned
+RUN_START_INDETERMINATE. Test-only tracing captured a FoundationError with
+authority_invalid before provider spawn. The exact authority predicate is still
+being investigated; an isolated passing rerun is not a repair or gate clearance.

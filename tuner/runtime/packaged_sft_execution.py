@@ -37,6 +37,12 @@ _ROLES = ("workload_record", "training_lineage", "training_metrics", "final_mode
 _CHILD_PHASES = ("TRANSPORT", "RELEASE", "INPUT", "IMPORT", "EXEC", "POSTCHECK")
 _CHILD_CATEGORIES = ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER")
 _CHILD_EXEC_CATEGORIES = ("RUNTIME", "TYPE", "ATTRIBUTE", "KEY", "MEMORY")
+CHILD_RUNTIME_MILESTONES = (
+    "CONFIG", "MODEL_SNAPSHOT", "MODEL_LIBRARY_LOAD", "MODEL_SOURCE",
+    "TOKENIZER_SOURCE", "MODEL_FINALIZE", "LOSS_GUARD", "DATA_PREP",
+    "LORA_ATTACH", "TRAINER_SETUP", "TRAIN_CALL", "SAVE", "POST_SAVE",
+    "BOOTSTRAP_ENV", "TORCH_IMPORT", "UNSLOTH_IMPORT", "TRAINER_IMPORT",
+)
 CHILD_EXIT_STAGES = {
     40 + phase_index * len(_CHILD_CATEGORIES) + category_index:
         "TRAINER_CHILD_" + phase + "_" + category
@@ -45,6 +51,8 @@ CHILD_EXIT_STAGES = {
 }
 CHILD_EXIT_STAGES.update({70 + index: "TRAINER_CHILD_EXEC_" + category
                           for index, category in enumerate(_CHILD_EXEC_CATEGORIES)})
+CHILD_EXIT_STAGES.update({80 + index: "TRAINER_CHILD_EXEC_RUNTIME_" + phase
+                          for index, phase in enumerate(CHILD_RUNTIME_MILESTONES)})
 CHILD_FAILURE_STAGES = frozenset(CHILD_EXIT_STAGES.values())
 _CODES = frozenset({
     "ADMISSION", "ADMISSION_CONTRACTS", "ADMISSION_RELEASE", "ADMISSION_PATHS",

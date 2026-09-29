@@ -70,7 +70,58 @@ def test_trainer_postcheck_failure_has_its_own_closed_phase_and_cleanup(monkeypa
     assert capsys.readouterr().err == "PACKAGED_SFT_CHILD_REJECTED\n"
 
 
-def test_unowned_import_directory_rejected(tmp_path, monkeypatch):
+@pytest.mark.parametrize("milestone", child._EXEC_RUNTIME_MILESTONES)
+def test_runtime_milestone_maps_exact_runtime_error_without_text(monkeypatch, milestone):
+    from types import SimpleNamespace
+    from tuner.runtime import packaged_sft_execution as seam
+    checks = []
+    private = SimpleNamespace(check=lambda: checks.append(True), close=lambda: checks.append("close"))
+    monkeypatch.setattr(seam, "_retain_private_snapshot", lambda *_: private)
+    source = "__packaged_runtime_phase__(" + repr(milestone) + "); raise RuntimeError('PRIVATE_SENTINEL')"
+    with pytest.raises(child._ChildFailure) as caught:
+        child._run_private_trainer(compile(source, "trainer-test", "exec"), Path("/installed/trainer.py"), {}, None, {}, classify=True)
+    assert caught.value.exit_code == 80 + child._EXEC_RUNTIME_MILESTONES.index(milestone)
+    assert checks == [True, True, "close"]
+    assert "PRIVATE_SENTINEL" not in str(caught.value)
+
+
+@pytest.mark.parametrize("marker", ("UNKNOWN", 17, None))
+def test_unknown_runtime_milestone_keeps_generic_runtime_code(monkeypatch, marker):
+    from types import SimpleNamespace
+    from tuner.runtime import packaged_sft_execution as seam
+    private = SimpleNamespace(check=lambda: None, close=lambda: None)
+    monkeypatch.setattr(seam, "_retain_private_snapshot", lambda *_: private)
+    source = "__packaged_runtime_phase__(" + repr(marker) + "); raise RuntimeError('PRIVATE_SENTINEL')"
+    with pytest.raises(child._ChildFailure) as caught:
+        child._run_private_trainer(compile(source, "trainer-test", "exec"), Path("/installed/trainer.py"), {}, None, {}, classify=True)
+    assert caught.value.exit_code == 70
+
+
+def test_trainer_bootstrap_markers_precede_each_import_boundary():
+    source = (Path(__file__).resolve().parents[2] / "Trainers/sft/train_sft.py").read_text(encoding="utf-8")
+    for milestone, target in (
+        ("BOOTSTRAP_ENV", "from shared.env_bootstrap import"),
+        ("TORCH_IMPORT", "import torch  # noqa: E402"),
+        ("UNSLOTH_IMPORT", "from unsloth import is_bfloat16_supported"),
+        ("TRAINER_IMPORT", "from transformers import Trainer"),
+    ):
+        assert source.index('_mark_packaged_runtime_phase("' + milestone + '")') < source.index(target)
+    assert source.count('_mark_packaged_runtime_phase("TRAIN_CALL")') == 2
+    assert '_mark_packaged_runtime_phase("TRAIN_CALL")\n            trainer.train(' in source
+
+
+def test_direct_trainer_without_packaged_hook_preserves_existing_execution(monkeypatch):
+    from types import SimpleNamespace
+    from tuner.runtime import packaged_sft_execution as seam
+    checks = []
+    private = SimpleNamespace(check=lambda: checks.append(True), close=lambda: checks.append("close"))
+    monkeypatch.setattr(seam, "_retain_private_snapshot", lambda *_: private)
+    source = "assert '__packaged_runtime_phase__' not in globals()"
+    child._run_private_trainer(compile(source, "trainer-test", "exec"), Path("/installed/trainer.py"), {}, None, {}, classify=False)
+    assert checks == [True, True, "close"]
+
+
+def test_unowned_import_directory_is_rejected(tmp_path, monkeypatch):
     owned = tmp_path / "owned.py"
     owned.write_text("x = 1")
     unowned = tmp_path / "hostile" / "configs.py"

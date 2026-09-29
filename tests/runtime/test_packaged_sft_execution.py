@@ -343,13 +343,15 @@ def test_nonzero_trainer_does_not_emit_success(material, seal):
 
 def test_child_exit_contract_is_finite_and_reserved():
     from tuner.runtime import packaged_sft_child as child
-    assert len(seam.CHILD_EXIT_STAGES) == 35
+    assert len(seam.CHILD_EXIT_STAGES) == 52
     assert set(seam.CHILD_EXIT_STAGES) == child._FAILURE_EXIT_CODES
     assert set(seam.CHILD_EXIT_STAGES.values()) == seam.CHILD_FAILURE_STAGES
     assert tuple(seam.CHILD_EXIT_STAGES.values()) == tuple(
         "TRAINER_CHILD_" + phase + "_" + category
         for phase in child._FAILURE_PHASES for category in child._FAILURE_CATEGORIES
-    ) + tuple("TRAINER_CHILD_EXEC_" + category for category in seam._CHILD_EXEC_CATEGORIES)
+    ) + tuple("TRAINER_CHILD_EXEC_" + category for category in seam._CHILD_EXEC_CATEGORIES) + tuple(
+        "TRAINER_CHILD_EXEC_RUNTIME_" + phase for phase in seam.CHILD_RUNTIME_MILESTONES
+    )
 
 
 @pytest.mark.parametrize("exit_code,expected", (
@@ -358,7 +360,12 @@ def test_child_exit_contract_is_finite_and_reserved():
     (69, "TRAINER_CHILD_POSTCHECK_OTHER"),
     (70, "TRAINER_CHILD_EXEC_RUNTIME"),
     (74, "TRAINER_CHILD_EXEC_MEMORY"),
-    (2, "TRAINER"), (75, "TRAINER"), (-9, "TRAINER"),
+    (80, "TRAINER_CHILD_EXEC_RUNTIME_CONFIG"),
+    (84, "TRAINER_CHILD_EXEC_RUNTIME_TOKENIZER_SOURCE"),
+    (92, "TRAINER_CHILD_EXEC_RUNTIME_POST_SAVE"),
+    (93, "TRAINER_CHILD_EXEC_RUNTIME_BOOTSTRAP_ENV"),
+    (96, "TRAINER_CHILD_EXEC_RUNTIME_TRAINER_IMPORT"),
+    (2, "TRAINER"), (75, "TRAINER"), (97, "TRAINER"), (-9, "TRAINER"),
 ))
 def test_trainer_exit_diagnostic_preserves_failure_and_never_publishes(material, seal, exit_code, expected):
     admitted = seam.admit_packaged_sft(**material)
