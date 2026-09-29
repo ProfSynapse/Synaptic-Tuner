@@ -721,4 +721,31 @@ from the focused passing suites and are not reported as passes.
 Paid promotion remains held after the local public-CLI stage test again returned
 RUN_START_INDETERMINATE. Test-only tracing captured a FoundationError with
 authority_invalid before provider spawn. The exact authority predicate is still
-being investigated; an isolated passing rerun is not a repair or gate clearance.
+being investigated at that checkpoint; a passing rerun was not treated as repair.
+
+The subsequent bounded predicate probe captured the cause of this local test
+failure at `foundation_v2/broker.py:127`: grant execution time was one second
+earlier than grant activation. All command-content, authority, epoch, revocation
+and HMAC predicates passed. Only `not_before <= now < expires` failed, with
+`now - not_before = -1` and `expires - now = 901`. The retained synthetic fixture
+is `/tmp/modal-grant-predicate-1-20260929/test_exact_worker_failure_stag7`.
+This establishes local wall-clock rollback, not a Modal/provider defect or the
+cause of the separate remote trainer RuntimeError. The verifier correctly failed
+closed; do not clamp time, backdate grants, relax expiry, or replay an attempt.
+
+Read-only environment checks found WSL host timesync enabled (`timesync_implicit=Y`),
+guest systemd-timesyncd active/enabled, an NTP offset of -780.528ms, and the Windows
+Time service stopped. These observations suggest competing time sources but do
+not prove the mechanism. Similar backward steps are reported in the
+[Microsoft WSL tracker](https://github.com/microsoft/WSL/issues/11790) and
+[timesyncd discussion](https://github.com/microsoft/WSL/discussions/11548).
+Independent review favors a temporary, reversible guest-NTP-stop experiment,
+with clock observation and the clean provider-free gate, rather than changing
+authority semantics. Explicit user approval is requested because stopping that
+service affects the whole WSL instance. Time-service state remains unchanged.
+
+Temporary test tracing was removed. The independently reviewed deterministic
+broker regression issues a valid stage grant at epoch 101, executes at 100, and
+asserts AUTHORITY_INVALID with no resolver/provider call or effect record.
+All 25 tests in the bounded-remediation file passed under the pinned launcher.
+This protects the correct fail-closed behavior; it does not fix the WSL clock.

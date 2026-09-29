@@ -16,6 +16,31 @@ from tuner.execution.foundation_v2.references import ProviderStageRefV1, StagePr
 from .helpers import *
 
 
+def test_broker_rejects_backward_epoch_before_dispatch_without_claiming_attempt():
+    command = stage_command()
+    executor = Executor()
+    repo, authority, receipts, invalid, _, resolver = environment(executor)
+    grant = authority.issue(
+        command.canonical_bytes,
+        grant_ref="stage-issued-at-101",
+        policy_digest=D[9],
+        requirement_digest=D[10],
+        not_before_epoch=101,
+        expires_at_epoch=1001,
+    )
+    assert authority.verify(grant, command.canonical_bytes, now_epoch=101)
+
+    with pytest.raises(FoundationError) as caught:
+        EffectBrokerV2(repo, resolver, authority, receipts, invalid).execute(
+            command.canonical_bytes, grant, now_epoch=100,
+        )
+
+    assert caught.value.code is DiagnosticCode.AUTHORITY_INVALID
+    assert resolver.calls == 0
+    assert executor.calls == 0
+    assert repo.get(command.operation.effect.effect_id) is None
+
+
 def _completed_stage():
     command = stage_command()
     executor = bound_executor_local(command, Executor())
