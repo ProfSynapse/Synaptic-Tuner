@@ -748,4 +748,15 @@ Temporary test tracing was removed. The independently reviewed deterministic
 broker regression issues a valid stage grant at epoch 101, executes at 100, and
 asserts AUTHORITY_INVALID with no resolver/provider call or effect record.
 All 25 tests in the bounded-remediation file passed under the pinned launcher.
-This protects the correct fail-closed behavior; it does not fix the WSL clock.
+This protects the correct fail-closed behavior; it does not repair the WSL clock.
+
+The user explicitly set the time-service experiment and authorization redesign
+aside and directed continuation of safe training. Independent review grants
+conditional GO for one fresh normal TrainingAPI diagnostic attempt on the
+reviewed milestone build, after a clean uninstrumented stage-projection gate,
+CURRENT commitments and an exact pushed source. The known clock regression
+remains a fail-closed environmental risk, not a reason to bypass checks. Normal
+train retains its integrated signed CPU qualification before GPU dispatch.
+No OS service, grant semantics, model pin or replay policy changes are authorized
+by this decision. Any recurring host failure requires exact-state diagnosis;
+no consumed or uncertain attempt may be replayed.
