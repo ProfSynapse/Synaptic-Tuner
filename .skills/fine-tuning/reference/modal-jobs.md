@@ -900,7 +900,15 @@ directory explicitly at 0700 before SDK writes. Create parents depth-first;
 `mkdir(parents=True, mode=0o700)` alone leaves intermediate modes dependent on
 ambient umask. Preserve descriptor-bound publication checks and process-global
 umask. Cover nested members with the real binding under umask 022 and 002; a
-locally reproduced permission mismatch does not establish a remote failure cause.
+local permission reproduction is separate from evidence of a remote cause.
+For a persistent-publication rejection, newer workers can report
+`SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION_<PREDICATE>`, with finite
+`SOURCE_CHAIN_*`, `CLAIM_*`, or `COPY_*` suffixes. The broad legacy stage remains
+a fallback. These labels identify the rejected operation or predicate, never
+permission to retry or skip a guard. Keep initial checks distinct from later
+rechecks; do not attribute a remote filesystem behavior from a local test alone.
+Publication error translation belongs at the Modal publisher adapter so shared
+model preparation does not acquire provider-only imports in the inference closure.
 For new workers, `SFT_ADMISSION_{CONTRACTS,RELEASE,PATHS,INPUT,ENVIRONMENT,INVOCATION,COMMITMENT}`
 identifies the existing admission subcheck; legacy `SFT_ADMISSION` remains
 accepted. Replay exact retained pure contracts locally before changing a recipe.

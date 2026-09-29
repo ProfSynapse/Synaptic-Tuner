@@ -32,14 +32,39 @@ _MAX_COPY_BYTES = 32 * 1024 * 1024 * 1024
 _COPY_CHUNK = 1024 * 1024
 _PROVIDER_VOLUME_ROOT = "/__modal/volumes"
 _VOLUME_ID = re.compile(r"vo-[A-Za-z0-9]+\Z")
+PUBLICATION_DIAGNOSTICS = frozenset({
+    "SOURCE_CHAIN_ROOT", "SOURCE_CHAIN_TMP", "SOURCE_CHAIN_OWNER",
+    "SOURCE_CHAIN_MODE", "SOURCE_CHAIN_OPEN",
+    "CLAIM_ROOT_ADMISSION", "CLAIM_PARENT", "CLAIM_CREATE_EXISTS", "CLAIM_CREATE_DENIED",
+    "CLAIM_CREATE_OS", "CLAIM_IDENTITY", "CLAIM_RECHECK",
+    "COPY_ROOT_ADMISSION", "COPY_MEMBER_PARENT", "COPY_SOURCE_ADMISSION",
+    "COPY_SOURCE_OPEN", "COPY_STREAM",
+    "COPY_DEST_CREATE_EXISTS", "COPY_DEST_CREATE_DENIED", "COPY_DEST_CREATE_OS",
+    "COPY_DEST_IDENTITY", "COPY_STREAM_READ", "COPY_STREAM_WRITE",
+    "COPY_STREAM_HASH", "COPY_STREAM_FSYNC", "COPY_SOURCE_RECHECK",
+    "COPY_DEST_RECHECK", "COPY_MEMBER_RECHECK", "COPY_PRIVATE_RECHECK",
+    "COPY_ROOT_RECHECK",
+})
 
 
 class VolumeRootBindingError(ValueError):
     """Closed error for an unavailable or changed bound root."""
 
+    def __init__(self, code: str | None = None):
+        self.code = code if code in PUBLICATION_DIAGNOSTICS else None
+        super().__init__("volume root binding invalid")
 
-def _invalid() -> VolumeRootBindingError:
-    return VolumeRootBindingError("volume root binding invalid")
+
+def _invalid(code: str | None = None) -> VolumeRootBindingError:
+    return VolumeRootBindingError(code)
+
+
+def _create_code(prefix: str, error: BaseException) -> str:
+    if isinstance(error, FileExistsError):
+        return prefix + "_EXISTS"
+    if isinstance(error, PermissionError):
+        return prefix + "_DENIED"
+    return prefix + "_OS"
 
 
 def _close_all(descriptors: tuple[int, ...] | list[int]) -> None:
@@ -133,37 +158,48 @@ def _chain(parts: tuple[str, ...]) -> _Chain:
 
 def _private_chain(parts: tuple[str, ...]) -> _Chain:
     """Retain a private scratch parent, admitting the standard sticky /tmp only."""
-    descriptors = [os.open("/", _DIR)]
     try:
-        _trusted_dir(os.fstat(descriptors[0]))
+        descriptors = [os.open("/", _DIR)]
+    except OSError:
+        raise _invalid("SOURCE_CHAIN_OPEN") from None
+    try:
+        try:
+            _trusted_dir(os.fstat(descriptors[0]))
+        except (OSError, VolumeRootBindingError):
+            raise _invalid("SOURCE_CHAIN_ROOT") from None
         in_tmp = False
         for index, part in enumerate(parts):
-            fd = os.open(part, _DIR, dir_fd=descriptors[-1])
+            try:
+                fd = os.open(part, _DIR, dir_fd=descriptors[-1])
+            except OSError:
+                raise _invalid("SOURCE_CHAIN_OPEN") from None
             descriptors.append(fd)
             info = os.fstat(fd)
             if index == 0 and part == "tmp":
                 if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o1777:
-                    raise _invalid()
+                    raise _invalid("SOURCE_CHAIN_TMP")
                 in_tmp = True
             elif in_tmp:
                 mode = stat.S_IMODE(info.st_mode)
                 # The first child of sticky /tmp must be the private 0700
                 # anchor. SDK-created descendants may be 0755 under it, but
                 # must remain owner-owned and not writable by anyone else.
-                if (
-                    not stat.S_ISDIR(info.st_mode)
-                    or info.st_uid != os.geteuid()
-                    or (index == 1 and mode != 0o700)
-                    or (index > 1 and mode & 0o022)
-                ):
-                    raise _invalid()
+                if not stat.S_ISDIR(info.st_mode):
+                    raise _invalid("SOURCE_CHAIN_MODE")
+                if info.st_uid != os.geteuid():
+                    raise _invalid("SOURCE_CHAIN_OWNER")
+                if (index == 1 and mode != 0o700) or (index > 1 and mode & 0o022):
+                    raise _invalid("SOURCE_CHAIN_MODE")
             else:
-                _trusted_dir(info)
+                if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o022:
+                    raise _invalid("SOURCE_CHAIN_MODE")
+                if info.st_uid not in (0, os.geteuid()):
+                    raise _invalid("SOURCE_CHAIN_OWNER")
         final = os.fstat(descriptors[-1])
-        if not parts or final.st_uid != os.geteuid() or (
-            not in_tmp and stat.S_IMODE(final.st_mode) != 0o700
-        ):
-            raise _invalid()
+        if not parts or final.st_uid != os.geteuid():
+            raise _invalid("SOURCE_CHAIN_OWNER")
+        if not in_tmp and stat.S_IMODE(final.st_mode) != 0o700:
+            raise _invalid("SOURCE_CHAIN_MODE")
         return _Chain(parts, tuple(descriptors), tuple(_identity(os.fstat(fd)) for fd in descriptors))
     except BaseException:
         try:
@@ -202,11 +238,14 @@ def _copy_bounds(expected_size: int, expected_sha256: str, maximum: int) -> None
 def _open_exact_source(parent: int, leaf: str, expected_size: int) -> tuple[int, tuple[int, int, int, int, int, int]]:
     before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size != expected_size:
-        raise _invalid()
-    fd = os.open(leaf, _READ, dir_fd=parent)
+        raise _invalid("COPY_SOURCE_ADMISSION")
+    try:
+        fd = os.open(leaf, _READ, dir_fd=parent)
+    except OSError:
+        raise _invalid("COPY_SOURCE_OPEN") from None
     try:
         if _file_identity(os.fstat(fd)) != _file_identity(before):
-            raise _invalid()
+            raise _invalid("COPY_SOURCE_ADMISSION")
         return fd, _file_identity(before)
     except BaseException:
         os.close(fd)
@@ -217,22 +256,31 @@ def _stream_exact(source: int, destination: int, expected_size: int, expected_sh
     digest = hashlib.sha256()
     count = 0
     while True:
-        chunk = os.read(source, min(_COPY_CHUNK, expected_size - count + 1))
+        try:
+            chunk = os.read(source, min(_COPY_CHUNK, expected_size - count + 1))
+        except OSError:
+            raise _invalid("COPY_STREAM_READ") from None
         if not chunk:
             break
         count += len(chunk)
         if count > expected_size:
-            raise _invalid()
+            raise _invalid("COPY_STREAM_HASH")
         digest.update(chunk)
         view = memoryview(chunk)
         while view:
-            written = os.write(destination, view)
+            try:
+                written = os.write(destination, view)
+            except OSError:
+                raise _invalid("COPY_STREAM_WRITE") from None
             if written <= 0:
-                raise _invalid()
+                raise _invalid("COPY_STREAM_WRITE")
             view = view[written:]
     if count != expected_size or digest.hexdigest() != expected_sha256:
-        raise _invalid()
-    os.fsync(destination)
+        raise _invalid("COPY_STREAM_HASH")
+    try:
+        os.fsync(destination)
+    except OSError:
+        raise _invalid("COPY_STREAM_FSYNC") from None
 
 
 def _remove_owned_leaf(parent: int, leaf: str, identity: tuple[int, int, int, int]) -> None:
@@ -431,7 +479,10 @@ class VolumeRootBinding:
     ) -> None:
         _copy_bounds(expected_size, expected_sha256, maximum)
         private_parts = _parts(private_path, absolute=True)
-        self._check_root()
+        try:
+            self._check_root()
+        except (OSError, VolumeRootBindingError):
+            raise _invalid("COPY_ROOT_ADMISSION") from None
         private_chain = None
         member_parents: list[int] = []
         source_fd = None
@@ -439,8 +490,10 @@ class VolumeRootBinding:
         destination_identity = None
         source_identity = None
         success = False
+        failure = "SOURCE_CHAIN_OPEN"
         try:
             private_chain = _private_chain(private_parts[:-1])
+            failure = "COPY_MEMBER_PARENT"
             member_parent, member_leaf, member_parents = self._member_parent(relative_path)
             private_parent, private_leaf = private_chain.descriptors[-1], private_parts[-1]
             if volume_source:
@@ -449,17 +502,26 @@ class VolumeRootBinding:
             else:
                 source_parent, source_leaf = private_parent, private_leaf
                 destination_parent, destination_leaf = member_parent, member_leaf
+            failure = "COPY_SOURCE_ADMISSION"
             source_fd, source_identity = _open_exact_source(source_parent, source_leaf, expected_size)
-            destination_fd = os.open(destination_leaf, _WRITE, 0o600, dir_fd=destination_parent)
+            failure = "COPY_DEST_CREATE_OS"
+            try:
+                destination_fd = os.open(destination_leaf, _WRITE, 0o600, dir_fd=destination_parent)
+            except OSError as error:
+                raise _invalid(_create_code("COPY_DEST_CREATE", error)) from None
+            failure = "COPY_DEST_IDENTITY"
             destination_info = os.fstat(destination_fd)
             if not stat.S_ISREG(destination_info.st_mode) or destination_info.st_nlink != 1:
-                raise _invalid()
+                raise _invalid("COPY_DEST_IDENTITY")
             destination_identity = _identity(destination_info)
+            failure = "COPY_STREAM"
             _stream_exact(source_fd, destination_fd, expected_size, expected_sha256)
+            failure = "COPY_SOURCE_RECHECK"
             if _file_identity(os.fstat(source_fd)) != source_identity or _file_identity(
                 os.stat(source_leaf, dir_fd=source_parent, follow_symlinks=False)
             ) != source_identity:
-                raise _invalid()
+                raise _invalid("COPY_SOURCE_RECHECK")
+            failure = "COPY_DEST_RECHECK"
             final_destination = os.fstat(destination_fd)
             named_destination = os.stat(destination_leaf, dir_fd=destination_parent, follow_symlinks=False)
             if (
@@ -469,15 +531,19 @@ class VolumeRootBinding:
                 or _identity(final_destination) != destination_identity
                 or _identity(named_destination) != destination_identity
             ):
-                raise _invalid()
+                raise _invalid("COPY_DEST_RECHECK")
+            failure = "COPY_MEMBER_RECHECK"
             self._check_member_parents(relative_path, member_parents)
+            failure = "COPY_PRIVATE_RECHECK"
             _recheck_chain(private_chain)
+            failure = "COPY_ROOT_RECHECK"
             self._check_root()
             success = True
         except (KeyboardInterrupt, SystemExit):
             raise
-        except BaseException:
-            raise _invalid() from None
+        except BaseException as error:
+            code = error.code if type(error) is VolumeRootBindingError else None
+            raise _invalid(code or failure) from None
         finally:
             for fd in (source_fd, destination_fd):
                 if fd is not None:
@@ -559,28 +625,39 @@ class VolumeRootBinding:
 
     def claim_directory(self, path: str) -> None:
         """Create one directory exclusively under the retained root."""
-        self._check_root()
+        try:
+            self._check_root()
+        except (OSError, VolumeRootBindingError):
+            raise _invalid("CLAIM_ROOT_ADMISSION") from None
         parents: list[int] = []
+        failure = "CLAIM_PARENT"
         try:
             parent, leaf, parents = self._member_parent(path)
-            os.mkdir(leaf, 0o700, dir_fd=parent)
+            failure = "CLAIM_CREATE_OS"
+            try:
+                os.mkdir(leaf, 0o700, dir_fd=parent)
+            except OSError as error:
+                raise _invalid(_create_code("CLAIM_CREATE", error)) from None
+            failure = "CLAIM_IDENTITY"
             created = os.open(leaf, _DIR, dir_fd=parent)
             try:
                 info = os.fstat(created)
                 named = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
                 if not stat.S_ISDIR(info.st_mode) or _identity(info) != _identity(named):
-                    raise _invalid()
+                    raise _invalid("CLAIM_IDENTITY")
+                failure = "CLAIM_RECHECK"
                 self._check_member_parents(path, parents)
                 self._check_root()
                 named = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
                 if _identity(info) != _identity(named):
-                    raise _invalid()
+                    raise _invalid("CLAIM_RECHECK")
             finally:
                 os.close(created)
         except (KeyboardInterrupt, SystemExit):
             raise
-        except BaseException:
-            raise _invalid() from None
+        except BaseException as error:
+            code = error.code if type(error) is VolumeRootBindingError else None
+            raise _invalid(code or failure) from None
         finally:
             for fd in reversed(parents):
                 os.close(fd)

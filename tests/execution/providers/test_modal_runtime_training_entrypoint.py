@@ -300,7 +300,7 @@ def test_image_substitution_fails_before_client_or_storage(monkeypatch) -> None:
         entrypoint._run_with_modal(b"signed-dispatch", sdk=SDK)
 
 
-def test_v2_entrypoint_binds_signed_volume_markers_and_private_model_cache(monkeypatch, tmp_path: Path) -> None:
+def test_v2_entrypoint_publisher_adapter_delegates_to_bound_model_cache(monkeypatch, tmp_path: Path) -> None:
     from tuner.execution.providers.modal import model_snapshot, packaged_dispatch, packaged_worker
     from tuner.execution.providers.modal import volume_root_binding
     from tuner.execution.providers.modal.packaged_dispatch import MODAL_PACKAGED_DISPATCH_V2_SCHEMA
@@ -333,6 +333,19 @@ def test_v2_entrypoint_binds_signed_volume_markers_and_private_model_cache(monke
     class Bound:
         def __init__(self, marker):
             self.marker = marker
+
+        def claim_directory(self, path):
+            if path == "fail":
+                raise volume_root_binding.VolumeRootBindingError("CLAIM_CREATE_DENIED")
+            assert path == "probe"
+            events.append("claim:" + self.marker.role)
+
+        def copy_in_exclusive(self, relative_path, source_path, *, expected_size,
+                              expected_sha256, maximum):
+            assert (relative_path, source_path, expected_size, expected_sha256, maximum) == (
+                "probe.bin", "/private/probe.bin", 1, "a" * 64, 1,
+            )
+            events.append("copy:" + self.marker.role)
 
         def __enter__(self):
             return self
@@ -381,7 +394,12 @@ def test_v2_entrypoint_binds_signed_volume_markers_and_private_model_cache(monke
     SDK.Volume = Volume
 
     def prepare_model_snapshot(**kwargs):
-        assert kwargs["persistent_binding"].marker.role == "model_cache"
+        publisher = kwargs["persistent_binding"]
+        publisher.claim_directory("probe")
+        publisher.copy_in_exclusive(
+            "probe.bin", "/private/probe.bin", expected_size=1,
+            expected_sha256="a" * 64, maximum=1,
+        )
         assert kwargs["persistent_root"].is_relative_to(tmp_path)
         assert kwargs["persistent_root"] != roots["model_cache"]
         assert kwargs["destination_root"].is_relative_to(tmp_path)
@@ -405,10 +423,11 @@ def test_v2_entrypoint_binds_signed_volume_markers_and_private_model_cache(monke
     result = entrypoint._run_with_modal(b"signed-dispatch", sdk=SDK)
     assert result["status_code"] == "completed"
     assert events[:3] == ["bind:control", "bind:artifacts", "bind:model_cache"]
-    assert events[3:6] == ["commit:vo-cache", "commit:vo-artifacts", "commit:vo-control"]
+    assert events[3:8] == ["claim:model_cache", "copy:model_cache", "commit:vo-cache",
+                           "commit:vo-artifacts", "commit:vo-control"]
 
 
-def test_v2_entrypoint_binds_signed_volume_markers_and_private_model_cache(monkeypatch, tmp_path: Path) -> None:
+def test_v2_entrypoint_publisher_adapter_maps_closed_binding_failure(monkeypatch, tmp_path: Path) -> None:
     from tuner.execution.providers.modal import model_snapshot, packaged_dispatch, packaged_worker
     from tuner.execution.providers.modal import volume_root_binding
     from tuner.execution.providers.modal.packaged_dispatch import MODAL_PACKAGED_DISPATCH_V2_SCHEMA
@@ -441,6 +460,19 @@ def test_v2_entrypoint_binds_signed_volume_markers_and_private_model_cache(monke
     class Bound:
         def __init__(self, marker):
             self.marker = marker
+
+        def claim_directory(self, path):
+            if path == "fail":
+                raise volume_root_binding.VolumeRootBindingError("CLAIM_CREATE_DENIED")
+            assert path == "probe"
+            events.append("claim:" + self.marker.role)
+
+        def copy_in_exclusive(self, relative_path, source_path, *, expected_size,
+                              expected_sha256, maximum):
+            assert (relative_path, source_path, expected_size, expected_sha256, maximum) == (
+                "probe.bin", "/private/probe.bin", 1, "a" * 64, 1,
+            )
+            events.append("copy:" + self.marker.role)
 
         def __enter__(self):
             return self
@@ -489,11 +521,12 @@ def test_v2_entrypoint_binds_signed_volume_markers_and_private_model_cache(monke
     SDK.Volume = Volume
 
     def prepare_model_snapshot(**kwargs):
-        assert kwargs["persistent_binding"].marker.role == "model_cache"
-        assert kwargs["persistent_root"].is_relative_to(tmp_path)
-        assert kwargs["persistent_root"] != roots["model_cache"]
-        assert kwargs["destination_root"].is_relative_to(tmp_path)
-        return kwargs["destination_root"]
+        publisher = kwargs["persistent_binding"]
+        with pytest.raises(model_snapshot.ModelSnapshotPreparationError) as caught:
+            publisher.claim_directory("fail")
+        assert caught.value.stage == "PERSISTENT_PUBLICATION_CLAIM_CREATE_DENIED"
+        assert caught.value.__cause__ is None
+        raise caught.value
 
     monkeypatch.setattr(model_snapshot, "prepare_model_snapshot", prepare_model_snapshot)
 
@@ -504,13 +537,15 @@ def test_v2_entrypoint_binds_signed_volume_markers_and_private_model_cache(monke
             self.prepare = kwargs["trainer_executor"]._model_preparer
 
         def __call__(self, payload, call_id, *, commit_artifacts, commit_control):
-            self.prepare({"ref": "Qwen/Qwen3.5-4B", "revision": "1" * 40}, tmp_path / "model")
-            commit_artifacts()
-            commit_control()
-            return {"status_code": "completed"}
+            from tuner.runtime.packaged_sft_execution import PackagedPreparationError
+            with pytest.raises(PackagedPreparationError) as caught:
+                self.prepare({"ref": "Qwen/Qwen3.5-4B", "revision": "1" * 40}, tmp_path / "model")
+            assert caught.value.stage == "MODEL_PERSISTENT_PUBLICATION_CLAIM_CREATE_DENIED"
+            assert caught.value.__cause__ is None
+            return {"status_code": "failed"}
 
     monkeypatch.setattr(packaged_worker, "ModalPackagedWorker", Worker)
     result = entrypoint._run_with_modal(b"signed-dispatch", sdk=SDK)
-    assert result["status_code"] == "completed"
+    assert result["status_code"] == "failed"
     assert events[:3] == ["bind:control", "bind:artifacts", "bind:model_cache"]
-    assert events[3:6] == ["commit:vo-cache", "commit:vo-artifacts", "commit:vo-control"]
+    assert not any(event.startswith("commit:") for event in events)

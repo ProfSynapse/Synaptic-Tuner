@@ -142,7 +142,9 @@ class _BoundCache:
         self.published.append((relative_path, expected_sha256))
 
 
-@pytest.mark.parametrize("stage", sorted(model_snapshot.MODEL_SNAPSHOT_PREPARATION_STAGES))
+@pytest.mark.parametrize("stage", sorted(model_snapshot.MODEL_SNAPSHOT_PREPARATION_STAGES - {
+    "PERSISTENT_PUBLICATION_" + code for code in model_snapshot.PERSISTENT_PUBLICATION_DIAGNOSTICS
+}))
 def test_model_preparation_stages_are_fixed_and_private(fixture, monkeypatch, tmp_path, stage):
     kwargs = {}
     if stage == "SDK_ADMISSION":
@@ -174,6 +176,22 @@ def test_model_preparation_stages_are_fixed_and_private(fixture, monkeypatch, tm
     with pytest.raises(ModelSnapshotPreparationError) as caught:
         prepare(fixture, **kwargs)
     assert caught.value.stage == stage
+    assert str(caught.value) == "model preparation failed"
+    assert caught.value.__cause__ is None
+
+
+@pytest.mark.parametrize("raised_stage,expected", (
+    ("PERSISTENT_PUBLICATION_CLAIM_CREATE_DENIED", "PERSISTENT_PUBLICATION_CLAIM_CREATE_DENIED"),
+    ("VERIFICATION", "PERSISTENT_PUBLICATION"),
+))
+def test_model_publication_accepts_only_finite_publisher_diagnostics(fixture, raised_stage, expected):
+    class RejectedPublisher:
+        def claim_directory(self, path):
+            raise ModelSnapshotPreparationError(raised_stage)
+
+    with pytest.raises(ModelSnapshotPreparationError) as caught:
+        prepare(fixture, persistent_binding=RejectedPublisher())
+    assert caught.value.stage == expected
     assert str(caught.value) == "model preparation failed"
     assert caught.value.__cause__ is None
 

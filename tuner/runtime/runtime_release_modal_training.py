@@ -44,6 +44,7 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
     from tuner.execution.providers.modal.facade import EXACT_MODAL_SDK_VERSION
     from tuner.execution.providers.modal.model_snapshot import (
         MODEL_SNAPSHOT_PREPARATION_STAGES,
+        PERSISTENT_PUBLICATION_DIAGNOSTICS,
         ModelSnapshotPreparationError,
         prepare_model_snapshot,
     )
@@ -60,7 +61,38 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
         QUALIFICATION_HMAC_ENV_KEY,
         ModalRuntimeQualificationHmacAuthenticator,
     )
-    from tuner.execution.providers.modal.volume_root_binding import VolumeRootBinding
+    from tuner.execution.providers.modal.volume_root_binding import (
+        PUBLICATION_DIAGNOSTICS, VolumeRootBinding, VolumeRootBindingError,
+    )
+
+    class _ModelPublisher:
+        """Translate only binding-owned finite publication failures."""
+
+        def __init__(self, binding):
+            self._binding = binding
+
+        def _call(self, operation, *args, **kwargs):
+            try:
+                return operation(*args, **kwargs)
+            except VolumeRootBindingError as error:
+                if (type(error) is VolumeRootBindingError
+                        and error.code in PUBLICATION_DIAGNOSTICS
+                        and error.code in PERSISTENT_PUBLICATION_DIAGNOSTICS):
+                    raise ModelSnapshotPreparationError(
+                        "PERSISTENT_PUBLICATION_" + error.code
+                    ) from None
+                raise
+
+        def claim_directory(self, path):
+            return self._call(self._binding.claim_directory, path)
+
+        def copy_in_exclusive(self, relative_path, source_path, *, expected_size,
+                              expected_sha256, maximum):
+            return self._call(
+                self._binding.copy_in_exclusive, relative_path, source_path,
+                expected_size=expected_size, expected_sha256=expected_sha256,
+                maximum=maximum,
+            )
 
     if _stage is not None:
         _stage[0] = "ENTRYPOINT_DISPATCH_AUTH"
@@ -158,7 +190,7 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
                         persistent_root=persistent if bindings is not None else cache,
                         destination_root=destination, scratch_root=scratch)
             if bindings is not None:
-                args["persistent_binding"] = bindings["model_cache"]
+                args["persistent_binding"] = _ModelPublisher(bindings["model_cache"])
             try:
                 snapshot = prepare_model_snapshot(**args)
             except ModelSnapshotPreparationError as error:

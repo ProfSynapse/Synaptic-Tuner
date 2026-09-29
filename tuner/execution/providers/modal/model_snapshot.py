@@ -19,11 +19,24 @@ import unicodedata
 
 from .mounted_io import copy_regular
 
+PERSISTENT_PUBLICATION_DIAGNOSTICS = frozenset({
+    "SOURCE_CHAIN_ROOT", "SOURCE_CHAIN_TMP", "SOURCE_CHAIN_OWNER",
+    "SOURCE_CHAIN_MODE", "SOURCE_CHAIN_OPEN",
+    "CLAIM_ROOT_ADMISSION", "CLAIM_PARENT", "CLAIM_CREATE_EXISTS", "CLAIM_CREATE_DENIED",
+    "CLAIM_CREATE_OS", "CLAIM_IDENTITY", "CLAIM_RECHECK",
+    "COPY_ROOT_ADMISSION", "COPY_MEMBER_PARENT", "COPY_SOURCE_ADMISSION",
+    "COPY_SOURCE_OPEN", "COPY_STREAM",
+    "COPY_DEST_CREATE_EXISTS", "COPY_DEST_CREATE_DENIED", "COPY_DEST_CREATE_OS",
+    "COPY_DEST_IDENTITY", "COPY_STREAM_READ", "COPY_STREAM_WRITE",
+    "COPY_STREAM_HASH", "COPY_STREAM_FSYNC", "COPY_SOURCE_RECHECK",
+    "COPY_DEST_RECHECK", "COPY_MEMBER_RECHECK", "COPY_PRIVATE_RECHECK",
+    "COPY_ROOT_RECHECK",
+})
 MODEL_SNAPSHOT_PREPARATION_STAGES = frozenset({
     "SDK_ADMISSION", "INPUT", "WORKSPACE_SETUP", "METADATA_FETCH",
     "METADATA_VALIDATION", "DOWNLOAD", "VERIFICATION",
     "PERSISTENT_PUBLICATION", "DESTINATION_COPY", "DESTINATION_VERIFICATION",
-})
+}) | frozenset("PERSISTENT_PUBLICATION_" + code for code in PERSISTENT_PUBLICATION_DIAGNOSTICS)
 
 
 class ModelSnapshotPreparationError(ValueError):
@@ -137,6 +150,13 @@ def prepare_model_snapshot(
                 scratch_root=scratch_root, persistent_binding=persistent_binding,
                 stage=stage,
             )
+    except ModelSnapshotPreparationError as error:
+        if (stage[0] == "PERSISTENT_PUBLICATION"
+                and type(error) is ModelSnapshotPreparationError
+                and error.stage in frozenset("PERSISTENT_PUBLICATION_" + code
+                                              for code in PERSISTENT_PUBLICATION_DIAGNOSTICS)):
+            raise ModelSnapshotPreparationError(error.stage) from None
+        raise ModelSnapshotPreparationError(stage[0]) from None
     except Exception:
         raise ModelSnapshotPreparationError(stage[0]) from None
 

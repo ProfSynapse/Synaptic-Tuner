@@ -542,4 +542,50 @@ The root regression gate passed 666/666 under pinned CPython 3.11.14, including
 real publication, mounted I/O, inference model/worker integration, packaged SFT,
 entrypoint, qualification, and host diagnostic checks. The generic worker closure
 remains unchanged and CURRENT; both fixed Modal source inventories received only
-reviewed model-preparer hash refreshes. Canonical skill copies match.
+reviewed model-preparer hashes. Skill copies are synchronized.
+
+Permission-fix source `99a04b79f163fab21140632c01940823526cd1a4` was pushed.
+The supplemental inference-preparation suite passed 79/79. CPU bootstrap
+`cpu-qual-93eeaf4cbc91c35ad7d0ffc7` was interrupted with only retained claim
+`build-263b4fca6b72ccbe0725b1c4ff57ccc114047ff8e925dd90ddfe41a0b014a2fd`
+and no catalog rows. Its provider effects remain uncertain; it was preserved,
+not replayed. Fresh CPU qualification `cpu-qual-7ee8e2ac563bf0e57809c7d7`
+passed at `2026-09-28T16:41:34.975804`, runtime release
+`28c3537c22095e7006baff175e696fa02203d4e5f5c0f06883df9f2ec024a9c3`,
+qualification output `5038bb480b120fd38f82d24226327748e92291e0e20fb89bbd50fc09eabe377c`.
+
+Fresh L40S attempt `modal-18ee4a76b58d8645178953b6` on this source still failed
+at `RUN_WORKER_SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION` at
+`2026-09-28T16:49:14.432862`. Exact read-only inspection confirmed the stage
+for call `fc-01M3MWCR2GWZFMB43QSE4S4NM4`, claim
+`ddc4da94b848a6b0e55918d80c7658fc6eace20adc1aa3b8c54e26031b6361ea`.
+The permission correction fixed a demonstrated local bug, but did not resolve
+this remote failure; do not attribute the old or new failure to umask.
+No optimizer steps, explicit model-cache commit, or durable LoRA are proved.
+Preserve this consumed attempt and narrow the publication operation/predicate
+using the deferred finite diagnostic design before selecting another fix.
+
+On 2026-09-29, the finite publication diagnostics completed independent static
+review. The implementation preserves rejection behavior and exposes only closed
+source-chain, directory-claim and copy-operation labels. The agent gate reported
+361 passes and one skipped serializer check; the orchestrator then ran that check
+with the existing CPython 3.11.14 / Modal 1.5.4 launcher, and both serialization
+size and all-reader allowlist parity passed. No dependency installation was needed.
+The handoff had stalled after agents completed, not during a running cloud job.
+
+Two independent source traces confirmed that normal standalone `train` invokes
+the signed CPU qualification on its own freshly deployed runtime before public
+training start. Tests cover both bootstrap/CPU/stage/spawn ordering and CPU failure
+blocking GPU start. A separate fresh `--qualify` checks a different deployment
+and its receipt is not reused. This attempt will use the normal train path's
+mandatory gate, not a redundant standalone qualification. This does not bypass
+CPU proof or claim that CPU proof establishes GPU/model success. The final frozen
+877-test combined gate passed in 100.08 seconds, including the pinned serializer.
+The binding/model/mounted-I/O suites passed 98 tests; the corrected entrypoint
+suite passed 23; generic worker/isolated-child regressions passed 64. A preceding
+combined run had one suppressed fake-start failure that passed alone, in the
+157-test standalone suite, and in the final combined rerun; its cause remains
+unproven rather than assigned to the diagnostic mapping. All three source
+commitment checks are CURRENT and skill copies match. No runtime/model pins or
+locked inventories changed. The next fresh attempt is a diagnostic smoke, not
+evidence that the remote publication problem is fixed.

@@ -57,8 +57,9 @@ def test_bound_root_reads_lists_and_exclusively_writes(layout):
         bound.write_exclusive("output/member", b"ok", 2)
         assert bound.read_regular("output/member", 2) == b"ok"
         assert bound.list_regular("output", 1) == (("member", 2),)
-        with pytest.raises(VolumeRootBindingError):
+        with pytest.raises(VolumeRootBindingError) as collision:
             bound.claim_directory("output")
+        assert collision.value.code == "CLAIM_CREATE_EXISTS"
         bound.write_exclusive("result.json", b"{}", 2)
         assert bound.read_regular("result.json", 2) == b"{}"
         with pytest.raises(VolumeRootBindingError):
@@ -203,8 +204,9 @@ def test_stream_copy_in_and_out_with_exclusive_destinations(layout, monkeypatch)
         bound.copy_out("cache.bin", str(output), expected_size=len(content), expected_sha256=digest, maximum=32 * 1024**3)
         with pytest.raises(VolumeRootBindingError):
             bound.copy_out("cache.bin", str(output), expected_size=len(content), expected_sha256=digest, maximum=len(content))
-        with pytest.raises(VolumeRootBindingError):
+        with pytest.raises(VolumeRootBindingError) as collision:
             bound.copy_in_exclusive("cache.bin", str(source), expected_size=len(content), expected_sha256=digest, maximum=len(content))
+        assert collision.value.code == "COPY_DEST_CREATE_EXISTS"
     assert sizes and max(sizes) <= 1024 * 1024
     assert (target / "cache.bin").read_bytes() == content
     assert output.read_bytes() == content
@@ -217,8 +219,9 @@ def test_copy_rejects_bad_digest_and_retains_failed_volume_leaf(layout):
     source = scratch / "source.bin"
     source.write_bytes(b"source")
     with _bind(layout) as bound:
-        with pytest.raises(VolumeRootBindingError):
+        with pytest.raises(VolumeRootBindingError) as digest_failure:
             bound.copy_in_exclusive("bad.bin", str(source), expected_size=6, expected_sha256="0" * 64, maximum=6)
+        assert digest_failure.value.code == "COPY_STREAM_HASH"
         assert (target / "bad.bin").read_bytes() == b"source"
         (target / "good.bin").write_bytes(b"good")
         with pytest.raises(VolumeRootBindingError):
@@ -242,8 +245,9 @@ def test_copy_rejects_private_source_link_and_destination_collision(layout):
         with pytest.raises(VolumeRootBindingError):
             bound.copy_in_exclusive("linked.bin", str(scratch / "alias.bin"), expected_size=6, expected_sha256=digest, maximum=6)
         bound.copy_in_exclusive("source.bin", str(source), expected_size=6, expected_sha256=digest, maximum=6)
-        with pytest.raises(VolumeRootBindingError):
+        with pytest.raises(VolumeRootBindingError) as collision:
             bound.copy_out("source.bin", str(output), expected_size=6, expected_sha256=digest, maximum=6)
+        assert collision.value.code == "COPY_DEST_CREATE_EXISTS"
     assert not (target / "linked.bin").exists()
     assert output.read_bytes() == b"existing"
 
@@ -268,10 +272,36 @@ def test_copy_rejects_changed_source_identity(layout, monkeypatch):
 
     with _bind(layout) as bound:
         monkeypatch.setattr(os, "read", replace_after_read)
-        with pytest.raises(VolumeRootBindingError):
+        with pytest.raises(VolumeRootBindingError) as changed_source:
             bound.copy_in_exclusive("changed.bin", str(source), expected_size=6, expected_sha256=hashlib.sha256(b"source").hexdigest(), maximum=6)
+        assert changed_source.value.code == "COPY_SOURCE_RECHECK"
     assert changed
     assert (target / "changed.bin").read_bytes() == b"source"
+
+
+@pytest.mark.parametrize("operation,code", (
+    ("write", "COPY_STREAM_WRITE"), ("fsync", "COPY_STREAM_FSYNC"),
+))
+def test_copy_reports_fixed_stream_operation_without_os_detail(layout, monkeypatch, operation, code):
+    _, _, target, _ = layout
+    scratch = target.parent.parent / "scratch"
+    scratch.mkdir(mode=0o700)
+    source = scratch / "source.bin"
+    source.write_bytes(b"source")
+
+    def denied(*_args, **_kwargs):
+        raise PermissionError("PRIVATE_SENTINEL")
+
+    with _bind(layout) as bound:
+        monkeypatch.setattr(os, operation, denied)
+        with pytest.raises(VolumeRootBindingError) as caught:
+            bound.copy_in_exclusive(
+                "stream.bin", str(source), expected_size=6,
+                expected_sha256=hashlib.sha256(b"source").hexdigest(), maximum=6,
+            )
+    assert caught.value.code == code
+    assert str(caught.value) == "volume root binding invalid"
+    assert caught.value.__cause__ is None
 
 
 def test_copy_accepts_private_scratch_under_sticky_tmp(layout):
@@ -321,8 +351,9 @@ def test_copy_rejects_hostile_private_ancestor(layout, mode):
     hostile.chmod(mode)
     try:
         with _bind(layout) as bound:
-            with pytest.raises(VolumeRootBindingError):
+            with pytest.raises(VolumeRootBindingError) as hostile_source:
                 bound.copy_in_exclusive("rejected.bin", str(source), expected_size=6, expected_sha256=hashlib.sha256(b"source").hexdigest(), maximum=6)
+            assert hostile_source.value.code == "SOURCE_CHAIN_MODE"
         assert not (target / "rejected.bin").exists()
     finally:
         hostile.chmod(0o700)

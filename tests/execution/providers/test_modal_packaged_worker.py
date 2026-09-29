@@ -17,6 +17,8 @@ from tuner.execution.providers.modal.packaged_worker import (
     PACKAGED_WORKER_FAILURE_STAGES,
     packaged_worker_failure,
 )
+from tuner.execution.providers.modal.model_snapshot import PERSISTENT_PUBLICATION_DIAGNOSTICS
+from tuner.execution.providers.modal.volume_root_binding import PUBLICATION_DIAGNOSTICS
 from tuner.runtime.packaged_sft_execution import PackagedSFTExecutionError, PREPARATION_FAILURE_STAGES
 
 from tests.execution.providers.test_modal_packaged_dispatch import Auth, _case
@@ -361,6 +363,7 @@ def test_existing_operation_directories_prevent_automatic_replay(tmp_path) -> No
 
 
 def test_failure_stage_contract_is_closed_and_rejects_dynamic_values() -> None:
+    assert PUBLICATION_DIAGNOSTICS == PERSISTENT_PUBLICATION_DIAGNOSTICS
     assert PACKAGED_WORKER_FAILURE_STAGES == frozenset({
         "ENTRYPOINT_SETUP", "ENTRYPOINT_IMPORTS", "ENTRYPOINT_DISPATCH_AUTH",
         "ENTRYPOINT_PROVIDER_ID", "ENTRYPOINT_VOLUME_ID", "ENTRYPOINT_CALL_ID",
@@ -383,7 +386,11 @@ def test_failure_stage_contract_is_closed_and_rejects_dynamic_values() -> None:
         "SFT_REVALIDATION",
         "SFT_INVOCATION", "SFT_TRAINER", "SFT_EVIDENCE", "SFT_ARTIFACT",
         "SFT_UNKNOWN", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
-    })
+    }) | frozenset("SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION_" + code
+                   for code in PUBLICATION_DIAGNOSTICS)
+    assert {stage.removeprefix("MODEL_PERSISTENT_PUBLICATION_")
+            for stage in PREPARATION_FAILURE_STAGES
+            if stage.startswith("MODEL_PERSISTENT_PUBLICATION_")} == PUBLICATION_DIAGNOSTICS
     for stage in PACKAGED_WORKER_FAILURE_STAGES:
         _assert_failure(packaged_worker_failure(stage), stage)
     _assert_failure(packaged_worker_failure("secret/path"), "SFT_UNKNOWN")
