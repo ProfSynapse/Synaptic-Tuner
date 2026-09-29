@@ -1017,4 +1017,45 @@ The reviewed facade splits those bytes before the public stream consumes them.
 All 39 framing/reader tests pass; all four source commitments are current, with
 only reviewed source/derived hashes refreshed. Canonical skill guidance and its
 copies document the per-artifact bound, chunk framing, bounded probe, and no-replay
-limitation. Next is a fresh ordinary end-to-end smoke, not a retry of the old job.
+limitation. That candidate was then exercised in a fresh ordinary smoke.
+
+### Verified end-to-end L40S smoke (2026-09-29)
+
+Source `df1a0d556d6d30c01ccfb8180301cfee751e04a7`, attempt
+`modal-4c9ccfa5f57b6e4b4b0e01c6`, submit claim
+`5758136f756a9d5a4c5edcd19a55d8ac11d030ae3ec3daba0f699a9ef98b9743`,
+and GPU call `fc-01M3QBRSE0EGZR2P8C7STJ7TNA` completed through the normal
+TrainingAPI CLI at `2026-09-29T16:05:37.946775` (exit 0, `success: true`).
+Integrated CPU qualification, training, durable publication, public outcome,
+verification, and all five bounded downloads succeeded.
+
+The verified local artifacts are under
+`/home/profsynapse/.local/state/synaptic-training/modal-4c9ccfa5f57b6e4b4b0e01c6-artifacts/`.
+Metrics and lineage independently report `final_step: 2`; lineage is `completed`,
+trainer exit code is 0, and configured `max_steps` is 2. Recorded trainer time
+is 138.1 seconds and total epochs 0.08839779005524862; this is trainer time,
+not end-to-end runtime or a cost measurement.
+
+`final_model.artifact` contains `adapter_config.json`,
+`adapter_model.safetensors` (169,907,160 bytes), and `README.md`. Adapter config
+declares `peft_type: LORA`, base `Qwen/Qwen3.5-4B`, rank 32 and alpha 64.
+This establishes saved durable LoRA weights, not merely an accepted call.
+An independent read-only review confirmed the five files, completed lineage,
+181 training and 39 validation examples, and the adapter configuration. Bounded
+safetensors-header inspection found 256 F32 tensors (128 LoRA A and 128 LoRA B)
+with positive contiguous offsets exactly covering the declared payload. No
+archive extraction, tensor-content inspection, or additional cloud call was used.
+
+| Verified role | Bytes | Local SHA-256 |
+|---|---:|---|
+| final_model | 169922560 | e8b50500ec70069595e72246f0a50e49a80e5e43bd8657fbdf3a7b414c2b5b95 |
+| tokenizer | 20008960 | e959edc8e5ee6f1c3ac1166901280ad98ba7b02ad33bea4fc8369befcc8acc6a |
+| training_lineage | 13953 | f40a3df2be28ab5b4575d09f1c0bb45da717e17dfa601ce245ac6321181b8ffa |
+| training_metrics | 119 | 7a2e069c6d14fba80ececf20626e80954c1a1f0ed54e7b639e9db181844476f4 |
+| workload_record | 2479 | 3dbbf4b5388d73b9410b33d8976c37b39c48c1635acd6f4a4a814a6aa32b61df |
+
+This is one verified two-step end-to-end smoke, not a full training run,
+quality evaluation, GGUF conversion, or broad hardware/reliability benchmark.
+All prior attempts and their resources remain preserved. No OS clock or
+production time-authority policy was changed. Download-only recovery remains
+deferred; the current result is a completed normal workflow, not recovered state.
