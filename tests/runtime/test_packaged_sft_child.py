@@ -9,8 +9,65 @@ from tuner.runtime.packaged_sft_execution import _digest
 
 
 def test_zero_argument_child_fails_closed(capsys):
-    assert child.main() == 2
+    assert child.main() == 42
     assert "PACKAGED_SFT_CHILD_REJECTED" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("phase", ("TRANSPORT", "RELEASE", "INPUT", "IMPORT", "EXEC", "POSTCHECK"))
+@pytest.mark.parametrize("fault,category", (
+    (OSError, "OS"), (ImportError, "IMPORT"), (ValueError, "VALUE"),
+    (SystemExit, "SYSTEM_EXIT"), (KeyboardInterrupt, "OTHER"),
+    (RuntimeError, "RUNTIME"), (TypeError, "TYPE"), (AttributeError, "ATTRIBUTE"),
+    (KeyError, "KEY"), (MemoryError, "MEMORY"),
+))
+def test_packaged_child_phase_and_exception_are_fixed_without_failure_text(monkeypatch, capsys, phase, fault, category):
+    from tuner.runtime.packaged_sft_execution import CHILD_EXIT_STAGES
+    monkeypatch.setattr(sys, "argv", ["child"])
+    def fail(_argv, current_phase):
+        current_phase[0] = phase
+        raise fault("PRIVATE_SENTINEL")
+    monkeypatch.setattr(child, "_run_packaged_child", fail)
+    exit_code = child.main()
+    effective_category = category if phase == "EXEC" or category in child._FAILURE_CATEGORIES else "OTHER"
+    assert CHILD_EXIT_STAGES[exit_code] == "TRAINER_CHILD_" + phase + "_" + effective_category
+    assert capsys.readouterr().err == "PACKAGED_SFT_CHILD_REJECTED\n"
+
+
+def test_packaged_child_keeps_clean_system_exit_zero(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["child"])
+    monkeypatch.setattr(child, "_run_packaged_child", lambda _argv, _phase: (_ for _ in ()).throw(SystemExit(0)))
+    assert child.main() == 0
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("failure", (
+    child._ChildFailure(0), child._ChildFailure(True), child._ChildFailure(75),
+    type("SpoofedFailure", (child._ChildFailure,), {})(40),
+))
+def test_spoofed_child_failure_cannot_return_success_or_unreserved_code(monkeypatch, capsys, failure):
+    monkeypatch.setattr(sys, "argv", ["child"])
+    monkeypatch.setattr(child, "run_packaged_child", lambda: (_ for _ in ()).throw(failure))
+    assert child.main() == 2
+    assert capsys.readouterr().err == "PACKAGED_SFT_CHILD_REJECTED\n"
+
+
+def test_trainer_postcheck_failure_has_its_own_closed_phase_and_cleanup(monkeypatch, capsys):
+    from types import SimpleNamespace
+    from tuner.runtime import packaged_sft_execution as seam
+    monkeypatch.setattr(sys, "argv", ["child"])
+    checks = []
+    def check():
+        checks.append(True)
+        if len(checks) == 2:
+            raise OSError("PRIVATE_SENTINEL")
+    private = SimpleNamespace(check=check, close=lambda: None)
+    monkeypatch.setattr(seam, "_retain_private_snapshot", lambda *_: private)
+    def run(_argv, _phase):
+        child._run_private_trainer(compile("pass", "trainer-test", "exec"), Path("/installed/trainer.py"), {}, None, {}, classify=True)
+    monkeypatch.setattr(child, "_run_packaged_child", run)
+    assert seam.CHILD_EXIT_STAGES[child.main()] == "TRAINER_CHILD_POSTCHECK_OS"
+    assert checks == [True, True]
+    assert capsys.readouterr().err == "PACKAGED_SFT_CHILD_REJECTED\n"
 
 
 def test_unowned_import_directory_rejected(tmp_path, monkeypatch):
@@ -40,7 +97,7 @@ def test_child_forbids_ambient_dotenv_discovery():
         child._OwnedImportGuard({}).find_spec("dotenv")
 
 
-@pytest.mark.parametrize("fault", [ValueError, SystemExit, KeyboardInterrupt])
+@pytest.mark.parametrize("fault", [ValueError, SystemExit, KeyboardInterrupt, lambda _: child._ChildFailure(40)])
 def test_local_diagnostic_dispatch_is_explicit_and_closed(monkeypatch, capsys, fault):
     monkeypatch.setattr(sys, "argv", ["child", "--qualify-local", "transport", "digest"])
     def reject(args):

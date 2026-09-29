@@ -19,7 +19,9 @@ from tuner.execution.providers.modal.packaged_worker import (
 )
 from tuner.execution.providers.modal.model_snapshot import PERSISTENT_PUBLICATION_DIAGNOSTICS
 from tuner.execution.providers.modal.volume_root_binding import PUBLICATION_DIAGNOSTICS
-from tuner.runtime.packaged_sft_execution import PackagedSFTExecutionError, PREPARATION_FAILURE_STAGES
+from tuner.runtime.packaged_sft_execution import (
+    CHILD_FAILURE_STAGES, PackagedSFTExecutionError, PREPARATION_FAILURE_STAGES,
+)
 
 from tests.execution.providers.test_modal_packaged_dispatch import Auth, _case
 
@@ -387,7 +389,8 @@ def test_failure_stage_contract_is_closed_and_rejects_dynamic_values() -> None:
         "SFT_INVOCATION", "SFT_TRAINER", "SFT_EVIDENCE", "SFT_ARTIFACT",
         "SFT_UNKNOWN", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
     }) | frozenset("SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION_" + code
-                   for code in PUBLICATION_DIAGNOSTICS)
+                   for code in PUBLICATION_DIAGNOSTICS) | frozenset(
+                       "SFT_" + stage for stage in CHILD_FAILURE_STAGES)
     assert {stage.removeprefix("MODEL_PERSISTENT_PUBLICATION_")
             for stage in PREPARATION_FAILURE_STAGES
             if stage.startswith("MODEL_PERSISTENT_PUBLICATION_")} == PUBLICATION_DIAGNOSTICS
@@ -427,7 +430,8 @@ def test_path_claim_failure_is_closed(tmp_path, monkeypatch) -> None:
     "ADMISSION_INPUT", "ADMISSION_ENVIRONMENT", "ADMISSION_INVOCATION",
     "ADMISSION_COMMITMENT", "PREPARATION", "REVALIDATION", "INVOCATION", "TRAINER",
     "EVIDENCE", "ARTIFACT",
-] + ["PREPARATION_" + stage for stage in sorted(PREPARATION_FAILURE_STAGES)])
+] + ["PREPARATION_" + stage for stage in sorted(PREPARATION_FAILURE_STAGES)]
+  + sorted(CHILD_FAILURE_STAGES))
 def test_generic_executor_exact_closed_stage_is_reported(tmp_path, sft_stage) -> None:
     class StageExecutor:
         def execute(self, **kwargs):

@@ -633,4 +633,53 @@ unprivileged launcher passed 370 focused regressions with the root-only test
 skipped; that skip is covered by the separate privileged execution, not counted
 as a pass. Independent review approved the minimal change. All three fixed
 source-commitment checks remained CURRENT without hash, inventory or pin changes.
-Proceed with one fresh normal train invocation and its integrated CPU gate.
+That gate authorized one fresh normal train invocation with integrated CPU proof.
+
+Pushed source `d93b6c8b` advanced attempt `modal-1fbd16d341752739b3a9088d`
+through model preparation and returned `WORKER_SFT_TRAINER` at
+`2026-09-29T10:27:21.456653`. Claim
+`2c638df741a8b36dace60f592094b3e987528f06718f2deaeddd25440b1d50e5`
+and call `fc-01M3PRMKX8VZENXT8KXH323BG3` were confirmed by the exact
+read-only inspector. No optimizer-step or adapter-success claim follows.
+
+Source tracing found that the bound v2 worker's stdout/stderr files live under
+the per-call private temporary directory and are removed on exit. Nonzero child
+exit and runner-start exceptions collapse into the same TRAINER stage; failed
+runs do not publish those files. Public logs are not qualified for this path.
+The next change must preserve a bounded closed diagnostic across this boundary,
+not guess OOM or change training configuration. This attempt remains consumed.
+
+Independent review selected reserved nonzero child exit codes instead of log
+parsing, a sidecar or another monitoring service. Six explicit child boundaries
+(transport, release/contracts, input/environment, import guard, trainer entry,
+postcheck) use five fixed categories; trainer entry additionally distinguishes
+five exact built-in error types. The host maps only those 35 reserved codes to
+closed stages. Unknown exits and signals remain generic, never inferred OOM.
+The existing bounded result, exact-claim inspector and public reader carry the
+labels. Messages, paths, traceback text, locals and log bytes stay private.
+No success, credential, publication, training-config or replay policy changed.
+
+Verification passed 685 worker/reader/inspector/projection checks, 222 execution
+and entrypoint checks, 104 isolated-child checks on memfd-capable Linux Python
+3.10, and 27 generic-worker checks. The pinned 3.11 launcher cannot run the
+eight existing native memfd child cases; those passed in the 3.10 child suite.
+All fixed source commitments are CURRENT after refreshing only the two changed
+members of the existing five-file worker closure. Independent static review
+approved the finite diagnostics and CPU-dispatch isolation.
+
+A recurring provider-free CLI projection test stopped before the fake provider
+call with `RUN_START_INDETERMINATE`, first at COMPLETION and then at a different
+parametrized label. Retained test state contains marker material and a stage
+receipt but no call catalog. This predates the child diagnostic change; tracing
+narrows it to the pre-spawn transport boundary but has not established a cause.
+Two instrumented full 117-case runs passed. Keep this risk separate and open;
+neither timing nor random marker content is asserted as the cause. Independent
+review permits one fresh diagnostic smoke only after a clean uninstrumented
+117-case gate also passes, CURRENT locks and diff checks; another gate failure
+holds promotion. This does not authorize replay or claim the flake was repaired.
+
+The clean uninstrumented gate passed all 117 cases in 113.67 seconds. Temporary
+test tracing was removed with no remaining diff in that test file. Skill trees
+are synchronized and diff checks are clean. The unresolved pre-submit risk is
+tracked in the private project as `T-22a498d3`; conditional review clears one
+fresh normal-train diagnostic attempt, with mandatory integrated CPU proof.

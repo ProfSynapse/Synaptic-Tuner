@@ -13,6 +13,35 @@ from zipfile import ZipFile
 from tuner.runtime.packaged_worker_closure import stable_read
 
 _OWNED_PREFIXES = frozenset({"tuner", "synaptic_tuner", "shared", "Trainers", "SynthChat", "Evaluator", "MechInterp", "configs", "src"})
+_FAILURE_PHASES = ("TRANSPORT", "RELEASE", "INPUT", "IMPORT", "EXEC", "POSTCHECK")
+_FAILURE_CATEGORIES = ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER")
+_EXEC_EXTRA_TYPES = (RuntimeError, TypeError, AttributeError, KeyError, MemoryError)
+_FAILURE_EXIT_CODES = frozenset(range(40, 75))
+
+
+class _ChildFailure(Exception):
+    def __init__(self, exit_code):
+        self.exit_code = exit_code
+
+
+def _zero_exit(error):
+    return type(error) is SystemExit and (error.code is None or (type(error.code) is int and error.code == 0))
+
+
+def _classified_failure(phase, error):
+    if phase == "EXEC" and type(error) in _EXEC_EXTRA_TYPES:
+        return _ChildFailure(70 + _EXEC_EXTRA_TYPES.index(type(error)))
+    if isinstance(error, OSError):
+        category = "OS"
+    elif isinstance(error, ImportError):
+        category = "IMPORT"
+    elif isinstance(error, ValueError):
+        category = "VALUE"
+    elif isinstance(error, SystemExit):
+        category = "SYSTEM_EXIT"
+    else:
+        category = "OTHER"
+    return _ChildFailure(40 + _FAILURE_PHASES.index(phase) * len(_FAILURE_CATEGORIES) + _FAILURE_CATEGORIES.index(category))
 
 
 class _OwnedSourceLoader(importlib.machinery.SourceFileLoader):
@@ -93,6 +122,18 @@ def _installed_import_guard(release, trainer):
 
 
 def run_packaged_child(argv=None):
+    phase = ["TRANSPORT"]
+    try:
+        return _run_packaged_child(argv, phase)
+    except _ChildFailure:
+        raise
+    except BaseException as error:
+        if _zero_exit(error):
+            raise
+        raise _classified_failure(phase[0], error) from None
+
+
+def _run_packaged_child(argv, phase):
     from tuner.runtime.packaged_sft_execution import (
         _document, _digest, _inspect_release, _admit_contracts, _runtime_projection,
         _invocation_spec, _canonical, PackagedSFTPaths, _retain_private_snapshot,
@@ -114,6 +155,7 @@ def run_packaged_child(argv=None):
     payload = _document(raw, _MAX_CHILD_BYTES)
     if set(payload) != {"release", "release_digest", "arguments", "provider_binding", "execution_binding", "workload", "artifact_policy", "paths", "environment", "model_snapshot"} or payload["arguments"] != args[5:]:
         raise ValueError
+    phase[0] = "RELEASE"
     release = parse_packaged_runtime_release(payload["release"])
     release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=payload["release_digest"])
     trainer = _inspect_release(release)
@@ -125,6 +167,7 @@ def run_packaged_child(argv=None):
     policy = ArtifactPolicy(tuple(policy_document["required_kinds"]), policy_document["retain_checkpoints"])
     workload_bytes = _canonical(payload["workload"])
     compiled = _admit_contracts(release, provider, execution, workload_bytes, policy)
+    phase[0] = "INPUT"
     paths = PackagedSFTPaths(**{key: Path(value) for key, value in payload["paths"].items()})
     projected = _runtime_projection(compiled)
     dataset = payload["arguments"][payload["arguments"].index("--local-file") + 1]
@@ -150,7 +193,9 @@ def run_packaged_child(argv=None):
     expected_argv, expected_environment, child_path, expected_raw, _, _ = _invocation_spec(physical, projected, snapshot, PurePosixPath(dataset), payload["model_snapshot"])
     if expected_raw != raw or list(expected_argv[4:]) != args or dict(os.environ) != expected_environment:
         raise ValueError
+    phase[0] = "IMPORT"
     guard = _installed_import_guard(release, trainer)
+    phase[0] = "INPUT"
     allowed = {"PATH", "CUDA_VISIBLE_DEVICES", "NVIDIA_VISIBLE_DEVICES", "LANG", "LC_ALL",
         "PYTHONNOUSERSITE", "PYTHONSAFEPATH", "PYTHONDONTWRITEBYTECODE", "HF_HOME", "TRANSFORMERS_CACHE",
         "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "WANDB_DISABLED", "TMPDIR", "HOME", "SYNAPTIC_MODEL_SNAPSHOT"}
@@ -162,22 +207,49 @@ def run_packaged_child(argv=None):
     # entrypoint. Their import origins remain guarded against substitution.
     sys.path.insert(0, str(trainer.parent))
     sys.argv = [str(trainer), *payload["arguments"]]
+    phase[0] = "IMPORT"
     code = _OwnedSourceLoader("__main__", str(trainer), guard.members[trainer]).get_code("__main__")
-    _run_private_trainer(code, trainer, payload["model_snapshot"], paths, model)
+    phase[0] = "EXEC"
+    _run_private_trainer(code, trainer, payload["model_snapshot"], paths, model, classify=True)
     return 0
 
 
-def _run_private_trainer(code, trainer, manifest, paths, model):
+def _run_private_trainer(code, trainer, manifest, paths, model, *, classify=False):
     from tuner.runtime.packaged_sft_execution import _retain_private_snapshot
-    private_copy = _retain_private_snapshot(manifest, paths, model)
     try:
-        private_copy.check()
-        exec(code, {"__name__": "__main__", "__file__": str(trainer), "__package__": None})
-    finally:
+        private_copy = _retain_private_snapshot(manifest, paths, model)
+    except BaseException as error:
+        if classify and not _zero_exit(error):
+            raise _classified_failure("INPUT", error) from None
+        raise
+    try:
         try:
             private_copy.check()
+        except BaseException as error:
+            if classify and not _zero_exit(error):
+                raise _classified_failure("INPUT", error) from None
+            raise
+        try:
+            exec(code, {"__name__": "__main__", "__file__": str(trainer), "__package__": None})
+        except BaseException as error:
+            if classify and not _zero_exit(error):
+                raise _classified_failure("EXEC", error) from None
+            raise
+    finally:
+        try:
+            try:
+                private_copy.check()
+            except BaseException as error:
+                if classify and not _zero_exit(error):
+                    raise _classified_failure("POSTCHECK", error) from None
+                raise
         finally:
-            private_copy.close()
+            try:
+                private_copy.close()
+            except BaseException as error:
+                if classify and not _zero_exit(error):
+                    raise _classified_failure("POSTCHECK", error) from None
+                raise
 
 
 def _check_local_cpu_environment(release):
@@ -260,6 +332,10 @@ def main():
         if sys.argv[1:2] == ["--qualify-local"]:
             return run_local_cpu_child(sys.argv[1:])
         return run_packaged_child()
+    except _ChildFailure as error:
+        print("PACKAGED_SFT_CHILD_REJECTED", file=sys.stderr)
+        return error.exit_code if (sys.argv[1:2] != ["--qualify-local"] and type(error) is _ChildFailure
+                                   and type(error.exit_code) is int and error.exit_code in _FAILURE_EXIT_CODES) else 2
     except SystemExit as error:
         if type(error) is SystemExit and (error.code is None or (type(error.code) is int and error.code == 0)):
             return 0

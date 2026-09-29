@@ -341,7 +341,39 @@ def test_nonzero_trainer_does_not_emit_success(material, seal):
     assert not (admitted.paths.state / "packaged-terminal.json").exists()
 
 
+def test_child_exit_contract_is_finite_and_reserved():
+    from tuner.runtime import packaged_sft_child as child
+    assert len(seam.CHILD_EXIT_STAGES) == 35
+    assert set(seam.CHILD_EXIT_STAGES) == child._FAILURE_EXIT_CODES
+    assert set(seam.CHILD_EXIT_STAGES.values()) == seam.CHILD_FAILURE_STAGES
+    assert tuple(seam.CHILD_EXIT_STAGES.values()) == tuple(
+        "TRAINER_CHILD_" + phase + "_" + category
+        for phase in child._FAILURE_PHASES for category in child._FAILURE_CATEGORIES
+    ) + tuple("TRAINER_CHILD_EXEC_" + category for category in seam._CHILD_EXEC_CATEGORIES)
+
+
+@pytest.mark.parametrize("exit_code,expected", (
+    (40, "TRAINER_CHILD_TRANSPORT_OS"),
+    (58, "TRAINER_CHILD_IMPORT_SYSTEM_EXIT"),
+    (69, "TRAINER_CHILD_POSTCHECK_OTHER"),
+    (70, "TRAINER_CHILD_EXEC_RUNTIME"),
+    (74, "TRAINER_CHILD_EXEC_MEMORY"),
+    (2, "TRAINER"), (75, "TRAINER"), (-9, "TRAINER"),
+))
+def test_trainer_exit_diagnostic_preserves_failure_and_never_publishes(material, seal, exit_code, expected):
+    admitted = seam.admit_packaged_sft(**material)
+    class Failed:
+        def run(self, invocation):
+            return core.TrainerEvidence(exit_code, invocation.final_model_dir, invocation.tokenizer_dir, {}, {}, {})
+    with pytest.raises(seam.PackagedSFTExecutionError) as caught:
+        seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare, runner=Failed())
+    assert caught.value.stage == expected
+    assert not list(admitted.paths.artifacts.iterdir())
+    assert not (admitted.paths.state / "packaged-terminal.json").exists()
+
+
 def test_invalid_artifact_set_never_publishes_completed_terminal(material, seal):
+    """Rejected artifacts cannot become a completed run."""
     admitted = seam.admit_packaged_sft(**material)
     class ExtraArtifact(FakeRunner):
         def run(self, invocation):

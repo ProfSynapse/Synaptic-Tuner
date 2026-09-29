@@ -10,6 +10,7 @@ from typing import Protocol
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes, digest_text, safe_ref
 from tuner.runtime.packaged_sft_execution import (
+    CHILD_FAILURE_STAGES,
     PackagedSFTExecutionError,
     PackagedSFTPaths,
     admit_packaged_sft,
@@ -65,14 +66,14 @@ PACKAGED_WORKER_FAILURE_STAGES = frozenset({
     "COPY_DEST_CREATE_OS COPY_DEST_IDENTITY COPY_STREAM COPY_STREAM_READ COPY_STREAM_WRITE "
     "COPY_STREAM_HASH COPY_STREAM_FSYNC COPY_SOURCE_RECHECK COPY_DEST_RECHECK "
     "COPY_MEMBER_RECHECK COPY_PRIVATE_RECHECK COPY_ROOT_RECHECK"
-).split())
+).split()) | frozenset("SFT_" + stage for stage in CHILD_FAILURE_STAGES)
 _SFT_FAILURE_STAGES = frozenset({
     "ADMISSION", "ADMISSION_CONTRACTS", "ADMISSION_RELEASE", "ADMISSION_PATHS",
     "ADMISSION_INPUT", "ADMISSION_ENVIRONMENT", "ADMISSION_INVOCATION",
     "ADMISSION_COMMITMENT", "PREPARATION", "REVALIDATION", "INVOCATION", "TRAINER",
     "EVIDENCE", "ARTIFACT",
 }) | frozenset(stage.removeprefix("SFT_") for stage in PACKAGED_WORKER_FAILURE_STAGES
-               if stage.startswith("SFT_PREPARATION_"))
+               if stage.startswith("SFT_PREPARATION_")) | CHILD_FAILURE_STAGES
 
 
 def packaged_worker_failure(stage: str) -> dict[str, object]:

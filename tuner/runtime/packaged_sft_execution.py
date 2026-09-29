@@ -34,12 +34,24 @@ from tuner.training.packaged_compilation import (
 LINEAGE_SCHEMA = "synaptic-packaged-sft-training-lineage/v1"
 TERMINAL_SCHEMA = "synaptic-packaged-sft-terminal/v1"
 _ROLES = ("workload_record", "training_lineage", "training_metrics", "final_model", "tokenizer")
+_CHILD_PHASES = ("TRANSPORT", "RELEASE", "INPUT", "IMPORT", "EXEC", "POSTCHECK")
+_CHILD_CATEGORIES = ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER")
+_CHILD_EXEC_CATEGORIES = ("RUNTIME", "TYPE", "ATTRIBUTE", "KEY", "MEMORY")
+CHILD_EXIT_STAGES = {
+    40 + phase_index * len(_CHILD_CATEGORIES) + category_index:
+        "TRAINER_CHILD_" + phase + "_" + category
+    for phase_index, phase in enumerate(_CHILD_PHASES)
+    for category_index, category in enumerate(_CHILD_CATEGORIES)
+}
+CHILD_EXIT_STAGES.update({70 + index: "TRAINER_CHILD_EXEC_" + category
+                          for index, category in enumerate(_CHILD_EXEC_CATEGORIES)})
+CHILD_FAILURE_STAGES = frozenset(CHILD_EXIT_STAGES.values())
 _CODES = frozenset({
     "ADMISSION", "ADMISSION_CONTRACTS", "ADMISSION_RELEASE", "ADMISSION_PATHS",
     "ADMISSION_INPUT", "ADMISSION_ENVIRONMENT", "ADMISSION_INVOCATION",
     "ADMISSION_COMMITMENT", "PREPARATION", "REVALIDATION", "INVOCATION",
     "TRAINER", "EVIDENCE", "ARTIFACT",
-}) | frozenset("PREPARATION_" + stage for stage in (
+}) | CHILD_FAILURE_STAGES | frozenset("PREPARATION_" + stage for stage in (
     "MODEL_UNAVAILABLE", "MODEL_SDK_ADMISSION", "MODEL_INPUT", "MODEL_WORKSPACE_SETUP",
     "MODEL_METADATA_FETCH", "MODEL_METADATA_VALIDATION",
     "MODEL_DOWNLOAD", "MODEL_VERIFICATION", "MODEL_PERSISTENT_PUBLICATION",
@@ -971,6 +983,7 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
     artifact_files = ()
     private_copy = None
     stage = "REVALIDATION"
+    child_failure_stage = None
     try:
         from Trainers.sft import runtime_v1 as core
         if (type(admitted) is not AdmittedPackagedSFT or admitted._seal is not _TOKEN or admitted._used
@@ -1026,7 +1039,7 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
                 "status": "completed", "trainer_exit_code": 0}
         class RevalidatingRunner:
             def run(self, invocation):
-                nonlocal stage
+                nonlocal stage, child_failure_stage
                 stage = "REVALIDATION"
                 for directory in (*admitted._directories, *snapshots):
                     directory.check()
@@ -1041,6 +1054,8 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
                         directory.close()
                 stage = "TRAINER"
                 evidence = (runner or core.SubprocessTrainerRunner()).run(invocation)
+                if type(evidence) is core.TrainerEvidence and type(evidence.exit_code) is int:
+                    child_failure_stage = CHILD_EXIT_STAGES.get(evidence.exit_code)
                 stage = "EVIDENCE"
                 private_copy.check()
                 for directory in admitted._directories:
@@ -1075,7 +1090,7 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
         try:
             if core is not None and isinstance(error, core.RuntimeV1Error):
                 code = getattr(error, "diagnostic_code", "")
-                stage = {"runtime_trainer_failed": "TRAINER", "runtime_evidence_rejected": "EVIDENCE",
+                stage = {"runtime_trainer_failed": child_failure_stage or "TRAINER", "runtime_evidence_rejected": "EVIDENCE",
                          "runtime_artifact_rejected": "ARTIFACT"}.get(code, stage)
         except BaseException:
             pass

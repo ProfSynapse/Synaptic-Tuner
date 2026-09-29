@@ -64,7 +64,13 @@ _FIXED_WORKER_FAILURE_STAGES = frozenset({
     "COPY_DEST_CREATE_OS COPY_DEST_IDENTITY COPY_STREAM COPY_STREAM_READ COPY_STREAM_WRITE "
     "COPY_STREAM_HASH COPY_STREAM_FSYNC COPY_SOURCE_RECHECK COPY_DEST_RECHECK "
     "COPY_MEMBER_RECHECK COPY_PRIVATE_RECHECK COPY_ROOT_RECHECK"
-).split())
+).split()) | frozenset(
+    "SFT_TRAINER_CHILD_" + phase + "_" + category
+    for phase in ("TRANSPORT", "RELEASE", "INPUT", "IMPORT", "EXEC", "POSTCHECK")
+    for category in ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER")
+) | frozenset("SFT_TRAINER_CHILD_EXEC_" + category for category in (
+    "RUNTIME", "TYPE", "ATTRIBUTE", "KEY", "MEMORY",
+))
 
 
 class ModalPackagedCoordinatorReaderV1:
