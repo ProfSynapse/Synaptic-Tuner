@@ -32,6 +32,19 @@ DEFAULT_CHAT_TEMPLATE = """{% for message in messages %}
 
 
 MEMORY_EFFICIENT_LOSS_REQUIRED = "SFT_MEMORY_EFFICIENT_LOSS_REQUIRED"
+_ABSENT_TOKENIZER = object()
+
+
+def _exact_snapshot_source(source, snapshot: Path) -> bool:
+    if type(source) is not str:
+        return False
+    candidate = Path(source)
+    if not candidate.is_absolute() or candidate != snapshot:
+        return False
+    try:
+        return candidate.resolve(strict=True) == snapshot
+    except OSError:
+        return False
 
 
 def require_unsloth_memory_efficient_loss(model, *, loss_mapping=None) -> None:
@@ -283,9 +296,18 @@ def load_model_and_tokenizer(
             raise RuntimeError("Loaded model snapshot does not match the protected revision")
         if _diagnostic_mark is not None:
             _diagnostic_mark("TOKENIZER_SOURCE")
-        tokenizer_source = getattr(tokenizer, "name_or_path", None)
-        if not isinstance(tokenizer_source, str) or Path(tokenizer_source).resolve() != protected_snapshot:
-            raise RuntimeError("Loaded tokenizer snapshot does not match the protected revision")
+        text_tokenizer = getattr(tokenizer, "tokenizer", _ABSENT_TOKENIZER)
+        if text_tokenizer is _ABSENT_TOKENIZER:
+            tokenizer_source = getattr(tokenizer, "name_or_path", None)
+            if not isinstance(tokenizer_source, str) or Path(tokenizer_source).resolve() != protected_snapshot:
+                raise RuntimeError("Loaded tokenizer snapshot does not match the protected revision")
+        else:
+            tokenizer_source = getattr(text_tokenizer, "name_or_path", None)
+            wrapper_source = getattr(tokenizer, "name_or_path", _ABSENT_TOKENIZER)
+            if (not _exact_snapshot_source(tokenizer_source, protected_snapshot)
+                    or (wrapper_source is not _ABSENT_TOKENIZER
+                        and not _exact_snapshot_source(wrapper_source, protected_snapshot))):
+                raise RuntimeError("Loaded tokenizer snapshot does not match the protected revision")
 
     if _diagnostic_mark is not None:
         _diagnostic_mark("MODEL_FINALIZE")

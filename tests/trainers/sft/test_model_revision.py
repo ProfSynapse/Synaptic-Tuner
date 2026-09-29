@@ -119,19 +119,81 @@ def test_runtime_loader_marks_exact_model_boundaries_without_changing_load(monke
     assert stages == ["MODEL_SNAPSHOT", "MODEL_LIBRARY_LOAD", "MODEL_SOURCE", "TOKENIZER_SOURCE", "MODEL_FINALIZE"]
 
 
-def test_runtime_loader_processor_without_top_level_source_still_rejects(monkeypatch, tmp_path: Path) -> None:
+def test_runtime_loader_accepts_exact_nested_text_tokenizer_and_preserves_processor(monkeypatch, tmp_path: Path) -> None:
     revision = "a" * 40
     cache = (tmp_path / "cache" / "model").resolve()
     snapshot = cache / "models--owner--model" / "snapshots" / revision
     snapshot.mkdir(parents=True)
     (snapshot / "config.json").write_text("{}", encoding="utf-8")
     module, _ = _load(monkeypatch, revision, snapshot)
-    def processor(**kwargs):
-        return (SimpleNamespace(config=SimpleNamespace(_name_or_path=kwargs["model_name"])),
-                SimpleNamespace(chat_template="x", tokenizer=SimpleNamespace(name_or_path=kwargs["model_name"])))
-    monkeypatch.setattr(module.FastLanguageModel, "from_pretrained", processor)
+    class TextTokenizer:
+        name_or_path = str(snapshot)
+        def __len__(self):
+            return 3
+    processor = SimpleNamespace(chat_template="x", tokenizer=TextTokenizer())
+    monkeypatch.setattr(module.FastLanguageModel, "from_pretrained", lambda **kwargs: (
+        SimpleNamespace(config=SimpleNamespace(_name_or_path=kwargs["model_name"])), processor))
     stages = []
-    with pytest.raises(RuntimeError, match="Loaded tokenizer snapshot"):
+    _, returned = module.load_model_and_tokenizer(
+        "owner/model", model_revision=revision, cache_dir=str(cache),
+        model_snapshot=str(snapshot), require_local_snapshot=True,
+        _diagnostic_mark=stages.append,
+    )
+    assert returned is processor
+    assert stages == ["MODEL_SNAPSHOT", "MODEL_LIBRARY_LOAD", "MODEL_SOURCE", "TOKENIZER_SOURCE", "MODEL_FINALIZE"]
+    processor.name_or_path = str(snapshot)
+    _, returned_with_wrapper_source = module.load_model_and_tokenizer(
+        "owner/model", model_revision=revision, cache_dir=str(cache),
+        model_snapshot=str(snapshot), require_local_snapshot=True,
+    )
+    assert returned_with_wrapper_source is processor
+
+
+@pytest.mark.parametrize("shape", (
+    "nested_none", "nested_missing", "nested_relative", "nested_mismatch",
+    "nested_nonstring", "wrapper_mismatch", "wrapper_none", "wrapper_relative", "wrapper_nonstring",
+    "wrapper_property_error",
+))
+def test_runtime_loader_rejects_unbound_or_conflicting_processor_sources(monkeypatch, tmp_path: Path, shape: str) -> None:
+    revision = "a" * 40
+    cache = (tmp_path / "cache" / "model").resolve()
+    snapshot = cache / "models--owner--model" / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+    module, _ = _load(monkeypatch, revision, snapshot)
+    nested = SimpleNamespace(name_or_path=str(snapshot))
+    processor = SimpleNamespace(chat_template="x", tokenizer=nested)
+    if shape == "nested_none":
+        processor.tokenizer = None
+    elif shape == "nested_missing":
+        processor.tokenizer = SimpleNamespace()
+    elif shape == "nested_relative":
+        nested.name_or_path = "relative/snapshot"
+    elif shape == "nested_mismatch":
+        nested.name_or_path = str(tmp_path / "foreign")
+    elif shape == "nested_nonstring":
+        nested.name_or_path = 7
+    elif shape == "wrapper_mismatch":
+        processor.name_or_path = str(tmp_path / "foreign")
+    elif shape == "wrapper_none":
+        processor.name_or_path = None
+    elif shape == "wrapper_relative":
+        processor.name_or_path = "relative/snapshot"
+    elif shape == "wrapper_nonstring":
+        processor.name_or_path = 7
+    elif shape == "wrapper_property_error":
+        class UnreadableProcessor:
+            tokenizer = nested
+            chat_template = "x"
+            @property
+            def name_or_path(self):
+                raise OSError("PRIVATE_SENTINEL")
+        processor = UnreadableProcessor()
+    monkeypatch.setattr(module.FastLanguageModel, "from_pretrained", lambda **kwargs: (
+        SimpleNamespace(config=SimpleNamespace(_name_or_path=kwargs["model_name"])), processor))
+    stages = []
+    expected = OSError if shape == "wrapper_property_error" else RuntimeError
+    with pytest.raises(expected):
         module.load_model_and_tokenizer(
             "owner/model", model_revision=revision, cache_dir=str(cache),
             model_snapshot=str(snapshot), require_local_snapshot=True,

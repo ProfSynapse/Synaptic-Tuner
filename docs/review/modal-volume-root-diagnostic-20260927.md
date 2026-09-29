@@ -769,3 +769,33 @@ existing clock port. Independent review approved this test-only change. It does
 not enter the real launcher, alter authority, suppress failures, or remove the
 separate deterministic rollback-negative regression. The environmental risk
 remains recorded while the training objective proceeds through ordinary guards.
+
+The isolated projection matrix passed all 134 cases. Pushed source `b65f4829`
+then completed integrated CPU qualification and submitted fresh GPU attempt
+`modal-62f366306b2d17940efedebe`. At `2026-09-29T12:41:11.194541`, the exact
+claim-bound inspector and public CLI agreed on
+`WORKER_SFT_TRAINER_CHILD_EXEC_RUNTIME_TOKENIZER_SOURCE` for claim
+`97a23f6c3849e5d22389b816c511be26df64f3cb336bb9418edfb86a8c440d04`,
+call `fc-01M3Q0BJPN4RQBME12FZM3MV81`. The model library load and model-source
+validation returned successfully; tokenizer-source validation failed. This is
+not optimizer-step, adapter-save, or OOM evidence. Preserve the consumed attempt.
+
+The existing loader accepts a processor wrapper elsewhere for vocabulary-size
+reporting but its protected source check only reads top-level `name_or_path`.
+Transformers documents processors as compositions containing a text tokenizer.
+The reviewed narrow candidate validates the nested tokenizer against the same
+exact snapshot, checks any present wrapper source for consistency, and preserves
+the original returned object. The remote object shape remains unmeasured; a
+fresh live run must test the candidate. No dependency/model pins, offline flags,
+authorization semantics, or OS time services are changed by this candidate.
+
+The narrow implementation passed all 21 focused loader tests under the pinned
+CPython 3.11.14 launcher, including nested-source acceptance, processor-object
+preservation, conflicting/malformed source rejection and property-error failure.
+The nine offline/bootstrap closure tests passed with their own fixture scope;
+the isolated launcher does not supply the unrelated root ML fixtures' NumPy.
+All four source commitments are CURRENT and skill trees remain synchronized.
+Only the model-loader hash in the fixed 66-member offline closure and that
+manifest's hash in the fixed 98-member bootstrap lock changed; no inventory,
+dependency pin, model revision or training parameter changed. The next proof
+is one fresh ordinary TrainingAPI run with its integrated CPU qualification.
