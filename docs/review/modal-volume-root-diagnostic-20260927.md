@@ -833,4 +833,41 @@ commitments are CURRENT; only hashes within existing inventories changed.
 The isolated core tests require pinned CPython 3.11.14; native 3.10 rejected
 its version contract before evidence, not a diagnostic assertion failure.
 The independent Modal-worker allowed-stage inventory was updated by exactly
-the eight reviewed labels. Skill trees remain synchronized.
+the eight reviewed labels; its full 130-test file passed. Skill trees remain
+synchronized.
+
+Pushed diagnostic source `779e4ddc276bad562421b27ec7122725c530b94d` passed
+integrated CPU qualification for `modal-595c5520451e28297b0a8503`. Submit claim
+`69c1c22dc5a173488d72238e1e1eabbe7d61e37fcc18e172270c2796c802cc97` produced
+call `fc-01M3Q3ZD5DKPY2S2PXSY7350YJ`. At `2026-09-29T13:46:34.960528`,
+public CLI and exact-call inspector still agreed on generic `WORKER_SFT_EVIDENCE`.
+The generic stage also spans subsequent core artifact assembly; it cannot prove
+the failure occurred at an evidence predicate or that training succeeded.
+
+A provider-free experiment added only `preprocessor_config.json` and
+`video_preprocessor_config.json` to the existing otherwise-valid runner output.
+Core artifact selection rejected it with its fixed unsupported-file error and
+no diagnostic code, reproducing the generic wrapper stage. Both filenames occur
+in the exact pinned Qwen snapshot. The live emitted inventory remains unobserved;
+this is a reproducible producer/contract incompatibility, not yet a live cause
+claim. The suspected PEFT base-ref mismatch is already corrected by the existing
+post-save stamp and is not promoted as the cause.
+
+The trainer inventory pins Transformers 5.17.0; earlier 4.57.1 processor docs
+only supported a general API explanation, not the live trainer version. Its
+Trainer save path does not save a processor with this repo's current kwargs,
+while the explicit ProcessorMixin save emits component configuration. The
+reviewed candidate keeps the processor for preprocessing/training but saves its
+text tokenizer for runtime-v1's text-only archive. It must serialize the actual
+wrapper chat template while restoring in-memory tokenizer state afterward.
+No artifact allowlist broadening or output-file deletion is part of this fix.
+
+The frozen save helper passed 21 focused source/behavior tests on pinned
+CPython 3.11.14. Tests exercise direct-tokenizer behavior, differing/missing
+inner templates, success/failure restoration, no processor save call, strict
+model/tokenizer archive acceptance for text-only output and rejection of both
+modality sidecars. Independent review found no issues. The fixed offline
+66-member manifest refresh changes only `train_sft.py`; the bootstrap lock
+refresh changes only the offline-manifest hash. All four commitments are CURRENT
+and skill trees are synchronized. The live candidate still requires one fresh
+ordinary run; prior consumed attempts are not reused.

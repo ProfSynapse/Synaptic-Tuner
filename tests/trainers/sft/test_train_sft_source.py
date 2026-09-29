@@ -1,8 +1,11 @@
 import argparse
 import ast
+import json
 from pathlib import Path
+from typing import Any
 
 import pytest
+import Trainers.sft.runtime_v1 as runtime_v1
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -297,10 +300,104 @@ def test_runtime_v1_projection_is_opt_in_atomic_and_post_save() -> None:
     ):
         assert flag in source
     assert "if any(present) and not all(present):" in source
-    assert "if args.protected_smoke_evidence or runtime_v1_requested:" in source
+    save_block = source[source.index("trainer.save_model(") : source.index("# Runtime v1 only:", source.index("trainer.save_model("))]
+    assert "if runtime_v1_requested:" in save_block
+    assert "_save_runtime_v1_text_tokenizer(tokenizer, final_model_path)" in save_block
+    assert "elif args.protected_smoke_evidence:" in save_block
+    assert "tokenizer.save_pretrained(str(final_model_path))" in save_block
     assert "os.replace(temporary, destination)" in source
     assert source.index("trainer.save_model(") < source.index("write_runtime_v1_projection_atomic(", source.index("def run("))
     assert 'lineage["synaptic_runtime_projection"] = runtime_projection' in source
+
+
+def _runtime_v1_text_saver():
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    function = next(node for node in ast.parse(source).body
+                    if isinstance(node, ast.FunctionDef) and node.name == "_save_runtime_v1_text_tokenizer")
+    namespace = {"Any": Any, "Path": Path}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), "text_tokenizer_saver", "exec"), namespace)
+    return namespace["_save_runtime_v1_text_tokenizer"]
+
+
+class _TextTokenizer:
+    def __init__(self, template: str | None = None, *, fail: bool = False) -> None:
+        if template is not None:
+            self.chat_template = template
+        self.fail = fail
+        self.saved_template = None
+
+    def save_pretrained(self, directory: str) -> None:
+        if self.fail:
+            raise RuntimeError("PRIVATE_SENTINEL")
+        root = Path(directory)
+        self.saved_template = getattr(self, "chat_template", None)
+        (root / "tokenizer_config.json").write_text(
+            json.dumps({"tokenizer_class": "Fixture", "chat_template": self.saved_template}), encoding="utf-8")
+        (root / "tokenizer.json").write_text(
+            '{"version":"1.0","model":{"type":"BPE","vocab":{"x":0}}}', encoding="utf-8")
+        if self.saved_template:
+            (root / "chat_template.jinja").write_text(self.saved_template, encoding="utf-8")
+
+
+class _Processor:
+    def __init__(self, text_tokenizer: _TextTokenizer, template: str) -> None:
+        self.tokenizer = text_tokenizer
+        self.chat_template = template
+        self.save_called = False
+
+    def save_pretrained(self, directory: str) -> None:
+        self.save_called = True
+        raise AssertionError("processor save must not create modality sidecars")
+
+
+@pytest.mark.parametrize("inner_template", ["inner template", None])
+def test_runtime_v1_saves_effective_wrapper_template_as_text_only(tmp_path: Path, inner_template: str | None) -> None:
+    text = _TextTokenizer(inner_template)
+    wrapper = _Processor(text, "effective wrapper template")
+    _runtime_v1_text_saver()(wrapper, tmp_path)
+    assert not wrapper.save_called
+    assert text.saved_template == wrapper.chat_template
+    assert (tmp_path / "chat_template.jinja").read_text(encoding="utf-8") == wrapper.chat_template
+    assert (tmp_path / "tokenizer_config.json").is_file()
+    assert (tmp_path / "tokenizer.json").is_file()
+    assert not (tmp_path / "preprocessor_config.json").exists()
+    assert not (tmp_path / "video_preprocessor_config.json").exists()
+    if inner_template is None:
+        assert not hasattr(text, "chat_template")
+    else:
+        assert text.chat_template == inner_template
+
+    (tmp_path / "adapter_config.json").write_text(
+        '{"peft_type":"LORA","base_model_name_or_path":"example/model"}', encoding="utf-8")
+    header = b'{"weight":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}'
+    header += b" " * ((8 - len(header) % 8) % 8)
+    (tmp_path / "adapter_model.safetensors").write_bytes(len(header).to_bytes(8, "little") + header + b"\x01\x00\x00\x00")
+    assert runtime_v1._select_artifact_members(tmp_path, "model", locked_model_ref="example/model")
+    assert runtime_v1._select_artifact_members(tmp_path, "tokenizer")
+    (tmp_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "video_preprocessor_config.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(runtime_v1.RuntimeV1Error, match="unsupported file"):
+        runtime_v1._select_artifact_members(tmp_path, "model", locked_model_ref="example/model")
+
+
+@pytest.mark.parametrize("inner_template", ["inner template", None])
+def test_runtime_v1_restores_text_template_when_save_fails(tmp_path: Path, inner_template: str | None) -> None:
+    text = _TextTokenizer(inner_template, fail=True)
+    wrapper = _Processor(text, "effective wrapper template")
+    with pytest.raises(RuntimeError, match="PRIVATE_SENTINEL"):
+        _runtime_v1_text_saver()(wrapper, tmp_path)
+    if inner_template is None:
+        assert not hasattr(text, "chat_template")
+    else:
+        assert text.chat_template == inner_template
+    assert not wrapper.save_called
+
+
+def test_runtime_v1_direct_tokenizer_save_is_unchanged(tmp_path: Path) -> None:
+    text = _TextTokenizer("direct template")
+    _runtime_v1_text_saver()(text, tmp_path)
+    assert text.saved_template == "direct template"
+    assert text.chat_template == "direct template"
 
 
 def _stamp_block(source: str) -> str:

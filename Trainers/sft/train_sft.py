@@ -33,6 +33,30 @@ def _mark_packaged_runtime_phase(phase: str) -> None:
         marker(phase)
 
 
+def _save_runtime_v1_text_tokenizer(tokenizer: Any, directory: Path) -> None:
+    """Save only the text tokenizer admitted by the runtime-v1 artifact contract."""
+    absent = object()
+    text_tokenizer = getattr(tokenizer, "tokenizer", absent)
+    if text_tokenizer is absent:
+        tokenizer.save_pretrained(str(directory))
+        return
+    if text_tokenizer is None:
+        raise RuntimeError("runtime-v1 processor has no text tokenizer")
+    template = getattr(tokenizer, "chat_template", absent)
+    if template is absent or template is None:
+        text_tokenizer.save_pretrained(str(directory))
+        return
+    original = getattr(text_tokenizer, "chat_template", absent)
+    text_tokenizer.chat_template = template
+    try:
+        text_tokenizer.save_pretrained(str(directory))
+    finally:
+        if original is absent:
+            del text_tokenizer.chat_template
+        else:
+            text_tokenizer.chat_template = original
+
+
 def runtime_profile_metadata(args: argparse.Namespace) -> dict[str, str] | None:
     """Validate the all-or-none runtime profile inputs forwarded by local-run."""
 
@@ -1641,7 +1665,9 @@ def run(args: argparse.Namespace):
     # Save final model
     print(f"\nSaving final model to: {final_model_path}")
     trainer.save_model(str(final_model_path))
-    if args.protected_smoke_evidence or runtime_v1_requested:
+    if runtime_v1_requested:
+        _save_runtime_v1_text_tokenizer(tokenizer, final_model_path)
+    elif args.protected_smoke_evidence:
         tokenizer.save_pretrained(str(final_model_path))
 
     # Runtime v1 only: peft wrote base_model_name_or_path as the offline
