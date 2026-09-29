@@ -442,3 +442,236 @@ def test_not_found_requires_exact_grpc_cause(monkeypatch):
     assert not diagnostic._proven_not_found(failure(ValueError("untrusted")))
     assert not diagnostic._proven_not_found(
         BoundedVolumeReadError("modal_volume_digest_mismatch"))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+def test_probe_admission_requires_same_claim_call_and_markers(tmp_path):
+    path, ref = _journal(tmp_path, marker_rows=True)
+    before = path.read_bytes()
+    binding, materials, call = diagnostic.read_retained_probe(path, ref, _CALL)
+    assert binding.command_digest == ref
+    assert materials == _materials(binding)
+    assert call == _CALL
+    assert path.read_bytes() == before
+    with pytest.raises(diagnostic.DiagnosticUnavailable):
+        diagnostic.read_retained_probe(path, ref, "fc-other")
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM catalogs WHERE catalog_ref=?", (diagnostic._MARKERS,))
+    with pytest.raises(diagnostic.DiagnosticUnavailable):
+        diagnostic.read_retained_probe(path, ref, _CALL)
+
+
+@pytest.mark.parametrize("size,expected", [
+    (0, "FIRST_BLOCK_EMPTY"),
+    (1024 * 1024, "FIRST_BLOCK_LE_1M"),
+    (1024 * 1024 + 1, "FIRST_BLOCK_GT_1M"),
+    (2 * 1024 * 1024, "FIRST_BLOCK_GT_1M"),
+])
+def test_probe_reads_only_first_bound_block_without_returning_bytes(size, expected):
+    binding = _case()[0]
+    requests, reads, urls = [], [], []
+
+    class Body:
+        remaining = size
+
+        async def read(self, maximum):
+            reads.append(maximum)
+            count = min(self.remaining, maximum, 8192)
+            self.remaining -= count
+            return b"private"[:1] * count
+
+    class Block:
+        status = 200
+        headers = {}
+        content = Body()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def get(self, url, *, allow_redirects):
+            urls.append((url, allow_redirects))
+            return Block()
+
+    class Stub:
+        async def VolumeGetFile2(self, request, *, retry, timeout):
+            requests.append((request, retry, timeout))
+            return SimpleNamespace(size=max(size, 1), start=0, len=max(size, 1),
+                                   get_urls=("https://provider.example/first",
+                                             "https://provider.example/unused"))
+
+    class Proto:
+        @staticmethod
+        def VolumeGetFile2Request(**kwargs):
+            return SimpleNamespace(**kwargs)
+
+    category = asyncio.run(diagnostic.inspect_first_artifact_block(
+        SimpleNamespace(stub=Stub()), binding, Proto, session_factory=Session,
+    ))
+    assert category == expected
+    assert len(requests) == 1
+    request, retry, timeout = requests[0]
+    assert retry is None and timeout == 15
+    assert request.volume_id == binding.provider_facts.artifact_volume_id
+    assert request.path == diagnostic.operation_path(
+        binding.command.operation.effect.effect_id, "output", "final_model.tar",
+    )
+    assert urls == [("https://provider.example/first", False)]
+    assert all(0 < count <= 64 * 1024 for count in reads)
+    assert size - Block.content.remaining <= diagnostic._FIRST_BLOCK_LIMIT + 1
+
+
+@pytest.mark.parametrize("change", [
+    {"size": 193 * 1024 * 1024}, {"start": 1}, {"len": 2},
+    {"get_urls": ()}, {"get_urls": ("http://provider.example/first",)},
+    {"get_urls": ("https://user@provider.example/first",)},
+])
+def test_probe_rejects_unbounded_or_untrusted_metadata_before_http(change):
+    binding = _case()[0]
+    metadata = dict(size=1, start=0, len=1,
+                    get_urls=("https://provider.example/first",))
+    metadata.update(change)
+
+    class Stub:
+        async def VolumeGetFile2(self, *_args, **_kwargs):
+            return SimpleNamespace(**metadata)
+
+    def no_session():
+        raise AssertionError("invalid metadata reached HTTP")
+
+    category = asyncio.run(diagnostic.inspect_first_artifact_block(
+        SimpleNamespace(stub=Stub()), binding,
+        SimpleNamespace(VolumeGetFile2Request=lambda **kwargs: SimpleNamespace(**kwargs)),
+        session_factory=no_session,
+    ))
+    assert category in {"BLOCK_METADATA_INVALID", "FIRST_BLOCK_UNAVAILABLE"}
+
+
+def test_probe_rejects_encoded_block_without_reading_body():
+    binding = _case()[0]
+
+    class Block:
+        status = 200
+        headers = {"Content-Encoding": "gzip"}
+
+        class content:
+            @staticmethod
+            async def read(_maximum):
+                raise AssertionError("encoded body must not be read")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def get(self, *_args, **_kwargs):
+            return Block()
+
+    class Stub:
+        async def VolumeGetFile2(self, *_args, **_kwargs):
+            return SimpleNamespace(size=2, start=0, len=2,
+                                   get_urls=("https://provider.example/first",))
+
+    category = asyncio.run(diagnostic.inspect_first_artifact_block(
+        SimpleNamespace(stub=Stub()), binding,
+        SimpleNamespace(VolumeGetFile2Request=lambda **kwargs: SimpleNamespace(**kwargs)),
+        session_factory=Session,
+    ))
+    assert category == "FIRST_BLOCK_UNAVAILABLE"
+
+
+def test_invalid_probe_journal_prevents_provider_import(tmp_path, monkeypatch, capsys):
+    imported = []
+    original = __import__("builtins").__import__
+
+    def guarded(name, *args, **kwargs):
+        if name == "modal" or name.startswith("modal."):
+            imported.append(name)
+            raise AssertionError("provider imported before probe admission")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", guarded)
+    code = diagnostic.main([
+        "--journal", str(tmp_path / "missing.sqlite3"),
+        "--claim-ref", "a" * 64, "--call-id", _CALL,
+        "--probe-final-model-first-chunk", "--modal-profile", "named-profile",
+    ])
+    assert code == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "schema_version": "synaptic-modal-packaged-artifact-probe-diagnostic/v1",
+        "authority": "DIAGNOSTIC_ONLY", "result": "JOURNAL_INVALID",
+    }
+    assert imported == []
+
+
+def test_pinned_synchronizer_bridges_probe_without_volume_hydration():
+    synchronizer = pytest.importorskip("modal._utils.async_utils").synchronizer
+    binding = _case()[0]
+    requests = []
+
+    class Body:
+        calls = 0
+
+        async def read(self, maximum):
+            self.calls += 1
+            assert maximum <= 64 * 1024
+            return b"x" if self.calls == 1 else b""
+
+    class Block:
+        status = 200
+        headers = {}
+        content = Body()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def get(self, url, *, allow_redirects):
+            assert url == "https://provider.example/first"
+            assert allow_redirects is False
+            return Block()
+
+    class Stub:
+        async def VolumeGetFile2(self, request, *, retry, timeout):
+            requests.append((request, retry, timeout))
+            return SimpleNamespace(size=1, start=0, len=1,
+                                   get_urls=("https://provider.example/first",))
+
+    proto = SimpleNamespace(VolumeGetFile2Request=lambda **kwargs: SimpleNamespace(**kwargs))
+    category = synchronizer.create_blocking(diagnostic.inspect_first_artifact_block)(
+        SimpleNamespace(stub=Stub()), binding, proto, session_factory=Session,
+    )
+    assert category == "FIRST_BLOCK_LE_1M"
+    assert len(requests) == 1
+    request, retry, timeout = requests[0]
+    assert (request.volume_id, request.path, retry, timeout) == (
+        binding.provider_facts.artifact_volume_id,
+        diagnostic.operation_path(binding.command.operation.effect.effect_id,
+                                  "output", "final_model.tar"), None, 15,
+    )

@@ -246,7 +246,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__facade_py": {
       "path": "tuner/execution/providers/modal/facade.py",
-      "sha256": "2c30a3c86f8ce32da569b8472f3816141baf5c555b38f490f68a9f730f0032f6"
+      "sha256": "c171c901e32dc943f17caf98dbc83bc90e06ee9797928a9baa7227d82494286f"
     },
     "bootstrap__tuner__execution__providers__modal__manifest_py": {
       "path": "tuner/execution/providers/modal/manifest.py",

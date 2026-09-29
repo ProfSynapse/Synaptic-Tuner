@@ -30,8 +30,9 @@ from tuner.training.modal_host_effects import (
     _encode_binding, _encode_marker_materials,
 )
 from tuner.execution.providers.modal.bounded_volume_read import (
-    BoundedModalVolumeReader, BoundedVolumeReadError,
+    BoundedModalVolumeReader, BoundedVolumeReadError, _https_url,
 )
+from tuner.execution.providers.modal.contracts import operation_path
 
 
 _NAMESPACE = "standalone-training"
@@ -44,6 +45,9 @@ _MAX_BINDING = 16 * 1024 * 1024
 _MAX_CALL = 1024
 _MAX_MARKERS = 4096
 _MAX_FIXED_RESULT = 512
+_MAX_ARTIFACT_BYTES = 192 * 1024 * 1024
+_FIRST_BLOCK_LIMIT = 1024 * 1024
+_MAX_BLOCK_URLS = 64
 _RESULT_SCHEMA = "synaptic-modal-packaged-worker-result/v1"
 _RESULT_SCHEMA_V2 = "synaptic-modal-packaged-worker-result/v2"
 _WORKER_FAILURE_STAGES = (
@@ -123,11 +127,12 @@ def _catalog_bytes(connection, catalog: str, item: str, maximum: int) -> bytes:
 
 
 def _read_retained(database: Path, claim_ref: str,
-                   supplied_call_id: str | None) -> str | tuple[ModalPackagedMarkerMaterial, ...]:
+                   supplied_call_id: str | None, *, probe: bool = False):
     """Authenticate a submit claim and exactly one diagnostic catalog read-only."""
     descriptor = None
     try:
         if (os.name != "posix" or not database.is_absolute()
+                or (probe and supplied_call_id is None)
                 or type(claim_ref) is not str or _HEX.fullmatch(claim_ref) is None
                 or (supplied_call_id is not None and (
                     type(supplied_call_id) is not str
@@ -179,7 +184,7 @@ def _read_retained(database: Path, claim_ref: str,
                     or binding.command_digest != claim_ref
                     or binding.authenticated_binding_digest != claim["binding_digest"]):
                 raise ValueError
-            if supplied_call_id is None:
+            if supplied_call_id is None or probe:
                 raw_markers = _catalog_bytes(connection, _MARKERS, claim_ref, _MAX_MARKERS)
                 materials = _decode_marker_materials(raw_markers)
                 facts = binding.provider_facts
@@ -196,7 +201,7 @@ def _read_retained(database: Path, claim_ref: str,
                         or len({item.marker_name for item in commitments}) != len(expected)
                         or len({item.value_sha256 for item in commitments}) != len(expected)):
                     raise ValueError
-            else:
+            if supplied_call_id is not None:
                 raw_call = _catalog_bytes(connection, _CALLS, claim_ref, _MAX_CALL)
                 call = parse_canonical_object(raw_call, name="packaged call")
                 if (canonical_bytes(call) != raw_call or set(call) != {"provider_job_ref"}
@@ -209,6 +214,8 @@ def _read_retained(database: Path, claim_ref: str,
                 or (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino)
                 or not _private_regular(current)):
             raise ValueError
+        if probe:
+            return binding, materials, supplied_call_id
         return materials if supplied_call_id is None else supplied_call_id
     except Exception:
         raise DiagnosticUnavailable("JOURNAL_INVALID") from None
@@ -229,6 +236,11 @@ def read_retained_markers(database: Path, claim_ref: str) -> tuple[ModalPackaged
     result = _read_retained(database, claim_ref, None)
     assert type(result) is tuple
     return result
+
+
+def read_retained_probe(database: Path, claim_ref: str, supplied_call_id: str):
+    """Read one exact submit binding, call, and marker set in one private snapshot."""
+    return _read_retained(database, claim_ref, supplied_call_id, probe=True)
 
 
 def _pinned_python() -> bool:
@@ -343,6 +355,54 @@ async def inspect_markers(reader: BoundedModalVolumeReader,
     return results
 
 
+async def inspect_first_artifact_block(client: object, binding: object, api_pb2: object,
+                                       *, session_factory=None) -> str:
+    """Bound one provider block read; this does not authenticate an artifact."""
+    try:
+        facts = binding.provider_facts
+        volume_id = facts.artifact_volume_id
+        path = operation_path(binding.command.operation.effect.effect_id,
+                              "output", "final_model.tar")
+        request = api_pb2.VolumeGetFile2Request(volume_id=volume_id, path=path)
+        response = await asyncio.wait_for(
+            client.stub.VolumeGetFile2(request, retry=None, timeout=15), timeout=16,
+        )
+        urls = tuple(response.get_urls)
+        if (type(response.size) is not int
+                or not 1 <= response.size <= _MAX_ARTIFACT_BYTES
+                or type(response.start) is not int or response.start != 0
+                or type(response.len) is not int or response.len != response.size
+                or not 1 <= len(urls) <= _MAX_BLOCK_URLS):
+            return "BLOCK_METADATA_INVALID"
+        urls = tuple(_https_url(url) for url in urls)
+        if session_factory is None:
+            import aiohttp
+            session_factory = lambda: aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30, sock_read=10),
+                read_bufsize=64 * 1024, auto_decompress=False,
+            )
+        total = 0
+        async with session_factory() as session:
+            async with session.get(urls[0], allow_redirects=False) as block:
+                if (block.status != 200
+                        or block.headers.get("Content-Encoding", "identity").lower()
+                        != "identity"):
+                    return "FIRST_BLOCK_UNAVAILABLE"
+                while total <= _FIRST_BLOCK_LIMIT:
+                    requested = min(64 * 1024, _FIRST_BLOCK_LIMIT + 1 - total)
+                    piece = await block.content.read(
+                        requested,
+                    )
+                    if type(piece) is not bytes or len(piece) > requested:
+                        return "FIRST_BLOCK_UNAVAILABLE"
+                    if not piece:
+                        return "FIRST_BLOCK_LE_1M" if total else "FIRST_BLOCK_EMPTY"
+                    total += len(piece)
+        return "FIRST_BLOCK_GT_1M"
+    except Exception:
+        return "FIRST_BLOCK_UNAVAILABLE"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--journal", required=True, type=Path)
@@ -350,12 +410,18 @@ def main(argv: list[str] | None = None) -> int:
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--call-id")
     selection.add_argument("--inspect-markers", action="store_true")
+    parser.add_argument("--probe-final-model-first-chunk", action="store_true")
     parser.add_argument("--modal-profile", required=True)
     args = parser.parse_args(argv)
     try:
-        retained = (read_retained_markers(args.journal, args.claim_ref)
-                    if args.inspect_markers else
-                    read_retained_call(args.journal, args.claim_ref, args.call_id))
+        if args.probe_final_model_first_chunk and args.inspect_markers:
+            raise DiagnosticUnavailable("INPUT_INVALID")
+        if args.probe_final_model_first_chunk:
+            retained = read_retained_probe(args.journal, args.claim_ref, args.call_id)
+        elif args.inspect_markers:
+            retained = read_retained_markers(args.journal, args.claim_ref)
+        else:
+            retained = read_retained_call(args.journal, args.claim_ref, args.call_id)
         profile = safe_ref(args.modal_profile, "modal_profile")
         with open(os.devnull, "w") as sink:
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
@@ -371,7 +437,25 @@ def main(argv: list[str] | None = None) -> int:
                     raise DiagnosticUnavailable("CREDENTIAL_UNAVAILABLE")
                 from modal._utils.async_utils import synchronizer
                 client = modal.Client.from_credentials(token_id, token_secret)
-                if args.inspect_markers:
+                if args.probe_final_model_first_chunk:
+                    binding, materials, call_id = retained
+                    reader = BoundedModalVolumeReader(sdk=modal, client=client)
+                    markers = synchronizer.create_blocking(inspect_markers)(reader, materials)
+                    if any(value != "MATCH" for value in markers.values()):
+                        category = "MARKER_UNAVAILABLE"
+                    else:
+                        from modal._serialization import serialize
+                        from modal_proto import api_pb2
+                        call = synchronizer.create_blocking(inspect_call)(
+                            client, call_id, api_pb2, serialize,
+                        )
+                        if call != "PROVIDER_SUCCESS_UNKNOWN":
+                            category = "CALL_UNAVAILABLE"
+                        else:
+                            category = synchronizer.create_blocking(
+                                inspect_first_artifact_block,
+                            )(client, binding, api_pb2)
+                elif args.inspect_markers:
                     reader = BoundedModalVolumeReader(sdk=modal, client=client)
                     category = synchronizer.create_blocking(inspect_markers)(reader, retained)
                 else:
@@ -384,13 +468,18 @@ def main(argv: list[str] | None = None) -> int:
         category = error.args[0]
     except Exception:
         category = "LOCAL_UNAVAILABLE"
-    if args.inspect_markers:
+    if args.probe_final_model_first_chunk:
+        payload = {"schema_version": "synaptic-modal-packaged-artifact-probe-diagnostic/v1",
+                   "authority": "DIAGNOSTIC_ONLY", "result": category}
+    elif args.inspect_markers:
         payload = {"schema_version": "synaptic-modal-packaged-marker-diagnostic/v1",
                    "authority": "DIAGNOSTIC_ONLY", "result": category}
     else:
         payload = {"schema_version": "synaptic-modal-packaged-call-diagnostic/v1",
                    "authority": "DIAGNOSTIC_ONLY", "result": category}
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    if args.probe_final_model_first_chunk:
+        return 0 if category in {"FIRST_BLOCK_LE_1M", "FIRST_BLOCK_GT_1M"} else 1
     if args.inspect_markers:
         return 0 if type(category) is dict and all(
             value == "MATCH" for value in category.values()) else 1

@@ -5,6 +5,8 @@ from dataclasses import dataclass, replace
 
 import pytest
 
+from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
+from tuner.execution.coordinator_v1.operations import _ArtifactStreamV1
 from tests.execution.providers.test_modal_source_resolution import _deployment
 from tests.execution.test_mutation_broker import command
 from tuner.execution.broker import MutationCommandV1
@@ -238,6 +240,34 @@ def test_read_list_and_deployment_use_only_explicit_client_environment_and_v1():
     name,kwargs=FakeVolume.calls[0]
     assert name=="control-name" and kwargs=={"environment_name":"env","create_if_missing":False,"version":1,"client":facade.client}
     assert FakeFunction.calls[-1][2]=={"environment_name":"env","client":facade.client}
+
+
+def test_volume_block_is_bounded_for_public_artifact_stream(monkeypatch):
+    facade, _ = make_facade()
+    payload = b"x" * (8 * 1024 * 1024)
+    FakeVolume.registry["artifact-name"].files["artifact.bin"] = payload
+
+    def read_one_block(self, path):
+        yield self.files[path]
+
+    monkeypatch.setattr(FakeVolume, "read_file", read_one_block)
+    chunks = list(facade.iter_complete("av", "artifact.bin", max_bytes=len(payload)))
+    assert [len(chunk) for chunk in chunks] == [1_048_576] * 8
+    assert b"".join(chunks) == payload
+
+    class Reader:
+        def iter_artifact_bytes(self, request, manifest, role, *, maximum_bytes):
+            assert role == "final_model"
+            return facade.iter_complete("av", "artifact.bin", max_bytes=maximum_bytes)
+
+    stream = _ArtifactStreamV1(
+        TrainingRunRef("run", "project"),
+        VerifiedArtifact("final_model", hashlib.sha256(payload).hexdigest(), len(payload)),
+        len(payload), Reader(), None, None,
+    )
+    assert b"".join(stream.iter_bytes()) == payload
+    with pytest.raises(ModalFacadeError, match="read_failed"):
+        next(facade.iter_complete("av", "artifact.bin", max_bytes=len(payload) - 1))
 
 
 def test_reads_and_listings_fail_closed_on_bounds_and_duplicates():

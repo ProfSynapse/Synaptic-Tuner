@@ -962,4 +962,59 @@ clock/auth policy is unchanged. The subsequent pinned CPython 3.11.14 gate
 passes all 223 standalone/download cases in 138.53 seconds, in addition to the
 12 reader cases. All four commitments are CURRENT and skills are synchronized.
 This establishes the provider-free regression barrier, not recovery of the
-prior process-local workflow or a live end-to-end success for the new source.
+prior process-local workflow or a live end-to-end success for that source.
+
+### Provider block versus public chunk contract (2026-09-29)
+
+Source `9dd7c6d2227b1fdeed4cd5fceffdc33b8ec9e475` passed CPU qualification
+for `modal-d060d4285f413117e0329811`. Submit claim
+`15f97a87cbe028300d35df731eb913bd3bad0805cd8b235b75f556eede12327d` produced
+GPU call `fc-01M3Q9H74NB63BHCN82NKVBMX8`. At
+`2026-09-29T15:26:01.755608` the public command again stopped at
+`RUN_ARTIFACT_DOWNLOAD`, after remote outcome and verification passed.
+Only a zero-byte final-model partial exists locally. The maximum-byte caller
+fix removes a demonstrated defect but does not establish full retrieval.
+
+Pinned Modal 1.5.4 `volume.py` downloads and yields whole provider blocks;
+`blob_utils.py` defines 8 MiB blocks. It also prefetches multiple blocks, so
+calling `next(read_file(...))` alone is not a bounded live diagnostic. A local
+exercise of the pinned SDK with in-memory RPC/HTTP responses yields one
+8,388,608-byte block. The actual facade passes it through unchanged, while
+the actual public artifact stream rejects chunks above 1,048,576 bytes before
+emitting any data. This reproduces a concrete cross-layer contract mismatch,
+not yet the exact live file's first-block shape. The minimal candidate splits
+provider blocks at the transport boundary without changing aggregate bounds,
+expected artifact hashes, or public limits. An exact-attempt diagnostic must
+remain bounded, read-only and non-authorizing; it cannot recreate lost MAC
+authority or substitute a diagnostic digest for artifact verification.
+
+The framing fix passes 39 adapter/reader tests through the actual public stream,
+including aggregate overflow rejection before its first output. The bootstrap
+lock refresh changes only the facade source hash. The inference closure changes
+the same existing facade member; its additive lock changes that member and the
+closure hash only (119 closure members, 121 source-inventory entries unchanged).
+No package, model, image, or inventory membership pins change.
+
+The initially reviewed diagnostic passed 188 local tests but a live exact-attempt
+probe returned `VOLUME_UNAVAILABLE` before artifact body access. A provider-free
+pinned synchronizer experiment showed that the callback receives `_Volume`,
+whose asynchronous `hydrate` has no `.aio` attribute. Independent review then
+found the extra `GetById` lookup redundant for this diagnostic: the same exact
+binding-supplied ID already passes a 32-byte marker read and is used directly in
+the artifact metadata RPC. The lookup neither pins a generation nor provides
+artifact/MAC authority. Remove it unconditionally, not as a failed-check fallback;
+retain the journal/call/marker admission and fixed-path bounded read. Product
+admission and artifact verification checks remain unchanged.
+
+The simplified inspector passes 188 tests, including the actual pinned SDK
+synchronizer bridge. Independent review approves the exact call/marker admission,
+fixed path, HTTPS/encoding restrictions, and 1 MiB + 1 byte read cap. A read-only
+probe of the exact retained `9dd7c6d2` attempt returned `FIRST_BLOCK_GT_1M`.
+Thus that saved model's first provider block exceeds the old public stream's
+chunk limit. No body, signed URL or secret was printed or saved by the probe;
+this remains diagnostic evidence, not full artifact authentication or recovery.
+The reviewed facade splits those bytes before the public stream consumes them.
+All 39 framing/reader tests pass; all four source commitments are current, with
+only reviewed source/derived hashes refreshed. Canonical skill guidance and its
+copies document the per-artifact bound, chunk framing, bounded probe, and no-replay
+limitation. Next is a fresh ordinary end-to-end smoke, not a retry of the old job.

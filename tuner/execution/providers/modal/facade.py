@@ -17,6 +17,7 @@ from .resolution import ModalDeploymentSelectionV1
 
 EXACT_MODAL_SDK_VERSION = "1.5.4"
 MODAL_VOLUME_V1 = 1
+_MAX_READ_CHUNK_BYTES = 1_048_576
 
 
 class ModalFunctionCallState(str, Enum):
@@ -164,12 +165,16 @@ class ExplicitModal154ReadFacade:
         size = 0
         try:
             for chunk in volume.read_file(path):
-                if not isinstance(chunk, bytes):
+                if type(chunk) is not bytes:
                     raise ValueError
                 size += len(chunk)
                 if size > max_bytes:
                     raise ValueError
-                yield chunk
+                if not chunk:
+                    yield chunk
+                else:
+                    for offset in range(0, len(chunk), _MAX_READ_CHUNK_BYTES):
+                        yield chunk[offset:offset + _MAX_READ_CHUNK_BYTES]
         except ModalFacadeError:
             raise
         except Exception:

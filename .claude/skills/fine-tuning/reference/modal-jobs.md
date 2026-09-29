@@ -579,8 +579,20 @@ metrics, final model, and tokenizer.
 The live Modal training policy admits at most **192 MiB for one artifact** and
 **256 MiB for the complete five-artifact set**. `final_model` remains a required
 member of that exact set even when intermediate checkpoints are not retained.
-These are output-retention limits, not the separate prepared-input publication
-limits (for example, the 64 MiB prepared-input limit below).
+These output-retention limits are separate from the 64 MiB prepared-input
+publication limit described below.
+
+For standalone downloads, pass the policy's per-artifact maximum (192 MiB),
+not its 256 MiB aggregate-set maximum. The packaged reader checks this bound
+when its lazy stream starts. Pinned Modal 1.5.4 yields whole provider blocks
+(8 MiB in its block implementation), not public-API-sized chunks. The provider
+facade must split them into at most 1 MiB chunks while preserving byte order,
+aggregate limits and final size/hash verification. Test a multi-MiB SDK-shaped
+block through the real facade and public artifact stream; tiny fake payloads
+do not exercise this boundary. A zero-byte local partial identifies pre-body
+failure only; it does not establish which authentication or transport check
+failed. Do not rerun a consumed submission to recover a download. The standalone
+host's process-local coordinator state is not durable download-resume support.
 
 Large LoRA output is not trusted merely because training reports success. Its
 publication and later retrieval stream bounded bytes, then verify the expected
@@ -849,7 +861,21 @@ poll, does not unpickle or print provider output, and reports only fixed
 diagnostic categories. `WORKER_FAILED` means the exact packaged worker's fixed
 failure result was returned; it does not disclose the failing operation,
 verify a run, or authorize replay. The public reader likewise recognizes only
-that exact failure dictionary; near misses stay unknown.
+that precise failure dictionary; near misses remain unknown.
+
+For a completed call whose local download stops before its first chunk, the
+same inspector accepts `--probe-final-model-first-chunk` together with the exact
+`--journal`, `--claim-ref`, `--call-id`, and `--modal-profile`. It validates the
+retained call/binding and markers, derives only that submit's final-model path,
+and reads using that exact bound Volume ID. No separate SDK Volume hydration
+is required: the marker and metadata RPCs already address that ID, and another
+lookup adds neither generation pinning nor artifact authority. This applies
+only to this diagnostic, not product admission. It bounds the block probe at
+1 MiB + 1 byte; it never uses the SDK's multi-block prefetch path. Only fixed
+`DIAGNOSTIC_ONLY` size categories are emitted, never contents, signed URLs or
+raw errors. Encoded/redirected responses and inconsistent metadata reject.
+This is not a full download, authenticated artifact verification, retained MAC
+authority, recovery, or permission to replay. Preserve the original attempt.
 
 When that exact submit has marker material but no retained call ID, use the same
 inspector with `--inspect-markers` instead of `--call-id`. Supply the exact

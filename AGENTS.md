@@ -166,6 +166,14 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Cloud Artifact UX
 
+- Modal artifact downloads must pass the shared per-artifact bound, not the
+  aggregate artifact-set bound. Pinned SDK file blocks may exceed the public
+  stream's 1 MiB chunk limit; split them at the provider facade while preserving
+  byte order, aggregate limits, and end-to-end hash verification. Regression
+  tests must carry multi-MiB SDK-shaped blocks through the real public stream.
+  A zero-byte partial is not a cause diagnosis, and a consumed training attempt
+  must never be replayed to recover a failed local download.
+
 - HF Jobs local dashboard parity comes from syncing JSONL training logs to the bucket and replaying them locally.
 - HF Jobs cloud evaluation now uses the same adapter idea: remote JSONL progress, local replay into the existing evaluation dashboard.
 - Modal may stream usable remote stdout directly; verify that before adding a separate local watcher.
