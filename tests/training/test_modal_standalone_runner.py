@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 from dataclasses import replace
+from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -385,6 +386,20 @@ def test_cli_v2_failed_returned_job_is_closed_without_artifact_publication(tmp_p
 def test_exact_worker_failure_stage_projects_closed_public_code(
         tmp_path, monkeypatch, capsys, stage):
     plan, context, events = _setup(tmp_path, monkeypatch)
+    frozen_now = runner.UTCClock().now()
+    frozen_epoch = int(datetime.fromisoformat(frozen_now.replace("Z", "+00:00")).timestamp())
+
+    class FrozenUTCClock:
+        def now(self):
+            return frozen_now
+
+        def now_iso(self):
+            return frozen_now
+
+        def now_epoch(self):
+            return frozen_epoch
+
+    monkeypatch.setattr(runner, "UTCClock", FrozenUTCClock)
 
     def failed(*_args, **_kwargs):
         raise ModalPackagedReadUnavailable("modal_packaged_call_failed_" + stage)

@@ -759,4 +759,13 @@ remains a fail-closed environmental risk, not a reason to bypass checks. Normal
 train retains its integrated signed CPU qualification before GPU dispatch.
 No OS service, grant semantics, model pin or replay policy changes are authorized
 by this decision. Any recurring host failure requires exact-state diagnosis;
-no consumed or uncertain attempt may be replayed.
+no consumed or uncertain attempt may be submitted again.
+
+The clean live-clock projection matrix stopped after 118 passes with another
+pre-submit indeterminate result; that fresh failure is not assigned a cause from
+its stage alone. To isolate what this matrix actually tests, its single
+parametrized case now supplies a fixed paired UTC string/epoch through the
+existing clock port. Independent review approved this test-only change. It does
+not enter the real launcher, alter authority, suppress failures, or remove the
+separate deterministic rollback-negative regression. The environmental risk
+remains recorded while the training objective proceeds through ordinary guards.
