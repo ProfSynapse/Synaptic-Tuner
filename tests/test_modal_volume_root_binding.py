@@ -320,6 +320,39 @@ def test_copy_accepts_private_scratch_under_sticky_tmp(layout):
         assert (target / "scratch.bin").read_bytes() == b"scratch"
 
 
+@pytest.mark.parametrize("owner,mode,code", (
+    (1, stat.S_IFDIR | 0o1777, "SOURCE_CHAIN_TMP_OWNER"),
+    (0, stat.S_IFDIR | 0o0755, "SOURCE_CHAIN_TMP_MODE_NONWRITABLE"),
+    (0, stat.S_IFDIR | 0o0777, "SOURCE_CHAIN_TMP_MODE_WRITABLE"),
+    (0, stat.S_IFREG | 0o0644, "SOURCE_CHAIN_TMP"),
+))
+def test_tmp_chain_reports_exact_closed_predicate(layout, monkeypatch, owner, mode, code):
+    _, _, target, _ = layout
+    with tempfile.TemporaryDirectory(prefix="modal-copy-", dir="/tmp") as directory:
+        source = Path(directory) / "source.bin"
+        source.write_bytes(b"source")
+        original_fstat = os.fstat
+
+        def reported_tmp_stat(fd):
+            info = original_fstat(fd)
+            if os.readlink(f"/proc/self/fd/{fd}") != "/tmp":
+                return info
+            fields = list(info)
+            fields[0], fields[4] = mode, owner
+            return os.stat_result(fields)
+
+        with _bind(layout) as bound:
+            monkeypatch.setattr(os, "fstat", reported_tmp_stat)
+            with pytest.raises(VolumeRootBindingError) as caught:
+                bound.copy_in_exclusive(
+                    "rejected.bin", str(source), expected_size=6,
+                    expected_sha256=hashlib.sha256(b"source").hexdigest(), maximum=6,
+                )
+        assert caught.value.code == code
+        assert str(caught.value) == "volume root binding invalid"
+        assert not (target / "rejected.bin").exists()
+
+
 def test_copy_accepts_sdk_directories_beneath_private_tmp_anchor(layout):
     _, _, target, _ = layout
     with tempfile.TemporaryDirectory(prefix="modal-copy-", dir="/tmp") as directory:

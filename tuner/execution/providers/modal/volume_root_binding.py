@@ -33,7 +33,9 @@ _COPY_CHUNK = 1024 * 1024
 _PROVIDER_VOLUME_ROOT = "/__modal/volumes"
 _VOLUME_ID = re.compile(r"vo-[A-Za-z0-9]+\Z")
 PUBLICATION_DIAGNOSTICS = frozenset({
-    "SOURCE_CHAIN_ROOT", "SOURCE_CHAIN_TMP", "SOURCE_CHAIN_OWNER",
+    "SOURCE_CHAIN_ROOT", "SOURCE_CHAIN_TMP", "SOURCE_CHAIN_TMP_OWNER",
+    "SOURCE_CHAIN_TMP_MODE_NONWRITABLE", "SOURCE_CHAIN_TMP_MODE_WRITABLE",
+    "SOURCE_CHAIN_OWNER",
     "SOURCE_CHAIN_MODE", "SOURCE_CHAIN_OPEN",
     "CLAIM_ROOT_ADMISSION", "CLAIM_PARENT", "CLAIM_CREATE_EXISTS", "CLAIM_CREATE_DENIED",
     "CLAIM_CREATE_OS", "CLAIM_IDENTITY", "CLAIM_RECHECK",
@@ -176,8 +178,14 @@ def _private_chain(parts: tuple[str, ...]) -> _Chain:
             descriptors.append(fd)
             info = os.fstat(fd)
             if index == 0 and part == "tmp":
-                if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o1777:
+                if not stat.S_ISDIR(info.st_mode):
                     raise _invalid("SOURCE_CHAIN_TMP")
+                if info.st_uid != 0:
+                    raise _invalid("SOURCE_CHAIN_TMP_OWNER")
+                mode = stat.S_IMODE(info.st_mode)
+                if mode != 0o1777:
+                    raise _invalid("SOURCE_CHAIN_TMP_MODE_WRITABLE" if mode & 0o022
+                                   else "SOURCE_CHAIN_TMP_MODE_NONWRITABLE")
                 in_tmp = True
             elif in_tmp:
                 mode = stat.S_IMODE(info.st_mode)

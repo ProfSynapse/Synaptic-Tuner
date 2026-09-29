@@ -589,3 +589,21 @@ unproven rather than assigned to the diagnostic mapping. All three source
 commitment checks are CURRENT and skill copies match. No runtime/model pins or
 locked inventories changed. The next fresh attempt is a diagnostic smoke, not
 evidence that the remote publication problem is fixed.
+
+Source `1b43fdd0d651593151e04cfa454bb9d86cd103e9` was pushed. Normal train
+passed its integrated CPU gate, then attempt `modal-c7765719c5d8504dd70f9e91`
+failed at `RUN_WORKER_SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION_SOURCE_CHAIN_TMP`
+at `2026-09-29T09:53:19.619620`. Exact claim
+`886855784118036b02e1ae409ba628b607ace64bb333488cd3c885a2e7990c00`
+and call `fc-01M3PPZTNT9WB7XTVKWANTPQAD` were confirmed through the read-only
+claim-bound inspector. This proves rejection at the private source ancestry's
+`/tmp` check, not a Volume copy or fsync failure. That check combines directory
+type, owner 0 and exact 01777 permissions. Preserve the consumed attempt; split
+only this remaining composite diagnostic before selecting a corrective policy.
+The remote ownership/permission category and optimizer steps remain unmeasured.
+The next diagnostic retains every rejection and separates `TMP_OWNER` from
+`TMP_MODE_NONWRITABLE` and `TMP_MODE_WRITABLE`. The latter two describe only
+group/other write bits (`mode & 0022`), not the owner's access or sticky-bit
+state. This probe still admits only root-owned 01777 `/tmp`. Independent review
+approved the diagnostic-only change; 837 focused regressions and four exact TMP
+public-CLI projection cases passed. All fixed source commitments are CURRENT.
