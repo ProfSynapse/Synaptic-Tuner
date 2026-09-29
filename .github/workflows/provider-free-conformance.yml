@@ -183,6 +183,8 @@ jobs:
           import tuner.inference.chat_session
           import Evaluator.verified_vllm_chat
           import Evaluator.local_run_chat
+          import Evaluator.schema_validator
+          import shared.validation.dataset_validator
           import tuner.inference.retrieved_model
           import tuner.inference.serving_target
           import tuner.inference.run_chat
@@ -283,6 +285,7 @@ jobs:
           python -B -m pytest -q -p no:cacheprovider \
             tests/evaluator/test_vllm_callers.py \
             tests/cloud/test_cloud_hf_job_vllm.py \
+            tests/cloud/test_schema_validator.py \
             tests/cloud/test_vllm_setup.py \
             tests/evaluator/test_vllm_runtime.py \
             tests/evaluator/test_vllm_startup_cleanup.py \

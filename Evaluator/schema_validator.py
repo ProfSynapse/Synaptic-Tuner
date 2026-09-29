@@ -3,15 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
-import sys
-from pathlib import Path
-
-# Add canonical skill validator path to sys.path.
-validator_dir = Path(__file__).parent.parent / ".skills" / "synethetic-data-generation" / "scripts"
-if str(validator_dir) not in sys.path:
-    sys.path.insert(0, str(validator_dir))
-
-import validate_syngen as dataset_validator
+from shared.validation import dataset_validator
 from shared.validation.parsing import parse_qwen_tool_calls
 from shared.validation.parsing.tool_call_parser import parse_gemma_tool_calls, is_gemma_tool_call
 
