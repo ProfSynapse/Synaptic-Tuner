@@ -66,7 +66,17 @@ def packaged_artifact_policy_digest(policy: ArtifactPolicy) -> str:
 def _validated_config(config: CanonicalDocument):
     if type(config) is not CanonicalDocument:
         raise TypeError("exact resolved configuration required")
-    value = _fields(config.to_dict(), _CONFIG_FIELDS, "packaged configuration")
+    value = config.to_dict()
+    if type(value) is not dict or set(value) not in (
+        _CONFIG_FIELDS, _CONFIG_FIELDS | {"post_training"},
+    ):
+        raise ValueError("packaged configuration has missing or unknown fields")
+    if "post_training" in value:
+        from .post_training import validate_post_training_config
+
+        validated = validate_post_training_config(value["post_training"])
+        if validated is None or canonical_json_bytes(validated) != canonical_json_bytes(value["post_training"]):
+            raise ValueError("packaged post-training configuration is not canonical")
     if value["schema_version"] != PACKAGED_SFT_CONFIG_SCHEMA or value["method"] != "sft":
         raise ValueError("unsupported packaged training configuration")
     if selected_execution_mode(config) != "packaged_runtime":

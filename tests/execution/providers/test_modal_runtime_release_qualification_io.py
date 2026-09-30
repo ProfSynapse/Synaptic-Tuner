@@ -294,12 +294,17 @@ def test_reader_authenticates_rehashes_and_relists_one_authoritative_output(monk
         "tuner.runtime.packaged_training_worker.qualify_installed_child",
         lambda release: local_cpu_result(dispatch.runtime_release, "a" * 64),
     )
+    monkeypatch.setattr(
+        "tuner.runtime.packaged_sft_execution._inspect_parent_release",
+        lambda release: None,
+    )
     worker = ModalRuntimeReleaseQualificationWorker(
         expected_facts=facts, verifier=auth, signer=auth,
         observer=Observer(facts), call_id_provider=lambda: "fc-qualification",
         roots=roots,
     )
-    assert worker(raw, commit_artifacts=lambda: None, commit_control=lambda: None)["status_code"] == "completed"
+    result = worker(raw, commit_artifacts=lambda: None, commit_control=lambda: None)
+    assert result["status_code"] == "completed", result
     facade = _facade(facts)
     control = FakeVolume.registry["control-name"]
     artifacts = FakeVolume.registry["artifact-name"]
@@ -331,12 +336,17 @@ def test_reader_rejects_changed_output_after_authenticated_receipt(monkeypatch, 
         "tuner.runtime.packaged_training_worker.qualify_installed_child",
         lambda release: local_cpu_result(dispatch.runtime_release, "a" * 64),
     )
+    monkeypatch.setattr(
+        "tuner.runtime.packaged_sft_execution._inspect_parent_release",
+        lambda release: None,
+    )
     worker = ModalRuntimeReleaseQualificationWorker(
         expected_facts=facts, verifier=auth, signer=auth,
         observer=Observer(facts), call_id_provider=lambda: "fc-qualification",
         roots=roots,
     )
-    assert worker(raw, commit_artifacts=lambda: None, commit_control=lambda: None)["status_code"] == "completed"
+    result = worker(raw, commit_artifacts=lambda: None, commit_control=lambda: None)
+    assert result["status_code"] == "completed", result
     facade = _facade(facts)
     for path in roots.control.rglob("*"):
         if path.is_file():

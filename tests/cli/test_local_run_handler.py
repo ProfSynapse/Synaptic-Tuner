@@ -96,7 +96,7 @@ def test_named_runtime_profile_resolves_into_plan_and_lineage_inputs(tmp_path):
     assert plan["runtime_profile"]["name"] == "qwen35-sft-v1"
     assert plan["runtime_profile"]["image"] == expected_image
     assert plan["runtime_profile"]["inventory_sha256"] == (
-        "sha256:f59c5a85101a9d289c0f680dd5fec9f73a5bd388c984aa60dff6d7ef08aef889"
+        "sha256:ecf4d0a27e5455b946237bf97790cba308765c2e5cf538e560e0de4c372f88e3"
     )
     assert plan["lineage_inputs"]["runtime_profile"] == {
         "name": "qwen35-sft-v1",

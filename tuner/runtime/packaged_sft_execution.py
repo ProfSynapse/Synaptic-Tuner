@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Mapping, Protocol
+from typing import Callable
 
 from tuner.runtime.packaged_worker_closure import stable_read, stable_file_digest
 from tuner.runtime.packaged_training_worker import INSTALLED_RUNTIME_INSPECTION_STAGES
@@ -61,7 +62,7 @@ _CODES = frozenset({
     "TRAINER", "EVIDENCE", "EVIDENCE_PRIVATE_COPY", "EVIDENCE_DIRECTORIES",
     "EVIDENCE_OUTPUT_BINDING", "EVIDENCE_OUTPUT_INVENTORY",
     "EVIDENCE_DATASET_BINDING", "EVIDENCE_PROJECTION_BINDING",
-    "EVIDENCE_OUTPUT_DIRECTORY", "EVIDENCE_METRICS", "ARTIFACT",
+    "EVIDENCE_OUTPUT_DIRECTORY", "EVIDENCE_METRICS", "ARTIFACT", "POST_TRAINING",
 }) | CHILD_FAILURE_STAGES | frozenset("PREPARATION_" + stage for stage in (
     "MODEL_UNAVAILABLE", "MODEL_SDK_ADMISSION", "MODEL_INPUT", "MODEL_WORKSPACE_SETUP",
     "MODEL_METADATA_FETCH", "MODEL_METADATA_VALIDATION",
@@ -258,6 +259,24 @@ class PackagedSFTResult:
     inventory_path: Path
     terminal_path: Path
     artifacts: tuple
+
+
+@dataclass(frozen=True, slots=True)
+class PackagedSFTPostTrainingContext:
+    """Local paths valid only while the executor retains their identities.
+
+    This context is issued after trainer exit and verified artifact creation;
+    its validator stops working when the enclosing execution scope closes.
+    It is neither a new submission grant nor a transferable serving receipt.
+    """
+
+    base_model_path: Path
+    adapter_path: Path
+    tokenizer_path: Path
+    python_executable: str
+    environment: dict
+    bindings: dict
+    validate: Callable[[], None] = field(repr=False)
 
 
 def _installed_python_digest(executable: str) -> str:
@@ -986,13 +1005,17 @@ def _write_terminal_exclusive(path, payload, parent, check):
             os.close(descriptor)
 
 
-def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_preparer: PackagedModelPreparer, runner=None) -> PackagedSFTResult:
+def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_preparer: PackagedModelPreparer, runner=None,
+                                 on_training_complete=None) -> PackagedSFTResult:
     """Consume one admitted execution; revalidation cannot renew its authority."""
     core = None
     snapshots = ()
     artifact_directories = []
     artifact_files = ()
     private_copy = None
+    output_inventories = {}
+    output_paths = None
+    post_training_scope = [False]
     stage = "REVALIDATION"
     child_failure_stage = None
     try:
@@ -1003,6 +1026,10 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
         admitted._used.append(True)
         compiled = _admit_contracts(admitted.release, admitted.provider_binding, admitted.execution,
                                    admitted.workload_bytes, admitted.artifact_policy)
+        post_training = compiled.document["configuration"]["document"].get("post_training")
+        if post_training is not None and not callable(on_training_complete):
+            stage = "POST_TRAINING"
+            raise ValueError
         _inspect_parent_release(admitted.release)
         for directory in admitted._directories:
             directory.check()
@@ -1050,7 +1077,7 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
                 "status": "completed", "trainer_exit_code": 0}
         class RevalidatingRunner:
             def run(self, invocation):
-                nonlocal stage, child_failure_stage
+                nonlocal stage, child_failure_stage, output_paths
                 stage = "REVALIDATION"
                 for directory in (*admitted._directories, *snapshots):
                     directory.check()
@@ -1078,8 +1105,10 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
                         raise ValueError
                     stage = "EVIDENCE_OUTPUT_INVENTORY"
                     for path in set((evidence.final_model_dir, evidence.tokenizer_dir)):
-                        held, _ = _snapshot_inventory(path, admitted.paths.state)
+                        held, output_inventory = _snapshot_inventory(path, admitted.paths.state)
                         artifact_directories.extend(held)
+                        output_inventories[path] = output_inventory
+                    output_paths = (evidence.final_model_dir, evidence.tokenizer_dir)
                 stage = "EVIDENCE"
                 return evidence
         result = core.execute_compiled_sft(admitted.workload_bytes, workload=projection, roots=admitted.paths,
@@ -1100,7 +1129,42 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
         artifact_root = next(directory for directory in admitted._directories if directory.path == admitted.paths.artifacts)
         state = next(directory for directory in admitted._directories if directory.path == admitted.paths.state)
         _write_terminal_exclusive(terminal_path, _canonical(terminal), state, check_terminal_inputs)
-        return PackagedSFTResult(result.workload_fingerprint, result.inventory_path, terminal_path, result.artifacts)
+        final_result = PackagedSFTResult(result.workload_fingerprint, result.inventory_path, terminal_path, result.artifacts)
+        if post_training is not None:
+            stage = "POST_TRAINING"
+            if output_paths is None:
+                raise ValueError
+            post_training_scope[0] = True
+            def validate_post_training_paths():
+                if not post_training_scope[0]:
+                    raise ValueError
+                check_terminal_inputs()
+                for directory in artifact_directories:
+                    directory.check()
+                for path, expected_inventory in output_inventories.items():
+                    retained, current_inventory = _snapshot_inventory(path, admitted.paths.state)
+                    try:
+                        if current_inventory != expected_inventory:
+                            raise ValueError
+                    finally:
+                        _close_resources(retained)
+            validate_post_training_paths()
+            context = PackagedSFTPostTrainingContext(
+                private_copy.snapshot, *output_paths, admitted.release.python_executable,
+                {"PATH": ":".join(dict.fromkeys((str(Path(admitted.release.python_executable).parent),
+                                               "/usr/local/bin", "/usr/bin", "/bin"))),
+                 "TMPDIR": str(admitted.paths.tmp),
+                 **{key: value for key, value in admitted.environment
+                    if key in {"CUDA_VISIBLE_DEVICES", "NVIDIA_VISIBLE_DEVICES"}}},
+                {"workload_digest": admitted.execution.workload_digest,
+                 "model_snapshot_digest": _digest(_canonical(private_copy.manifest)),
+                 "adapter_digest": next(entry["sha256"] for entry in _document(inventory_raw)["artifacts"]
+                                        if entry["role"] == "final_model")},
+                validate_post_training_paths,
+            )
+            on_training_complete(final_result, context)
+            validate_post_training_paths()
+        return final_result
     except BaseException as error:
         try:
             if core is not None and isinstance(error, core.RuntimeV1Error):
@@ -1115,6 +1179,7 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
             pass
         raise PackagedSFTExecutionError(stage) from None
     finally:
+        post_training_scope[0] = False
         resources = [*snapshots, *artifact_directories, *artifact_files]
         if private_copy is not None:
             resources.append(private_copy)

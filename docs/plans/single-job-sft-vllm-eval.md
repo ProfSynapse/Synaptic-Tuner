@@ -1,6 +1,8 @@
 # One-job SFT and chat evaluation rehearsal
 
-Status: design for the next bounded rehearsal; no full training run is authorized by this plan.
+Status (2026-09-30): implemented candidate with 18 focused provider-free tests
+passing and independent review completed. Linux CI and exact-image live serving
+qualification remain pending; no full training run is authorized by this plan.
 
 ## Outcome
 
@@ -32,7 +34,7 @@ vLLM and the Qwen3.5 LoRA in that same image. The current training result
 accepts exactly five artifact roles; evaluation results need a separate
 verified phase output.
 
-## Proposed phases inside one submitted GPU job
+## Configured phases inside one submitted GPU job
 
 1. **Prepare once.** Admit the exact source, dataset, recipe, model revision,
    runtime, and evaluation scenarios. Prepare and verify the

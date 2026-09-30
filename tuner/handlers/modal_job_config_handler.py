@@ -110,6 +110,8 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
         "RUN_OUTCOME": ("UNAVAILABLE", "modal_standalone_runner.outcome"),
         "RUN_VERIFY": ("UNAVAILABLE", "modal_standalone_runner.verify"),
         "RUN_ARTIFACT_DOWNLOAD": ("UNAVAILABLE", "modal_standalone_runner.artifact_download"),
+        "RUN_EVALUATION_READ": ("UNAVAILABLE", "modal_standalone_runner.evaluation_read"),
+        "RUN_EVALUATION_GATE": ("UNAVAILABLE", "modal_standalone_runner.evaluation_gate"),
         "RUN_WORKER_FAILED": ("UNAVAILABLE", "modal_standalone_runner.worker_result"),
     }
     run_phase.update({
@@ -224,10 +226,14 @@ class ModalJobConfigHandler(BaseHandler):
                 modal_profile=profile, modal_environment=environment,
                 fresh_attempt=bool(getattr(self.args, "fresh_attempt", False)),
             )
+            evaluation_passed = getattr(result, "evaluation_passed", None)
+            evaluation_path = getattr(result, "evaluation_path", None)
             self.output({
                 "schema_version": "synaptic-modal-sft-run-result/v1",
                 "run": result.run.to_dict(),
                 "verified_artifacts": [str(path) for path in result.artifact_paths],
+                "evaluation_path": None if evaluation_path is None else str(evaluation_path),
+                "evaluation_passed": evaluation_passed,
                 "gpu_only_timeout_estimate_minor_units": result.gpu_only_timeout_estimate_minor_units,
                 "operator_maximum_cost_minor_units": result.maximum_cost_minor_units,
                 "currency": "USD",
@@ -235,8 +241,8 @@ class ModalJobConfigHandler(BaseHandler):
                 "excluded_billing_dimensions": [
                     "build", "cpu", "memory", "storage", "usage-beyond-timeout",
                 ],
-            })
-            return 0
+            }, success=evaluation_passed is not False)
+            return 2 if evaluation_passed is False else 0
         except Exception as error:
             self.output_error(
                 "Modal training did not complete", code="MODAL_TRAINING_UNAVAILABLE",

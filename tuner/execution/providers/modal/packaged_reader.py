@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 from typing import Iterator, Protocol
 
 from tuner.execution.foundation_v2.canonical import (
@@ -221,6 +222,59 @@ class ModalPackagedReader:
             facts.artifact_volume_id, prefix, max_entries=6,
         ))) != expected:
             raise ValueError("packaged artifact changed during streaming")
+
+    def read_evaluation(self, binding, *, provider_job_ref: str, workload_bytes: bytes) -> bytes:
+        """Authenticate one separately retained post-training phase record.
+
+        Training completion still has exactly five roles. The opt-in record
+        binds both that completed artifact set and the signed workload's config.
+        """
+        from tuner.training.recipes import canonical_json_bytes
+        from tuner.training.packaged_compilation import compile_packaged_sft_workload
+        from tuner.training.contracts import CanonicalDocument
+        from tuner.training.post_training import validate_post_training_config
+        from tuner.runtime.post_training_eval import MAX_EVALUATION_RECORD_BYTES, validate_evaluation_record
+        workload = json.loads(workload_bytes)
+        compiled = compile_packaged_sft_workload(
+            resolved_config=CanonicalDocument.from_mapping(workload["configuration"]["document"]))
+        if (compiled.canonical_bytes != workload_bytes
+                or compiled.fingerprint != binding.execution_binding.workload_digest):
+            raise ValueError("packaged evaluation workload differs")
+        config = validate_post_training_config(workload["configuration"]["document"].get("post_training"))
+        if config is None:
+            raise ValueError("packaged evaluation was not configured")
+        completion = self.observe_completion(binding, provider_job_ref=provider_job_ref)
+        facts = binding.provider_facts
+        relative = operation_path(completion.effect_id, "evaluation")
+        raw = self._facade.read_complete(facts.artifact_volume_id, relative + "/record.json",
+                                         max_bytes=MAX_EVALUATION_RECORD_BYTES)
+        tag = self._facade.read_complete(facts.artifact_volume_id, relative + "/record.mac", max_bytes=128)
+        if self._verifier.verify("modal-packaged-evaluation/v1", raw, tag, self._key_ref) is not True:
+            raise ValueError("packaged evaluation authentication failed")
+        document = json.loads(raw)
+        expected = {
+            "schema_version": "synaptic-modal-packaged-evaluation/v1",
+            "effect_id": completion.effect_id,
+            "command_digest": binding.command_digest,
+            "provider_job_ref": completion.provider_job_ref,
+            "execution_binding_digest": binding.execution_binding.binding_digest,
+            "training_completion_sha256": completion.completion_digest,
+            "post_training_sha256": hashlib.sha256(canonical_json_bytes(config)).hexdigest(),
+        }
+        if (type(document) is not dict or set(document) != {*expected, "evaluation"}
+                or canonical_json_bytes(document) != raw
+                or any(document[key] != value for key, value in expected.items())):
+            raise ValueError("packaged evaluation binding mismatch")
+        record = validate_evaluation_record(document["evaluation"], config=config)
+        adapter = next(member for member in completion.members if member.role == "final_model")
+        if (record["bindings"]["workload_digest"] != binding.execution_binding.workload_digest
+                or record["bindings"]["adapter_digest"] != adapter.sha256):
+            raise ValueError("packaged evaluation model binding mismatch")
+        # Revalidate the deployment and completion after the read; a signed
+        # record from another generation cannot qualify this retained run.
+        if self.observe_completion(binding, provider_job_ref=provider_job_ref) != completion:
+            raise ValueError("packaged evaluation completion changed")
+        return raw
 
 
 __all__ = [

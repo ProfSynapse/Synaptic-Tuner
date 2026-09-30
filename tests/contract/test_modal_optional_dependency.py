@@ -44,14 +44,22 @@ def test_modal_extra_and_launcher_lock_are_exact():
 
 
 def test_engine_modal_modules_do_not_import_the_optional_sdk_at_module_scope():
+    class ModuleScopeImports(ast.NodeVisitor):
+        def visit_FunctionDef(self, node):
+            pass
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Import(self, node):
+            assert all(alias.name != "modal" for alias in node.names), path
+
+        def visit_ImportFrom(self, node):
+            assert node.module != "modal" and not (node.module or "").startswith("modal."), path
+
     root = ROOT / "tuner" / "execution" / "providers" / "modal"
     for path in root.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                assert all(alias.name != "modal" for alias in node.names), path
-            elif isinstance(node, ast.ImportFrom):
-                assert node.module != "modal" and not (node.module or "").startswith("modal."), path
+        ModuleScopeImports().visit(tree)
 
 
 def test_importing_public_api_does_not_materialize_modal_sdk():

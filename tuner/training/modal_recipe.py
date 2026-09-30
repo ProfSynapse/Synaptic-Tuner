@@ -20,6 +20,7 @@ from tuner.training.packaged_compilation import PACKAGED_SFT_CONFIG_SCHEMA
 from tuner.training.packaged_compilation import (
     compile_packaged_sft_workload, packaged_configuration_digest,
 )
+from tuner.training.post_training import validate_post_training_config
 
 
 _PROFILE = "qwen35-sft-v1"
@@ -53,6 +54,7 @@ class ModalSFTRecipeV1:
     accelerator_count: int
     timeout_seconds: int
     maximum_cost_minor_units: int | None
+    post_training: dict[str, object] | None = None
 
     def training_input(self, dataset_ref: str) -> TrainingInputV1:
         return TrainingInputV1(
@@ -66,14 +68,17 @@ class ModalSFTRecipeV1:
         if identity.format != "syntunia-sft-row/v2" or identity.revision != self.dataset_digest:
             raise ValueError("prepared input differs from recipe identity")
         public = self.training_input(identity.ref)
-        return CanonicalDocument.from_mapping({
+        document = {
             "schema_version": PACKAGED_SFT_CONFIG_SCHEMA,
             "method": "sft",
             "execution": {"mode": "packaged_runtime"},
             "model": {**self.model.to_dict(), "load_in_4bit": False},
             "dataset": identity.to_dict(),
             "sft": public.hyperparameters.to_dict(),
-        })
+        }
+        if self.post_training is not None:
+            document["post_training"] = validate_post_training_config(self.post_training)
+        return CanonicalDocument.from_mapping(document)
 
     def artifact_policy(self) -> ArtifactPolicy:
         return ArtifactPolicy(self.artifacts.required_kinds, self.artifacts.retain_checkpoints)
@@ -171,7 +176,7 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
     """Load the existing YAML shape, rejecting provider authority and unknown controls."""
     cfg = _section(load_recipe(path, "cloud"), {
         "name", "description", "target", "method", "provider", "job", "run",
-        "model", "dataset", "training", "lora", "artifacts",
+        "model", "dataset", "training", "lora", "artifacts", "post_training",
     }, "recipe")
     if cfg.get("target") != "cloud" or cfg.get("provider") != "modal" or cfg.get("method") != "sft":
         raise ValueError("Modal SFT requires target: cloud, provider: modal, method: sft")
@@ -256,4 +261,5 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
         counts["train"], counts["validation"], _PROFILE, model_input,
         hyperparameters, artifacts, job["accelerator"],
         job["accelerator_count"], job["timeout_seconds"], maximum_cost,
+        validate_post_training_config(cfg.get("post_training")),
     )

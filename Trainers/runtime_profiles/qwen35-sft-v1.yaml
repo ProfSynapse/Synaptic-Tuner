@@ -13,4 +13,4 @@ runtime:
   image: unsloth/unsloth@sha256:1644d635bc7c5b57ed64cabbab1ae00647dfb583c2135fdfb6a461aeeba52739
   inventory:
     path: qwen35-sft-v1.inventory.json
-    sha256: sha256:f59c5a85101a9d289c0f680dd5fec9f73a5bd388c984aa60dff6d7ef08aef889
+    sha256: sha256:ecf4d0a27e5455b946237bf97790cba308765c2e5cf538e560e0de4c372f88e3

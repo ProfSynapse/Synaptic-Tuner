@@ -7,6 +7,7 @@ import json
 import subprocess
 
 import pytest
+import yaml
 
 from tuner.execution.providers.modal.runtime_build import (
     ModalBuildCandidateV1,
@@ -132,8 +133,16 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
     from pathlib import Path
     from tuner.execution.providers.modal import runtime_build
 
-    profile = Path("Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c/profile.yaml")
-    source_wheel = profile.parent / "synaptic_tuner-1.1.0-py3-none-any.whl"
+    source_profile = Path("Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c/profile.yaml")
+    profile_data = yaml.safe_load(source_profile.read_text(encoding="utf-8"))
+    for wheel in profile_data["packaged_runtime"]["bootstrap"]:
+        contents = ("fixture " + wheel["filename"]).encode("ascii")
+        (tmp_path / wheel["filename"]).write_bytes(contents)
+        wheel["sha256"] = hashlib.sha256(contents).hexdigest()
+    profile = tmp_path / "profile.yaml"
+    profile.write_text(yaml.safe_dump(profile_data), encoding="utf-8")
+    source_wheel = tmp_path / "synaptic_tuner-1.1.0-py3-none-any.whl"
+    source_wheel.write_bytes(b"fixture source wheel")
     events: list[str] = []
 
     def prepare(_source, destination, *, expected_source_commit, builder_cache_root):

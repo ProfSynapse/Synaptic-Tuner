@@ -376,8 +376,9 @@ def test_cleanup_preserves_replaced_owned_role_leaf(tmp_path: Path, monkeypatch)
         real_stream(runs, run, artifact, attempt, owned_files)
         if artifact.role == "final_model":
             path = next(tmp_path.glob(".retrieved-*")) / "final_model.tar"
-            path.unlink()
-            path.write_bytes(b"unowned replacement")
+            replacement = path.with_suffix(".replacement")
+            replacement.write_bytes(b"unowned replacement")
+            replacement.replace(path)
             raise RuntimeError("forced failure")
 
     monkeypatch.setattr(retrieved_model, "_stream", replace_after_stream)

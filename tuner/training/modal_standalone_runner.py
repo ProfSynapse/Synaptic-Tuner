@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import platform
@@ -95,6 +96,8 @@ _RUN_PHASE_DIAGNOSTICS = {
     "RUN_OUTCOME": ("UNAVAILABLE", "modal_standalone_runner.outcome"),
     "RUN_VERIFY": ("UNAVAILABLE", "modal_standalone_runner.verify"),
     "RUN_ARTIFACT_DOWNLOAD": ("UNAVAILABLE", "modal_standalone_runner.artifact_download"),
+    "RUN_EVALUATION_READ": ("UNAVAILABLE", "modal_standalone_runner.evaluation_read"),
+    "RUN_EVALUATION_GATE": ("UNAVAILABLE", "modal_standalone_runner.evaluation_gate"),
     "RUN_WORKER_FAILED": ("UNAVAILABLE", "modal_standalone_runner.worker_result"),
 }
 _RUN_PHASE_DIAGNOSTICS.update({
@@ -183,6 +186,8 @@ class ModalStandaloneRunResultV1:
     artifact_paths: tuple[Path, ...]
     gpu_only_timeout_estimate_minor_units: int
     maximum_cost_minor_units: int
+    evaluation_path: Path | None = None
+    evaluation_passed: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -392,6 +397,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 allowed_purposes=frozenset({
                     "modal-packaged-dispatch/v1", "modal-packaged-dispatch/v2",
                     "modal-packaged-completion/v1",
+                    "modal-packaged-evaluation/v1",
                 }),
             )
             effects = ModalPackagedHostEffectsV1(
@@ -511,10 +517,41 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 "workload_record", "training_lineage", "training_metrics",
                 "final_model", "tokenizer",
             )))
+            evaluation_path = None
+            evaluation_passed = None
+            if recipe.post_training is not None:
+                phase = "RUN_EVALUATION_READ"
+                # Use the existing authenticated Foundation read binding;
+                # evaluation does not create another submission or grant.
+                workflow = host.composition.stores.workflow_store.get(started.run)
+                current_request = host.composition.runs._request(workflow, ProviderReadPurposeV1.OBSERVE)
+                current_binding = host.reader._binding(current_request, ProviderReadPurposeV1.OBSERVE)
+                raw = reader.read_evaluation(current_binding, provider_job_ref=provider_job_ref,
+                                             workload_bytes=workload.canonical_bytes)
+                directory = os.open(artifact_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    descriptor = os.open("evaluation.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                         0o600, dir_fd=directory)
+                    with os.fdopen(descriptor, "wb") as stream:
+                        stream.write(raw)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+                evaluation_path = artifact_root / "evaluation.json"
+                phase = "RUN_EVALUATION_GATE"
+                evaluation = json.loads(raw)["evaluation"]
+                if (evaluation["status"] not in ("completed", "failed")
+                        or type(evaluation["gate_passed"]) is not bool):
+                    raise ModalStandalonePhaseUnavailable(phase)
+                evaluation_passed = evaluation["gate_passed"]
             return ModalStandaloneRunResultV1(
                 started.run, artifact_paths,
                 runtime.quote.gpu_only_timeout_estimate_minor_units,
                 recipe.maximum_cost_minor_units,
+                evaluation_path,
+                evaluation_passed,
             )
     except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable):
         raise

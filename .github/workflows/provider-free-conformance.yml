@@ -21,6 +21,7 @@ on:
       - "Evaluator/openai_compat_client.py"
       - "Evaluator/verified_vllm_chat.py"
       - "Evaluator/local_run_chat.py"
+      - "tests/evaluator/test_same_job_post_training_eval.py"
       - "tests/evaluator/test_owned_process.py"
       - "tests/evaluator/test_vllm_*.py"
       - "tests/evaluator/test_chat_session.py"
@@ -283,6 +284,7 @@ jobs:
       - name: Run real caller bodies with fake external effects
         run: |
           python -B -m pytest -q -p no:cacheprovider \
+            tests/evaluator/test_same_job_post_training_eval.py \
             tests/evaluator/test_vllm_callers.py \
             tests/cloud/test_cloud_hf_job_vllm.py \
             tests/cloud/test_schema_validator.py \

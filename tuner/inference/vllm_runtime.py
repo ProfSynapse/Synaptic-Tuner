@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from importlib import metadata
 import http.client
 import json
 import math
@@ -12,7 +13,7 @@ import socket
 import sys
 import threading
 import time
-from typing import Mapping
+from typing import Callable, Mapping
 
 from tuner.inference.owned_process import OwnedProcessLease, _UNKNOWN, _identity
 from tuner.inference.serving_target import ServingTarget
@@ -72,6 +73,17 @@ class VerifiedLocalVLLMSource:
 
 
 @dataclass(frozen=True, slots=True)
+class VerifiedInJobVLLMSource:
+    """Paths held by a same-job owner; validate checks retained identities."""
+
+    base_model_path: Path
+    adapter_path: Path
+    tokenizer_path: Path
+    validate: Callable[[], None]
+    expected_version: str
+
+
+@dataclass(frozen=True, slots=True)
 class ExplicitNetworkVLLMSource:
     model_ref: str
     revision: str | None = None
@@ -81,7 +93,7 @@ class ExplicitNetworkVLLMSource:
 
 @dataclass(frozen=True, slots=True)
 class VLLMStartupSpec:
-    source: VerifiedLocalVLLMSource | ExplicitNetworkVLLMSource
+    source: VerifiedLocalVLLMSource | VerifiedInJobVLLMSource | ExplicitNetworkVLLMSource
     served_model_name: str
     host: str = "127.0.0.1"
     port: int = 8000
@@ -90,6 +102,11 @@ class VLLMStartupSpec:
     enforce_eager: bool = True
     tokenizer_mode: str | None = None
     max_lora_rank: int = 64
+    dtype: str | None = None
+    max_model_len: int | None = None
+    max_num_seqs: int | None = None
+    max_num_batched_tokens: int | None = None
+    language_model_only: bool = False
     startup_timeout_s: float = 600.0
     readiness_request_timeout_s: float = 2.0
     python_executable: str = field(default_factory=lambda: sys.executable)
@@ -298,6 +315,17 @@ def _projection(
         raise ValueError("tokenizer mode is invalid")
     if type(spec.max_lora_rank) is not int or not 1 <= spec.max_lora_rank <= 1024:
         raise ValueError("maximum LoRA rank is invalid")
+    if spec.dtype not in (None, "auto", "float16", "bfloat16", "float32"):
+        raise ValueError("dtype is invalid")
+    for option, value, low, high in (
+        ("max_model_len", spec.max_model_len, 128, 262144),
+        ("max_num_seqs", spec.max_num_seqs, 1, 1024),
+        ("max_num_batched_tokens", spec.max_num_batched_tokens, 128, 262144),
+    ):
+        if value is not None and (type(value) is not int or not low <= value <= high):
+            raise ValueError(f"{option} is invalid")
+    if type(spec.language_model_only) is not bool:
+        raise ValueError("language_model_only is invalid")
     startup = _finite(
         spec.startup_timeout_s, "startup timeout", 0.01, _MAX_STARTUP_SECONDS
     )
@@ -325,6 +353,16 @@ def _projection(
         argv.append("--enforce-eager")
     if spec.tokenizer_mode is not None:
         argv.extend(("--tokenizer-mode", spec.tokenizer_mode))
+    if spec.dtype is not None:
+        argv.extend(("--dtype", spec.dtype))
+    if spec.max_model_len is not None:
+        argv.extend(("--max-model-len", str(spec.max_model_len)))
+    if spec.max_num_seqs is not None:
+        argv.extend(("--max-num-seqs", str(spec.max_num_seqs)))
+    if spec.max_num_batched_tokens is not None:
+        argv.extend(("--max-num-batched-tokens", str(spec.max_num_batched_tokens)))
+    if spec.language_model_only:
+        argv.append("--language-model-only")
     if type(spec.source) is VerifiedLocalVLLMSource:
         target = spec.source.target
         if type(target) is not ServingTarget:
@@ -357,6 +395,33 @@ def _projection(
                     f"{name}={adapter}",
                 )
             )
+        env = _local_environment(env)
+    elif type(spec.source) is VerifiedInJobVLLMSource:
+        source = spec.source
+        if not callable(source.validate):
+            raise TypeError("in-job source requires a validator")
+        if (
+            type(source.expected_version) is not str
+            or not source.expected_version
+            or len(source.expected_version) > 64
+            or metadata.version("vllm") != source.expected_version
+        ):
+            raise ValueError("installed vLLM version differs from pinned version")
+        for path in (source.base_model_path, source.adapter_path, source.tokenizer_path):
+            if not isinstance(path, Path) or not path.is_absolute() or not path.is_dir():
+                raise ValueError("in-job model path is invalid")
+        source.validate()
+        _lora_name(name)
+        if name == _LORA_BASE_ALIAS:
+            raise ValueError("LoRA served name collides with base alias")
+        argv[argv.index("--served-model-name") + 1] = _LORA_BASE_ALIAS
+        expected_names = tuple(sorted((_LORA_BASE_ALIAS, name)))
+        argv.extend((
+            "--model", str(source.base_model_path),
+            "--tokenizer", str(source.tokenizer_path),
+            "--enable-lora", "--max-lora-rank", str(spec.max_lora_rank),
+            "--lora-modules", f"{name}={source.adapter_path}",
+        ))
         env = _local_environment(env)
     elif type(spec.source) is ExplicitNetworkVLLMSource:
         source = spec.source

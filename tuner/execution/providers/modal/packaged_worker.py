@@ -60,6 +60,7 @@ PACKAGED_WORKER_FAILURE_STAGES = frozenset({
     "SFT_EVIDENCE_DATASET_BINDING", "SFT_EVIDENCE_PROJECTION_BINDING",
     "SFT_EVIDENCE_OUTPUT_DIRECTORY", "SFT_EVIDENCE_METRICS",
     "SFT_UNKNOWN", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
+    "SFT_POST_TRAINING",
 }) | frozenset("SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION_" + code for code in (
     "SOURCE_CHAIN_ROOT SOURCE_CHAIN_TMP SOURCE_CHAIN_TMP_OWNER "
     "SOURCE_CHAIN_TMP_MODE_NONWRITABLE SOURCE_CHAIN_TMP_MODE_WRITABLE "
@@ -75,7 +76,7 @@ _SFT_FAILURE_STAGES = frozenset({
     "ADMISSION", "ADMISSION_CONTRACTS", "ADMISSION_RELEASE", "ADMISSION_PATHS",
     "ADMISSION_INPUT", "ADMISSION_ENVIRONMENT", "ADMISSION_INVOCATION",
     "ADMISSION_COMMITMENT", "PREPARATION", "REVALIDATION", "INVOCATION", "TRAINER",
-    "EVIDENCE", "ARTIFACT",
+    "EVIDENCE", "ARTIFACT", "POST_TRAINING",
 }) | frozenset(stage.removeprefix("SFT_") for stage in PACKAGED_WORKER_FAILURE_STAGES
                if stage.startswith(("SFT_PREPARATION_", "SFT_EVIDENCE_"))) | CHILD_FAILURE_STAGES
 
@@ -106,6 +107,7 @@ class PackagedTrainerExecutor(Protocol):
         artifact_policy,
         paths: PackagedSFTPaths,
         environment: tuple[tuple[str, str], ...],
+        on_training_complete=None,
     ): ...
 
 
@@ -133,6 +135,7 @@ class InstalledPackagedSFTTrainerExecutor:
         artifact_policy,
         paths,
         environment,
+        on_training_complete=None,
     ):
         admitted = admit_packaged_sft(
             runtime_release=runtime_release,
@@ -145,6 +148,7 @@ class InstalledPackagedSFTTrainerExecutor:
         )
         return execute_admitted_packaged_sft(
             admitted, model_preparer=self._model_preparer, runner=self._runner,
+            on_training_complete=on_training_complete,
         )
 
 
@@ -401,6 +405,30 @@ class ModalPackagedWorker:
             stage = "PATH_CLAIM"
             paths = self._paths(dispatch)
             stage = "SFT_ADMISSION"
+            post_training = json.loads(dispatch.workload_bytes)["configuration"]["document"].get("post_training")
+            retained_completion = []
+            def complete_then_evaluate(result, context):
+                # Save the verified adapter before serving. Later evaluation
+                # failure cannot erase or require a replay of training.
+                completion = self._publish_completion(dispatch, result, provider_job_ref, paths)
+                commit_artifacts()
+                commit_control()
+                retained_completion.append(completion)
+                context.validate()
+                from tuner.runtime.post_training_eval import execute_post_training_evaluation
+                record = execute_post_training_evaluation(
+                    post_training,
+                    base_model_path=context.base_model_path,
+                    adapter_path=context.adapter_path,
+                    tokenizer_path=context.tokenizer_path,
+                    validate=context.validate,
+                    environment=context.environment,
+                    cwd=paths.tmp,
+                    python_executable=context.python_executable,
+                    bindings=context.bindings,
+                )
+                self._publish_evaluation(dispatch, record, provider_job_ref, completion, paths)
+                commit_artifacts()
             result = self._executor.execute(
                 runtime_release=dispatch.runtime_release,
                 provider_binding=dispatch.provider_binding,
@@ -409,13 +437,18 @@ class ModalPackagedWorker:
                 artifact_policy=dispatch.artifact_policy,
                 paths=paths,
                 environment=dispatch.environment,
+                **({"on_training_complete": complete_then_evaluate} if post_training is not None else {}),
             )
             stage = "COMPLETION"
-            completion = self._publish_completion(dispatch, result, provider_job_ref, paths)
-            stage = "ARTIFACT_COMMIT"
-            commit_artifacts()
-            stage = "CONTROL_COMMIT"
-            commit_control()
+            if post_training is not None and len(retained_completion) != 1:
+                raise ValueError("packaged evaluation callback unavailable")
+            completion = (retained_completion[0] if retained_completion else
+                          self._publish_completion(dispatch, result, provider_job_ref, paths))
+            if not retained_completion:
+                stage = "ARTIFACT_COMMIT"
+                commit_artifacts()
+                stage = "CONTROL_COMMIT"
+                commit_control()
             return {
                 "schema_version": "synaptic-modal-packaged-worker-result/v1",
                 "effect_id": dispatch.submit_command.operation.effect.effect_id,
@@ -430,6 +463,42 @@ class ModalPackagedWorker:
                     and exc.stage in _SFT_FAILURE_STAGES else "SFT_UNKNOWN"
                 )
             return packaged_worker_failure(stage)
+
+    def _publish_evaluation(self, dispatch, record, job_ref, completion, paths):
+        """Separate signed phase output; the five training roles stay exact."""
+        from tuner.training.recipes import canonical_json_bytes
+        effect_id = dispatch.submit_command.operation.effect.effect_id
+        configured = json.loads(dispatch.workload_bytes)["configuration"]["document"]["post_training"]
+        from tuner.runtime.post_training_eval import validate_evaluation_record, MAX_EVALUATION_RECORD_BYTES
+        validate_evaluation_record(record, config=configured)
+        document = {
+            "schema_version": "synaptic-modal-packaged-evaluation/v1",
+            "effect_id": effect_id,
+            "command_digest": dispatch.submit_command.digest,
+            "provider_job_ref": safe_ref(job_ref, "provider_job_ref"),
+            "execution_binding_digest": dispatch.execution_binding.binding_digest,
+            "training_completion_sha256": hashlib.sha256(completion).hexdigest(),
+            "post_training_sha256": hashlib.sha256(canonical_json_bytes(configured)).hexdigest(),
+            "evaluation": record,
+        }
+        raw = canonical_json_bytes(document)
+        if len(raw) > MAX_EVALUATION_RECORD_BYTES:
+            raise ValueError("packaged evaluation record exceeds bound")
+        tag = self._signer.sign("modal-packaged-evaluation/v1", raw, dispatch.key_ref)
+        if type(tag) is not bytes or not 1 <= len(tag) <= 128:
+            raise ValueError("packaged evaluation authentication unavailable")
+        relative = operation_path(effect_id, "evaluation")
+        if self._bindings is not None:
+            output = self._bindings["artifacts"]
+            output.claim_directory(relative)
+            output.write_exclusive(relative + "/record.json", raw, MAX_EVALUATION_RECORD_BYTES)
+            output.write_exclusive(relative + "/record.mac", tag, 128)
+        else:
+            root = self._roots.artifacts
+            directory = root / relative
+            claim_directory(root, directory)
+            write_exclusive(root, directory / "record.json", raw)
+            write_exclusive(root, directory / "record.mac", tag)
 
 
 __all__ = [
