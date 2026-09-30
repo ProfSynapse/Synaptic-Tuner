@@ -48,6 +48,8 @@ _MAX_FIXED_RESULT = 512
 _MAX_ARTIFACT_BYTES = 192 * 1024 * 1024
 _FIRST_BLOCK_LIMIT = 1024 * 1024
 _MAX_BLOCK_URLS = 64
+# Same closed physical-record budget as the worker; avoid importing ML runtime dependencies.
+_MAX_EVALUATION_RECORD_BYTES = 16 * 1024 * 1024
 _RESULT_SCHEMA = "synaptic-modal-packaged-worker-result/v1"
 _RESULT_SCHEMA_V2 = "synaptic-modal-packaged-worker-result/v2"
 _WORKER_FAILURE_STAGES = (
@@ -75,7 +77,7 @@ _WORKER_FAILURE_STAGES = (
     "SFT_EVIDENCE_OUTPUT_BINDING", "SFT_EVIDENCE_OUTPUT_INVENTORY",
     "SFT_EVIDENCE_DATASET_BINDING", "SFT_EVIDENCE_PROJECTION_BINDING",
     "SFT_EVIDENCE_OUTPUT_DIRECTORY", "SFT_EVIDENCE_METRICS",
-    "SFT_UNKNOWN", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
+    "SFT_UNKNOWN", "SFT_POST_TRAINING", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
 ) + tuple("SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION_" + code for code in (
     "SOURCE_CHAIN_ROOT SOURCE_CHAIN_TMP SOURCE_CHAIN_TMP_OWNER "
     "SOURCE_CHAIN_TMP_MODE_NONWRITABLE SOURCE_CHAIN_TMP_MODE_WRITABLE "
@@ -403,6 +405,135 @@ async def inspect_first_artifact_block(client: object, binding: object, api_pb2:
         return "FIRST_BLOCK_UNAVAILABLE"
 
 
+async def _read_diagnostic_file(client, api_pb2, volume_id, path, maximum, session_factory):
+    """Read bounded physical bytes, without asserting content authenticity."""
+    try:
+        request = api_pb2.VolumeGetFile2Request(
+            volume_id=volume_id, path=path, start=0, len=maximum + 1,
+        )
+        response = await asyncio.wait_for(
+            client.stub.VolumeGetFile2(request, retry=None, timeout=15), timeout=16,
+        )
+        size = response.size
+        if (type(size) is not int or not 1 <= size <= maximum
+                or type(response.start) is not int or response.start != 0
+                or type(response.len) is not int or response.len != size
+                or not 1 <= len(response.get_urls) <= _MAX_BLOCK_URLS):
+            raise DiagnosticUnavailable("FILE_METADATA_INVALID")
+        urls = tuple(_https_url(url) for url in response.get_urls)
+        data = bytearray()
+        async with session_factory() as session:
+            for url in urls:
+                async with session.get(url, allow_redirects=False) as block:
+                    if (block.status != 200 or block.headers.get(
+                            "Content-Encoding", "identity").lower() != "identity"):
+                        raise DiagnosticUnavailable("FILE_UNAVAILABLE")
+                    while True:
+                        piece = await block.content.read(min(64 * 1024, size - len(data) + 1))
+                        if type(piece) is not bytes or len(piece) > min(64 * 1024, size - len(data) + 1):
+                            raise DiagnosticUnavailable("FILE_SIZE_INVALID")
+                        if not piece:
+                            break
+                        data.extend(piece)
+                        if len(data) > size:
+                            raise DiagnosticUnavailable("FILE_SIZE_INVALID")
+        if len(data) != size:
+            raise DiagnosticUnavailable("FILE_SIZE_INVALID")
+        return bytes(data)
+    except DiagnosticUnavailable:
+        raise
+    except Exception:
+        raise DiagnosticUnavailable("FILE_UNAVAILABLE") from None
+
+
+def evaluation_metadata(raw, tag, binding, call_id):
+    """Closed projection of unverified bytes; equality is not authentication."""
+    result = {
+        "result": "JSON_INVALID", "mac_authentication": "UNVERIFIED",
+        "record_size_bytes": len(raw), "record_sha256": hashlib.sha256(raw).hexdigest(),
+        "mac_size_bytes": len(tag), "mac_sha256": hashlib.sha256(tag).hexdigest(),
+    }
+    def unique(pairs):
+        document = {}
+        for key, value in pairs:
+            if key in document:
+                raise ValueError
+            document[key] = value
+        return document
+    def invalid_constant(_value):
+        raise ValueError
+    try:
+        document = json.loads(raw, object_pairs_hook=unique, parse_constant=invalid_constant)
+        if type(document) is not dict or type(document.get("evaluation")) is not dict:
+            return result
+        evaluation = document["evaluation"]
+        expected = {
+            "effect_id": binding.command.operation.effect.effect_id,
+            "command_digest": binding.command_digest,
+            "provider_job_ref": call_id,
+            "execution_binding_digest": binding.execution_binding.binding_digest,
+        }
+        encoding = lambda ascii_only: json.dumps(
+            document, sort_keys=True, separators=(",", ":"), ensure_ascii=ascii_only,
+            allow_nan=False,
+        ).encode("utf-8")
+        result.update({
+            "result": "METADATA_READ",
+            "schema_matches": document.get("schema_version") == "synaptic-modal-packaged-evaluation/v1",
+            "evaluation_schema_matches": evaluation.get("schema_version") == "synaptic-post-training-evaluation/v1",
+            "status": evaluation.get("status") if evaluation.get("status") in ("completed", "failed") else "UNKNOWN",
+            "gate_passed": evaluation.get("gate_passed") if type(evaluation.get("gate_passed")) is bool else None,
+            "failure_code": (evaluation.get("failure_code") if evaluation.get("failure_code") is None
+                or evaluation.get("failure_code") in ("startup_failed", "runtime_failed", "deadline",
+                    "incomplete", "identity_changed", "gate_failed", "oversized_response", "evaluation_error")
+                else "UNKNOWN"),
+            "case_count": evaluation.get("case_count") if type(evaluation.get("case_count")) is int
+                and 0 <= evaluation["case_count"] <= 32 else None,
+            "passed_count": evaluation.get("passed_count") if type(evaluation.get("passed_count")) is int
+                and 0 <= evaluation["passed_count"] <= 32 else None,
+            "canonical_ascii_matches": encoding(True) == raw,
+            "canonical_utf8_matches": encoding(False) == raw,
+            "binding_matches": {key: document.get(key) == value for key, value in expected.items()},
+        })
+    except Exception:
+        pass
+    return result
+
+
+async def inspect_evaluation_metadata(client, binding, materials, call_id, api_pb2,
+                                      *, marker_reader, session_factory=None):
+    try:
+        markers = await inspect_markers(marker_reader, materials)
+        if any(value != "MATCH" for value in markers.values()):
+            return {"result": "MARKER_UNAVAILABLE", "mac_authentication": "UNVERIFIED"}
+        if session_factory is None:
+            import aiohttp
+            session_factory = lambda: aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30, sock_read=10),
+                read_bufsize=64 * 1024, auto_decompress=False,
+            )
+        volume_id = binding.provider_facts.artifact_volume_id
+        prefix = operation_path(binding.command.operation.effect.effect_id, "evaluation")
+        raw = await asyncio.wait_for(_read_diagnostic_file(
+            client, api_pb2, volume_id, prefix + "/record.json", _MAX_EVALUATION_RECORD_BYTES,
+            session_factory,
+        ), timeout=60)
+        tag = await asyncio.wait_for(_read_diagnostic_file(
+            client, api_pb2, volume_id, prefix + "/record.mac", 128, session_factory,
+        ), timeout=60)
+        # Correlate the physical Volume again after both reads.
+        if any(value != "MATCH" for value in (await inspect_markers(marker_reader, materials)).values()):
+            return {"result": "MARKER_UNAVAILABLE", "mac_authentication": "UNVERIFIED"}
+        return evaluation_metadata(raw, tag, binding, call_id)
+    except DiagnosticUnavailable as error:
+        code = error.args[0] if error.args in {
+            ("FILE_METADATA_INVALID",), ("FILE_SIZE_INVALID",), ("FILE_UNAVAILABLE",),
+        } else "FILE_UNAVAILABLE"
+        return {"result": code, "mac_authentication": "UNVERIFIED"}
+    except Exception:
+        return {"result": "FILE_UNAVAILABLE", "mac_authentication": "UNVERIFIED"}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--journal", required=True, type=Path)
@@ -411,12 +542,14 @@ def main(argv: list[str] | None = None) -> int:
     selection.add_argument("--call-id")
     selection.add_argument("--inspect-markers", action="store_true")
     parser.add_argument("--probe-final-model-first-chunk", action="store_true")
+    parser.add_argument("--inspect-evaluation-metadata", action="store_true")
     parser.add_argument("--modal-profile", required=True)
     args = parser.parse_args(argv)
     try:
-        if args.probe_final_model_first_chunk and args.inspect_markers:
+        if ((args.probe_final_model_first_chunk or args.inspect_evaluation_metadata) and args.inspect_markers
+                or args.probe_final_model_first_chunk and args.inspect_evaluation_metadata):
             raise DiagnosticUnavailable("INPUT_INVALID")
-        if args.probe_final_model_first_chunk:
+        if args.probe_final_model_first_chunk or args.inspect_evaluation_metadata:
             retained = read_retained_probe(args.journal, args.claim_ref, args.call_id)
         elif args.inspect_markers:
             retained = read_retained_markers(args.journal, args.claim_ref)
@@ -437,7 +570,14 @@ def main(argv: list[str] | None = None) -> int:
                     raise DiagnosticUnavailable("CREDENTIAL_UNAVAILABLE")
                 from modal._utils.async_utils import synchronizer
                 client = modal.Client.from_credentials(token_id, token_secret)
-                if args.probe_final_model_first_chunk:
+                if args.inspect_evaluation_metadata:
+                    binding, materials, call_id = retained
+                    from modal_proto import api_pb2
+                    category = synchronizer.create_blocking(inspect_evaluation_metadata)(
+                        client, binding, materials, call_id, api_pb2,
+                        marker_reader=BoundedModalVolumeReader(sdk=modal, client=client),
+                    )
+                elif args.probe_final_model_first_chunk:
                     binding, materials, call_id = retained
                     reader = BoundedModalVolumeReader(sdk=modal, client=client)
                     markers = synchronizer.create_blocking(inspect_markers)(reader, materials)
@@ -468,7 +608,11 @@ def main(argv: list[str] | None = None) -> int:
         category = error.args[0]
     except Exception:
         category = "LOCAL_UNAVAILABLE"
-    if args.probe_final_model_first_chunk:
+    if args.inspect_evaluation_metadata:
+        payload = {"schema_version": "synaptic-modal-packaged-evaluation-diagnostic/v1",
+                   "authority": "DIAGNOSTIC_ONLY", "mac_authentication": "UNVERIFIED",
+                   "result": category}
+    elif args.probe_final_model_first_chunk:
         payload = {"schema_version": "synaptic-modal-packaged-artifact-probe-diagnostic/v1",
                    "authority": "DIAGNOSTIC_ONLY", "result": category}
     elif args.inspect_markers:
@@ -478,6 +622,8 @@ def main(argv: list[str] | None = None) -> int:
         payload = {"schema_version": "synaptic-modal-packaged-call-diagnostic/v1",
                    "authority": "DIAGNOSTIC_ONLY", "result": category}
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    if args.inspect_evaluation_metadata:
+        return 0 if type(category) is dict and category.get("result") == "METADATA_READ" else 1
     if args.probe_final_model_first_chunk:
         return 0 if category in {"FIRST_BLOCK_LE_1M", "FIRST_BLOCK_GT_1M"} else 1
     if args.inspect_markers:

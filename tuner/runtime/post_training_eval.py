@@ -8,13 +8,6 @@ import re
 import time
 from typing import Callable, Mapping
 
-from Evaluator.config import VLLMSettings
-from Evaluator.config_loader import ConfigLoader
-from Evaluator.runner import evaluate_cases
-from Evaluator.vllm_client import VLLMClient
-from tuner.inference.vllm_runtime import (
-    VLLMStartupSpec, VerifiedInJobVLLMSource, start_vllm_runtime,
-)
 from tuner.training.post_training import validate_post_training_config
 
 
@@ -91,6 +84,13 @@ def execute_post_training_evaluation(
     runtime = None
     failure_code = None
     try:
+        from Evaluator.config import VLLMSettings
+        from Evaluator.config_loader import ConfigLoader
+        from Evaluator.runner import evaluate_cases
+        from Evaluator.vllm_client import VLLMClient
+        from tuner.inference.vllm_runtime import (
+            VLLMStartupSpec, VerifiedInJobVLLMSource, start_vllm_runtime,
+        )
         validate()
         loader = ConfigLoader(cwd)
         cases = [loader._test_to_case(item, {}) for item in evaluation["scenarios"]]

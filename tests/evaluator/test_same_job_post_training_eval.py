@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import os
+import subprocess
+import sys
 
 import pytest
 
 from Evaluator.protocols import BackendResponse
+from Evaluator import vllm_client
 from tuner.inference import vllm_runtime
 from tuner.runtime import post_training_eval
 from tuner.training.post_training import validate_post_training_config
@@ -43,6 +48,43 @@ def _bindings():
         ("workload_digest", "a"), ("model_snapshot_digest", "b"),
         ("adapter_digest", "c"),
     )}
+
+
+def test_record_validation_import_stays_host_light():
+    config = _config()
+    record = {
+        "schema_version": "synaptic-post-training-evaluation/v1",
+        "status": "failed", "gate_passed": False,
+        "failure_code": "startup_failed", "case_count": 2,
+        "passed_count": 0, "pass_rate": 0.0, "min_pass_rate": 1.0,
+        "cases": [], "bindings": _bindings(),
+    }
+    probe = """
+import builtins
+import json
+import sys
+
+payload = json.load(sys.stdin)
+original_import = builtins.__import__
+blocked = {"Evaluator", "torch", "numpy", "pandas", "transformers", "vllm", "unsloth"}
+def guarded_import(name, *args, **kwargs):
+    if name.split(".", 1)[0] in blocked:
+        raise ImportError("execution-only dependency imported by host validation")
+    return original_import(name, *args, **kwargs)
+builtins.__import__ = guarded_import
+from tuner.runtime.post_training_eval import MAX_EVALUATION_RECORD_BYTES, validate_evaluation_record
+assert MAX_EVALUATION_RECORD_BYTES == 16 * 1024 * 1024
+assert validate_evaluation_record(payload["record"], config=payload["config"]) == payload["record"]
+assert not blocked.intersection(sys.modules)
+"""
+    interpreter = os.environ.get("SYNAPTIC_HOST_LIGHT_PYTHON", sys.executable)
+    result = subprocess.run(
+        [interpreter, "-c", probe],
+        input=json.dumps({"config": config, "record": record}),
+        text=True, capture_output=True, timeout=30,
+        cwd=Path(__file__).resolve().parents[2], check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_validator_rejects_unbounded_or_nonasserted_cases():
@@ -108,8 +150,8 @@ def test_run_uses_existing_assertion_runner_and_closes_runtime(tmp_path: Path, m
             events.append("chat")
             return BackendResponse(message="ready", raw={"choices": [{"message": {"content": "ready"}}]}, latency_s=0.1)
 
-    monkeypatch.setattr(post_training_eval, "start_vllm_runtime", lambda *args, **kwargs: Lease())
-    monkeypatch.setattr(post_training_eval, "VLLMClient", Client)
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
     record = post_training_eval.execute_post_training_evaluation(
         _config(), base_model_path=paths[0], adapter_path=paths[1], tokenizer_path=paths[2],
         validate=lambda: events.append("validate"), environment={"PATH": "/usr/bin"},
@@ -134,8 +176,8 @@ def test_cleanup_uncertainty_cannot_return_success(tmp_path: Path, monkeypatch):
         def close(self):
             return False
 
-    monkeypatch.setattr(post_training_eval, "start_vllm_runtime", lambda *args, **kwargs: Lease())
-    monkeypatch.setattr(post_training_eval, "VLLMClient", lambda *args, **kwargs: object())
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", lambda *args, **kwargs: object())
     with pytest.raises(post_training_eval.PostTrainingCleanupUnresolved) as caught:
         post_training_eval.execute_post_training_evaluation(
             _config(), base_model_path=tmp_path, adapter_path=tmp_path,
@@ -169,8 +211,8 @@ def test_failed_generation_has_closed_code_and_cannot_pass_zero_gate(
                 raise message
             return BackendResponse(message=message, raw={}, latency_s=0.1)
 
-    monkeypatch.setattr(post_training_eval, "start_vllm_runtime", lambda *args, **kwargs: Lease())
-    monkeypatch.setattr(post_training_eval, "VLLMClient", Client)
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
     config = _config()
     config["evaluation"]["min_pass_rate"] = 0
     record = post_training_eval.execute_post_training_evaluation(
@@ -217,8 +259,8 @@ def test_partial_pass_counts_survive_later_failure(tmp_path: Path, monkeypatch, 
                 return next(self.readings)
 
         monkeypatch.setattr(post_training_eval, "time", Clock())
-    monkeypatch.setattr(post_training_eval, "start_vllm_runtime", lambda *args, **kwargs: Lease())
-    monkeypatch.setattr(post_training_eval, "VLLMClient", Client)
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
     config = _config()
     record = post_training_eval.execute_post_training_evaluation(
         config, base_model_path=tmp_path, adapter_path=tmp_path,

@@ -37,6 +37,200 @@ _SPEC.loader.exec_module(diagnostic)
 _CALL = "fc-packaged-call"
 
 
+def _evaluation_document(binding):
+    return {
+        "schema_version": "synaptic-modal-packaged-evaluation/v1",
+        "effect_id": binding.command.operation.effect.effect_id,
+        "command_digest": binding.command_digest,
+        "provider_job_ref": _CALL,
+        "execution_binding_digest": binding.execution_binding.binding_digest,
+        "evaluation": {"schema_version": "synaptic-post-training-evaluation/v1",
+                       "status": "completed", "gate_passed": True, "response": "private café"},
+    }
+
+
+@pytest.mark.parametrize("ascii_only", [True, False])
+def test_evaluation_metadata_projects_encoding_without_raw_content(ascii_only):
+    binding = _case()[0]
+    raw = json.dumps(_evaluation_document(binding), sort_keys=True, separators=(",", ":"),
+                     ensure_ascii=ascii_only).encode("utf-8")
+    metadata = diagnostic.evaluation_metadata(raw, b"unverified tag", binding, _CALL)
+    assert metadata["result"] == "METADATA_READ"
+    assert metadata["mac_authentication"] == "UNVERIFIED"
+    assert metadata["canonical_ascii_matches"] is ascii_only
+    assert metadata["canonical_utf8_matches"] is not ascii_only
+    assert metadata["schema_matches"] and metadata["evaluation_schema_matches"]
+    assert metadata["status"] == "completed" and metadata["gate_passed"] is True
+    assert all(metadata["binding_matches"].values())
+    assert metadata["record_size_bytes"] == len(raw)
+    assert metadata["record_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert "private" not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize("raw", [b"not json", b"[]", b'{"evaluation":{}} trailing',
+    b'{"evaluation":{},"evaluation":{}}', b'{"evaluation":{"gate_passed":NaN}}'])
+def test_evaluation_bad_json_is_closed(raw):
+    metadata = diagnostic.evaluation_metadata(raw, b"tag", _case()[0], _CALL)
+    assert metadata["result"] == "JSON_INVALID"
+    assert metadata["mac_authentication"] == "UNVERIFIED"
+    assert "binding_matches" not in metadata
+
+
+def test_evaluation_mismatches_and_unknown_values_are_not_echoed():
+    binding = _case()[0]
+    document = _evaluation_document(binding)
+    document.update(effect_id="private unrelated", schema_version="private schema")
+    document["evaluation"].update(status="private status", gate_passed=1)
+    metadata = diagnostic.evaluation_metadata(json.dumps(document).encode(), b"tag", binding, _CALL)
+    assert metadata["status"] == "UNKNOWN" and metadata["gate_passed"] is None
+    assert metadata["schema_matches"] is False
+    assert metadata["binding_matches"]["effect_id"] is False
+    assert "private" not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize("failure,expected", [(None, None), ("deadline", "deadline"),
+    ("startup_failed", "startup_failed"), ("private provider details", "UNKNOWN")])
+@pytest.mark.parametrize("count,expected_count", [(0, 0), (32, 32), (33, None), (-1, None), (True, None)])
+def test_evaluation_failure_and_counts_are_closed(failure, expected, count, expected_count):
+    binding = _case()[0]
+    document = _evaluation_document(binding)
+    document["evaluation"].update(failure_code=failure, case_count=count, passed_count=count)
+    metadata = diagnostic.evaluation_metadata(json.dumps(document).encode(), b"tag", binding, _CALL)
+    assert metadata["failure_code"] == expected
+    assert metadata["case_count"] == expected_count and metadata["passed_count"] == expected_count
+    assert "private" not in json.dumps(metadata)
+
+
+def _evaluation_transport(raw, tag=b"tag", *, size_delta=0, metadata_change=None, encoding=None):
+    requests = []
+    content_by_url = {"https://provider.example/record": raw,
+                      "https://provider.example/mac": tag}
+    class Stub:
+        async def VolumeGetFile2(self, request, *, retry, timeout):
+            requests.append((request, retry, timeout))
+            is_record = request.path.endswith("record.json")
+            data = raw if is_record else tag
+            values = dict(size=len(data) + size_delta, start=0, len=len(data) + size_delta,
+                          get_urls=("https://provider.example/record" if is_record else "https://provider.example/mac",))
+            values.update(metadata_change or {})
+            return SimpleNamespace(**values)
+    class Session:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        def get(self, url, *, allow_redirects):
+            assert allow_redirects is False
+            data = content_by_url[url]
+            class Body:
+                remaining = data
+                async def read(self, maximum):
+                    chunk, self.remaining = self.remaining[:maximum], self.remaining[maximum:]
+                    return chunk
+            class Block:
+                status = 200
+                headers = {"Content-Encoding": encoding} if encoding else {}
+                content = Body()
+                async def __aenter__(self): return self
+                async def __aexit__(self, *_args): pass
+            return Block()
+    return SimpleNamespace(stub=Stub()), Session, requests
+
+
+def _inspect_evaluation(raw, **kwargs):
+    binding = _case()[0]
+    client, session, requests = _evaluation_transport(raw, **kwargs)
+    class MarkerReader:
+        async def read_exact(self, **_kwargs): return b"marker"
+    proto = SimpleNamespace(VolumeGetFile2Request=lambda **values: SimpleNamespace(**values))
+    result = asyncio.run(diagnostic.inspect_evaluation_metadata(
+        client, binding, _materials(binding), _CALL, proto,
+        marker_reader=MarkerReader(), session_factory=session,
+    ))
+    return result, requests, binding
+
+
+def test_evaluation_reads_exact_derived_paths_with_record_and_mac_budgets():
+    raw = json.dumps(_evaluation_document(_case()[0])).encode()
+    result, requests, binding = _inspect_evaluation(raw)
+    assert result["result"] == "METADATA_READ"
+    assert len(requests) == 2
+    for (request, retry, timeout), leaf, bound in zip(requests, ("record.json", "record.mac"),
+                                                   (16 * 1024 * 1024, 128)):
+        assert request.volume_id == binding.provider_facts.artifact_volume_id
+        assert request.path == diagnostic.operation_path(
+            binding.command.operation.effect.effect_id, "evaluation") + "/" + leaf
+        assert (request.start, request.len, retry, timeout) == (0, bound + 1, None, 15)
+
+
+def test_evaluation_accepts_mac_at_exact_budget():
+    result, _, _ = _inspect_evaluation(b'{"evaluation":{}}', tag=b"x" * 128)
+    assert result["result"] == "METADATA_READ"
+    assert result["mac_size_bytes"] == 128
+    assert result["mac_authentication"] == "UNVERIFIED"
+
+
+@pytest.mark.parametrize("error", [RuntimeError("private provider response"),
+    diagnostic.DiagnosticUnavailable("private provider response")])
+def test_evaluation_provider_errors_never_escape_projection(error):
+    binding = _case()[0]
+    class Stub:
+        async def VolumeGetFile2(self, *_args, **_kwargs): raise error
+    class Reader:
+        async def read_exact(self, **_kwargs): return b"marker"
+    result = asyncio.run(diagnostic.inspect_evaluation_metadata(
+        SimpleNamespace(stub=Stub()), binding, _materials(binding), _CALL,
+        SimpleNamespace(VolumeGetFile2Request=lambda **kwargs: SimpleNamespace(**kwargs)),
+        marker_reader=Reader(), session_factory=lambda: None,
+    ))
+    assert result == {"result": "FILE_UNAVAILABLE", "mac_authentication": "UNVERIFIED"}
+
+
+@pytest.mark.parametrize("options,code", [
+    ({"size_delta": 1}, "FILE_SIZE_INVALID"),
+    ({"size_delta": -1}, "FILE_SIZE_INVALID"),
+    ({"metadata_change": {"size": 16 * 1024 * 1024 + 1}}, "FILE_METADATA_INVALID"),
+    ({"metadata_change": {"start": True}}, "FILE_METADATA_INVALID"),
+    ({"metadata_change": {"get_urls": ()}}, "FILE_METADATA_INVALID"),
+    ({"metadata_change": {"get_urls": ("http://private.example",)}}, "FILE_UNAVAILABLE"),
+    ({"encoding": "gzip"}, "FILE_UNAVAILABLE"),
+    ({"tag": b"x" * 129}, "FILE_METADATA_INVALID"),
+])
+def test_evaluation_transport_rejects_invalid_sizes_urls_encoding_and_mac(options, code):
+    result, _, _ = _inspect_evaluation(b'{"evaluation":{}}', **options)
+    assert result == {"result": code, "mac_authentication": "UNVERIFIED"}
+
+
+@pytest.mark.parametrize("later", [False, True])
+def test_evaluation_marker_mismatch_blocks_or_discards_metadata(later):
+    binding = _case()[0]
+    client, session, requests = _evaluation_transport(b'{"evaluation":{}}')
+    class Reader:
+        count = 0
+        async def read_exact(self, **kwargs):
+            self.count += 1
+            if self.count == (3 if later else 1):
+                raise BoundedVolumeReadError("private provider exception")
+            return b"marker"
+    result = asyncio.run(diagnostic.inspect_evaluation_metadata(
+        client, binding, _materials(binding), _CALL,
+        SimpleNamespace(VolumeGetFile2Request=lambda **values: SimpleNamespace(**values)),
+        marker_reader=Reader(), session_factory=session,
+    ))
+    assert result == {"result": "MARKER_UNAVAILABLE", "mac_authentication": "UNVERIFIED"}
+    assert len(requests) == (2 if later else 0)
+
+
+def test_invalid_evaluation_journal_is_closed_before_provider_import(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(diagnostic, "read_retained_probe", lambda *args: (_ for _ in ()).throw(
+        diagnostic.DiagnosticUnavailable("JOURNAL_INVALID")))
+    assert diagnostic.main(["--journal", str(tmp_path / "missing.sqlite3"),
+        "--claim-ref", "a" * 64, "--call-id", _CALL, "--inspect-evaluation-metadata",
+        "--modal-profile", "named-profile"]) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output == {"schema_version": "synaptic-modal-packaged-evaluation-diagnostic/v1",
+                      "authority": "DIAGNOSTIC_ONLY", "mac_authentication": "UNVERIFIED",
+                      "result": "JOURNAL_INVALID"}
+
+
 def test_worker_failure_stage_allowlists_agree_across_all_readers():
     assert PACKAGED_WORKER_FAILURE_STAGES == _FIXED_WORKER_FAILURE_STAGES
     assert PACKAGED_WORKER_FAILURE_STAGES == frozenset(diagnostic._WORKER_FAILURE_STAGES)

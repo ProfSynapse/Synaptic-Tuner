@@ -877,6 +877,21 @@ raw errors. Encoded/redirected responses and inconsistent metadata reject.
 This is not a full download, authenticated artifact verification, retained MAC
 authority, recovery, or permission to replay. Preserve the original attempt.
 
+For a completed same-job rehearsal that fails at evaluation readback, the
+inspector also accepts `--inspect-evaluation-metadata` with the exact journal,
+submit-command digest, call ID, and profile. It correlates the retained binding
+and markers, reads only that operation's evaluation record (16 MiB maximum) and
+MAC (128 bytes maximum), and emits fixed outcomes, sizes, digests, and binding/
+encoding comparison flags. It never emits prompts, responses, signed URLs,
+credentials, or exception text. `mac_authentication: UNVERIFIED` is intentional:
+the original host's ephemeral MAC key is not recovered by this diagnostic.
+Self-consistency does not verify a run, qualify serving, or authorize replay.
+Keep the consumed attempt and its training artifacts intact. The host readback
+phase includes both the remote read and local save; its label alone is not a
+root-cause diagnosis. Test record validation in the pinned lightweight launcher,
+not only an ML-equipped test environment; execution-only evaluator imports must
+not be required just to validate a signed record.
+
 When that exact submit has marker material but no retained call ID, use the same
 inspector with `--inspect-markers` instead of `--call-id`. Supply the exact
 `--journal`, submit-command `--claim-ref`, and named `--modal-profile`. This
