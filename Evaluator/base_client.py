@@ -14,7 +14,8 @@ from typing import Any, Callable, Dict, List, Mapping, Sequence, TypeVar
 
 import requests
 
-from .protocols import BackendError, BackendResponse, BackendSettings
+from .protocols import (BackendError, BackendResponse, BackendSettings,
+                        RequestFailureCode, closed_request_failure_code)
 
 T = TypeVar("T")
 _MAX_HTTP_BODY_BYTES = 64 * 1024 * 1024
@@ -130,6 +131,25 @@ def _bounded_json_bytes(value: Any, maximum_bytes: int) -> bytes:
     if len(encoded) != expected_size or len(encoded) > maximum_bytes:
         raise ValueError("HTTP request JSON is invalid or exceeds its bound")
     return encoded
+
+
+def _typed_request_failure_code(error: BaseException) -> RequestFailureCode:
+    """Best-effort classification from types/status, without parsing messages."""
+    try:
+        if isinstance(error, requests.Timeout):
+            return RequestFailureCode.TIMEOUT
+        if isinstance(error, requests.ConnectionError):
+            return RequestFailureCode.CONNECTION
+        if isinstance(error, requests.HTTPError):
+            status = getattr(getattr(error, "response", None), "status_code", None)
+            if type(status) is int and status in {400, 401, 403, 404, 408, 413, 422, 429, 500, 502, 503, 504}:
+                return RequestFailureCode(f"http_{status}")
+            return RequestFailureCode.HTTP_OTHER
+        if isinstance(error, requests.RequestException):
+            return RequestFailureCode.REQUEST
+        return closed_request_failure_code(error)
+    except Exception:
+        return RequestFailureCode.UNKNOWN
 
 
 class BaseBackendClient(ABC):
@@ -392,9 +412,15 @@ class BaseBackendClient(ABC):
                 # Exponential backoff capped at 5 seconds
                 time.sleep(min(2 ** attempt, 5))
 
-        raise self._create_error(
+        error = self._create_error(
             f"{error_message} after {self.retries + 1} attempts: {last_error}"
         )
+        if isinstance(error, BackendError):
+            try:
+                error.request_failure_code = _typed_request_failure_code(last_error)
+            except Exception:
+                pass
+        raise error
 
     @property
     @abstractmethod

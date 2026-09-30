@@ -1,11 +1,33 @@
 # Qwen 3.5 4B: full-training flight plan (not launch-ready)
 
-Status: provider-free flight preparation, not paid launch approval. The private
+Status: representative rehearsal training verified; chapter evaluation still
+unqualified. Full-epoch training remains held. The private
 full-training recipe remains a candidate; no full run is submitted. The successful
 two-step [same-job smoke](../../Trainers/recipes/qwen35_4b_modal_train_eval_smoke.yaml)
 qualified the isolated SFT → saved LoRA → same verified base snapshot → vLLM →
 evaluation → authenticated record/verified downloads workflow. Its three simple
 cases did not qualify long-form writing quality.
+
+## Representative rehearsal evidence (2026-09-30)
+
+Pushed source `52d85db5a820cce43c00339c925cebc804b42a3e` completed the
+two-step representative rehearsal on an NVIDIA L40S. Authenticated trainer
+lineage reports 176 training and 44 evaluation examples, the pinned Qwen 3.5
+4B revision, rank-32 LoRA and 32,768-token training context. Recorded training
+time was 140.7 seconds, with `final_step: 2` and
+`total_epochs: 0.09090909090909091`; this is not a full epoch. The public workflow
+verified and downloaded all five required training artifacts, including the
+saved adapter, and its authenticated same-job evaluation record.
+
+The three representative chapter requests all failed before a valid response.
+Their retained legacy `evaluation_error` labels and null response/latency do
+not establish a timeout, server rejection, model-quality problem, or failed
+content assertion. The original exception detail was discarded. A local
+real-client/payload/assertion test with fake HTTP passed all three cases; that
+does not qualify the live server. Keep the consumed attempt and its artifacts;
+measure the live request boundary with reviewed closed diagnostics before
+changing settings. Writing quality and 32K concurrent chapter completion remain
+unproven. Full training, GGUF and publication remain held.
 
 ## Proposed training shape
 

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 import logging
+import math
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
@@ -31,7 +33,7 @@ from shared.verifiers.builtins.retrieval_verifier import (
 )
 from shared.verifiers.builtins.tool_sequence import evaluate_tool_sequence
 from .prompt_sets import PromptCase
-from .protocols import BackendClient
+from .protocols import BackendClient, RequestFailureCode, closed_request_failure_code
 from .response_view import build_response_view
 from .schema_validator import ToolCall, ValidationResult, ValidatorIssue, validate_assistant_response
 
@@ -82,6 +84,7 @@ class EvaluationRecord:
     retrieval: Optional["RetrievalValidationResult"] = None
     audio: Optional["AudioValidationResult"] = None
     conversation_trace: Optional[List[Dict[str, Any]]] = None
+    request_failure_code: Optional[RequestFailureCode] = None
 
     @property
     def status(self) -> str:
@@ -374,6 +377,10 @@ def _evaluate_single_case(
     # schema, behavior is byte-identical to the legacy chat() path — zero
     # regression for every non-structured scenario.
     try:
+        request_started = time.monotonic()
+    except Exception:
+        request_started = None
+    try:
         response_schema = case.metadata.get("response_schema")
         response_schema_name = case.metadata.get("response_schema_name")
         if response_schema and hasattr(client, "structured_chat"):
@@ -383,13 +390,21 @@ def _evaluate_single_case(
         else:
             response = client.chat(case.chat_messages())
     except Exception as exc:
+        elapsed = None
+        try:
+            duration = time.monotonic() - request_started
+            if type(duration) in (int, float) and math.isfinite(duration) and 0 <= duration <= 3600:
+                elapsed = duration
+        except Exception:
+            pass
         return EvaluationRecord(
             case=case,
             response_text=None,
             validator=None,
-            latency_s=None,
+            latency_s=elapsed,
             raw_response=None,
             error=str(exc),
+            request_failure_code=closed_request_failure_code(exc),
         )
 
     # Run schema validation (with optional context validation)

@@ -889,7 +889,19 @@ raw errors. Encoded/redirected responses and inconsistent metadata reject.
 This is not a full download, authenticated artifact verification, retained MAC
 authority, recovery, or permission to replay. Preserve the original attempt.
 
-For a completed same-job rehearsal that fails at evaluation readback, the
+For same-job request failures, retain only a closed request-failure category and
+bounded attempt elapsed time in the authenticated evaluation record. Do not
+persist exception text, HTTP bodies, URLs, prompts, or arbitrary paths. A legacy
+`evaluation_error` with null response/latency locates failure before a valid
+response; it does not establish a timeout, server rejection, or an assertion
+failure. Once the worker exits, discarded exception detail and suppressed child
+output cannot be reconstructed from that record. Reproduce the real client path
+locally, review the diagnostic change, refresh only affected existing source
+commitments, and use a fresh ordinarily CPU-qualified attempt to measure the
+live boundary. Keep prior artifacts and consumed authority intact; never change
+model, prompt, concurrency, or deadlines based on the generic label alone.
+
+For a completed same-job rehearsal that fails specifically at evaluation readback, the
 inspector also accepts `--inspect-evaluation-metadata` with the exact journal,
 submit-command digest, call ID, and profile. It correlates the retained binding
 and markers, reads only that operation's evaluation record (16 MiB maximum) and

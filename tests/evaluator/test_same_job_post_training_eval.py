@@ -9,7 +9,7 @@ import threading
 
 import pytest
 
-from Evaluator.protocols import BackendResponse
+from Evaluator.protocols import BackendResponse, BackendError, RequestFailureCode
 from Evaluator import vllm_client
 from tuner.inference import vllm_runtime
 from tuner.runtime import post_training_eval
@@ -51,8 +51,120 @@ def _bindings():
     )}
 
 
+@pytest.mark.parametrize("failures,expected", [
+    (("timeout", "connection", "http400"), ("request_timeout", "request_connection", "http_400")),
+    (("http_other", "value", "backend"), ("http_other", "request_validation", "request_backend")),
+    (("request", "unknown", "hostile_status"), ("request_transport", "request_unknown", "request_unknown")),
+])
+def test_real_http_failures_have_closed_ordered_signed_codes_and_cleanup(tmp_path, monkeypatch, failures, expected):
+    import requests
+    from types import SimpleNamespace
+    from Evaluator import base_client
+    from tests.evaluator.test_http_transport_policy import Session, Response
+    secret = "HF_TOKEN=private https://private.example/customer /home/private prompt-body"
+    sessions = []
+    class HostileStatus:
+        @property
+        def status_code(self):
+            raise ValueError(secret)
+    errors = {
+        "timeout": requests.Timeout(secret), "connection": requests.ConnectionError(secret),
+        "http400": requests.HTTPError(secret, response=SimpleNamespace(status_code=400)),
+        "http_other": requests.HTTPError(secret, response=SimpleNamespace(status_code=499)),
+        "value": ValueError(secret), "backend": BackendError(secret),
+        "request": requests.RequestException(secret), "unknown": RuntimeError(secret),
+        "hostile_status": requests.HTTPError(secret, response=HostileStatus()),
+    }
+    class FailingSession(Session):
+        def request(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            payload = json.loads(kwargs["data"])
+            assert "max_tokens" not in payload and "max_completion_tokens" not in payload
+            assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+            index = int(payload["messages"][-1]["content"])
+            raise errors[failures[index]]
+    def session():
+        value = FailingSession(Response({}))
+        sessions.append(value)
+        return value
+    class Lease:
+        served_model_name = "new-adapter"
+        host, port = "127.0.0.1", 8000
+        def close(self):
+            assert len(sessions) == 3 and all(item.closed for item in sessions)
+            return True
+    monkeypatch.setattr(base_client.requests, "Session", session)
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    config = _config()
+    evaluation = config["evaluation"]
+    evaluation["generation"].update(max_tokens=None, chat_template_kwargs={"enable_thinking": False})
+    evaluation["max_cases"] = evaluation["vllm"]["max_num_seqs"] = 3
+    original = evaluation["scenarios"][0]
+    evaluation["scenarios"] = [dict(original, id=f"case_{index}", question=str(index)) for index in range(3)]
+    record = post_training_eval.execute_post_training_evaluation(
+        config, base_model_path=tmp_path, adapter_path=tmp_path, tokenizer_path=tmp_path,
+        validate=lambda: None, environment={}, cwd=tmp_path,
+        python_executable=sys.executable, bindings=_bindings())
+    assert record["failure_code"] == "evaluation_error" and record["gate_passed"] is False
+    assert [case["error_code"] for case in record["cases"]] == list(expected)
+    assert [case["id"] for case in record["cases"]] == [f"case_{index}" for index in range(3)]
+    assert all(0 <= case["latency_seconds"] <= 3600 for case in record["cases"])
+    assert sum(len(item.calls) for item in sessions) == 3
+    assert secret not in json.dumps(record)
+    post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
+
+
+def test_closed_request_record_codes_match_enum_and_reject_hostile_values():
+    from Evaluator.protocols import closed_request_failure_code
+    assert post_training_eval._REQUEST_FAILURE_CODES == {item.value for item in RequestFailureCode}
+    error = BackendError("private", request_failure_code="private-code")
+    assert closed_request_failure_code(error) is RequestFailureCode.BACKEND
+    class HostileError(BackendError):
+        @property
+        def request_failure_code(self):
+            raise RuntimeError("private-code")
+        @request_failure_code.setter
+        def request_failure_code(self, value):
+            raise RuntimeError("private-setter-code")
+    assert closed_request_failure_code(HostileError("private")) is RequestFailureCode.BACKEND
+
+
+@pytest.mark.parametrize("elapsed", [float("nan"), -1.0, 3601.0, "clock_failure"])
+def test_failed_request_elapsed_is_optional_and_bounded(tmp_path, monkeypatch, elapsed):
+    from Evaluator import runner
+    from Evaluator.config_loader import ConfigLoader
+    case = ConfigLoader(tmp_path)._test_to_case(_config()["evaluation"]["scenarios"][0], {})
+    class Client:
+        def chat(self, messages):
+            raise BackendError("legacy-private-text", request_failure_code=RequestFailureCode.TIMEOUT)
+    values = iter([0.0, elapsed])
+    def clock():
+        value = next(values)
+        if value == "clock_failure":
+            raise RuntimeError("private-clock-text")
+        return value
+    monkeypatch.setattr(runner.time, "monotonic", clock)
+    result = runner._evaluate_single_case(case, Client(), False)
+    assert result.latency_s is None
+    assert result.request_failure_code is RequestFailureCode.TIMEOUT
+    assert result.error == "legacy-private-text"
+
+
+@pytest.mark.parametrize("status,expected", [(400, "http_400"), (401, "http_401"),
+    (403, "http_403"), (404, "http_404"), (408, "http_408"), (413, "http_413"),
+    (422, "http_422"), (429, "http_429"), (500, "http_500"), (502, "http_502"),
+    (503, "http_503"), (504, "http_504"), (499, "http_other"),
+    (True, "http_other"), ("HF_TOKEN=private", "http_other")])
+def test_http_status_diagnostics_are_exact_finite_codes(status, expected):
+    import requests
+    from types import SimpleNamespace
+    from Evaluator.base_client import _typed_request_failure_code
+    error = requests.HTTPError("private-message", response=SimpleNamespace(status_code=status))
+    assert _typed_request_failure_code(error).value == expected
+
+
 @pytest.mark.parametrize("template_options", [False, True])
-def test_record_validation_import_stays_host_light(template_options):
+def test_record_validation_import_stays_host_light(template_options: bool):
     config = _config()
     if template_options:
         config["evaluation"]["generation"].update(max_tokens=None, chat_template_kwargs={"enable_thinking": False})
@@ -332,7 +444,7 @@ def test_first_case_error_retains_later_finished_chapter(tmp_path: Path, monkeyp
     assert record["gate_passed"] is False
     assert record["failure_code"] == "evaluation_error"
     assert [case["id"] for case in record["cases"]] == ["one", "two"]
-    assert record["cases"][0]["error_code"] == "evaluation_error"
+    assert record["cases"][0]["error_code"] == "request_unknown"
     assert record["cases"][1]["response"] == "ready"
     assert record["passed_count"] == 1
     assert "private backend detail" not in str(record)

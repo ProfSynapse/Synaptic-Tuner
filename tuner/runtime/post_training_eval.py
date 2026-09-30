@@ -14,6 +14,12 @@ from tuner.training.post_training import validate_post_training_config
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _BINDING_KEYS = {"workload_digest", "model_snapshot_digest", "adapter_digest"}
 _RESPONSE_BYTES = 64 * 1024
+_REQUEST_FAILURE_CODES = frozenset({
+    "request_timeout", "request_connection", "request_transport", "request_validation",
+    "request_backend", "request_unknown", "http_other", "http_400", "http_401",
+    "http_403", "http_404", "http_408", "http_413", "http_422", "http_429",
+    "http_500", "http_502", "http_503", "http_504",
+})
 MAX_EVALUATION_RECORD_BYTES = 16 * 1024 * 1024
 _FAILURE_CODES = {"deadline", "incomplete", "startup_failed", "runtime_failed", "identity_changed", "gate_failed", "oversized_response", "evaluation_error"}
 
@@ -85,6 +91,7 @@ def execute_post_training_evaluation(
     failure_code = None
     try:
         from Evaluator.config import VLLMSettings
+        from Evaluator.protocols import RequestFailureCode
         from Evaluator.config_loader import ConfigLoader
         from Evaluator.runner import evaluate_cases
         from Evaluator.vllm_client import VLLMClient
@@ -160,6 +167,14 @@ def execute_post_training_evaluation(
                 status = "fail"
                 if failure_code is None:
                     failure_code = "oversized_response"
+            error_code = "evaluation_error" if result.error is not None or oversized else None
+            if result.error is not None:
+                try:
+                    typed_code = getattr(result, "request_failure_code", None)
+                    if type(typed_code) is RequestFailureCode:
+                        error_code = typed_code.value
+                except Exception:
+                    pass
             record["cases"].append({
                 "id": case.case_id,
                 "status": status,
@@ -171,9 +186,7 @@ def execute_post_training_evaluation(
                     else None
                 ),
                 "matched_path": matched_path,
-                "error_code": (
-                    "evaluation_error" if result.error is not None or oversized else None
-                ),
+                "error_code": error_code,
             })
             validate()
             if failure_code is None and time.monotonic() >= deadline:
@@ -266,7 +279,9 @@ def validate_evaluation_record(
         matched = case["matched_path"]
         if matched is not None and (type(matched) is not str or len(matched) > 256):
             raise ValueError("evaluation matched path is invalid")
-        if case["error_code"] not in (None, "evaluation_error"):
+        code = case["error_code"]
+        if code is not None and (type(code) is not str
+                or code not in _REQUEST_FAILURE_CODES | {"evaluation_error"}):
             raise ValueError("evaluation error code is invalid")
     passed = sum(item["status"] == "pass" for item in cases)
     if record["passed_count"] != passed or record["pass_rate"] != passed / record["case_count"]:
