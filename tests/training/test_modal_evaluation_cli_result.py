@@ -107,8 +107,11 @@ def test_valid_failed_evaluation_retains_run_artifacts_and_one_submission(tmp_pa
     }
     validate_evaluation_record(record, config=post_training)
     raw = json.dumps({"evaluation": record}, sort_keys=True, separators=(",", ":")).encode()
-    monkeypatch.setattr(ModalPackagedReader, "read_evaluation",
-                        lambda self, *_args, **_kwargs: raw)
+    read_calls = []
+    def read_evaluation(self, *_args, **_kwargs):
+        read_calls.append(True)
+        return raw
+    monkeypatch.setattr(ModalPackagedReader, "read_evaluation", read_evaluation)
 
     result = runner.run_modal_standalone_job(
         plan=plan, context=context, modal_profile="explicit", modal_environment="main",
@@ -117,4 +120,5 @@ def test_valid_failed_evaluation_retains_run_artifacts_and_one_submission(tmp_pa
     assert result.evaluation_path is not None
     assert result.evaluation_path.read_bytes() == raw
     assert len(result.artifact_paths) == 5
+    assert read_calls == [True]
     assert events == ["bootstrap", "cpu", "stage", "spawn"]

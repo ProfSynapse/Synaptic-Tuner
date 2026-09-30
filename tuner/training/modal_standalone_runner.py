@@ -524,8 +524,8 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 # Use the existing authenticated Foundation read binding;
                 # evaluation does not create another submission or grant.
                 workflow = host.composition.stores.workflow_store.get(started.run)
-                current_request = host.composition.runs._request(workflow, ProviderReadPurposeV1.OBSERVE)
-                current_binding = host.reader._binding(current_request, ProviderReadPurposeV1.OBSERVE)
+                current_request = host.composition.runs._request(workflow, ProviderReadPurposeV1.ARTIFACTS)
+                current_binding = host.reader._binding(current_request, ProviderReadPurposeV1.ARTIFACTS)
                 raw = reader.read_evaluation(current_binding, provider_job_ref=provider_job_ref,
                                              workload_bytes=workload.canonical_bytes)
                 directory = os.open(artifact_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
