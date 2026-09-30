@@ -1,0 +1,17 @@
+{
+  "release_ref": "runtime:qwen35-sft-packaged-3360351c",
+  "compatibility": {
+    "methods": [
+      "sft"
+    ],
+    "models": [
+      {
+        "ref": "Qwen/Qwen3.5-4B",
+        "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+      }
+    ],
+    "dataset_formats": [
+      "syntunia-sft-row/v2"
+    ]
+  }
+}

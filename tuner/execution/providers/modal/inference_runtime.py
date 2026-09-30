@@ -37,6 +37,7 @@ _REQUIRED_SOURCES = frozenset(
         "tuner/execution/providers/modal/inference_runtime.py",
         "tuner/execution/providers/modal/inference_wire.py",
         "tuner/execution/providers/modal/inference_worker.py",
+        "tuner/execution/providers/modal/prepared_input.py",
         "tuner/inference/chat_session.py",
         "tuner/inference/retrieved_model.py",
         "tuner/inference/run_chat.py",

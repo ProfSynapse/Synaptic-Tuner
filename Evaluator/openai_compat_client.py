@@ -68,8 +68,13 @@ class OpenAICompatClient(BaseBackendClient):
             "stream": False,
             "temperature": self.settings.temperature,
             "top_p": self.settings.top_p,
-            "max_tokens": self.settings.max_tokens,
         }
+        if self.settings.max_tokens is not None:
+            payload["max_tokens"] = self.settings.max_tokens
+        template_kwargs = getattr(self.settings, "chat_template_kwargs", None)
+        if template_kwargs is not None:
+            from synaptic_tuner.api.v1.training_input import validate_chat_template_kwargs
+            payload["chat_template_kwargs"] = validate_chat_template_kwargs(template_kwargs)
         if self.settings.seed is not None:
             payload["seed"] = self.settings.seed
         return payload

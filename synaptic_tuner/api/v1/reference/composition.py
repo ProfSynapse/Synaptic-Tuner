@@ -142,6 +142,7 @@ def compose_reference_host(
     data: ReferenceDataPortsV1 | None = None,
     pipelines: object | None = None,
     chat: object | None = None,
+    input_preparation: object | None = None,
 ) -> ReferenceComposition:
     """Compose Training, Runs and Artifacts and, when given, the Evaluation, Data, Pipelines and Chat families.
 
@@ -218,6 +219,7 @@ def compose_reference_host(
             authorization,
             authority.cursor_authority,
             authority.clock,
+            input_preparation,
         ),
     )
     pipeline_operations = None

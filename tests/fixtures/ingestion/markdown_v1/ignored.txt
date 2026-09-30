@@ -1,0 +1,1 @@
+This non-Markdown file is excluded from ingestion.

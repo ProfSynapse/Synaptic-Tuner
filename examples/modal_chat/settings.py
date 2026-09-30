@@ -88,6 +88,7 @@ _INFERENCE = {
     ),
 }
 _REVISION = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
+_PREPARED_REF = re.compile(r"prepared://sha256/([0-9a-f]{64})")
 _CREDENTIAL_KEYS = frozenset({"HF_TOKEN", "SYNAPTIC_EVIDENCE_MAC_KEY"})
 
 
@@ -145,8 +146,19 @@ class ModalChatSettings:
         if type(document["load_in_4bit"]) is not bool:
             raise TypeError("load_in_4bit must be an exact boolean")
         training = TrainingInputV1.from_dict(deepcopy(document["training_input"]))
-        if training.dataset.ref != "project://" + document["dataset_project_path"]:
-            raise ValueError("training dataset does not match dataset_project_path")
+        dataset_ref = training.dataset.ref
+        prepared_match = _PREPARED_REF.fullmatch(dataset_ref)
+        if prepared_match is None:
+            if dataset_ref != "project://" + document["dataset_project_path"]:
+                raise ValueError(
+                    "training dataset does not match dataset_project_path"
+                )
+        elif PurePosixPath(document["dataset_project_path"]).name != (
+            "dataset-" + prepared_match.group(1)
+        ):
+            raise ValueError(
+                "prepared dataset path does not match its content-addressed reference"
+            )
         if (
             _REVISION.fullmatch(training.model.revision) is None
             or _REVISION.fullmatch(training.model.tokenizer_revision) is None

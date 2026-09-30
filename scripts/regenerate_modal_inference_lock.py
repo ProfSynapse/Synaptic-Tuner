@@ -107,6 +107,7 @@ SOURCE_MEMBERS = (
     "tuner/execution/providers/modal/manifest.py",
     "tuner/execution/providers/modal/model_snapshot.py",
     "tuner/execution/providers/modal/mounted_io.py",
+    "tuner/execution/providers/modal/prepared_input.py",
     "tuner/execution/providers/modal/resolution.py",
     "tuner/execution/providers/modal/runtime.py",
     "tuner/execution/providers/modal/worker_ports.py",
@@ -141,6 +142,12 @@ SOURCE_MEMBERS = (
     "tuner/training/methods/sft.py",
     "tuner/training/recipes.py",
 )
+SOURCE_MEMBER_COUNT = 119
+ADDITIVE_SOURCE_MIGRATION = "tuner/execution/providers/modal/prepared_input.py"
+PREVIOUS_SOURCE_MEMBERS = tuple(
+    path for path in SOURCE_MEMBERS if path != ADDITIVE_SOURCE_MIGRATION
+)
+PREVIOUS_SOURCE_MEMBER_COUNT = 118
 
 
 class MaintenanceFault(RuntimeError):
@@ -252,6 +259,75 @@ def _production_manifest(root: Path, expected: bytes) -> None:
         raise MaintenanceFault("PRODUCTION_MANIFEST_MISMATCH")
 
 
+def _validate_additive_predecessor(
+    runtime: dict[str, object],
+    closure: dict[str, object],
+    closure_bytes: bytes,
+    dependency: bytes,
+) -> None:
+    """Accept only the exact reviewed 118-member predecessor inventory."""
+
+    members = closure["members"]
+    inventory = runtime["source_inventory"]
+    if type(members) is not list or type(inventory) is not list:
+        raise MaintenanceFault("INVENTORY_INVALID")
+    if (
+        closure["payload_bytes"]
+        != sum(item["size_bytes"] for item in members)  # type: ignore[index]
+    ):
+        raise MaintenanceFault("INVENTORY_INVALID")
+    unsigned = dict(closure)
+    unsigned.pop("closure_digest")
+    if closure["closure_digest"] != hashlib.sha256(_canonical(unsigned)).hexdigest():
+        raise MaintenanceFault("INVENTORY_INVALID")
+    by_path = {item["path"]: item for item in inventory}  # type: ignore[index]
+    if any(by_path.get(item["path"]) != item for item in members):  # type: ignore[index]
+        raise MaintenanceFault("INVENTORY_INVALID")
+    expected_resources = {
+        CLOSURE_RELATIVE: {
+            "path": CLOSURE_RELATIVE,
+            "size_bytes": len(closure_bytes),
+            "sha256": hashlib.sha256(closure_bytes).hexdigest(),
+        },
+        DEPENDENCY_RELATIVE: {
+            "path": DEPENDENCY_RELATIVE,
+            "size_bytes": len(dependency),
+            "sha256": hashlib.sha256(dependency).hexdigest(),
+        },
+    }
+    if any(by_path.get(path) != entry for path, entry in expected_resources.items()):
+        raise MaintenanceFault("INVENTORY_INVALID")
+
+
+def _production_additive_predecessor(
+    root: Path,
+    runtime_bytes: bytes,
+    closure_bytes: bytes,
+    inventory: object,
+) -> None:
+    """Run production parsing under only the exact preceding required set."""
+
+    from tuner.execution.providers.modal import inference_runtime
+
+    current_required = inference_runtime._REQUIRED_SOURCES
+    previous_required = frozenset(
+        path for path in current_required if path != ADDITIVE_SOURCE_MIGRATION
+    )
+    if current_required - previous_required != {ADDITIVE_SOURCE_MIGRATION}:
+        raise MaintenanceFault("ADDITIVE_MIGRATION_POLICY_INVALID")
+    try:
+        inference_runtime._REQUIRED_SOURCES = previous_required
+        _production_manifest(root, runtime_bytes)
+        inference_runtime._worker_closure(
+            closure_bytes,
+            inventory,
+            CLOSURE_RELATIVE,
+            DEPENDENCY_RELATIVE,
+        )
+    finally:
+        inference_runtime._REQUIRED_SOURCES = current_required
+
+
 def refresh(root: Path) -> tuple[bytes, bytes, bytes, bytes]:
     """Return current/runtime and refreshed/runtime+closure bytes."""
     runtime_before = _read(root, RUNTIME_RELATIVE, 1024 * 1024)
@@ -259,10 +335,6 @@ def refresh(root: Path) -> tuple[bytes, bytes, bytes, bytes]:
     dependency = _read(root, DEPENDENCY_RELATIVE)
     runtime = _load(runtime_before)
     closure = _load(closure_before)
-    try:
-        _production_manifest(root, runtime_before)
-    except Exception as exc:
-        raise MaintenanceFault("EXISTING_RUNTIME_REJECTED") from exc
     expected_runtime_fields = {
         "schema_version",
         "base_registry_reference",
@@ -295,15 +367,35 @@ def refresh(root: Path) -> tuple[bytes, bytes, bytes, bytes]:
         != "tuner/execution/providers/modal/inference_bootstrap.py"
     ):
         raise MaintenanceFault("SCHEMA_INVALID")
+    raw_members = closure.get("members")
+    if type(raw_members) is not list:
+        raise MaintenanceFault("INVENTORY_INVALID")
+    member_paths = tuple(
+        item.get("path") if type(item) is dict else None
+        for item in raw_members
+    )
+    migration = member_paths == PREVIOUS_SOURCE_MEMBERS
+    existing_members = PREVIOUS_SOURCE_MEMBERS if migration else SOURCE_MEMBERS
+    existing_count = (
+        PREVIOUS_SOURCE_MEMBER_COUNT if migration else SOURCE_MEMBER_COUNT
+    )
+    expected_existing_inventory = tuple(
+        sorted((*existing_members, DEPENDENCY_RELATIVE, CLOSURE_RELATIVE))
+    )
     expected_inventory = tuple(
         sorted((*SOURCE_MEMBERS, DEPENDENCY_RELATIVE, CLOSURE_RELATIVE))
     )
-    _entries(closure.get("members"), SOURCE_MEMBERS)
-    _entries(runtime.get("source_inventory"), expected_inventory)
+    _entries(closure.get("members"), existing_members)
+    _entries(runtime.get("source_inventory"), expected_existing_inventory)
     if (
         SOURCE_MEMBERS != tuple(sorted(SOURCE_MEMBERS))
-        or len(set(SOURCE_MEMBERS)) != 118
-        or closure.get("member_count") != 118
+        or len(SOURCE_MEMBERS) != SOURCE_MEMBER_COUNT
+        or len(set(SOURCE_MEMBERS)) != SOURCE_MEMBER_COUNT
+        or PREVIOUS_SOURCE_MEMBERS != tuple(sorted(PREVIOUS_SOURCE_MEMBERS))
+        or len(PREVIOUS_SOURCE_MEMBERS) != PREVIOUS_SOURCE_MEMBER_COUNT
+        or set(SOURCE_MEMBERS) - set(PREVIOUS_SOURCE_MEMBERS)
+        != {ADDITIVE_SOURCE_MIGRATION}
+        or closure.get("member_count") != existing_count
         or type(closure.get("payload_bytes")) is not int
         or type(closure.get("closure_digest")) is not str
     ):
@@ -311,17 +403,33 @@ def refresh(root: Path) -> tuple[bytes, bytes, bytes, bytes]:
 
     from tuner.execution.providers.modal.inference_runtime import _worker_closure
 
-    try:
-        _worker_closure(
-            closure_before,
-            runtime["source_inventory"],
-            CLOSURE_RELATIVE,
-            DEPENDENCY_RELATIVE,
+    if migration:
+        _validate_additive_predecessor(
+            runtime, closure, closure_before, dependency,
         )
-    except (TypeError, ValueError, KeyError) as exc:
-        raise MaintenanceFault("EXISTING_LOCK_REJECTED") from exc
+        try:
+            _production_additive_predecessor(
+                root,
+                runtime_before,
+                closure_before,
+                runtime["source_inventory"],
+            )
+        except Exception as exc:
+            raise MaintenanceFault("EXISTING_LOCK_REJECTED") from exc
+    else:
+        try:
+            _production_manifest(root, runtime_before)
+            _worker_closure(
+                closure_before,
+                runtime["source_inventory"],
+                CLOSURE_RELATIVE,
+                DEPENDENCY_RELATIVE,
+            )
+        except Exception as exc:
+            raise MaintenanceFault("EXISTING_LOCK_REJECTED") from exc
     members = [_member(root, path) for path in SOURCE_MEMBERS]
     closure_new = dict(closure)
+    closure_new["member_count"] = SOURCE_MEMBER_COUNT
     closure_new["members"] = members
     closure_new["payload_bytes"] = sum(item["size_bytes"] for item in members)
     unsigned = dict(closure_new)
@@ -392,7 +500,10 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
         rb, cb, ra, ca = refresh(repo)
         if rb == ra and cb == ca:
             print(
-                json.dumps({"status": "CURRENT", "member_count": 118}, sort_keys=True)
+                json.dumps(
+                    {"status": "CURRENT", "member_count": SOURCE_MEMBER_COUNT},
+                    sort_keys=True,
+                )
             )
             return 0
         if not args.write:
@@ -443,7 +554,12 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
     ) as exc:
         print(f"Modal inference lock maintenance failed: {exc}", file=sys.stderr)
         return 125
-    print(json.dumps({"status": "REFRESHED", "member_count": 118}, sort_keys=True))
+    print(
+        json.dumps(
+            {"status": "REFRESHED", "member_count": SOURCE_MEMBER_COUNT},
+            sort_keys=True,
+        )
+    )
     return 0
 
 

@@ -1,7 +1,9 @@
-"""Check or refresh only source hashes in the packaged Modal runtime lock.
+"""Check or refresh the packaged Modal runtime lock's reviewed source boundary.
 
 The default is read-only. ``--write`` atomically replaces the lock after every
 declared source has been safely read and the lock has been rechecked for races.
+Inventory changes remain forbidden except for the explicit, one-way
+``modal_prepared_input`` additive migration declared in this script.
 This tool performs no provider, SDK, network, package, or image operation.
 """
 
@@ -111,11 +113,18 @@ LOCKED_FILES = {
     "dependency_lock": "requirements/modal-launcher-v1.lock",
     "deployment_wrapper": "tuner/execution/providers/modal/coordinator_deployment.py",
     "modal_mounted_io": "tuner/execution/providers/modal/mounted_io.py",
+    "modal_prepared_input": "tuner/execution/providers/modal/prepared_input.py",
     "modal_runtime": "tuner/execution/providers/modal/runtime.py",
     "modal_worker_ports": "tuner/execution/providers/modal/worker_ports.py",
     "modal_worker_source": "tuner/execution/providers/modal/worker_source.py",
     "model_preparation": "tuner/execution/providers/modal/model_snapshot.py",
     "sft_runtime": "Trainers/sft/runtime_v1.py",
+}
+# One deliberately reviewed additive inventory transition.  This is not a
+# general inventory editor: only the immediately preceding inventory may be
+# advanced, and the new member's path and digest are derived here.
+ADDITIVE_LOCK_MIGRATION = {
+    "modal_prepared_input": "tuner/execution/providers/modal/prepared_input.py",
 }
 MAX_LOCK_BYTES = 256 * 1024
 MAX_SOURCE_BYTES = 16 * 1024 * 1024
@@ -224,6 +233,26 @@ def _updated(root: Path, current: bytes) -> bytes:
         raise LockRegenerationError("LOCK_INVALID") from exc
     if type(document) is not dict or _canonical(document) != current:
         raise LockRegenerationError("LOCK_NOT_CANONICAL")
+    locked = document.get("locked_files")
+    if type(locked) is not dict:
+        raise LockRegenerationError("LOCKED_FILE_INVENTORY_INVALID")
+    missing = set(LOCKED_FILES) - set(locked)
+    unknown = set(locked) - set(LOCKED_FILES)
+    if missing or unknown:
+        if missing != set(ADDITIVE_LOCK_MIGRATION) or unknown:
+            raise LockRegenerationError("LOCKED_FILE_INVENTORY_INVALID")
+        migrated = json.loads(json.dumps(document))
+        for name, expected_path in ADDITIVE_LOCK_MIGRATION.items():
+            if LOCKED_FILES.get(name) != expected_path:
+                raise LockRegenerationError("LOCKED_FILE_MIGRATION_INVALID")
+            payload, _ = _safe_regular_bytes(
+                root, expected_path, maximum=MAX_SOURCE_BYTES,
+            )
+            migrated["locked_files"][name] = {
+                "path": expected_path,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        document = migrated
     try:
         # Apply runtime composition's SDK-free structural/policy validation.
         # Preserve non-hash fields without independently approving their pins.

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from synaptic_tuner.api import v1
-from synaptic_tuner.api.v1 import planning, training_facade
+from synaptic_tuner.api.v1 import execution, planning, training_facade, training_sources
 from synaptic_tuner.api.v1.host import APIHost, HostPorts
 from synaptic_tuner.api.v1.providers import ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef
@@ -67,7 +67,10 @@ def test_root_training_exports_have_only_canonical_contract_identities():
 def test_public_training_verbs_and_start_signature_are_exact():
     verbs = {name for name, value in v1.TrainingAPI.__dict__.items()
              if not name.startswith("_") and inspect.isfunction(value)}
-    assert verbs == {"load", "resolve", "plan", "preflight", "start"}
+    assert verbs == {"prepare", "load", "resolve", "plan", "preflight", "start"}
+    assert tuple(inspect.signature(v1.TrainingAPI.prepare).parameters) == (
+        "self", "source", "config",
+    )
     assert tuple(inspect.signature(v1.TrainingAPI.start).parameters) == (
         "self", "plan", "preflight",
     )
@@ -75,6 +78,59 @@ def test_public_training_verbs_and_start_signature_are_exact():
         "training", "runs", "artifacts", "evaluation", "chat", "data",
         "pipelines", "clock",
     )
+
+
+def test_prepared_input_format_identity_is_segmented_and_locator_free():
+    digest = "a" * 64
+    for format_value in ("syntunia-sft-row/v1", "syntunia-sft-row/v2"):
+        identity = v1.PreparedTrainingInputIdentity(
+            f"prepared://sha256/{digest}", digest, "b" * 64, 1, format_value,
+        )
+        assert identity.format == format_value
+
+    for format_value in (
+        ".", "..", "format/.", "format/..", "format//v1", "../format",
+        "file://dataset", "C:/private", "C:\\private\\dataset.jsonl",
+        "/format", "format/", "customer prose format", "a" * 65,
+    ):
+        with pytest.raises(ValueError, match="logical identifier"):
+            v1.PreparedTrainingInputIdentity(
+                f"prepared://sha256/{digest}", digest, "b" * 64, 1,
+                format_value,
+            )
+
+
+def test_prepared_input_identity_has_one_canonical_class_object():
+    from tuner.training import contracts
+
+    assert (
+        v1.PreparedTrainingInputIdentity
+        is execution.PreparedTrainingInputIdentity
+        is training_sources.PreparedTrainingInputIdentity
+        is contracts.PreparedTrainingInputIdentity
+    )
+
+
+def test_root_prepared_identity_import_does_not_load_host_preparation_modules():
+    root = Path(__file__).resolve().parents[2]
+    code = f"""
+import sys
+sys.path.insert(0, {str(root)!r})
+from synaptic_tuner.api.v1 import PreparedTrainingInputIdentity
+assert PreparedTrainingInputIdentity.__module__ == "synaptic_tuner.api.v1.execution"
+for name in (
+    "synaptic_tuner.api.v1.training_sources",
+    "synaptic_tuner.api.v1.training_facade",
+    "synaptic_tuner.api.v1.planning",
+    "synaptic_tuner.api.v1.providers",
+    "synaptic_tuner.api.v1.results",
+):
+    assert name not in sys.modules, name
+"""
+    completed = subprocess.run(
+        [sys.executable, "-B", "-c", code], capture_output=True, text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_api_host_delegates_generic_training_without_provider_fields():
@@ -180,7 +236,11 @@ def test_root_training_symbol_import_is_engine_and_provider_light():
     code = f"""
 import sys
 sys.path.insert(0, {str(root)!r})
-from synaptic_tuner.api.v1 import TrainingAPI, TrainingPlan, TrainingRequest, ProviderRef
+from synaptic_tuner.api.v1 import (
+    LocalTrainingInputPathV1, OneUseTrainingInputUploadV1,
+    PreparedTrainingInputIdentity, TrainingAPI, TrainingPlan, TrainingRequest,
+    TrainingPreparationConfigV1, ProviderRef,
+)
 for prefix in ("tuner", "modal", "sqlite3"):
     assert not any(name == prefix or name.startswith(prefix + ".") for name in sys.modules)
 """

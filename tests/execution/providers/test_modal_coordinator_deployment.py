@@ -4,6 +4,7 @@ import pytest
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.providers.modal.coordinator_deployment import build_modal_coordinator_deployment
+from tuner.execution.providers.modal.coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
 from tuner.execution.providers.modal.config import ModalRuntimeLockV1
 from tuner.execution.providers.modal.deployment_v1 import ModalDeploymentSpecV1
 from tuner.execution.providers.modal.resolution import ModalDeploymentSelectionV1
@@ -114,7 +115,10 @@ def test_successful_wrapper_orders_prepared_artifact_then_artifact_then_control(
     events = []
 
     class Worker:
-        def __init__(self, **kwargs): events.append("compose")
+        def __init__(self, **kwargs):
+            assert kwargs["bounds"] is MODAL_TRAINING_ARTIFACT_BOUNDS_V1
+            assert kwargs["completion"]._bounds is MODAL_TRAINING_ARTIFACT_BOUNDS_V1
+            events.append("compose")
         def __call__(self, dispatch, job, commit_prepared):
             events.append("worker"); commit_prepared(); return {"status_code": "completed"}
 

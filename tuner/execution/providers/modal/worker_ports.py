@@ -21,6 +21,7 @@ DIAGNOSTIC_CODES = frozenset({
     "runtime_workload_engine_rejected", "runtime_workload_fingerprint_rejected",
     "runtime_workload_reconstruction_rejected", "runtime_workload_roots_rejected",
     "runtime_workload_schema_rejected", "source_topology_invalid", "trainer_invocation_failed",
+    "prepared_input_rejected",
     "trainer_nonzero", "worker_source_path_noncanonical", "worker_control_path_noncanonical",
     "worker_source_retain_failed", "worker_source_copy_failed", "worker_closure_rejected",
 })

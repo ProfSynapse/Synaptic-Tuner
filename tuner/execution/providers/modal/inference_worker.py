@@ -89,6 +89,11 @@ def _serving_preparation(
         enforce_eager=serving["enforce_eager"],
         tokenizer_mode=serving["tokenizer_mode"],
         max_lora_rank=serving["max_lora_rank"],
+        dtype=None,
+        max_model_len=None,
+        max_num_seqs=None,
+        max_num_batched_tokens=None,
+        language_model_only=False,
         startup_timeout_s=policy["startup_timeout_seconds"],
         readiness_request_timeout_s=(
             serving["readiness_request_timeout_milliseconds"] / 1000

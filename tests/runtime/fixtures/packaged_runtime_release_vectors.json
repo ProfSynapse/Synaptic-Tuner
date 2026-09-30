@@ -1,0 +1,18 @@
+{
+  "release": {
+    "canonical_json": "{\"compatibility\":{\"dataset_formats\":[\"syntunia-sft-row/v2\"],\"methods\":[\"sft\"],\"models\":[{\"ref\":\"Qwen/Qwen3.5-4B\",\"revision\":\"1111111111111111111111111111111111111111\"}]},\"contracts\":{\"artifact_contract_schema\":\"synaptic-sft-artifacts/v1\",\"prepared_input_schema\":\"synaptic-prepared-training-input/v1\",\"workload_schema\":\"synaptic-sft-workload/v1\"},\"image\":{\"digest\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"reference\":\"ghcr.io/synaptic-labs/tuner@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"installed_distributions\":{\"count\":327,\"digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"manifest_digest\":\"15222c9b64ca8f6f52ff208f63224c9b48a97b7773ea2e4bd2fa69f6cee11144\",\"package\":{\"digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"name\":\"synaptic-tuner\",\"source_provenance_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"version\":\"1.2.3\"},\"platform\":{\"cuda_version\":\"12.4.1\",\"machine\":\"x86_64\",\"runtime_facts\":{\"bool\":true,\"maximum\":9007199254740991,\"minimum\":-9007199254740991,\"nested\":{\"array\":[null,\"café\",\"雪\",{\"flag\":false}]}},\"system\":\"linux\"},\"python\":{\"executable\":\"/usr/local/bin/python\",\"executable_digest\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"implementation\":\"cpython\",\"version\":\"3.12.3\"},\"release_ref\":\"runtime:qwen35-sft-v1\",\"schema_version\":\"synaptic-packaged-training-runtime-release/v1\",\"worker\":{\"closure_digest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"entrypoint\":\"tuner.runtime.packaged_worker:main\"}}",
+    "digest": "15222c9b64ca8f6f52ff208f63224c9b48a97b7773ea2e4bd2fa69f6cee11144"
+  },
+  "provider": {
+    "canonical_json": "{\"binding_digest\":\"f1b682b321b01fcde4d9c59bcd31095a2b73a2dd384a16adba5ceac9bc3a6a09\",\"provider_facts_digest\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"provider_facts_schema\":\"fixture-runtime-facts/v1\",\"provider_ref\":\"provider:fixture\",\"runtime_release_digest\":\"15222c9b64ca8f6f52ff208f63224c9b48a97b7773ea2e4bd2fa69f6cee11144\",\"schema_version\":\"synaptic-provider-runtime-binding/v1\"}",
+    "digest": "f1b682b321b01fcde4d9c59bcd31095a2b73a2dd384a16adba5ceac9bc3a6a09"
+  },
+  "execution": {
+    "canonical_json": "{\"artifact_policy_digest\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"binding_digest\":\"4da727432fa34150a60aabdd8bd60f6333d106213a66b5c9bfacd72ed71a0b9e\",\"configuration_digest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"prepared_input\":{\"content_digest\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"format\":\"syntunia-sft-row/v2\",\"ref\":\"prepared://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"revision\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":10513545},\"provider_runtime_binding_digest\":\"f1b682b321b01fcde4d9c59bcd31095a2b73a2dd384a16adba5ceac9bc3a6a09\",\"run_ref\":\"run:fiction-001\",\"runtime_release_digest\":\"15222c9b64ca8f6f52ff208f63224c9b48a97b7773ea2e4bd2fa69f6cee11144\",\"schema_version\":\"synaptic-packaged-execution-binding/v1\",\"workload_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}",
+    "digest": "4da727432fa34150a60aabdd8bd60f6333d106213a66b5c9bfacd72ed71a0b9e"
+  },
+  "unicode_key_policy": {
+    "input_key": "café",
+    "admission": "rejected_ascii_keys_only"
+  }
+}

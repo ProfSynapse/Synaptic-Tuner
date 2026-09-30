@@ -244,6 +244,58 @@ def test_hyperparameter_booleans_are_exact(field: str) -> None:
         TrainingInputV1.from_dict(document)
 
 
+def test_prepared_sft_controls_are_optional_atomic_and_canonical() -> None:
+    baseline = _document()
+    assert TrainingInputV1.from_dict(baseline).to_dict() == baseline
+
+    controls = {
+        "dataset_format": "messages",
+        "completion_only_loss": True,
+        "assistant_only_loss": False,
+        "use_preassigned_splits": True,
+        "prompt_render": "prompt_completion",
+        "packing": False,
+        "require_memory_efficient_loss": True,
+    }
+    extended = _document()
+    extended["hyperparameters"].update(controls)  # type: ignore[union-attr]
+    value = TrainingInputV1.from_dict(extended)
+    assert value.to_dict() == extended
+    assert value.hyperparameters.dataset_format == "messages"
+
+    for field in controls:
+        incomplete = _document()
+        incomplete["hyperparameters"].update(controls)  # type: ignore[union-attr]
+        del incomplete["hyperparameters"][field]  # type: ignore[index]
+        with pytest.raises(ValueError):
+            TrainingInputV1.from_dict(incomplete)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "completion_only_loss", "assistant_only_loss", "use_preassigned_splits",
+        "packing", "require_memory_efficient_loss",
+    ],
+)
+def test_prepared_sft_boolean_controls_are_exact(field: str) -> None:
+    document = _document()
+    document["hyperparameters"].update(  # type: ignore[union-attr]
+        {
+            "dataset_format": "messages",
+            "completion_only_loss": True,
+            "assistant_only_loss": False,
+            "use_preassigned_splits": True,
+            "prompt_render": "prompt_completion",
+            "packing": False,
+            "require_memory_efficient_loss": True,
+        }
+    )
+    document["hyperparameters"][field] = 1  # type: ignore[index]
+    with pytest.raises(TypeError):
+        TrainingInputV1.from_dict(document)
+
+
 @pytest.mark.parametrize(
     ("container", "field", "replacement"),
     [

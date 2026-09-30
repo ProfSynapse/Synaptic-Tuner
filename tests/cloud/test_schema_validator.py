@@ -1,7 +1,7 @@
 from Evaluator.schema_validator import validate_assistant_response
 
 
-def test_validate_assistant_response_filters_wrapper_schema_warning():
+def test_validate_assistant_response_preserves_wrapper_name():
     response = """
 <tool_call>
 {
@@ -30,11 +30,11 @@ def test_validate_assistant_response_filters_wrapper_schema_warning():
 
     result = validate_assistant_response(response)
 
-    assert [tool.name for tool in result.tool_calls] == ["searchManager_searchContent"]
-    assert all("No schema found for this tool" not in issue.message for issue in result.issues)
+    assert [tool.name for tool in result.tool_calls] == ["useTools"]
+    assert result.tool_calls[0].arguments["calls"][0]["tool"] == "searchContent"
 
 
-def test_validate_assistant_response_preserves_wrapper_context_on_expanded_calls():
+def test_validate_assistant_response_preserves_wrapper_context():
     response = """
 <tool_call>
 {
@@ -76,7 +76,7 @@ def test_validate_assistant_response_preserves_wrapper_context_on_expanded_calls
     assert result.tool_calls[0].arguments["context"]["goal"] == "Find the crash notes."
 
 
-def test_validate_assistant_response_expands_non_default_wrapper_name():
+def test_validate_assistant_response_preserves_non_default_wrapper_name():
     response = """
 <tool_call>
 {
@@ -105,7 +105,7 @@ def test_validate_assistant_response_expands_non_default_wrapper_name():
 
     result = validate_assistant_response(response)
 
-    assert [tool.name for tool in result.tool_calls] == ["searchManager_searchContent"]
+    assert [tool.name for tool in result.tool_calls] == ["batchTools"]
     assert result.tool_calls[0].arguments["context"]["workspaceId"] == "ws_1732300800000_atlasroll"
 
 
@@ -136,5 +136,5 @@ def test_validate_assistant_response_recovers_malformed_qwen_tool_call():
     result = validate_assistant_response(response)
 
     assert result.passed is False
-    assert [tool.name for tool in result.tool_calls] == ["searchManager_searchContent"]
+    assert [tool.name for tool in result.tool_calls] == ["batchTools"]
     assert any("malformed <tool_call> JSON recovered heuristically" in issue.message for issue in result.issues)

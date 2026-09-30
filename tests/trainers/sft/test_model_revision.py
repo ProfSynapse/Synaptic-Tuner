@@ -28,6 +28,7 @@ def _load(monkeypatch, revision: str | None, snapshot: Path):
             return model, tokenizer
 
     monkeypatch.setitem(sys.modules, "unsloth", SimpleNamespace(FastLanguageModel=Fast, is_bfloat16_supported=lambda: True))
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
     monkeypatch.setitem(
         sys.modules, "huggingface_hub",
         SimpleNamespace(snapshot_download=lambda **kwargs: str(snapshot)),
@@ -99,6 +100,106 @@ def test_runtime_loader_consumes_only_the_exact_local_snapshot(
             "local_files_only": True,
         }
     ]
+
+
+def test_runtime_loader_marks_exact_model_boundaries_without_changing_load(monkeypatch, tmp_path: Path) -> None:
+    revision = "a" * 40
+    cache = (tmp_path / "cache" / "model").resolve()
+    snapshot = cache / "models--owner--model" / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+    module, calls = _load(monkeypatch, revision, snapshot)
+    stages = []
+    module.load_model_and_tokenizer(
+        "owner/model", model_revision=revision, cache_dir=str(cache),
+        model_snapshot=str(snapshot), require_local_snapshot=True,
+        _diagnostic_mark=stages.append,
+    )
+    assert len(calls) == 1
+    assert stages == ["MODEL_SNAPSHOT", "MODEL_LIBRARY_LOAD", "MODEL_SOURCE", "TOKENIZER_SOURCE", "MODEL_FINALIZE"]
+
+
+def test_runtime_loader_accepts_exact_nested_text_tokenizer_and_preserves_processor(monkeypatch, tmp_path: Path) -> None:
+    revision = "a" * 40
+    cache = (tmp_path / "cache" / "model").resolve()
+    snapshot = cache / "models--owner--model" / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+    module, _ = _load(monkeypatch, revision, snapshot)
+    class TextTokenizer:
+        name_or_path = str(snapshot)
+        def __len__(self):
+            return 3
+    processor = SimpleNamespace(chat_template="x", tokenizer=TextTokenizer())
+    monkeypatch.setattr(module.FastLanguageModel, "from_pretrained", lambda **kwargs: (
+        SimpleNamespace(config=SimpleNamespace(_name_or_path=kwargs["model_name"])), processor))
+    stages = []
+    _, returned = module.load_model_and_tokenizer(
+        "owner/model", model_revision=revision, cache_dir=str(cache),
+        model_snapshot=str(snapshot), require_local_snapshot=True,
+        _diagnostic_mark=stages.append,
+    )
+    assert returned is processor
+    assert stages == ["MODEL_SNAPSHOT", "MODEL_LIBRARY_LOAD", "MODEL_SOURCE", "TOKENIZER_SOURCE", "MODEL_FINALIZE"]
+    processor.name_or_path = str(snapshot)
+    _, returned_with_wrapper_source = module.load_model_and_tokenizer(
+        "owner/model", model_revision=revision, cache_dir=str(cache),
+        model_snapshot=str(snapshot), require_local_snapshot=True,
+    )
+    assert returned_with_wrapper_source is processor
+
+
+@pytest.mark.parametrize("shape", (
+    "nested_none", "nested_missing", "nested_relative", "nested_mismatch",
+    "nested_nonstring", "wrapper_mismatch", "wrapper_none", "wrapper_relative", "wrapper_nonstring",
+    "wrapper_property_error",
+))
+def test_runtime_loader_rejects_unbound_or_conflicting_processor_sources(monkeypatch, tmp_path: Path, shape: str) -> None:
+    revision = "a" * 40
+    cache = (tmp_path / "cache" / "model").resolve()
+    snapshot = cache / "models--owner--model" / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+    module, _ = _load(monkeypatch, revision, snapshot)
+    nested = SimpleNamespace(name_or_path=str(snapshot))
+    processor = SimpleNamespace(chat_template="x", tokenizer=nested)
+    if shape == "nested_none":
+        processor.tokenizer = None
+    elif shape == "nested_missing":
+        processor.tokenizer = SimpleNamespace()
+    elif shape == "nested_relative":
+        nested.name_or_path = "relative/snapshot"
+    elif shape == "nested_mismatch":
+        nested.name_or_path = str(tmp_path / "foreign")
+    elif shape == "nested_nonstring":
+        nested.name_or_path = 7
+    elif shape == "wrapper_mismatch":
+        processor.name_or_path = str(tmp_path / "foreign")
+    elif shape == "wrapper_none":
+        processor.name_or_path = None
+    elif shape == "wrapper_relative":
+        processor.name_or_path = "relative/snapshot"
+    elif shape == "wrapper_nonstring":
+        processor.name_or_path = 7
+    elif shape == "wrapper_property_error":
+        class UnreadableProcessor:
+            tokenizer = nested
+            chat_template = "x"
+            @property
+            def name_or_path(self):
+                raise OSError("PRIVATE_SENTINEL")
+        processor = UnreadableProcessor()
+    monkeypatch.setattr(module.FastLanguageModel, "from_pretrained", lambda **kwargs: (
+        SimpleNamespace(config=SimpleNamespace(_name_or_path=kwargs["model_name"])), processor))
+    stages = []
+    expected = OSError if shape == "wrapper_property_error" else RuntimeError
+    with pytest.raises(expected):
+        module.load_model_and_tokenizer(
+            "owner/model", model_revision=revision, cache_dir=str(cache),
+            model_snapshot=str(snapshot), require_local_snapshot=True,
+            _diagnostic_mark=stages.append,
+        )
+    assert stages[-1] == "TOKENIZER_SOURCE"
 
 
 def test_runtime_loader_rejects_foreign_snapshot_binding(
@@ -175,3 +276,39 @@ def test_runtime_loader_never_falls_back_when_local_loading_fails(
     assert len(calls) == 1
     assert calls[0]["model_name"] == str(snapshot)
     assert calls[0]["local_files_only"] is True
+
+
+def _unsloth_loss():
+    def UnslothForCausalLMLoss():
+        pass
+
+    UnslothForCausalLMLoss.__module__ = "unsloth_zoo.loss_utils"
+    return UnslothForCausalLMLoss
+
+
+def test_memory_efficient_loss_gate_accepts_exact_unsloth_mapping(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module, _ = _load(monkeypatch, None, tmp_path)
+    loss = _unsloth_loss()
+    module.require_unsloth_memory_efficient_loss(
+        SimpleNamespace(loss_function=loss),
+        loss_mapping={"ForCausalLM": loss, "ForConditionalGeneration": loss},
+    )
+
+
+@pytest.mark.parametrize(
+    "selected,mapping",
+    [
+        (lambda: None, {"ForCausalLM": lambda: None}),
+        (_unsloth_loss(), {}),
+    ],
+)
+def test_memory_efficient_loss_gate_rejects_fallback_or_missing_mapping(
+    monkeypatch, tmp_path: Path, selected, mapping
+) -> None:
+    module, _ = _load(monkeypatch, None, tmp_path)
+    with pytest.raises(RuntimeError, match="SFT_MEMORY_EFFICIENT_LOSS_REQUIRED"):
+        module.require_unsloth_memory_efficient_loss(
+            SimpleNamespace(loss_function=selected), loss_mapping=mapping
+        )

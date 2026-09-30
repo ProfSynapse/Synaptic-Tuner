@@ -110,6 +110,44 @@ def test_fixed_trainer_arguments_reject_optional_features() -> None:
         )
 
 
+_RAW_TEXT_ARGUMENTS = [
+    "--no-completion-only-loss",
+    "--no-assistant-only-loss",
+    "--use-preassigned-splits",
+    "--runtime-v1-dataset-schema",
+    "syntunia-sft-row/v1",
+    "--runtime-v1-dataset-format",
+    "raw_text",
+]
+
+
+@pytest.mark.parametrize(
+    ("extra_arguments", "message"),
+    [
+        (["--no-completion-only-loss"], "incomplete"),
+        (_RAW_TEXT_ARGUMENTS + ["--split-dataset"], "contradictory"),
+        (
+            [
+                "--no-completion-only-loss",
+                "--no-assistant-only-loss",
+                "--use-preassigned-splits",
+                "--runtime-v1-dataset-schema",
+                "other/v1",
+                "--runtime-v1-dataset-format",
+                "raw_text",
+            ],
+            "invalid",
+        ),
+        ([*_RAW_TEXT_ARGUMENTS[:-1], "messages"], "invalid"),
+    ],
+)
+def test_raw_text_trainer_arguments_fail_closed(extra_arguments, message) -> None:
+    with pytest.raises(OfflineSFTWorkerError, match=message):
+        offline_sft_worker._validate_trainer_arguments(
+            ["--max-steps", "1", "--no-load-in-4bit", *extra_arguments]
+        )
+
+
 def test_owned_loader_reads_source_only_and_never_writes_bytecode(tmp_path, monkeypatch):
     source = tmp_path / "member.py"
     source.write_text("VALUE = 7\n", encoding="utf-8")

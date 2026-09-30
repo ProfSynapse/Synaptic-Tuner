@@ -11,7 +11,6 @@ from .planning import ResolvedTrainingRequest, TrainingPlan
 from .providers import ProviderRef
 from .results import TrainingRunRef
 
-
 @dataclass(frozen=True, slots=True)
 class TrainingRequest:
     request_id: str
@@ -197,6 +196,9 @@ class TrainingStart:
 
 
 class TrainingOperations(Protocol):
+    def prepare(
+        self, source: "TrainingInputSourceV1", config: "TrainingPreparationConfigV1"
+    ) -> "PreparedTrainingInputResultV1": ...
     def load(self, canonical_json: str) -> TrainingRequest: ...
     def resolve(self, request: TrainingRequest) -> ResolvedTrainingRequest: ...
     def plan(self, resolved: ResolvedTrainingRequest, provider: ProviderRef) -> TrainingPlan: ...
@@ -214,6 +216,13 @@ class TrainingAPI:
     def __init__(self, operations: TrainingOperations, *, clock: Clock) -> None:
         self._operations = operations
         self._clock = clock
+
+    def prepare(
+        self, source: "TrainingInputSourceV1", config: "TrainingPreparationConfigV1"
+    ) -> "PreparedTrainingInputResultV1":
+        # The host preparation operation validates sources, configuration and
+        # results. Keep the public facade independent of host source contracts.
+        return self._operations.prepare(source, config)
 
     def load(self, canonical_json: str) -> TrainingRequest:
         return self._operations.load(canonical_json)

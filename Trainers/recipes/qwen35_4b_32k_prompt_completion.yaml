@@ -1,0 +1,66 @@
+# Local Docker smoke for the 32K prompt/completion SFT path.
+#
+# This intentionally follows the normal Syntunia user journey: select a named
+# runtime profile, point at a prepared dataset, and run one local recipe. The
+# profile pins the known-working image and its complete dependency inventory.
+name: qwen35-4b-32k-prompt-completion
+description: Smoke-test Qwen3.5 4B prompt/completion SFT on the prepared writing dataset.
+target: local
+method: sft
+provider: local_docker
+
+job:
+  runtime_profile: qwen35-sft-v1
+  pull_policy: missing
+  transfer: auto
+  keep_container: false
+
+run:
+  method: sft
+  trainer: Trainers/sft/train_sft.py
+  dry_run: true
+  dashboard: false
+  quiet: true
+
+model:
+  name: Qwen/Qwen3.5-4B
+  revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  max_seq_length: 32768
+  load_in_4bit: false
+
+dataset:
+  local_file: .tracking/datasets/dataset-1320a280805495f7847910b8c061021c31ec474295164d27aab472c6d209964c/dataset.jsonl
+  schema_version: syntunia-sft-row/v2
+  format: messages
+  use_preassigned_splits: true
+  split_dataset: false
+
+training:
+  batch_size: 1
+  gradient_accumulation: 8
+  learning_rate: 1.0e-4
+  num_epochs: 1
+  packing: false
+  completion_only_loss: true
+  assistant_only_loss: false
+  prompt_render: prompt_completion
+  require_memory_efficient_loss: true
+  save_steps: 10
+  save_total_limit: 2
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.0
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+artifacts:
+  output_root: toolset-training-artifacts/runs/local_docker/sft/{name}
+  run_timestamp: "{timestamp}"

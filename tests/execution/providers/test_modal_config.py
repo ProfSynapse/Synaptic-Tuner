@@ -22,6 +22,7 @@ def test_checked_in_modal_profile_and_packaged_runtime_lock_resolve_strictly():
     assert profile.function_name.endswith("0" * 32)
     assert runtime.registry_reference.endswith("5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39")
     assert len(runtime.locked_digest("deployment_wrapper"))==64
+    assert len(runtime.locked_digest("modal_prepared_input")) == 64
 
 
 def test_modal_profile_rejects_unknown_fields_and_ambient_secret_values():

@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Local operator consistency diagnostics, not training, provider, publication or GPU authority. Authoritative verification requires the original release/image evidence chain.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "status",
+        "scope",
+        "qualification_config_sha256",
+        "runtime_release_sha256",
+        "runtime_release_digest",
+        "worker_closure_digest",
+        "package_digest",
+        "python_executable_digest",
+        "installed_distributions_digest",
+        "final_runtime_capture_sha256",
+        "image_verification_sha256",
+        "profile_sha256",
+        "image_config_digest",
+        "image_reference",
+        "child",
+        "training_executed",
+        "gpu_qualified",
+        "provider_qualified"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "synaptic-packaged-local-qualification-evidence/v1"
+        },
+        "status": {
+          "const": "LOCAL_CPU_DIAGNOSTIC_PASS"
+        },
+        "scope": {
+          "const": "installed_child_cpu_only"
+        },
+        "qualification_config_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "runtime_release_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "runtime_release_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "worker_closure_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "package_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "python_executable_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "installed_distributions_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "final_runtime_capture_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "image_verification_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "profile_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "image_config_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "image_reference": {
+          "type": "string",
+          "pattern": "^.+@sha256:[0-9a-f]{64}$"
+        },
+        "child": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version",
+            "runtime_release_digest",
+            "dataset_sha256",
+            "snapshot_sha256",
+            "trainer_sha256",
+            "isolated",
+            "sealed_input",
+            "private_snapshot",
+            "trainer_source_compiled",
+            "container_runtime",
+            "nvidia_visible_devices",
+            "cuda_visible_devices",
+            "gpu_device_namespace_absent",
+            "training_executed",
+            "gpu_qualified",
+            "provider_qualified"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": "synaptic-installed-child-cpu/v1"
+            },
+            "runtime_release_digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "dataset_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "snapshot_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "trainer_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "isolated": {
+              "const": true
+            },
+            "sealed_input": {
+              "const": true
+            },
+            "private_snapshot": {
+              "const": true
+            },
+            "trainer_source_compiled": {
+              "const": true
+            },
+            "container_runtime": {"const": "runc"},
+            "nvidia_visible_devices": {"const": "void"},
+            "cuda_visible_devices": {"const": ""},
+            "gpu_device_namespace_absent": {"const": true},
+            "training_executed": {
+              "const": false
+            },
+            "gpu_qualified": {
+              "const": false
+            },
+            "provider_qualified": {
+              "const": false
+            }
+          }
+        },
+        "training_executed": {
+          "const": false
+        },
+        "gpu_qualified": {
+          "const": false
+        },
+        "provider_qualified": {
+          "const": false
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "status",
+        "evidence_sha256",
+        "runtime_release_digest",
+        "training_executed",
+        "gpu_qualified",
+        "provider_qualified"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "synaptic-packaged-local-qualification-evidence/v1"
+        },
+        "status": {
+          "const": "LOCAL_CPU_DIAGNOSTIC_VERIFIED"
+        },
+        "evidence_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "runtime_release_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "training_executed": {
+          "const": false
+        },
+        "gpu_qualified": {
+          "const": false
+        },
+        "provider_qualified": {
+          "const": false
+        }
+      }
+    }
+  ]
+}

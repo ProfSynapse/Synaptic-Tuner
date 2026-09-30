@@ -626,6 +626,7 @@ def _current(
     definition_id="df-1",
     function_ids=None,
     class_ids=(),
+    previous_app_id="",
 ):
     return CurrentModalDeployment(
         app_id,
@@ -634,7 +635,22 @@ def _current(
         ((name, function_id),) if function_ids is None else function_ids,
         class_ids,
         (CurrentModalFunction(function_id, name, app_id, web_url, definition_id),),
+        previous_app_id,
     )
+
+
+def _stopped(*, generation=6, previous_app_id="ap-stopped", **overrides):
+    values = {
+        "app_id": "",
+        "generation": generation,
+        "deployed": False,
+        "function_ids": (("historical-function", "fu-old"),),
+        "class_ids": (),
+        "functions": (),
+        "previous_app_id": previous_app_id,
+    }
+    values.update(overrides)
+    return CurrentModalDeployment(**values)
 
 
 def test_existing_generation_advances_exactly_once_without_name_collision(
@@ -663,6 +679,102 @@ def test_existing_generation_advances_exactly_once_without_name_collision(
         app_name="synaptic-training-v1",
         function_name="run_sft_v1_" + "1" * 32,
         environment_name="environment-a",
+    )
+
+
+def test_stopped_generation_redeploys_to_new_app_identity(case, monkeypatch):
+    sdk, client, storage, _, owner = case
+    prior = _stopped()
+    values = iter((prior, _current(generation=1), _current(generation=1)))
+    monkeypatch.setattr(
+        deployment, "read_current_deployment", lambda **kwargs: next(values)
+    )
+    receipt = parse_canonical_object(
+        owner.deploy_once(attempt_ref="stopped"), name="receipt"
+    )
+    assert receipt["app_id"] == "ap-1"
+    assert receipt["deployment_generation"] == 1
+    prestate = parse_canonical_object(
+        storage.catalog("deployment-prestates", encode=bytes, decode=bytes).resolve(
+            "stopped"
+        ),
+        name="prestate",
+    )
+    assert prestate["schema_version"] == "synaptic-modal-chat-deployment-prestate/v2"
+    assert prestate["state"] == "STOPPED"
+    assert prestate["app_id"] is None
+    assert prestate["previous_app_id"] == "ap-stopped"
+    assert prestate["authorizing"] is False
+    owner.observe(
+        client=client,
+        app_name="synaptic-training-v1",
+        function_name="run_sft_v1_" + "1" * 32,
+        environment_name="environment-a",
+    )
+
+
+def test_stopped_generation_cannot_reuse_previous_app_identity(case, monkeypatch):
+    sdk, _, _, _, owner = case
+    sdk.app_id = "ap-stopped"
+    monkeypatch.setattr(
+        deployment, "read_current_deployment", lambda **kwargs: _stopped()
+    )
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="stopped-reused")
+    assert len(sdk.deploy_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "prior",
+    [
+        _stopped(generation=0),
+        _stopped(previous_app_id=""),
+        _stopped(app_id="ap-current"),
+        _stopped(function_ids=(("run_sft_v1_" + "1" * 32, "fu-old"),)),
+        _stopped(class_ids=(("Unexpected", "cs-old"),)),
+        _stopped(
+            functions=(
+                CurrentModalFunction("fu-old", "other", "ap-old", "", "df-old"),
+            )
+        ),
+    ],
+)
+def test_malformed_stopped_prestate_fails_before_dispatch(case, monkeypatch, prior):
+    sdk, _, _, _, owner = case
+    monkeypatch.setattr(
+        deployment, "read_current_deployment", lambda **kwargs: prior
+    )
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="malformed-stopped")
+    assert sdk.deploy_calls == []
+
+
+@pytest.mark.parametrize(
+    "current",
+    [
+        _current(generation=0),
+        _current(generation=2),
+        _current(generation=6),
+        _current(generation=1, app_id="ap-other"),
+        _stopped(generation=1),
+    ],
+)
+def test_stopped_redeploy_requires_exact_new_identity_and_generation_one(
+    case, monkeypatch, current
+):
+    _, _, storage, _, owner = case
+    values = iter((_stopped(), current))
+    monkeypatch.setattr(
+        deployment, "read_current_deployment", lambda **kwargs: next(values)
+    )
+    with pytest.raises(deployment.ModalChatDeploymentError, match="failed"):
+        owner.deploy_once(attempt_ref="stopped-hostile")
+    assert owner.candidate_receipt is not None
+    assert (
+        storage.catalog("deployment-results", encode=bytes, decode=bytes).resolve(
+            "stopped-hostile"
+        )
+        is None
     )
 
 

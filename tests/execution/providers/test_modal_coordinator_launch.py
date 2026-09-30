@@ -130,6 +130,16 @@ def test_launch_claim_and_admission_bind_exact_authenticated_predecessor(monkeyp
     assert admitted.bundle == material.bundle
 
 
+def test_raw_bundle_sentinel_never_appears_in_stage_launch_or_admission_repr(monkeypatch):
+    case = launch_case(monkeypatch)
+    material = case[-2]
+    envelope = case[-1]
+    admission = admit(case)
+    sentinel = material.bundle.decode("ascii")
+    assert sentinel == "opaque-bundle"
+    assert all(sentinel not in repr(value) for value in (material, envelope, admission))
+
+
 def test_forged_submit_predecessor_is_rejected_by_generic_stage_reduction(monkeypatch):
     case = launch_case(monkeypatch)
     harness, _, submit, stage_record, assessment, authority, authentic, material, _ = case

@@ -1,0 +1,18 @@
+# Private local configuration: keep both this output and the source notes outside Git.
+nexus:
+  vault: My Vault
+  workspace: training-research
+  session: nexus-note-snapshot
+notes:
+  - id: architecture
+    path: Research/architecture.md
+    metadata:
+      topic: architecture
+      version: 1
+  - id: decisions
+    path: Research/decisions.md
+    metadata:
+      topic: decisions
+options:
+  strip_frontmatter: true
+output_path: private/nexus-note-snapshot.jsonl

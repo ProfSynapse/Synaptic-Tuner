@@ -1,0 +1,58 @@
+{
+  "schema_version": "synaptic-ingestion-cli/v2",
+  "project_ref": "replace_project_ref",
+  "admission_request_id": "replace_admission_request_id",
+  "request_id": "replace_request_id",
+  "admission_limits": {
+    "max_member_bytes": 4194304,
+    "max_total_bytes": 33554432
+  },
+  "discovery": {
+    "include": [
+      "**/*.md"
+    ],
+    "exclude": [],
+    "include_hidden": false
+  },
+  "structure": {
+    "name": "MarkdownNote",
+    "version": "1",
+    "frontmatter_mode": "optional",
+    "fields": [
+      {
+        "name": "body",
+        "selector": {
+          "kind": "document_body",
+          "key": null
+        },
+        "value_kind": "string",
+        "required": true
+      },
+      {
+        "name": "path",
+        "selector": {
+          "kind": "logical_path",
+          "key": null
+        },
+        "value_kind": "string",
+        "required": true
+      }
+    ],
+    "text_projections": [
+      {
+        "name": "text",
+        "field_ref": "body"
+      }
+    ],
+    "metadata": [
+      {
+        "name": "path",
+        "field_ref": "path"
+      }
+    ]
+  },
+  "binding": {
+    "binding_id": "markdown",
+    "pattern": "**/*.md"
+  }
+}

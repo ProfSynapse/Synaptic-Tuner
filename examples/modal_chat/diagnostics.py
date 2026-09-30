@@ -11,6 +11,7 @@ _PHASES = frozenset(
     {
         "INPUTS",
         "LOCAL_INPUTS_CHECKED",
+        "QUOTE_TRAINING",
         "PROVISIONING",
         "DEPLOYING",
         "RESOLVING",

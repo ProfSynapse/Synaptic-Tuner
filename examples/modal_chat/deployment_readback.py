@@ -35,6 +35,7 @@ class CurrentModalDeployment:
     function_ids: tuple[tuple[str, str], ...]
     class_ids: tuple[tuple[str, str], ...]
     functions: tuple[CurrentModalFunction, ...]
+    previous_app_id: str = ""
 
 
 async def _read(client, app_name, environment_name, function_name):
@@ -49,25 +50,34 @@ async def _read(client, app_name, environment_name, function_name):
     except NotFoundError:
         # Caller independently rechecks the existing environment in its scope.
         return None
+    state = before.lifecycle.app_state
     if (
         before.environment_name != environment_name
-        or not before.app_id
-        or before.lifecycle.app_state != api_pb2.APP_STATE_DEPLOYED
+        or state not in (api_pb2.APP_STATE_DEPLOYED, api_pb2.APP_STATE_STOPPED)
         or type(before.lifecycle.version) is not int
         or before.lifecycle.version < 1
     ):
         raise ValueError
-    app_id = safe_ref(before.app_id, "app_id")
+    if state == api_pb2.APP_STATE_STOPPED:
+        if before.app_id or not before.previous_app_id:
+            raise ValueError
+        previous_app_id = safe_ref(before.previous_app_id, "previous_app_id")
+        app_id, layout_app_id, deployed = "", previous_app_id, False
+    else:
+        if not before.app_id:
+            raise ValueError
+        app_id = safe_ref(before.app_id, "app_id")
+        previous_app_id = (
+            safe_ref(before.previous_app_id, "previous_app_id")
+            if before.previous_app_id
+            else ""
+        )
+        layout_app_id, deployed = app_id, True
     response = await client.stub.AppGetLayout(
-        api_pb2.AppGetLayoutRequest(app_id=app_id)
+        api_pb2.AppGetLayoutRequest(app_id=layout_app_id)
     )
     after = await client.stub.AppGetByDeploymentName(request)
-    if (
-        after.environment_name != environment_name
-        or after.app_id != app_id
-        or after.lifecycle.app_state != api_pb2.APP_STATE_DEPLOYED
-        or after.lifecycle.version != before.lifecycle.version
-    ):
+    if after != before:
         raise ValueError
     layout = response.app_layout
     if (
@@ -103,7 +113,7 @@ async def _read(client, app_name, environment_name, function_name):
         if selected is None or item.object_id != selected:
             continue
         metadata = item.function_handle_metadata
-        if metadata.function_name != function_name or metadata.app_id != app_id:
+        if metadata.function_name != function_name or metadata.app_id != layout_app_id:
             raise ValueError
         definition = metadata.definition_id
         if definition:
@@ -121,7 +131,13 @@ async def _read(client, app_name, environment_name, function_name):
     if selected is not None and len(observed) != 1:
         raise ValueError
     return CurrentModalDeployment(
-        app_id, before.lifecycle.version, True, functions, classes, tuple(observed)
+        app_id,
+        before.lifecycle.version,
+        deployed,
+        functions,
+        classes,
+        tuple(observed),
+        previous_app_id,
     )
 
 

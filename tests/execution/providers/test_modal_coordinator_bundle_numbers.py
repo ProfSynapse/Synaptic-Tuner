@@ -60,8 +60,16 @@ def test_workload_boundary_keeps_secret_rejection():
 
 
 @pytest.mark.parametrize(
-    "payload", [b"", "{}", bytearray(b"{}"), b" " * (MAX_WORKLOAD_BYTES + 1)]
+    "case",
+    ("empty-bytes", "text", "bytearray", "oversized-bytes"),
+    ids=("empty", "text", "bytearray", "oversized"),
 )
-def test_workload_boundary_requires_bounded_exact_bytes(payload):
+def test_workload_boundary_requires_bounded_exact_bytes(case):
+    payload = {
+        "empty-bytes": lambda: b"",
+        "text": lambda: "{}",
+        "bytearray": lambda: bytearray(b"{}"),
+        "oversized-bytes": lambda: b" " * (MAX_WORKLOAD_BYTES + 1),
+    }[case]()
     with pytest.raises(ValueError, match="bounded nonempty bytes"):
         parse_workload_object(payload)

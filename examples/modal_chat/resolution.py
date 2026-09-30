@@ -12,15 +12,26 @@ from synaptic_tuner.api.v1 import load_training_input_contract_v1
 from synaptic_tuner.api.v1._contract import contract_digest
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from synaptic_tuner.api.v1.training_input import TrainingInputV1
+from tuner.dataset_prep import (
+    DatasetPrepValidationError,
+    ROW_SCHEMA_VERSION,
+    ROW_SCHEMA_VERSION_V2,
+    LocalPreparedTrainingInputSource,
+    snapshot_prepared_dataset_v1,
+    snapshot_prepared_dataset_v2,
+    verify_prepared_dataset_v1,
+    verify_prepared_dataset_v2,
+)
 from tuner.execution.foundation_v2.canonical import safe_ref
 from tuner.execution.providers.modal.config import ModalRuntimeLockV1
+from tuner.execution.providers.modal.prepared_input import MAX_PRIVATE_DATASET_BYTES
 from tuner.execution.providers.modal.resolution import (
     ModalDeploymentSelectionV1,
     ModalExecutionSourceResolutionV1,
 )
 from tuner.execution.evidence import canonical_utc
 from tuner.project.context import ProjectContext
-from tuner.project.git_verification import GitCliLocalSourceInspector
+from tuner.project.git_verification import GitCliLocalSourceInspector, _local_git
 from tuner.project.source_bundle import SourceLock
 from tuner.training.contracts import (
     ArtifactPolicy,
@@ -29,12 +40,15 @@ from tuner.training.contracts import (
     ResourceSpec,
     RuntimeSpec,
     TrainingRequest,
+    PreparedTrainingInputIdentity,
+    VerifiedTrainingInputSource,
 )
 from tuner.training.methods.sft import (
     SFT_CONFIG_SCHEMA,
 )
 
 _REVISION = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+_PREPARED_REF = re.compile(r"^prepared://sha256/([0-9a-f]{64})$")
 _MAX_DATASET_BYTES = 16 * 1024 * 1024 * 1024
 
 
@@ -68,7 +82,12 @@ def _regular_digest(root: Path, relative: Path, maximum: int) -> tuple[int, str]
         raise ValueError("consumer source path is invalid")
     descriptor = -1
     try:
-        flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_BINARY", 0)
+        )
         flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(selected, flags)
         before = os.fstat(descriptor)
@@ -113,6 +132,70 @@ def _regular_digest(root: Path, relative: Path, maximum: int) -> tuple[int, str]
             os.close(descriptor)
 
 
+def _require_private_prepared_path(root: Path, relative: Path) -> None:
+    if (
+        not isinstance(root, Path)
+        or not isinstance(relative, Path)
+        or relative.is_absolute()
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        raise ValueError("prepared dataset path is invalid")
+    paths = (
+        relative.as_posix(),
+        (relative / "manifest.json").as_posix(),
+        (relative / "dataset.jsonl").as_posix(),
+    )
+    if _local_git(root, "ls-files", "--stage", "-z", "--", *paths):
+        raise ValueError("prepared dataset path is not private")
+    if _local_git(root, "ls-tree", "-z", "HEAD", "--", *paths):
+        raise ValueError("prepared dataset path is not private")
+    for path in paths:
+        _local_git(root, "check-ignore", "--no-index", "-q", "--", path)
+
+
+def verify_configured_dataset(
+    root: Path,
+    relative: Path,
+    dataset_ref: str,
+    maximum_regular_bytes: int,
+    configured_format: str | None,
+):
+    """Verify a configured project file or content-addressed prepared bundle.
+
+    This deliberately has no provider dependency, so local input checks validate
+    the same prepared-dataset identity as the later rich resolver.
+    """
+    if type(dataset_ref) is not str:
+        raise TypeError("dataset_ref must be an exact string")
+    prepared_match = _PREPARED_REF.fullmatch(dataset_ref)
+    if prepared_match is None:
+        expected_ref = "project://" + relative.as_posix()
+        if dataset_ref != expected_ref:
+            raise ValueError("dataset reference differs from consumer project path")
+        _regular_digest(root, relative, maximum_regular_bytes)
+        return None
+    _require_private_prepared_path(root, relative)
+    prepared_path = root / relative
+    try:
+        verified = verify_prepared_dataset_v1(prepared_path)
+        dataset_format = ROW_SCHEMA_VERSION
+    except DatasetPrepValidationError:
+        verified = verify_prepared_dataset_v2(prepared_path)
+        dataset_format = ROW_SCHEMA_VERSION_V2
+    _require_private_prepared_path(root, relative)
+    if verified.semantic_identity.dataset_digest != prepared_match.group(1):
+        raise ValueError("prepared dataset reference differs from its identity")
+    if (
+        dataset_format == ROW_SCHEMA_VERSION_V2
+        and configured_format != "messages"
+    ) or (
+        dataset_format == ROW_SCHEMA_VERSION
+        and configured_format not in {None, "raw_text"}
+    ):
+        raise ValueError("prepared dataset format differs from SFT controls")
+    return verified, dataset_format
+
+
 class ModalChatRichTrainingResolver:
     """Resolve one allocated request through real local and authenticated sources."""
 
@@ -126,6 +209,8 @@ class ModalChatRichTrainingResolver:
         "_runtime_lock",
         "_finalizer",
         "_audience_ref",
+        "_private_dataset_bytes",
+        "_prepared_input_source",
     )
 
     def __init__(
@@ -166,6 +251,16 @@ class ModalChatRichTrainingResolver:
         self._runtime_lock = runtime_lock
         self._finalizer = source_finalizer
         self._audience_ref = safe_ref(audience_ref, "audience_ref")
+        self._private_dataset_bytes: bytes | None = None
+        self._prepared_input_source: VerifiedTrainingInputSource | None = None
+
+    @property
+    def private_dataset_bytes(self) -> bytes | None:
+        return self._private_dataset_bytes
+
+    @property
+    def prepared_input_source(self) -> VerifiedTrainingInputSource | None:
+        return self._prepared_input_source
 
     def resolve(
         self, request: TrainingRequest, *, context: ProjectContext
@@ -188,27 +283,93 @@ class ModalChatRichTrainingResolver:
                 raise ValueError("model and tokenizer revisions must be immutable")
             inspected = GitCliLocalSourceInspector().inspect(context=context)
             dataset_relative = self._dataset_path
-            expected_ref = "project://" + dataset_relative.as_posix()
-            if training_input.dataset.ref != expected_ref:
-                raise ValueError("dataset reference differs from consumer project path")
-            dataset_size, dataset_sha256 = _regular_digest(
-                context.project_root, dataset_relative, _MAX_DATASET_BYTES
-            )
+            dataset_ref = training_input.dataset.ref
+            prepared_match = _PREPARED_REF.fullmatch(dataset_ref)
+            private_dataset_bytes: bytes | None = None
+            prepared_input_source: VerifiedTrainingInputSource | None = None
+            dataset_format: str | None = None
+            if prepared_match is not None:
+                prepared_digest = prepared_match.group(1)
+                _require_private_prepared_path(context.project_root, dataset_relative)
+                prepared_path = context.project_root / dataset_relative
+                try:
+                    verified = verify_prepared_dataset_v1(prepared_path)
+                    dataset_format = ROW_SCHEMA_VERSION
+                except DatasetPrepValidationError:
+                    verified = verify_prepared_dataset_v2(prepared_path)
+                    dataset_format = ROW_SCHEMA_VERSION_V2
+                _require_private_prepared_path(context.project_root, dataset_relative)
+                identity = verified.semantic_identity
+                if identity.dataset_digest != prepared_digest:
+                    raise ValueError("prepared dataset reference differs from its identity")
+                dataset_revision = identity.dataset_digest
+                dataset_size = identity.dataset_bytes
+                dataset_sha256 = identity.dataset_sha256
+                prepared_identity = PreparedTrainingInputIdentity(
+                    ref=dataset_ref,
+                    revision=dataset_revision,
+                    content_digest=dataset_sha256,
+                    size_bytes=dataset_size,
+                    format=dataset_format,
+                )
+                if dataset_size <= MAX_PRIVATE_DATASET_BYTES:
+                    if dataset_format == ROW_SCHEMA_VERSION:
+                        snapshotted, private_dataset_bytes = snapshot_prepared_dataset_v1(
+                            prepared_path
+                        )
+                    else:
+                        snapshotted, private_dataset_bytes = snapshot_prepared_dataset_v2(
+                            prepared_path
+                        )
+                    if snapshotted.semantic_identity != identity:
+                        raise ValueError("prepared dataset changed during resolution")
+                else:
+                    prepared_input_source = LocalPreparedTrainingInputSource(
+                        prepared_path.resolve(strict=True), prepared_identity,
+                    )
+                configured_format = training_input.hyperparameters.dataset_format
+                if (
+                    dataset_format == ROW_SCHEMA_VERSION_V2
+                    and configured_format != "messages"
+                ) or (
+                    dataset_format == ROW_SCHEMA_VERSION
+                    and configured_format not in {None, "raw_text"}
+                ):
+                    raise ValueError(
+                        "prepared dataset format differs from SFT controls"
+                    )
+            else:
+                expected_ref = "project://" + dataset_relative.as_posix()
+                if dataset_ref != expected_ref:
+                    raise ValueError(
+                        "dataset reference differs from consumer project path"
+                    )
+                dataset_size, dataset_sha256 = _regular_digest(
+                    context.project_root, dataset_relative, _MAX_DATASET_BYTES
+                )
+                dataset_revision = inspected.project_source.commit.lower()
             training_source_sha256 = hashlib.sha256(
                 request.document.canonical_json.encode("utf-8")
             ).hexdigest()
             input_digest = training_input.input_digest()
             contract_identity = input_contract.identity.identity_digest
+            if dataset_format is not None:
+                ingress_dataset = {
+                    "content_digest": dataset_sha256,
+                    "format": dataset_format,
+                    "ref": dataset_ref,
+                    "revision": dataset_revision,
+                    "size_bytes": dataset_size,
+                }
+            else:
+                ingress_dataset = {
+                    "content_digest": dataset_sha256,
+                    "path": dataset_relative.as_posix(),
+                    "size_bytes": dataset_size,
+                }
             ingress_digest = contract_digest(
                 "synaptic-modal-chat-training-ingress/v1",
-                {
-                    "dataset": {
-                        "content_digest": dataset_sha256,
-                        "path": dataset_relative.as_posix(),
-                        "size_bytes": dataset_size,
-                    },
-                    "training_input_digest": input_digest,
-                },
+                {"dataset": ingress_dataset, "training_input_digest": input_digest},
             )
             provider_policy_digest = contract_digest(
                 "synaptic-modal-chat-provider-policy/v1", self._deployment.to_dict()
@@ -237,9 +398,14 @@ class ModalChatRichTrainingResolver:
                     {
                         "content_digest": dataset_sha256,
                         "kind": "dataset",
-                        "ref": training_input.dataset.ref,
-                        "revision": inspected.project_source.commit.lower(),
+                        "ref": dataset_ref,
+                        "revision": dataset_revision,
                         "size_bytes": dataset_size,
+                        **(
+                            {"format": dataset_format}
+                            if dataset_format is not None
+                            else {}
+                        ),
                     },
                 ),
                 runtime={
@@ -270,6 +436,15 @@ class ModalChatRichTrainingResolver:
             hyperparameters.update(
                 {name: value for name, value in duration.items() if value is not None}
             )
+            resolved_dataset = {
+                "content_digest": dataset_sha256,
+                "ref": dataset_ref,
+                "revision": dataset_revision,
+            }
+            if dataset_format is not None:
+                resolved_dataset.update(
+                    {"format": dataset_format, "size_bytes": dataset_size}
+                )
             resolved_config = CanonicalDocument.from_mapping(
                 {
                     "schema_version": SFT_CONFIG_SCHEMA,
@@ -278,15 +453,11 @@ class ModalChatRichTrainingResolver:
                         **training_input.model.to_dict(),
                         "load_in_4bit": self._load_in_4bit,
                     },
-                    "dataset": {
-                        "content_digest": dataset_sha256,
-                        "ref": training_input.dataset.ref,
-                        "revision": inspected.project_source.commit.lower(),
-                    },
+                    "dataset": resolved_dataset,
                     "sft": hyperparameters,
                 }
             )
-            return ResolvedTrainingComponents(
+            resolved_components = ResolvedTrainingComponents(
                 execution_source=finalized.execution_source,
                 execution_context=CanonicalDocument.from_mapping(
                     {
@@ -311,6 +482,9 @@ class ModalChatRichTrainingResolver:
                     training_input.artifacts.retain_checkpoints,
                 ),
             )
+            self._private_dataset_bytes = private_dataset_bytes
+            self._prepared_input_source = prepared_input_source
+            return resolved_components
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception:

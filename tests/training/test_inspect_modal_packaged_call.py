@@ -1,0 +1,871 @@
+"""Provider-free tests for the claim-bound packaged-call diagnostic."""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import sqlite3
+import sys
+from types import SimpleNamespace
+from types import ModuleType
+
+import pytest
+
+from tuner.execution.foundation_v2.canonical import canonical_bytes
+from tuner.training.modal_host_effects import (
+    ModalPackagedMarkerMaterial, _encode_binding, _encode_marker_materials,
+)
+from tuner.execution.providers.modal.packaged_dispatch import ModalPackagedVolumeMarker
+from tuner.execution.providers.modal.bounded_volume_read import BoundedVolumeReadError
+from tuner.execution.providers.modal.packaged_worker import (
+    PACKAGED_WORKER_FAILURE_STAGES, packaged_worker_failure,
+)
+from tuner.training.modal_host_reader import _FIXED_WORKER_FAILURE_STAGES
+
+from tests.execution.providers.test_modal_packaged_binding import _binding
+from tests.execution.providers.test_modal_packaged_dispatch import _case
+
+
+_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "inspect_modal_packaged_call.py"
+_SPEC = importlib.util.spec_from_file_location("inspect_modal_packaged_call", _SCRIPT)
+diagnostic = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(diagnostic)
+_CALL = "fc-packaged-call"
+
+
+def _evaluation_document(binding):
+    return {
+        "schema_version": "synaptic-modal-packaged-evaluation/v1",
+        "effect_id": binding.command.operation.effect.effect_id,
+        "command_digest": binding.command_digest,
+        "provider_job_ref": _CALL,
+        "execution_binding_digest": binding.execution_binding.binding_digest,
+        "evaluation": {"schema_version": "synaptic-post-training-evaluation/v1",
+                       "status": "completed", "gate_passed": True, "response": "private café"},
+    }
+
+
+@pytest.mark.parametrize("ascii_only", [True, False])
+def test_evaluation_metadata_projects_encoding_without_raw_content(ascii_only):
+    binding = _case()[0]
+    raw = json.dumps(_evaluation_document(binding), sort_keys=True, separators=(",", ":"),
+                     ensure_ascii=ascii_only).encode("utf-8")
+    metadata = diagnostic.evaluation_metadata(raw, b"unverified tag", binding, _CALL)
+    assert metadata["result"] == "METADATA_READ"
+    assert metadata["mac_authentication"] == "UNVERIFIED"
+    assert metadata["canonical_ascii_matches"] is ascii_only
+    assert metadata["canonical_utf8_matches"] is not ascii_only
+    assert metadata["schema_matches"] and metadata["evaluation_schema_matches"]
+    assert metadata["status"] == "completed" and metadata["gate_passed"] is True
+    assert all(metadata["binding_matches"].values())
+    assert metadata["record_size_bytes"] == len(raw)
+    assert metadata["record_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert "private" not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize("raw", [b"not json", b"[]", b'{"evaluation":{}} trailing',
+    b'{"evaluation":{},"evaluation":{}}', b'{"evaluation":{"gate_passed":NaN}}'])
+def test_evaluation_bad_json_is_closed(raw):
+    metadata = diagnostic.evaluation_metadata(raw, b"tag", _case()[0], _CALL)
+    assert metadata["result"] == "JSON_INVALID"
+    assert metadata["mac_authentication"] == "UNVERIFIED"
+    assert "binding_matches" not in metadata
+
+
+def test_evaluation_mismatches_and_unknown_values_are_not_echoed():
+    binding = _case()[0]
+    document = _evaluation_document(binding)
+    document.update(effect_id="private unrelated", schema_version="private schema")
+    document["evaluation"].update(status="private status", gate_passed=1)
+    metadata = diagnostic.evaluation_metadata(json.dumps(document).encode(), b"tag", binding, _CALL)
+    assert metadata["status"] == "UNKNOWN" and metadata["gate_passed"] is None
+    assert metadata["schema_matches"] is False
+    assert metadata["binding_matches"]["effect_id"] is False
+    assert "private" not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize("failure,expected", [(None, None), ("deadline", "deadline"),
+    ("startup_failed", "startup_failed"), ("private provider details", "UNKNOWN")])
+@pytest.mark.parametrize("count,expected_count", [(0, 0), (32, 32), (33, None), (-1, None), (True, None)])
+def test_evaluation_failure_and_counts_are_closed(failure, expected, count, expected_count):
+    binding = _case()[0]
+    document = _evaluation_document(binding)
+    document["evaluation"].update(failure_code=failure, case_count=count, passed_count=count)
+    metadata = diagnostic.evaluation_metadata(json.dumps(document).encode(), b"tag", binding, _CALL)
+    assert metadata["failure_code"] == expected
+    assert metadata["case_count"] == expected_count and metadata["passed_count"] == expected_count
+    assert "private" not in json.dumps(metadata)
+
+
+def _evaluation_transport(raw, tag=b"tag", *, size_delta=0, metadata_change=None, encoding=None):
+    requests = []
+    content_by_url = {"https://provider.example/record": raw,
+                      "https://provider.example/mac": tag}
+    class Stub:
+        async def VolumeGetFile2(self, request, *, retry, timeout):
+            requests.append((request, retry, timeout))
+            is_record = request.path.endswith("record.json")
+            data = raw if is_record else tag
+            values = dict(size=len(data) + size_delta, start=0, len=len(data) + size_delta,
+                          get_urls=("https://provider.example/record" if is_record else "https://provider.example/mac",))
+            values.update(metadata_change or {})
+            return SimpleNamespace(**values)
+    class Session:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        def get(self, url, *, allow_redirects):
+            assert allow_redirects is False
+            data = content_by_url[url]
+            class Body:
+                remaining = data
+                async def read(self, maximum):
+                    chunk, self.remaining = self.remaining[:maximum], self.remaining[maximum:]
+                    return chunk
+            class Block:
+                status = 200
+                headers = {"Content-Encoding": encoding} if encoding else {}
+                content = Body()
+                async def __aenter__(self): return self
+                async def __aexit__(self, *_args): pass
+            return Block()
+    return SimpleNamespace(stub=Stub()), Session, requests
+
+
+def _inspect_evaluation(raw, **kwargs):
+    binding = _case()[0]
+    client, session, requests = _evaluation_transport(raw, **kwargs)
+    class MarkerReader:
+        async def read_exact(self, **_kwargs): return b"marker"
+    proto = SimpleNamespace(VolumeGetFile2Request=lambda **values: SimpleNamespace(**values))
+    result = asyncio.run(diagnostic.inspect_evaluation_metadata(
+        client, binding, _materials(binding), _CALL, proto,
+        marker_reader=MarkerReader(), session_factory=session,
+    ))
+    return result, requests, binding
+
+
+def test_evaluation_reads_exact_derived_paths_with_record_and_mac_budgets():
+    raw = json.dumps(_evaluation_document(_case()[0])).encode()
+    result, requests, binding = _inspect_evaluation(raw)
+    assert result["result"] == "METADATA_READ"
+    assert len(requests) == 2
+    for (request, retry, timeout), leaf, bound in zip(requests, ("record.json", "record.mac"),
+                                                   (16 * 1024 * 1024, 128)):
+        assert request.volume_id == binding.provider_facts.artifact_volume_id
+        assert request.path == diagnostic.operation_path(
+            binding.command.operation.effect.effect_id, "evaluation") + "/" + leaf
+        assert (request.start, request.len, retry, timeout) == (0, bound + 1, None, 15)
+
+
+def test_evaluation_accepts_mac_at_exact_budget():
+    result, _, _ = _inspect_evaluation(b'{"evaluation":{}}', tag=b"x" * 128)
+    assert result["result"] == "METADATA_READ"
+    assert result["mac_size_bytes"] == 128
+    assert result["mac_authentication"] == "UNVERIFIED"
+
+
+@pytest.mark.parametrize("error", [RuntimeError("private provider response"),
+    diagnostic.DiagnosticUnavailable("private provider response")])
+def test_evaluation_provider_errors_never_escape_projection(error):
+    binding = _case()[0]
+    class Stub:
+        async def VolumeGetFile2(self, *_args, **_kwargs): raise error
+    class Reader:
+        async def read_exact(self, **_kwargs): return b"marker"
+    result = asyncio.run(diagnostic.inspect_evaluation_metadata(
+        SimpleNamespace(stub=Stub()), binding, _materials(binding), _CALL,
+        SimpleNamespace(VolumeGetFile2Request=lambda **kwargs: SimpleNamespace(**kwargs)),
+        marker_reader=Reader(), session_factory=lambda: None,
+    ))
+    assert result == {"result": "FILE_UNAVAILABLE", "mac_authentication": "UNVERIFIED"}
+
+
+@pytest.mark.parametrize("options,code", [
+    ({"size_delta": 1}, "FILE_SIZE_INVALID"),
+    ({"size_delta": -1}, "FILE_SIZE_INVALID"),
+    ({"metadata_change": {"size": 16 * 1024 * 1024 + 1}}, "FILE_METADATA_INVALID"),
+    ({"metadata_change": {"start": True}}, "FILE_METADATA_INVALID"),
+    ({"metadata_change": {"get_urls": ()}}, "FILE_METADATA_INVALID"),
+    ({"metadata_change": {"get_urls": ("http://private.example",)}}, "FILE_UNAVAILABLE"),
+    ({"encoding": "gzip"}, "FILE_UNAVAILABLE"),
+    ({"tag": b"x" * 129}, "FILE_METADATA_INVALID"),
+])
+def test_evaluation_transport_rejects_invalid_sizes_urls_encoding_and_mac(options, code):
+    result, _, _ = _inspect_evaluation(b'{"evaluation":{}}', **options)
+    assert result == {"result": code, "mac_authentication": "UNVERIFIED"}
+
+
+@pytest.mark.parametrize("later", [False, True])
+def test_evaluation_marker_mismatch_blocks_or_discards_metadata(later):
+    binding = _case()[0]
+    client, session, requests = _evaluation_transport(b'{"evaluation":{}}')
+    class Reader:
+        count = 0
+        async def read_exact(self, **kwargs):
+            self.count += 1
+            if self.count == (3 if later else 1):
+                raise BoundedVolumeReadError("private provider exception")
+            return b"marker"
+    result = asyncio.run(diagnostic.inspect_evaluation_metadata(
+        client, binding, _materials(binding), _CALL,
+        SimpleNamespace(VolumeGetFile2Request=lambda **values: SimpleNamespace(**values)),
+        marker_reader=Reader(), session_factory=session,
+    ))
+    assert result == {"result": "MARKER_UNAVAILABLE", "mac_authentication": "UNVERIFIED"}
+    assert len(requests) == (2 if later else 0)
+
+
+def test_invalid_evaluation_journal_is_closed_before_provider_import(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(diagnostic, "read_retained_probe", lambda *args: (_ for _ in ()).throw(
+        diagnostic.DiagnosticUnavailable("JOURNAL_INVALID")))
+    assert diagnostic.main(["--journal", str(tmp_path / "missing.sqlite3"),
+        "--claim-ref", "a" * 64, "--call-id", _CALL, "--inspect-evaluation-metadata",
+        "--modal-profile", "named-profile"]) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output == {"schema_version": "synaptic-modal-packaged-evaluation-diagnostic/v1",
+                      "authority": "DIAGNOSTIC_ONLY", "mac_authentication": "UNVERIFIED",
+                      "result": "JOURNAL_INVALID"}
+
+
+def test_worker_failure_stage_allowlists_agree_across_all_readers():
+    assert PACKAGED_WORKER_FAILURE_STAGES == _FIXED_WORKER_FAILURE_STAGES
+    assert PACKAGED_WORKER_FAILURE_STAGES == frozenset(diagnostic._WORKER_FAILURE_STAGES)
+    runtime_phases = (
+        "CONFIG", "MODEL_SNAPSHOT", "MODEL_LIBRARY_LOAD", "MODEL_SOURCE",
+        "TOKENIZER_SOURCE", "MODEL_FINALIZE", "LOSS_GUARD", "DATA_PREP",
+        "LORA_ATTACH", "TRAINER_SETUP", "TRAIN_CALL", "SAVE", "POST_SAVE", "BOOTSTRAP_ENV",
+        "TORCH_IMPORT", "UNSLOTH_IMPORT", "TRAINER_IMPORT",
+    )
+    assert {
+        f"SFT_TRAINER_CHILD_EXEC_RUNTIME_{phase}" for phase in runtime_phases
+    } <= PACKAGED_WORKER_FAILURE_STAGES
+
+
+def test_fixed_worker_failure_results_fit_pinned_modal_serializer():
+    serialize = pytest.importorskip("modal._serialization").serialize
+    sizes = [len(serialize(packaged_worker_failure(stage)))
+             for stage in PACKAGED_WORKER_FAILURE_STAGES]
+    assert max(sizes) <= diagnostic._MAX_FIXED_RESULT
+
+
+def _journal(tmp_path, *, binding=None, claim_override=None, call_override=None,
+             catalog_name=None, marker_rows=False):
+    binding = binding or _case()[0]
+    command_digest = binding.command_digest
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    path = private / "modal-host.sqlite3"
+    claim = canonical_bytes(claim_override or {
+        "schema_version": "synaptic-modal-packaged-host-attempt/v1",
+        "command_digest": command_digest,
+        "binding_digest": binding.authenticated_binding_digest,
+    })
+    raw_binding = _encode_binding(binding)
+    call = canonical_bytes(call_override or {"provider_job_ref": _CALL})
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE attempts(namespace_ref TEXT,attempt_ref TEXT,digest TEXT,evidence BLOB)")
+        db.execute("CREATE TABLE catalogs(namespace_ref TEXT,catalog_ref TEXT,item_ref TEXT,payload BLOB,digest TEXT)")
+        db.execute("INSERT INTO attempts VALUES(?,?,?,?)", (
+            diagnostic._NAMESPACE, command_digest,
+            hashlib.sha256(claim).hexdigest(), claim,
+        ))
+        for name, raw in ((diagnostic._BINDINGS, raw_binding),
+                          (catalog_name or diagnostic._CALLS, call)):
+            db.execute("INSERT INTO catalogs VALUES(?,?,?,?,?)", (
+                diagnostic._NAMESPACE, name, command_digest, raw,
+                hashlib.sha256(raw).hexdigest(),
+            ))
+        if marker_rows:
+            raw = _encode_marker_materials(_materials(binding))
+            db.execute("INSERT INTO catalogs VALUES(?,?,?,?,?)", (
+                diagnostic._NAMESPACE, diagnostic._MARKERS, command_digest,
+                raw, hashlib.sha256(raw).hexdigest(),
+            ))
+    path.chmod(0o600)
+    return path, command_digest
+
+
+def _materials(binding):
+    facts = binding.provider_facts
+    roles = (("control", facts.control_volume_id),
+             ("artifacts", facts.artifact_volume_id))
+    if facts.model_cache_volume_id is not None:
+        roles += (("model_cache", facts.model_cache_volume_id),)
+    return tuple(
+        ModalPackagedMarkerMaterial(
+            ModalPackagedVolumeMarker(role, volume_id,
+                                      ".synaptic-volume-marker-" + f"{index:032x}",
+                                      hashlib.sha256(bytes([index]) * 32).hexdigest()),
+            bytes([index]) * 32,
+        ) for index, (role, volume_id) in enumerate(roles, 1)
+    )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+def test_real_submit_binding_claim_and_call_are_required(tmp_path):
+    path, claim_ref = _journal(tmp_path)
+    before = set(path.parent.iterdir())
+    assert diagnostic.read_retained_call(path, claim_ref, _CALL) == _CALL
+    assert set(path.parent.iterdir()) == before
+    for ref, call_id in (("a" * 64, _CALL), (claim_ref, "fc-other"),
+                         ("invalid", _CALL)):
+        with pytest.raises(diagnostic.DiagnosticUnavailable):
+            diagnostic.read_retained_call(path, ref, call_id)
+    assert set(path.parent.iterdir()) == before
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+@pytest.mark.parametrize("mutation", ["bad_binding_digest", "wrong_call", "wrong_catalog"])
+def test_claim_binding_and_catalog_cannot_be_swapped(tmp_path, mutation):
+    binding = _case()[0]
+    overrides = {}
+    if mutation == "bad_binding_digest":
+        overrides["claim_override"] = {
+            "schema_version": "synaptic-modal-packaged-host-attempt/v1",
+            "command_digest": binding.command_digest, "binding_digest": "a" * 64,
+        }
+    elif mutation == "wrong_call":
+        overrides["call_override"] = {"provider_job_ref": "fc-other"}
+    else:
+        overrides["catalog_name"] = "another-catalog"
+    path, ref = _journal(tmp_path, binding=binding, **overrides)
+    with pytest.raises(diagnostic.DiagnosticUnavailable):
+        diagnostic.read_retained_call(path, ref, _CALL)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+def test_rejects_link_and_broad_permissions(tmp_path):
+    path, ref = _journal(tmp_path)
+    link = path.parent / "link.sqlite3"
+    link.symlink_to(path)
+    with pytest.raises(diagnostic.DiagnosticUnavailable):
+        diagnostic.read_retained_call(link, ref, _CALL)
+    path.chmod(0o644)
+    with pytest.raises(diagnostic.DiagnosticUnavailable):
+        diagnostic.read_retained_call(path, ref, _CALL)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+def test_stage_command_cannot_be_treated_as_a_submitted_call(tmp_path):
+    path, ref = _journal(tmp_path, binding=_binding(b"packaged-prepared-input"))
+    with pytest.raises(diagnostic.DiagnosticUnavailable):
+        diagnostic.read_retained_call(path, ref, _CALL)
+
+
+class _Result:
+    def __init__(self, status, data=b"opaque", blob=""):
+        self.status, self.data, self.data_blob_id = status, data, blob
+
+
+class _Response:
+    def __init__(self, outputs, unfinished):
+        self.outputs, self.num_unfinished_inputs = outputs, unfinished
+
+
+class _GenericResult:
+    GENERIC_STATUS_SUCCESS = 1
+    GENERIC_STATUS_FAILURE = 2
+    GENERIC_STATUS_TERMINATED = 3
+    GENERIC_STATUS_TIMEOUT = 4
+    GENERIC_STATUS_INIT_FAILURE = 5
+    GENERIC_STATUS_INTERNAL_FAILURE = 6
+    GENERIC_STATUS_IDLE_TIMEOUT = 7
+    GENERIC_STATUS_MEMORY_MANAGER_EVICTION = 8
+
+
+class _Proto:
+    GenericResult = _GenericResult
+    FunctionGetOutputsResponse = _Response
+    DATA_FORMAT_PICKLE = 1
+
+    @staticmethod
+    def FunctionGetOutputsRequest(**kwargs):
+        return SimpleNamespace(**kwargs)
+
+
+@pytest.mark.parametrize("response,expected", [
+    (_Response([], 1), "PENDING"),
+    (_Response([], 0), "OUTPUT_EXPIRED"),
+    (_Response([SimpleNamespace(idx=0, data_format=1, result=_Result(1))], 0),
+     "PROVIDER_SUCCESS_UNKNOWN"),
+    (_Response([SimpleNamespace(idx=0, data_format=1, result=_Result(2))], 0),
+     "PROVIDER_FAILURE"),
+    (_Response([SimpleNamespace(idx=1, data_format=1, result=_Result(1))], 0),
+     "INVALID_RESPONSE"),
+])
+def test_one_non_consuming_raw_poll(monkeypatch, response, expected):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: False)
+    calls = []
+
+    class _Stub:
+        async def FunctionGetOutputs(self, request, *, retry, timeout):
+            calls.append((request, retry, timeout))
+            return response
+
+    result = asyncio.run(diagnostic.inspect_call(
+        SimpleNamespace(stub=_Stub()), _CALL, _Proto, lambda _: b"fixed",
+    ))
+    assert result == expected
+    assert len(calls) == 1
+    request, retry, timeout = calls[0]
+    assert retry is None and timeout == 15
+    assert request.function_call_id == _CALL
+    assert request.timeout == 0 and request.clear_on_success is False
+    assert request.last_entry_id == "0-0"
+    assert request.start_idx == request.end_idx == 0 and request.max_values == 1
+
+
+def test_only_exact_locally_serialized_failure_is_classified(monkeypatch):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
+    fixed = b"trusted-fixed-failure"
+    serialize_calls = []
+
+    def serialize(document):
+        serialize_calls.append(document)
+        return fixed
+
+    def classify(data, *, blob="", data_format=1):
+        output = SimpleNamespace(data_format=data_format, result=_Result(1, data, blob))
+        return diagnostic._classify_fixed_failure(output, _Proto, serialize)
+
+    assert classify(fixed) == "WORKER_FAILED"
+    assert serialize_calls == [{
+        "schema_version": diagnostic._RESULT_SCHEMA, "effect_id": "unavailable",
+        "status_code": "failed", "completion_sha256": "0" * 64,
+    }]
+    for data, options in ((b"untrusted", {}), (fixed, {"blob": "bl-opaque"}),
+                          (fixed, {"data_format": 99})):
+        assert classify(data, **options) == "PROVIDER_SUCCESS_UNKNOWN"
+
+
+@pytest.mark.parametrize("stage", diagnostic._WORKER_FAILURE_STAGES)
+def test_exact_v2_failure_bytes_report_only_fixed_stage(monkeypatch, stage):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
+    document = {
+        "schema_version": diagnostic._RESULT_SCHEMA_V2,
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+        "failure_stage": stage,
+    }
+    # This serializer is deterministic; the diagnostic still compares opaque
+    # bytes and never parses the returned provider payload.
+    serialize = canonical_bytes
+    output = SimpleNamespace(
+        data_format=_Proto.DATA_FORMAT_PICKLE,
+        result=_Result(_GenericResult.GENERIC_STATUS_SUCCESS,
+                       serialize(document)),
+    )
+    assert diagnostic._classify_fixed_failure(
+        output, _Proto, serialize,
+    ) == f"WORKER_{stage}"
+
+
+@pytest.mark.parametrize("mutation", [
+    {"effect_id": "other"}, {"status_code": "completed"},
+    {"completion_sha256": "a" * 64}, {"failure_stage": "SFT_OTHER"},
+    {"failure_stage": "ENTRYPOINT_MOUNT_CONTROL_DIR_EXTRA"},
+    {"schema_version": "other"}, {"extra": "private data"},
+])
+def test_v2_result_near_misses_remain_unclassified(monkeypatch, mutation):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
+    document = {
+        "schema_version": diagnostic._RESULT_SCHEMA_V2,
+        "effect_id": "unavailable",
+        "status_code": "failed",
+        "completion_sha256": "0" * 64,
+        "failure_stage": "SFT_TRAINER",
+    }
+    document.update(mutation)
+    output = SimpleNamespace(
+        data_format=_Proto.DATA_FORMAT_PICKLE,
+        result=_Result(_GenericResult.GENERIC_STATUS_SUCCESS,
+                       canonical_bytes(document)),
+    )
+    assert diagnostic._classify_fixed_failure(
+        output, _Proto, canonical_bytes,
+    ) == "PROVIDER_SUCCESS_UNKNOWN"
+
+
+def test_invalid_journal_prevents_provider_import(tmp_path, monkeypatch, capsys):
+    imported = []
+    original = __import__("builtins").__import__
+
+    def guarded(name, *args, **kwargs):
+        if name == "modal" or name.startswith("modal."):
+            imported.append(name)
+            raise AssertionError("provider imported before journal admission")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", guarded)
+    code = diagnostic.main([
+        "--journal", str(tmp_path / "missing.sqlite3"),
+        "--claim-ref", "a" * 64, "--call-id", _CALL,
+        "--modal-profile", "named-profile",
+    ])
+    assert code == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "schema_version": "synaptic-modal-packaged-call-diagnostic/v1",
+        "authority": "DIAGNOSTIC_ONLY", "result": "JOURNAL_INVALID",
+    }
+    assert imported == []
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+def test_markers_need_no_call_and_leave_journal_untouched(tmp_path):
+    path, ref = _journal(tmp_path, marker_rows=True)
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM catalogs WHERE catalog_ref=?", (diagnostic._CALLS,))
+    before = path.read_bytes()
+    expected = _materials(_case()[0])
+    assert diagnostic.read_retained_markers(path, ref) == expected
+    assert path.read_bytes() == before
+    assert tuple(path.parent.iterdir()) == (path,)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+@pytest.mark.parametrize("mutation", ["wrong_role", "wrong_volume", "duplicate_name",
+                                      "wrong_value", "wrong_digest", "missing_catalog"])
+def test_marker_catalog_tampering_fails_closed(tmp_path, mutation):
+    path, ref = _journal(tmp_path, marker_rows=True)
+    with sqlite3.connect(path) as db:
+        if mutation == "missing_catalog":
+            db.execute("DELETE FROM catalogs WHERE catalog_ref=?", (diagnostic._MARKERS,))
+        else:
+            raw = db.execute("SELECT payload FROM catalogs WHERE catalog_ref=?",
+                             (diagnostic._MARKERS,)).fetchone()[0]
+            document = json.loads(raw)
+            items = document["items"]
+            if mutation == "wrong_role":
+                items[0]["role"] = "artifacts"
+            elif mutation == "wrong_volume":
+                items[0]["volume_id"] = "vo-other"
+            elif mutation == "duplicate_name":
+                items[1]["marker_name"] = items[0]["marker_name"]
+            elif mutation == "wrong_value":
+                items[0]["value_hex"] = "00" * 32
+            else:
+                items[0]["value_sha256"] = "a" * 64
+            raw = canonical_bytes(document)
+            db.execute("UPDATE catalogs SET payload=?,digest=? WHERE catalog_ref=?",
+                       (raw, hashlib.sha256(raw).hexdigest(), diagnostic._MARKERS))
+    with pytest.raises(diagnostic.DiagnosticUnavailable, match="JOURNAL_INVALID"):
+        diagnostic.read_retained_markers(path, ref)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+def test_invalid_marker_journal_prevents_provider_import(tmp_path, monkeypatch, capsys):
+    imported = []
+    original = __import__("builtins").__import__
+
+    def guarded(name, *args, **kwargs):
+        if name == "modal" or name.startswith("modal."):
+            imported.append(name)
+            raise AssertionError("provider imported before marker admission")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", guarded)
+    code = diagnostic.main([
+        "--journal", str(tmp_path / "missing.sqlite3"),
+        "--claim-ref", "a" * 64, "--inspect-markers",
+        "--modal-profile", "named-profile",
+    ])
+    assert code == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "schema_version": "synaptic-modal-packaged-marker-diagnostic/v1",
+        "authority": "DIAGNOSTIC_ONLY", "result": "JOURNAL_INVALID",
+    }
+    assert imported == []
+
+
+def test_marker_reads_are_exact_and_classified_without_payloads():
+    materials = _materials(_case()[0])
+    calls = []
+
+    class Reader:
+        async def read_exact(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 2:
+                raise BoundedVolumeReadError("modal_volume_digest_mismatch")
+            return b"opaque bytes are never reported"
+
+    results = asyncio.run(diagnostic.inspect_markers(Reader(), materials))
+    assert results == {"control": "MATCH", "artifacts": "UNAVAILABLE"}
+    for call, material in zip(calls, materials):
+        assert call == {"volume_id": material.commitment.volume_id,
+                        "path": material.commitment.marker_name,
+                        "expected_size": 32,
+                        "expected_sha256": material.commitment.value_sha256,
+                        "max_bytes": 32}
+
+
+def test_not_found_requires_exact_grpc_cause(monkeypatch):
+    class Status:
+        NOT_FOUND = object()
+        INTERNAL = object()
+
+    class GRPCError(Exception):
+        def __init__(self, status):
+            self.status = status
+
+    package = ModuleType("grpclib")
+    package.__path__ = []
+    constants = ModuleType("grpclib.const")
+    constants.Status = Status
+    exceptions = ModuleType("grpclib.exceptions")
+    exceptions.GRPCError = GRPCError
+    for name, module in (("grpclib", package), ("grpclib.const", constants),
+                         ("grpclib.exceptions", exceptions)):
+        monkeypatch.setitem(sys.modules, name, module)
+
+    def failure(cause):
+        try:
+            raise cause
+        except Exception:
+            try:
+                raise BoundedVolumeReadError("modal_volume_range_unavailable") from None
+            except BoundedVolumeReadError as error:
+                return error
+
+    assert diagnostic._proven_not_found(failure(GRPCError(Status.NOT_FOUND)))
+    assert not diagnostic._proven_not_found(failure(GRPCError(Status.INTERNAL)))
+    assert not diagnostic._proven_not_found(failure(ValueError("untrusted")))
+    assert not diagnostic._proven_not_found(
+        BoundedVolumeReadError("modal_volume_digest_mismatch"))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private POSIX journal")
+def test_probe_admission_requires_same_claim_call_and_markers(tmp_path):
+    path, ref = _journal(tmp_path, marker_rows=True)
+    before = path.read_bytes()
+    binding, materials, call = diagnostic.read_retained_probe(path, ref, _CALL)
+    assert binding.command_digest == ref
+    assert materials == _materials(binding)
+    assert call == _CALL
+    assert path.read_bytes() == before
+    with pytest.raises(diagnostic.DiagnosticUnavailable):
+        diagnostic.read_retained_probe(path, ref, "fc-other")
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM catalogs WHERE catalog_ref=?", (diagnostic._MARKERS,))
+    with pytest.raises(diagnostic.DiagnosticUnavailable):
+        diagnostic.read_retained_probe(path, ref, _CALL)
+
+
+@pytest.mark.parametrize("size,expected", [
+    (0, "FIRST_BLOCK_EMPTY"),
+    (1024 * 1024, "FIRST_BLOCK_LE_1M"),
+    (1024 * 1024 + 1, "FIRST_BLOCK_GT_1M"),
+    (2 * 1024 * 1024, "FIRST_BLOCK_GT_1M"),
+])
+def test_probe_reads_only_first_bound_block_without_returning_bytes(size, expected):
+    binding = _case()[0]
+    requests, reads, urls = [], [], []
+
+    class Body:
+        remaining = size
+
+        async def read(self, maximum):
+            reads.append(maximum)
+            count = min(self.remaining, maximum, 8192)
+            self.remaining -= count
+            return b"private"[:1] * count
+
+    class Block:
+        status = 200
+        headers = {}
+        content = Body()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def get(self, url, *, allow_redirects):
+            urls.append((url, allow_redirects))
+            return Block()
+
+    class Stub:
+        async def VolumeGetFile2(self, request, *, retry, timeout):
+            requests.append((request, retry, timeout))
+            return SimpleNamespace(size=max(size, 1), start=0, len=max(size, 1),
+                                   get_urls=("https://provider.example/first",
+                                             "https://provider.example/unused"))
+
+    class Proto:
+        @staticmethod
+        def VolumeGetFile2Request(**kwargs):
+            return SimpleNamespace(**kwargs)
+
+    category = asyncio.run(diagnostic.inspect_first_artifact_block(
+        SimpleNamespace(stub=Stub()), binding, Proto, session_factory=Session,
+    ))
+    assert category == expected
+    assert len(requests) == 1
+    request, retry, timeout = requests[0]
+    assert retry is None and timeout == 15
+    assert request.volume_id == binding.provider_facts.artifact_volume_id
+    assert request.path == diagnostic.operation_path(
+        binding.command.operation.effect.effect_id, "output", "final_model.tar",
+    )
+    assert urls == [("https://provider.example/first", False)]
+    assert all(0 < count <= 64 * 1024 for count in reads)
+    assert size - Block.content.remaining <= diagnostic._FIRST_BLOCK_LIMIT + 1
+
+
+@pytest.mark.parametrize("change", [
+    {"size": 193 * 1024 * 1024}, {"start": 1}, {"len": 2},
+    {"get_urls": ()}, {"get_urls": ("http://provider.example/first",)},
+    {"get_urls": ("https://user@provider.example/first",)},
+])
+def test_probe_rejects_unbounded_or_untrusted_metadata_before_http(change):
+    binding = _case()[0]
+    metadata = dict(size=1, start=0, len=1,
+                    get_urls=("https://provider.example/first",))
+    metadata.update(change)
+
+    class Stub:
+        async def VolumeGetFile2(self, *_args, **_kwargs):
+            return SimpleNamespace(**metadata)
+
+    def no_session():
+        raise AssertionError("invalid metadata reached HTTP")
+
+    category = asyncio.run(diagnostic.inspect_first_artifact_block(
+        SimpleNamespace(stub=Stub()), binding,
+        SimpleNamespace(VolumeGetFile2Request=lambda **kwargs: SimpleNamespace(**kwargs)),
+        session_factory=no_session,
+    ))
+    assert category in {"BLOCK_METADATA_INVALID", "FIRST_BLOCK_UNAVAILABLE"}
+
+
+def test_probe_rejects_encoded_block_without_reading_body():
+    binding = _case()[0]
+
+    class Block:
+        status = 200
+        headers = {"Content-Encoding": "gzip"}
+
+        class content:
+            @staticmethod
+            async def read(_maximum):
+                raise AssertionError("encoded body must not be read")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def get(self, *_args, **_kwargs):
+            return Block()
+
+    class Stub:
+        async def VolumeGetFile2(self, *_args, **_kwargs):
+            return SimpleNamespace(size=2, start=0, len=2,
+                                   get_urls=("https://provider.example/first",))
+
+    category = asyncio.run(diagnostic.inspect_first_artifact_block(
+        SimpleNamespace(stub=Stub()), binding,
+        SimpleNamespace(VolumeGetFile2Request=lambda **kwargs: SimpleNamespace(**kwargs)),
+        session_factory=Session,
+    ))
+    assert category == "FIRST_BLOCK_UNAVAILABLE"
+
+
+def test_invalid_probe_journal_prevents_provider_import(tmp_path, monkeypatch, capsys):
+    imported = []
+    original = __import__("builtins").__import__
+
+    def guarded(name, *args, **kwargs):
+        if name == "modal" or name.startswith("modal."):
+            imported.append(name)
+            raise AssertionError("provider imported before probe admission")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", guarded)
+    code = diagnostic.main([
+        "--journal", str(tmp_path / "missing.sqlite3"),
+        "--claim-ref", "a" * 64, "--call-id", _CALL,
+        "--probe-final-model-first-chunk", "--modal-profile", "named-profile",
+    ])
+    assert code == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "schema_version": "synaptic-modal-packaged-artifact-probe-diagnostic/v1",
+        "authority": "DIAGNOSTIC_ONLY", "result": "JOURNAL_INVALID",
+    }
+    assert imported == []
+
+
+def test_pinned_synchronizer_bridges_probe_without_volume_hydration():
+    synchronizer = pytest.importorskip("modal._utils.async_utils").synchronizer
+    binding = _case()[0]
+    requests = []
+
+    class Body:
+        calls = 0
+
+        async def read(self, maximum):
+            self.calls += 1
+            assert maximum <= 64 * 1024
+            return b"x" if self.calls == 1 else b""
+
+    class Block:
+        status = 200
+        headers = {}
+        content = Body()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def get(self, url, *, allow_redirects):
+            assert url == "https://provider.example/first"
+            assert allow_redirects is False
+            return Block()
+
+    class Stub:
+        async def VolumeGetFile2(self, request, *, retry, timeout):
+            requests.append((request, retry, timeout))
+            return SimpleNamespace(size=1, start=0, len=1,
+                                   get_urls=("https://provider.example/first",))
+
+    proto = SimpleNamespace(VolumeGetFile2Request=lambda **kwargs: SimpleNamespace(**kwargs))
+    category = synchronizer.create_blocking(diagnostic.inspect_first_artifact_block)(
+        SimpleNamespace(stub=Stub()), binding, proto, session_factory=Session,
+    )
+    assert category == "FIRST_BLOCK_LE_1M"
+    assert len(requests) == 1
+    request, retry, timeout = requests[0]
+    assert (request.volume_id, request.path, retry, timeout) == (
+        binding.provider_facts.artifact_volume_id,
+        diagnostic.operation_path(binding.command.operation.effect.effect_id,
+                                  "output", "final_model.tar"), None, 15,
+    )

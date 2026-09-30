@@ -61,6 +61,14 @@ def test_wire_admits_only_minimal_exact_worker_values(monkeypatch):
     assert not hasattr(result, "stage_record") and not hasattr(result, "authority")
 
 
+def test_raw_bundle_sentinel_never_appears_in_wire_admission_repr(monkeypatch):
+    values = wire_case(monkeypatch)
+    result = admit(values)
+    sentinel = values[2].bundle.decode("ascii")
+    assert sentinel == "opaque-bundle"
+    assert sentinel not in repr(result)
+
+
 @pytest.mark.parametrize("field", ["claim_tag", "stage_claim_tag", "bundle"])
 def test_wire_rejects_bad_signatures_or_bundle(monkeypatch, field):
     values = wire_case(monkeypatch)

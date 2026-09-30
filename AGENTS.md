@@ -11,6 +11,10 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - Do not create throwaway scripts just to get a task done if an existing script, CLI, or skill can be used or extended.
 - If the capability does not exist, the next step is not an ad hoc workaround. Update the relevant skill and add the proper checked-in script/CLI workflow so the new capability is reusable.
 - Prefer repo CLIs and checked-in scripts over manual bucket/API probing whenever those surfaces exist.
+- Diagnose failures from the exact attempt's retained records, logs, pinned SDK source, and provider documentation. Use relevant issue/forum reports to form hypotheses, then run a targeted experiment before calling a hypothesis the cause. A closed failure phase locates a boundary; it does not establish the cause.
+- Keep the training workflow proportional to the supported use case. Remove redundant operations when documented behavior and experiments show they add no useful guarantee;
+  retain source/model pins, credential isolation, artifact verification, and protection against replaying an uncertain submission. Test doubles must model the provider's documented behavior, not merely repeat our implementation.
+- For prompt/completion training, explicitly review the generation scaffold at the target boundary and keep model-specific chat-template arguments in recipe configuration, consistent with serving. Preserve legacy canonical documents when optional arguments are absent. An explicit null output budget means no request-level token ceiling, not unlimited context, time, or transport size. A completed-text smoke must check natural completion and must not be reported as a writing-quality evaluation.
 
 ## Config-First Generation Discipline
 
@@ -47,6 +51,31 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - HF cloud eval results are saved under the source run's `evaluations/vllm/{timestamp}/` prefix. Inspect `evaluation_results.json` first, then `evaluation_results.md`, then `evaluation_lineage.json`; use `logs/eval_progress.jsonl` only for live/debug state.
 
 ## Modal v1
+
+- The approved packaged-runtime policy separates hosted-parent inventory from the
+  isolated trainer: parent admission/revalidation checks the complete inventory
+  under authenticated, stable Python library roots against the exact release,
+  while the isolated child and default inspector retain full ambient inventory
+  checks. Preserve parent Python, wheel/bootstrap bytes, provenance, members,
+  closure and trainer assets; unproven roots or mismatched inventories reject.
+  This explicitly accepts extra outside-root dependencies in the privileged
+  parent and does not attest loaded-module origins. Do not extend that allowance
+  to the isolated trainer or use a failed check as a scope-switching fallback.
+
+- The standalone host uses a thread-affine SQLite attempt journal and call catalogs.
+  Do not pass catalog resolve/publish through `_bounded`'s worker thread. Keep
+  journal operations on their owning thread and bound only the provider
+  hydrate/spawn/call-ID closure. A timed-out worker may still spawn later;
+  preserve the consumed claim and never auto-replay or infer no call from a
+  missing catalog row.
+
+- The minimal consumer's provisioning step is create-only
+  (`allow_existing=False`). A genuinely fresh manual attempt must use unused
+  control Volume, artifact Volume, model-cache Volume, and runtime Secret names;
+  changing only the attempt or deployment reference is insufficient. Preserve
+  failed state and existing resources, diagnose exact collisions read-only, and
+  never reinterpret an already-exists failure as retry, adoption, or cleanup
+  authority.
 
 - Training and model chat are independent processes. Use the model-first
   `scripts/chat_model.py` / `tuner.inference.model_chat.open_model_chat` boundary
@@ -129,7 +158,7 @@ This repository has a few cloud-training constraints that are easy to relearn th
   together before refreshing hashes. Moving code must not remove it from the
   locked source boundary. Bootstrap provider modules and the offline trainer
   closure are separate inventories; change only the inventory actually affected.
-- Prepare pinned models automatically on the execution machine using the Hub SDK in private scratch; never expose hostile shared cache paths to SDK writes. Reuse only independently verified repository files, commit the persistent cache before training, and keep the offline trainer subprocess credential-free. No operator weight upload step is required.
+- Prepare pinned models automatically on the execution machine using the Hub SDK in private scratch; never expose hostile shared cache paths to SDK writes. Create the private repository and each validated member-parent directory explicitly at 0700 before SDK writes; do not depend on ambient umask, use `mkdir(parents=True)` for permission guarantees, or relax the publication guard. Test nested members through the real binding under umask 022 and 002. Reuse only independently verified repository files, commit the persistent cache before training, and keep the offline trainer subprocess credential-free. No operator weight upload step is required.
 - Modal training is available only behind the provider-neutral public `TrainingAPI`; do not recreate a `modal run` launcher, provider-specific public verb, or engine-owned database.
 - The consuming host owns configuration, credentials, grants, coordinator/Foundation persistence, retained preparation catalogs, data, and product state. Compose the existing generic store and authority ports; do not recreate the removed Modal-specific lifecycle repository.
 - Enforce the packaged `modal-runtime-v1.lock.json` at composition and again in the remote source materializer. The CPython 3.11/Linux launcher dependency file must contain the complete transitive closure with exact hashes; install it with `--require-hashes` and never resolve additional packages at runtime.
@@ -138,6 +167,14 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - A self-consistent provider observation cannot override the packaged image, SDK, Python, dependency, wrapper, worker, SFT runtime, or ML-stack lock. No live preflight or paid smoke may run until the provider-free barrier and independent review are green.
 
 ## Cloud Artifact UX
+
+- Modal artifact downloads must pass the shared per-artifact bound, not the
+  aggregate artifact-set bound. Pinned SDK file blocks may exceed the public
+  stream's 1 MiB chunk limit; split them at the provider facade while preserving
+  byte order, aggregate limits, and end-to-end hash verification. Regression
+  tests must carry multi-MiB SDK-shaped blocks through the real public stream.
+  A zero-byte partial is not a cause diagnosis, and a consumed training attempt
+  must never be replayed to recover a failed local download.
 
 - HF Jobs local dashboard parity comes from syncing JSONL training logs to the bucket and replaying them locally.
 - HF Jobs cloud evaluation now uses the same adapter idea: remote JSONL progress, local replay into the existing evaluation dashboard.

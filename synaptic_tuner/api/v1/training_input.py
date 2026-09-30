@@ -31,6 +31,11 @@ _MAX_SAVE_TOTAL_LIMIT = 10_000
 _MAX_LORA_RANK = 4096
 _MAX_LORA_ALPHA = 65_536
 _MAX_SEED = 4_294_967_295
+_MAX_CHAT_TEMPLATE_KWARGS_BYTES = 4096
+_RESERVED_CHAT_TEMPLATE_KWARGS = frozenset({
+    "messages", "tokenize", "add_generation_prompt", "return_dict",
+    "return_tensors", "continue_final_message", "chat_template",
+})
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 _ASCII_COMPONENT = re.compile(r"[A-Za-z0-9]+")
 _CREDENTIAL_KEYS = frozenset(
@@ -349,6 +354,14 @@ class SFTTrainingHyperparametersV1:
     use_rslora: bool
     init_lora_weights: bool
     split_dataset: bool
+    dataset_format: str | None = None
+    completion_only_loss: bool | None = None
+    assistant_only_loss: bool | None = None
+    use_preassigned_splits: bool | None = None
+    prompt_render: str | None = None
+    packing: bool | None = None
+    require_memory_efficient_loss: bool | None = None
+    chat_template_kwargs: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         integer_bounds = {
@@ -395,9 +408,41 @@ class SFTTrainingHyperparametersV1:
         )
         for field in ("use_dora", "use_rslora", "init_lora_weights", "split_dataset"):
             object.__setattr__(self, field, _exact_bool(getattr(self, field), field))
+        prepared_fields = (
+            "dataset_format",
+            "completion_only_loss",
+            "assistant_only_loss",
+            "use_preassigned_splits",
+            "prompt_render",
+            "packing",
+            "require_memory_efficient_loss",
+        )
+        present = tuple(getattr(self, field) is not None for field in prepared_fields)
+        if any(present) and not all(present):
+            raise ValueError("prepared SFT controls must be supplied together")
+        if all(present):
+            if self.dataset_format not in {"raw_text", "messages"}:
+                raise ValueError("dataset_format is unsupported")
+            if self.prompt_render not in {"full_conversation", "prompt_completion"}:
+                raise ValueError("prompt_render is unsupported")
+            for field in (
+                "completion_only_loss",
+                "assistant_only_loss",
+                "use_preassigned_splits",
+                "packing",
+                "require_memory_efficient_loss",
+            ):
+                object.__setattr__(
+                    self, field, _exact_bool(getattr(self, field), field)
+                )
+        if self.chat_template_kwargs is not None:
+            if self.dataset_format == "raw_text":
+                raise ValueError("chat_template_kwargs does not apply to raw text")
+            object.__setattr__(self, "chat_template_kwargs",
+                               validate_chat_template_kwargs(self.chat_template_kwargs))
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        result = {
             "schema_version": _SFT_SCHEMA,
             "batch_size": self.batch_size,
             "gradient_accumulation_steps": self.gradient_accumulation_steps,
@@ -416,10 +461,25 @@ class SFTTrainingHyperparametersV1:
             "init_lora_weights": self.init_lora_weights,
             "split_dataset": self.split_dataset,
         }
+        if self.dataset_format is not None:
+            result.update(
+                {
+                    "dataset_format": self.dataset_format,
+                    "completion_only_loss": self.completion_only_loss,
+                    "assistant_only_loss": self.assistant_only_loss,
+                    "use_preassigned_splits": self.use_preassigned_splits,
+                    "prompt_render": self.prompt_render,
+                    "packing": self.packing,
+                    "require_memory_efficient_loss": self.require_memory_efficient_loss,
+                }
+            )
+        if self.chat_template_kwargs is not None:
+            result["chat_template_kwargs"] = validate_chat_template_kwargs(self.chat_template_kwargs)
+        return result
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> "SFTTrainingHyperparametersV1":
-        expected = frozenset(
+        base_fields = frozenset(
             {
                 "schema_version", "batch_size", "gradient_accumulation_steps",
                 "learning_rate", "duration", "max_seq_length", "seed", "save_steps",
@@ -428,6 +488,17 @@ class SFTTrainingHyperparametersV1:
                 "init_lora_weights", "split_dataset",
             }
         )
+        prepared_fields = frozenset(
+            {
+                "dataset_format", "completion_only_loss", "assistant_only_loss",
+                "use_preassigned_splits", "prompt_render", "packing",
+                "require_memory_efficient_loss",
+            }
+        )
+        supplied = frozenset(value) if type(value) is dict else frozenset()
+        expected = base_fields | prepared_fields if supplied & prepared_fields else base_fields
+        if "chat_template_kwargs" in supplied:
+            expected = expected | {"chat_template_kwargs"}
         value = _fields(value, expected, "hyperparameters")
         if value["schema_version"] != _SFT_SCHEMA:
             raise ValueError("hyperparameters schema is unsupported")
@@ -451,6 +522,14 @@ class SFTTrainingHyperparametersV1:
             use_rslora=value["use_rslora"],  # type: ignore[arg-type]
             init_lora_weights=value["init_lora_weights"],  # type: ignore[arg-type]
             split_dataset=value["split_dataset"],  # type: ignore[arg-type]
+            dataset_format=value.get("dataset_format"),  # type: ignore[arg-type]
+            completion_only_loss=value.get("completion_only_loss"),  # type: ignore[arg-type]
+            assistant_only_loss=value.get("assistant_only_loss"),  # type: ignore[arg-type]
+            use_preassigned_splits=value.get("use_preassigned_splits"),  # type: ignore[arg-type]
+            prompt_render=value.get("prompt_render"),  # type: ignore[arg-type]
+            packing=value.get("packing"),  # type: ignore[arg-type]
+            require_memory_efficient_loss=value.get("require_memory_efficient_loss"),  # type: ignore[arg-type]
+            chat_template_kwargs=value.get("chat_template_kwargs"),  # type: ignore[arg-type]
         )
 
 
@@ -504,6 +583,57 @@ def _json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def _reject_constant(_value: str) -> object:
     raise ValueError
+
+
+def validate_chat_template_kwargs(value: object) -> dict[str, object]:
+    """Snapshot bounded, finite JSON kwargs without assuming a model template."""
+    if type(value) is not dict or not value:
+        raise ValueError("chat_template_kwargs must be a nonempty object")
+    nodes = 0
+
+    def check(item: object, depth: int) -> None:
+        nonlocal nodes
+        nodes += 1
+        if nodes > 64 or depth > 4:
+            raise ValueError("chat_template_kwargs exceeds its structure limit")
+        if type(item) is dict:
+            for key, child in item.items():
+                if type(key) is not str or not key:
+                    raise ValueError("chat_template_kwargs contains an invalid key")
+                try:
+                    key_size = len(key.encode("utf-8"))
+                except UnicodeEncodeError:
+                    raise ValueError("chat_template_kwargs contains an invalid key") from None
+                if key_size > 128:
+                    raise ValueError("chat_template_kwargs contains an invalid key")
+                check(child, depth + 1)
+        elif type(item) is list:
+            for child in item:
+                check(child, depth + 1)
+        elif type(item) is str:
+            try:
+                size = len(item.encode("utf-8"))
+            except UnicodeEncodeError:
+                raise ValueError("chat_template_kwargs contains invalid text") from None
+            if size > 1024:
+                raise ValueError("chat_template_kwargs contains an oversized string")
+        elif type(item) is float:
+            if not math.isfinite(item):
+                raise ValueError("chat_template_kwargs must be finite JSON")
+        elif type(item) not in (int, bool, type(None)):
+            raise TypeError("chat_template_kwargs must contain only JSON values")
+
+    if set(value) & _RESERVED_CHAT_TEMPLATE_KWARGS:
+        raise ValueError("chat_template_kwargs overrides renderer controls")
+    check(value, 0)
+    try:
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=False, allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError):
+        raise ValueError("chat_template_kwargs must be valid JSON") from None
+    if len(encoded) > _MAX_CHAT_TEMPLATE_KWARGS_BYTES:
+        raise ValueError("chat_template_kwargs exceeds its byte limit")
+    return json.loads(encoded)
 
 
 @dataclass(frozen=True, slots=True)

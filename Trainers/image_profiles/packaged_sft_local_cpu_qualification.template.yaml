@@ -1,0 +1,5 @@
+schema_version: synaptic-packaged-local-qualification-config/v1
+protocol: synaptic-installed-child-cpu/v1
+# Replace only with the digest from an actually verified release. This template
+# deliberately fails admission and grants no training, GPU, or provider authority.
+runtime_release_digest: REPLACE_WITH_VERIFIED_RELEASE_DIGEST

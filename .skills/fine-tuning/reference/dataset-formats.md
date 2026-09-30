@@ -4,7 +4,60 @@ Dataset requirements for the current CLI-first tool-calling stack.
 
 ---
 
-## SFT Dataset Format
+## SFT Dataset Formats
+
+### Verified raw text
+
+Use this shape when a declarative dataset-prep recipe projects one verified
+normalized source item directly into one training row. The public command is:
+
+```bash
+python tuner.py prepare-dataset --config <config.json> --json
+```
+
+The resulting content-addressed dataset contains a manifest plus JSONL rows with
+exactly these fields:
+
+```jsonl
+{"schema_version":"syntunia-sft-row/v1","format":"raw_text","row_id":"<stable-id>","source_item_id":"<stable-source-id>","split":"train","text":"<projected text>"}
+```
+
+Key rules:
+
+- Authority requires both `schema_version: syntunia-sft-row/v1` and
+  `format: raw_text`; an arbitrary `text` column is not sufficient.
+- Every row declares exactly `train` or `validation`. The trainer consumes those
+  splits directly and never creates a random split for this format.
+- The payload field is `text`; `raw_text` names the format.
+- Raw-text rows are tokenized directly, terminated with the tokenizer-derived
+  EOS token, and trained with full-sequence labels. They are not chat-rendered.
+- Do not mix raw-text rows with conversations or prompt/completion rows.
+- The public manifest and CLI response contain stable identities and counts, not
+  corpus prose, host paths, or the raw split seed.
+
+### Authoritative prompt/completion messages
+
+Use this shape when a dataset builder has already chosen the exact context prompt,
+target prose, grouping, and split:
+
+```jsonl
+{"schema_version":"syntunia-sft-row/v2","format":"messages","row_id":"row-<stable-id>","target_item_id":"item-<stable-id>","context_item_ids":["item-<stable-id>"],"group_id":"<group>","split":"train","messages":[{"role":"user","content":"<context bundle and request>"},{"role":"assistant","content":"<target prose>"}]}
+```
+
+Key rules:
+
+- Authority requires the exact v2 schema and `format: messages`; legacy message
+  rows retain legacy behavior.
+- Every row has exactly one user turn followed by one assistant turn and a
+  preassigned `train` or `validation` split.
+- Train only the assistant completion. Do not include source metadata in the
+  target unless it is intentionally part of the prose.
+- Authoritative rows fail instead of truncating. Choose `max_seq_length` from an
+  exact tokenizer profile that admits every intended row.
+- Context document order remains dataset-builder policy; the trainer does not
+  impose an outline-first or other corpus-specific convention.
+
+### Conversational SFT
 
 Positive examples only. Tool-calling examples should use OpenAI-style `tool_calls`.
 
@@ -100,7 +153,11 @@ details + the canonical `Datasets/embedding/examples/` fixtures are in the
 
 ---
 
-## Current Tool Wrapper
+## Example Tool-Calling Recipe
+
+The wrapper below is one declarative dataset recipe, not a parser or trainer
+runtime truth. Keep wrapper names and required fields in scenario/config YAML so
+other datasets can use different schemas without runtime code changes.
 
 The canonical tool-call format is:
 

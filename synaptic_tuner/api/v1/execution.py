@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from ._contract import PreparedTrainingInputIdentity
+
 
 def _required(value: str, field_name: str) -> str:
     if not isinstance(value, str):
@@ -17,6 +19,8 @@ def _required(value: str, field_name: str) -> str:
 
 def _optional(value: str | None, field_name: str) -> str | None:
     return None if value is None else _required(value, field_name)
+
+
 
 
 class RunState(str, Enum):
@@ -166,6 +170,7 @@ __all__ = [
     "ErrorCode",
     "ExecutionError",
     "ExecutionGrant",
+    "PreparedTrainingInputIdentity",
     "RunRef",
     "RunState",
     "RunStatus",

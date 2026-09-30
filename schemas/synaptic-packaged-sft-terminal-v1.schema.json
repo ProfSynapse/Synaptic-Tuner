@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "synaptic-packaged-sft-terminal/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "runtime_release_digest", "provider_runtime_binding_digest", "execution_binding_digest", "workload_fingerprint", "configuration_digest", "artifact_policy_digest", "run_ref", "status", "inventory_sha256", "artifact_roles"],
+  "properties": {
+    "schema_version": {"const": "synaptic-packaged-sft-terminal/v1"},
+    "runtime_release_digest": {"$ref": "#/$defs/digest"},
+    "provider_runtime_binding_digest": {"$ref": "#/$defs/digest"},
+    "execution_binding_digest": {"$ref": "#/$defs/digest"},
+    "workload_fingerprint": {"$ref": "#/$defs/digest"},
+    "configuration_digest": {"$ref": "#/$defs/digest"},
+    "artifact_policy_digest": {"$ref": "#/$defs/digest"},
+    "run_ref": {"type": "string", "minLength": 1},
+    "status": {"const": "completed"},
+    "inventory_sha256": {"$ref": "#/$defs/digest"},
+    "artifact_roles": {"const": ["workload_record", "training_lineage", "training_metrics", "final_model", "tokenizer"]}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

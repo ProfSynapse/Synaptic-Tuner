@@ -167,6 +167,43 @@ def test_invalid_copy_bound_does_not_create_destination(tmp_path, maximum):
     assert not destination.parent.exists()
 
 
+def test_copy_regular_rejects_symlink_source_and_redirected_parent(tmp_path):
+    source_root = tmp_path / "source-root"
+    destination_root = tmp_path / "destination-root"
+    outside = tmp_path / "outside"
+    source_root.mkdir()
+    destination_root.mkdir()
+    outside.mkdir()
+    target = outside / "payload.bin"
+    target.write_bytes(b"payload")
+    alias = source_root / "payload.bin"
+    try:
+        alias.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    with pytest.raises(ValueError, match="bounded regular file|unavailable"):
+        mounted_io.copy_regular(
+            source_root,
+            alias,
+            destination_root,
+            destination_root / "private" / "payload.bin",
+            maximum=1024,
+        )
+    assert tuple(destination_root.iterdir()) == ()
+
+    alias.unlink()
+    (source_root / "trusted").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="trusted directory|unavailable"):
+        mounted_io.copy_regular(
+            source_root,
+            source_root / "trusted" / "payload.bin",
+            destination_root,
+            destination_root / "private" / "payload.bin",
+            maximum=1024,
+        )
+    assert tuple(destination_root.iterdir()) == ()
+
+
 @pytest.mark.parametrize("maximum", [-1, True, 1.0])
 def test_invalid_read_bound_is_rejected_before_path_lookup(tmp_path, maximum):
     with pytest.raises(ValueError, match="exact integer"):

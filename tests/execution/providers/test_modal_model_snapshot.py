@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
 
 import pytest
 
-from tuner.execution.providers.modal.model_snapshot import prepare_model_snapshot
+from tuner.execution.providers.modal import model_snapshot
+from tuner.execution.providers.modal.model_snapshot import (
+    ModelSnapshotPreparationError, prepare_model_snapshot,
+)
 from tuner.project.execution_source import ExecutionSourceV1
 from tests.training.test_training_service import _execution_source
 
@@ -111,11 +115,178 @@ def fixture(tmp_path, monkeypatch):
 
 def prepare(fixture, **overrides):
     return prepare_model_snapshot(
-        model_ref=MODEL,
-        revision=REVISION,
-        token="fixture-credential",
-        **(fixture.roots | overrides),
+        **({"model_ref": MODEL, "revision": REVISION, "token": "fixture-credential"}
+           | fixture.roots | overrides),
     )
+
+
+class _BoundCache:
+    def __init__(self, root: Path):
+        self.root = root
+        self.published = []
+
+    def claim_directory(self, relative_path: str) -> None:
+        (self.root / relative_path).mkdir()
+
+    def copy_in_exclusive(
+        self, relative_path: str, source_path: str, *,
+        expected_size: int, expected_sha256: str, maximum: int,
+    ) -> None:
+        source = Path(source_path)
+        content = source.read_bytes()
+        assert len(content) == expected_size <= maximum
+        assert hashlib.sha256(content).hexdigest() == expected_sha256
+        destination = self.root / relative_path
+        with destination.open("xb") as output:
+            output.write(content)
+        self.published.append((relative_path, expected_sha256))
+
+
+@pytest.mark.parametrize("stage", sorted(model_snapshot.MODEL_SNAPSHOT_PREPARATION_STAGES - {
+    "PERSISTENT_PUBLICATION_" + code for code in model_snapshot.PERSISTENT_PUBLICATION_DIAGNOSTICS
+}))
+def test_model_preparation_stages_are_fixed_and_private(fixture, monkeypatch, tmp_path, stage):
+    kwargs = {}
+    if stage == "SDK_ADMISSION":
+        monkeypatch.setattr(model_snapshot, "_bind_hub_api", lambda *_: (_ for _ in ()).throw(RuntimeError("PRIVATE_SENTINEL")))
+    elif stage == "INPUT":
+        kwargs["model_ref"] = "invalid/three/parts"
+    elif stage == "WORKSPACE_SETUP":
+        kwargs["destination_root"] = tmp_path / "absent"
+    elif stage == "METADATA_FETCH":
+        monkeypatch.setattr(sys.modules["huggingface_hub"].HfApi, "model_info",
+                            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("PRIVATE_SENTINEL")))
+    elif stage == "METADATA_VALIDATION":
+        fixture.info.sha = "b" * 40
+    elif stage == "DOWNLOAD":
+        monkeypatch.setattr(sys.modules["huggingface_hub"], "snapshot_download",
+                            lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("PRIVATE_SENTINEL")))
+    elif stage == "VERIFICATION":
+        fixture.info.siblings[0].blob_id = "b" * 40
+    elif stage == "PERSISTENT_PUBLICATION":
+        kwargs["persistent_binding"] = _BoundCache(tmp_path / "absent-cache")
+    else:
+        original = model_snapshot.copy_regular
+        def reject_at_boundary(source_root, source, destination_root, destination, **options):
+            if ((stage == "DESTINATION_COPY" and destination_root == fixture.roots["destination_root"])
+                    or (stage == "DESTINATION_VERIFICATION" and destination_root.name == "verification")):
+                raise RuntimeError("PRIVATE_SENTINEL")
+            return original(source_root, source, destination_root, destination, **options)
+        monkeypatch.setattr(model_snapshot, "copy_regular", reject_at_boundary)
+    with pytest.raises(ModelSnapshotPreparationError) as caught:
+        prepare(fixture, **kwargs)
+    assert caught.value.stage == stage
+    assert str(caught.value) == "model preparation failed"
+    assert caught.value.__cause__ is None
+
+
+@pytest.mark.parametrize("raised_stage,expected", (
+    ("PERSISTENT_PUBLICATION_CLAIM_CREATE_DENIED", "PERSISTENT_PUBLICATION_CLAIM_CREATE_DENIED"),
+    ("VERIFICATION", "PERSISTENT_PUBLICATION"),
+))
+def test_model_publication_accepts_only_finite_publisher_diagnostics(fixture, raised_stage, expected):
+    class RejectedPublisher:
+        def claim_directory(self, path):
+            raise ModelSnapshotPreparationError(raised_stage)
+
+    with pytest.raises(ModelSnapshotPreparationError) as caught:
+        prepare(fixture, persistent_binding=RejectedPublisher())
+    assert caught.value.stage == expected
+    assert str(caught.value) == "model preparation failed"
+    assert caught.value.__cause__ is None
+
+
+def test_bound_cache_publishes_every_verified_member_from_private_scratch(
+    fixture, tmp_path
+):
+    cache = _BoundCache(tmp_path / "bound-cache")
+    cache.root.mkdir()
+    result = prepare(fixture, persistent_binding=cache)
+    assert {p.name: p.read_bytes() for p in result.iterdir()} == fixture.files
+    assert sorted(path for path, _ in cache.published) == [
+        f"models--fixture--tiny/snapshots/{REVISION}/{name}"
+        for name in sorted(fixture.files)
+    ]
+    for path, digest in cache.published:
+        assert hashlib.sha256((cache.root / path).read_bytes()).hexdigest() == digest
+    assert [args["allow_patterns"] for name, args in fixture.calls if name == "download"] == [
+        list(fixture.files)
+    ]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux descriptor-relative mount semantics")
+@pytest.mark.parametrize("umask", (0o022, 0o002))
+def test_real_volume_binding_publishes_verified_model_fixture(fixture, monkeypatch, tmp_path, umask):
+    from tuner.execution.providers.modal import volume_root_binding as bound
+    nested_name, nested_content = "nested/config.json", b"nested verified bytes"
+    fixture.files[nested_name] = nested_content
+    fixture.info.siblings.append(SimpleNamespace(
+        rfilename=nested_name, size=len(nested_content), lfs=None,
+        blob_id=hashlib.sha1(f"blob {len(nested_content)}\0".encode() + nested_content).hexdigest(),
+    ))
+    target_parent = tmp_path / "__modal" / "volumes"
+    target = target_parent / "vo-test"
+    target.mkdir(parents=True)
+    mount = tmp_path / "mnt" / "model-cache"
+    mount.parent.mkdir()
+    mount.symlink_to(target, target_is_directory=True)
+    marker_name = ".synaptic-test-marker"
+    marker = b"m" * 32
+    (target / marker_name).write_bytes(marker)
+    monkeypatch.setattr(bound, "_PROVIDER_VOLUME_ROOT", str(target_parent))
+    original_trust = bound._trusted_dir
+    def allow_test_tmp(info):
+        if info.st_uid == 0 and info.st_mode & 0o1000:
+            return
+        original_trust(info)
+    monkeypatch.setattr(bound, "_trusted_dir", allow_test_tmp)
+    original_umask = os.umask(umask)
+    try:
+        with bound.VolumeRootBinding.bind(
+            root_path=str(mount), volume_id="vo-test", marker_name=marker_name,
+            marker_sha256=hashlib.sha256(marker).hexdigest(),
+        ) as binding:
+            snapshot = prepare(fixture, persistent_root=mount, persistent_binding=binding)
+            assert all((snapshot / name).read_bytes() == content for name, content in fixture.files.items())
+    finally:
+        os.umask(original_umask)
+    published = target / "models--fixture--tiny" / "snapshots" / REVISION
+    assert all((published / name).read_bytes() == content for name, content in fixture.files.items())
+
+
+def test_bound_cache_never_opens_provider_symlink_path(fixture, tmp_path):
+    cache = _BoundCache(tmp_path / "bound-cache")
+    cache.root.mkdir()
+    mounted = tmp_path / "modal-mounted-cache"
+    mounted.symlink_to(cache.root, target_is_directory=True)
+    result = prepare(fixture, persistent_root=mounted, persistent_binding=cache)
+    assert {p.name: p.read_bytes() for p in result.iterdir()} == fixture.files
+    assert len(cache.published) == len(fixture.files)
+    assert list(fixture.roots["persistent_root"].iterdir()) == []
+    assert list(fixture.roots["scratch_root"].iterdir()) == []
+
+
+def test_bound_cache_collision_fails_without_adopting_existing_files(fixture, tmp_path):
+    cache = _BoundCache(tmp_path / "bound-cache")
+    existing = cache.root / "models--fixture--tiny" / "snapshots" / REVISION
+    existing.mkdir(parents=True)
+    (existing / "config.json").write_bytes(fixture.files["config.json"])
+    with pytest.raises(ValueError, match="^model preparation failed$"):
+        prepare(fixture, persistent_binding=cache)
+    assert cache.published == []
+    assert (existing / "config.json").read_bytes() == fixture.files["config.json"]
+    assert list(fixture.roots["destination_root"].iterdir()) == []
+
+
+def test_bound_cache_rejects_wrong_git_blob_before_any_volume_write(fixture, tmp_path):
+    cache = _BoundCache(tmp_path / "bound-cache")
+    cache.root.mkdir()
+    fixture.info.siblings[0].blob_id = "b" * 40
+    with pytest.raises(ValueError, match="^model preparation failed$"):
+        prepare(fixture, persistent_binding=cache)
+    assert list(cache.root.iterdir()) == []
+    assert cache.published == []
+    assert list(fixture.roots["destination_root"].iterdir()) == []
 
 
 def test_cache_miss_downloads_privately_then_reuses_verified_files(fixture, tmp_path):

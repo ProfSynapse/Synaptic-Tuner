@@ -93,6 +93,11 @@ def _envelope_snapshot(envelope: ModalLaunchEnvelope) -> tuple[object, ...]:
         bytes(material.claim_tag),
         envelope.stage_record.record_digest,
         bytes(envelope.stage_assessment.canonical_bytes),
+        (
+            None
+            if material.prepared_input_descriptor is None
+            else bytes(material.prepared_input_descriptor)
+        ),
     )
 
 
@@ -329,6 +334,8 @@ def _bind(
         retained_envelope[11],
         retained_envelope[12],
         retained_envelope[13],
+        retained_envelope[16],
+        None,
     )
     admitted_envelope = ModalLaunchEnvelope(
         submit_binding,

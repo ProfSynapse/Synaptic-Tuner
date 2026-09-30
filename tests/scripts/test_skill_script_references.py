@@ -42,7 +42,7 @@ def test_generalizable_skill_scripts_exist_in_canonical_tree() -> None:
         REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "prune_dataset_from_loss.py",
         REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "read_bucket_artifact.py",
         REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "split_for_gspo.py",
-        REPO_ROOT / ".skills" / "synethetic-data-generation" / "scripts" / "validate_syngen.py",
+        REPO_ROOT / ".skills" / "synthetic-data-generation" / "scripts" / "validate_syngen.py",
         REPO_ROOT / ".skills" / "upload-deployment" / "scripts" / "upload_model.py",
     ]
 

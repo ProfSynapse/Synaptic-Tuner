@@ -11,6 +11,8 @@ from datasets import Dataset
 
 from shared.sft_preprocessing import (
     PreparedSFTExample,
+    detect_sft_record_format,
+    is_authoritative_preassigned_sft_record,
     materialize_sft_example as _materialize_sft_example,
     normalize_sft_messages,
     sanitize_messages_for_chat_template,
@@ -25,11 +27,28 @@ def sanitize_conversations(messages: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def normalize_sft_example(example: dict[str, Any]) -> dict[str, Any]:
+    detected = detect_sft_record_format(example)
+    if detected == "raw_text":
+        return {
+            "schema_version": example["schema_version"],
+            "format": example["format"],
+            "text": example["text"],
+            "split": example["split"],
+        }
     messages, example_format = normalize_sft_messages(example)
-    return {
+    normalized = {
         "messages": messages,
         "example_format": example_format,
     }
+    if is_authoritative_preassigned_sft_record(example):
+        normalized.update(
+            {
+                "schema_version": example["schema_version"],
+                "format": example["format"],
+                "split": example["split"],
+            }
+        )
+    return normalized
 
 
 def render_chat_text(messages: list[dict[str, Any]], tokenizer: Any) -> str:
@@ -60,7 +79,9 @@ def materialize_sft_features(
         raise ValueError(f"Unsupported tool_call_mode: {tool_call_mode}")
 
     assistant_only_loss = loss_mask_mode == ASSISTANT_ONLY
-    record = {"messages": example["messages"]} if "messages" in example else example
+    record = example
+    if "messages" in example and not is_authoritative_preassigned_sft_record(example):
+        record = {"messages": example["messages"]}
     return _materialize_sft_example(
         tokenizer=tokenizer,
         record=record,
@@ -81,6 +102,9 @@ def prepare_sft_dataset(
     chat_template_kwargs: dict[str, Any] | None = None,
     aux_target_field: str | None = None,
     prompt_render: str = "full_conversation",
+    assistant_only_loss_requested: bool = False,
+    aux_token_position: str | int | None = None,
+    use_preassigned_splits: bool = False,
 ) -> Dataset:
     del backend  # The contract is backend-agnostic; callers choose the trainer separately.
 
@@ -90,6 +114,40 @@ def prepare_sft_dataset(
     # extending only the collator is too late. When ``aux_target_field`` is None
     # the returned dict is exactly {input_ids, attention_mask, labels}, identical
     # to the feature-off behavior.
+    dataset_formats = {detect_sft_record_format(dataset[index]) for index in range(len(dataset))}
+    authoritative_rows = [
+        is_authoritative_preassigned_sft_record(dataset[index]) for index in range(len(dataset))
+    ]
+    if any(authoritative_rows) and not all(authoritative_rows):
+        raise ValueError("Prepared authoritative rows cannot mix with legacy SFT rows.")
+    if use_preassigned_splits and (not authoritative_rows or not all(authoritative_rows)):
+        raise ValueError(
+            "dataset.use_preassigned_splits=true requires a uniform authoritative prepared dataset."
+        )
+    if "raw_text" in dataset_formats and len(dataset_formats) > 1:
+        raise ValueError("SFT datasets cannot mix raw_text and conversational row formats.")
+    dataset_format = next(iter(dataset_formats), None)
+    if dataset_format == "raw_text":
+        if not use_preassigned_splits:
+            raise ValueError(
+                "raw_text SFT rows require dataset.use_preassigned_splits=true."
+            )
+        if loss_mask_mode != FULL_SEQUENCE or assistant_only_loss_requested:
+            raise ValueError(
+                "raw_text SFT rows require full-sequence loss; disable both "
+                "completion_only_loss and assistant_only_loss."
+            )
+        if prompt_render != "full_conversation":
+            raise ValueError(
+                "raw_text SFT rows bypass chat rendering and are incompatible with "
+                "prompt_render='prompt_completion'."
+            )
+        if aux_token_position == "end_of_prompt":
+            raise ValueError(
+                "raw_text SFT rows have no prompt boundary and are incompatible "
+                "with aux_head token_position='end_of_prompt'."
+            )
+
     def _materialize(example: dict[str, Any]) -> dict[str, Any]:
         normalized = normalize_sft_example(example)
         prepared = materialize_sft_features(
@@ -152,6 +210,9 @@ def load_and_prepare_sft_dataset(
     chat_template_kwargs: dict[str, Any] | None = None,
     aux_target_field: str | None = None,
     prompt_render: str = "full_conversation",
+    assistant_only_loss_requested: bool = False,
+    aux_token_position: str | int | None = None,
+    use_preassigned_splits: bool = False,
 ) -> Dataset:
     del num_proc
     del include_text
@@ -163,4 +224,7 @@ def load_and_prepare_sft_dataset(
         chat_template_kwargs=chat_template_kwargs,
         aux_target_field=aux_target_field,
         prompt_render=prompt_render,
+        assistant_only_loss_requested=assistant_only_loss_requested,
+        aux_token_position=aux_token_position,
+        use_preassigned_splits=use_preassigned_splits,
     )

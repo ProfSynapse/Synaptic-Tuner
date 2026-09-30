@@ -23,6 +23,10 @@ SFT_ENTRYPOINT = "Trainers/sft/runtime_v1.py"
 SFT_RUNTIME_REQUIREMENTS_SCHEMA = "synaptic-sft-runtime-requirements/v1"
 _REVISION = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_PREPARED_REF = re.compile(r"^prepared://sha256/([0-9a-f]{64})$")
+_PREPARED_DATASET_FORMATS = frozenset(
+    {"syntunia-sft-row/v1", "syntunia-sft-row/v2"}
+)
 _UNSLOTH_INIT_LORA_WEIGHTS = frozenset({"gaussian", "loftq", "corda"})
 
 SFT_ARTIFACT_CONTRACT = ArtifactContract(
@@ -114,6 +118,31 @@ def _validate_init_lora_weights(value: object) -> None:
     )
 
 
+def _validate_dataset_identity(dataset: dict[str, object]) -> None:
+    ref = dataset["ref"]
+    if not isinstance(ref, str):
+        raise TypeError("dataset.ref must be a string")
+    prepared = _PREPARED_REF.fullmatch(ref)
+    if prepared is None:
+        if ref.startswith("prepared:"):
+            raise ValueError("dataset.ref is not a valid prepared dataset reference")
+        return
+    required = {"ref", "revision", "content_digest", "size_bytes", "format"}
+    if set(dataset) != required:
+        raise ValueError("prepared dataset identity has missing or unknown fields")
+    digest = prepared.group(1)
+    if dataset["revision"] != digest:
+        raise ValueError("prepared dataset revision must equal its reference digest")
+    if dataset["format"] not in _PREPARED_DATASET_FORMATS:
+        raise ValueError(
+            "prepared dataset format must be one of "
+            + ", ".join(sorted(_PREPARED_DATASET_FORMATS))
+        )
+    size = dataset["size_bytes"]
+    if type(size) is not int or size <= 0:
+        raise ValueError("prepared dataset size_bytes must be an exact positive integer")
+
+
 def compile_sft_workload(
     *,
     resolved_config: CanonicalDocument,
@@ -137,6 +166,7 @@ def compile_sft_workload(
     if not isinstance(model["load_in_4bit"], bool):
         raise TypeError("model.load_in_4bit must be a boolean")
     dataset = _resource(config.get("dataset"), "dataset", ("ref", "revision"))
+    _validate_dataset_identity(dataset)
     method_config = config.get("sft")
     if not isinstance(method_config, Mapping):
         raise TypeError("sft must be a mapping")

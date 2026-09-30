@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,8 @@ from tuner.execution.providers.modal.coordinator_binding import ModalCommandBind
 from tuner.execution.providers.modal.coordinator_bundle import ModalCoordinatorBundle
 from tuner.execution.providers.modal.coordinator_dispatch import build_modal_worker_dispatch
 from tuner.execution.providers.modal.coordinator_wire import ModalWorkerLaunchExpectation
+from tuner.execution.providers.modal.prepared_input import MountedPreparedInputDescriptor
+from tuner.training.contracts import PreparedTrainingInputIdentity
 from tuner.execution.providers.modal.coordinator_worker import (
     ModalWorkerInvocation, ModalWorkerStaticExpectation, MountedModalCoordinatorWorker,
     _execute_modal_worker, admit_modal_worker,
@@ -24,6 +27,7 @@ from tuner.execution.providers.modal.worker_ports import ModalProcessResult
 from tests.execution.providers.test_modal_coordinator_adapter import composed
 from tests.execution.providers.test_modal_coordinator_bundle import _fixture
 from tests.execution.providers.modal_coordinator_fixtures import real_launch_bundle_case
+from tests.training.test_sft_compilation import _config
 
 
 D = tuple(str(index) * 64 for index in range(1, 10))
@@ -38,13 +42,30 @@ class Auth:
         return hmac.compare_digest(self.sign(purpose, payload, key_ref), tag)
 
 
-def case(*, roots=("/workspace/control", "/workspace/run", "/workspace/worker-control")):
-    stage_binding, material, recipes, policy, closure = _fixture()
+def case(
+    *,
+    roots=("/workspace/control", "/workspace/run", "/workspace/worker-control"),
+    config_extra=None,
+    private_dataset_bytes=None,
+    mounted_payload=None,
+):
+    stage_binding, material, recipes, policy, closure = _fixture(
+        config_extra=config_extra,
+    )
+    stage = __import__("tuner.execution.foundation_v2.commands", fromlist=["parse_exact_command"]).parse_exact_command(stage_binding.command_bytes)
+    mounted_descriptor = None
+    if mounted_payload is not None:
+        dataset = config_extra["dataset"]
+        mounted_descriptor = MountedPreparedInputDescriptor.create(
+            PreparedTrainingInputIdentity.from_mapping(dataset),
+            stage_effect_id=stage.operation.effect.effect_id,
+        )
     bundle = ModalCoordinatorBundle.build(
         stage_binding, material, recipes, log_terminal_policy=policy,
         worker_closure_manifest=closure,
+        private_dataset_bytes=private_dataset_bytes,
+        mounted_prepared_input=mounted_descriptor,
     )
-    stage = __import__("tuner.execution.foundation_v2.commands", fromlist=["parse_exact_command"]).parse_exact_command(stage_binding.command_bytes)
     prep = stage.preparation
     predecessor = StagePredecessorV2(
         prep.provider.provider_id, prep.provider.profile_ref, prep.scope.account_ref,
@@ -62,8 +83,12 @@ def case(*, roots=("/workspace/control", "/workspace/run", "/workspace/worker-co
     )
     selection = submit_binding.deployment.selection
     key_ref = "stage-key"
-    stage_claim = canonical_bytes({
-        "schema_version": "synaptic.modal-stage-claim/v2", "command": stage.to_dict(),
+    stage_document = {
+        "schema_version": (
+            "synaptic.modal-stage-claim/v3"
+            if mounted_descriptor is not None
+            else "synaptic.modal-stage-claim/v2"
+        ), "command": stage.to_dict(),
         "command_digest": stage.digest, "binding_digest": stage_binding.authenticated_binding_digest,
         "provider_id": prep.provider.provider_id, "profile_ref": prep.provider.profile_ref,
         "account_ref": prep.scope.account_ref, "namespace_ref": prep.scope.namespace_ref,
@@ -75,9 +100,16 @@ def case(*, roots=("/workspace/control", "/workspace/run", "/workspace/worker-co
         "control_volume_id": "control-id", "artifact_volume_id": "artifact-id",
         "key_ref": key_ref, "bundle_sha256": hashlib.sha256(bundle.transport_bytes).hexdigest(),
         "bundle_size": len(bundle.transport_bytes),
-    })
+    }
+    if mounted_descriptor is not None:
+        stage_document["prepared_input"] = mounted_descriptor.to_dict()
+    stage_claim = canonical_bytes(stage_document)
     auth = Auth()
-    stage_tag = auth.sign("modal-stage-claim/v2", stage_claim, key_ref)
+    stage_tag = auth.sign(
+        "modal-stage-claim/v3" if mounted_descriptor is not None else "modal-stage-claim/v2",
+        stage_claim,
+        key_ref,
+    )
     bound_doc = {
         "reference": {"provider_id": prep.provider.provider_id, "profile_ref": prep.provider.profile_ref,
                       "account_ref": prep.scope.account_ref, "namespace_ref": prep.scope.namespace_ref,
@@ -137,6 +169,29 @@ def admit(values):
     )
 
 
+def _mounted_config(payload):
+    document = _config().to_dict()
+    prepared_digest = "a" * 64
+    document["dataset"] = {
+        "ref": f"prepared://sha256/{prepared_digest}",
+        "revision": prepared_digest,
+        "content_digest": hashlib.sha256(payload).hexdigest(),
+        "size_bytes": len(payload),
+        "format": "syntunia-sft-row/v2",
+    }
+    document["sft"] = dict(document["sft"]) | {
+        "dataset_format": "messages",
+        "completion_only_loss": True,
+        "assistant_only_loss": False,
+        "use_preassigned_splits": True,
+        "split_dataset": False,
+        "prompt_render": "prompt_completion",
+        "packing": False,
+        "require_memory_efficient_loss": True,
+    }
+    return document
+
+
 def real_case(monkeypatch):
     shared = real_launch_bundle_case(monkeypatch)
     envelope, staged, bundle = shared["envelope"], shared["material"], shared["bundle"]
@@ -181,6 +236,68 @@ def test_pure_admission_reconstructs_foundation_native_invocation(monkeypatch):
     policy["generation"] = 999
     assert invocation.log_policy["generation"] == 1
     assert invocation.stage_claim_sha256 == hashlib.sha256(values[1]).hexdigest()
+
+
+def test_mounted_prepared_input_admission_carries_descriptor_and_copies_privately(monkeypatch):
+    payload = b"large" + b"x" * (2 * 1024 * 1024)
+    config = _mounted_config(payload)
+    invocation = admit(case(
+        config_extra={"dataset": config["dataset"], "sft": config["sft"]},
+        mounted_payload=payload,
+    ))
+    assert invocation.private_dataset_bytes is None
+    assert invocation.prepared_input_descriptor is not None
+    descriptor = MountedPreparedInputDescriptor.parse(
+        invocation.prepared_input_descriptor
+    )
+    assert descriptor.identity.content_digest == hashlib.sha256(payload).hexdigest()
+    assert descriptor.relative_path.endswith("/payload.bin")
+    events = []
+
+    class Sources:
+        def prepare_and_verify(self, *args):
+            events.append("source")
+
+    class Processes:
+        def run(self, argv, **kwargs):
+            events.append("process")
+            return ModalProcessResult(0)
+
+    def copy(source_root, source, destination_root, destination, *, maximum):
+        events.append("copy")
+        assert source_root == Path("/workspace/run")
+        assert source == source_root / descriptor.relative_path
+        assert destination_root == Path(invocation.source.roots["state"])
+        assert destination.name == "private-dataset.jsonl"
+        assert maximum == 64 * 1024 * 1024
+        return descriptor.identity.size_bytes, descriptor.identity.content_digest
+
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.coordinator_worker.copy_regular", copy,
+    )
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.coordinator_worker.prepared_dataset_path",
+        lambda state, binding: state / binding.relative_path,
+    )
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.coordinator_worker.worker_source.read_locked_closure_manifest",
+        lambda source: events.append("closure") or invocation.closure_manifest,
+    )
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.coordinator_worker.worker_source.write_runtime_closure_manifest",
+        lambda *args: events.append("write"),
+    )
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.coordinator_worker.worker_source.stage_runtime_worker",
+        lambda *args: events.append("stage"),
+    )
+    assert _execute_modal_worker(
+        invocation,
+        sources=Sources(),
+        processes=Processes(),
+        commit_prepared=lambda: None,
+    ).returncode == 0
+    assert events == ["source", "copy", "closure", "write", "stage", "process"]
 
 
 def test_static_selection_mismatch_fails_before_wire_verification():

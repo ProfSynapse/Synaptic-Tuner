@@ -7,7 +7,12 @@ from typing import Any, Literal
 
 
 LossMaskMode = Literal["full_sequence", "assistant_only"]
-ExampleFormat = Literal["messages", "prompt_completion"]
+ExampleFormat = Literal["messages", "prompt_completion", "raw_text"]
+
+RAW_TEXT_SCHEMA_VERSION = "syntunia-sft-row/v1"
+RAW_TEXT_FORMAT = "raw_text"
+MESSAGES_SCHEMA_VERSION_V2 = "syntunia-sft-row/v2"
+MESSAGES_FORMAT = "messages"
 
 
 @dataclass
@@ -158,6 +163,92 @@ def normalize_sft_messages(record: dict[str, Any]) -> tuple[list[dict[str, Any]]
     return messages, "prompt_completion"
 
 
+def detect_sft_record_format(record: dict[str, Any]) -> ExampleFormat:
+    """Identify the declared SFT row format without treating arbitrary text as authority."""
+    schema_version = record.get("schema_version")
+    declared_format = record.get("format")
+    claims_raw_text = (
+        schema_version == RAW_TEXT_SCHEMA_VERSION or declared_format == RAW_TEXT_FORMAT
+    )
+    if claims_raw_text:
+        if schema_version != RAW_TEXT_SCHEMA_VERSION or declared_format != RAW_TEXT_FORMAT:
+            raise ValueError(
+                "raw_text SFT rows require both schema_version="
+                f"{RAW_TEXT_SCHEMA_VERSION!r} and format={RAW_TEXT_FORMAT!r}."
+            )
+        if any(record.get(key) is not None for key in ("messages", "conversations", "prompt", "completion")):
+            raise ValueError(
+                "raw_text SFT rows cannot also declare messages/conversations or "
+                "prompt/completion fields."
+            )
+        text = record.get("text")
+        if not isinstance(text, str) or not text:
+            raise ValueError("raw_text SFT rows require a non-empty string text field.")
+        if record.get("split") not in {"train", "validation"}:
+            raise ValueError(
+                "raw_text SFT rows require split='train' or split='validation'."
+            )
+        return "raw_text"
+
+    claims_authoritative_messages = (
+        schema_version == MESSAGES_SCHEMA_VERSION_V2
+        or declared_format == MESSAGES_FORMAT
+    )
+    if claims_authoritative_messages:
+        if schema_version != MESSAGES_SCHEMA_VERSION_V2 or declared_format != MESSAGES_FORMAT:
+            raise ValueError(
+                "authoritative message SFT rows require both schema_version="
+                f"{MESSAGES_SCHEMA_VERSION_V2!r} and format={MESSAGES_FORMAT!r}."
+            )
+        if any(record.get(key) is not None for key in ("conversations", "prompt", "completion", "text")):
+            raise ValueError(
+                "authoritative message SFT rows cannot also declare conversations, "
+                "prompt/completion, or text fields."
+            )
+        messages = record.get("messages")
+        if not isinstance(messages, list) or len(messages) != 2:
+            raise ValueError("authoritative message SFT rows require exactly two messages.")
+        for message, role in zip(messages, ("user", "assistant")):
+            if (
+                not isinstance(message, dict)
+                or set(message) != {"role", "content"}
+                or message.get("role") != role
+                or not isinstance(message.get("content"), str)
+                or not message["content"]
+            ):
+                raise ValueError(
+                    "authoritative message SFT rows require user then assistant prose messages."
+                )
+        if record.get("split") not in {"train", "validation"}:
+            raise ValueError(
+                "authoritative message SFT rows require split='train' or split='validation'."
+            )
+        return "messages"
+
+    if record.get("messages") or record.get("conversations"):
+        return "messages"
+    if record.get("prompt") is not None and record.get("completion") is not None:
+        return "prompt_completion"
+    # Preserve the established error and accepted shapes through the canonical
+    # normalizer. In particular, an arbitrary ``text`` column is not authority.
+    _, example_format = normalize_sft_messages(record)
+    return example_format
+
+
+def is_authoritative_preassigned_sft_record(record: dict[str, Any]) -> bool:
+    """Return whether a row carries strict prepared-dataset split authority."""
+
+    schema_version = record.get("schema_version")
+    declared_format = record.get("format")
+    if schema_version == RAW_TEXT_SCHEMA_VERSION or declared_format == RAW_TEXT_FORMAT:
+        detect_sft_record_format(record)
+        return True
+    if schema_version == MESSAGES_SCHEMA_VERSION_V2 or declared_format == MESSAGES_FORMAT:
+        detect_sft_record_format(record)
+        return True
+    return False
+
+
 def materialize_sft_example(
     *,
     tokenizer: Any,
@@ -174,6 +265,46 @@ def materialize_sft_example(
     # forward unrecognized keys into the Jinja context and ignore them, so this is
     # safe for any chat template that does not reference the supplied keys.
     template_kwargs = chat_template_kwargs or {}
+
+    example_format = detect_sft_record_format(record)
+    authoritative_messages = (
+        record.get("schema_version") == MESSAGES_SCHEMA_VERSION_V2
+        and record.get("format") == MESSAGES_FORMAT
+    )
+
+    if example_format == "raw_text":
+        if assistant_only_loss:
+            raise ValueError(
+                "raw_text SFT rows require full-sequence loss; assistant-only or "
+                "completion-only loss is incompatible."
+            )
+        if prompt_render != "full_conversation":
+            raise ValueError(
+                "raw_text SFT rows bypass chat rendering and require "
+                "prompt_render='full_conversation'."
+            )
+
+        _encoder = getattr(tokenizer, "tokenizer", tokenizer)
+        terminal_id = getattr(_encoder, "eos_token_id", None)
+        if terminal_id is None:
+            terminal_id = getattr(tokenizer, "eos_token_id", None)
+        if terminal_id is None:
+            raise ValueError(
+                "raw_text SFT rows require the tokenizer to define eos_token_id; "
+                "the terminal is derived from the tokenizer and never hardcoded."
+            )
+        full_tokens = _encoder.encode(record["text"], add_special_tokens=False) + [terminal_id]
+        truncation_applied = len(full_tokens) > max_seq_length
+        input_ids = list(full_tokens[:max_seq_length])
+        return PreparedSFTExample(
+            input_ids=input_ids,
+            attention_mask=[1] * len(input_ids),
+            labels=list(input_ids),
+            example_format="raw_text",
+            loss_mask_mode="full_sequence",
+            truncation_applied=truncation_applied,
+            source_hash=source_hash,
+        )
 
     messages, example_format = normalize_sft_messages(record)
     messages = sanitize_messages_for_chat_template(messages)
@@ -233,12 +364,22 @@ def materialize_sft_example(
         )
 
         full_ids = prompt_ids + completion_ids
+        if authoritative_messages and len(full_ids) > max_seq_length:
+            raise ValueError(
+                "authoritative message prompt_completion rows must fit fully within "
+                "max_seq_length; target or context truncation is forbidden."
+            )
         truncation_applied = len(full_ids) > max_seq_length
         input_ids = list(full_ids[:max_seq_length])
         attention_mask = [1] * len(input_ids)
         # Mask the prompt segment; every completion token (incl. the terminal)
         # carries a real label. Right-trim mirrors the full-conversation contract.
         labels = ([-100] * len(prompt_ids) + completion_ids)[:max_seq_length]
+        if authoritative_messages and not any(label != -100 for label in labels):
+            raise ValueError(
+                "authoritative message prompt_completion rows require at least one "
+                "supervised assistant token."
+            )
         return PreparedSFTExample(
             input_ids=input_ids,
             attention_mask=attention_mask,

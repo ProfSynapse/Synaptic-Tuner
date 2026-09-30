@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from tuner.execution.coordinator_v1.model import (
@@ -20,6 +20,7 @@ from .contracts import BoundsPolicyV1, sha
 from .coordinator_binding import ModalCommandBinding
 from .coordinator_staging import (
     ModalStageMaterial, _claim_document, modal_stage_provider_ref,
+    stage_claim_purpose,
 )
 
 
@@ -38,7 +39,7 @@ class _Signer(Protocol):
 @dataclass(frozen=True, slots=True)
 class ModalLaunchEnvelope:
     submit_binding: ModalCommandBinding
-    stage_material: ModalStageMaterial
+    stage_material: ModalStageMaterial = field(repr=False)
     stage_record: EffectRecordV2
     stage_assessment: AuthenticatedFoundationRecordAssessmentV1
     claim: bytes
@@ -68,7 +69,7 @@ class ModalLaunchAdmission:
     control_volume_id: str
     artifact_volume_id: str
     key_ref: str
-    bundle: bytes
+    bundle: bytes = field(repr=False)
     stage_claim: bytes
     stage_claim_tag: bytes
 
@@ -97,7 +98,8 @@ def _stage_proof(envelope, foundation_authenticator, assessment_authenticator,
         raise ValueError("stage claim does not bind retained material")
     try:
         stage_valid = stage_verifier.verify(
-            "modal-stage-claim/v2", material.claim, material.claim_tag, material.key_ref,
+            stage_claim_purpose(material), material.claim, material.claim_tag,
+            material.key_ref,
         )
     except Exception:
         raise ValueError("stage claim authentication unavailable") from None

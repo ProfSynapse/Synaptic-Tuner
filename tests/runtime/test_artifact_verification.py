@@ -69,7 +69,9 @@ def _canonical(value) -> bytes:
     ).encode()
 
 
-def _runtime_workload():
+def _runtime_workload(
+    *, raw_text: bool = False, raw_dataset_without_controls: bool = False
+):
     source = _execution_source()
     roots = {
         "engine": "/workspace/engine", "project": "/workspace/project",
@@ -90,8 +92,7 @@ def _runtime_workload():
         environment=environment,
         python_executable="/usr/bin/python", python_version="3.12.3",
     )
-    config = CanonicalDocument.from_mapping(
-        {
+    config_document = {
             "schema_version": "synaptic-sft-config/v1", "method": "sft",
             "model": {"ref": "example/model", "revision": "c" * 40, "tokenizer_revision": "c" * 40, "load_in_4bit": False},
             "dataset": {"ref": "project://data/train.jsonl", "revision": "9" * 40, "content_digest": "d" * 64, "format": "configured/v1"},
@@ -104,7 +105,18 @@ def _runtime_workload():
                 "use_rslora": False, "init_lora_weights": True, "split_dataset": False,
             },
         }
-    )
+    if raw_text or raw_dataset_without_controls:
+        config_document["dataset"]["format"] = "syntunia-sft-row/v1"
+    if raw_text:
+        config_document["sft"].update(
+            {
+                "dataset_format": "raw_text",
+                "completion_only_loss": False,
+                "assistant_only_loss": False,
+                "use_preassigned_splits": True,
+            }
+        )
+    config = CanonicalDocument.from_mapping(config_document)
     return compile_sft_workload(resolved_config=config, execution_source=source)
 
 
@@ -134,6 +146,16 @@ def _lineage(workload) -> bytes:
         "--lora-dropout", "0.0", "--lora-target-modules", "q_proj,v_proj",
         "--init-lora-weights", "true", "--no-load-in-4bit",
     ]
+    if config["sft"].get("dataset_format") == "raw_text":
+        argv[-1:-1] = [
+            "--no-completion-only-loss",
+            "--no-assistant-only-loss",
+            "--use-preassigned-splits",
+            "--runtime-v1-dataset-schema",
+            "syntunia-sft-row/v1",
+            "--runtime-v1-dataset-format",
+            "raw_text",
+        ]
     environment = {
         "PATH": "/usr/local/bin",
         "SYNAPTIC_ENGINE_ROOT": root, "SYNAPTIC_PROJECT_ROOT": project_root,
@@ -169,6 +191,17 @@ def _lineage(workload) -> bytes:
         "outputs": {"run_dir": run_dir, "final_model_dir": f"{run_dir}/final_model"},
         "status": "completed",
     }
+    if config["sft"].get("dataset_format") == "raw_text":
+        projection["dataset"].update(
+            {"schema_version": "syntunia-sft-row/v1", "format": "raw_text"}
+        )
+        projection["training"].update(
+            {
+                "completion_only_loss": False,
+                "assistant_only_loss": False,
+                "use_preassigned_splits": True,
+            }
+        )
     trainer = {
         "training_type": "SFT", "run_directory": run_dir,
         "model": {"base_model": "example/model", "load_in_4bit": False},
@@ -187,8 +220,11 @@ def _lineage(workload) -> bytes:
     return _canonical(wrapper)
 
 
-def _fixture():
-    workload = _runtime_workload()
+def _fixture(*, raw_text: bool = False, raw_dataset_without_controls: bool = False):
+    workload = _runtime_workload(
+        raw_text=raw_text,
+        raw_dataset_without_controls=raw_dataset_without_controls,
+    )
     values = {
         "workload.json": workload.canonical_bytes,
         "training_lineage.json": _lineage(workload),
@@ -343,6 +379,36 @@ def test_provider_projection_comparison_rejects_boolean_numeric_alias() -> None:
     workload, inventory, reader, values = _fixture()
     wrapper = json.loads(values["training_lineage.json"])
     wrapper["trainer_lineage"]["synaptic_runtime_projection"]["model"]["load_in_4bit"] = 0
+    values["training_lineage.json"] = _canonical(wrapper)
+    assert _verify_current(workload, inventory, reader, values).status is VerificationStatus.INVALID
+
+
+def test_provider_verifies_bound_raw_text_semantics() -> None:
+    workload, inventory, reader, values = _fixture(raw_text=True)
+    assert _verify_current(workload, inventory, reader, values).status is VerificationStatus.VERIFIED
+
+
+def test_provider_rejects_raw_dataset_schema_without_bound_controls() -> None:
+    workload, inventory, reader, values = _fixture(
+        raw_dataset_without_controls=True
+    )
+    assert _verify_current(workload, inventory, reader, values).status is VerificationStatus.INVALID
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "replacement"),
+    [
+        ("training", "completion_only_loss", True),
+        ("training", "assistant_only_loss", True),
+        ("training", "use_preassigned_splits", False),
+        ("dataset", "format", "messages"),
+        ("dataset", "schema_version", "other/v1"),
+    ],
+)
+def test_provider_rejects_tampered_raw_text_projection(section, field, replacement) -> None:
+    workload, inventory, reader, values = _fixture(raw_text=True)
+    wrapper = json.loads(values["training_lineage.json"])
+    wrapper["trainer_lineage"]["synaptic_runtime_projection"][section][field] = replacement
     values["training_lineage.json"] = _canonical(wrapper)
     assert _verify_current(workload, inventory, reader, values).status is VerificationStatus.INVALID
 

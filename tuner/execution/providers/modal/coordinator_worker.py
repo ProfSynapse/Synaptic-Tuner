@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable, Protocol
 
@@ -22,7 +22,15 @@ from .coordinator_binding import ModalCommandBinding
 from .coordinator_bundle import ModalCoordinatorBundle, parse_workload_object
 from .coordinator_dispatch import parse_modal_worker_dispatch
 from .coordinator_wire import ModalWorkerLaunchExpectation, admit_modal_launch_wire
-from .mounted_io import read_regular
+from .mounted_io import copy_regular, read_regular
+from .prepared_input import (
+    MAX_MOUNTED_PREPARED_DATASET_BYTES,
+    PREPARED_INPUT_DESCRIPTOR_MEMBER,
+    MountedPreparedInputDescriptor,
+    bind_private_dataset,
+    materialize_private_dataset,
+    prepared_dataset_path,
+)
 from .resolution import ModalDeploymentSelectionV1, VerifiedModalDeploymentIdentityV1
 from .worker_ports import (
     FixedProcessRunner, ModalProcessResult, ModalRemotePhaseError, SourceMaterializer,
@@ -135,6 +143,7 @@ class ModalWorkerInvocation:
     environment_items: tuple[tuple[str, str], ...]
     argv: tuple[str, str, str]
     cwd: str
+    artifact_root: str
     closure_manifest_runtime_path: str
     control_volume_id: str
     artifact_volume_id: str
@@ -142,6 +151,8 @@ class ModalWorkerInvocation:
     launch_claim_sha256: str
     stage_claim_sha256: str
     bundle_sha256: str
+    private_dataset_bytes: bytes | None = field(repr=False)
+    prepared_input_descriptor: bytes | None = field(repr=False)
 
     def __new__(cls, *args, **kwargs):
         raise TypeError("Modal worker invocations are admission-minted")
@@ -221,6 +232,13 @@ def _validate_invocation(value: ModalWorkerInvocation) -> None:
         raise ValueError("invocation workload differs from source")
     if source.run_id != submit.preparation.run_id:
         raise ValueError("invocation source run differs from preparation")
+    dataset = workload.get("configuration", {}).get("document", {}).get("dataset")
+    mounted_descriptor = (
+        None
+        if value.prepared_input_descriptor is None
+        else MountedPreparedInputDescriptor.parse(value.prepared_input_descriptor)
+    )
+    bind_private_dataset(dataset, value.private_dataset_bytes, mounted_descriptor)
     if source.fingerprint != submit.preparation.source_digest:
         raise ValueError("invocation source digest differs from preparation")
     workload_fingerprint = hashlib.sha256(
@@ -273,6 +291,7 @@ def _validate_invocation(value: ModalWorkerInvocation) -> None:
             or value.cwd != source.roots["tmp"]
             or value.environment_items != tuple(sorted(expected_environment.items()))):
         raise ValueError("invocation fixed runtime derivation differs")
+    _root(value.artifact_root, "artifact_root")
     path = PurePosixPath(value.closure_manifest_runtime_path)
     expected_suffix = PurePosixPath(operation_path(
         submit.operation.effect.effect_id, "input", path.name,
@@ -310,7 +329,7 @@ def _member(bundle: ModalCoordinatorBundle, name: str) -> bytes:
 
 def _derive_invocation(
     admission, bundle: ModalCoordinatorBundle, *, stage_claim_sha256: str,
-    worker_control_root: str,
+    worker_control_root: str, artifact_root: str,
 ) -> ModalWorkerInvocation:
     submit = parse_exact_command(admission.submit_command_bytes)
     stage = parse_exact_command(admission.stage_command_bytes)
@@ -321,6 +340,22 @@ def _derive_invocation(
         parse_canonical_object(source_bytes, name="worker execution source")
     )
     workload = _member(bundle, "workload.json")
+    private_dataset = next(
+        (
+            member.content
+            for member in bundle.members
+            if member.name == "private-dataset.jsonl"
+        ),
+        None,
+    )
+    descriptor_bytes = next(
+        (
+            member.content
+            for member in bundle.members
+            if member.name == PREPARED_INPUT_DESCRIPTOR_MEMBER
+        ),
+        None,
+    )
     closure_bytes = _member(bundle, "worker-closure-manifest.json")
     closure = parse_offline_sft_worker_manifest(
         closure_bytes, source_ref="modal-coordinator-worker:closure",
@@ -361,13 +396,19 @@ def _derive_invocation(
         deployment_bytes=bytes(admission.deployment_bytes), execution_source_bytes=source.canonical_bytes,
         workload=bytes(workload), log_policy_bytes=bytes(policy_bytes),
         closure_manifest=bytes(closure_bytes), environment_items=tuple(sorted(environment.items())),
-        argv=argv, cwd=source.roots["tmp"],
+        argv=argv, cwd=source.roots["tmp"], artifact_root=artifact_root,
         closure_manifest_runtime_path=control.manifest_path.as_posix(),
         control_volume_id=admission.control_volume_id,
         artifact_volume_id=admission.artifact_volume_id, key_ref=admission.key_ref,
         launch_claim_sha256=admission.launch_claim_sha256,
         stage_claim_sha256=stage_claim_sha256,
         bundle_sha256=bundle.sha256,
+        private_dataset_bytes=(
+            None if private_dataset is None else bytes(private_dataset)
+        ),
+        prepared_input_descriptor=(
+            None if descriptor_bytes is None else bytes(descriptor_bytes)
+        ),
     )
 
 
@@ -390,9 +431,30 @@ def admit_modal_worker(
     )
     if bundle.transport_bytes != bundle_transport:
         raise ValueError("worker bundle differs from wire admission")
+    stage_document = parse_canonical_object(stage_claim, name="stage claim")
+    descriptor_bytes = next(
+        (
+            member.content
+            for member in bundle.members
+            if member.name == PREPARED_INPUT_DESCRIPTOR_MEMBER
+        ),
+        None,
+    )
+    if (
+        stage_document.get("prepared_input")
+        != (
+            None
+            if descriptor_bytes is None
+            else parse_canonical_object(
+                descriptor_bytes, name="prepared input descriptor",
+            )
+        )
+    ):
+        raise ValueError("stage claim differs from prepared input descriptor")
     return _derive_invocation(
         admission, bundle, stage_claim_sha256=sha(stage_claim),
         worker_control_root=static.worker_control_root,
+        artifact_root=static.artifact_root,
     )
 
 
@@ -405,6 +467,45 @@ def _execute_modal_worker(
     validate_modal_worker_invocation(invocation)
     source = invocation.source
     sources.prepare_and_verify(source, invocation.deployment.selection)
+    workload_document = parse_workload_object(invocation.workload)
+    dataset = workload_document.get("configuration", {}).get("document", {}).get(
+        "dataset"
+    )
+    mounted_descriptor = (
+        None
+        if invocation.prepared_input_descriptor is None
+        else MountedPreparedInputDescriptor.parse(
+            invocation.prepared_input_descriptor
+        )
+    )
+    private_binding = bind_private_dataset(
+        dataset, invocation.private_dataset_bytes, mounted_descriptor,
+    )
+    if private_binding is not None:
+        try:
+            state_root = Path(source.roots["state"])
+            if mounted_descriptor is None:
+                materialize_private_dataset(
+                    state_root,
+                    private_binding,
+                    invocation.private_dataset_bytes,
+                )
+            else:
+                destination = prepared_dataset_path(state_root, private_binding)
+                size, digest = copy_regular(
+                    Path(invocation.artifact_root),
+                    Path(invocation.artifact_root) / mounted_descriptor.relative_path,
+                    state_root,
+                    destination,
+                    maximum=MAX_MOUNTED_PREPARED_DATASET_BYTES,
+                )
+                if (size, digest) != (
+                    private_binding.size_bytes,
+                    private_binding.content_digest,
+                ):
+                    raise ValueError("mounted prepared input does not match")
+        except Exception:
+            raise ModalRemotePhaseError(124, "prepared_input_rejected") from None
     try:
         locked = worker_source.read_locked_closure_manifest(source)
     except OSError:

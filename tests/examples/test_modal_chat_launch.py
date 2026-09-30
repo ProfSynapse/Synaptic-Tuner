@@ -97,6 +97,104 @@ def test_check_is_default_and_never_constructs_credentials_or_executes(
     assert json.loads(capsys.readouterr().out)["status"] == "LOCAL_INPUTS_CHECKED"
 
 
+def test_quote_training_dispatches_without_entering_paid_execute(monkeypatch, capsys):
+    values = (object(), object(), object(), object())
+    monkeypatch.setattr(launch, "check_inputs", lambda *args, **kwargs: values)
+
+    def quote(settings, source, *, profile):
+        assert (settings, source, profile) == (values[2], values[3], "selected")
+        return b'{"authorizing":false,"status":"TRAINING_QUOTE_OBSERVED"}'
+
+    monkeypatch.setattr(launch, "quote_training", quote)
+    monkeypatch.setattr(
+        launch,
+        "execute",
+        lambda *args, **kwargs: pytest.fail("quote entered paid execution"),
+    )
+    assert (
+        launch.main(
+            [
+                "--project-root",
+                "/consumer",
+                "--configuration",
+                "configuration/smoke.json",
+                "--mode",
+                "quote-training",
+                "--modal-profile",
+                "selected",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out) == {
+        "authorizing": False,
+        "status": "TRAINING_QUOTE_OBSERVED",
+    }
+
+
+def test_quote_training_rejects_irrelevant_model_token_file(monkeypatch, capsys):
+    monkeypatch.setattr(
+        launch, "check_inputs", lambda *args, **kwargs: (1, 2, 3, 4)
+    )
+    monkeypatch.setattr(
+        launch,
+        "quote_training",
+        lambda *args, **kwargs: pytest.fail("invalid quote arguments reached rates"),
+    )
+    assert (
+        launch.main(
+            [
+                "--project-root",
+                "/consumer",
+                "--configuration",
+                "configuration/smoke.json",
+                "--mode",
+                "quote-training",
+                "--modal-profile",
+                "selected",
+                "--hf-token-env-file",
+                "/private/token.env",
+            ]
+        )
+        == 1
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["phase"] == "INPUTS"
+    assert result["authorizing"] is False
+
+
+def test_quote_training_failure_reports_closed_quote_phase(monkeypatch, capsys):
+    monkeypatch.setattr(
+        launch, "check_inputs", lambda *args, **kwargs: (1, 2, 3, 4)
+    )
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("private-provider-rate-message")
+
+    monkeypatch.setattr(launch, "quote_training", fail)
+    assert (
+        launch.main(
+            [
+                "--project-root",
+                "/consumer",
+                "--configuration",
+                "configuration/smoke.json",
+                "--mode",
+                "quote-training",
+                "--modal-profile",
+                "selected",
+            ]
+        )
+        == 1
+    )
+    output = capsys.readouterr().out
+    result = json.loads(output)
+    assert result["phase"] == "QUOTE_TRAINING"
+    assert result["authorizing"] is False
+    assert result["retry_authorized"] is False
+    assert "private-provider-rate-message" not in output
+
+
 def test_bad_arguments_never_echo_supplied_values(capsys):
     assert launch.main(["--not-a-real-flag", "private-argument-value"]) == 1
     output = capsys.readouterr()

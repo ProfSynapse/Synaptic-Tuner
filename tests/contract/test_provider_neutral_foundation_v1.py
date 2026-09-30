@@ -78,7 +78,9 @@ def _verbs(api_type: type) -> set[str]:
 
 
 def test_semantic_api_ownership_is_exact() -> None:
-    assert _verbs(TrainingAPI) == {"load", "resolve", "plan", "preflight", "start"}
+    assert _verbs(TrainingAPI) == {
+        "prepare", "load", "resolve", "plan", "preflight", "start",
+    }
     assert _verbs(RunsAPI) == {
         "list", "show", "outcome", "logs", "cancel", "reconcile", "verify",
         "reverify", "artifacts",

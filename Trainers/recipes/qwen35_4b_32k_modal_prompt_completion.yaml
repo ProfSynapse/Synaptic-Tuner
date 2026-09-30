@@ -1,0 +1,68 @@
+# Prepared v2 dataset and named runtime profile for a Modal SFT run.
+name: qwen35-4b-32k-modal-prompt-completion
+target: cloud
+method: sft
+provider: modal
+
+job:
+  runtime_profile: qwen35-sft-v1
+  accelerator: L40S
+  accelerator_count: 1
+  timeout_seconds: 1800
+  maximum_cost_minor_units: 200  # USD GPU-estimate authorization, not a provider billing cap.
+
+run:
+  method: sft
+  dry_run: false
+
+model:
+  name: Qwen/Qwen3.5-4B
+  revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  max_seq_length: 32768
+  load_in_4bit: false
+
+dataset:
+  local_file: .tracking/datasets/dataset-1320a280805495f7847910b8c061021c31ec474295164d27aab472c6d209964c/dataset.jsonl
+  schema_version: syntunia-sft-row/v2
+  format: messages
+  use_preassigned_splits: true
+  split_dataset: false
+  expected_digest: 1320a280805495f7847910b8c061021c31ec474295164d27aab472c6d209964c
+  expected_split_counts:
+    train: 181
+    validation: 39
+
+training:
+  batch_size: 1
+  gradient_accumulation: 8
+  learning_rate: 1.0e-4
+  max_steps: 2
+  packing: false
+  completion_only_loss: true
+  assistant_only_loss: false
+  prompt_render: prompt_completion
+  require_memory_efficient_loss: true
+  save_steps: 10
+  save_total_limit: 2
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.0
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+artifacts:
+  required_kinds:
+    - workload_record
+    - training_lineage
+    - training_metrics
+    - final_model
+    - tokenizer
+  retain_checkpoints: false

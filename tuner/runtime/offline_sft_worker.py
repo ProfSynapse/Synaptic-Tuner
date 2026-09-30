@@ -74,6 +74,9 @@ _VALUE_FLAGS = frozenset(
         "--runtime-v1-tokenizer-revision",
         "--runtime-v1-dataset-revision",
         "--runtime-v1-dataset-digest",
+        "--runtime-v1-dataset-schema",
+        "--runtime-v1-dataset-format",
+        "--aux-head-prompt-render",
         "--batch-size",
         "--gradient-accumulation",
         "--learning-rate",
@@ -98,8 +101,32 @@ _BOOLEAN_FLAGS = frozenset(
         "--use-dora",
         "--use-rslora",
         "--split-dataset",
+        "--no-completion-only-loss",
+        "--completion-only-loss",
+        "--no-assistant-only-loss",
+        "--use-preassigned-splits",
+        "--require-memory-efficient-loss",
         "--load-in-4bit",
         "--no-load-in-4bit",
+    }
+)
+_PREPARED_BOOLEAN_FLAGS = frozenset(
+    {
+        "--no-assistant-only-loss",
+        "--use-preassigned-splits",
+    }
+)
+_PREPARED_VALUE_FLAGS = frozenset(
+    {"--runtime-v1-dataset-schema", "--runtime-v1-dataset-format"}
+)
+_RAW_TEXT_FLAGS = _PREPARED_BOOLEAN_FLAGS | _PREPARED_VALUE_FLAGS | frozenset(
+    {"--no-completion-only-loss"}
+)
+_MESSAGE_FLAGS = _PREPARED_BOOLEAN_FLAGS | _PREPARED_VALUE_FLAGS | frozenset(
+    {
+        "--completion-only-loss",
+        "--require-memory-efficient-loss",
+        "--aux-head-prompt-render",
     }
 )
 
@@ -598,6 +625,7 @@ def _validate_trainer_arguments(arguments: Sequence[str]) -> None:
         raise OfflineSFTWorkerError("offline SFT trainer arguments are empty")
     index = 0
     seen: set[str] = set()
+    values: dict[str, str] = {}
     while index < len(arguments):
         flag = arguments[index]
         if flag in seen:
@@ -610,6 +638,7 @@ def _validate_trainer_arguments(arguments: Sequence[str]) -> None:
             value = arguments[index + 1]
             if not isinstance(value, str) or not value or value.startswith("--"):
                 raise OfflineSFTWorkerError("offline SFT trainer flag lacks a value")
+            values[flag] = value
             index += 2
             continue
         raise OfflineSFTWorkerError("offline SFT trainer feature is unavailable")
@@ -617,6 +646,74 @@ def _validate_trainer_arguments(arguments: Sequence[str]) -> None:
         raise OfflineSFTWorkerError("offline SFT trainer duration is ambiguous")
     if ("--load-in-4bit" in seen) == ("--no-load-in-4bit" in seen):
         raise OfflineSFTWorkerError("offline SFT quantization is ambiguous")
+    prepared_flags = _RAW_TEXT_FLAGS | _MESSAGE_FLAGS
+    present_prepared_flags = prepared_flags & seen
+    if present_prepared_flags:
+        schema = values.get("--runtime-v1-dataset-schema")
+        dataset_format = values.get("--runtime-v1-dataset-format")
+        if (
+            schema == "syntunia-sft-row/v1"
+            or dataset_format == "raw_text"
+            or (
+                schema is None
+                and dataset_format is None
+                and "--no-completion-only-loss" in present_prepared_flags
+            )
+        ):
+            expected = _RAW_TEXT_FLAGS
+            label = "raw-text"
+        elif (
+            schema == "syntunia-sft-row/v2"
+            or dataset_format == "messages"
+            or (
+                schema is None
+                and dataset_format is None
+                and bool(
+                    present_prepared_flags
+                    & {
+                        "--completion-only-loss",
+                        "--require-memory-efficient-loss",
+                        "--aux-head-prompt-render",
+                    }
+                )
+            )
+        ):
+            expected = _MESSAGE_FLAGS
+            label = "message"
+        else:
+            raise OfflineSFTWorkerError(
+                "offline SFT prepared trainer arguments are invalid"
+            )
+        if label == "raw-text" and present_prepared_flags - _RAW_TEXT_FLAGS:
+            raise OfflineSFTWorkerError(
+                "offline SFT trainer feature is unavailable"
+            )
+        if label == "message" and present_prepared_flags - _MESSAGE_FLAGS:
+            raise OfflineSFTWorkerError(
+                "offline SFT trainer feature is unavailable"
+            )
+        if present_prepared_flags != expected:
+            raise OfflineSFTWorkerError(
+                f"offline SFT {label} trainer arguments are incomplete"
+            )
+        if label == "raw-text" and (
+            schema != "syntunia-sft-row/v1" or dataset_format != "raw_text"
+        ):
+            raise OfflineSFTWorkerError(
+                "offline SFT raw-text trainer arguments are invalid"
+            )
+        if label == "message" and (
+            schema != "syntunia-sft-row/v2"
+            or dataset_format != "messages"
+            or values.get("--aux-head-prompt-render") != "prompt_completion"
+        ):
+            raise OfflineSFTWorkerError(
+                "offline SFT message trainer arguments are invalid"
+            )
+        if "--split-dataset" in seen:
+            raise OfflineSFTWorkerError(
+                f"offline SFT {label} trainer arguments are contradictory"
+            )
 
 
 def run_offline_sft_worker(argv: Sequence[str] | None = None) -> int:

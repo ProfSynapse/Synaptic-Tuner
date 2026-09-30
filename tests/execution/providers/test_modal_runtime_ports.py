@@ -33,6 +33,23 @@ for name in ('tuner.execution.providers.modal.remote',
     assert completed.returncode == 0, completed.stderr.decode()
 
 
+def test_remote_coordinator_import_closes_over_prepared_input_materializer():
+    import subprocess
+    import sys
+    root = __import__("pathlib").Path(__file__).resolve().parents[3]
+    code = f"""
+import sys
+sys.path.insert(0, {str(root)!r})
+import tuner.execution.providers.modal.coordinator_deployment
+assert 'tuner.execution.providers.modal.prepared_input' in sys.modules
+"""
+    completed = subprocess.run(
+        [sys.executable, "-B", "-c", code], check=False, cwd=root,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+
+
 def test_process_result_requires_exact_output_bytes():
     with pytest.raises(TypeError, match="exact bytes"):
         ModalProcessResult(0, bytearray(b"not-exact"))

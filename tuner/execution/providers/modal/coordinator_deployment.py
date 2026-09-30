@@ -5,7 +5,10 @@ import re
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes, parse_canonical_object, safe_ref
 
-from .coordinator_producer import MountedModalCoordinatorProducer
+from .coordinator_producer import (
+    MODAL_TRAINING_ARTIFACT_BOUNDS_V1,
+    MountedModalCoordinatorProducer,
+)
 from .coordinator_worker import ModalWorkerStaticExpectation, MountedModalCoordinatorWorker
 from .binding import ModalClientBinding
 from .config import ModalProviderProfileV1, ModalRuntimeLockV1
@@ -151,7 +154,9 @@ def build_modal_coordinator_deployment(
             processes=SubprocessSftRunner(
                 secret_keys=spec.runtime_secret_keys, model_token_key=model_token_key,
                 timeout_seconds=spec.timeout_seconds,
-            ), completion=MountedModalCoordinatorProducer(authenticator), static=static,
+            ), completion=MountedModalCoordinatorProducer(
+                authenticator, bounds=MODAL_TRAINING_ARTIFACT_BOUNDS_V1,
+            ), static=static, bounds=MODAL_TRAINING_ARTIFACT_BOUNDS_V1,
         )
         result = worker(dispatch_bytes, job_ref, artifact.commit)
         artifact.commit()

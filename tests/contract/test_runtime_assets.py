@@ -27,6 +27,17 @@ BOOTSTRAP_CAPSULE_SCHEMA = "schemas/synaptic-bootstrap-capsule-v1.schema.json"
 HF_PROVISIONING_CLAIM_SCHEMA = "schemas/synaptic-hf-provisioning-claim-v1.schema.json"
 
 
+def test_packaged_sft_default_is_an_exact_distribution_asset() -> None:
+    document = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    assert document["tool"]["setuptools"]["package-data"]["Trainers.sft.configs"] == ["config.yaml"]
+    member = "Trainers/sft/configs/config.yaml"
+    assert (REPO_ROOT / member).is_file()
+    candidate = os.environ.get(WHEEL_ENV)
+    if candidate:
+        with zipfile.ZipFile(candidate) as archive:
+            assert archive.read(member) == (REPO_ROOT / member).read_bytes()
+
+
 @dataclass(frozen=True)
 class AssetFamily:
     """A deliberate family in the supported runtime boundary."""

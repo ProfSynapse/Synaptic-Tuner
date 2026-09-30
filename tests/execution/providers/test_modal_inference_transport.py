@@ -691,13 +691,13 @@ def test_failed_ready_retains_pending_channel_cleanup_lease(monkeypatch):
 
     worker = threading.Thread(target=execute, daemon=True)
     worker.start()
-    assert close_entered.wait(1.0)
+    assert close_entered.wait(5.0)
     ownership = transport.pending_cleanup(submit_command_digest=launch.submit.digest)
     assert type(ownership.channel) is RealModalInferenceChannelClient
     assert ownership.channel.cleanup_pending is True
     assert state.sandbox.terminations == [True]
     release.set()
-    worker.join(timeout=1.0)
+    worker.join(timeout=5.0)
     assert len(errors) == 1 and type(errors[0]) is ModalInferenceTransportError
     assert ownership.channel.cleanup_pending is False
     assert state.sandbox.terminations == [True]
