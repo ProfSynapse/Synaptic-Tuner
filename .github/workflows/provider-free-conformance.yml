@@ -88,9 +88,13 @@ concurrency:
 
 jobs:
   conformance:
-    name: CPython 3.12 / pytest 8
+    name: CPython 3.12 / pytest 8 (${{ matrix.suite }})
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core, modal-inference]
     env:
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
       MODAL_IS_REMOTE: "1"
@@ -216,12 +220,32 @@ jobs:
 
       - name: Run provider-free conformance contracts
         env:
+          CONFORMANCE_SUITE: ${{ matrix.suite }}
           HF_TOKEN: ""
           HF_API_KEY: ""
           MODAL_TOKEN_ID: ""
           MODAL_TOKEN_SECRET: ""
           WANDB_API_KEY: ""
         run: |
+          inference_tests=(tests/execution/providers/test_modal_inference_*.py)
+          other_modal_tests=()
+          for test_file in tests/execution/providers/test_modal_*.py; do
+            if [[ "$test_file" != tests/execution/providers/test_modal_inference_*.py ]]; then
+              other_modal_tests+=("$test_file")
+            fi
+          done
+          if [[ ! -f "${inference_tests[0]}" || ${#other_modal_tests[@]} -eq 0 ]]; then
+            echo "Modal provider test selection is empty" >&2
+            exit 1
+          fi
+          if [[ "$CONFORMANCE_SUITE" == "modal-inference" ]]; then
+            python -B -m pytest -q -p no:cacheprovider "${inference_tests[@]}"
+            exit
+          fi
+          if [[ "$CONFORMANCE_SUITE" != "core" ]]; then
+            echo "Unknown conformance suite" >&2
+            exit 1
+          fi
           python -B -m pytest -q -p no:cacheprovider \
             tests/contract/test_provider_neutral_foundation_v1.py \
             tests/contract/test_modal_optional_dependency.py \
@@ -253,7 +277,19 @@ jobs:
             tests/inference \
             tests/trainers/sft/test_runtime_v1.py \
             tests/execution/providers/docker_provider_v1 \
-            tests/execution/providers/test_modal_*.py
+            "${other_modal_tests[@]}"
+
+  conformance-gate:
+    name: CPython 3.12 / pytest 8
+    needs: [conformance]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Require both conformance shards
+        env:
+          CONFORMANCE_RESULT: ${{ needs.conformance.result }}
+        run: test "$CONFORMANCE_RESULT" = success
 
   evaluator-callers:
     name: CPU-only evaluator caller regressions
