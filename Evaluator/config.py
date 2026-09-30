@@ -190,7 +190,7 @@ class BaseBackendSettings(ABC):
     # reasoning models, which reject the temperature parameter entirely).
     temperature: Optional[float] = None
     top_p: float = 0.9
-    max_tokens: int = 1024
+    max_tokens: Optional[int] = 1024
     seed: Optional[int] = None
 
     def base_url(self) -> str:
@@ -268,6 +268,16 @@ class VLLMSettings(BaseBackendSettings):
     model_path: Optional[str] = None
     lora_adapter: Optional[str] = None
     gpu_memory_utilization: float = 0.9
+    chat_template_kwargs: Optional[dict[str, object]] = None
+
+    def __post_init__(self) -> None:
+        if self.max_tokens is not None and (
+            type(self.max_tokens) is not int or not 1 <= self.max_tokens <= 262144
+        ):
+            raise ValueError("maximum output tokens is outside its bound")
+        if self.chat_template_kwargs is not None:
+            from synaptic_tuner.api.v1.training_input import validate_chat_template_kwargs
+            self.chat_template_kwargs = validate_chat_template_kwargs(self.chat_template_kwargs)
 
 
 @dataclass

@@ -132,6 +132,7 @@ _SFT_KEYS = {
     "prompt_render",
     "packing",
     "require_memory_efficient_loss",
+    "chat_template_kwargs",
 }
 _PREPARED_SFT_KEYS = {
     "dataset_format",
@@ -144,7 +145,11 @@ _MESSAGE_SFT_KEYS = _PREPARED_SFT_KEYS | {
     "packing",
     "require_memory_efficient_loss",
 }
-_REQUIRED_SFT_KEYS = _SFT_KEYS - {"max_steps", "num_epochs"} - _MESSAGE_SFT_KEYS
+_REQUIRED_SFT_KEYS = _SFT_KEYS - {"max_steps", "num_epochs", "chat_template_kwargs"} - _MESSAGE_SFT_KEYS
+_RESERVED_CHAT_TEMPLATE_KWARGS = frozenset({
+    "messages", "tokenize", "add_generation_prompt", "return_dict",
+    "return_tensors", "continue_final_message", "chat_template",
+})
 
 
 class RuntimeV1Error(RuntimeError):
@@ -1286,6 +1291,8 @@ def build_trainer_invocation(
         raise RuntimeV1Error(
             "runtime v1 prepared dataset controls require a prepared dataset format"
         )
+    if "chat_template_kwargs" in sft:
+        _validated_chat_template_kwargs(sft)
     model_revision = model.get("revision")
     if model.get("tokenizer_revision") != model_revision:
         raise RuntimeV1Error("runtime v1 requires one exact model/tokenizer snapshot")
@@ -1586,10 +1593,63 @@ def _append_sft_arguments(
                 "messages",
             )
         )
+    if "chat_template_kwargs" in sft:
+        argv.extend(("--chat-template-kwargs", _validated_chat_template_kwargs(sft)))
     load_in_4bit = model["load_in_4bit"]
     if not isinstance(load_in_4bit, bool):
         raise RuntimeV1Error("model.load_in_4bit must be a boolean")
     argv.append("--load-in-4bit" if load_in_4bit else "--no-load-in-4bit")
+
+
+def _validated_chat_template_kwargs(sft: Mapping[str, object]) -> str:
+    kwargs = sft["chat_template_kwargs"]
+    if sft.get("dataset_format") == "raw_text" or type(kwargs) is not dict or not kwargs:
+        raise RuntimeV1Error("chat_template_kwargs requires rendered messages")
+    if set(kwargs) & _RESERVED_CHAT_TEMPLATE_KWARGS:
+        raise RuntimeV1Error("chat_template_kwargs overrides renderer controls")
+    nodes = 0
+
+    def check(item: object, depth: int) -> None:
+        nonlocal nodes
+        nodes += 1
+        if nodes > 64 or depth > 4:
+            raise RuntimeV1Error("chat_template_kwargs exceeds its structure limit")
+        if type(item) is dict:
+            for key, child in item.items():
+                if type(key) is not str or not key:
+                    raise RuntimeV1Error("chat_template_kwargs contains an invalid key")
+                try:
+                    key_size = len(key.encode("utf-8"))
+                except UnicodeEncodeError:
+                    raise RuntimeV1Error("chat_template_kwargs contains an invalid key") from None
+                if key_size > 128:
+                    raise RuntimeV1Error("chat_template_kwargs contains an invalid key")
+                check(child, depth + 1)
+        elif type(item) is list:
+            for child in item:
+                check(child, depth + 1)
+        elif type(item) is str:
+            try:
+                size = len(item.encode("utf-8"))
+            except UnicodeEncodeError:
+                raise RuntimeV1Error("chat_template_kwargs contains invalid text") from None
+            if size > 1024:
+                raise RuntimeV1Error("chat_template_kwargs contains an oversized string")
+        elif type(item) is float:
+            if not math.isfinite(item):
+                raise RuntimeV1Error("chat_template_kwargs must be finite JSON")
+        elif type(item) not in (int, bool, type(None)):
+            raise RuntimeV1Error("chat_template_kwargs must contain only JSON values")
+
+    check(kwargs, 0)
+    try:
+        encoded = json.dumps(kwargs, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=False, allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError):
+        raise RuntimeV1Error("chat_template_kwargs must be finite JSON") from None
+    if len(encoded) > 4096:
+        raise RuntimeV1Error("chat_template_kwargs exceeds its byte limit")
+    return encoded.decode("utf-8")
 
 
 def _positive_int(value: object, name: str) -> str:

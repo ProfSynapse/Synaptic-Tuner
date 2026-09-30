@@ -225,7 +225,7 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
     training = _section(cfg.get("training"), {
         "batch_size", "gradient_accumulation", "learning_rate", "num_epochs", "max_steps",
         "packing", "completion_only_loss", "assistant_only_loss", "prompt_render",
-        "require_memory_efficient_loss", "save_steps", "save_total_limit", "seed",
+        "require_memory_efficient_loss", "chat_template_kwargs", "save_steps", "save_total_limit", "seed",
     }, "training")
     if ("num_epochs" in training) == ("max_steps" in training):
         raise ValueError("training requires exactly one duration")
@@ -255,6 +255,7 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
         use_preassigned_splits=True, prompt_render=training["prompt_render"],
         packing=training["packing"],
         require_memory_efficient_loss=training["require_memory_efficient_loss"],
+        chat_template_kwargs=training.get("chat_template_kwargs"),
     )
     return ModalSFTRecipeV1(
         cfg.get("name", path.stem), locator, dataset["expected_digest"],

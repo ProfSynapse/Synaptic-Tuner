@@ -43,6 +43,9 @@ training:
   prompt_render: prompt_completion
   require_memory_efficient_loss: true
   save_steps: 10
+  # Prose-only targets and serving use the same model-specific template choice.
+  chat_template_kwargs:
+    enable_thinking: false
   save_total_limit: 2
 
 lora:
@@ -78,6 +81,12 @@ post_training:
             - type: length_min
               path: $.content
               value: 1
+            - type: jsonpath_equals
+              path: $.raw_api_message.choices[0].finish_reason
+              value: stop
+            - type: jsonpath_not_regex
+              path: $.content
+              pattern: '(?i)<think>|</think>|thinking process'
       - id: observation_prose
         question: Describe a quiet garden at sunrise in two sentences.
         correct:
@@ -85,6 +94,12 @@ post_training:
             - type: length_min
               path: $.content
               value: 1
+            - type: jsonpath_equals
+              path: $.raw_api_message.choices[0].finish_reason
+              value: stop
+            - type: jsonpath_not_regex
+              path: $.content
+              pattern: '(?i)<think>|</think>|thinking process'
       - id: explanation_prose
         question: Explain why taking a short walk can help someone think through a problem.
         correct:
@@ -92,15 +107,24 @@ post_training:
             - type: length_min
               path: $.content
               value: 1
+            - type: jsonpath_equals
+              path: $.raw_api_message.choices[0].finish_reason
+              value: stop
+            - type: jsonpath_not_regex
+              path: $.content
+              pattern: '(?i)<think>|</think>|thinking process'
     min_pass_rate: 1.0
     max_cases: 3
     startup_timeout_seconds: 300.0
     timeout_seconds: 600.0
     served_model_name: rehearsal-lora
     generation:
-      max_tokens: 128
+      # Omit the request token ceiling; available context still bounds generation.
+      max_tokens: null
       temperature: 0.0
       top_p: 1.0
+      chat_template_kwargs:
+        enable_thinking: false
     vllm:
       expected_version: 0.26.0
       dtype: bfloat16

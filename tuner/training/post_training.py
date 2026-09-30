@@ -95,8 +95,15 @@ def validate_post_training_config(raw: object) -> dict | None:
         raise ValueError("evaluation timeout cannot be shorter than startup")
     if type(evaluation["served_model_name"]) is not str or _NAME.fullmatch(evaluation["served_model_name"]) is None or evaluation["served_model_name"] == "synaptic-base":
         raise ValueError("served model name is invalid")
-    generation = _fields(evaluation["generation"], {"max_tokens", "temperature", "top_p"}, "generation")
-    _integer(generation["max_tokens"], "maximum output tokens", 1, 4096)
+    generation = evaluation["generation"]
+    if (type(generation) is not dict or not {"max_tokens", "temperature", "top_p"}.issubset(generation)
+            or set(generation) - {"max_tokens", "temperature", "top_p", "chat_template_kwargs"}):
+        raise ValueError("generation has missing or unknown fields")
+    if generation["max_tokens"] is not None:
+        _integer(generation["max_tokens"], "maximum output tokens", 1, 262144)
+    if "chat_template_kwargs" in generation:
+        from synaptic_tuner.api.v1.training_input import validate_chat_template_kwargs
+        generation["chat_template_kwargs"] = validate_chat_template_kwargs(generation["chat_template_kwargs"])
     generation["temperature"] = _number(generation["temperature"], "temperature", 0.0, 2.0)
     generation["top_p"] = _number(generation["top_p"], "top p", 0.000001, 1.0)
     vllm = _fields(evaluation["vllm"], {
@@ -114,6 +121,6 @@ def validate_post_training_config(raw: object) -> dict | None:
     _integer(vllm["max_lora_rank"], "maximum LoRA rank", 1, 1024)
     if type(vllm["language_model_only"]) is not bool:
         raise ValueError("language model only must be boolean")
-    if generation["max_tokens"] >= vllm["max_model_len"]:
+    if generation["max_tokens"] is not None and generation["max_tokens"] >= vllm["max_model_len"]:
         raise ValueError("output token bound must fit model context")
     return config

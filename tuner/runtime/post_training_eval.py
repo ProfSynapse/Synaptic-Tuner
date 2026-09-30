@@ -124,6 +124,7 @@ def execute_post_training_evaluation(
                 temperature=generation["temperature"], top_p=generation["top_p"],
                 max_tokens=generation["max_tokens"], model_path=None,
                 lora_adapter=None,
+                chat_template_kwargs=generation.get("chat_template_kwargs"),
             )
             client = VLLMClient(
                 settings, timeout=min(remaining, 120.0), retries=0,

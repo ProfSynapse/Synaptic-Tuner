@@ -50,8 +50,11 @@ def _bindings():
     )}
 
 
-def test_record_validation_import_stays_host_light():
+@pytest.mark.parametrize("template_options", [False, True])
+def test_record_validation_import_stays_host_light(template_options):
     config = _config()
+    if template_options:
+        config["evaluation"]["generation"].update(max_tokens=None, chat_template_kwargs={"enable_thinking": False})
     record = {
         "schema_version": "synaptic-post-training-evaluation/v1",
         "status": "failed", "gate_passed": False,
@@ -124,7 +127,11 @@ def test_same_job_source_projects_offline_local_lora_and_pinned_options(tmp_path
     assert projected.expected_model_names == ("new-adapter", "synaptic-base")
 
 
-def test_run_uses_existing_assertion_runner_and_closes_runtime(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize("generation_options", [{}, {"max_tokens": None, "chat_template_kwargs": {"enable_thinking": False}}, {"max_tokens": 8192}])
+def test_run_uses_existing_assertion_runner_and_closes_runtime(tmp_path: Path, monkeypatch, generation_options):
+    config = _config()
+    config["evaluation"]["generation"].update(generation_options)
+    config["evaluation"]["vllm"]["max_model_len"] = 16384
     paths = [tmp_path / name for name in ("base", "adapter", "tokenizer")]
     for path in paths:
         path.mkdir()
@@ -143,6 +150,8 @@ def test_run_uses_existing_assertion_runner_and_closes_runtime(tmp_path: Path, m
     class Client:
         def __init__(self, settings, **kwargs):
             assert settings.api_key is None
+            assert settings.max_tokens == config["evaluation"]["generation"]["max_tokens"]
+            assert settings.chat_template_kwargs == config["evaluation"]["generation"].get("chat_template_kwargs")
             assert kwargs["trust_environment"] is False
             assert kwargs["retries"] == 0
 
@@ -153,7 +162,7 @@ def test_run_uses_existing_assertion_runner_and_closes_runtime(tmp_path: Path, m
     monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
     monkeypatch.setattr(vllm_client, "VLLMClient", Client)
     record = post_training_eval.execute_post_training_evaluation(
-        _config(), base_model_path=paths[0], adapter_path=paths[1], tokenizer_path=paths[2],
+        config, base_model_path=paths[0], adapter_path=paths[1], tokenizer_path=paths[2],
         validate=lambda: events.append("validate"), environment={"PATH": "/usr/bin"},
         cwd=tmp_path, python_executable="/usr/bin/python3", bindings=_bindings(),
     )

@@ -168,7 +168,27 @@ controls as one atomic optional group on `SFTTrainingHyperparametersV1`:
 `require_memory_efficient_loss`. Omitting the whole group preserves the original
 v1 input document exactly. A prepared v2 artifact requires the group and
 `dataset_format: messages`; the consumer resolver transports it unchanged into
-the resolved SFT config.
+the resolved SFT configuration.
+
+Optional `training.chat_template_kwargs` in a Modal recipe flows through the
+provider-neutral SFT hyperparameters into the existing `--chat-template-kwargs`
+trainer flag. It is bounded finite JSON, not an executable template override;
+renderer-control keys are rejected. Omit it to preserve the legacy canonical
+document. For prompt/completion rows, inspect the pinned tokenizer's generation
+scaffold and use matching template arguments at serving time. Keep model-specific
+arguments in the recipe, never in generic engine behavior.
+An offline boundary regression can use an already-verified saved tokenizer
+archive, without weights or Hub access:
+
+```bash
+SYNAPTIC_TEST_QWEN35_TOKENIZER_ARTIFACT=/private/verified/tokenizer.artifact \
+  python -B -m pytest -q tests/training/test_chat_template_training_transport.py
+```
+
+The artifact-backed case checks the exact pinned template hash, generation
+scaffold, prompt mask, and prose-plus-EOS target. Without that explicit local
+artifact it skips; the generic contract/transport cases still run. This checks
+token placement, not live GPU execution or writing quality.
 
 ### Auxiliary Readout Head (`aux_head`, optional)
 An optional auxiliary scalar readout head that learns to predict a per-row

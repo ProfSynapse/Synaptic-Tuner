@@ -14,6 +14,7 @@ from enum import Enum
 from pathlib import PurePosixPath
 from typing import BinaryIO, Protocol, runtime_checkable
 
+from synaptic_tuner.api.v1.training_input import validate_chat_template_kwargs
 from tuner.training.recipes import CompiledWorkload
 
 from .artifacts import (
@@ -832,6 +833,19 @@ def _expected_trainer_argv(
         )
     elif present_prepared_keys:
         return []
+    if "chat_template_kwargs" in sft:
+        if sft.get("dataset_format") == "raw_text":
+            return []
+        try:
+            kwargs = validate_chat_template_kwargs(sft["chat_template_kwargs"])
+            encoded = json.dumps(kwargs, sort_keys=True,
+                                 separators=(",", ":"), ensure_ascii=False,
+                                 allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError, UnicodeEncodeError):
+            return []
+        if len(encoded) > 4096:
+            return []
+        argv.extend(("--chat-template-kwargs", encoded.decode("utf-8")))
     argv.append("--load-in-4bit" if model["load_in_4bit"] else "--no-load-in-4bit")
     return argv
 

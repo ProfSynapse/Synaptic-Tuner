@@ -12,7 +12,9 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - If the capability does not exist, the next step is not an ad hoc workaround. Update the relevant skill and add the proper checked-in script/CLI workflow so the new capability is reusable.
 - Prefer repo CLIs and checked-in scripts over manual bucket/API probing whenever those surfaces exist.
 - Diagnose failures from the exact attempt's retained records, logs, pinned SDK source, and provider documentation. Use relevant issue/forum reports to form hypotheses, then run a targeted experiment before calling a hypothesis the cause. A closed failure phase locates a boundary; it does not establish the cause.
-- Keep the training workflow proportional to the supported use case. Remove redundant operations when documented behavior and experiments show they add no useful guarantee; retain source/model pins, credential isolation, artifact verification, and protection against replaying an uncertain submission. Test doubles must model the provider's documented behavior, not merely repeat our implementation.
+- Keep the training workflow proportional to the supported use case. Remove redundant operations when documented behavior and experiments show they add no useful guarantee;
+  retain source/model pins, credential isolation, artifact verification, and protection against replaying an uncertain submission. Test doubles must model the provider's documented behavior, not merely repeat our implementation.
+- For prompt/completion training, explicitly review the generation scaffold at the target boundary and keep model-specific chat-template arguments in recipe configuration, consistent with serving. Preserve legacy canonical documents when optional arguments are absent. An explicit null output budget means no request-level token ceiling, not unlimited context, time, or transport size. A completed-text smoke must check natural completion and must not be reported as a writing-quality evaluation.
 
 ## Config-First Generation Discipline
 

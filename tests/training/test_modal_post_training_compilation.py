@@ -87,6 +87,34 @@ def test_checked_in_combined_recipe_compiles_exact_inline_evaluation():
 
 
 def test_combined_recipe_cases_are_bound_to_host_execution_material():
+    # This is still a completed-text smoke, not a style-quality qualification.
+    recipe = load_modal_sft_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
+    config = _config(recipe).to_dict()
+    assert config["sft"]["chat_template_kwargs"] == {"enable_thinking": False}
+    generation = config["post_training"]["evaluation"]["generation"]
+    assert generation["max_tokens"] is None
+    assert generation["chat_template_kwargs"] == config["sft"]["chat_template_kwargs"]
+
+
+@pytest.mark.parametrize("content,finish_reason,expected", [
+    ("Welcome to the neighborhood!", "stop", True),
+    ("Welcome to the neighborhood!", "length", False),
+    ("Thinking Process: decide how to greet the neighbor", "stop", False),
+    ("<think>Decide what to say</think>", "stop", False),
+    ("", "stop", False),
+])
+def test_combined_recipe_rejects_truncated_or_thinking_only_responses(content, finish_reason, expected):
+    from Evaluator.response_view import build_response_view
+    from shared.verifiers.builtins.assertion_verifier import evaluate_correctness
+
+    recipe = load_modal_sft_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
+    scenarios = recipe.post_training["evaluation"]["scenarios"]
+    raw = {"choices": [{"message": {"content": content}, "finish_reason": finish_reason}]}
+    view = build_response_view(content, raw)
+    assert all(evaluate_correctness(case["correct"], view).passed is expected for case in scenarios)
+
+
+def test_combined_recipe_config_is_bound_to_host_execution_material():
     recipe = load_modal_sft_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
     config = _config(recipe)
     workload = compile_packaged_sft_workload(resolved_config=config)
@@ -110,6 +138,43 @@ def test_combined_recipe_cases_are_bound_to_host_execution_material():
     changed["post_training"]["evaluation"]["scenarios"][0]["question"] += " Please."
     with pytest.raises(ValueError, match="binding differs"):
         compile_bound_packaged_workload(CanonicalDocument.from_mapping(changed), binding)
+
+
+@pytest.mark.parametrize("limit", [None, 1, 8192])
+def test_generation_transport_controls_are_bound_without_legacy_byte_changes(limit):
+    from tuner.training.post_training import validate_post_training_config
+    from tuner.training.recipes import canonical_json_bytes
+    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    legacy = _evaluation()
+    assert canonical_json_bytes(validate_post_training_config(legacy)) == canonical_json_bytes(legacy)
+    requested = _evaluation()
+    requested["evaluation"]["generation"].update(max_tokens=limit, chat_template_kwargs={"enable_thinking": False})
+    requested["evaluation"]["vllm"]["max_model_len"] = 16384
+    normalized = validate_post_training_config(requested)
+    assert normalized["evaluation"]["generation"]["max_tokens"] == limit
+    baseline = _config(replace(recipe, post_training=legacy))
+    changed = _config(replace(recipe, post_training=normalized))
+    assert packaged_configuration_digest(changed) != packaged_configuration_digest(baseline)
+    assert compile_packaged_sft_workload(resolved_config=changed).fingerprint != compile_packaged_sft_workload(resolved_config=baseline).fingerprint
+
+
+@pytest.mark.parametrize("limit", [True, 0, -1, 1.5, 262145, 4096])
+def test_post_training_token_limit_rejects_invalid_or_context_sized_values(limit):
+    from tuner.training.post_training import validate_post_training_config
+    config = _evaluation()
+    config["evaluation"]["generation"]["max_tokens"] = limit
+    with pytest.raises(ValueError):
+        validate_post_training_config(config)
+
+
+@pytest.mark.parametrize("kwargs", [None, {}, {"tokenize": False}, {"value": float("inf")},
+                                     {"value": "x" * 4097}])
+def test_post_training_template_kwargs_use_shared_bounded_validator(kwargs):
+    from tuner.training.post_training import validate_post_training_config
+    config = _evaluation()
+    config["evaluation"]["generation"]["chat_template_kwargs"] = kwargs
+    with pytest.raises(ValueError):
+        validate_post_training_config(config)
 
 
 def test_opt_in_evaluation_rejects_unbound_or_invalid_controls():

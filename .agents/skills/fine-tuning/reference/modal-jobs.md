@@ -890,7 +890,18 @@ Keep the consumed attempt and its training artifacts intact. The host readback
 phase includes both the remote read and local save; its label alone is not a
 root-cause diagnosis. Test record validation in the pinned lightweight launcher,
 not only an ML-equipped test environment; execution-only evaluator imports must
-not be required just to validate a signed record.
+not be required merely to validate a signed record.
+
+For the opt-in same-job evaluation, `generation.max_tokens: null` deliberately
+omits the request-level output ceiling. Available model context, model/server
+defaults, job deadlines, and bounded request/response storage still apply; this
+is not infinite generation. Explicit positive integer budgets remain supported.
+Optional `generation.chat_template_kwargs` transports bounded finite JSON to
+vLLM; model-specific values stay in the recipe and should match the training
+template settings. The Qwen prose rehearsal selects `enable_thinking: false` in
+both places and requires `finish_reason: stop` plus configured rejection of
+thinking-only text. Those assertions qualify completed-text mechanics, not
+chapter quality. Audit the saved replies before authorizing full training.
 
 When that exact submit has marker material but no retained call ID, use the same
 inspector with `--inspect-markers` instead of `--call-id`. Supply the exact
