@@ -119,15 +119,106 @@ def _post_start_phase(workflow_phase: WorkflowPhaseV1) -> str | None:
     return _POST_START_PHASES.get(workflow_phase)
 
 
+_START_CAUSE_FILES = frozenset({
+    "tuner/training/modal_standalone_runner.py", "tuner/training/modal_host_effects.py",
+    "tuner/training/modal_host_storage.py", "tuner/training/modal_host_requests.py",
+    "tuner/training/coordinator_service.py", "tuner/dataset_prep/training_input_source.py",
+    "tuner/dataset_prep/publication.py", "synaptic_tuner/api/v1/training_facade.py",
+    "synaptic_tuner/api/v1/reference/training.py", "synaptic_tuner/api/v1/reference/repositories.py",
+    "tuner/execution/coordinator_v1/coordinator.py", "tuner/execution/coordinator_v1/foundation.py",
+    "tuner/execution/foundation_v2/authority.py", "tuner/execution/foundation_v2/broker.py",
+    "tuner/execution/foundation_v2/repository.py", "tuner/execution/providers/modal/packaged_effects.py",
+    "tuner/execution/providers/modal/packaged_transport.py", "tuner/execution/providers/modal/packaged_staging.py",
+})
+_START_CAUSE_CATEGORIES = frozenset({
+    "COORDINATOR", "FOUNDATION", "VALUE", "TYPE", "TIMEOUT", "OS", "RUNTIME", "OTHER",
+})
+
+
+def validate_start_failure_causes(value: object) -> list[dict[str, object]]:
+    """Revalidate closed diagnostic data before projecting it through the CLI."""
+    from tuner.execution.coordinator_v1.coordinator import CoordinatorCodeV1
+    from tuner.execution.foundation_v2.canonical import DiagnosticCode
+    codes = {"COORDINATOR": {item.value for item in CoordinatorCodeV1},
+             "FOUNDATION": {item.value for item in DiagnosticCode}}
+    if type(value) not in (tuple, list) or not 1 <= len(value) <= 4:
+        return []
+    result = []
+    for item in value:
+        if type(item) is not dict or set(item) != {"category", "code", "locations"}:
+            return []
+        category, code, locations = item["category"], item["code"], item["locations"]
+        if type(category) is not str or category not in _START_CAUSE_CATEGORIES:
+            return []
+        if code is not None and (type(code) is not str or code not in codes.get(category, set())):
+            return []
+        if type(locations) not in (tuple, list) or len(locations) > 4:
+            return []
+        safe_locations = []
+        for location in locations:
+            if type(location) is not dict or set(location) != {"file", "line"}:
+                return []
+            file, line = location["file"], location["line"]
+            if (type(file) is not str or file not in _START_CAUSE_FILES
+                    or type(line) is not int or not 1 <= line <= 1000000):
+                return []
+            safe_locations.append({"file": file, "line": line})
+        result.append({"category": category, "code": code, "locations": safe_locations})
+    return result
+
+
+def _closed_start_failure_causes(error: BaseException) -> list[dict[str, object]]:
+    """Inspect bounded suppressed context, never exception text or frame locals."""
+    from tuner.execution.coordinator_v1.coordinator import CoordinatorErrorV1, CoordinatorCodeV1
+    from tuner.execution.foundation_v2.canonical import FoundationError, DiagnosticCode
+    categories = {ValueError: "VALUE", TypeError: "TYPE", TimeoutError: "TIMEOUT",
+                  OSError: "OS", RuntimeError: "RUNTIME"}
+    root = Path(__file__).resolve().parents[2]
+    result, seen = [], set()
+    current = error
+    for _ in range(4):
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        category, code = categories.get(type(current), "OTHER"), None
+        if type(current) is CoordinatorErrorV1:
+            category = "COORDINATOR"
+            code = current.code.value if type(current.code) is CoordinatorCodeV1 else None
+        elif type(current) is FoundationError:
+            category = "FOUNDATION"
+            code = current.code.value if type(current.code) is DiagnosticCode else None
+        locations, trace = [], current.__traceback__
+        for _ in range(64):
+            if trace is None:
+                break
+            try:
+                file = Path(trace.tb_frame.f_code.co_filename).relative_to(root).as_posix()
+            except (ValueError, TypeError):
+                file = None
+            if file in _START_CAUSE_FILES and 1 <= trace.tb_lineno <= 1000000:
+                locations.append({"file": file, "line": trace.tb_lineno})
+            trace = trace.tb_next
+        result.append({"category": category, "code": code, "locations": locations[-4:]})
+        # Suppression controls display, not whether a retained safe category is useful.
+        current = current.__cause__ if current.__cause__ is not None else current.__context__
+    return validate_start_failure_causes(result)
+
+
 class ModalStandalonePhaseUnavailable(RuntimeError):
     """Closed, non-authorizing diagnosis after a validated CPU receipt."""
 
-    def __init__(self, phase: str):
+    def __init__(self, phase: str, *, start_causes: object = ()):
         if phase not in _RUN_PHASE_DIAGNOSTICS:
             raise ValueError("invalid_modal_standalone_phase")
         self.phase = phase
         self.failure_class, self.location = _RUN_PHASE_DIAGNOSTICS[phase]
         self.retry_authorized = False
+        self.start_causes = []
+        if phase == "RUN_START_INDETERMINATE":
+            try:
+                self.start_causes = validate_start_failure_causes(start_causes)
+            except Exception:
+                pass
         super().__init__("modal_standalone_phase_unavailable")
 
 
@@ -579,7 +670,13 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
         if phase is not None:
             raise ModalStandalonePhaseUnavailable(phase) from None
         raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable") from None
-    except Exception:
+    except Exception as failure:
         if phase is not None:
-            raise ModalStandalonePhaseUnavailable(phase) from None
+            causes = ()
+            if phase == "RUN_START_INDETERMINATE":
+                try:
+                    causes = _closed_start_failure_causes(failure)
+                except Exception:
+                    pass  # Diagnostic failure cannot replace the original closed phase.
+            raise ModalStandalonePhaseUnavailable(phase, start_causes=causes) from None
         raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable") from None

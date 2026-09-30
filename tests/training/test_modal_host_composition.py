@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import pytest
 from dataclasses import replace
 from io import BytesIO
 from hashlib import sha256
@@ -144,7 +145,8 @@ def test_public_training_api_prepares_existing_publication_without_provider(tmp_
     assert events == []
 
 
-def test_public_training_api_stages_and_submits_once_with_fake_modal(tmp_path, monkeypatch):
+@pytest.mark.parametrize("full_context", [False, True], ids=["legacy", "full-context"])
+def test_public_training_api_stages_and_submits_once_with_fake_modal(tmp_path, monkeypatch, full_context):
     bound, arguments, events, _ = _components()
     effects_binding = _binding()
     assert bound == effects_binding
@@ -152,8 +154,42 @@ def test_public_training_api_stages_and_submits_once_with_fake_modal(tmp_path, m
     public, original = packaged_fixture()
     release = effects_binding.runtime_release
     execution = effects_binding.execution_binding
+    configuration = original.resolved_config
+    if full_context:
+        from synaptic_tuner.api.v1._contract import PreparedTrainingInputIdentity
+        from tuner.runtime.releases import PackagedExecutionBindingV1
+        from tuner.training.packaged_compilation import packaged_configuration_digest
+        from tests.training.test_modal_post_training_compilation import _evaluation
+
+        document = configuration.to_dict()
+        document["sft"].update(max_seq_length=32768, duration={"max_steps": 2, "num_epochs": None},
+                               chat_template_kwargs={"enable_thinking": False})
+        evaluation = _evaluation()
+        settings = evaluation["evaluation"]
+        settings["max_cases"] = 3
+        settings["generation"].update(max_tokens=None,
+                                       chat_template_kwargs={"enable_thinking": False})
+        settings["vllm"].update(max_model_len=32768, max_num_seqs=3)
+        settings["scenarios"] = [{
+            "id": f"chapter_{index}", "question": "Context prose. " * 1200,
+            "correct": settings["scenarios"][0]["correct"],
+        } for index in range(3)]
+        document["post_training"] = evaluation
+        request_document = public.to_dict()
+        request_document["hyperparameters"] = document["sft"]
+        public = type(public).from_dict(request_document)
+        configuration = CanonicalDocument.from_mapping(document)
+        workload = compile_packaged_sft_workload(resolved_config=configuration)
+        execution = PackagedExecutionBindingV1.build(
+            run_ref=execution.run_ref, runtime_release=release,
+            provider_runtime_binding=effects_binding.provider_binding,
+            **PreparedTrainingInputIdentity.from_dict(document["dataset"]).execution_binding_fields(),
+            workload_digest=workload.fingerprint,
+            configuration_digest=packaged_configuration_digest(configuration),
+            artifact_policy_digest=execution.artifact_policy_digest,
+        )
     components = replace(
-        original, execution_source=execution,
+        original, execution_source=execution, resolved_config=configuration,
         execution_context=CanonicalDocument.from_mapping({
             "schema_version": PACKAGED_CONTEXT_SCHEMA,
             "runtime_release": release.to_dict(),
@@ -189,8 +225,19 @@ def test_public_training_api_stages_and_submits_once_with_fake_modal(tmp_path, m
     )
 
     stage_calls = []
+    boundaries = []
+    original_bind = effects.bind
+
+    def bind(*args, **kwargs):
+        boundaries.append("BIND_ENTER")
+        result = original_bind(*args, **kwargs)
+        boundaries.append("BIND_RETURN")
+        return result
+
+    monkeypatch.setattr(effects, "bind", bind)
 
     def stage_once(_stager, material):
+        boundaries.append("STAGE_TRANSPORT")
         stage_calls.append(material.descriptor.stage_effect_id)
         descriptor = material.descriptor
         return ModalPackagedStageReceipt(
@@ -258,16 +305,27 @@ def test_public_training_api_stages_and_submits_once_with_fake_modal(tmp_path, m
     plan = api.training.plan(resolved, ProviderRef("modal", adapter.effect_executor.profile_ref))
     preflight = api.training.preflight(plan)
     assert events == []
+    foundation_type = type(host.composition.foundation)
+    original_execute = foundation_type.execute
+
+    def execute(self, *args, **kwargs):
+        boundaries.append("FOUNDATION_ENTER")
+        result = original_execute(self, *args, **kwargs)
+        boundaries.append("FOUNDATION_RETURN")
+        return result
+
+    monkeypatch.setattr(foundation_type, "execute", execute)
     try:
         started = api.training.start(plan, preflight)
     except Exception as error:
-        raise AssertionError((str(error), events, storage.attempts.claimed,
-                              storage.catalogs["packaged-bindings-v1"].values.keys(),
-                              storage.catalogs["packaged-stage-receipts-v1"].values.keys(),
-                              storage.catalogs["packaged-calls-v1"].values.keys(),
-                              stage_calls)) from None
+        code = getattr(error, "code", None)
+        raise AssertionError((type(error).__name__, getattr(code, "value", None),
+                              boundaries)) from None
     assert started.accepted is True
     assert len(storage.attempts.claimed) == 2
+    assert boundaries == ["BIND_ENTER", "BIND_RETURN", "FOUNDATION_ENTER",
+                          "STAGE_TRANSPORT", "FOUNDATION_RETURN", "BIND_ENTER",
+                          "BIND_RETURN", "FOUNDATION_ENTER", "FOUNDATION_RETURN"]
 
     completion_digest = "e" * 64
 

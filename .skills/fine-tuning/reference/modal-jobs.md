@@ -654,7 +654,19 @@ image construction.
    by the durable provider job ID and Volume evidence. Never retry an ambiguous
    submission.
 
-## Failure diagnostics
+## Failure diagnostics (including closed start context)
+
+`RUN_START_INDETERMINATE` spans the whole public start call, not just GPU
+submission. Optional `exception_chain` diagnostics retain at most four closed
+exception categories/recognized coordinator or Foundation enum codes and four
+allowlisted repo-relative file/line locations per entry. They inspect suppressed
+context without emitting messages, source lines, locals, credentials or private
+paths. Collection/validation failure preserves the original closed phase.
+An exception chain narrows local boundaries; it does not prove the root cause,
+no external effect, successful training, or permission to replay. If an earlier
+process retained only the broad phase, these diagnostics cannot recover its lost
+exception after exit. Use an independently reviewed provider-free reproduction
+before proposing a fix; a fake-provider pass is not live transport qualification.
 
 The local source-wheel gate reports fixed input, HEAD, and tracked-status
 categories. Before/after labels refer to the commit-archive boundary;

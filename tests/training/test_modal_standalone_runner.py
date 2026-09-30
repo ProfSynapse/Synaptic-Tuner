@@ -672,6 +672,79 @@ def test_post_cpu_host_failures_have_only_closed_non_retryable_diagnostics(
     assert events == ["bootstrap", "cpu"]
 
 
+@pytest.mark.parametrize("broken_diagnostics", [None, "collector", "validator"])
+def test_start_collapse_retains_closed_suppressed_codes_and_survives_diagnostic_failure(
+        tmp_path, monkeypatch, broken_diagnostics):
+    from tuner.execution.coordinator_v1.coordinator import CoordinatorCodeV1, CoordinatorErrorV1
+    from tuner.execution.foundation_v2.canonical import DiagnosticCode, FoundationError
+    from tuner.handlers.modal_job_config_handler import _closed_bootstrap_details
+    plan, context, events = _setup(tmp_path, monkeypatch)
+    secret = "HF_TOKEN=private /home/private/customer"
+    def fail(*args, **kwargs):
+        try:
+            try:
+                raise ValueError(secret)
+            except ValueError:
+                raise FoundationError(DiagnosticCode.AUTHORITY_INVALID) from None
+        except FoundationError:
+            raise CoordinatorErrorV1(CoordinatorCodeV1.FOUNDATION_INTERRUPTED) from None
+    monkeypatch.setattr(TrainingAPI, "start", fail)
+    if broken_diagnostics == "collector":
+        monkeypatch.setattr(runner, "_closed_start_failure_causes", fail)
+    elif broken_diagnostics == "validator":
+        monkeypatch.setattr(runner, "validate_start_failure_causes", fail)
+    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as caught:
+        runner.run_modal_standalone_job(plan=plan, context=context,
+                                       modal_profile="explicit", modal_environment="main")
+    details = _closed_bootstrap_details(caught.value)
+    assert details["phase"] == "RUN_START_INDETERMINATE"
+    assert details["retry_authorized"] is False
+    if broken_diagnostics:
+        assert "exception_chain" not in details
+    else:
+        assert [(item["category"], item["code"]) for item in details["exception_chain"]] == [
+            ("COORDINATOR", "foundation_interrupted"),
+            ("FOUNDATION", "authority_invalid"), ("VALUE", None)]
+    assert secret not in json.dumps(details)
+    assert "/home/private" not in json.dumps(details)
+    assert "test_modal_standalone_runner.py" not in json.dumps(details)
+    assert events == ["bootstrap", "cpu"]
+    monkeypatch.setattr(runner, "validate_start_failure_causes", fail)
+    assert "exception_chain" not in _closed_bootstrap_details(caught.value)
+
+
+def test_start_cause_locations_bounds_and_projection_reject_hostile_data():
+    from tuner.handlers.modal_job_config_handler import _closed_bootstrap_details
+    namespace = {}
+    approved = str(ROOT / "tuner/training/modal_host_effects.py")
+    exec(compile("def fail():\n raise ValueError('private-secret')", approved, "exec"), namespace)
+    retained = None
+    try:
+        namespace["fail"]()
+    except ValueError as error:
+        retained = error
+        causes = runner._closed_start_failure_causes(error)
+    assert causes == [{"category": "VALUE", "code": None, "locations": [
+        {"file": "tuner/training/modal_host_effects.py", "line": 2}]}]
+    for _ in range(8):
+        next_error = RuntimeError("private-secret")
+        next_error.__context__ = retained
+        retained = next_error
+    assert len(runner._closed_start_failure_causes(retained)) == 4
+    retained.__context__ = retained
+    assert len(runner._closed_start_failure_causes(retained)) == 1
+    diagnosis = runner.ModalStandalonePhaseUnavailable("RUN_START_INDETERMINATE")
+    for category, code, file, line in (
+        ("PrivateSecretClass", None, "tuner/training/modal_host_effects.py", 2),
+        ("FOUNDATION", "private-secret", "tuner/training/modal_host_effects.py", 2),
+        ("VALUE", None, "/home/private/customer", 2),
+        ("VALUE", None, "tuner/training/modal_host_effects.py", True),
+    ):
+        diagnosis.start_causes = [{"category": category, "code": code,
+                                   "locations": [{"file": file, "line": line}]}]
+        assert "exception_chain" not in _closed_bootstrap_details(diagnosis)
+
+
 def test_post_start_workflow_lookup_failure_is_closed_without_private_details(tmp_path, monkeypatch):
     plan, context, events = _setup(tmp_path, monkeypatch)
     monkeypatch.setattr(

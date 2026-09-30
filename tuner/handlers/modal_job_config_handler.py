@@ -121,12 +121,21 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
     if type(error) is ModalStandalonePhaseUnavailable and error.retry_authorized is False:
         admitted = run_phase.get(error.phase)
         if admitted == (error.failure_class, error.location):
-            return {
+            details = {
                 "phase": error.phase,
                 "failure_class": error.failure_class,
                 "location": error.location,
                 "retry_authorized": False,
             }
+            if error.phase == "RUN_START_INDETERMINATE":
+                try:
+                    from tuner.training.modal_standalone_runner import validate_start_failure_causes
+                    causes = validate_start_failure_causes(getattr(error, "start_causes", ()))
+                except Exception:
+                    causes = []
+                if causes:
+                    details["exception_chain"] = causes
+            return details
     return None
 
 
