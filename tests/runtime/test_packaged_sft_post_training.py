@@ -121,22 +121,3 @@ def test_changed_adapter_is_rejected_while_context_is_live(material, seal):
         )
     assert caught.value.stage == "POST_TRAINING"
     assert (admitted.paths.artifacts / "final_model.tar").is_file()
-
-
-def test_changed_adapter_is_rejected_while_context_is_live(material, seal):
-    _opt_in(material)
-    admitted = seam.admit_packaged_sft(**material)
-
-    def mutate(_result, context):
-        context.validate()
-        adapter_config = context.adapter_path / "adapter_config.json"
-        adapter_config.write_bytes(adapter_config.read_bytes() + b" ")
-        context.validate()
-
-    with pytest.raises(seam.PackagedSFTExecutionError) as caught:
-        seam.execute_admitted_packaged_sft(
-            admitted, model_preparer=prepare, runner=FakeRunner(),
-            on_training_complete=mutate,
-        )
-    assert caught.value.stage == "POST_TRAINING"
-    assert (admitted.paths.artifacts / "final_model.tar").is_file()

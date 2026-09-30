@@ -183,52 +183,8 @@ def test_failed_generation_has_closed_code_and_cannot_pass_zero_gate(
     assert record["failure_code"] == expected_code
     assert "private backend detail" not in str(record)
     post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
-@pytest.mark.parametrize("interruption", ["identity", "deadline"])
-def test_partial_pass_counts_survive_later_failure(tmp_path: Path, monkeypatch, interruption):
-    class Lease:
-        served_model_name = "new-adapter"
-        host = "127.0.0.1"
-        port = 8000
 
-        def close(self):
-            return True
 
-    class Client:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def chat(self, messages):
-            return BackendResponse(message="ready", raw={}, latency_s=0.1)
-
-    checks = []
-
-    def validate():
-        checks.append(1)
-        if interruption == "identity" and len(checks) >= 2:
-            raise ValueError("changed")
-
-    if interruption == "deadline":
-        class Clock:
-            readings = iter((0.0, 0.0, 31.0))
-
-            def monotonic(self):
-                return next(self.readings)
-
-        monkeypatch.setattr(post_training_eval, "time", Clock())
-    monkeypatch.setattr(post_training_eval, "start_vllm_runtime", lambda *args, **kwargs: Lease())
-    monkeypatch.setattr(post_training_eval, "VLLMClient", Client)
-    config = _config()
-    record = post_training_eval.execute_post_training_evaluation(
-        config, base_model_path=tmp_path, adapter_path=tmp_path,
-        tokenizer_path=tmp_path, validate=validate, environment={},
-        cwd=tmp_path, python_executable="/usr/bin/python3", bindings=_bindings(),
-    )
-    assert record["status"] == "failed"
-    assert record["failure_code"] == ("identity_changed" if interruption == "identity" else "deadline")
-    assert len(record["cases"]) == 1
-    assert record["passed_count"] == 1
-    assert record["pass_rate"] == 0.5
-    post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
 @pytest.mark.parametrize("interruption", ["identity", "deadline"])
 def test_partial_pass_counts_survive_later_failure(tmp_path: Path, monkeypatch, interruption):
     class Lease:
