@@ -57,7 +57,36 @@ Key rules:
 - Context document order remains dataset-builder policy; the trainer does not
   impose an outline-first or other corpus-specific convention.
 
-### Conversational SFT
+### Chronological group holdouts for prepared messages
+
+The existing v2 `prepare-dataset` command supports this optional split declaration:
+
+```json
+{"kind":"group_sequence_tail","allocations":[{"name":"train","weight":4},{"name":"validation","weight":1}]}
+```
+
+This policy has no seed. It orders target items by authenticated
+`ItemLineageV2.sequence` within each configured group, using a training prefix and
+validation tail. Equal-sequence cohorts stay together. Among boundaries with
+both splits nonempty, choose the validation count nearest the weighted allocation;
+an equally near boundary favors the larger validation tail. Groups with no such
+boundary fail, including singleton groups. Counts can therefore differ from the
+requested ratio; inspect the actual per-group counts before launch.
+
+Target revision families and target derivation chains cannot cross splits.
+Training contexts cannot contain held-out targets or their revision/derivative
+lineage. Validation contexts may include earlier training targets, matching a
+next-item prediction workflow. Conflicting lineage fails rather than silently
+moving examples. The manifest retains bounded ID-only split lineage so artifact
+verification can independently recompute assignments and leakage checks.
+
+Publish through `python tuner.py prepare-dataset --config <config.json> --json`;
+preserve the old immutable artifact. This changes split policy, not prompts,
+assistant prose, document ordering, or the trainer. The existing seeded
+`group_hash_rank` policy remains unchanged for whole-group holdouts. Sequence-tail
+validation measures later items within known groups, not unseen-group performance.
+
+### Legacy conversational SFT
 
 Positive examples only. Tool-calling examples should use OpenAI-style `tool_calls`.
 

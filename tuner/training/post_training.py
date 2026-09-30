@@ -67,9 +67,11 @@ def validate_post_training_config(raw: object) -> dict | None:
         if type(identifier) is not str or _NAME.fullmatch(identifier) is None or identifier in seen:
             raise ValueError("evaluation case id is invalid or repeated")
         seen.add(identifier)
-        if type(scenario["question"]) is not str or not scenario["question"].strip() or len(scenario["question"].encode("utf-8")) > 8192:
+        # The aggregate JSON byte bound already covers every prompt field.
+        # Model context admission belongs to the configured serving runtime.
+        if type(scenario["question"]) is not str or not scenario["question"].strip():
             raise ValueError("evaluation question is invalid")
-        if "system" in scenario and (type(scenario["system"]) is not str or len(scenario["system"].encode("utf-8")) > 8192):
+        if "system" in scenario and type(scenario["system"]) is not str:
             raise ValueError("evaluation system prompt is invalid")
         if "messages" in scenario:
             messages = scenario["messages"]
@@ -77,7 +79,6 @@ def validate_post_training_config(raw: object) -> dict | None:
                 type(message) is not dict or set(message) != {"role", "content"}
                 or message["role"] not in ("system", "user", "assistant")
                 or type(message["content"]) is not str
-                or len(message["content"].encode("utf-8")) > 8192
                 for message in messages
             ):
                 raise ValueError("evaluation messages are invalid")

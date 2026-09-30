@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -176,6 +177,212 @@ def test_run_uses_existing_assertion_runner_and_closes_runtime(tmp_path: Path, m
         post_training_eval.validate_evaluation_record(record, config=_config())
 
 
+def test_parallel_requests_overlap_are_bounded_ordered_and_join_before_cleanup(tmp_path: Path, monkeypatch):
+    config = _config()
+    config["evaluation"]["scenarios"].append({
+        "id": "three", "question": "Say ready a third time", "correct": {
+            "assertions": [{"type": "jsonpath_equals", "path": "$.content", "value": "ready"}]
+        },
+    })
+    config["evaluation"]["max_cases"] = 3
+    config["evaluation"]["vllm"]["max_num_seqs"] = 2
+    barrier = threading.Barrier(2, timeout=5)
+    second_done = threading.Event()
+    guard = threading.Lock()
+    state = {"active": 0, "peak": 0, "started": [], "finished": [], "closed": False}
+    starts = []
+
+    class Lease:
+        served_model_name = "new-adapter"
+        host = "127.0.0.1"
+        port = 8000
+
+        def close(self):
+            with guard:
+                assert state["active"] == 0
+                state["closed"] = True
+            return True
+
+    class Client:
+        def __init__(self, settings, **kwargs):
+            assert settings.model == "new-adapter"
+            assert kwargs["retries"] == 0
+            assert 0 < kwargs["timeout"] <= config["evaluation"]["timeout_seconds"]
+
+        def chat(self, messages):
+            question = messages[-1]["content"]
+            with guard:
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+                state["started"].append(question)
+            try:
+                if question in ("Say ready", "Say ready again"):
+                    barrier.wait()
+                if question == "Say ready":
+                    assert second_done.wait(5)
+                elif question == "Say ready again":
+                    second_done.set()
+                return BackendResponse(message="ready", raw={}, latency_s=0.1)
+            finally:
+                with guard:
+                    state["finished"].append(question)
+                    state["active"] -= 1
+
+    def start(*args, **kwargs):
+        starts.append(1)
+        return Lease()
+
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", start)
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
+    record = post_training_eval.execute_post_training_evaluation(
+        config, base_model_path=tmp_path, adapter_path=tmp_path,
+        tokenizer_path=tmp_path, validate=lambda: None, environment={},
+        cwd=tmp_path, python_executable="/usr/bin/python3", bindings=_bindings(),
+    )
+    assert starts == [1]
+    assert state["peak"] == 2
+    assert state["finished"].index("Say ready again") < state["finished"].index("Say ready")
+    assert state["closed"] is True
+    assert record["status"] == "completed"
+    assert [case["id"] for case in record["cases"]] == ["one", "two", "three"]
+    assert record["passed_count"] == 3
+
+
+def test_parallel_backend_error_keeps_ordered_partial_count_and_waits_for_cleanup(tmp_path: Path, monkeypatch):
+    config = _config()
+    config["evaluation"]["min_pass_rate"] = 0
+    finished = threading.Event()
+    closed = []
+
+    class Lease:
+        served_model_name = "new-adapter"
+        host = "127.0.0.1"
+        port = 8000
+
+        def close(self):
+            assert finished.is_set()
+            closed.append(True)
+            return True
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def chat(self, messages):
+            if messages[-1]["content"] == "Say ready again":
+                finished.set()
+                raise RuntimeError("private backend detail")
+            assert finished.wait(5)
+            return BackendResponse(message="ready", raw={}, latency_s=0.1)
+
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
+    record = post_training_eval.execute_post_training_evaluation(
+        config, base_model_path=tmp_path, adapter_path=tmp_path,
+        tokenizer_path=tmp_path, validate=lambda: None, environment={},
+        cwd=tmp_path, python_executable="/usr/bin/python3", bindings=_bindings(),
+    )
+    assert closed == [True]
+    assert record["status"] == "failed"
+    assert record["gate_passed"] is False
+    assert record["failure_code"] == "evaluation_error"
+    assert [case["id"] for case in record["cases"]] == ["one", "two"]
+    assert record["passed_count"] == 1
+    assert record["pass_rate"] == 0.5
+    assert "private backend detail" not in str(record)
+    post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
+
+
+def test_first_case_error_retains_later_finished_chapter(tmp_path: Path, monkeypatch):
+    config = _config()
+    config["evaluation"]["min_pass_rate"] = 0
+    later_finished = threading.Event()
+    closed = []
+
+    class Lease:
+        served_model_name = "new-adapter"
+        host = "127.0.0.1"
+        port = 8000
+
+        def close(self):
+            assert later_finished.is_set()
+            closed.append(True)
+            return True
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def chat(self, messages):
+            if messages[-1]["content"] == "Say ready":
+                assert later_finished.wait(5)
+                raise RuntimeError("private backend detail")
+            later_finished.set()
+            return BackendResponse(message="ready", raw={}, latency_s=0.1)
+
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
+    record = post_training_eval.execute_post_training_evaluation(
+        config, base_model_path=tmp_path, adapter_path=tmp_path,
+        tokenizer_path=tmp_path, validate=lambda: None, environment={},
+        cwd=tmp_path, python_executable="/usr/bin/python3", bindings=_bindings(),
+    )
+    assert closed == [True]
+    assert record["status"] == "failed"
+    assert record["gate_passed"] is False
+    assert record["failure_code"] == "evaluation_error"
+    assert [case["id"] for case in record["cases"]] == ["one", "two"]
+    assert record["cases"][0]["error_code"] == "evaluation_error"
+    assert record["cases"][1]["response"] == "ready"
+    assert record["passed_count"] == 1
+    assert "private backend detail" not in str(record)
+    post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
+
+
+def test_queued_case_cannot_start_request_after_global_deadline(tmp_path: Path, monkeypatch):
+    config = _config()
+    config["evaluation"]["vllm"]["max_num_seqs"] = 1
+    calls = []
+
+    class Clock:
+        expired = False
+
+        def monotonic(self):
+            return 31.0 if self.expired else 0.0
+
+    clock = Clock()
+
+    class Lease:
+        served_model_name = "new-adapter"
+        host = "127.0.0.1"
+        port = 8000
+
+        def close(self):
+            return True
+
+    class Client:
+        def __init__(self, settings, **kwargs):
+            assert 0 < kwargs["timeout"] <= 30
+
+        def chat(self, messages):
+            calls.append(messages[-1]["content"])
+            clock.expired = True
+            return BackendResponse(message="ready", raw={}, latency_s=0.1)
+
+    monkeypatch.setattr(post_training_eval, "time", clock)
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
+    record = post_training_eval.execute_post_training_evaluation(
+        config, base_model_path=tmp_path, adapter_path=tmp_path,
+        tokenizer_path=tmp_path, validate=lambda: None, environment={},
+        cwd=tmp_path, python_executable="/usr/bin/python3", bindings=_bindings(),
+    )
+    assert calls == ["Say ready"]
+    assert record["failure_code"] == "deadline"
+    assert record["passed_count"] == 1
+    assert record["gate_passed"] is False
+
+
 def test_cleanup_uncertainty_cannot_return_success(tmp_path: Path, monkeypatch):
     class Lease:
         served_model_name = "new-adapter"
@@ -262,7 +469,7 @@ def test_partial_pass_counts_survive_later_failure(tmp_path: Path, monkeypatch, 
 
     if interruption == "deadline":
         class Clock:
-            readings = iter((0.0, 0.0, 31.0))
+            readings = iter((0.0, 0.0, 0.0, 31.0))
 
             def monotonic(self):
                 return next(self.readings)
@@ -278,7 +485,8 @@ def test_partial_pass_counts_survive_later_failure(tmp_path: Path, monkeypatch, 
     )
     assert record["status"] == "failed"
     assert record["failure_code"] == ("identity_changed" if interruption == "identity" else "deadline")
-    assert len(record["cases"]) == 1
-    assert record["passed_count"] == 1
-    assert record["pass_rate"] == 0.5
+    expected_count = 1 if interruption == "identity" else 2
+    assert len(record["cases"]) == expected_count
+    assert record["passed_count"] == expected_count
+    assert record["pass_rate"] == expected_count / 2
     post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())

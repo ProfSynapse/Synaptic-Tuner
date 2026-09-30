@@ -16,7 +16,9 @@ This repository has a few cloud-training constraints that are easy to relearn th
   retain source/model pins, credential isolation, artifact verification, and protection against replaying an uncertain submission. Test doubles must model the provider's documented behavior, not merely repeat our implementation.
 - For prompt/completion training, explicitly review the generation scaffold at the target boundary and keep model-specific chat-template arguments in recipe configuration, consistent with serving. Preserve legacy canonical documents when optional arguments are absent. An explicit null output budget means no request-level token ceiling, not unlimited context, time, or transport size. A completed-text smoke must check natural completion and must not be reported as a writing-quality evaluation.
 
-## Config-First Generation Discipline
+## Config-First Generation and Split Discipline
+
+- Review training/validation coverage across the configured groups before launch. For chronological context-to-completion data, use the existing preparation CLI's opt-in sequence-tail policy when both splits need each group represented. Authenticate ordering from declared lineage, keep equal-sequence cohorts together, and reject training contexts containing held-out targets or their revisions/derivatives. Validation may use earlier training context. Rebuild to a fresh immutable publication; never relabel an existing dataset or silently repair conflicting lineage.
 
 - This repo is format-agnostic. Do not treat the current tool wrapper, CLI shape, or toy dataset format as a runtime truth.
 - For generation and evaluation tasks, do not change runtime code to support one user's current tool schema, wrapper, commands, examples, or dataset shape. Use config, scenario YAML, rubric YAML, schema files, or checked-in declarative config instead.

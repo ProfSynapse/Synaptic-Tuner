@@ -250,32 +250,44 @@ class ContextPackageV2:
 
 @dataclass(frozen=True, slots=True)
 class GroupSplitV2:
-    seed: str
+    seed: str | None
     allocations: tuple[SplitAllocationV1, ...]
     kind: str = "group_hash_rank"
 
     def __post_init__(self) -> None:
-        if self.kind != "group_hash_rank":
-            _invalid("v2 split kind must be group_hash_rank")
-        object.__setattr__(self, "seed", _seed(self.seed, "split seed"))
+        if self.kind not in ("group_hash_rank", "group_sequence_tail"):
+            _invalid("v2 split kind is unsupported")
+        if self.kind == "group_hash_rank":
+            object.__setattr__(self, "seed", _seed(self.seed, "split seed"))
+        elif self.seed is not None:
+            _invalid("group_sequence_tail does not use a seed")
         if type(self.allocations) is not tuple or len(self.allocations) != 2:
-            _invalid("group_hash_rank requires train and validation allocations")
+            _invalid("v2 split requires train and validation allocations")
         if tuple(item.name for item in self.allocations) != ("train", "validation"):
-            _invalid("group_hash_rank allocations must be train then validation")
+            _invalid("v2 split allocations must be train then validation")
 
     @classmethod
     def from_dict(cls, value: object) -> "GroupSplitV2":
-        item = _exact(value, frozenset({"kind", "seed", "allocations"}), "split")
+        if type(value) is not dict:
+            _invalid("split is invalid")
+        fields = (
+            frozenset({"kind", "seed", "allocations"})
+            if value.get("kind") == "group_hash_rank"
+            else frozenset({"kind", "allocations"})
+        )
+        item = _exact(value, fields, "split")
         allocations = item["allocations"]
         if type(allocations) is not list:
             _invalid("split allocations must be a list")
         return cls(
-            item["seed"],  # type: ignore[arg-type]
+            item.get("seed"),  # type: ignore[arg-type]
             tuple(SplitAllocationV1.from_dict(entry) for entry in allocations),
             item["kind"],  # type: ignore[arg-type]
         )
 
     def hashed_recipe(self) -> dict[str, object]:
+        if self.kind == "group_sequence_tail":
+            return {"kind": self.kind, "allocations": [item.to_dict() for item in self.allocations]}
         return {
             "kind": self.kind,
             "seed_sha256": hashlib.sha256(
@@ -285,6 +297,8 @@ class GroupSplitV2:
         }
 
     def to_dict(self) -> dict[str, object]:
+        if self.kind == "group_sequence_tail":
+            return {"kind": self.kind, "allocations": [item.to_dict() for item in self.allocations]}
         return {
             "kind": self.kind,
             "seed": self.seed,
@@ -604,32 +618,65 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
                 _invalid("derivative targets must share one group_id")
 
     group_ids = tuple(dict.fromkeys(lineage[target].group_id for target in targets))
-    if len(group_ids) < 2:
+    if config.split.kind == "group_hash_rank" and len(group_ids) < 2:
         _invalid("group-safe train/validation splitting requires at least two groups")
-    ranked_groups = sorted(
-        group_ids,
-        key=lambda group: (_domain_digest(_GROUP_ORDER_DOMAIN_V2, {"seed": config.split.seed, "group_id": group}), group),
-    )
-    group_sizes = _allocation_counts(config.split.allocations, len(ranked_groups))
-    if any(size == 0 for size in group_sizes):
-        _invalid("group-safe split allocations require a nonempty group in every split")
-    group_splits: dict[str, str] = {}
-    offset = 0
-    for allocation, size in zip(config.split.allocations, group_sizes):
-        for group_id in ranked_groups[offset : offset + size]:
-            group_splits[group_id] = allocation.name
-        offset += size
-
-    target_splits = {
-        target_id: group_splits[lineage[target_id].group_id]
-        for target_id in target_set
-    }
+    if config.split.kind == "group_hash_rank":
+        ranked_groups = sorted(
+            group_ids,
+            key=lambda group: (_domain_digest(_GROUP_ORDER_DOMAIN_V2, {"seed": config.split.seed, "group_id": group}), group),
+        )
+        group_sizes = _allocation_counts(config.split.allocations, len(ranked_groups))
+        if any(size == 0 for size in group_sizes):
+            _invalid("group-safe split allocations require a nonempty group in every split")
+        group_splits: dict[str, str] = {}
+        offset = 0
+        for allocation, size in zip(config.split.allocations, group_sizes):
+            for group_id in ranked_groups[offset : offset + size]:
+                group_splits[group_id] = allocation.name
+            offset += size
+        target_splits = {
+            target_id: group_splits[lineage[target_id].group_id]
+            for target_id in target_set
+        }
+    else:
+        target_splits: dict[str, str] = {}
+        for group_id in group_ids:
+            ordered = sorted(
+                (target for target in targets if lineage[target].group_id == group_id),
+                key=lambda target: (lineage[target].sequence, target),
+            )
+            desired = _allocation_counts(config.split.allocations, len(ordered))[1]
+            cuts = [
+                index for index in range(1, len(ordered))
+                if lineage[ordered[index - 1]].sequence < lineage[ordered[index]].sequence
+            ]
+            if not cuts:
+                _invalid("sequence-tail group has no chronology boundary with both splits")
+            cutoff = min(cuts, key=lambda index: (abs(len(ordered) - index - desired), -(len(ordered) - index)))
+            for target in ordered[:cutoff]:
+                target_splits[target] = "train"
+            for target in ordered[cutoff:]:
+                target_splits[target] = "validation"
+        heldout = {target for target, split in target_splits.items() if split == "validation"}
+        heldout_families = {lineage[target].revision_family for target in heldout}
+        if any(lineage[target].revision_family in heldout_families for target in target_set - heldout):
+            _invalid("a target revision family crosses sequence-tail splits")
+        for target in target_set:
+            if any(ancestor in target_set and target_splits[ancestor] != target_splits[target] for ancestor in _ancestors(target, lineage)):
+                _invalid("derived targets cross sequence-tail splits")
     for package in config.packages:
         package_split = target_splits[package.target_item_id]
         for context_id in package.context_item_ids:
             ancestor_targets = _ancestors(context_id, lineage) & target_set
-            if any(target_splits[ancestor_id] != package_split for ancestor_id in ancestor_targets):
-                _invalid("context descends from a target assigned to a different split")
+            if config.split.kind == "group_hash_rank":
+                if any(target_splits[ancestor_id] != package_split for ancestor_id in ancestor_targets):
+                    _invalid("context descends from a target assigned to a different split")
+            else:
+                closure = (context_id, *_ancestors(context_id, lineage))
+                if any(item in target_set and lineage[item].group_id != lineage[package.target_item_id].group_id for item in closure):
+                    _invalid("context target lineage crosses groups")
+                if package_split == "train" and any(item in heldout or lineage[item].revision_family in heldout_families for item in closure):
+                    _invalid("training context contains held-out target lineage")
 
     rows: list[SftMessagesRowV2] = []
     manifest_lineage: list[dict[str, object]] = []
@@ -681,7 +728,7 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
                 package.target_item_id,
                 package.context_item_ids,
                 group_id,
-                group_splits[group_id],
+                target_splits[package.target_item_id],
                 messages,
             )
         )
@@ -708,6 +755,7 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
     lineage_digest = _domain_digest(_LINEAGE_DOMAIN_V2, manifest_lineage)
     group_ids_sha256 = _stream_digest(tuple(sorted(group_ids)))
     recipe = config.semantic_recipe()
+    split_lineage = [entry.to_dict() for entry in config.lineage] if config.split.kind == "group_sequence_tail" else None
     dataset_basis = {
         "source_bundle_digest": bundle.semantic_identity.bundle_digest,
         "source_structure_set_digest": bundle.semantic_identity.structure_set_digest,
@@ -724,6 +772,8 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
         "row_ids_sha256": row_ids_sha256,
         "split_counts": split_counts,
     }
+    if split_lineage is not None:
+        dataset_basis["split_lineage"] = split_lineage
     dataset_digest = _domain_digest(_DATASET_DOMAIN_V2, dataset_basis)
     dataset_id = "dataset-" + dataset_digest
     manifest = {
@@ -750,6 +800,8 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
         "row_ids_sha256": row_ids_sha256,
         "split_counts": split_counts,
     }
+    if split_lineage is not None:
+        manifest["split_lineage"] = split_lineage
     manifest_raw = _canonical_bytes(manifest)
     identity = DatasetSemanticIdentityV1(
         dataset_id,

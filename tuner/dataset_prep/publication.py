@@ -55,6 +55,7 @@ from .context_messages import (
     MESSAGES_FORMAT,
     ROW_SCHEMA_VERSION_V2,
     DatasetPrepConfigV2,
+    ItemLineageV2,
     build_prepared_dataset_v2,
     _DATASET_DOMAIN_V2,
     _LINEAGE_DOMAIN_V2,
@@ -1002,10 +1003,17 @@ def _validate_recipe_v2(value: object) -> dict[str, object]:
     _digest(transforms["selection_digest"], "target transform digest")
     _nonnegative_int(transforms["fenced_info_count"], "fenced info count", MAX_ROWS)
     _nonnegative_int(transforms["line_prefix_count"], "line prefix count", MAX_ROWS)
-    split = _exact(recipe["split"], frozenset({"kind", "seed_sha256", "allocations"}), "v2 split")
-    if split["kind"] != "group_hash_rank":
+    raw_split = recipe["split"]
+    if type(raw_split) is not dict or raw_split.get("kind") not in ("group_hash_rank", "group_sequence_tail"):
         _invalid("v2 split kind is unsupported")
-    _digest(split["seed_sha256"], "split seed digest")
+    split_fields = (
+        frozenset({"kind", "seed_sha256", "allocations"})
+        if raw_split["kind"] == "group_hash_rank"
+        else frozenset({"kind", "allocations"})
+    )
+    split = _exact(raw_split, split_fields, "v2 split")
+    if split["kind"] == "group_hash_rank":
+        _digest(split["seed_sha256"], "split seed digest")
     allocations = split["allocations"]
     if type(allocations) is not list or len(allocations) != 2:
         _invalid("v2 split allocations are invalid")
@@ -1021,6 +1029,106 @@ def _validate_recipe_v2(value: object) -> dict[str, object]:
     return recipe
 
 
+def _verify_sequence_tail(
+    manifest: dict[str, object], recipe: dict[str, object],
+    rows: list[tuple[str, str, str, tuple[str, ...]]], item_count: int,
+) -> None:
+    raw_lineage = manifest["split_lineage"]
+    expected_count = recipe["context_package"]["lineage_count"]
+    if type(raw_lineage) is not list or len(raw_lineage) != expected_count or len(raw_lineage) > item_count:
+        _invalid("sequence-tail lineage count is invalid")
+    if _domain_digest(_LINEAGE_DOMAIN_V2, raw_lineage) != recipe["context_package"]["lineage_digest"]:
+        _invalid("sequence-tail lineage digest differs")
+    entries = [ItemLineageV2.from_dict(raw) for raw in raw_lineage]
+    by_id = {entry.item_id: entry for entry in entries}
+    if len(by_id) != len(entries):
+        _invalid("sequence-tail lineage IDs are duplicated")
+    for entry in entries:
+        if any(parent not in by_id or by_id[parent].sequence > entry.sequence for parent in entry.derived_from):
+            _invalid("sequence-tail derivation is unresolved or noncausal")
+
+    visiting: set[str] = set()
+    ancestors: dict[str, frozenset[str]] = {}
+
+    def closure(item_id: str) -> frozenset[str]:
+        if item_id in ancestors:
+            return ancestors[item_id]
+        if item_id in visiting:
+            _invalid("sequence-tail derivation is cyclic")
+        visiting.add(item_id)
+        result: set[str] = set()
+        for parent in by_id[item_id].derived_from:
+            result.add(parent)
+            result.update(closure(parent))
+        visiting.remove(item_id)
+        ancestors[item_id] = frozenset(result)
+        return ancestors[item_id]
+
+    for entry in entries:
+        closure(entry.item_id)
+
+    targets: dict[str, tuple[str, str, tuple[str, ...]]] = {}
+    groups: dict[str, list[str]] = {}
+    for target_id, group_id, split, contexts in rows:
+        if target_id not in by_id or by_id[target_id].group_id != group_id or target_id in targets:
+            _invalid("sequence-tail target lineage is invalid")
+        targets[target_id] = (group_id, split, contexts)
+        groups.setdefault(group_id, []).append(target_id)
+    allocations = recipe["split"]["allocations"]
+    train_weight, validation_weight = (item["weight"] for item in allocations)
+    total_weight = train_weight + validation_weight
+    for group_targets in groups.values():
+        ordered = sorted(group_targets, key=lambda target: (by_id[target].sequence, target))
+        count = len(ordered)
+        validation_base = count * validation_weight // total_weight
+        train_remainder = count * train_weight % total_weight
+        validation_remainder = count * validation_weight % total_weight
+        desired = validation_base + int(
+            count * train_weight // total_weight + validation_base < count
+            and validation_remainder > train_remainder
+        )
+        cuts = [
+            index for index in range(1, count)
+            if by_id[ordered[index - 1]].sequence < by_id[ordered[index]].sequence
+        ]
+        if not cuts:
+            _invalid("sequence-tail group lacks a safe chronology boundary")
+        cutoff = min(cuts, key=lambda index: (abs(count - index - desired), -(count - index)))
+        for index, target_id in enumerate(ordered):
+            if targets[target_id][1] != ("train" if index < cutoff else "validation"):
+                _invalid("sequence-tail row assignment is invalid")
+    heldout = {target for target, (_, split, _) in targets.items() if split == "validation"}
+    families = {by_id[target].revision_family for target in heldout}
+    for target, (_, split, contexts) in targets.items():
+        if split == "train" and by_id[target].revision_family in families:
+            _invalid("sequence-tail target revision family crosses splits")
+        if any(
+            parent in targets and (
+                targets[parent][1] != split or targets[parent][0] != targets[target][0]
+            )
+            for parent in closure(target)
+        ):
+            _invalid("sequence-tail target derivation crosses splits or groups")
+        for context in contexts:
+            if context not in by_id:
+                _invalid("sequence-tail context lineage is unresolved")
+            context_members = (context, *closure(context))
+            if any(by_id[member].sequence > by_id[target].sequence for member in context_members):
+                _invalid("sequence-tail context is newer than its target")
+            if any(by_id[member].revision_family == by_id[target].revision_family for member in context_members):
+                _invalid("sequence-tail context duplicates target revision")
+            if any(
+                member in targets and by_id[member].group_id != by_id[target].group_id
+                for member in context_members
+            ):
+                _invalid("sequence-tail referenced target crosses groups")
+            if split == "train" and any(
+                member in heldout or by_id[member].revision_family in families
+                for member in context_members
+            ):
+                _invalid("training context contains held-out lineage")
+
+
 def _verify_bytes_v2(
     path: Path,
     manifest_raw: bytes,
@@ -1028,9 +1136,13 @@ def _verify_bytes_v2(
     *,
     require_content_addressed_name: bool = True,
 ) -> VerifiedPreparedDatasetV1:
+    raw_manifest = _parse_canonical_object(manifest_raw, MAX_MANIFEST_BYTES, "manifest")
+    raw_recipe = raw_manifest.get("recipe")
+    raw_split = raw_recipe.get("split") if type(raw_recipe) is dict else None
+    tail = type(raw_split) is dict and raw_split.get("kind") == "group_sequence_tail"
     manifest = _exact(
-        _parse_canonical_object(manifest_raw, MAX_MANIFEST_BYTES, "manifest"),
-        _MANIFEST_FIELDS_V2,
+        raw_manifest,
+        _MANIFEST_FIELDS_V2 | frozenset({"split_lineage"}) if tail else _MANIFEST_FIELDS_V2,
         "v2 manifest",
     )
     if manifest["schema_version"] != ARTIFACT_SCHEMA_VERSION_V2 or manifest["format"] != MESSAGES_FORMAT:
@@ -1122,6 +1234,7 @@ def _verify_bytes_v2(
     observed_counts = {"train": 0, "validation": 0}
     observed_groups: dict[str, str] = {}
     referenced_items: set[str] = set()
+    tail_rows: list[tuple[str, str, str, tuple[str, ...]]] = []
     for index, line in enumerate(lines):
         row = _exact(_parse_canonical_object(line, MAX_DATASET_BYTES, "dataset row"), _ROW_FIELDS_V2, "v2 row")
         if row["schema_version"] != ROW_SCHEMA_VERSION_V2 or row["format"] != MESSAGES_FORMAT:
@@ -1180,8 +1293,10 @@ def _verify_bytes_v2(
         if row_id != expected_row_id:
             _invalid("v2 row_id does not bind row semantics")
         prior_split = observed_groups.setdefault(group_id, split)
-        if prior_split != split:
+        if not tail and prior_split != split:
             _invalid("v2 group crosses declared splits")
+        if tail:
+            tail_rows.append((target_item_id, group_id, split, tuple(context_item_ids)))
         row_ids.append(row_id)
         observed_counts[split] += 1
         referenced_items.add(target_item_id)
@@ -1198,6 +1313,8 @@ def _verify_bytes_v2(
         _invalid("v2 row IDs digest is invalid")
     if recipe["context_package"]["package_count"] != row_count:
         _invalid("v2 recipe package count is inconsistent")
+    if tail:
+        _verify_sequence_tail(manifest, recipe, tail_rows, item_count)
 
     basis = {
         "source_bundle_digest": bundle_digest,
@@ -1215,6 +1332,8 @@ def _verify_bytes_v2(
         "row_ids_sha256": row_ids_sha256,
         "split_counts": checked_counts,
     }
+    if tail:
+        basis["split_lineage"] = manifest["split_lineage"]
     if _domain_digest(_DATASET_DOMAIN_V2, basis) != dataset_digest:
         _invalid("v2 dataset digest is invalid")
     identity = DatasetSemanticIdentityV1(

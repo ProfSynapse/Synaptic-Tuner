@@ -113,39 +113,53 @@ def execute_post_training_evaluation(
         runtime = start_vllm_runtime(
             startup, cwd=cwd, environment=environment, deadline=deadline,
         )
-        for case in cases:
-            remaining = deadline - time.monotonic()
-            if not math.isfinite(remaining) or remaining <= 0:
-                failure_code = "deadline"
-                break
-            settings = VLLMSettings(
-                model=runtime.served_model_name,
-                scheme="http", host=runtime.host, port=runtime.port, api_key=None,
-                temperature=generation["temperature"], top_p=generation["top_p"],
-                max_tokens=generation["max_tokens"], model_path=None,
-                lora_adapter=None,
-                chat_template_kwargs=generation.get("chat_template_kwargs"),
-            )
-            client = VLLMClient(
-                settings, timeout=min(remaining, 120.0), retries=0,
-                trust_environment=False, allow_redirects=False,
-                max_request_bytes=1 << 20, max_response_bytes=1 << 20,
-            )
-            result = evaluate_cases([case], client)[0]
+        settings = VLLMSettings(
+            model=runtime.served_model_name,
+            scheme="http", host=runtime.host, port=runtime.port, api_key=None,
+            temperature=generation["temperature"], top_p=generation["top_p"],
+            max_tokens=generation["max_tokens"], model_path=None,
+            lora_adapter=None,
+            chat_template_kwargs=generation.get("chat_template_kwargs"),
+        )
+
+        class DeadlineClient:
+            def chat(self, messages):
+                remaining = deadline - time.monotonic()
+                if not math.isfinite(remaining) or remaining <= 0:
+                    raise TimeoutError("evaluation deadline reached")
+                client = VLLMClient(
+                    settings, timeout=min(remaining, 120.0), retries=0,
+                    trust_environment=False, allow_redirects=False,
+                    max_request_bytes=1 << 20, max_response_bytes=1 << 20,
+                )
+                return client.chat(messages)
+
+        results = evaluate_cases(
+            cases, DeadlineClient(), parallel=True,
+            max_workers=min(len(cases), vllm["max_num_seqs"]),
+        )
+        for case, result in zip(cases, results):
             status = result.status
-            if result.error is not None:
-                failure_code = "evaluation_error"
+            if result.error is not None and failure_code is None:
+                failure_code = (
+                    "deadline" if time.monotonic() >= deadline
+                    else "evaluation_error"
+                )
             matched_path = (
                 result.correctness.matched_path
                 if result.correctness is not None else None
             )
             if type(matched_path) is not str or len(matched_path) > 256:
                 matched_path = None
+            oversized = False
             try:
                 response = _response(result.response_text)
             except ValueError:
-                failure_code = "oversized_response"
-                break
+                oversized = True
+                response = None
+                status = "fail"
+                if failure_code is None:
+                    failure_code = "oversized_response"
             record["cases"].append({
                 "id": case.case_id,
                 "status": status,
@@ -157,14 +171,13 @@ def execute_post_training_evaluation(
                     else None
                 ),
                 "matched_path": matched_path,
-                "error_code": "evaluation_error" if result.error is not None else None,
+                "error_code": (
+                    "evaluation_error" if result.error is not None or oversized else None
+                ),
             })
             validate()
-            if failure_code is not None:
-                break
-            if time.monotonic() >= deadline:
+            if failure_code is None and time.monotonic() >= deadline:
                 failure_code = "deadline"
-                break
         record["passed_count"] = sum(case["status"] == "pass" for case in record["cases"])
         record["pass_rate"] = record["passed_count"] / record["case_count"]
         if failure_code is None and len(record["cases"]) == record["case_count"]:

@@ -903,6 +903,19 @@ both places and requires `finish_reason: stop` plus configured rejection of
 thinking-only text. Those assertions qualify completed-text mechanics, not
 chapter quality. Audit the saved replies before authorizing full training.
 
+For a first chapter-writing review, use a few complete context bundles and save
+the generated drafts for the author's review. A nonempty reply and natural stop
+are mechanical checks, not a writing-quality judgment; no LLM judge or prompt
+variation suite is required for that workflow. Private inline scenarios may live
+in a gitignored recipe loaded by the existing `train --job-config` command.
+The 128 KiB aggregate JSON bound covers prompt fields; there is no separate
+per-message byte ceiling. Model context and bounded HTTP transport still apply.
+Same-job requests reuse the existing evaluator's concurrent runner against one
+vLLM server and adapter, with workers bounded by the configured `max_num_seqs`
+and case count. Results retain case order and requests drain before GPU cleanup.
+Longer context and concurrency settings still require GPU qualification; a
+provider-free config plan is not evidence that they fit the selected hardware.
+
 When that exact submit has marker material but no retained call ID, use the same
 inspector with `--inspect-markers` instead of `--call-id`. Supply the exact
 `--journal`, submit-command `--claim-ref`, and named `--modal-profile`. This

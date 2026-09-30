@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import replace
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from tuner.dataset_prep import (
     TargetTransformsV2,
     build_prepared_dataset_v2,
 )
+from tuner.dataset_prep import publication
 from tuner.ingestion import (
     NormalizedItemInputV1,
     load_verified_normalized_bundle_v1,
@@ -122,6 +124,183 @@ def _config(tmp_path: Path):
         ),
     )
     return bundle, ids, documents, config
+
+
+def _tail_config(config, ids):
+    targets = {ids[f"target-{letter}.md"] for letter in "abcde"}
+    lineage = tuple(
+        replace(entry, group_id="series") if entry.item_id in targets else entry
+        for entry in config.lineage
+    )
+    return replace(
+        config, lineage=lineage,
+        split=GroupSplitV2(
+            None,
+            (SplitAllocationV1("train", 4), SplitAllocationV1("validation", 1)),
+            "group_sequence_tail",
+        ),
+    )
+
+
+def _relabel_and_rehash(prepared, index: int, split: str):
+    rows = [json.loads(line) for line in prepared.dataset_raw.splitlines()]
+    rows[index]["split"] = split
+    dataset_raw = b"".join(publication._canonical_bytes(row) + b"\n" for row in rows)
+    manifest = json.loads(prepared.manifest_raw)
+    manifest["dataset_bytes"] = len(dataset_raw)
+    manifest["dataset_sha256"] = hashlib.sha256(dataset_raw).hexdigest()
+    manifest["split_counts"] = {
+        name: sum(row["split"] == name for row in rows)
+        for name in ("train", "validation")
+    }
+    basis = {
+        "source_bundle_digest": manifest["source"]["bundle_digest"],
+        "source_structure_set_digest": manifest["source"]["structure_set_digest"],
+        "projection": manifest["projection"],
+        "projection_digest": manifest["projection_digest"],
+        "recipe": manifest["recipe"],
+        "lineage": manifest["lineage"],
+        "lineage_digest": manifest["lineage_digest"],
+        "group_count": manifest["group_count"],
+        "group_ids_sha256": manifest["group_ids_sha256"],
+        "row_count": manifest["row_count"],
+        "dataset_bytes": manifest["dataset_bytes"],
+        "dataset_sha256": manifest["dataset_sha256"],
+        "row_ids_sha256": manifest["row_ids_sha256"],
+        "split_counts": manifest["split_counts"],
+    }
+    if "split_lineage" in manifest:
+        basis["split_lineage"] = manifest["split_lineage"]
+    manifest["dataset_digest"] = publication._domain_digest(publication._DATASET_DOMAIN_V2, basis)
+    manifest["dataset_id"] = "dataset-" + manifest["dataset_digest"]
+    return manifest, publication._canonical_bytes(manifest), dataset_raw
+
+
+def test_sequence_tail_preserves_rows_and_verifies_authenticated_assignment(tmp_path: Path) -> None:
+    bundle, ids, _documents, legacy = _config(tmp_path)
+    config = _tail_config(legacy, ids)
+    assert DatasetPrepConfigV2.from_dict(config.to_dict()) == config
+    prepared = build_prepared_dataset_v2(bundle, config)
+    old = build_prepared_dataset_v2(bundle, legacy)
+    assert [row.messages for row in prepared.rows] == [row.messages for row in old.rows]
+    assert [row.split for row in prepared.rows] == ["train"] * 4 + ["validation"]
+    assert "split_lineage" in prepared.manifest
+    assert "split_lineage" not in old.manifest
+    assert prepared.manifest["recipe"]["split"] == {
+        "kind": "group_sequence_tail",
+        "allocations": [{"name": "train", "weight": 4}, {"name": "validation", "weight": 1}],
+    }
+    assert publication._verify_bytes_v2(
+        tmp_path / prepared.identity.dataset_id,
+        prepared.manifest_raw, prepared.dataset_raw,
+    ).semantic_identity == prepared.identity
+    rows = [
+        (row.target_item_id, row.group_id, row.split, row.context_item_ids)
+        for row in prepared.rows
+    ]
+    wrong = list(rows)
+    target, group, _split, contexts = wrong[0]
+    wrong[0] = (target, group, "validation", contexts)
+    with pytest.raises(DatasetPrepValidationError, match="assignment"):
+        publication._verify_sequence_tail(
+            dict(prepared.manifest), prepared.manifest["recipe"], wrong,
+            bundle.semantic_identity.item_count,
+        )
+
+
+def test_sequence_tail_keeps_equal_sequence_cohort_together(tmp_path: Path) -> None:
+    bundle, ids, _documents, legacy = _config(tmp_path)
+    config = _tail_config(legacy, ids)
+    lineage = _lineage_with(config.lineage, ids["target-d.md"], sequence=14)
+    prepared = build_prepared_dataset_v2(bundle, replace(config, lineage=lineage))
+    assert [row.split for row in prepared.rows] == ["train"] * 3 + ["validation"] * 2
+    assert publication._verify_bytes_v2(
+        tmp_path / prepared.identity.dataset_id,
+        prepared.manifest_raw, prepared.dataset_raw,
+    ).semantic_identity == prepared.identity
+
+
+def test_sequence_tail_rejects_single_target_group_and_revision_leak(tmp_path: Path) -> None:
+    bundle, ids, _documents, legacy = _config(tmp_path)
+    config = replace(legacy, split=GroupSplitV2(
+        None,
+        (SplitAllocationV1("train", 4), SplitAllocationV1("validation", 1)),
+        "group_sequence_tail",
+    ))
+    with pytest.raises(DatasetPrepValidationError, match="chronology boundary"):
+        build_prepared_dataset_v2(bundle, config)
+    config = _tail_config(legacy, ids)
+    lineage = _lineage_with(config.lineage, ids["context-root.md"], revision_family="target-e")
+    packages = (
+        replace(config.packages[0], context_item_ids=(ids["context-root.md"], ids["context-a.md"])),
+        *config.packages[1:],
+    )
+    with pytest.raises(DatasetPrepValidationError, match="held-out target lineage"):
+        build_prepared_dataset_v2(bundle, replace(config, lineage=lineage, packages=packages))
+
+
+def test_sequence_tail_allows_validation_to_use_prior_training_target(tmp_path: Path) -> None:
+    bundle, ids, _documents, legacy = _config(tmp_path)
+    config = _tail_config(legacy, ids)
+    packages = (*config.packages[:-1], replace(config.packages[-1], context_item_ids=(ids["target-d.md"],)))
+    prepared = build_prepared_dataset_v2(bundle, replace(config, packages=packages))
+    assert prepared.rows[-2].split == "train"
+    assert prepared.rows[-1].split == "validation"
+    assert prepared.rows[-1].context_item_ids == (ids["target-d.md"],)
+    retained = tmp_path / prepared.identity.dataset_id
+    retained.mkdir(mode=0o700)
+    publication._write_member(retained / "manifest.json", prepared.manifest_raw)
+    publication._write_member(retained / "dataset.jsonl", prepared.dataset_raw)
+    assert publication.verify_prepared_dataset_v2(retained).semantic_identity == prepared.identity
+
+
+def test_sequence_tail_rejects_transitive_heldout_revision_and_target_family_crossing(tmp_path: Path) -> None:
+    bundle, ids, _documents, legacy = _config(tmp_path)
+    config = _tail_config(legacy, ids)
+    lineage = _lineage_with(config.lineage, ids["context-root.md"], revision_family="target-e")
+    lineage = _lineage_with(lineage, ids["context-a.md"], derived_from=(ids["context-root.md"],))
+    packages = tuple(
+        replace(package, context_item_ids=(ids["context-b.md"],))
+        if package.target_item_id == ids["target-e.md"] else package for package in config.packages
+    )
+    with pytest.raises(DatasetPrepValidationError, match="held-out target lineage"):
+        build_prepared_dataset_v2(bundle, replace(config, lineage=lineage, packages=packages))
+    same_family = _lineage_with(config.lineage, ids["target-e.md"], revision_family="target-a")
+    with pytest.raises(DatasetPrepValidationError, match="revision family crosses"):
+        build_prepared_dataset_v2(bundle, replace(config, lineage=same_family))
+
+
+def test_sequence_tail_assignment_does_not_depend_on_package_array_order(tmp_path: Path) -> None:
+    bundle, ids, _documents, legacy = _config(tmp_path)
+    config = _tail_config(legacy, ids)
+    forward = build_prepared_dataset_v2(bundle, config)
+    reversed_rows = build_prepared_dataset_v2(bundle, replace(config, packages=tuple(reversed(config.packages))))
+    assert {row.target_item_id: row.split for row in forward.rows} == {
+        row.target_item_id: row.split for row in reversed_rows.rows
+    }
+
+
+def test_artifact_verifier_rejects_rehashed_wrong_tail_assignment_and_old_mixed_group(tmp_path: Path) -> None:
+    bundle, ids, _documents, legacy = _config(tmp_path)
+    tail = build_prepared_dataset_v2(bundle, _tail_config(legacy, ids))
+    manifest, manifest_raw, dataset_raw = _relabel_and_rehash(tail, 0, "validation")
+    wrong_tail = tmp_path / manifest["dataset_id"]
+    wrong_tail.mkdir(mode=0o700)
+    publication._write_member(wrong_tail / "manifest.json", manifest_raw)
+    publication._write_member(wrong_tail / "dataset.jsonl", dataset_raw)
+    with pytest.raises(DatasetPrepValidationError, match="assignment"):
+        publication.verify_prepared_dataset_v2(wrong_tail)
+    old = build_prepared_dataset_v2(bundle, legacy)
+    old_split = old.rows[0].split
+    manifest, manifest_raw, dataset_raw = _relabel_and_rehash(
+        old, 1, "validation" if old_split == "train" else "train",
+    )
+    wrong_old = tmp_path / manifest["dataset_id"]
+    wrong_old.mkdir(mode=0o700)
+    publication._write_member(wrong_old / "manifest.json", manifest_raw)
+    publication._write_member(wrong_old / "dataset.jsonl", dataset_raw)
+    with pytest.raises(DatasetPrepValidationError, match="group crosses declared splits"):
+        publication.verify_prepared_dataset_v2(wrong_old)
 
 
 def test_five_generic_packages_render_exact_two_message_rows_and_safe_manifest(tmp_path: Path) -> None:

@@ -187,3 +187,43 @@ def test_opt_in_evaluation_rejects_unbound_or_invalid_controls():
             compile_packaged_sft_workload(
                 resolved_config=CanonicalDocument.from_mapping(candidate),
             )
+
+
+@pytest.mark.parametrize("field", ["question", "system", "messages"])
+@pytest.mark.parametrize("content", ["x" * 9000, "雪" * 3000], ids=["ascii", "utf8"])
+def test_long_prompt_fields_use_aggregate_bound_not_per_message_cap(field, content):
+    from tuner.training.post_training import validate_post_training_config
+
+    config = _evaluation()
+    case = config["evaluation"]["scenarios"][0]
+    case[field] = ([{"role": "user", "content": content}]
+                   if field == "messages" else content)
+    assert len(content.encode("utf-8")) > 8192
+    assert validate_post_training_config(config) == config
+
+
+def test_prompt_payload_still_rejects_one_byte_beyond_aggregate_bound():
+    import json
+    from tuner.training.post_training import validate_post_training_config
+
+    config = _evaluation()
+    case = config["evaluation"]["scenarios"][0]
+    case["question"] = ""
+    overhead = len(json.dumps(config, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8"))
+    case["question"] = "x" * (128 * 1024 - overhead)
+    assert validate_post_training_config(config) == config
+    case["question"] += "x"
+    with pytest.raises(ValueError, match="bounded JSON"):
+        validate_post_training_config(config)
+
+
+@pytest.mark.parametrize("field", ["question", "system", "messages"])
+def test_removing_prompt_size_cap_preserves_prompt_type_checks(field):
+    from tuner.training.post_training import validate_post_training_config
+
+    config = _evaluation()
+    case = config["evaluation"]["scenarios"][0]
+    case[field] = ([{"role": "user", "content": 123}]
+                   if field == "messages" else 123)
+    with pytest.raises(ValueError):
+        validate_post_training_config(config)
