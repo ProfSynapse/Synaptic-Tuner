@@ -1,7 +1,7 @@
 # Qwen 3.5 4B: full-training flight plan (not launch-ready)
 
-Status: representative rehearsal training verified; chapter evaluation still
-unqualified. Full-epoch training remains held. The private
+Status: representative train/save/serve/chapter mechanics verified; human
+writing-quality review remains pending. Full-epoch training remains held. The private
 full-training recipe remains a candidate; no full run is submitted. The successful
 two-step [same-job smoke](../../Trainers/recipes/qwen35_4b_modal_train_eval_smoke.yaml)
 qualified the isolated SFT → saved LoRA → same verified base snapshot → vLLM →
@@ -26,8 +26,32 @@ content assertion. The original exception detail was discarded. A local
 real-client/payload/assertion test with fake HTTP passed all three cases; that
 does not qualify the live server. Keep the consumed attempt and its artifacts;
 measure the live request boundary with reviewed closed diagnostics before
-changing settings. Writing quality and 32K concurrent chapter completion remain
-unproven. Full training, GGUF and publication remain held.
+changing settings. At that checkpoint, writing quality and 32K concurrent chapter
+completion were unproven. Full training, GGUF and publication remained held.
+
+## Successful representative follow-through
+
+The fresh ordinary rehearsal from pushed source
+`9f8ed4302bedb3409e670eac78294c70833f72e7` passed end to end with the same
+configuration/workload as the failed request attempt. Authenticated metrics
+report two steps in 146.3 seconds. All five required training artifacts and
+the signed evaluation record were verified and saved. The adapter archive is
+169,922,560 bytes, below the existing 192 MiB per-artifact bound.
+
+The three held-out chapter cases from different series passed their configured
+nonempty-text and natural-stop checks, with no request errors. Saved replies
+contain 730, 799 and 722 whitespace-delimited words; request latencies are
+93.204771, 114.119370 and 92.746525 seconds. The authenticated workload confirms
+32K context, three sequences, vLLM 0.26.0, bf16, thinking disabled, and no
+request-level output-token ceiling. Actual decode settings are temperature 0.7
+and top-p 0.9. The evaluator dispatches the cases concurrently; the retained
+record does not measure their temporal overlap.
+
+This is one successful representative rehearsal, not statistical reliability,
+an explanation of the earlier discarded request errors, or a prose-quality
+score. The new closed diagnostics did not change deadlines, retries, prompts,
+model, data or concurrency; retain them to diagnose any recurrence. The author
+still needs to read the saved drafts. No full epoch or GGUF was launched.
 
 ## Proposed training shape
 
