@@ -135,11 +135,18 @@ def execute_post_training_evaluation(
                 if not math.isfinite(remaining) or remaining <= 0:
                     raise TimeoutError("evaluation deadline reached")
                 client = VLLMClient(
-                    settings, timeout=min(remaining, 120.0), retries=0,
+                    settings, timeout=remaining, retries=0,
                     trust_environment=False, allow_redirects=False,
                     max_request_bytes=1 << 20, max_response_bytes=1 << 20,
                 )
-                return client.chat(messages)
+                # Requests uses connect/read inactivity timeouts, not a total
+                # wall-clock deadline. Drain and close its transport normally,
+                # then reject a late reply before the assertion runner sees it.
+                response = client.chat(messages)
+                remaining = deadline - time.monotonic()
+                if not math.isfinite(remaining) or remaining <= 0:
+                    raise TimeoutError("evaluation deadline reached")
+                return response
 
         results = evaluate_cases(
             cases, DeadlineClient(), parallel=True,

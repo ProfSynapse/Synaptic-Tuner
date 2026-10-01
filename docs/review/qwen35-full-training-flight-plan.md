@@ -128,21 +128,27 @@ not establish raw-byte precision or capacity beyond this sampled two-step worklo
 
 Evaluation passed two of three configured mechanics cases: case 0 in 80.649603
 seconds and case 2 in 66.099006 seconds. Case 1 returned `request_timeout` at
-120.007829 seconds with no response. This reached the existing 120-second
+120.007829 seconds with no response. This reached the then-existing 120-second
 per-request runtime limit, which is not YAML-configurable. No OOM diagnostic
 was reported. The two successful output texts remain inside the saved
 evaluation JSON, not standalone chapter files; author quality review remains
 pending. The failed evaluation gate does not undo training-artifact verification.
-No retry or new paid launch is authorized. Full training, GGUF and publication
-remain held.
+Attempt `modal-34879e001230749c84e9d714` has consumed its submission authority
+and cannot be replayed. One separately approved fresh batch-4/accumulation-2
+smoke remains pending fix review and release gates; it has not launched.
+Full training, GGUF and publication remain held.
 
-The private recipe's 1200-second total evaluation window cannot lengthen that
-request limit through config alone. The proposed runtime adjustment would use
-the remaining existing evaluation deadline instead of the fixed 120-second
-clamp, retaining zero retries, parallelism, request/response bounds and cleanup.
-This needs no new timeout field or schema knob, but requires separate review
-and tests of actual deadline semantics before claiming a whole-call bound.
-No runtime or recipe change is implemented here.
+The narrow runtime correction removes that clamp and uses the remaining
+existing evaluation deadline after startup and elapsed case work. It rejects
+expired requests before I/O and late replies before assertions, retaining zero
+retries, parallelism, request/response bounds and cleanup. No new timeout field
+or recipe change is needed. The 66 provider-free evaluator/transport tests
+passed; independent review and release qualification remain required.
+Requests' timeout is connect/read inactivity, not a strict total HTTP timer;
+slowly arriving bounded bodies can overrun the window. Requests drain before
+normal runtime cleanup, which uses bounded TERM/KILL. Evaluation is synchronous
+in the packaged worker; the configured 1800-second provider execution timeout
+is the outer backstop, not proof that cleanup ran after forced termination.
 
 ## Proposed training shape
 
@@ -226,9 +232,10 @@ five training artifacts plus separate evaluation record.
 - Current inline post-training config is at most **128 KiB**, with at most **16**
   messages per case and **32** cases. There is no separate per-message byte cap;
   the canonical config and the existing **1 MiB** HTTP request bound remain.
-  Evaluation startup and total timeout are separately
-  configurable (candidate 300/1800 seconds), but each request is hard-bounded at
-  **120 seconds** and each retained response at **64 KiB**. Large context bundles
+  Evaluation startup and total timeout are separately configurable; requests
+  use the remaining evaluation window for HTTP inactivity and reply acceptance,
+  subject to the deadline limitations above. Each retained response remains
+  bounded at **64 KiB**. Large context bundles
   or chapters that exceed these limits cannot be truthfully tested by splitting,
   truncating, or calling `max_tokens: null` an unlimited-output mode.
 
@@ -239,9 +246,9 @@ selection. This holds out later chapter targets in known series; it is not an
 unseen-series generalization benchmark. Never relabel the old publication.
 Retain complete original user contexts without assistant targets or a system
 prompt. There is no judge, prompt-variation suite, or automatic prose-quality
-verdict. The 120-second per-request and 64-KiB retained-response
-bounds remain measured risks: revisit them only if an actual representative
-generation exceeds them.
+verdict. The evaluation deadline and 64-KiB retained-response bound remain
+measured risks; honoring the configured window does not qualify complete
+generation beyond those limits.
 
 ## Bounded rehearsal before the epoch
 

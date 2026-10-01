@@ -491,8 +491,225 @@ def test_queued_case_cannot_start_request_after_global_deadline(tmp_path: Path, 
     )
     assert calls == ["Say ready"]
     assert record["failure_code"] == "deadline"
-    assert record["passed_count"] == 1
+    assert record["passed_count"] == 0
     assert record["gate_passed"] is False
+    assert all(case["response"] is None for case in record["cases"])
+
+
+@pytest.mark.parametrize("startup_elapsed,read_gaps,expected_timeouts,passed", (
+    (20.0, ((150.0,), (50.0,)), (280.0, 130.0), 2),
+    (300.0, (), (), 0),
+    # Requests permits a body that trickles for longer than its inactivity
+    # timeout when every gap is shorter. Our deadline rejects that late body.
+    (20.0, ((90.0, 90.0, 90.0, 90.0),), (280.0,), 0),
+))
+def test_real_client_uses_remaining_deadline_and_rejects_late_bodies(
+    tmp_path, monkeypatch, startup_elapsed, read_gaps, expected_timeouts, passed,
+):
+    import requests
+    from types import SimpleNamespace
+    from Evaluator import base_client
+    from tests.evaluator.test_http_transport_policy import Session, Response
+    clock = SimpleNamespace(now=0.0)
+    timers = SimpleNamespace(monotonic=lambda: clock.now, perf_counter=lambda: clock.now)
+    config = _config()
+    config["evaluation"]["timeout_seconds"] = 300
+    config["evaluation"]["vllm"]["max_num_seqs"] = 1
+    config["evaluation"]["generation"].update(max_tokens=None, chat_template_kwargs={"enable_thinking": False})
+    sessions, timeouts, closed = [], [], []
+
+    class TimedResponse(Response):
+        def iter_content(self, chunk_size):
+            body = json.dumps(self.payload).encode()
+            for index, gap in enumerate(self.gaps):
+                if gap > self.timeout:
+                    raise requests.ReadTimeout("closed fixture")
+                clock.now += gap
+                low = len(body) * index // len(self.gaps)
+                high = len(body) * (index + 1) // len(self.gaps)
+                yield body[low:high]
+
+    class TimedSession(Session):
+        def request(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            assert self.trust_env is False and kwargs["allow_redirects"] is False
+            assert kwargs["stream"] is True
+            payload = json.loads(kwargs["data"])
+            assert "max_tokens" not in payload and "max_completion_tokens" not in payload
+            assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+            timeouts.append(kwargs["timeout"])
+            self.response.timeout = kwargs["timeout"]
+            return self.response
+
+    def session():
+        index = len(sessions)
+        assert index < len(read_gaps), "expired queued case performed HTTP I/O"
+        response = TimedResponse({"choices": [{"message": {"content": "ready"}}]})
+        response.gaps = read_gaps[index]
+        value = TimedSession(response)
+        sessions.append(value)
+        return value
+
+    class Lease:
+        served_model_name = "new-adapter"
+        host, port = "127.0.0.1", 8000
+        def close(self):
+            assert all(item.closed and item.response.closed for item in sessions)
+            closed.append(True)
+            return True
+
+    def start(*args, **kwargs):
+        assert kwargs["deadline"] == 300.0
+        clock.now += startup_elapsed
+        return Lease()
+
+    monkeypatch.setattr(post_training_eval, "time", timers)
+    monkeypatch.setattr(base_client, "time", timers)
+    monkeypatch.setattr(base_client.requests, "Session", session)
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", start)
+    record = post_training_eval.execute_post_training_evaluation(
+        config, base_model_path=tmp_path, adapter_path=tmp_path, tokenizer_path=tmp_path,
+        validate=lambda: None, environment={}, cwd=tmp_path,
+        python_executable=sys.executable, bindings=_bindings(),
+    )
+    assert timeouts == list(expected_timeouts)
+    assert record["passed_count"] == passed and record["gate_passed"] is (passed == 2)
+    assert closed == [True]
+    assert [case["id"] for case in record["cases"]] == ["one", "two"]
+    if passed:
+        assert [case["latency_seconds"] for case in record["cases"]] == [150.0, 50.0]
+        assert record["status"] == "completed"
+    else:
+        assert record["failure_code"] == "deadline"
+        assert all(case["status"] == "fail" and case["response"] is None for case in record["cases"])
+    post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
+
+
+def test_real_requests_socket_accepts_elapsed_over_120_within_evaluation_deadline(tmp_path, monkeypatch):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from types import SimpleNamespace
+    from Evaluator import base_client
+    clock = SimpleNamespace(now=0.0)
+    timers = SimpleNamespace(monotonic=lambda: clock.now, perf_counter=lambda: clock.now)
+    config = _config()
+    config["evaluation"].update(timeout_seconds=300, max_cases=1)
+    config["evaluation"]["scenarios"] = config["evaluation"]["scenarios"][:1]
+    requests_seen, timeouts, closed = [], [], []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+        def do_POST(self):
+            assert self.path == "/v1/chat/completions"
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests_seen.append(payload)
+            # Simulate elapsed generation time while retaining a real local
+            # TCP request/response through the unmodified Requests Session.
+            clock.now += 150.0
+            body = json.dumps({"choices": [{"message": {"content": "ready"}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    real_client = vllm_client.VLLMClient
+
+    def observe_client(*args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return real_client(*args, **kwargs)
+
+    class Lease:
+        served_model_name = "new-adapter"
+        host, port = server.server_address
+        def close(self):
+            assert len(requests_seen) == 1
+            closed.append(True)
+            return True
+
+    def start(*args, **kwargs):
+        assert kwargs["deadline"] == 300.0
+        clock.now += 20.0
+        return Lease()
+
+    monkeypatch.setattr(post_training_eval, "time", timers)
+    monkeypatch.setattr(base_client, "time", timers)
+    monkeypatch.setattr(vllm_client, "VLLMClient", observe_client)
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", start)
+    try:
+        record = post_training_eval.execute_post_training_evaluation(
+            config, base_model_path=tmp_path, adapter_path=tmp_path, tokenizer_path=tmp_path,
+            validate=lambda: None, environment={}, cwd=tmp_path,
+            python_executable=sys.executable, bindings=_bindings(),
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert timeouts == [280.0] and closed == [True]
+    assert record["gate_passed"] is True and record["passed_count"] == 1
+    assert record["cases"][0]["response"] == "ready"
+    assert record["cases"][0]["latency_seconds"] == 150.0
+    assert requests_seen[0]["model"] == "new-adapter"
+    post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
+
+
+def test_late_parallel_http_results_drain_before_runtime_cleanup(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from Evaluator import base_client
+    from tests.evaluator.test_http_transport_policy import Session, Response
+    config = _config()
+    barrier = threading.Barrier(2, timeout=5)
+    guard = threading.Lock()
+    state = {"now": 0.0, "active": 0, "peak": 0, "closed": False}
+    sessions = []
+
+    class ParallelSession(Session):
+        def request(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            assert kwargs["timeout"] == 30.0
+            with guard:
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+            barrier.wait()
+            state["now"] = 31.0
+            return self.response
+        def close(self):
+            super().close()
+            with guard:
+                state["active"] -= 1
+
+    def session():
+        value = ParallelSession(Response({"choices": [{"message": {"content": "ready"}}]}))
+        sessions.append(value)
+        return value
+
+    class Lease:
+        served_model_name = "new-adapter"
+        host, port = "127.0.0.1", 8000
+        def close(self):
+            assert state["active"] == 0
+            assert len(sessions) == 2 and all(item.closed and item.response.closed for item in sessions)
+            state["closed"] = True
+            return True
+
+    monkeypatch.setattr(post_training_eval, "time", SimpleNamespace(monotonic=lambda: state["now"]))
+    monkeypatch.setattr(base_client.requests, "Session", session)
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    record = post_training_eval.execute_post_training_evaluation(
+        config, base_model_path=tmp_path, adapter_path=tmp_path, tokenizer_path=tmp_path,
+        validate=lambda: None, environment={}, cwd=tmp_path,
+        python_executable=sys.executable, bindings=_bindings(),
+    )
+    assert state["peak"] == 2 and state["closed"] is True
+    assert record["failure_code"] == "deadline" and record["gate_passed"] is False
+    assert record["passed_count"] == 0
+    assert all(case["status"] == "fail" and case["response"] is None for case in record["cases"])
 
 
 def test_cleanup_uncertainty_cannot_return_success(tmp_path: Path, monkeypatch):
@@ -578,15 +795,18 @@ def test_partial_pass_counts_survive_later_failure(tmp_path: Path, monkeypatch, 
         checks.append(1)
         if interruption == "identity" and len(checks) >= 2:
             raise ValueError("changed")
+        if interruption == "deadline" and len(checks) >= 2:
+            clock.now = 31.0
 
     if interruption == "deadline":
         class Clock:
-            readings = iter((0.0, 0.0, 0.0, 31.0))
+            now = 0.0
 
             def monotonic(self):
-                return next(self.readings)
+                return self.now
 
-        monkeypatch.setattr(post_training_eval, "time", Clock())
+        clock = Clock()
+        monkeypatch.setattr(post_training_eval, "time", clock)
     monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
     monkeypatch.setattr(vllm_client, "VLLMClient", Client)
     config = _config()

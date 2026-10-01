@@ -950,6 +950,15 @@ per-message byte ceiling. Model context and bounded HTTP transport still apply.
 Same-job requests reuse the existing evaluator's concurrent runner against one
 vLLM server and adapter, with workers bounded by the configured `max_num_seqs`
 and case count. Results retain case order and requests drain before GPU cleanup.
+Same-job requests use the remaining configured evaluation window after startup
+and elapsed case work; they have no separate 120-second clamp. Expired cases
+do not start requests, and replies returned after the deadline cannot reach
+correctness assertions. Requests' HTTP timeout bounds connect/read inactivity,
+not total wall time: a slowly arriving bounded body can overrun that window.
+Normal returns/errors drain request workers before bounded TERM/KILL runtime
+cleanup. Evaluation runs synchronously in the packaged worker, without a
+separate evaluation-child timer; the provider Function's configured execution
+timeout is the outer backstop, not a guarantee that finally/cleanup completed.
 Longer context and concurrency settings still require GPU qualification; a
 provider-free config plan is not evidence that they fit the selected hardware.
 
