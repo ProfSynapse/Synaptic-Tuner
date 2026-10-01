@@ -32,7 +32,7 @@ from tuner.training.modal_host_effects import (
 from tuner.execution.providers.modal.bounded_volume_read import (
     BoundedModalVolumeReader, BoundedVolumeReadError, _https_url,
 )
-from tuner.execution.providers.modal.contracts import operation_path
+from tuner.execution.providers.modal.contracts import operation_path, provider_entry_identity
 
 
 _NAMESPACE = "standalone-training"
@@ -46,12 +46,26 @@ _MAX_CALL = 1024
 _MAX_MARKERS = 4096
 _MAX_FIXED_RESULT = 512
 _MAX_ARTIFACT_BYTES = 192 * 1024 * 1024
+_MAX_ARTIFACT_TOTAL_BYTES = 256 * 1024 * 1024
 _FIRST_BLOCK_LIMIT = 1024 * 1024
 _MAX_BLOCK_URLS = 64
 # Same closed physical-record budget as the worker; avoid importing ML runtime dependencies.
 _MAX_EVALUATION_RECORD_BYTES = 16 * 1024 * 1024
+_MAX_COMPLETION_RECORD_BYTES = 64 * 1024
 _RESULT_SCHEMA = "synaptic-modal-packaged-worker-result/v1"
 _RESULT_SCHEMA_V2 = "synaptic-modal-packaged-worker-result/v2"
+_PHASE_SCHEMA = "synaptic-modal-packaged-phase/v1"
+_PHASE_PREFIX = "SYNAPTIC_PHASE "
+_PHASE_LIMIT = 256
+_PHASE_RECORD_BYTES = 512
+_PHASE_MESSAGE_BYTES = 4096
+_PHASE_RESPONSE_BYTES = 256 * 1024
+_PHASES = frozenset((
+    "TRAINER_EXECUTE", "TRAINING_PUBLICATION", "TRAINING_ARTIFACT_COMMIT",
+    "TRAINING_CONTROL_COMMIT", "EVALUATION_PREPARE", "EVALUATION_IDENTITY_VALIDATE",
+    "VLLM_PREPARE", "VLLM_SPAWN", "VLLM_READINESS", "CHAT_BATCH", "CHAT_REQUEST",
+    "VLLM_CLEANUP", "EVALUATION_PUBLICATION", "EVALUATION_ARTIFACT_COMMIT",
+))
 _WORKER_FAILURE_STAGES = (
     "ENTRYPOINT_SETUP", "ENTRYPOINT_IMPORTS", "ENTRYPOINT_DISPATCH_AUTH",
     "ENTRYPOINT_PROVIDER_ID", "ENTRYPOINT_VOLUME_ID", "ENTRYPOINT_CALL_ID",
@@ -291,8 +305,14 @@ def _classify_fixed_failure(output: object, api_pb2: object, serialize: object) 
 
 
 async def inspect_call(client: object, call_id: str, api_pb2: object,
-                       serialize: object) -> str:
+                       serialize: object, *, include_provider_status: bool = False) -> str | dict:
     """Poll one raw response; never unpickle or consume provider output."""
+    provider_status = None
+
+    def finish(category: str):
+        return ({"result": category, "provider_status": provider_status}
+                if include_provider_status else category)
+
     request = api_pb2.FunctionGetOutputsRequest(
         function_call_id=call_id, timeout=0, last_entry_id="0-0",
         clear_on_success=False, requested_at=time.time(),
@@ -303,19 +323,32 @@ async def inspect_call(client: object, call_id: str, api_pb2: object,
             client.stub.FunctionGetOutputs(request, retry=None, timeout=15), timeout=16,
         )
     except Exception:
-        return "POLL_UNAVAILABLE"
+        return finish("POLL_UNAVAILABLE")
     try:
         if (type(response) is not api_pb2.FunctionGetOutputsResponse
                 or type(response.num_unfinished_inputs) is not int
                 or response.num_unfinished_inputs < 0):
-            return "INVALID_RESPONSE"
+            return finish("INVALID_RESPONSE")
         if len(response.outputs) == 0:
-            return "PENDING" if response.num_unfinished_inputs > 0 else "OUTPUT_EXPIRED"
+            return finish("PENDING" if response.num_unfinished_inputs > 0 else "OUTPUT_EXPIRED")
         if len(response.outputs) != 1 or response.outputs[0].idx != 0:
-            return "INVALID_RESPONSE"
+            return finish("INVALID_RESPONSE")
         status = response.outputs[0].result.status
+        if type(status) is not int:
+            return finish("INVALID_RESPONSE")
+        # Explicit finite projection, never descriptor names or provider text.
+        provider_status = {
+            api_pb2.GenericResult.GENERIC_STATUS_SUCCESS: "SUCCESS",
+            api_pb2.GenericResult.GENERIC_STATUS_FAILURE: "FAILURE",
+            api_pb2.GenericResult.GENERIC_STATUS_TERMINATED: "TERMINATED",
+            api_pb2.GenericResult.GENERIC_STATUS_TIMEOUT: "TIMEOUT",
+            api_pb2.GenericResult.GENERIC_STATUS_INIT_FAILURE: "INIT_FAILURE",
+            api_pb2.GenericResult.GENERIC_STATUS_INTERNAL_FAILURE: "INTERNAL_FAILURE",
+            api_pb2.GenericResult.GENERIC_STATUS_IDLE_TIMEOUT: "IDLE_TIMEOUT",
+            api_pb2.GenericResult.GENERIC_STATUS_MEMORY_MANAGER_EVICTION: "MEMORY_MANAGER_EVICTION",
+        }.get(status, "UNKNOWN")
         if status == api_pb2.GenericResult.GENERIC_STATUS_SUCCESS:
-            return _classify_fixed_failure(response.outputs[0], api_pb2, serialize)
+            return finish(_classify_fixed_failure(response.outputs[0], api_pb2, serialize))
         if status in {
                 api_pb2.GenericResult.GENERIC_STATUS_FAILURE,
                 api_pb2.GenericResult.GENERIC_STATUS_TERMINATED,
@@ -325,10 +358,118 @@ async def inspect_call(client: object, call_id: str, api_pb2: object,
                 api_pb2.GenericResult.GENERIC_STATUS_IDLE_TIMEOUT,
                 api_pb2.GenericResult.GENERIC_STATUS_MEMORY_MANAGER_EVICTION,
         }:
-            return "PROVIDER_FAILURE"
-        return "INVALID_RESPONSE"
+            return finish("PROVIDER_FAILURE")
+        return finish("INVALID_RESPONSE")
     except Exception:
-        return "INVALID_RESPONSE"
+        provider_status = None
+        return finish("INVALID_RESPONSE")
+
+
+def _phase_filters(binding, call_id):
+    """Only identifiers authenticated by the retained submit binding are allowed."""
+    try:
+        facts = binding.provider_facts
+        values = (facts.app_id, facts.function_id, call_id)
+        for value, prefix in zip(values, ("ap-", "fu-", "fc-")):
+            if (type(value) is not str or not value.startswith(prefix)
+                    or len(value) > _MAX_CALL or safe_ref(value, "provider_ref") != value):
+                raise ValueError
+        return values
+    except Exception:
+        raise DiagnosticUnavailable("JOURNAL_INVALID") from None
+
+
+def _phase_record(line):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError
+            result[key] = value
+        return result
+
+    if (len(line.encode("utf-8")) > _PHASE_RECORD_BYTES
+            or any(ord(character) < 32 for character in line)):
+        raise ValueError
+    record = json.loads(line[len(_PHASE_PREFIX):], object_pairs_hook=unique)
+    if (type(record) is not dict or set(record) != {
+            "schema_version", "phase", "edge", "elapsed_ms", "request_ordinal"}
+            or record["schema_version"] != _PHASE_SCHEMA
+            or type(record["phase"]) is not str or record["phase"] not in _PHASES
+            or type(record["edge"]) is not str or record["edge"] not in {"START", "RETURN", "ERROR"}
+            or type(record["elapsed_ms"]) is not int
+            or not 0 <= record["elapsed_ms"] <= 86400000):
+        raise ValueError
+    ordinal = record["request_ordinal"]
+    if record["phase"] == "CHAT_REQUEST":
+        if type(ordinal) is not int or not 1 <= ordinal <= 32:
+            raise ValueError
+    elif ordinal is not None:
+        raise ValueError
+    # Emit only the validated finite vocabulary and bounded integers.
+    return {key: record[key] for key in ("phase", "edge", "elapsed_ms", "request_ordinal")}
+
+
+async def inspect_phase_trace(client, binding, call_id, api_pb2):
+    """One pinned unary log snapshot, with byte rejection only AFTER reception.
+
+    AppFetchLogs has no wire-byte cap. No pagination, retry, log helper, or result
+    deserialization is permitted. Even valid records cannot establish complete
+    history, cause, artifact verification, or retry authority.
+    """
+    projection = {"result": "TRACE_INCONCLUSIVE", "completeness": "INCONCLUSIVE",
+                  "reason": "UNAVAILABLE", "records": [],
+                  "wire_byte_cap": False, "byte_bounds": "AFTER_RECEPTION",
+                  "entry_limit": _PHASE_LIMIT,
+                  "response_byte_limit": _PHASE_RESPONSE_BYTES,
+                  "message_byte_limit": _PHASE_MESSAGE_BYTES,
+                  "record_byte_limit": _PHASE_RECORD_BYTES}
+    app_id, function_id, authenticated_call = _phase_filters(binding, call_id)
+    request = api_pb2.AppFetchLogsRequest(
+        app_id=app_id, function_id=function_id, function_call_id=authenticated_call,
+        limit=_PHASE_LIMIT,
+    )
+    try:
+        response = await asyncio.wait_for(
+            client.stub.AppFetchLogs(request, retry=None, timeout=15), timeout=16,
+        )
+    except Exception:
+        return projection
+    try:
+        if type(response) is not api_pb2.AppFetchLogsResponse:
+            raise ValueError
+        if response.ByteSize() > _PHASE_RESPONSE_BYTES:
+            projection["reason"] = "RECEIVED_BOUND_EXCEEDED"
+            return projection
+        entries = sum(len(batch.items) for batch in response.batches)
+        if entries > _PHASE_LIMIT or len(response.batches) > _PHASE_LIMIT:
+            projection["reason"] = "RECEIVED_BOUND_EXCEEDED"
+            return projection
+        records = []
+        for batch in response.batches:
+            for item in batch.items:
+                if item.ByteSize() > _PHASE_MESSAGE_BYTES:
+                    projection["reason"] = "RECEIVED_BOUND_EXCEEDED"
+                    return projection
+                lines = item.data.split("\n")
+                for index, line in enumerate(lines):
+                    if not line.startswith(_PHASE_PREFIX):
+                        continue
+                    if (index == len(lines) - 1 or batch.function_id != function_id
+                            or item.function_call_id != authenticated_call):
+                        raise ValueError
+                    records.append(_phase_record(line))
+                    if len(records) >= _PHASE_LIMIT:
+                        projection["reason"] = "CAPPED"
+                        return projection
+        projection.update(result="TRACE_READ" if records and entries < _PHASE_LIMIT
+                          else "TRACE_INCONCLUSIVE",
+                          reason="CAPPED" if entries == _PHASE_LIMIT else
+                          "SNAPSHOT_ONLY" if records else "MISSING", records=records)
+        return projection
+    except Exception:
+        projection["reason"] = "MALFORMED"
+        return projection
 
 
 def _proven_not_found(error: BoundedVolumeReadError) -> bool:
@@ -506,8 +647,64 @@ def evaluation_metadata(raw, tag, binding, call_id):
     return result
 
 
-async def inspect_evaluation_metadata(client, binding, materials, call_id, api_pb2,
-                                      *, marker_reader, session_factory=None):
+def training_completion_metadata(raw, tag, binding, call_id):
+    """Project physical completion metadata, never authenticate or echo its content."""
+    result = {
+        "result": "JSON_INVALID", "mac_authentication": "UNVERIFIED",
+        "record_size_bytes": len(raw), "record_sha256": hashlib.sha256(raw).hexdigest(),
+        "mac_size_bytes": len(tag), "mac_sha256": hashlib.sha256(tag).hexdigest(),
+    }
+    try:
+        document = parse_canonical_object(raw, name="completion metadata")
+        expected = {
+            "effect_id": binding.command.operation.effect.effect_id,
+            "command_digest": binding.command_digest,
+            "provider_job_ref": call_id,
+            "runtime_release_digest": binding.runtime_release.manifest_digest,
+            "provider_runtime_binding_digest": binding.provider_binding.binding_digest,
+            "execution_binding_digest": binding.execution_binding.binding_digest,
+        }
+        names = {"workload_record": "workload.json", "training_lineage": "training_lineage.json",
+                 "training_metrics": "training_metrics.json", "final_model": "final_model.tar",
+                 "tokenizer": "tokenizer.tar"}
+        members = document.get("members")
+        inventory_matches = type(members) is list and len(members) == 5
+        seen, total = set(), 0
+        if inventory_matches:
+            for member in members:
+                if (type(member) is not dict or set(member) != {
+                        "role", "path", "size", "sha256", "provider_entry_id"}
+                        or type(member["role"]) is not str or member["role"] not in names
+                        or member["role"] in seen or type(member["size"]) is not int
+                        or not 1 <= member["size"] <= _MAX_ARTIFACT_BYTES
+                        or type(member["sha256"]) is not str or _HEX.fullmatch(member["sha256"]) is None):
+                    inventory_matches = False
+                    break
+                path = operation_path(expected["effect_id"], "output", names[member["role"]])
+                if (member["path"] != path or member["provider_entry_id"] != provider_entry_identity(
+                        binding.provider_facts.artifact_volume_id, path, member["size"])):
+                    inventory_matches = False
+                    break
+                seen.add(member["role"])
+                total += member["size"]
+        result.update({
+            "result": "METADATA_READ",
+            "schema_matches": document.get("schema_version") == "synaptic-modal-packaged-completion/v1",
+            "fields_match": set(document) == {"schema_version", *expected,
+                "stage_receipt_sha256", "inventory_sha256", "terminal_sha256", "members"},
+            "binding_matches": {key: document.get(key) == value for key, value in expected.items()},
+            "digest_fields_valid": all(type(document.get(key)) is str
+                and _HEX.fullmatch(document[key]) is not None
+                for key in ("stage_receipt_sha256", "inventory_sha256", "terminal_sha256")),
+            "inventory_matches": inventory_matches and seen == set(names) and total <= _MAX_ARTIFACT_TOTAL_BYTES,
+        })
+    except Exception:
+        pass
+    return result
+
+
+async def _inspect_phase_metadata(client, binding, materials, call_id, api_pb2,
+                                  *, marker_reader, session_factory=None, training_completion=False):
     try:
         markers = await inspect_markers(marker_reader, materials)
         if any(value != "MATCH" for value in markers.values()):
@@ -518,19 +715,24 @@ async def inspect_evaluation_metadata(client, binding, materials, call_id, api_p
                 timeout=aiohttp.ClientTimeout(total=30, sock_read=10),
                 read_bufsize=64 * 1024, auto_decompress=False,
             )
-        volume_id = binding.provider_facts.artifact_volume_id
-        prefix = operation_path(binding.command.operation.effect.effect_id, "evaluation")
+        volume_id = (binding.provider_facts.control_volume_id if training_completion
+                     else binding.provider_facts.artifact_volume_id)
+        prefix = operation_path(binding.command.operation.effect.effect_id,
+                                "evidence" if training_completion else "evaluation")
+        leaf = "packaged-completion" if training_completion else "record"
+        maximum = _MAX_COMPLETION_RECORD_BYTES if training_completion else _MAX_EVALUATION_RECORD_BYTES
         raw = await asyncio.wait_for(_read_diagnostic_file(
-            client, api_pb2, volume_id, prefix + "/record.json", _MAX_EVALUATION_RECORD_BYTES,
+            client, api_pb2, volume_id, prefix + "/" + leaf + ".json", maximum,
             session_factory,
         ), timeout=60)
         tag = await asyncio.wait_for(_read_diagnostic_file(
-            client, api_pb2, volume_id, prefix + "/record.mac", 128, session_factory,
+            client, api_pb2, volume_id, prefix + "/" + leaf + ".mac", 128, session_factory,
         ), timeout=60)
         # Correlate the physical Volume again after both reads.
         if any(value != "MATCH" for value in (await inspect_markers(marker_reader, materials)).values()):
             return {"result": "MARKER_UNAVAILABLE", "mac_authentication": "UNVERIFIED"}
-        return evaluation_metadata(raw, tag, binding, call_id)
+        projection = training_completion_metadata if training_completion else evaluation_metadata
+        return projection(raw, tag, binding, call_id)
     except DiagnosticUnavailable as error:
         code = error.args[0] if error.args in {
             ("FILE_METADATA_INVALID",), ("FILE_SIZE_INVALID",), ("FILE_UNAVAILABLE",),
@@ -538,6 +740,15 @@ async def inspect_evaluation_metadata(client, binding, materials, call_id, api_p
         return {"result": code, "mac_authentication": "UNVERIFIED"}
     except Exception:
         return {"result": "FILE_UNAVAILABLE", "mac_authentication": "UNVERIFIED"}
+
+
+async def inspect_evaluation_metadata(client, binding, materials, call_id, api_pb2, **kwargs):
+    return await _inspect_phase_metadata(client, binding, materials, call_id, api_pb2, **kwargs)
+
+
+async def inspect_training_completion_metadata(client, binding, materials, call_id, api_pb2, **kwargs):
+    return await _inspect_phase_metadata(client, binding, materials, call_id, api_pb2,
+                                         training_completion=True, **kwargs)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -549,18 +760,27 @@ def main(argv: list[str] | None = None) -> int:
     selection.add_argument("--inspect-markers", action="store_true")
     parser.add_argument("--probe-final-model-first-chunk", action="store_true")
     parser.add_argument("--inspect-evaluation-metadata", action="store_true")
+    parser.add_argument("--inspect-training-completion-metadata", action="store_true")
+    parser.add_argument("--inspect-phase-trace", action="store_true",
+                        help="One finite phase-log snapshot; byte bounds apply after reception.")
+    parser.add_argument("--include-provider-status", action="store_true",
+                        help="Include only a finite provider status from the same call poll.")
     parser.add_argument("--modal-profile", required=True)
     args = parser.parse_args(argv)
     try:
-        if ((args.probe_final_model_first_chunk or args.inspect_evaluation_metadata) and args.inspect_markers
-                or args.probe_final_model_first_chunk and args.inspect_evaluation_metadata):
+        if sum((args.inspect_markers, args.probe_final_model_first_chunk,
+                args.inspect_evaluation_metadata, args.inspect_training_completion_metadata,
+                args.include_provider_status, args.inspect_phase_trace)) > 1:
             raise DiagnosticUnavailable("INPUT_INVALID")
-        if args.probe_final_model_first_chunk or args.inspect_evaluation_metadata:
+        if (args.probe_final_model_first_chunk or args.inspect_evaluation_metadata
+                or args.inspect_training_completion_metadata or args.inspect_phase_trace):
             retained = read_retained_probe(args.journal, args.claim_ref, args.call_id)
         elif args.inspect_markers:
             retained = read_retained_markers(args.journal, args.claim_ref)
         else:
             retained = read_retained_call(args.journal, args.claim_ref, args.call_id)
+        if args.inspect_phase_trace:
+            _phase_filters(retained[0], retained[2])
         profile = safe_ref(args.modal_profile, "modal_profile")
         with open(os.devnull, "w") as sink:
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
@@ -576,10 +796,18 @@ def main(argv: list[str] | None = None) -> int:
                     raise DiagnosticUnavailable("CREDENTIAL_UNAVAILABLE")
                 from modal._utils.async_utils import synchronizer
                 client = modal.Client.from_credentials(token_id, token_secret)
-                if args.inspect_evaluation_metadata:
+                if args.inspect_phase_trace:
+                    binding, _, call_id = retained
+                    from modal_proto import api_pb2
+                    category = synchronizer.create_blocking(inspect_phase_trace)(
+                        client, binding, call_id, api_pb2,
+                    )
+                elif args.inspect_evaluation_metadata or args.inspect_training_completion_metadata:
                     binding, materials, call_id = retained
                     from modal_proto import api_pb2
-                    category = synchronizer.create_blocking(inspect_evaluation_metadata)(
+                    inspect = (inspect_training_completion_metadata if args.inspect_training_completion_metadata
+                               else inspect_evaluation_metadata)
+                    category = synchronizer.create_blocking(inspect)(
                         client, binding, materials, call_id, api_pb2,
                         marker_reader=BoundedModalVolumeReader(sdk=modal, client=client),
                     )
@@ -609,13 +837,19 @@ def main(argv: list[str] | None = None) -> int:
                     from modal_proto import api_pb2
                     category = synchronizer.create_blocking(inspect_call)(
                         client, retained, api_pb2, serialize,
+                        **({"include_provider_status": True} if args.include_provider_status else {}),
                     )
     except DiagnosticUnavailable as error:
         category = error.args[0]
     except Exception:
         category = "LOCAL_UNAVAILABLE"
-    if args.inspect_evaluation_metadata:
-        payload = {"schema_version": "synaptic-modal-packaged-evaluation-diagnostic/v1",
+    if args.inspect_phase_trace:
+        payload = {"schema_version": "synaptic-modal-packaged-phase-diagnostic/v1",
+                   "authority": "DIAGNOSTIC_ONLY", "result": category}
+    elif args.inspect_evaluation_metadata or args.inspect_training_completion_metadata:
+        schema = ("synaptic-modal-packaged-training-completion-diagnostic/v1"
+                  if args.inspect_training_completion_metadata else "synaptic-modal-packaged-evaluation-diagnostic/v1")
+        payload = {"schema_version": schema,
                    "authority": "DIAGNOSTIC_ONLY", "mac_authentication": "UNVERIFIED",
                    "result": category}
     elif args.probe_final_model_first_chunk:
@@ -627,8 +861,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         payload = {"schema_version": "synaptic-modal-packaged-call-diagnostic/v1",
                    "authority": "DIAGNOSTIC_ONLY", "result": category}
+        if args.include_provider_status:
+            projection = category if type(category) is dict else {
+                "result": category, "provider_status": None}
+            category = projection["result"]
+            payload.update(projection)
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-    if args.inspect_evaluation_metadata:
+    if args.inspect_phase_trace:
+        return 0 if type(category) is dict and category.get("result") == "TRACE_READ" else 1
+    if args.inspect_evaluation_metadata or args.inspect_training_completion_metadata:
         return 0 if type(category) is dict and category.get("result") == "METADATA_READ" else 1
     if args.probe_final_model_first_chunk:
         return 0 if category in {"FIRST_BLOCK_LE_1M", "FIRST_BLOCK_GT_1M"} else 1

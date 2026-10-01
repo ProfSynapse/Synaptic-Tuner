@@ -178,15 +178,29 @@ def start_vllm_runtime(
     cwd: Path,
     environment: Mapping[str, str],
     deadline: float | None = None,
+    phase_callback: Callable | None = None,
 ) -> VLLMRuntimeLease:
     """Validate, spawn, and wait for one explicitly scoped vLLM runtime."""
     absolute_deadline = _absolute_deadline(deadline)
     if absolute_deadline is not None:
         _deadline_now(absolute_deadline)
-    projection = _projection(spec, cwd=cwd, environment=environment)
+    def emit(phase, edge):
+        try:
+            if callable(phase_callback):
+                phase_callback(phase, edge, None)
+        except Exception:
+            pass
+    emit("VLLM_PREPARE", "START")
+    try:
+        projection = _projection(spec, cwd=cwd, environment=environment)
+    except BaseException:
+        emit("VLLM_PREPARE", "ERROR")
+        raise
+    emit("VLLM_PREPARE", "RETURN")
     if absolute_deadline is not None:
         _deadline_now(absolute_deadline)
     process: OwnedProcessLease | None = None
+    waiting = False
     try:
         if not _port_available(projection.host, projection.port):
             raise VLLMRuntimeError("managed vLLM loopback port is already in use")
@@ -197,11 +211,19 @@ def start_vllm_runtime(
         startup_deadline = now + projection.startup_timeout_s
         if absolute_deadline is not None:
             startup_deadline = min(startup_deadline, absolute_deadline)
-        process = _spawn(
-            projection.argv,
-            cwd=projection.cwd,
-            environment=projection.environment,
-        )
+        emit("VLLM_SPAWN", "START")
+        try:
+            process = _spawn(
+                projection.argv,
+                cwd=projection.cwd,
+                environment=projection.environment,
+            )
+        except BaseException:
+            emit("VLLM_SPAWN", "ERROR")
+            raise
+        emit("VLLM_SPAWN", "RETURN")
+        emit("VLLM_READINESS", "START")
+        waiting = True
         while True:
             if not _leader_alive(process):
                 raise VLLMRuntimeError("vLLM process ended before readiness")
@@ -219,6 +241,8 @@ def start_vllm_runtime(
                     absolute_deadline
                 ) >= startup_deadline or not _leader_alive(process):
                     raise VLLMRuntimeError("vLLM readiness was not timely and live")
+                emit("VLLM_READINESS", "RETURN")
+                waiting = False
                 return VLLMRuntimeLease(
                     process,
                     host=projection.host,
@@ -232,9 +256,17 @@ def start_vllm_runtime(
                 )
             )
     except BaseException as error:
+        if waiting:
+            emit("VLLM_READINESS", "ERROR")
         if process is not None:
             try:
-                resolved = process.close()
+                emit("VLLM_CLEANUP", "START")
+                try:
+                    resolved = process.close()
+                except BaseException:
+                    emit("VLLM_CLEANUP", "ERROR")
+                    raise
+                emit("VLLM_CLEANUP", "RETURN")
             except BaseException:
                 resolved = False
             if not resolved:

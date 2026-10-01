@@ -134,8 +134,8 @@ was reported. The two successful output texts remain inside the saved
 evaluation JSON, not standalone chapter files; author quality review remains
 pending. The failed evaluation gate does not undo training-artifact verification.
 Attempt `modal-34879e001230749c84e9d714` has consumed its submission authority
-and cannot be replayed. One separately approved fresh batch-4/accumulation-2
-smoke remains pending fix review and release gates; it has not launched.
+and cannot be replayed. The separately approved fresh batch-4/accumulation-2
+smoke was subsequently launched; its unresolved outcome is recorded below.
 Full training, GGUF and publication remain held.
 
 The narrow runtime correction removes that clamp and uses the remaining
@@ -149,6 +149,47 @@ slowly arriving bounded bodies can overrun the window. Requests drain before
 normal runtime cleanup, which uses bounded TERM/KILL. Evaluation is synchronous
 in the packaged worker; the configured 1800-second provider execution timeout
 is the outer backstop, not proof that cleanup ran after forced termination.
+
+The subsequent attempt `modal-9bd06f663f2bc211d0a23bba` ran execution source
+`a4529e3351a71ec90ae39529eb5ab0fbe2d8eca7`, bound to submit
+`2c234478630719fa4d36821a87836c7fae7be663f1a319444ebf2b24fa574ee5`
+and call `fc-01M3VGAE9W09K7TZTN4AZA5E58`.
+Its ordinary observation exited 1 at `RUN_CALL_OBSERVE` /
+`INDETERMINATE` / `modal_standalone_runner.call_observe`, with
+`retry_authorized: false`, at 2026-10-01 07:02:04.157464 Eastern. One bound
+inspector exited 0 with `DIAGNOSTIC_ONLY` / `PROVIDER_FAILURE`. That generic
+category merges seven provider statuses and does not establish timeout, OOM,
+worker stage or cause; elapsed duration is not a diagnosis. The expected local
+artifact directory is absent, with no verified metrics for this attempt.
+Absence locally does not establish absence of remote artifacts.
+
+The user has authorized continuing corrective work until this is fixed reliably.
+The narrow diagnostic extension adds opt-in `--include-provider-status` to the
+existing inspector's same authenticated, non-consuming poll, retaining default
+output and exposing only finite provider enum metadata. Its 301 provider-free
+tests and independent review were accepted. One exact bound status read then
+returned `provider_status: TIMEOUT`; this does not locate the worker phase or
+prove the timeout's cause. One existing evaluation-metadata read exited 1 with
+`FILE_UNAVAILABLE` and `mac_authentication: UNVERIFIED`, which is inconclusive,
+not evidence that the remote evaluation record is missing.
+The reviewed follow-up added `--inspect-training-completion-metadata`. One exact
+bound read returned `METADATA_READ`: the completion record was 2434 bytes with
+SHA-256 `6ea5895d8c7ea6cef771f683bc26d4678668498c4986510b98b9811257ad95ba`;
+the MAC was 32 bytes with SHA-256
+`6a479c59501ad6d1cbf4cd7133550d4f435952859b86369fcfb912bef6afda63`.
+Schema, fields, all six bindings, digest formats and five-role inventory checks
+matched. This physical metadata remains MAC-unverified, not proof of training
+success, completed commits or evaluation entry.
+
+The next targeted correction adds a closed, bounded phase/timing trace around
+publication/commits, evaluation preparation, serving startup, immediate chat
+request edges, request drain and cleanup. It changes no recipe, deadlines,
+batch shape, prompts or output limits. A reviewed fresh instrumented smoke can
+identify an outstanding operation without establishing its cause. Runtime hooks
+passed 297 provider-free tests; independent review and the inference source-hash
+refresh remain required. No instrumented GPU run has launched in this checkpoint.
+The consumed attempt remains non-replayable; full training, GGUF and publication
+remain held. A provider status alone will not establish root cause.
 
 ## Proposed training shape
 

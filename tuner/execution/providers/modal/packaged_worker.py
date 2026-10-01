@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from pathlib import Path
+import threading
+import time
 from typing import Protocol
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes, digest_text, safe_ref
@@ -79,6 +82,67 @@ _SFT_FAILURE_STAGES = frozenset({
     "EVIDENCE", "ARTIFACT", "POST_TRAINING",
 }) | frozenset(stage.removeprefix("SFT_") for stage in PACKAGED_WORKER_FAILURE_STAGES
                if stage.startswith(("SFT_PREPARATION_", "SFT_EVIDENCE_"))) | CHILD_FAILURE_STAGES
+
+PACKAGED_PHASES = frozenset({
+    "TRAINER_EXECUTE", "TRAINING_PUBLICATION", "TRAINING_ARTIFACT_COMMIT",
+    "TRAINING_CONTROL_COMMIT", "EVALUATION_PREPARE", "EVALUATION_IDENTITY_VALIDATE",
+    "VLLM_PREPARE", "VLLM_SPAWN", "VLLM_READINESS", "CHAT_BATCH", "CHAT_REQUEST",
+    "VLLM_CLEANUP", "EVALUATION_PUBLICATION", "EVALUATION_ARTIFACT_COMMIT",
+})
+
+
+class _PackagedPhaseTrace:
+    """Best-effort fixed diagnostic lines, not workload limits or authority."""
+    def __init__(self, *, clock=time.monotonic, sink=None):
+        self._clock, self._sink = clock, sink
+        self._lock, self._count = threading.Lock(), 0
+        try:
+            self._started = clock()
+        except Exception:
+            self._started = None
+
+    def emit(self, phase, edge, request_ordinal=None):
+        try:
+            if (type(phase) is not str or phase not in PACKAGED_PHASES
+                    or type(edge) is not str or edge not in {"START", "RETURN", "ERROR"}
+                    or (phase == "CHAT_REQUEST" and (type(request_ordinal) is not int
+                        or not 1 <= request_ordinal <= 32))
+                    or (phase != "CHAT_REQUEST" and request_ordinal is not None)):
+                return
+            with self._lock:
+                if self._count >= 256 or type(self._started) not in (int, float):
+                    return
+                now = self._clock()
+                if type(now) not in (int, float):
+                    return
+                elapsed = (now - self._started) * 1000
+                if not math.isfinite(elapsed) or not 0 <= elapsed <= 86400000:
+                    return
+                line = "SYNAPTIC_PHASE " + json.dumps({
+                    "schema_version": "synaptic-modal-packaged-phase/v1",
+                    "phase": phase, "edge": edge, "elapsed_ms": int(elapsed),
+                    "request_ordinal": request_ordinal,
+                }, separators=(",", ":"), sort_keys=True)
+                if len(line.encode("utf-8")) > 512:
+                    return
+                self._count += 1
+                if self._sink is None:
+                    print(line, flush=True)
+                else:
+                    self._sink(line)
+        except Exception:
+            pass
+
+
+def _phase_call(trace, phase, operation):
+    trace.emit(phase, "START")
+    try:
+        result = operation()
+    except BaseException:
+        trace.emit(phase, "ERROR")
+        raise
+    trace.emit(phase, "RETURN")
+    return result
 
 
 def packaged_worker_failure(stage: str) -> dict[str, object]:
@@ -372,6 +436,7 @@ class ModalPackagedWorker:
         commit_artifacts,
         commit_control,
     ) -> dict[str, object]:
+        trace = _PackagedPhaseTrace()
         stage = "DISPATCH_AUTH"
         try:
             dispatch = parse_modal_packaged_dispatch(dispatch_bytes, self._verifier)
@@ -410,11 +475,12 @@ class ModalPackagedWorker:
             def complete_then_evaluate(result, context):
                 # Save the verified adapter before serving. Later evaluation
                 # failure cannot erase or require a replay of training.
-                completion = self._publish_completion(dispatch, result, provider_job_ref, paths)
-                commit_artifacts()
-                commit_control()
+                completion = _phase_call(trace, "TRAINING_PUBLICATION", lambda:
+                    self._publish_completion(dispatch, result, provider_job_ref, paths))
+                _phase_call(trace, "TRAINING_ARTIFACT_COMMIT", commit_artifacts)
+                _phase_call(trace, "TRAINING_CONTROL_COMMIT", commit_control)
                 retained_completion.append(completion)
-                context.validate()
+                _phase_call(trace, "EVALUATION_IDENTITY_VALIDATE", context.validate)
                 from tuner.runtime.post_training_eval import execute_post_training_evaluation
                 record = execute_post_training_evaluation(
                     post_training,
@@ -426,10 +492,12 @@ class ModalPackagedWorker:
                     cwd=paths.tmp,
                     python_executable=context.python_executable,
                     bindings=context.bindings,
+                    phase_callback=trace.emit,
                 )
-                self._publish_evaluation(dispatch, record, provider_job_ref, completion, paths)
-                commit_artifacts()
-            result = self._executor.execute(
+                _phase_call(trace, "EVALUATION_PUBLICATION", lambda:
+                    self._publish_evaluation(dispatch, record, provider_job_ref, completion, paths))
+                _phase_call(trace, "EVALUATION_ARTIFACT_COMMIT", commit_artifacts)
+            result = _phase_call(trace, "TRAINER_EXECUTE", lambda: self._executor.execute(
                 runtime_release=dispatch.runtime_release,
                 provider_binding=dispatch.provider_binding,
                 execution_binding=dispatch.execution_binding,
@@ -438,17 +506,18 @@ class ModalPackagedWorker:
                 paths=paths,
                 environment=dispatch.environment,
                 **({"on_training_complete": complete_then_evaluate} if post_training is not None else {}),
-            )
+            ))
             stage = "COMPLETION"
             if post_training is not None and len(retained_completion) != 1:
                 raise ValueError("packaged evaluation callback unavailable")
             completion = (retained_completion[0] if retained_completion else
-                          self._publish_completion(dispatch, result, provider_job_ref, paths))
+                          _phase_call(trace, "TRAINING_PUBLICATION", lambda:
+                              self._publish_completion(dispatch, result, provider_job_ref, paths)))
             if not retained_completion:
                 stage = "ARTIFACT_COMMIT"
-                commit_artifacts()
+                _phase_call(trace, "TRAINING_ARTIFACT_COMMIT", commit_artifacts)
                 stage = "CONTROL_COMMIT"
-                commit_control()
+                _phase_call(trace, "TRAINING_CONTROL_COMMIT", commit_control)
             return {
                 "schema_version": "synaptic-modal-packaged-worker-result/v1",
                 "effect_id": dispatch.submit_command.operation.effect.effect_id,

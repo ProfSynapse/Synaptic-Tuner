@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from dataclasses import fields
 import hashlib
+import json
 from pathlib import Path
 import sys
 import tempfile
+import threading
 from types import SimpleNamespace
 import pytest
 
@@ -19,6 +22,8 @@ from tuner.execution.providers.modal.packaged_worker import (
     ModalPackagedWorkerRoots,
     PACKAGED_WORKER_FAILURE_STAGES,
     packaged_worker_failure,
+    _PackagedPhaseTrace,
+    PACKAGED_PHASES,
 )
 from tuner.execution.providers.modal.model_snapshot import PERSISTENT_PUBLICATION_DIAGNOSTICS
 from tuner.execution.providers.modal.contracts import operation_path
@@ -583,3 +588,89 @@ def test_commit_failure_is_closed(tmp_path, failed_commit, stage) -> None:
     ), stage)
     assert len(signer.calls) == 1
     assert events == (["artifacts"] if failed_commit == "artifacts" else ["artifacts", "control"])
+
+
+def test_phase_trace_is_atomic_finite_private_and_capped():
+    lines = []
+    trace = _PackagedPhaseTrace(clock=lambda: 1.25, sink=lines.append)
+    threads = [threading.Thread(target=lambda: [trace.emit("CHAT_REQUEST", "START", 1)
+                                                for _ in range(100)]) for _ in range(4)]
+    for thread in threads: thread.start()
+    for thread in threads: thread.join(5)
+    assert all(not thread.is_alive() for thread in threads)
+    assert len(lines) == 256
+    for line in lines:
+        assert len(line.encode()) <= 512 and line.startswith("SYNAPTIC_PHASE ")
+        document = json.loads(line.removeprefix("SYNAPTIC_PHASE "))
+        assert document == {"schema_version": "synaptic-modal-packaged-phase/v1",
+            "phase": "CHAT_REQUEST", "edge": "START", "request_ordinal": 1, "elapsed_ms": 0}
+
+
+@pytest.mark.parametrize("phase,edge,ordinal", [("private path", "START", None),
+    ("CHAT_BATCH", "private edge", None), ("CHAT_REQUEST", "START", 33),
+    ("CHAT_REQUEST", "START", True), ("CHAT_REQUEST", "START", None),
+    ("CHAT_BATCH", "START", 1)])
+def test_phase_trace_rejects_unknown_and_hostile_fields(phase, edge, ordinal):
+    lines = []
+    _PackagedPhaseTrace(clock=lambda: 0, sink=lines.append).emit(phase, edge, ordinal)
+    assert lines == []
+
+
+@pytest.mark.parametrize("now", [float("nan"), float("inf"), -1, 86401, True, "private"])
+def test_phase_trace_clock_failures_are_inconclusive(now):
+    values = iter([0, now])
+    lines = []
+    _PackagedPhaseTrace(clock=lambda: next(values), sink=lines.append).emit("CHAT_BATCH", "START")
+    assert lines == []
+
+
+def test_phase_output_failure_preserves_worker_result(tmp_path, monkeypatch):
+    from tuner.execution.providers.modal import packaged_worker as module
+    _, dispatch, worker, _, _, _ = _worker(tmp_path)
+    def reject(*_args, **_kwargs): raise OSError("private output failure")
+    monkeypatch.setattr(module, "print", reject, raising=False)
+    result = worker(dispatch, "fc-1", commit_artifacts=lambda: None, commit_control=lambda: None)
+    assert result["status_code"] == "completed"
+
+
+def test_same_job_phase_edges_bracket_commits_before_evaluation(tmp_path, monkeypatch, capsys):
+    from tuner.execution.providers.modal import packaged_worker as module
+    from tuner.runtime import post_training_eval
+    events = []
+    class CallbackExecutor(Executor):
+        def execute(self, **kwargs):
+            result = super().execute(**kwargs)
+            context = SimpleNamespace(validate=lambda: events.append("validate"),
+                base_model_path=tmp_path, adapter_path=tmp_path, tokenizer_path=tmp_path,
+                environment={}, python_executable=sys.executable, bindings={})
+            kwargs["on_training_complete"](result, context)
+            return result
+    _, raw_dispatch, worker, _, _, _ = _worker(tmp_path, executor=CallbackExecutor())
+    dispatch = module.parse_modal_packaged_dispatch(raw_dispatch, Auth())
+    workload = json.loads(dispatch.workload_bytes)
+    workload["configuration"]["document"]["post_training"] = {"mode": "same_job"}
+    # The fixture's immutable binding has no evaluation recipe. Isolate callback
+    # sequencing after admission; dispatch authentication is tested separately.
+    admitted = SimpleNamespace(**{field.name: getattr(dispatch, field.name) for field in fields(dispatch)})
+    admitted.workload_bytes = canonical_bytes(workload)
+    admitted.submit_command = dispatch.submit_command
+    monkeypatch.setattr(module, "parse_modal_packaged_dispatch", lambda *_args: admitted)
+    def evaluate(*_args, **kwargs):
+        assert events == ["artifacts", "control", "validate"]
+        assert callable(kwargs["phase_callback"])
+        events.append("evaluate")
+        return {}
+    monkeypatch.setattr(post_training_eval, "execute_post_training_evaluation", evaluate)
+    monkeypatch.setattr(ModalPackagedWorker, "_publish_evaluation", lambda *_args: events.append("publish"))
+    result = worker(raw_dispatch, "fc-1", commit_artifacts=lambda: events.append("artifacts"),
+                    commit_control=lambda: events.append("control"))
+    assert result["status_code"] == "completed"
+    assert events == ["artifacts", "control", "validate", "evaluate", "publish", "artifacts"]
+    records = [json.loads(line.removeprefix("SYNAPTIC_PHASE "))
+               for line in capsys.readouterr().out.splitlines()]
+    pairs = [(record["phase"], record["edge"]) for record in records]
+    assert pairs == [("TRAINER_EXECUTE", "START"), *[(phase, edge) for phase in (
+        "TRAINING_PUBLICATION", "TRAINING_ARTIFACT_COMMIT", "TRAINING_CONTROL_COMMIT",
+        "EVALUATION_IDENTITY_VALIDATE", "EVALUATION_PUBLICATION", "EVALUATION_ARTIFACT_COMMIT")
+        for edge in ("START", "RETURN")], ("TRAINER_EXECUTE", "RETURN")]
+    assert all(record["phase"] in PACKAGED_PHASES for record in records)

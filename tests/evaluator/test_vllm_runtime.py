@@ -61,6 +61,42 @@ def test_network_runtime_projects_exact_args_and_returns_lease(tmp_path: Path, m
     assert lease.close()
 
 
+@pytest.mark.parametrize("fault", [None, "callback", "prepare", "spawn", "readiness"])
+def test_optional_phase_edges_locate_startup_boundary_without_changing_results(tmp_path, monkeypatch, fault):
+    events = []
+    process = _Process()
+    def trace(*event):
+        if fault == "callback": raise RuntimeError("private callback")
+        events.append(event)
+    def spawn(*_args, **_kwargs):
+        assert fault == "callback" or events[-1] == ("VLLM_SPAWN", "START", None)
+        if fault == "spawn": raise OSError("private spawn argv")
+        return process
+    def ready(*_args):
+        assert fault == "callback" or events[-1] == ("VLLM_READINESS", "START", None)
+        if fault == "readiness": raise RuntimeError("private model readiness")
+        return True
+    monkeypatch.setattr(runtime, "_spawn", spawn)
+    monkeypatch.setattr(runtime, "_leader_alive", lambda _process: True)
+    monkeypatch.setattr(runtime, "_ready", ready)
+    spec = _network(host="0.0.0.0") if fault == "prepare" else _network()
+    if fault in {"prepare", "spawn", "readiness"}:
+        with pytest.raises((ValueError, OSError, RuntimeError)):
+            runtime.start_vllm_runtime(spec, cwd=tmp_path, environment={}, phase_callback=trace)
+        phase = {"prepare": "VLLM_PREPARE", "spawn": "VLLM_SPAWN", "readiness": "VLLM_READINESS"}[fault]
+        assert (phase, "ERROR", None) in events
+        assert process.close_calls == (1 if fault == "readiness" else 0)
+        if fault == "readiness": assert events[-1] == ("VLLM_CLEANUP", "RETURN", None)
+    else:
+        lease = runtime.start_vllm_runtime(spec, cwd=tmp_path, environment={}, phase_callback=trace)
+        if fault is None:
+            assert events == [(phase, edge, None) for phase in (
+                "VLLM_PREPARE", "VLLM_SPAWN", "VLLM_READINESS") for edge in ("START", "RETURN")]
+        else: assert events == []
+        assert lease.close()
+    assert "private" not in json.dumps(events)
+
+
 def test_projection_denials_are_before_spawn(tmp_path: Path, monkeypatch):
     calls = []
     monkeypatch.setattr(runtime, "_spawn", lambda *args, **kwargs: calls.append(1))

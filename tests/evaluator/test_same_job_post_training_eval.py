@@ -51,6 +51,82 @@ def _bindings():
     )}
 
 
+@pytest.mark.parametrize("fast_error", [False, True])
+def test_phase_trace_request_edges_are_immediate_and_batch_drains_before_cleanup(tmp_path, monkeypatch, fast_error):
+    events = []
+    lock = threading.Lock()
+    barrier = threading.Barrier(2, timeout=5)
+    fast_traced = threading.Event()
+    def trace(phase, edge, ordinal):
+        with lock:
+            events.append((phase, edge, ordinal))
+        if phase == "CHAT_REQUEST" and edge in {"RETURN", "ERROR"}:
+            fast_traced.set()
+    class Client:
+        def __init__(self, *_args, **_kwargs): pass
+        def chat(self, messages):
+            barrier.wait()
+            if messages[-1]["content"] == "Say ready":
+                assert fast_traced.wait(5), "fast edge was blocked by ordered case emission"
+            elif fast_error:
+                raise BackendError("private prompt/token/path")
+            return BackendResponse(message="ready", raw={}, latency_s=0.1)
+    class Lease:
+        served_model_name = "new-adapter"
+        host, port = "127.0.0.1", 8000
+        def close(self):
+            assert events[-1] == ("VLLM_CLEANUP", "START", None)
+            assert ("CHAT_BATCH", "RETURN", None) in events
+            assert len([event for event in events if event[0] == "CHAT_REQUEST" and event[1] != "START"]) == 2
+            return True
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *_args, **_kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
+    record = post_training_eval.execute_post_training_evaluation(
+        _config(), base_model_path=tmp_path, adapter_path=tmp_path, tokenizer_path=tmp_path,
+        validate=lambda: None, environment={}, cwd=tmp_path, python_executable=sys.executable,
+        bindings=_bindings(), phase_callback=trace)
+    starts = [ordinal for phase, edge, ordinal in events if phase == "CHAT_REQUEST" and edge == "START"]
+    assert sorted(starts) == [1, 2]
+    assert ("VLLM_CLEANUP", "RETURN", None) in events
+    assert record["passed_count"] == (1 if fast_error else 2)
+    assert "private" not in json.dumps(events)
+
+
+@pytest.mark.parametrize("fault", ["callback", "validate", "cleanup"])
+def test_phase_callback_errors_preserve_evaluation_and_cleanup_outcomes(tmp_path, monkeypatch, fault):
+    events = []
+    def trace(*event):
+        if fault == "callback": raise OSError("private callback")
+        events.append(event)
+    class Client:
+        def __init__(self, *_args, **_kwargs): pass
+        def chat(self, _messages): return BackendResponse(message="ready", raw={}, latency_s=0.1)
+    class Lease:
+        served_model_name = "new-adapter"
+        host, port = "127.0.0.1", 8000
+        def close(self):
+            if fault == "cleanup": raise OSError("private cleanup")
+            return True
+    def validate():
+        if fault == "validate": raise ValueError("private model identity")
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *_args, **_kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
+    args = dict(base_model_path=tmp_path, adapter_path=tmp_path, tokenizer_path=tmp_path,
+        validate=validate, environment={}, cwd=tmp_path, python_executable=sys.executable,
+        bindings=_bindings(), phase_callback=trace)
+    if fault == "cleanup":
+        with pytest.raises(post_training_eval.PostTrainingCleanupUnresolved):
+            post_training_eval.execute_post_training_evaluation(_config(), **args)
+        assert ("VLLM_CLEANUP", "ERROR", None) in events
+    else:
+        record = post_training_eval.execute_post_training_evaluation(_config(), **args)
+        assert record["gate_passed"] is (fault == "callback")
+        if fault == "validate":
+            assert ("EVALUATION_IDENTITY_VALIDATE", "ERROR", None) in events
+            assert ("EVALUATION_PREPARE", "ERROR", None) in events
+    assert "private" not in json.dumps(events)
+
+
 @pytest.mark.parametrize("failures,expected", [
     (("timeout", "connection", "http400"), ("request_timeout", "request_connection", "http_400")),
     (("http_other", "value", "backend"), ("http_other", "request_validation", "request_backend")),

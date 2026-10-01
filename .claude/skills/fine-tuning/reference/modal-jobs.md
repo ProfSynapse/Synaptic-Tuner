@@ -888,6 +888,17 @@ failure result was returned; it does not disclose the failing operation,
 verify a run, or authorize replay. The public reader likewise recognizes only
 that precise failure dictionary; near misses remain unknown.
 
+For that same call-only command, add `--include-provider-status` to include
+`provider_status` from the same single authenticated, non-consuming poll.
+The only labels are `SUCCESS`, `FAILURE`, `TERMINATED`, `TIMEOUT`,
+`INIT_FAILURE`, `INTERNAL_FAILURE`, `IDLE_TIMEOUT`, `MEMORY_MANAGER_EVICTION`
+and `UNKNOWN` for other enum values; pending, expired, malformed or unavailable
+responses report null. Default JSON and exit behavior are unchanged. The option
+cannot be combined with marker, evaluation-metadata or artifact-probe modes.
+This is provider enum metadata, not exception text, a worker stage, root cause,
+artifact verification or replay authority. It reads no failure payloads, blobs
+or logs and never deserializes remote objects.
+
 For a completed call whose local download stops before its first chunk, the
 same inspector accepts `--probe-final-model-first-chunk` together with the exact
 `--journal`, `--claim-ref`, `--call-id`, and `--modal-profile`. It validates the
@@ -928,6 +939,36 @@ phase includes both the remote read and local save; its label alone is not a
 root-cause diagnosis. Test record validation in the pinned lightweight launcher,
 not only an ML-equipped test environment; execution-only evaluator imports must
 not be required merely to validate a signed record.
+
+For an unresolved provider timeout, the same exact bound evaluation-metadata
+read may provide physical phase evidence; `FILE_UNAVAILABLE` is inconclusive,
+not proof of missing data. Alternatively, use the mutually exclusive
+`--inspect-training-completion-metadata` mode with the same exact journal,
+submit digest, call ID and profile. It marker-checks before/after reading only
+the control Volume's derived `evidence/packaged-completion.json` (64 KiB) and
+`.mac` (128 bytes). Output contains sizes/digests and fixed schema, binding and
+five-role inventory comparison flags, always `mac_authentication: UNVERIFIED`.
+It reads no weights, logs or arbitrary paths. Physical matching metadata does
+not authenticate artifacts or prove training passed, commits finished, or
+evaluation began. The worker publishes training outputs/completion and commits
+both Volumes before evaluation; evaluation output is published after evaluation
+returns. Preserve this ordering as a hypothesis boundary, not a timeout cause.
+
+Packaged workers emit best-effort `SYNAPTIC_PHASE ` lines containing only
+`schema_version: synaptic-modal-packaged-phase/v1`, fixed `phase`, fixed `edge`
+(`START`, `RETURN`, `ERROR`), `elapsed_ms` (0–86400000 from worker entry), and
+`request_ordinal` (1–32 for `CHAT_REQUEST`, null otherwise). The finite phases
+cover trainer execution, training publication, each training commit, evaluation
+preparation/identity validation, vLLM preparation/spawn/readiness, chat batch/
+request, cleanup, evaluation publication and its artifact commit. Request edges
+are immediate, independent of ordered evaluator callbacks; batch return occurs
+only after requests drain. Ordinals identify request-entry order, not scenarios.
+The 256-record/512-byte line caps limit diagnostics only, never workloads.
+Ordinary trace callback/output failures do not change workload results. Missing,
+capped or unmatched edges remain inconclusive; a last outstanding boundary is
+not proof of cause, successful cleanup, artifacts or retry authority. Preserve
+the recipe and deadlines when using one reviewed instrumented smoke to locate
+the operation; do not increase timeouts merely because the provider timed out.
 
 For the opt-in same-job evaluation, `generation.max_tokens: null` deliberately
 omits the request-level output ceiling. Available model context, model/server

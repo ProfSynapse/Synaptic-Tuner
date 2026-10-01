@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
 from pathlib import Path
 import re
 import time
+import threading
 from typing import Callable, Mapping
 
 from tuner.training.post_training import validate_post_training_config
@@ -26,6 +28,27 @@ _FAILURE_CODES = {"deadline", "incomplete", "startup_failed", "runtime_failed", 
 
 class PostTrainingCleanupUnresolved(RuntimeError):
     """The vLLM process family may still own GPU resources."""
+
+
+def _emit_phase(callback, phase, edge, ordinal=None):
+    if phase == "CHAT_REQUEST" and ordinal is None:
+        return
+    try:
+        if callable(callback):
+            callback(phase, edge, ordinal)
+    except Exception:
+        pass
+
+
+@contextmanager
+def _phase_span(callback, phase, ordinal=None):
+    _emit_phase(callback, phase, "START", ordinal)
+    try:
+        yield
+    except BaseException:
+        _emit_phase(callback, phase, "ERROR", ordinal)
+        raise
+    _emit_phase(callback, phase, "RETURN", ordinal)
 
 
 def _bindings(value: Mapping[str, str]) -> dict[str, str]:
@@ -56,6 +79,7 @@ def execute_post_training_evaluation(
     cwd: Path,
     python_executable: str,
     bindings: dict[str, str],
+    phase_callback: Callable | None = None,
 ) -> dict:
     """Run evaluator assertions on the locally prepared base and new adapter.
 
@@ -89,6 +113,13 @@ def execute_post_training_evaluation(
     }
     runtime = None
     failure_code = None
+    original_validate = validate
+    def validate():
+        with _phase_span(phase_callback, "EVALUATION_IDENTITY_VALIDATE"):
+            original_validate()
+    request_lock, request_count = threading.Lock(), 0
+    preparing = True
+    _emit_phase(phase_callback, "EVALUATION_PREPARE", "START")
     try:
         from Evaluator.config import VLLMSettings
         from Evaluator.protocols import RequestFailureCode
@@ -117,8 +148,11 @@ def execute_post_training_evaluation(
             language_model_only=vllm["language_model_only"],
             max_lora_rank=vllm["max_lora_rank"],
         )
+        preparing = False
+        _emit_phase(phase_callback, "EVALUATION_PREPARE", "RETURN")
         runtime = start_vllm_runtime(
             startup, cwd=cwd, environment=environment, deadline=deadline,
+            **({"phase_callback": phase_callback} if callable(phase_callback) else {}),
         )
         settings = VLLMSettings(
             model=runtime.served_model_name,
@@ -131,6 +165,14 @@ def execute_post_training_evaluation(
 
         class DeadlineClient:
             def chat(self, messages):
+                nonlocal request_count
+                with request_lock:
+                    request_count += 1
+                    ordinal = request_count if request_count <= 32 else None
+                with _phase_span(phase_callback, "CHAT_REQUEST", ordinal):
+                    return self._chat(messages)
+
+            def _chat(self, messages):
                 remaining = deadline - time.monotonic()
                 if not math.isfinite(remaining) or remaining <= 0:
                     raise TimeoutError("evaluation deadline reached")
@@ -148,10 +190,11 @@ def execute_post_training_evaluation(
                     raise TimeoutError("evaluation deadline reached")
                 return response
 
-        results = evaluate_cases(
-            cases, DeadlineClient(), parallel=True,
-            max_workers=min(len(cases), vllm["max_num_seqs"]),
-        )
+        with _phase_span(phase_callback, "CHAT_BATCH"):
+            results = evaluate_cases(
+                cases, DeadlineClient(), parallel=True,
+                max_workers=min(len(cases), vllm["max_num_seqs"]),
+            )
         for case, result in zip(cases, results):
             status = result.status
             if result.error is not None and failure_code is None:
@@ -208,15 +251,20 @@ def execute_post_training_evaluation(
         else:
             record["failure_code"] = failure_code or "incomplete"
     except (KeyboardInterrupt, SystemExit):
+        if preparing:
+            _emit_phase(phase_callback, "EVALUATION_PREPARE", "ERROR")
         raise
     except Exception as error:
+        if preparing:
+            _emit_phase(phase_callback, "EVALUATION_PREPARE", "ERROR")
         if getattr(error, "cleanup_lease", None) is not None:
             raise
         record["failure_code"] = "runtime_failed" if runtime is not None else "startup_failed"
     finally:
         if runtime is not None:
             try:
-                stopped = runtime.close()
+                with _phase_span(phase_callback, "VLLM_CLEANUP"):
+                    stopped = runtime.close()
             except BaseException:
                 stopped = False
             if not stopped:
