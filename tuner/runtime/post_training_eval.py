@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import time
 import threading
+import socket
 from typing import Callable, Mapping
 
 from tuner.training.post_training import validate_post_training_config
@@ -28,6 +29,159 @@ _FAILURE_CODES = {"deadline", "incomplete", "startup_failed", "runtime_failed", 
 
 class PostTrainingCleanupUnresolved(RuntimeError):
     """The vLLM process family may still own GPU resources."""
+
+
+_SERVING_METRICS = {
+    "vllm:num_requests_running": "running_requests",
+    "vllm:num_requests_waiting": "waiting_requests",
+    "vllm:generation_tokens_total": "generation_tokens",
+    "vllm:kv_cache_usage_perc": "kv_cache_usage",
+}
+
+
+def _read_serving_metrics(port, stop, connected=None):
+    """Fixed loopback HTTP only; deadlines checked between bounded socket reads.
+
+    No Requests inactivity timeout is treated as a whole-call deadline. Each
+    socket operation is bounded separately; a stalled diagnostic is disposable.
+    """
+    if type(port) is not int or not 1 <= port <= 65535 or stop.is_set():
+        raise ValueError("diagnostic endpoint invalid")
+    deadline = time.monotonic() + 1.0
+    with socket.create_connection(("127.0.0.1", port), timeout=0.25) as connection:
+        if connected is not None:
+            connected(connection)
+        connection.sendall(b"GET /metrics HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        data = bytearray()
+        header_end = None
+        size = None
+        while True:
+            remaining = deadline - time.monotonic()
+            if stop.is_set() or remaining <= 0:
+                raise ValueError("diagnostic read expired")
+            connection.settimeout(min(0.25, remaining))
+            chunk = connection.recv(1024)
+            if not chunk:
+                break
+            data.extend(chunk)
+            if header_end is None:
+                marker = data.find(b"\r\n\r\n")
+                if marker == -1:
+                    if len(data) > 4096:
+                        raise ValueError("diagnostic headers oversized")
+                    continue
+                header_end = marker + 4
+                if header_end > 4096:
+                    raise ValueError("diagnostic headers oversized")
+                headers = bytes(data[:marker]).split(b"\r\n")
+                if not re.fullmatch(rb"HTTP/1\.[01] 200(?: [^\r\n]*)?", headers[0]):
+                    raise ValueError("diagnostic response unavailable")
+                lengths = []
+                for header in headers[1:]:
+                    name, separator, value = header.partition(b":")
+                    if not separator:
+                        raise ValueError("diagnostic headers invalid")
+                    if name.lower() == b"transfer-encoding":
+                        raise ValueError("diagnostic encoding unsupported")
+                    if name.lower() == b"content-length":
+                        if not re.fullmatch(rb"[0-9]{1,6}", value.strip()):
+                            raise ValueError("diagnostic length invalid")
+                        lengths.append(int(value))
+                if len(lengths) != 1 or lengths[0] > 262144:
+                    raise ValueError("diagnostic body bound invalid")
+                size = lengths[0]
+            if len(data) - header_end > size:
+                raise ValueError("diagnostic body oversized")
+            if len(data) - header_end == size:
+                break
+        if header_end is None or len(data) - header_end != size:
+            raise ValueError("diagnostic response truncated")
+        return _parse_serving_metrics(bytes(data[header_end:]))
+
+
+def _parse_serving_metrics(raw):
+    if type(raw) is not bytes or len(raw) > 262144:
+        raise ValueError("diagnostic body invalid")
+    lines = raw.splitlines()
+    if len(lines) > 4096 or any(len(line) > 4096 for line in lines):
+        raise ValueError("diagnostic lines oversized")
+    values = {}
+    for line in lines:
+        name = re.split(rb"[ {\t]", line, maxsplit=1)[0].decode("ascii", errors="ignore")
+        if name not in _SERVING_METRICS:
+            continue
+        match = re.fullmatch(rb"[a-zA-Z_:][a-zA-Z0-9_:]*(?:\{[^\r\n]*\})?[ \t]+([^ \t]+)", line)
+        if match is None or name in values:
+            raise ValueError("diagnostic series ambiguous")
+        value = float(match[1])
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("diagnostic value invalid")
+        if name == "vllm:kv_cache_usage_perc":
+            if value > 1:
+                raise ValueError("diagnostic fraction invalid")
+        else:
+            if value > 2**53 - 1 or not value.is_integer():
+                raise ValueError("diagnostic counter invalid")
+            value = int(value)
+        values[name] = value
+    if set(values) != set(_SERVING_METRICS):
+        raise ValueError("diagnostic series unavailable")
+    return {_SERVING_METRICS[name]: value for name, value in values.items()}
+
+
+def _serving_diagnostic(callback, kind, values):
+    try:
+        if callable(callback):
+            callback(kind, values)
+    except Exception:
+        pass
+
+
+class _ServingSampler:
+    def __init__(self, runtime, callback):
+        self._runtime, self._callback = runtime, callback
+        self._stop = threading.Event()
+        self._connection = None
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        # Never join before GPU cleanup, nor give this observer ownership of it.
+        self._stop.set()
+        with self._lock:
+            connection = self._connection
+        if connection is not None:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def finish(self):
+        self._thread.join(timeout=0.05)
+
+    def _run(self):
+        for _ in range(64):
+            if self._stop.is_set():
+                return
+            try:
+                if self._runtime.host != "127.0.0.1":
+                    return
+                values = _read_serving_metrics(self._runtime.port, self._stop, self._connected)
+                if not self._stop.is_set():
+                    _serving_diagnostic(self._callback, "METRICS", values)
+            except Exception:
+                pass
+            if self._stop.wait(15):
+                return
+
+    def _connected(self, connection):
+        with self._lock:
+            self._connection = connection
+        if self._stop.is_set():
+            connection.shutdown(socket.SHUT_RDWR)
 
 
 def _emit_phase(callback, phase, edge, ordinal=None):
@@ -80,6 +234,7 @@ def execute_post_training_evaluation(
     python_executable: str,
     bindings: dict[str, str],
     phase_callback: Callable | None = None,
+    serving_callback: Callable | None = None,
 ) -> dict:
     """Run evaluator assertions on the locally prepared base and new adapter.
 
@@ -112,6 +267,7 @@ def execute_post_training_evaluation(
         "bindings": identities,
     }
     runtime = None
+    sampler = None
     failure_code = None
     original_validate = validate
     def validate():
@@ -154,6 +310,12 @@ def execute_post_training_evaluation(
             startup, cwd=cwd, environment=environment, deadline=deadline,
             **({"phase_callback": phase_callback} if callable(phase_callback) else {}),
         )
+        if callable(serving_callback):
+            try:
+                sampler = _ServingSampler(runtime, serving_callback)
+                sampler.start()
+            except Exception:
+                sampler = None
         settings = VLLMSettings(
             model=runtime.served_model_name,
             scheme="http", host=runtime.host, port=runtime.port, api_key=None,
@@ -261,12 +423,19 @@ def execute_post_training_evaluation(
             raise
         record["failure_code"] = "runtime_failed" if runtime is not None else "startup_failed"
     finally:
+        if sampler is not None:
+            sampler.stop()
         if runtime is not None:
             try:
                 with _phase_span(phase_callback, "VLLM_CLEANUP"):
                     stopped = runtime.close()
             except BaseException:
                 stopped = False
+            else:
+                if type(stopped) is bool:
+                    _serving_diagnostic(serving_callback, "CLEANUP", {"cleanup_resolved": stopped})
+            if sampler is not None:
+                sampler.finish()
             if not stopped:
                 error = PostTrainingCleanupUnresolved("vLLM process cleanup unresolved")
                 error.cleanup_lease = runtime

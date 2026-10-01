@@ -51,6 +51,262 @@ def _bindings():
     )}
 
 
+def _metric_body():
+    return (b'vllm:num_requests_running{model_name="private"} 2\n'
+            b'vllm:num_requests_waiting 0\n'
+            b'vllm:generation_tokens_total 1203\n'
+            b'vllm:kv_cache_usage_perc 0.25\n')
+
+
+@pytest.mark.parametrize("mutation", ["duplicate", "missing", "nan", "fraction", "negative", "huge", "oversized", "line"])
+def test_serving_metrics_parser_rejects_ambiguous_or_unbounded_data(mutation):
+    raw = _metric_body()
+    if mutation == "duplicate": raw += b'vllm:num_requests_running{model_name="other"} 1\n'
+    if mutation == "missing": raw = raw.replace(b'vllm:num_requests_waiting 0\n', b'')
+    if mutation == "nan": raw = raw.replace(b'1203', b'NaN')
+    if mutation == "fraction": raw = raw.replace(b'0.25', b'1.1')
+    if mutation == "negative": raw = raw.replace(b'1203', b'-1')
+    if mutation == "huge": raw = raw.replace(b'1203', b'9007199254740992')
+    if mutation == "oversized": raw = b'x' * 262145
+    if mutation == "line": raw += b'#' + b'x' * 4096
+    with pytest.raises(ValueError):
+        post_training_eval._parse_serving_metrics(raw)
+
+
+@pytest.mark.parametrize("mode", ["valid", "redirect", "duplicate_length", "oversized", "headers", "truncated", "trickle"])
+def test_serving_metrics_real_socket_fixed_request_and_bounds(mode):
+    import socketserver
+    import time
+    requests = []
+    class Handler(socketserver.BaseRequestHandler):
+        def handle(self):
+            requests.append(self.request.recv(4096))
+            body = _metric_body()
+            header = b'HTTP/1.0 200 OK\r\nContent-Length: ' + str(len(body)).encode() + b'\r\n\r\n'
+            if mode == "redirect": header = b'HTTP/1.0 302 Found\r\nContent-Length: 0\r\n\r\n'; body = b''
+            if mode == "duplicate_length": header = header.replace(b'\r\n\r\n', b'\r\nContent-Length: 1\r\n\r\n')
+            if mode == "oversized": header = b'HTTP/1.0 200 OK\r\nContent-Length: 262145\r\n\r\n'
+            if mode == "headers": header = b'HTTP/1.0 200 OK\r\nX: ' + b'x' * 5000
+            if mode == "truncated": body = body[:-1]
+            try:
+                if mode == "trickle":
+                    for _ in range(30):
+                        self.request.sendall(b'H')
+                        time.sleep(0.05)
+                else:
+                    self.request.sendall(header + body)
+            except OSError:
+                pass
+    class Server(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+    server = Server(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    started = time.monotonic()
+    try:
+        if mode == "valid":
+            assert post_training_eval._read_serving_metrics(server.server_address[1], threading.Event()) == {
+                "running_requests": 2, "waiting_requests": 0, "generation_tokens": 1203, "kv_cache_usage": .25}
+        else:
+            with pytest.raises((ValueError, OSError)):
+                post_training_eval._read_serving_metrics(server.server_address[1], threading.Event())
+        assert time.monotonic() - started < 1.5
+        assert requests == [b'GET /metrics HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n']
+    finally:
+        server.shutdown(); server.server_close(); thread.join(2)
+
+
+def test_serving_metrics_real_prometheus_exposition_discards_labels():
+    prometheus = pytest.importorskip("prometheus_client")
+    registry = prometheus.CollectorRegistry()
+    for name, value in (("num_requests_running", 2), ("num_requests_waiting", 1), ("kv_cache_usage_perc", .5)):
+        prometheus.Gauge("vllm:" + name, "private help", ["model_name"], registry=registry).labels("private model").set(value)
+    prometheus.Counter("vllm:generation_tokens", "private help", ["model_name"], registry=registry).labels("private model").inc(15)
+    raw = prometheus.generate_latest(registry)
+    assert b"vllm:generation_tokens_total" in raw
+    values = post_training_eval._parse_serving_metrics(raw)
+    assert values == {"running_requests": 2, "waiting_requests": 1, "generation_tokens": 15, "kv_cache_usage": .5}
+    assert "private" not in json.dumps(values)
+
+
+def test_serving_metrics_actual_instrumentator_http_route_contract():
+    # Local-library contract coverage, not pinned remote vLLM qualification.
+    import http.client
+    import re
+    import socket
+    import time
+    fastapi = pytest.importorskip("fastapi")
+    prometheus = pytest.importorskip("prometheus_client")
+    instrumentator = pytest.importorskip("prometheus_fastapi_instrumentator")
+    uvicorn = pytest.importorskip("uvicorn")
+    from starlette.routing import Mount
+    registry = prometheus.CollectorRegistry()
+    for name, value in (("num_requests_running", 2), ("num_requests_waiting", 0), ("kv_cache_usage_perc", .25)):
+        prometheus.Gauge("vllm:" + name, "help", ["model_name"], registry=registry).labels("private").set(value)
+    prometheus.Counter("vllm:generation_tokens", "help", registry=registry).inc(1203)
+    class PrometheusResponse(fastapi.Response):
+        media_type = prometheus.CONTENT_TYPE_LATEST
+    app = fastapi.FastAPI()
+    # Match vLLM0.26 attach_router: expose first, then patched ASGI Mount.
+    instrumentator.Instrumentator(excluded_handlers=["/metrics", "/health", "/load", "/ping", "/version", "/server_info"], registry=registry).add().instrument(app).expose(app, response_class=PrometheusResponse)
+    route = Mount("/metrics", prometheus.make_asgi_app(registry=registry))
+    route.path_regex = re.compile("^/metrics(?P<path>.*)$")
+    app.routes.append(route)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, log_level="critical", access_log=False, lifespan="off"))
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 3
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert server.started
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
+        try:
+            connection.request("GET", "/metrics")
+            response = connection.getresponse()
+            assert response.status == 200  # no 307 slash redirect
+            assert response.getheader("Content-Length") is not None
+            assert response.getheader("Content-Encoding") is None
+            assert response.getheader("Transfer-Encoding") is None
+            response.read()
+        finally:
+            connection.close()
+        assert post_training_eval._read_serving_metrics(port, threading.Event()) == {
+            "running_requests": 2, "waiting_requests": 0, "generation_tokens": 1203, "kv_cache_usage": .25}
+    finally:
+        server.should_exit = True
+        thread.join(3)
+        listener.close()
+        assert not thread.is_alive()
+
+
+def test_serving_sampler_schedule_cap_and_errors_are_best_effort(monkeypatch):
+    class Lease:
+        host, port = "127.0.0.1", 8000
+    events = []
+    sampler = post_training_eval._ServingSampler(Lease(), lambda kind, values: events.append(values))
+    class Stop:
+        def is_set(self): return False
+        def wait(self, seconds):
+            assert seconds == 15
+            return False
+    sampler._stop = Stop()
+    monkeypatch.setattr(post_training_eval, "_read_serving_metrics", lambda *args: post_training_eval._parse_serving_metrics(_metric_body()))
+    sampler._run()
+    assert len(events) == 64
+    monkeypatch.setattr(post_training_eval, "_read_serving_metrics", lambda *args: (_ for _ in ()).throw(OSError("private")))
+    sampler._run()
+    assert len(events) == 64
+
+
+@pytest.mark.parametrize("outcome", [True, False, "exception"])
+def test_serving_cleanup_projection_only_reports_normal_boolean_return(tmp_path, monkeypatch, outcome):
+    events = []
+    class Client:
+        def __init__(self, *args, **kwargs): pass
+        def chat(self, messages): return BackendResponse(message="ready", raw={}, latency_s=.1)
+    class Lease:
+        served_model_name, host, port = "new-adapter", "127.0.0.1", 8000
+        def close(self):
+            if outcome == "exception": raise OSError("private cleanup")
+            return outcome
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
+    monkeypatch.setattr(post_training_eval._ServingSampler, "start", lambda self: None)
+    monkeypatch.setattr(post_training_eval._ServingSampler, "finish", lambda self: None)
+    def run():
+        return post_training_eval.execute_post_training_evaluation(
+            _config(), base_model_path=tmp_path, adapter_path=tmp_path, tokenizer_path=tmp_path,
+            validate=lambda: None, environment={}, cwd=tmp_path, python_executable=sys.executable,
+            bindings=_bindings(), serving_callback=lambda kind, values: events.append((kind, values)))
+    if outcome is True:
+        assert run()["gate_passed"] is True
+    else:
+        with pytest.raises(post_training_eval.PostTrainingCleanupUnresolved): run()
+    assert events == ([] if outcome == "exception" else [("CLEANUP", {"cleanup_resolved": outcome})])
+
+
+def test_real_trace_blocked_metrics_sink_does_not_block_evaluation_cleanup(tmp_path, monkeypatch):
+    from tuner.execution.providers.modal.packaged_worker import _PackagedPhaseTrace
+    entered, release, closed = threading.Event(), threading.Event(), threading.Event()
+    def sink(line):
+        if line.startswith("SYNAPTIC_SERVING "):
+            entered.set()
+            assert release.wait(5)
+    trace = _PackagedPhaseTrace(sink=sink)
+    monkeypatch.setattr(post_training_eval, "_read_serving_metrics", lambda *args: post_training_eval._parse_serving_metrics(_metric_body()))
+    class Client:
+        def __init__(self, *args, **kwargs): pass
+        def chat(self, messages):
+            assert entered.wait(2)
+            return BackendResponse(message="ready", raw={}, latency_s=.1)
+    class Lease:
+        host, port, served_model_name = "127.0.0.1", 8000, "new-adapter"
+        def close(self):
+            assert entered.is_set() and not release.is_set()
+            closed.set()
+            return True
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
+    finished = threading.Event()
+    outcomes = []
+    def evaluate():
+        try:
+            outcomes.append(post_training_eval.execute_post_training_evaluation(
+                _config(), base_model_path=tmp_path, adapter_path=tmp_path, tokenizer_path=tmp_path,
+                validate=lambda: None, environment={}, cwd=tmp_path, python_executable=sys.executable,
+                bindings=_bindings(), phase_callback=trace.emit, serving_callback=trace.emit_serving))
+        except BaseException as error:
+            outcomes.append(error)
+        finally:
+            finished.set()
+    evaluator = threading.Thread(target=evaluate, daemon=True)
+    try:
+        evaluator.start()
+        assert finished.wait(2), "diagnostic sink blocked evaluation cleanup/return"
+        assert closed.is_set() and outcomes[0]["gate_passed"] is True
+        assert not release.is_set()
+    finally:
+        release.set()
+        evaluator.join(3)
+        assert not evaluator.is_alive()
+
+
+def test_serving_sampler_stall_cannot_block_cleanup(tmp_path, monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    def stalled(*args):
+        entered.set()
+        release.wait(5)
+        return post_training_eval._parse_serving_metrics(_metric_body())
+    monkeypatch.setattr(post_training_eval, "_read_serving_metrics", stalled)
+    events = []
+    class Client:
+        def __init__(self, *args, **kwargs): pass
+        def chat(self, messages):
+            assert entered.wait(2)
+            return BackendResponse(message="ready", raw={}, latency_s=.1)
+    class Lease:
+        host, port, served_model_name = "127.0.0.1", 8000, "new-adapter"
+        def close(self):
+            assert not release.is_set()
+            events.append("closed")
+            return True
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
+    try:
+        record = post_training_eval.execute_post_training_evaluation(
+            _config(), base_model_path=tmp_path, adapter_path=tmp_path, tokenizer_path=tmp_path,
+            validate=lambda: None, environment={}, cwd=tmp_path, python_executable=sys.executable,
+            bindings=_bindings(), serving_callback=lambda kind, values: events.append((kind, values)))
+        assert record["gate_passed"] is True
+        assert events == ["closed", ("CLEANUP", {"cleanup_resolved": True})]
+    finally:
+        release.set()
+
+
 @pytest.mark.parametrize("fast_error", [False, True])
 def test_phase_trace_request_edges_are_immediate_and_batch_drains_before_cleanup(tmp_path, monkeypatch, fast_error):
     events = []

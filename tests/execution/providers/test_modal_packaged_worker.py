@@ -590,6 +590,53 @@ def test_commit_failure_is_closed(tmp_path, failed_commit, stage) -> None:
     assert events == (["artifacts"] if failed_commit == "artifacts" else ["artifacts", "control"])
 
 
+def test_serving_trace_reserves_phase_capacity_and_projects_exact_closed_fields():
+    from tuner.execution.providers.modal.packaged_worker import _PackagedPhaseTrace
+    lines = []
+    trace = _PackagedPhaseTrace(clock=lambda: 1, sink=lines.append)
+    metrics = {"running_requests": 2, "waiting_requests": 0, "generation_tokens": 3, "kv_cache_usage": .5}
+    for _ in range(200): trace.emit_serving("METRICS", metrics)
+    assert len(lines) == 64
+    for _ in range(191): trace.emit("CHAT_BATCH", "RETURN")
+    trace.emit_serving("CLEANUP", {"cleanup_resolved": False})
+    trace.emit_serving("METRICS", metrics)
+    assert len(lines) == 256
+    record = json.loads(lines[0].removeprefix("SYNAPTIC_SERVING "))
+    assert record == {"schema_version": "synaptic-modal-serving-diagnostic/v1", "kind": "METRICS",
+        "elapsed_ms": 0, **metrics, "cleanup_resolved": None}
+    assert all(len(line.encode()) <= 512 for line in lines)
+    assert json.loads(lines[-1].removeprefix("SYNAPTIC_SERVING "))["cleanup_resolved"] is False
+
+
+@pytest.mark.parametrize("values", [None, {"private": "secret"},
+    {"running_requests": True, "waiting_requests": 0, "generation_tokens": 0, "kv_cache_usage": 0},
+    {"running_requests": 0, "waiting_requests": 0, "generation_tokens": 0, "kv_cache_usage": float("nan")},
+    {"running_requests": 0, "waiting_requests": 0, "generation_tokens": 2**53, "kv_cache_usage": 0}])
+def test_serving_trace_hostile_values_never_emitted(values):
+    from tuner.execution.providers.modal.packaged_worker import _PackagedPhaseTrace
+    lines = []
+    _PackagedPhaseTrace(clock=lambda: 0, sink=lines.append).emit_serving("METRICS", values)
+    assert lines == []
+
+
+def test_both_trace_emitters_drop_contention_and_release_after_sink_error():
+    from tuner.execution.providers.modal.packaged_worker import _PackagedPhaseTrace
+    metrics = {"running_requests": 0, "waiting_requests": 0, "generation_tokens": 1, "kv_cache_usage": 0}
+    trace = _PackagedPhaseTrace(clock=lambda: 0, sink=lambda line: (_ for _ in ()).throw(OSError("private sink")))
+    trace._lock.acquire()
+    try:
+        trace.emit("VLLM_CLEANUP", "START")
+        trace.emit_serving("CLEANUP", {"cleanup_resolved": True})
+        assert trace._count == 0
+    finally:
+        trace._lock.release()
+    trace.emit("VLLM_CLEANUP", "START")
+    trace.emit_serving("METRICS", metrics)
+    assert trace._count == 2
+    assert trace._lock.acquire(blocking=False)
+    trace._lock.release()
+
+
 def test_phase_trace_is_atomic_finite_private_and_capped():
     lines = []
     trace = _PackagedPhaseTrace(clock=lambda: 1.25, sink=lines.append)
@@ -598,6 +645,9 @@ def test_phase_trace_is_atomic_finite_private_and_capped():
     for thread in threads: thread.start()
     for thread in threads: thread.join(5)
     assert all(not thread.is_alive() for thread in threads)
+    # Contended diagnostics may be dropped; emitted records remain atomic.
+    assert 0 < len(lines) <= 256
+    for _ in range(256): trace.emit("CHAT_REQUEST", "START", 1)
     assert len(lines) == 256
     for line in lines:
         assert len(line.encode()) <= 512 and line.startswith("SYNAPTIC_PHASE ")

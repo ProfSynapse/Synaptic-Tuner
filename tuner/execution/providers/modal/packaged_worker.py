@@ -96,6 +96,7 @@ class _PackagedPhaseTrace:
     def __init__(self, *, clock=time.monotonic, sink=None):
         self._clock, self._sink = clock, sink
         self._lock, self._count = threading.Lock(), 0
+        self._metrics_count = 0
         try:
             self._started = clock()
         except Exception:
@@ -109,7 +110,9 @@ class _PackagedPhaseTrace:
                         or not 1 <= request_ordinal <= 32))
                     or (phase != "CHAT_REQUEST" and request_ordinal is not None)):
                 return
-            with self._lock:
+            if not self._lock.acquire(blocking=False):
+                return
+            try:
                 if self._count >= 256 or type(self._started) not in (int, float):
                     return
                 now = self._clock()
@@ -130,6 +133,63 @@ class _PackagedPhaseTrace:
                     print(line, flush=True)
                 else:
                     self._sink(line)
+            finally:
+                self._lock.release()
+        except Exception:
+            pass
+
+    def emit_serving(self, kind, values):
+        try:
+            metric_keys = {"running_requests", "waiting_requests", "generation_tokens", "kv_cache_usage"}
+            if type(kind) is not str or type(values) is not dict:
+                return
+            projection = {key: None for key in metric_keys}
+            projection["cleanup_resolved"] = None
+            if kind == "METRICS":
+                if set(values) != metric_keys:
+                    return
+                if any(type(values[key]) is not int or not 0 <= values[key] <= 2**53 - 1
+                       for key in metric_keys - {"kv_cache_usage"}):
+                    return
+                fraction = values["kv_cache_usage"]
+                if type(fraction) not in (int, float) or not math.isfinite(fraction) or not 0 <= fraction <= 1:
+                    return
+                projection.update(values)
+            elif kind == "CLEANUP":
+                if set(values) != {"cleanup_resolved"} or type(values["cleanup_resolved"]) is not bool:
+                    return
+                projection.update(values)
+            else:
+                return
+            if not self._lock.acquire(blocking=False):
+                return
+            try:
+                if self._count >= 256 or (kind == "METRICS" and
+                        (self._count >= 128 or self._metrics_count >= 64)):
+                    return
+                if type(self._started) not in (int, float):
+                    return
+                now = self._clock()
+                if type(now) not in (int, float):
+                    return
+                elapsed = (now - self._started) * 1000
+                if not math.isfinite(elapsed) or not 0 <= elapsed <= 86400000:
+                    return
+                line = "SYNAPTIC_SERVING " + json.dumps({
+                    "schema_version": "synaptic-modal-serving-diagnostic/v1",
+                    "kind": kind, "elapsed_ms": int(elapsed), **projection,
+                }, separators=(",", ":"), sort_keys=True)
+                if len(line.encode("utf-8")) > 512:
+                    return
+                self._count += 1
+                if kind == "METRICS":
+                    self._metrics_count += 1
+                if self._sink is None:
+                    print(line, flush=True)
+                else:
+                    self._sink(line)
+            finally:
+                self._lock.release()
         except Exception:
             pass
 
@@ -493,6 +553,7 @@ class ModalPackagedWorker:
                     python_executable=context.python_executable,
                     bindings=context.bindings,
                     phase_callback=trace.emit,
+                    serving_callback=trace.emit_serving,
                 )
                 _phase_call(trace, "EVALUATION_PUBLICATION", lambda:
                     self._publish_evaluation(dispatch, record, provider_job_ref, completion, paths))

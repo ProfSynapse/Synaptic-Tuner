@@ -13,6 +13,7 @@ import contextlib
 import hashlib
 import hmac
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -56,6 +57,9 @@ _RESULT_SCHEMA = "synaptic-modal-packaged-worker-result/v1"
 _RESULT_SCHEMA_V2 = "synaptic-modal-packaged-worker-result/v2"
 _PHASE_SCHEMA = "synaptic-modal-packaged-phase/v1"
 _PHASE_PREFIX = "SYNAPTIC_PHASE "
+_SERVING_PREFIX = "SYNAPTIC_SERVING "
+_SERVING_SCHEMA = "synaptic-modal-serving-diagnostic/v1"
+_SERVING_METRICS_LIMIT = 64
 _PHASE_LIMIT = 256
 _PHASE_RECORD_BYTES = 512
 _PHASE_MESSAGE_BYTES = 4096
@@ -379,7 +383,7 @@ def _phase_filters(binding, call_id):
         raise DiagnosticUnavailable("JOURNAL_INVALID") from None
 
 
-def _phase_record(line):
+def _diagnostic_record(line, prefix):
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -391,7 +395,14 @@ def _phase_record(line):
     if (len(line.encode("utf-8")) > _PHASE_RECORD_BYTES
             or any(ord(character) < 32 for character in line)):
         raise ValueError
-    record = json.loads(line[len(_PHASE_PREFIX):], object_pairs_hook=unique)
+    def nonfinite(_value):
+        raise ValueError
+
+    return json.loads(line[len(prefix):], object_pairs_hook=unique, parse_constant=nonfinite)
+
+
+def _phase_record(line):
+    record = _diagnostic_record(line, _PHASE_PREFIX)
     if (type(record) is not dict or set(record) != {
             "schema_version", "phase", "edge", "elapsed_ms", "request_ordinal"}
             or record["schema_version"] != _PHASE_SCHEMA
@@ -410,14 +421,42 @@ def _phase_record(line):
     return {key: record[key] for key in ("phase", "edge", "elapsed_ms", "request_ordinal")}
 
 
-async def inspect_phase_trace(client, binding, call_id, api_pb2):
+def _serving_record(line):
+    record = _diagnostic_record(line, _SERVING_PREFIX)
+    metrics = ("running_requests", "waiting_requests", "generation_tokens", "kv_cache_usage")
+    if (type(record) is not dict or set(record) != {
+            "schema_version", "kind", "elapsed_ms", *metrics, "cleanup_resolved"}
+            or record["schema_version"] != _SERVING_SCHEMA
+            or type(record["kind"]) is not str or record["kind"] not in {"METRICS", "CLEANUP"}
+            or type(record["elapsed_ms"]) is not int
+            or not 0 <= record["elapsed_ms"] <= 86400000):
+        raise ValueError
+    if record["kind"] == "METRICS":
+        if (record["cleanup_resolved"] is not None
+                or any(type(record[key]) is not int or not 0 <= record[key] <= 2**53 - 1
+                       for key in metrics[:3])
+                or type(record["kv_cache_usage"]) not in (int, float)
+                or not math.isfinite(record["kv_cache_usage"])
+                or not 0 <= record["kv_cache_usage"] <= 1):
+            raise ValueError
+    elif (any(record[key] is not None for key in metrics)
+          or type(record["cleanup_resolved"]) is not bool):
+        raise ValueError
+    return {key: record[key] for key in ("kind", "elapsed_ms", *metrics, "cleanup_resolved")}
+
+
+async def _inspect_log_records(client, binding, call_id, api_pb2, *,
+                               prefix, parser, serving=False):
     """One pinned unary log snapshot, with byte rejection only AFTER reception.
 
     AppFetchLogs has no wire-byte cap. No pagination, retry, log helper, or result
     deserialization is permitted. Even valid records cannot establish complete
     history, cause, artifact verification, or retry authority.
     """
-    projection = {"result": "TRACE_INCONCLUSIVE", "completeness": "INCONCLUSIVE",
+    inconclusive = "SERVING_INCONCLUSIVE" if serving else "TRACE_INCONCLUSIVE"
+    read = "SERVING_READ" if serving else "TRACE_READ"
+    record_stage = "SERVING_RECORD" if serving else "PHASE_RECORD"
+    projection = {"result": inconclusive, "completeness": "INCONCLUSIVE",
                   "reason": "UNAVAILABLE", "records": [],
                   "wire_byte_cap": False, "byte_bounds": "AFTER_RECEPTION",
                   "entry_limit": _PHASE_LIMIT,
@@ -447,6 +486,7 @@ async def inspect_phase_trace(client, binding, call_id, api_pb2):
             projection["reason"] = "RECEIVED_BOUND_EXCEEDED"
             return projection
         records = []
+        metrics_count = 0
         # A print() record and its newline can be separate TaskLogs items. Keep
         # independent remainders by returned stream identity and FD; never join
         # different calls, tasks, inputs, containers, or stdout/stderr streams.
@@ -479,7 +519,7 @@ async def inspect_phase_trace(client, binding, call_id, api_pb2):
                     line = remainder + chunk
                     remainder = ""
                     candidate = bool(line) and (
-                        line.startswith(_PHASE_PREFIX) or _PHASE_PREFIX.startswith(line))
+                        line.startswith(prefix) or prefix.startswith(line))
                     if not candidate:
                         discarding = bool(line) and not complete
                         continue
@@ -490,17 +530,23 @@ async def inspect_phase_trace(client, binding, call_id, api_pb2):
                                 api_pb2.FILE_DESCRIPTOR_STDOUT, api_pb2.FILE_DESCRIPTOR_STDERR,
                             }):
                         raise ValueError
-                    validation_stage = "PHASE_RECORD"
+                    validation_stage = record_stage
                     if len(line.encode("utf-8")) > _PHASE_RECORD_BYTES:
                         raise ValueError
                     if not complete:
                         remainder = line
                         continue
                     validation_stage = "LINE_FRAMING"
-                    if not line.startswith(_PHASE_PREFIX):
+                    if not line.startswith(prefix):
                         raise ValueError
-                    validation_stage = "PHASE_RECORD"
-                    records.append(_phase_record(line))
+                    validation_stage = record_stage
+                    record = parser(line)
+                    records.append(record)
+                    if serving and record["kind"] == "METRICS":
+                        metrics_count += 1
+                        if metrics_count >= _SERVING_METRICS_LIMIT:
+                            projection["reason"] = "CAPPED"
+                            return projection
                     if len(records) >= _PHASE_LIMIT:
                         projection["reason"] = "CAPPED"
                         return projection
@@ -508,8 +554,8 @@ async def inspect_phase_trace(client, binding, call_id, api_pb2):
         validation_stage = "LINE_FRAMING"
         if any(remainder for remainder, _ in streams.values()):
             raise ValueError
-        projection.update(result="TRACE_READ" if records and entries < _PHASE_LIMIT
-                          else "TRACE_INCONCLUSIVE",
+        projection.update(result=read if records and entries < _PHASE_LIMIT
+                          else inconclusive,
                           reason="CAPPED" if entries == _PHASE_LIMIT else
                           "SNAPSHOT_ONLY" if records else "MISSING", records=records)
         return projection
@@ -517,6 +563,17 @@ async def inspect_phase_trace(client, binding, call_id, api_pb2):
         projection["reason"] = "MALFORMED"
         projection["validation_stage"] = validation_stage
         return projection
+
+
+async def inspect_phase_trace(client, binding, call_id, api_pb2):
+    return await _inspect_log_records(client, binding, call_id, api_pb2,
+                                      prefix=_PHASE_PREFIX, parser=_phase_record)
+
+
+async def inspect_serving_metrics(client, binding, call_id, api_pb2):
+    """Numeric snapshots only; cleanup resolution is not live GPU/artifact proof."""
+    return await _inspect_log_records(client, binding, call_id, api_pb2,
+                                      prefix=_SERVING_PREFIX, parser=_serving_record, serving=True)
 
 
 def _proven_not_found(error: BoundedVolumeReadError) -> bool:
@@ -810,6 +867,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--inspect-training-completion-metadata", action="store_true")
     parser.add_argument("--inspect-phase-trace", action="store_true",
                         help="One finite phase-log snapshot; byte bounds apply after reception.")
+    parser.add_argument("--inspect-serving-metrics", action="store_true",
+                        help="One fixed numeric serving snapshot; byte bounds apply after reception.")
     parser.add_argument("--include-provider-status", action="store_true",
                         help="Include only a finite provider status from the same call poll.")
     parser.add_argument("--modal-profile", required=True)
@@ -817,16 +876,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if sum((args.inspect_markers, args.probe_final_model_first_chunk,
                 args.inspect_evaluation_metadata, args.inspect_training_completion_metadata,
-                args.include_provider_status, args.inspect_phase_trace)) > 1:
+                args.include_provider_status, args.inspect_phase_trace, args.inspect_serving_metrics)) > 1:
             raise DiagnosticUnavailable("INPUT_INVALID")
         if (args.probe_final_model_first_chunk or args.inspect_evaluation_metadata
-                or args.inspect_training_completion_metadata or args.inspect_phase_trace):
+                or args.inspect_training_completion_metadata or args.inspect_phase_trace
+                or args.inspect_serving_metrics):
             retained = read_retained_probe(args.journal, args.claim_ref, args.call_id)
         elif args.inspect_markers:
             retained = read_retained_markers(args.journal, args.claim_ref)
         else:
             retained = read_retained_call(args.journal, args.claim_ref, args.call_id)
-        if args.inspect_phase_trace:
+        if args.inspect_phase_trace or args.inspect_serving_metrics:
             _phase_filters(retained[0], retained[2])
         profile = safe_ref(args.modal_profile, "modal_profile")
         with open(os.devnull, "w") as sink:
@@ -843,10 +903,11 @@ def main(argv: list[str] | None = None) -> int:
                     raise DiagnosticUnavailable("CREDENTIAL_UNAVAILABLE")
                 from modal._utils.async_utils import synchronizer
                 client = modal.Client.from_credentials(token_id, token_secret)
-                if args.inspect_phase_trace:
+                if args.inspect_phase_trace or args.inspect_serving_metrics:
                     binding, _, call_id = retained
                     from modal_proto import api_pb2
-                    category = synchronizer.create_blocking(inspect_phase_trace)(
+                    inspect = inspect_serving_metrics if args.inspect_serving_metrics else inspect_phase_trace
+                    category = synchronizer.create_blocking(inspect)(
                         client, binding, call_id, api_pb2,
                     )
                 elif args.inspect_evaluation_metadata or args.inspect_training_completion_metadata:
@@ -890,7 +951,10 @@ def main(argv: list[str] | None = None) -> int:
         category = error.args[0]
     except Exception:
         category = "LOCAL_UNAVAILABLE"
-    if args.inspect_phase_trace:
+    if args.inspect_serving_metrics:
+        payload = {"schema_version": _SERVING_SCHEMA,
+                   "authority": "DIAGNOSTIC_ONLY", "result": category}
+    elif args.inspect_phase_trace:
         payload = {"schema_version": "synaptic-modal-packaged-phase-diagnostic/v1",
                    "authority": "DIAGNOSTIC_ONLY", "result": category}
     elif args.inspect_evaluation_metadata or args.inspect_training_completion_metadata:
@@ -914,6 +978,8 @@ def main(argv: list[str] | None = None) -> int:
             category = projection["result"]
             payload.update(projection)
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    if args.inspect_serving_metrics:
+        return 0 if type(category) is dict and category.get("result") == "SERVING_READ" else 1
     if args.inspect_phase_trace:
         return 0 if type(category) is dict and category.get("result") == "TRACE_READ" else 1
     if args.inspect_evaluation_metadata or args.inspect_training_completion_metadata:

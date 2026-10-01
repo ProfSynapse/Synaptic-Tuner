@@ -1327,7 +1327,8 @@ def test_phase_cli_mutually_exclusive_before_authentication(monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize("fault", ["journal", "app", "function", None])
-def test_phase_cli_authentication_and_filters_precede_credentials(monkeypatch, tmp_path, capsys, fault):
+@pytest.mark.parametrize("serving", [False, True])
+def test_phase_cli_authentication_and_filters_precede_credentials(monkeypatch, tmp_path, capsys, fault, serving):
     proto = pytest.importorskip("modal_proto.api_pb2")
     events, requests = [], []
     binding = _case()[0]
@@ -1347,7 +1348,7 @@ def test_phase_cli_authentication_and_filters_precede_credentials(monkeypatch, t
     class Stub:
         async def AppFetchLogs(self, request, **kwargs):
             requests.append((request, kwargs))
-            return _phase_response([_phase_line()])
+            return _phase_response([_serving_line() if serving else _phase_line()])
     def client(*_args):
         assert events == ["authenticated", "credential", "credential"]
         events.append("client")
@@ -1363,9 +1364,11 @@ def test_phase_cli_authentication_and_filters_precede_credentials(monkeypatch, t
     for name, module in [("modal", modal), ("modal.config", config), ("modal._utils.async_utils", utils)]:
         monkeypatch.setitem(sys.modules, name, module)
     code = diagnostic.main(["--journal", str(tmp_path / "journal"), "--claim-ref", "a" * 64,
-        "--call-id", _CALL, "--modal-profile", "profile", "--inspect-phase-trace"])
+        "--call-id", _CALL, "--modal-profile", "profile",
+        "--inspect-serving-metrics" if serving else "--inspect-phase-trace"])
     output = json.loads(capsys.readouterr().out)
-    assert output["schema_version"] == "synaptic-modal-packaged-phase-diagnostic/v1"
+    assert output["schema_version"] == ("synaptic-modal-serving-diagnostic/v1" if serving
+                                        else "synaptic-modal-packaged-phase-diagnostic/v1")
     assert output["authority"] == "DIAGNOSTIC_ONLY" and "private" not in json.dumps(output)
     if fault:
         assert code == 1 and output["result"] == "JOURNAL_INVALID"
@@ -1627,3 +1630,286 @@ def test_phase_omitted_call_id_continuation_remains_fail_closed():
     assert len(requests) == 1 and result["result"] == "TRACE_INCONCLUSIVE"
     assert result["reason"] == "MALFORMED" and result["validation_stage"] == "LINE_FRAMING"
     assert result["records"] == []
+
+
+def _serving_line(**changes):
+    record = dict(schema_version="synaptic-modal-serving-diagnostic/v1", kind="METRICS",
+                  elapsed_ms=0, running_requests=1, waiting_requests=2,
+                  generation_tokens=3, kv_cache_usage=0.5, cleanup_resolved=None)
+    record.update(changes)
+    return "SYNAPTIC_SERVING " + json.dumps(record, separators=(",", ":")) + "\n"
+
+
+def _cleanup_line(resolved):
+    return _serving_line(kind="CLEANUP", running_requests=None, waiting_requests=None,
+                         generation_tokens=None, kv_cache_usage=None, cleanup_resolved=resolved)
+
+
+def _inspect_serving(response):
+    proto = pytest.importorskip("modal_proto.api_pb2")
+    requests = []
+    class Stub:
+        async def AppFetchLogs(self, request, *, retry, timeout):
+            requests.append((request, retry, timeout))
+            if isinstance(response, Exception): raise response
+            return response
+    result = asyncio.run(diagnostic.inspect_serving_metrics(
+        SimpleNamespace(stub=Stub()), _case()[0], _CALL, proto))
+    return result, requests
+
+
+@pytest.mark.parametrize("resolved", [False, True])
+def test_serving_one_exact_protobuf_request_and_numeric_projection(resolved):
+    proto = pytest.importorskip("modal_proto.api_pb2")
+    result, requests = _inspect_serving(_phase_response([
+        _phase_line(), "private label model prompt response\n", _serving_line(), _cleanup_line(resolved)]))
+    assert len(requests) == 1
+    request, retry, timeout = requests[0]
+    assert type(request) is proto.AppFetchLogsRequest
+    assert request == proto.AppFetchLogsRequest(app_id="ap-owned", function_id="fu-worker",
+                                               function_call_id=_CALL, limit=256)
+    assert (retry, timeout) == (None, 15)
+    assert result["result"] == "SERVING_READ" and result["completeness"] == "INCONCLUSIVE"
+    assert result["reason"] == "SNAPSHOT_ONLY" and result["wire_byte_cap"] is False
+    assert result["byte_bounds"] == "AFTER_RECEPTION"
+    assert result["records"] == [
+        dict(kind="METRICS", elapsed_ms=0, running_requests=1, waiting_requests=2,
+             generation_tokens=3, kv_cache_usage=0.5, cleanup_resolved=None),
+        dict(kind="CLEANUP", elapsed_ms=0, running_requests=None, waiting_requests=None,
+             generation_tokens=None, kv_cache_usage=None, cleanup_resolved=resolved)]
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("field", ["running_requests", "waiting_requests", "generation_tokens"])
+@pytest.mark.parametrize("value", [0, 2**53 - 1])
+def test_serving_counter_valid_bounds(field, value):
+    result, _ = _inspect_serving(_phase_response([_serving_line(**{field: value})]))
+    assert result["records"][0][field] == value
+
+
+@pytest.mark.parametrize("field", ["running_requests", "waiting_requests", "generation_tokens"])
+@pytest.mark.parametrize("value", [-1, 2**53, True, False, 1.0, None, "private", float("nan"), float("inf")])
+def test_serving_counter_invalid_types_and_bounds(field, value):
+    result, _ = _inspect_serving(_phase_response([_serving_line(**{field: value})]))
+    assert result["reason"] == "MALFORMED" and result["validation_stage"] == "SERVING_RECORD"
+    assert result["records"] == [] and "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("value", [0, 1, 0.0, 1.0, 0.125])
+def test_serving_kv_fraction_valid(value):
+    result, _ = _inspect_serving(_phase_response([_serving_line(kv_cache_usage=value)]))
+    assert result["records"][0]["kv_cache_usage"] == value
+
+
+@pytest.mark.parametrize("value", [-0.01, 1.01, True, False, None, "private",
+                                   float("nan"), float("inf"), float("-inf"), 10**309])
+def test_serving_kv_fraction_invalid_and_nonfinite(value):
+    result, _ = _inspect_serving(_phase_response([_serving_line(kv_cache_usage=value)]))
+    assert result["reason"] == "MALFORMED" and result["records"] == []
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("changes", [
+    {"schema_version": "private"}, {"kind": "private"}, {"kind": []},
+    {"elapsed_ms": True}, {"elapsed_ms": -1}, {"elapsed_ms": 86400001},
+    {"elapsed_ms": 1.0}, {"elapsed_ms": None}, {"cleanup_resolved": True},
+    {"private": "model label"}, {"kind": "CLEANUP", "cleanup_resolved": True},
+])
+def test_serving_exact_schema_and_kind_invariants(changes):
+    result, _ = _inspect_serving(_phase_response([_serving_line(**changes)]))
+    assert result["reason"] == "MALFORMED" and result["records"] == []
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "private", [], {}])
+def test_serving_cleanup_resolution_requires_exact_bool(value):
+    result, _ = _inspect_serving(_phase_response([_cleanup_line(value)]))
+    assert result["reason"] == "MALFORMED" and result["records"] == []
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("field", ["running_requests", "waiting_requests", "generation_tokens", "kv_cache_usage"])
+def test_serving_cleanup_metrics_must_all_be_null(field):
+    line = _cleanup_line(False).replace('"' + field + '":null', '"' + field + '":0')
+    result, _ = _inspect_serving(_phase_response([line]))
+    assert result["reason"] == "MALFORMED" and result["records"] == []
+
+
+@pytest.mark.parametrize("line", [
+    _serving_line().replace('"kind":"METRICS"', '"kind":"METRICS","kind":"CLEANUP"'),
+    _serving_line().replace('"generation_tokens":3,', ''),
+    _serving_line().replace('"kv_cache_usage":0.5', '"kv_cache_usage":1e999'),
+    _serving_line().replace('"elapsed_ms":0', '"elapsed_ms":\n0'),
+    'SYNAPTIC_SERVING []\n', 'SYNAPTIC_SERVING private\n',
+])
+def test_serving_hostile_json_is_closed_without_echo(line):
+    result, _ = _inspect_serving(_phase_response([line]))
+    assert result["reason"] == "MALFORMED" and result["records"] == []
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("cut", [1, 8, len("SYNAPTIC_SERVING "), 60, -1])
+def test_serving_actual_protobuf_chunk_reassembly(cut):
+    line = _serving_line()
+    result, requests = _inspect_serving(_phase_response([line[:cut], line[cut:]]))
+    assert len(requests) == 1 and result["result"] == "SERVING_READ"
+    assert len(result["records"]) == 1
+
+
+@pytest.mark.parametrize("fault", ["call", "container", "input", "fd"])
+def test_serving_interleaved_wrong_stream_cannot_complete_record(fault):
+    proto = pytest.importorskip("modal_proto.api_pb2")
+    line = _serving_line()
+    response = _phase_response([line[:-1], "\n"])
+    item = response.batches[0].items[1]
+    if fault == "call": item.function_call_id = ""
+    elif fault == "container": item.container_id = "private"
+    elif fault == "input": item.input_id = "private"
+    else: item.file_descriptor = proto.FILE_DESCRIPTOR_STDERR
+    result, _ = _inspect_serving(response)
+    assert result["reason"] == "MALFORMED" and result["validation_stage"] == "LINE_FRAMING"
+    assert result["records"] == [] and "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("fragment", ["SYN", "SYNAPTIC_SERVING ", _serving_line()])
+def test_serving_wrong_call_matching_fragment_rejects(fragment):
+    result, _ = _inspect_serving(_phase_response([fragment], call="fc-private"))
+    assert result["validation_stage"] == "RESPONSE_IDENTITY" and result["records"] == []
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("lines,reason", [
+    ([], "MISSING"), ([_phase_line()], "MISSING"), (["SYNAPTIC_SERV"], "MALFORMED"),
+    ([_serving_line()] * 64, "CAPPED"), ([_serving_line()] * 65, "CAPPED"),
+    (["ignored\n"] * 255 + [_serving_line()], "CAPPED"),
+    (["private" * 1024], "RECEIVED_BOUND_EXCEEDED"),
+    (["x" * 2048] * 256, "RECEIVED_BOUND_EXCEEDED"),
+    (["ignored\n"] * 257, "RECEIVED_BOUND_EXCEEDED"),
+])
+def test_serving_missing_truncated_capped_and_received_bounds(lines, reason):
+    result, requests = _inspect_serving(_phase_response(lines))
+    assert len(requests) == 1 and result["result"] == "SERVING_INCONCLUSIVE"
+    assert result["reason"] == reason and result["completeness"] == "INCONCLUSIVE"
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("extra", [0, 1])
+def test_serving_record_byte_bound_includes_prefix(extra):
+    line = _serving_line().rstrip("\n")
+    line += " " * (512 - len(line.encode()) + extra)
+    result, _ = _inspect_serving(_phase_response([line, "\n"]))
+    assert result["reason"] == ("MALFORMED" if extra else "SNAPSHOT_ONLY")
+
+
+def test_phase_mode_ignores_serving_records_and_preserves_projection():
+    result, _ = _inspect_trace(_phase_response([_serving_line(), _cleanup_line(False), _phase_line()]))
+    baseline, _ = _inspect_trace(_phase_response([_phase_line()]))
+    assert result == baseline
+
+
+@pytest.mark.parametrize("mode", ["--inspect-markers", "--inspect-evaluation-metadata",
+    "--probe-final-model-first-chunk", "--include-provider-status",
+    "--inspect-training-completion-metadata", "--inspect-phase-trace"])
+def test_serving_cli_exclusive_modes_reject_before_authentication(monkeypatch, tmp_path, capsys, mode):
+    def reject(*_args): pytest.fail("invalid serving mode reached authentication")
+    monkeypatch.setattr(diagnostic, "read_retained_probe", reject)
+    args = ["--journal", str(tmp_path / "journal"), "--claim-ref", "a" * 64,
+            "--modal-profile", "profile", "--inspect-serving-metrics", mode]
+    if mode != "--inspect-markers": args.extend(["--call-id", _CALL])
+    assert diagnostic.main(args) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output == {"schema_version": "synaptic-modal-serving-diagnostic/v1",
+                      "authority": "DIAGNOSTIC_ONLY", "result": "INPUT_INVALID"}
+
+
+def test_serving_invalid_journal_prevents_provider_import(monkeypatch, tmp_path, capsys):
+    """Serving mode admits retained authentication before provider imports."""
+    original = __import__("builtins").__import__
+    def guarded(name, *args, **kwargs):
+        if name == "modal" or name.startswith("modal.") or name == "modal_proto":
+            pytest.fail("provider imported before serving admission")
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr("builtins.__import__", guarded)
+    assert diagnostic.main(["--journal", str(tmp_path / "missing"), "--claim-ref", "a" * 64,
+        "--call-id", _CALL, "--modal-profile", "profile", "--inspect-serving-metrics"]) == 1
+    assert json.loads(capsys.readouterr().out)["result"] == "JOURNAL_INVALID"
+
+
+def test_serving_real_emitter_chunks_and_schema_parity():
+    import contextlib
+    from tuner.execution.providers.modal.packaged_worker import _PackagedPhaseTrace
+    chunks = []
+    sink = SimpleNamespace(write=lambda value: chunks.append(value), flush=lambda: None)
+    trace = _PackagedPhaseTrace(clock=lambda: 1.0)
+    with contextlib.redirect_stdout(sink):
+        trace.emit_serving("METRICS", dict(running_requests=1, waiting_requests=0,
+            generation_tokens=2**53 - 1, kv_cache_usage=0.25))
+        trace.emit_serving("CLEANUP", dict(cleanup_resolved=False))
+    assert len(chunks) == 4 and chunks[1] == chunks[3] == "\n"
+    result, requests = _inspect_serving(_phase_response(chunks))
+    assert len(requests) == 1 and result["result"] == "SERVING_READ"
+    assert [record["kind"] for record in result["records"]] == ["METRICS", "CLEANUP"]
+    assert result["records"][0]["generation_tokens"] == 2**53 - 1
+    assert result["records"][1]["cleanup_resolved"] is False
+
+
+def test_serving_real_emitter_metric_cap_remains_inconclusive():
+    from tuner.execution.providers.modal.packaged_worker import _PackagedPhaseTrace
+    lines = []
+    trace = _PackagedPhaseTrace(clock=lambda: 1.0, sink=lines.append)
+    for _ in range(65):
+        trace.emit_serving("METRICS", dict(running_requests=0, waiting_requests=0,
+            generation_tokens=0, kv_cache_usage=0))
+    trace.emit_serving("CLEANUP", dict(cleanup_resolved=True))
+    assert len(lines) == 65  # 64 metrics plus terminal cleanup, never 65 metrics.
+    result, _ = _inspect_serving(_phase_response([line + "\n" for line in lines]))
+    assert result["result"] == "SERVING_INCONCLUSIVE" and result["reason"] == "CAPPED"
+
+
+def test_serving_effective_id_fallback_and_interleaving_preserved():
+    proto = pytest.importorskip("modal_proto.api_pb2")
+    first, second = _serving_line(), _cleanup_line(False)
+    response = _phase_response([first[:-1], second[:-1], "\n", "\n"])
+    batch = response.batches[0]
+    batch.task_id, batch.input_id = "private-container", "private-input"
+    for index, item in enumerate(batch.items):
+        if index in {1, 3}: item.file_descriptor = proto.FILE_DESCRIPTOR_STDERR
+    batch.items[0].container_id, batch.items[0].input_id = batch.task_id, batch.input_id
+    result, _ = _inspect_serving(response)
+    assert result["result"] == "SERVING_READ"
+    assert [record["kind"] for record in result["records"]] == ["METRICS", "CLEANUP"]
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("response", [RuntimeError("private provider"), SimpleNamespace(batches=[])])
+def test_serving_provider_failure_and_shape_are_closed(response):
+    result, requests = _inspect_serving(response)
+    assert len(requests) == 1 and result["records"] == []
+    assert result["result"] == "SERVING_INCONCLUSIVE"
+    assert result["reason"] in {"UNAVAILABLE", "MALFORMED"}
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("extra", [0, 1])
+def test_serving_response_byte_boundary_metadata_is_not_projected(extra):
+    response = _phase_response([_serving_line()])
+    response.batches[0].task_id = "private" + "x" * 261000
+    response.batches[0].task_id += "x" * (
+        diagnostic._PHASE_RESPONSE_BYTES + extra - response.ByteSize())
+    assert response.ByteSize() == diagnostic._PHASE_RESPONSE_BYTES + extra
+    result, _ = _inspect_serving(response)
+    assert result["reason"] == ("RECEIVED_BOUND_EXCEEDED" if extra else "SNAPSHOT_ONLY")
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("extra", [0, 1])
+def test_serving_message_byte_boundary_includes_unprojected_metadata(extra):
+    response = _phase_response([_serving_line()])
+    item = response.batches[0].items[0]
+    item.container_name = "private"
+    while item.ByteSize() < diagnostic._PHASE_MESSAGE_BYTES + extra:
+        item.container_name += "x"
+    assert item.ByteSize() == diagnostic._PHASE_MESSAGE_BYTES + extra
+    result, _ = _inspect_serving(response)
+    assert result["reason"] == ("RECEIVED_BOUND_EXCEEDED" if extra else "SNAPSHOT_ONLY")
+    assert "private" not in json.dumps(result)

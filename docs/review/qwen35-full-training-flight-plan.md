@@ -181,15 +181,89 @@ Schema, fields, all six bindings, digest formats and five-role inventory checks
 matched. This physical metadata remains MAC-unverified, not proof of training
 success, completed commits or evaluation entry.
 
-The next targeted correction adds a closed, bounded phase/timing trace around
+The subsequently implemented targeted correction adds a closed, bounded phase/timing trace around
 publication/commits, evaluation preparation, serving startup, immediate chat
 request edges, request drain and cleanup. It changes no recipe, deadlines,
 batch shape, prompts or output limits. A reviewed fresh instrumented smoke can
 identify an outstanding operation without establishing its cause. Runtime hooks
 passed 297 provider-free tests; independent review and the inference source-hash
-refresh remain required. No instrumented GPU run has launched in this checkpoint.
+refresh were still required at that preceding checkpoint. The instrumented run
+had not yet launched then; its later outcome follows below.
 The consumed attempt remains non-replayable; full training, GGUF and publication
 remain held. A provider status alone will not establish root cause.
+
+### Instrumented 4×2 rehearsal outcome (2026-10-01)
+
+Attempt `modal-9c0fbe98dab7d37f3dfaee3a` ran submitted source
+`e551c5b337f6c77d4c4bad3e6a30141a20e83f8e`, submit
+`bba6f0ae0fb490c9d9502edb0484a89c57a45a43dc5ed91876d0dd60b4e198b5`,
+call `fc-01M3VQ850CHCH6NQXE63HCQDMK`. The owning command exited 1 at
+09:03:09.122370 Eastern, `RUN_CALL_OBSERVE` / `INDETERMINATE`, with
+`retry_authorized: false`. One exact final diagnostic status read reports
+provider `TIMEOUT`. The final 32-event `SNAPSHOT_ONLY` trace records publication,
+artifact/control commit, vLLM preparation and readiness returns. Chat ordinal 3
+returned to the client after 106.881 seconds; that is not assertion or writing-
+quality proof. Ordinals 2/1 and the batch report errors at 1796.816/1796.819
+seconds elapsed. Evaluation start 596807 ms plus its configured 1200000 ms
+window gives 1796807 ms: the timing is deadline-consistent, not underlying-cause
+proof. Cleanup START/RETURN appears at 1796820/1798511 ms, but RETURN does not
+establish a resolved cleanup-success boolean. Missing evaluation-publication
+edges in this snapshot do not prove absence.
+
+One evaluation-metadata read returned `FILE_UNAVAILABLE` with MAC `UNVERIFIED`,
+inconclusive. The exact local artifact directory, five expected files and
+`evaluation.json` are absent locally; remote absence and authenticated artifact
+verification are not established. New verified metrics and actual cost remain
+null. The earlier verified baseline and 34879e artifacts/metrics are unchanged.
+
+The first phase-read rejection was a reproduced reader chunk-contract bug:
+real emitter newline chunks and pinned-SDK line buffering. Its inspector-only
+fix is released as `c7dae6fafac338cc6b9218085150ccd0833be41e`; independent
+499-test verification took 8.68 seconds, with final author verification about
+8 seconds (nonadditive). All four commitment checks are CURRENT and skill sync
+passes. The corrected reader worked against the live retained call; it does not
+fix or diagnose inference latency. Submitted execution remains e551c5b.
+
+The initial numeric serving-telemetry plan was assessed without launching.
+The existing model-first CLI caps output at 1024 tokens and time at 900 seconds,
+lacks concurrent requests and adapter-volume mounts, and cannot faithfully
+reproduce this workload; expanding that consumer is not authorized. Current
+config cannot expose private vLLM metrics, so the narrow reusable capability
+for the existing same-job path was subsequently implemented as recorded below. No promise of a
+retraining-free probe is made. No timeout, output cap, model, data or prompt
+change is approved here. Standing bounded fresh-cycle authority retains source,
+review/preflight/live-rate gates and forbids uncertain replay; full training,
+GGUF and publication remain held. Vault writes are suspended pending the
+unresolved journal-history anomaly; checkpoint receipts/transports are retained.
+
+### Serving-metrics implementation checkpoint (2026-10-01)
+
+The minimal capability across six files (four runtime, two inspector) passed
+independent review: 882 tests in 47.47 seconds, no findings. A reproduced P1
+shared-emitter lock stall was corrected in both emitters with nonblocking
+acquire/drop-on-contention and finally-release, keeping the sink inside the
+lock. Real phase/evaluation emission returned within two seconds while a metrics
+writer remained blocked. A real FastAPI/Instrumentator/Prometheus loopback
+fixture exercised HTTP 200, no redirects/gzip/chunking, and actual Content-Length;
+its local package versions are not pinned remote qualification. Four commitment
+checks (98/119/66/5) are CURRENT and sync/diff pass, without hash refresh or pin
+changes. Production changes are not yet pushed or launched; current released
+HEAD remains c7dae6f and 9c0f execution e551c5b is immutable.
+
+Opt-in `--inspect-serving-metrics` uses one exact AppFetchLogs read. The closed
+eight-key `SYNAPTIC_SERVING` schema admits METRICS/CLEANUP records with four
+numeric metrics, no labels; cleanup boolean reflects only the actual returned
+value, not exception classification. Phase semantics are unchanged. Sampling
+allows 64 attempts at 15-second intervals, bounded elapsed/socket work, 4-KiB
+headers and 256-KiB bodies; active-socket shutdown and GPU cleanup precede the
+50-ms join. Shared 256/512 record caps stop metrics at 64/total 128 to reserve
+terminal phases. Contention, caps and missing records remain inconclusive.
+KV-cache telemetry is not VRAM; token counts are aggregates, not quality or
+cause evidence. The next step is reviewed release/push, plan/live quote and ONE
+fresh bounded L40S 4×2 two-step rehearsal under standing authority. No new
+launch, deadline/output-cap/model/data/prompt change or full-training/GGUF/
+publication authorization is recorded. Canonical skill guidance waits for live
+ground truth; vault writes remain stopped.
 
 ## Proposed training shape
 
