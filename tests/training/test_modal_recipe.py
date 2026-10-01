@@ -89,8 +89,34 @@ def test_recipe_rejects_unapproved_authority_and_incompatible_controls(monkeypat
 
 
 def test_recipe_accepts_reviewed_a100_option(monkeypatch):
+    """The existing accelerator admission remains unchanged."""
     recipe = _load(monkeypatch, lambda data: data["job"].update(accelerator="A100-80GB"))
     assert recipe.accelerator == "A100-80GB"
+
+
+@pytest.mark.parametrize("timeout", [1, 3600, 7200, 14400, 86400])
+def test_recipe_timeout_bound_preserves_legacy_workload_bytes(monkeypatch, timeout):
+    baseline = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    requested = _load(monkeypatch, lambda data: data["job"].update(timeout_seconds=timeout))
+    identity = PreparedTrainingInputIdentity("prepared://sha256/" + baseline.dataset_digest,
+        baseline.dataset_digest, "a" * 64, 123, "syntunia-sft-row/v2")
+    original_config = baseline.packaged_config(identity)
+    changed_config = requested.packaged_config(identity)
+    assert requested.timeout_seconds == timeout
+    assert original_config.canonical_json.encode("utf-8") == changed_config.canonical_json.encode("utf-8")
+    assert compile_packaged_sft_workload(resolved_config=original_config).fingerprint == \
+        compile_packaged_sft_workload(resolved_config=changed_config).fingerprint
+
+
+@pytest.mark.parametrize("timeout", [None, True, False, "86400", 1.5, 0, -1, 86401])
+def test_recipe_timeout_rejects_nonfinite_or_inexact_authority(monkeypatch, timeout):
+    with pytest.raises(ValueError):
+        _load(monkeypatch, lambda data: data["job"].update(timeout_seconds=timeout))
+
+
+def test_recipe_timeout_is_required(monkeypatch):
+    with pytest.raises(ValueError):
+        _load(monkeypatch, lambda data: data["job"].pop("timeout_seconds"))
 
 
 def test_existing_v2_publication_is_prepared_without_changing_identity(tmp_path):
@@ -151,7 +177,8 @@ def test_train_plan_does_not_expose_private_recipe_paths_or_malformed_yaml(
     assert "secret-marker" not in output
 
 
-def test_plan_verifies_publication_without_network_or_provider_effects(tmp_path, monkeypatch):
+@pytest.mark.parametrize("timeout", [1800, 14400, 86400])
+def test_plan_verifies_publication_without_network_or_provider_effects(tmp_path, monkeypatch, timeout):
     _, _, _, dataset_config = _config(tmp_path / "source")
     root = tmp_path / ".tracking" / "datasets"
     try:
@@ -160,6 +187,7 @@ def test_plan_verifies_publication_without_network_or_provider_effects(tmp_path,
         published = prepare_dataset_v2(dataset_config, root)
     semantic = published.semantic_identity
     document = yaml.safe_load(RECIPE.read_text(encoding="utf-8"))
+    document["job"]["timeout_seconds"] = timeout
     document["dataset"]["local_file"] = str(
         Path(".tracking") / "datasets" / published.path.name / "dataset.jsonl"
     )
@@ -176,7 +204,7 @@ def test_plan_verifies_publication_without_network_or_provider_effects(tmp_path,
     assert plan.workload_digest
     assert plan.to_dict()["resource_request"] == {
         "accelerator": "L40S", "accelerator_count": 1,
-        "timeout_seconds": 1800,
+        "timeout_seconds": timeout,
     }
     assert plan.to_dict()["operator_maximum_cost"] == {
         "currency": "USD", "minor_units": 200,

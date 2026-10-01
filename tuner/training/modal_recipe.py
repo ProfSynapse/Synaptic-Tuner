@@ -191,7 +191,7 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
             or type(job.get("accelerator_count")) is not int
             or job["accelerator_count"] != 1
             or type(job.get("timeout_seconds")) is not int
-            or not 1 <= job["timeout_seconds"] <= 3600):
+            or not 1 <= job["timeout_seconds"] <= 86400):
         raise ValueError("Modal Qwen SFT requires one supported bounded GPU request")
     maximum_cost = job.get("maximum_cost_minor_units")
     if maximum_cost is not None and (type(maximum_cost) is not int or maximum_cost < 1):

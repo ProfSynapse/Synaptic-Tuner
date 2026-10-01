@@ -1,12 +1,54 @@
 # Qwen 3.5 4B: full-training flight plan (not launch-ready)
 
-Status: representative train/save/serve/chapter mechanics verified; human
+Historical initial status: representative train/save/serve/chapter mechanics verified; human
 writing-quality review remains pending. Full-epoch training remains held. The private
 full-training recipe remains a candidate; no full run is submitted. The successful
 two-step [same-job smoke](../../Trainers/recipes/qwen35_4b_modal_train_eval_smoke.yaml)
 qualified the isolated SFT → saved LoRA → same verified base snapshot → vLLM →
 evaluation → authenticated record/verified downloads workflow. Its three simple
 cases did not qualify long-form writing quality.
+
+## Current one-epoch approval checkpoint (2026-10-01)
+
+Joseph approved ONE epoch with a four-hour ceiling. The accepted private recipe
+uses batch 4/accumulation 2, outer 14400 seconds, evaluation 3600 seconds,
+startup 300 seconds and an 800-cent GPU quote allowance: the preceding $1.95/hour
+rate implies 780 cents for four hours, but a fresh live quote is pending. This is
+an operator allowance, not a provider billing cap or actual cost. The narrow
+generic admission fix and independent gate passed: 80 tests passed in 6.74
+seconds, four tracked files accepted, no P1/P2 findings. The four default
+commitments are CURRENT (98/119/66/packaged); skill sync and whitespace checks
+passed. Reviewed release, fresh live quote and launch preflight remain pending;
+no full run has launched. Qualification cases, model, dataset, profile and
+sampler are unchanged. The earlier full-training-held passages below are historical context,
+not a reversal of this conditional one-epoch approval.
+
+Accepted private recipe SHA: `421882d61f31787a57b92593848a18846641c63b7bd9b57f556da128e04aad69`.
+Public-plan config: `83145a69a20eedb9f3eda2988e3c289cfc15b10ae59ae17a0061405d6b361e70`;
+workload: `c0f59db8f81359c62dcafc75206b33532bd423250be438b4d9d8832042eff535`.
+
+Two ordinary rehearsals, `modal-74a621ea0f198fdbb74b82c4` and
+`modal-33c5806267fe77200e525502`, succeeded from source
+`2e7c5dc8def3b973253c683b6c05410c18d9f03b`: batch 4/accumulation 2, two steps,
+null request output-token ceiling, thinking false, three parallel series cases.
+Both verified five artifact roles and saved evaluation records. Confirmation
+33c's trainer walltime was 194.0 seconds, not whole-job duration; peak allocated/
+reserved/visible memory was 27.093/29.922/44.392 GiB. Its three returned responses
+contained 998/634/1943 words. These are configured mechanical passes and limited
+automated checks, not human writing-quality review or universal reliability.
+
+Accepted local artifact directories (five `.artifact` roles plus
+`evaluation.json` in each):
+
+- `/home/profsynapse/.local/state/synaptic-training/modal-74a621ea0f198fdbb74b82c4-artifacts`
+- `/home/profsynapse/.local/state/synaptic-training/modal-33c5806267fe77200e525502-artifacts`
+
+Generic step-based checkpoint/full-state resume work remains deferred until the
+full run is clearly underway. Direct trainer step/resume support exists, but
+packaged durability/public-API support is a separate gap; no implementation is
+started here. Two epochs, GGUF and publication are not approved. Vault writes
+remain STOP for the unresolved history anomaly, consumed claims are never
+replayed, and human quality remains unreviewed.
 
 ## Representative rehearsal evidence (2026-09-30)
 

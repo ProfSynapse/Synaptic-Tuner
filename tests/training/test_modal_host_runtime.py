@@ -220,6 +220,25 @@ def test_l40s_quote_uses_exact_live_key_and_never_falls_back_to_a100():
     assert not _Volume.created and not _Secret.created and not _App.created
 
 
+def test_four_hour_l40s_quote_retains_cost_gate_without_provisioning():
+    _Workspace.rates = {"gpu_hour_cost_l40s": Decimal("1.95000")}
+    resource = ResourceSpec("L40S", 1, 14400)
+    quote = host.quote_modal_runtime_for_host(
+        sdk=_SDK, client=object(), client_binding=_binding(),
+        recipe_resource=resource, maximum_cost_minor_units=800,
+    )
+    assert quote.gpu_only_timeout_estimate_minor_units == 780
+    assert quote.maximum_cost_minor_units == 800 and quote.resource == resource
+    assert quote.authorization_semantics == "operator-maximum-not-provider-billing-cap"
+    assert {"build", "cpu", "memory", "storage", "usage-beyond-timeout"}.issubset(quote.excluded_billing_dimensions)
+    with pytest.raises(ValueError, match="ceiling"):
+        host.quote_modal_runtime_for_host(
+            sdk=_SDK, client=object(), client_binding=_binding(),
+            recipe_resource=resource, maximum_cost_minor_units=400,
+        )
+    assert not _Volume.created and not _Secret.created and not _App.created
+
+
 def test_scoped_quote_rejects_extreme_decimal_rate(monkeypatch):
     _Workspace.rates = {"gpu_hour_cost_a100_80gb": Decimal("1E-999999")}
     with pytest.raises(ValueError, match="scoped rate is invalid"):
