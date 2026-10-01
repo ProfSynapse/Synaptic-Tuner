@@ -304,6 +304,38 @@ or established as a fix. No automatic retry/replay; full
 training, GGUF and publication remain held, author review pending. Vault writes
 remain STOP for the unresolved history anomaly; prior verified proofs survive.
 
+### Top-p-only rehearsal terminal checkpoint (2026-10-01)
+
+Consumed attempt `modal-153b952c8722f545726b0aba` executed source
+`a2f8aa20a2d70d0419699e64f0fba87f1ec43921`, submit
+`913885a417a565825ca0fab2370104f33158ea4928825382df8d4a703bc15546`,
+call `fc-01M3W029ECSA49SS3G3TYV0AYH`. Ordinary observation exited 1 at
+11:37:09.062203 Eastern with `RUN_CALL_OBSERVE`/`INDETERMINATE` and
+`retry_authorized:false`; the exact provider-status read reports `TIMEOUT`.
+No local artifact/evaluation download was verified; the expected directory and
+five files plus evaluation record are absent locally, not proof of remote
+absence. The final diagnostic snapshot has 44 phase events: two requests
+returned, one request emitted ERROR, followed by evaluation publication/commit
+returns and trainer ERROR. Without a verified evaluation artifact, the request
+ERROR does not identify exact failure text. The serving snapshot contains
+64 metrics and `cleanup_resolved:true`; last aggregate generation was 14768,
+one running/zero waiting. Neither aggregate tokens nor these boundaries prove
+repetition, writing quality or a precise cause. Actual cost is unknown.
+
+The optional generic controls `presence_penalty`, `top_k`, `min_p` and
+`repetition_penalty` are accepted source capability, with no model defaults and
+exact legacy bytes preserved when absent. Independent suites passed 204 and
+810 tests. Reviewed hash-only maintenance of the existing inference closure/lock
+pair is complete: 119 paths/order, the other 117 members and all non-hash pins
+unchanged; four default checks CURRENT (98/119/66/5), skill sync/whitespace pass.
+Source acceptance is not pinned live qualification. The next experiment uses
+the full documented non-thinking Qwen sampler (temperature 0.7/top_p 0.8/top_k
+20/min_p 0/presence 1.5/repetition 1), plus outer timeout 2160 seconds, retaining
+evaluation 1200/startup 300 seconds and no request output-token ceiling. It is
+not launched here or a proven fix. Consumed attempts are not replayed; full
+training, human-quality acceptance, GGUF and publication remain held. Vault
+writes remain STOP. Earlier top-p-only plan records are historical.
+
 ## Proposed training shape
 
 The private, gitignored candidate recipe is

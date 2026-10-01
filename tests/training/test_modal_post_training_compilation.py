@@ -177,6 +177,62 @@ def test_post_training_template_kwargs_use_shared_bounded_validator(kwargs):
         validate_post_training_config(config)
 
 
+@pytest.mark.parametrize("controls", [{},
+    {"presence_penalty": 1.5, "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0},
+    {"presence_penalty": -2.0, "top_k": -1, "min_p": 1.0, "repetition_penalty": 3.0},
+])
+def test_optional_decode_controls_bind_compilation_and_schema_without_legacy_changes(controls):
+    import json
+    from jsonschema import Draft202012Validator
+    from tuner.training.post_training import validate_post_training_config
+    from tuner.training.recipes import canonical_json_bytes
+    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    legacy = _evaluation()
+    legacy_bytes = canonical_json_bytes(legacy)
+    assert canonical_json_bytes(validate_post_training_config(legacy)) == legacy_bytes
+    baseline = _config(replace(recipe, post_training=legacy))
+    requested = _evaluation()
+    requested["evaluation"]["generation"].update(controls)
+    requested = validate_post_training_config(requested)
+    config = _config(replace(recipe, post_training=requested))
+    workload = compile_packaged_sft_workload(resolved_config=config)
+    assert workload.document["configuration"]["document"]["post_training"] == requested
+    ordinary = compile_packaged_sft_workload(resolved_config=baseline)
+    assert (workload.fingerprint == ordinary.fingerprint) is (not controls)
+    assert (config == baseline) is (not controls)
+    schema = json.loads((ROOT / "schemas/synaptic-packaged-sft-workload-v1.schema.json").read_text())
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    for compiled in (ordinary, workload, compile_packaged_sft_workload(resolved_config=_config(recipe)),
+            compile_packaged_sft_workload(resolved_config=_config(load_modal_sft_recipe(COMBINED_RECIPE, profiles_root=PROFILES)))):
+        validator.validate(compiled.document)
+
+
+@pytest.mark.parametrize("name,bad", [
+    (name, bad) for name in ("presence_penalty", "top_k", "min_p", "repetition_penalty")
+    for bad in (None, True, False, "1", float("nan"), float("inf"), float("-inf"))
+] + [("presence_penalty", -2.1), ("presence_penalty", 2.1), ("min_p", -0.1),
+     ("min_p", 1.1), ("repetition_penalty", 0), ("repetition_penalty", -1),
+     ("top_k", -2), ("top_k", 1.5), ("presence_penalty", 10**400),
+     ("min_p", 10**400), ("repetition_penalty", 10**400)])
+def test_optional_decode_controls_reject_invalid_configuration_and_schema(name, bad):
+    import json
+    import math
+    from jsonschema import Draft202012Validator
+    from tuner.training.post_training import validate_post_training_config
+    config = _evaluation()
+    config["evaluation"]["generation"][name] = bad
+    with pytest.raises(ValueError):
+        validate_post_training_config(config)
+    # JSON Schema cannot express IEEE finite/representable-number bounds;
+    # canonical admission owns those rejections.
+    if (type(bad) is float and not math.isfinite(bad)) or (type(bad) is int and bad == 10**400):
+        return
+    schema = json.loads((ROOT / "schemas/synaptic-packaged-sft-workload-v1.schema.json").read_text())
+    validator = Draft202012Validator({"$ref": "#/$defs/post_training", "$defs": schema["$defs"]})
+    assert not validator.is_valid(config)
+
+
 def test_opt_in_evaluation_rejects_unbound_or_invalid_controls():
     recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
     valid = _config(replace(recipe, post_training=_evaluation())).to_dict()

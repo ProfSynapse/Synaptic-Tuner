@@ -917,7 +917,10 @@ def test_real_client_uses_remaining_deadline_and_rejects_late_bodies(
     post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
 
 
-def test_real_requests_socket_accepts_elapsed_over_120_within_evaluation_deadline(tmp_path, monkeypatch):
+@pytest.mark.parametrize("decode_controls", [{}, {
+    "presence_penalty": 1.5, "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+}])
+def test_real_requests_socket_accepts_elapsed_over_120_with_evaluation_decode_controls(tmp_path, monkeypatch, decode_controls):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from types import SimpleNamespace
     from Evaluator import base_client
@@ -925,6 +928,7 @@ def test_real_requests_socket_accepts_elapsed_over_120_within_evaluation_deadlin
     timers = SimpleNamespace(monotonic=lambda: clock.now, perf_counter=lambda: clock.now)
     config = _config()
     config["evaluation"].update(timeout_seconds=300, max_cases=1)
+    config["evaluation"]["generation"].update(decode_controls)
     config["evaluation"]["scenarios"] = config["evaluation"]["scenarios"][:1]
     requests_seen, timeouts, closed = [], [], []
 
@@ -988,6 +992,11 @@ def test_real_requests_socket_accepts_elapsed_over_120_within_evaluation_deadlin
     assert record["cases"][0]["response"] == "ready"
     assert record["cases"][0]["latency_seconds"] == 150.0
     assert requests_seen[0]["model"] == "new-adapter"
+    for name in ("presence_penalty", "top_k", "min_p", "repetition_penalty"):
+        if name in decode_controls:
+            assert requests_seen[0][name] == decode_controls[name]
+        else:
+            assert name not in requests_seen[0]
     post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
 
 

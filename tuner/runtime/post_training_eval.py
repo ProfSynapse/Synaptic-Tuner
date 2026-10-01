@@ -323,6 +323,10 @@ def execute_post_training_evaluation(
             max_tokens=generation["max_tokens"], model_path=None,
             lora_adapter=None,
             chat_template_kwargs=generation.get("chat_template_kwargs"),
+            presence_penalty=generation.get("presence_penalty"),
+            top_k=generation.get("top_k"),
+            min_p=generation.get("min_p"),
+            repetition_penalty=generation.get("repetition_penalty"),
         )
 
         class DeadlineClient:

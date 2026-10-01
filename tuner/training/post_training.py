@@ -25,7 +25,11 @@ def _integer(value: object, label: str, low: int, high: int) -> int:
 
 
 def _number(value: object, label: str, low: float, high: float) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value):
+    try:
+        finite = type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite:
         raise ValueError(f"{label} must be finite")
     result = float(value)
     if not low <= result <= high:
@@ -36,8 +40,8 @@ def _number(value: object, label: str, low: float, high: float) -> float:
 def validate_post_training_config(raw: object) -> dict | None:
     """Return a JSON-only normalized specification, or None when absent.
 
-    Every runtime-affecting option is explicit so a submitted workload cannot
-    acquire a different serving policy through defaults added later.
+    Required controls are explicit. Optional decode controls remain absent when
+    unspecified, preserving legacy workload bytes and server-default behavior.
     """
     if raw is None:
         return None
@@ -98,7 +102,7 @@ def validate_post_training_config(raw: object) -> dict | None:
         raise ValueError("served model name is invalid")
     generation = evaluation["generation"]
     if (type(generation) is not dict or not {"max_tokens", "temperature", "top_p"}.issubset(generation)
-            or set(generation) - {"max_tokens", "temperature", "top_p", "chat_template_kwargs"}):
+            or set(generation) - {"max_tokens", "temperature", "top_p", "chat_template_kwargs", "presence_penalty", "top_k", "min_p", "repetition_penalty"}):
         raise ValueError("generation has missing or unknown fields")
     if generation["max_tokens"] is not None:
         _integer(generation["max_tokens"], "maximum output tokens", 1, 262144)
@@ -107,6 +111,14 @@ def validate_post_training_config(raw: object) -> dict | None:
         generation["chat_template_kwargs"] = validate_chat_template_kwargs(generation["chat_template_kwargs"])
     generation["temperature"] = _number(generation["temperature"], "temperature", 0.0, 2.0)
     generation["top_p"] = _number(generation["top_p"], "top p", 0.000001, 1.0)
+    for name, low, high in (("presence_penalty", -2.0, 2.0), ("min_p", 0.0, 1.0),
+                            ("repetition_penalty", 0.0, float("inf"))):
+        if name in generation:
+            generation[name] = _number(generation[name], name, low, high)
+            if name == "repetition_penalty" and generation[name] == 0:
+                raise ValueError("repetition penalty must be greater than zero")
+    if "top_k" in generation and (type(generation["top_k"]) is not int or generation["top_k"] < -1):
+        raise ValueError("top k must be an integer greater than or equal to -1")
     vllm = _fields(evaluation["vllm"], {
         "expected_version", "dtype", "max_model_len", "tensor_parallel_size",
         "max_num_seqs", "max_num_batched_tokens", "language_model_only", "max_lora_rank",

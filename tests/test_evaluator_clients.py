@@ -15,6 +15,32 @@ def test_vllm_output_limit_null_omits_token_fields(limit):
         assert payload["max_tokens"] == limit
 
 
+@pytest.mark.parametrize("controls", [
+    {"presence_penalty": -2, "top_k": -1, "min_p": 0, "repetition_penalty": 0.1},
+    {"presence_penalty": 2, "top_k": 0, "min_p": 1, "repetition_penalty": 3.0},
+    {"presence_penalty": 1.5, "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0},
+])
+def test_vllm_optional_decode_controls_project_only_fixed_supplied_keys(controls):
+    baseline = VLLMClient(VLLMSettings(model="generic-model"))._build_payload([])
+    requested = VLLMClient(VLLMSettings(model="generic-model", **controls))._build_payload([])
+    assert requested == {**baseline, **controls}
+    assert VLLMClient(VLLMSettings(model="generic-model", presence_penalty=None, top_k=None,
+        min_p=None, repetition_penalty=None))._build_payload([]) == baseline
+    assert not set(controls).intersection(baseline)
+
+
+@pytest.mark.parametrize("name,bad", [
+    (name, bad) for name in ("presence_penalty", "top_k", "min_p", "repetition_penalty")
+    for bad in (True, False, "1", float("nan"), float("inf"), float("-inf"))
+] + [("presence_penalty", -2.1), ("presence_penalty", 2.1), ("min_p", -0.1),
+     ("min_p", 1.1), ("repetition_penalty", 0), ("repetition_penalty", -1),
+     ("top_k", -2), ("top_k", 1.5), ("presence_penalty", 10**400),
+     ("min_p", 10**400), ("repetition_penalty", 10**400)])
+def test_vllm_optional_decode_controls_reject_invalid_settings(name, bad):
+    with pytest.raises(ValueError):
+        VLLMSettings(model="generic-model", **{name: bad})
+
+
 def test_vllm_omitted_generation_options_preserve_default_payload():
     payload = VLLMClient(VLLMSettings(model="generic-model"))._build_payload([])
     assert payload["max_tokens"] == 1024

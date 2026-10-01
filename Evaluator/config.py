@@ -269,8 +269,25 @@ class VLLMSettings(BaseBackendSettings):
     lora_adapter: Optional[str] = None
     gpu_memory_utilization: float = 0.9
     chat_template_kwargs: Optional[dict[str, object]] = None
+    presence_penalty: Optional[float] = None
+    top_k: Optional[int] = None
+    min_p: Optional[float] = None
+    repetition_penalty: Optional[float] = None
 
     def __post_init__(self) -> None:
+        import math
+        for name, low, high in (("presence_penalty", -2.0, 2.0), ("min_p", 0.0, 1.0),
+                                ("repetition_penalty", 0.0, float("inf"))):
+            value = getattr(self, name)
+            try:
+                finite = type(value) in (int, float) and math.isfinite(value)
+            except OverflowError:
+                finite = False
+            if value is not None and (not finite
+                    or not low <= value <= high or (name == "repetition_penalty" and value == 0)):
+                raise ValueError(f"{name} is outside its bound")
+        if self.top_k is not None and (type(self.top_k) is not int or self.top_k < -1):
+            raise ValueError("top k must be an integer greater than or equal to -1")
         if self.max_tokens is not None and (
             type(self.max_tokens) is not int or not 1 <= self.max_tokens <= 262144
         ):
