@@ -106,10 +106,43 @@ optimizer count. No new five-artifact verification, evaluation, metrics or
 training timing was obtained. The earlier unknown-cause attempt and successful
 batch-1/accumulation-8 baseline remain preserved.
 
-Batch 4 with accumulation 2 on the same L40S is a **proposed, unmeasured** next
-bounded candidate, requiring fresh approval before any submission. No recipe
-change or additional launch is authorized by these diagnostics. Full training,
-GGUF and publication remain held.
+Joseph separately approved one fresh batch-4/accumulation-2 L40S smoke with
+`max_steps: 2`. It used pushed execution source
+`cd97f2955d99830330f3501b0290a06088668504`, attempt
+`modal-34879e001230749c84e9d714`, submit
+`c6395199cddd456d03c4a17c86538c011f260d5671cfc4f9b09247b51c14fa1c`, and call
+`fc-01M3TGBHTA9675SNG8MHM141MJ`. The ordinary CLI verified and saved all five
+training artifacts plus the evaluation record, then exited 1 with
+`evaluation_passed: false`. One exact bound inspector exited 0 with
+`authority: DIAGNOSTIC_ONLY` and `result: PROVIDER_SUCCESS_UNKNOWN`; this is not
+a training-failure diagnosis.
+
+Saved training metrics and lineage agree on `final_step: 2`,
+`total_epochs: 0.09090909090909091`, and 176/44 examples. Recorded training time
+was 172.1 seconds, rounded to one decimal from `trainer.train()` wall time,
+not whole-job elapsed time. The saved allocator profile reports peak allocated
+27.093 GiB and peak reserved 29.922 GiB out of 47.374 GiB total, or 57.19% and
+63.16% respectively. These `_gb` fields use a `1024**3` divisor; the separate
+hardware figure of 50.9 decimal GB is not the same unit. The rounded values do
+not establish raw-byte precision or capacity beyond this sampled two-step workload.
+
+Evaluation passed two of three configured mechanics cases: case 0 in 80.649603
+seconds and case 2 in 66.099006 seconds. Case 1 returned `request_timeout` at
+120.007829 seconds with no response. This reached the existing 120-second
+per-request runtime limit, which is not YAML-configurable. No OOM diagnostic
+was reported. The two successful output texts remain inside the saved
+evaluation JSON, not standalone chapter files; author quality review remains
+pending. The failed evaluation gate does not undo training-artifact verification.
+No retry or new paid launch is authorized. Full training, GGUF and publication
+remain held.
+
+The private recipe's 1200-second total evaluation window cannot lengthen that
+request limit through config alone. The proposed runtime adjustment would use
+the remaining existing evaluation deadline instead of the fixed 120-second
+clamp, retaining zero retries, parallelism, request/response bounds and cleanup.
+This needs no new timeout field or schema knob, but requires separate review
+and tests of actual deadline semantics before claiming a whole-call bound.
+No runtime or recipe change is implemented here.
 
 ## Proposed training shape
 
