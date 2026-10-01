@@ -544,7 +544,7 @@ async def _inspect_log_records(client, binding, call_id, api_pb2, *,
                     records.append(record)
                     if serving and record["kind"] == "METRICS":
                         metrics_count += 1
-                        if metrics_count >= _SERVING_METRICS_LIMIT:
+                        if metrics_count > _SERVING_METRICS_LIMIT:
                             projection["reason"] = "CAPPED"
                             return projection
                     if len(records) >= _PHASE_LIMIT:

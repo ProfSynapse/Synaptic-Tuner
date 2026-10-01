@@ -265,6 +265,45 @@ launch, deadline/output-cap/model/data/prompt change or full-training/GGUF/
 publication authorization is recorded. Canonical skill guidance waits for live
 ground truth; vault writes remain stopped.
 
+### Metrics-instrumented rehearsal outcome (2026-10-01)
+
+Attempt `modal-a9adf37df87ef78288934bb9` executed source
+`3dd4465e4af91480a751c2520649c9089cd97a0c`, submit
+`3a8900b1406be4f4dcf38b690e5ccc840220efdce24b2261e87262735cf0d29e`,
+call `fc-01M3VWR0THCV643ECM8SCN1MZM`. The ordinary pipeline verified all five
+training artifacts plus `evaluation.json`, then exited 1 for evaluation failure.
+Two training steps took 192.0 seconds (trainer walltime, not whole-job duration).
+Peak allocated/reserved/visible memory was 27.093/29.922/44.392 GiB: this is
+observed capacity, not worst-length qualification. The LoRA archive is
+169922560 bytes; actual cost remains unknown.
+
+Shattered Crystal passed configured natural-stop mechanics: 634 words,
+80.063697 seconds. Symphony of Shadows passed: 590 words, 78.578954 seconds.
+Endless Nights returned no response and hit `request_timeout` at 972.557987
+seconds. These are 2/3 mechanical passes, not human writing-quality judgments.
+Live aggregate generation increased to 13522 tokens with one active request and
+no queue; it does not establish per-case repetition or the timeout's root cause.
+The final 43-event snapshot records evaluation-publication and artifact-commit
+RETURN, alongside ordinary artifact verification. Cleanup RETURN alone is not
+a success boolean. The initial final serving read was CAPPED; its off-by-one fix
+passed independent review in 15.54 seconds: 620 independent tests passed; this
+repeats the author suite. No P1/P2; four commitments CURRENT, sync/diff green.
+ONE retained same-call read
+then returned SERVING_READ/SNAPSHOT_ONLY, completeness INCONCLUSIVE, 64 METRICS
+and one CLEANUP: last sample at 1721470 ms, one running request, zero waiting,
+13522 aggregate generation tokens; `cleanup_resolved:true` at 1773999 ms.
+This confirms the recorded cleanup boolean,
+not cause, quality or global reliability. Private config is unchanged.
+
+The [pinned Qwen README](https://huggingface.co/Qwen/Qwen3.5-4B/blob/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/README.md#best-practices)
+recommends non-thinking general-task temperature 0.7/top_p 0.8/top_k 20/min_p 0/
+presence_penalty 1.5/repetition_penalty 1. Current sampling is 0.7/0.9; penalties
+are not configurable through this schema. A minimal `top_p: 0.8` comparison is
+only one part of the model-card sampler, not full alignment. It is not launched
+or established as a fix. No automatic retry/replay; full
+training, GGUF and publication remain held, author review pending. Vault writes
+remain STOP for the unresolved history anomaly; prior verified proofs survive.
+
 ## Proposed training shape
 
 The private, gitignored candidate recipe is

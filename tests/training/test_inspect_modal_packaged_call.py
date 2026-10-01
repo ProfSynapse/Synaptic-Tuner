@@ -1780,7 +1780,7 @@ def test_serving_wrong_call_matching_fragment_rejects(fragment):
 
 @pytest.mark.parametrize("lines,reason", [
     ([], "MISSING"), ([_phase_line()], "MISSING"), (["SYNAPTIC_SERV"], "MALFORMED"),
-    ([_serving_line()] * 64, "CAPPED"), ([_serving_line()] * 65, "CAPPED"),
+    ([_serving_line()] * 65, "CAPPED"),
     (["ignored\n"] * 255 + [_serving_line()], "CAPPED"),
     (["private" * 1024], "RECEIVED_BOUND_EXCEEDED"),
     (["x" * 2048] * 256, "RECEIVED_BOUND_EXCEEDED"),
@@ -1853,17 +1853,28 @@ def test_serving_real_emitter_chunks_and_schema_parity():
     assert result["records"][1]["cleanup_resolved"] is False
 
 
-def test_serving_real_emitter_metric_cap_remains_inconclusive():
+@pytest.mark.parametrize("include_cleanup", [False, True])
+def test_serving_real_emitter_exact_metric_limit_is_readable(include_cleanup):
     from tuner.execution.providers.modal.packaged_worker import _PackagedPhaseTrace
     lines = []
     trace = _PackagedPhaseTrace(clock=lambda: 1.0, sink=lines.append)
     for _ in range(65):
         trace.emit_serving("METRICS", dict(running_requests=0, waiting_requests=0,
             generation_tokens=0, kv_cache_usage=0))
-    trace.emit_serving("CLEANUP", dict(cleanup_resolved=True))
-    assert len(lines) == 65  # 64 metrics plus terminal cleanup, never 65 metrics.
-    result, _ = _inspect_serving(_phase_response([line + "\n" for line in lines]))
-    assert result["result"] == "SERVING_INCONCLUSIVE" and result["reason"] == "CAPPED"
+    if include_cleanup:
+        trace.emit_serving("CLEANUP", dict(cleanup_resolved=True))
+    assert len(lines) == 64 + int(include_cleanup)
+    # Real print framing: record and newline are separate protobuf log items.
+    result, requests = _inspect_serving(_phase_response([chunk for line in lines for chunk in (line, "\n")]))
+    assert len(requests) == 1 and result["result"] == "SERVING_READ"
+    assert len(result["records"]) == 64 + int(include_cleanup)
+    assert result["reason"] == "SNAPSHOT_ONLY" and "validation_stage" not in result
+    assert result["completeness"] == "INCONCLUSIVE"
+    assert result["wire_byte_cap"] is False and result["byte_bounds"] == "AFTER_RECEPTION"
+    assert all(record["kind"] == "METRICS" for record in result["records"][:64])
+    if include_cleanup:
+        assert result["records"][-1]["kind"] == "CLEANUP"
+        assert result["records"][-1]["cleanup_resolved"] is True
 
 
 def test_serving_effective_id_fallback_and_interleaving_preserved():
