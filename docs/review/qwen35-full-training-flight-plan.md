@@ -77,13 +77,39 @@ obtained. The successful batch-1 run and all consumed attempts are preserved.
 
 The label identifies an otherwise unclassified exception during child execution,
 not a proven out-of-memory condition or a specific training milestone. The
-current classifier recognizes exact built-in RuntimeError/MemoryError types;
-distinct library exception types can fall into OTHER. PyTorch's distinct
+classifier at that source/attempt recognized exact built-in RuntimeError/MemoryError
+types; distinct library exception types could fall into OTHER. PyTorch's distinct
 OutOfMemoryError is one compatible hypothesis, not evidence of this run's cause.
 The original exception detail was not retained in a recoverable authenticated
 diagnostic. Do not infer maximum safe batch size, reduce context, or replay
-this attempt from that label. A narrowly reviewed closed diagnostic improvement
-is the proposed next step before a separately authorized paid retry.
+this attempt from that label.
+
+The finite diagnostic improvement was implemented and independently reviewed:
+876 provider-free tests passed; eight native sealed-descriptor tests remained
+unexercised because the test interpreter lacks `os.memfd_create`. The child now
+recognizes the already-loaded Torch OOM identity and preserves trusted finite
+execution milestones for OOM and otherwise unknown library errors. Existing
+codes remain accepted; no raw exception detail is transported.
+
+The single approved fresh batch-8/accumulation-1 L40S smoke used pushed execution
+source `f7ae5251325de28d8bd488d6f9f51ba82586f82a`, attempt
+`modal-82ca1d46874b4eae914ff807`, submit
+`becb752e9cc5f34e2941d279131b7576f80da264c7e7a203579bea333ac0f48e`, and call
+`fc-01M3TEYN47EWK921PG3H0AP4P6`. It terminated with
+`RUN_WORKER_SFT_TRAINER_CHILD_EXEC_TORCH_OOM_TRAIN_CALL`; the CLI reported
+`retry_authorized: false`. The exact bound read-only inspector independently
+matched `WORKER_SFT_TRAINER_CHILD_EXEC_TORCH_OOM_TRAIN_CALL` with
+`authority: DIAGNOSTIC_ONLY`. This confirms the new diagnostic transport live:
+Torch OOM identity and the trusted `TRAIN_CALL` milestone only. It establishes
+neither device, allocation size/source, capacity limit, root cause nor completed
+optimizer count. No new five-artifact verification, evaluation, metrics or
+training timing was obtained. The earlier unknown-cause attempt and successful
+batch-1/accumulation-8 baseline remain preserved.
+
+Batch 4 with accumulation 2 on the same L40S is a **proposed, unmeasured** next
+bounded candidate, requiring fresh approval before any submission. No recipe
+change or additional launch is authorized by these diagnostics. Full training,
+GGUF and publication remain held.
 
 ## Proposed training shape
 
