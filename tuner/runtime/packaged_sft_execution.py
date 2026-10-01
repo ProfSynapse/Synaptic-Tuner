@@ -54,6 +54,11 @@ CHILD_EXIT_STAGES.update({70 + index: "TRAINER_CHILD_EXEC_" + category
                           for index, category in enumerate(_CHILD_EXEC_CATEGORIES)})
 CHILD_EXIT_STAGES.update({80 + index: "TRAINER_CHILD_EXEC_RUNTIME_" + phase
                           for index, phase in enumerate(CHILD_RUNTIME_MILESTONES)})
+CHILD_EXIT_STAGES[76] = "TRAINER_CHILD_EXEC_TORCH_OOM"
+CHILD_EXIT_STAGES.update({100 + index: "TRAINER_CHILD_EXEC_OTHER_" + phase
+                          for index, phase in enumerate(CHILD_RUNTIME_MILESTONES)})
+CHILD_EXIT_STAGES.update({120 + index: "TRAINER_CHILD_EXEC_TORCH_OOM_" + phase
+                          for index, phase in enumerate(CHILD_RUNTIME_MILESTONES)})
 CHILD_FAILURE_STAGES = frozenset(CHILD_EXIT_STAGES.values())
 _CODES = frozenset({
     "ADMISSION", "ADMISSION_CONTRACTS", "ADMISSION_RELEASE", "ADMISSION_PATHS",

@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 from io import BytesIO
 from zipfile import ZipFile
+from types import ModuleType
 
 from tuner.runtime.packaged_worker_closure import stable_read
 
@@ -22,7 +23,7 @@ _EXEC_RUNTIME_MILESTONES = (
     "LORA_ATTACH", "TRAINER_SETUP", "TRAIN_CALL", "SAVE", "POST_SAVE",
     "BOOTSTRAP_ENV", "TORCH_IMPORT", "UNSLOTH_IMPORT", "TRAINER_IMPORT",
 )
-_FAILURE_EXIT_CODES = frozenset((*range(40, 75), *range(80, 97)))
+_FAILURE_EXIT_CODES = frozenset((*range(40, 75), 76, *range(80, 97), *range(100, 117), *range(120, 137)))
 
 
 class _ChildFailure(Exception):
@@ -35,21 +36,41 @@ def _zero_exit(error):
 
 
 def _classified_failure(phase, error, runtime_milestone=None):
+    error_type = type(error)
+    error_bases = type.__getattribute__(error_type, "__mro__")
+    # Torch's CUDA alias is the same C-extension exception as torch's general
+    # OOM class. Inspect only already-loaded, admitted modules: no diagnostic
+    # import, exception attribute access, class-name matching or message parsing.
+    if phase == "EXEC":
+        extension = sys.modules.get("torch._C")
+        cuda = sys.modules.get("torch.cuda")
+        if type(extension) is ModuleType and type(cuda) is ModuleType:
+            oom = vars(extension).get("OutOfMemoryError")
+            if (type(oom) is type and vars(cuda).get("OutOfMemoryError") is oom
+                    and any(base is oom for base in error_bases)):
+                if type(runtime_milestone) is str and runtime_milestone in _EXEC_RUNTIME_MILESTONES:
+                    return _ChildFailure(120 + _EXEC_RUNTIME_MILESTONES.index(runtime_milestone))
+                return _ChildFailure(76)
     if (phase == "EXEC" and type(error) is RuntimeError and type(runtime_milestone) is str
             and runtime_milestone in _EXEC_RUNTIME_MILESTONES):
         return _ChildFailure(80 + _EXEC_RUNTIME_MILESTONES.index(runtime_milestone))
-    if phase == "EXEC" and type(error) in _EXEC_EXTRA_TYPES:
-        return _ChildFailure(70 + _EXEC_EXTRA_TYPES.index(type(error)))
-    if isinstance(error, OSError):
+    if phase == "EXEC":
+        for index, extra_type in enumerate(_EXEC_EXTRA_TYPES):
+            if error_type is extra_type:
+                return _ChildFailure(70 + index)
+    if any(base is OSError for base in error_bases):
         category = "OS"
-    elif isinstance(error, ImportError):
+    elif any(base is ImportError for base in error_bases):
         category = "IMPORT"
-    elif isinstance(error, ValueError):
+    elif any(base is ValueError for base in error_bases):
         category = "VALUE"
-    elif isinstance(error, SystemExit):
+    elif any(base is SystemExit for base in error_bases):
         category = "SYSTEM_EXIT"
     else:
         category = "OTHER"
+    if (phase == "EXEC" and category == "OTHER" and type(runtime_milestone) is str
+            and runtime_milestone in _EXEC_RUNTIME_MILESTONES):
+        return _ChildFailure(100 + _EXEC_RUNTIME_MILESTONES.index(runtime_milestone))
     return _ChildFailure(40 + _FAILURE_PHASES.index(phase) * len(_FAILURE_CATEGORIES) + _FAILURE_CATEGORIES.index(category))
 
 

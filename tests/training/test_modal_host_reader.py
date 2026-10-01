@@ -180,6 +180,29 @@ def test_v2_worker_failure_reports_only_fixed_stage(stage):
     assert str(error.value) == f"modal_packaged_call_failed_{stage}"
 
 
+@pytest.mark.parametrize("stage", (
+    "SFT_TRAINER_CHILD_EXEC_TORCH_OOM",
+    "SFT_TRAINER_CHILD_EXEC_TORCH_OOM_TRAIN_CALL",
+    "SFT_TRAINER_CHILD_EXEC_OTHER_TRAIN_CALL",
+))
+@pytest.mark.parametrize("change", (
+    {"status_code": "completed"}, {"completion_sha256": "a" * 64},
+    {"extra": "PRIVATE_SENTINEL"}, {"effect_id": "private-effect"},
+    {"schema_version": "synaptic-modal-packaged-worker-result/v1"},
+    {"failure_stage": "SFT_TRAINER_CHILD_EXEC_TORCH_OOM_TRAIN_CALL_EXTRA"},
+    {"failure_stage": "SFT_TRAINER_CHILD_EXEC_OTHER_UNKNOWN"},
+))
+def test_new_diagnostic_near_matches_remain_unknown_through_observe(stage, change):
+    from tuner.execution.providers.modal.packaged_worker import packaged_worker_failure
+    reader, request, _ = _reader("failed")
+    result = packaged_worker_failure(stage)
+    result.update(change)
+    reader._facade.result = result
+    with pytest.raises(ModalPackagedReadUnavailable) as caught:
+        reader.observe(request)
+    assert caught.value.args == ("modal_packaged_call_unknown",)
+
+
 @pytest.mark.parametrize("change", [
     {"effect_id": "other"}, {"status_code": "completed"},
     {"completion_sha256": "a" * 64}, {"schema_version": "other"},

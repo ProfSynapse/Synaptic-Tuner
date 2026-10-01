@@ -53,6 +53,38 @@ score. The new closed diagnostics did not change deadlines, retries, prompts,
 model, data or concurrency; retain them to diagnose any recurrence. The author
 still needs to read the saved drafts. No full epoch or GGUF was launched.
 
+## Batch-capacity smoke: 8 examples at once
+
+Joseph approved a more aggressive L40S smoke on 2026-09-30. The private
+qualification recipe changed to batch 8 and accumulation 1, retaining two
+optimizer steps, the complete 176/44 dataset, model/runtime pins, 32K context,
+rank-32 LoRA, loss controls and same-job evaluation. The effective example
+batch remains eight; padding and loss normalization can differ from batch 1
+with accumulation 8. No full-epoch recipe was changed.
+
+The earlier successful baseline's retained capacity profile reports 13.189 GiB
+peak allocated and 14.498 GiB peak reserved out of 44.392 GiB visible to
+PyTorch, leaving 29.894 GiB reserved headroom. These are allocator measurements
+from a two-step run, not worst-case full-epoch or vLLM memory qualification.
+
+Fresh attempt `modal-853d9958ca337b1ff90d3610`, from pushed source
+`023e9ada8610b74163cb6978fddf38e1af0fc25a`, reached GPU submission after the
+ordinary CPU gate but failed with `RUN_WORKER_SFT_TRAINER_CHILD_EXEC_OTHER`.
+The exact bound read-only inspector independently returned
+`WORKER_SFT_TRAINER_CHILD_EXEC_OTHER`. No new verified artifact set,
+evaluation record, optimizer count, training timing or capacity profile was
+obtained. The successful batch-1 run and all consumed attempts are preserved.
+
+The label identifies an otherwise unclassified exception during child execution,
+not a proven out-of-memory condition or a specific training milestone. The
+current classifier recognizes exact built-in RuntimeError/MemoryError types;
+distinct library exception types can fall into OTHER. PyTorch's distinct
+OutOfMemoryError is one compatible hypothesis, not evidence of this run's cause.
+The original exception detail was not retained in a recoverable authenticated
+diagnostic. Do not infer maximum safe batch size, reduce context, or replay
+this attempt from that label. A narrowly reviewed closed diagnostic improvement
+is the proposed next step before a separately authorized paid retry.
+
 ## Proposed training shape
 
 The private, gitignored candidate recipe is

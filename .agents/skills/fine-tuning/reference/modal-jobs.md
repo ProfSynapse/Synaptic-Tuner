@@ -656,6 +656,19 @@ image construction.
 
 ## Failure diagnostics (including closed start context)
 
+Packaged trainer failures recognize the already-loaded Torch OOM exception
+identity as `SFT_TRAINER_CHILD_EXEC_TORCH_OOM`, with a finite milestone suffix
+when the installed trainer set the trusted callback. Torch's CUDA alias shares
+the general Torch OOM class; this label does not establish device, allocation
+size, allocation source, or batch capacity. Otherwise unknown library errors
+retain that callback's finite milestone as `SFT_TRAINER_CHILD_EXEC_OTHER_<MILESTONE>`;
+without a valid marker they retain legacy `SFT_TRAINER_CHILD_EXEC_OTHER`.
+Existing codes remain accepted. Discarded historical `EXEC_OTHER` diagnostics
+cannot establish OOM retrospectively or justify recipe changes or replay.
+No exception text, class names, traceback, paths, locals or trainer logs are
+transported by these labels. The alias is defined in
+[pinned Torch source](https://github.com/pytorch/pytorch/blob/v2.11.0/torch/cuda/__init__.py).
+
 `RUN_START_INDETERMINATE` spans the whole public start call, not just GPU
 submission. Optional `exception_chain` diagnostics retain at most four closed
 exception categories/recognized coordinator or Foundation enum codes and four

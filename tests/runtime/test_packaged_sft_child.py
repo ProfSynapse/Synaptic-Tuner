@@ -110,6 +110,90 @@ def test_trainer_bootstrap_markers_precede_each_import_boundary():
     assert '_mark_packaged_runtime_phase("TRAIN_CALL")\n            trainer.train(' in source
 
 
+@pytest.mark.parametrize("milestone", child._EXEC_RUNTIME_MILESTONES)
+def test_unknown_library_error_keeps_callback_milestone_and_cleanup(monkeypatch, milestone):
+    from types import SimpleNamespace
+    from tuner.runtime import packaged_sft_execution as seam
+    checks = []
+    private = SimpleNamespace(check=lambda: checks.append(True), close=lambda: checks.append("close"))
+    monkeypatch.setattr(seam, "_retain_private_snapshot", lambda *_: private)
+    source = ("class LibraryError(RuntimeError):\n"
+              "    def __str__(self): raise AssertionError('PRIVATE_SENTINEL')\n"
+              "    def __getattribute__(self, name): raise AssertionError('PRIVATE_SENTINEL')\n"
+              "__packaged_runtime_phase__(" + repr(milestone) + ")\n"
+              "raise LibraryError('PRIVATE_SENTINEL')")
+    with pytest.raises(child._ChildFailure) as caught:
+        child._run_private_trainer(compile(source, "trainer-test", "exec"), Path("/installed/trainer.py"), {}, None, {}, classify=True)
+    assert caught.value.exit_code == 100 + child._EXEC_RUNTIME_MILESTONES.index(milestone)
+    assert checks == [True, True, "close"]
+
+
+@pytest.mark.parametrize("milestone", (None, "UNKNOWN", 17, *child._EXEC_RUNTIME_MILESTONES))
+def test_torch_oom_alias_identity_and_subclasses_without_diagnostic_import(monkeypatch, milestone):
+    from types import ModuleType
+    # Pinned torch/cuda/__init__.py aliases torch._C.OutOfMemoryError;
+    # Exceptions.cpp creates that exception with RuntimeError as its base.
+    extension, cuda = ModuleType("torch._C"), ModuleType("torch.cuda")
+    oom = type("OutOfMemoryError", (RuntimeError,), {})
+    extension.OutOfMemoryError = cuda.OutOfMemoryError = oom
+    monkeypatch.setitem(sys.modules, "torch._C", extension)
+    monkeypatch.setitem(sys.modules, "torch.cuda", cuda)
+    expected = (120 + child._EXEC_RUNTIME_MILESTONES.index(milestone)
+                if type(milestone) is str and milestone in child._EXEC_RUNTIME_MILESTONES else 76)
+    for error in (oom("PRIVATE_SENTINEL"), type("DerivedOOM", (oom,), {})("PRIVATE_SENTINEL")):
+        assert child._classified_failure("EXEC", error, milestone).exit_code == expected
+    spoof = type("OutOfMemoryError", (RuntimeError,), {"__module__": "torch"})
+    assert child._classified_failure("EXEC", spoof(), None).exit_code == 64
+    cuda.OutOfMemoryError = spoof
+    assert child._classified_failure("EXEC", oom(), None).exit_code == 64
+    monkeypatch.delitem(sys.modules, "torch.cuda")
+    assert child._classified_failure("EXEC", oom(), None).exit_code == 64
+    assert child._classified_failure("IMPORT", oom(), "TRAIN_CALL").exit_code == 59
+
+
+def test_real_loaded_torch_oom_identity_without_gpu_allocation():
+    torch = pytest.importorskip("torch")
+    assert torch.cuda.OutOfMemoryError is torch._C.OutOfMemoryError
+    assert issubclass(torch.cuda.OutOfMemoryError, RuntimeError)
+    assert child._classified_failure("EXEC", torch.cuda.OutOfMemoryError("PRIVATE_SENTINEL"), "TRAIN_CALL").exit_code == 130
+
+
+@pytest.mark.parametrize("marker", ("UNKNOWN", 17, None))
+def test_unknown_library_error_invalid_callback_clears_previous_milestone(monkeypatch, marker):
+    from types import SimpleNamespace
+    from tuner.runtime import packaged_sft_execution as seam
+    monkeypatch.setattr(seam, "_retain_private_snapshot", lambda *_: SimpleNamespace(check=lambda: None, close=lambda: None))
+    source = ("__packaged_runtime_phase__('TRAIN_CALL')\n"
+              "__packaged_runtime_phase__(" + repr(marker) + ")\n"
+              "class LibraryError(RuntimeError): pass\nraise LibraryError('PRIVATE_SENTINEL')")
+    with pytest.raises(child._ChildFailure) as caught:
+        child._run_private_trainer(compile(source, "trainer-test", "exec"), Path("/installed/trainer.py"), {}, None, {}, classify=True)
+    assert caught.value.exit_code == 64
+
+
+def test_new_stages_survive_worker_consumer_and_inspector_closed_contracts(monkeypatch):
+    import pickle
+    from types import SimpleNamespace
+    from tuner.runtime.packaged_sft_execution import CHILD_FAILURE_STAGES
+    from tuner.execution.providers.modal.packaged_worker import PACKAGED_WORKER_FAILURE_STAGES, packaged_worker_failure
+    from tuner.training import modal_standalone_runner as consumer
+    from scripts import inspect_modal_packaged_call as inspector
+    expected = {"SFT_" + stage for stage in CHILD_FAILURE_STAGES}
+    assert expected <= PACKAGED_WORKER_FAILURE_STAGES
+    assert expected <= set(inspector._WORKER_FAILURE_STAGES)
+    monkeypatch.setattr(inspector, "_pinned_python", lambda: True)
+    api = SimpleNamespace(DATA_FORMAT_PICKLE=1)
+    for stage in expected:
+        result = packaged_worker_failure(stage)
+        assert result["failure_stage"] == stage
+        assert consumer.ModalStandalonePhaseUnavailable("RUN_WORKER_" + stage).phase == "RUN_WORKER_" + stage
+        output = SimpleNamespace(data_format=1, result=SimpleNamespace(data_blob_id="", data=pickle.dumps(result)))
+        assert inspector._classify_fixed_failure(output, api, pickle.dumps) == "WORKER_" + stage
+        result["failure_stage"] = stage + "_PRIVATE_SENTINEL"
+        output.result.data = pickle.dumps(result)
+        assert inspector._classify_fixed_failure(output, api, pickle.dumps) == "PROVIDER_SUCCESS_UNKNOWN"
+
+
 def test_direct_trainer_without_packaged_hook_preserves_existing_execution(monkeypatch):
     from types import SimpleNamespace
     from tuner.runtime import packaged_sft_execution as seam

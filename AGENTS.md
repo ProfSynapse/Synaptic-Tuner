@@ -54,6 +54,12 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Packaged trainer `TORCH_OOM` diagnostics recognize Torch's shared OOM
+  exception identity; the CUDA alias alone does not establish device, allocation
+  size or batch capacity. Preserve trusted finite execution milestones for
+  unknown library failures. Historical `EXEC_OTHER` cannot retrospectively
+  establish OOM or justify a recipe change or attempt replay.
+
 - The approved packaged-runtime policy separates hosted-parent inventory from the
   isolated trainer: parent admission/revalidation checks the complete inventory
   under authenticated, stable Python library roots against the exact release,

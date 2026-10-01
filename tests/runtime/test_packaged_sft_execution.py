@@ -343,7 +343,8 @@ def test_nonzero_trainer_does_not_emit_success(material, seal):
 
 def test_child_exit_contract_is_finite_and_reserved():
     from tuner.runtime import packaged_sft_child as child
-    assert len(seam.CHILD_EXIT_STAGES) == 52
+    assert len(seam.CHILD_EXIT_STAGES) == 87
+    assert all(type(code) is int and 0 < code <= 255 for code in seam.CHILD_EXIT_STAGES)
     assert set(seam.CHILD_EXIT_STAGES) == child._FAILURE_EXIT_CODES
     assert set(seam.CHILD_EXIT_STAGES.values()) == seam.CHILD_FAILURE_STAGES
     assert tuple(seam.CHILD_EXIT_STAGES.values()) == tuple(
@@ -351,6 +352,9 @@ def test_child_exit_contract_is_finite_and_reserved():
         for phase in child._FAILURE_PHASES for category in child._FAILURE_CATEGORIES
     ) + tuple("TRAINER_CHILD_EXEC_" + category for category in seam._CHILD_EXEC_CATEGORIES) + tuple(
         "TRAINER_CHILD_EXEC_RUNTIME_" + phase for phase in seam.CHILD_RUNTIME_MILESTONES
+    ) + ("TRAINER_CHILD_EXEC_TORCH_OOM",) + tuple(
+        "TRAINER_CHILD_EXEC_" + category + "_" + phase
+        for category in ("OTHER", "TORCH_OOM") for phase in seam.CHILD_RUNTIME_MILESTONES
     )
 
 
@@ -365,6 +369,13 @@ def test_child_exit_contract_is_finite_and_reserved():
     (92, "TRAINER_CHILD_EXEC_RUNTIME_POST_SAVE"),
     (93, "TRAINER_CHILD_EXEC_RUNTIME_BOOTSTRAP_ENV"),
     (96, "TRAINER_CHILD_EXEC_RUNTIME_TRAINER_IMPORT"),
+    (76, "TRAINER_CHILD_EXEC_TORCH_OOM"),
+    (100, "TRAINER_CHILD_EXEC_OTHER_CONFIG"),
+    (110, "TRAINER_CHILD_EXEC_OTHER_TRAIN_CALL"),
+    (116, "TRAINER_CHILD_EXEC_OTHER_TRAINER_IMPORT"),
+    (120, "TRAINER_CHILD_EXEC_TORCH_OOM_CONFIG"),
+    (130, "TRAINER_CHILD_EXEC_TORCH_OOM_TRAIN_CALL"),
+    (136, "TRAINER_CHILD_EXEC_TORCH_OOM_TRAINER_IMPORT"),
     (2, "TRAINER"), (75, "TRAINER"), (97, "TRAINER"), (-9, "TRAINER"),
 ))
 def test_trainer_exit_diagnostic_preserves_failure_and_never_publishes(material, seal, exit_code, expected):
