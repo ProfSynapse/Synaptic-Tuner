@@ -435,6 +435,7 @@ async def inspect_phase_trace(client, binding, call_id, api_pb2):
         )
     except Exception:
         return projection
+    validation_stage = "RESPONSE_SHAPE"
     try:
         if type(response) is not api_pb2.AppFetchLogsResponse:
             raise ValueError
@@ -446,22 +447,67 @@ async def inspect_phase_trace(client, binding, call_id, api_pb2):
             projection["reason"] = "RECEIVED_BOUND_EXCEEDED"
             return projection
         records = []
+        # A print() record and its newline can be separate TaskLogs items. Keep
+        # independent remainders by returned stream identity and FD; never join
+        # different calls, tasks, inputs, containers, or stdout/stderr streams.
+        # Unknown lines enter discard mode until newline, rather than growing
+        # an unbounded buffer. Every retained remainder is at most 512 bytes,
+        # and total received input is already bounded by response.ByteSize().
+        # TaskLogs.function_call_id has no protobuf presence guarantee, and
+        # the pinned SDK does not promise it on every continuation. An omitted
+        # call ID is a separate stream: do not infer identity from the filter.
+        # Its newline cannot complete an authenticated pending phase record;
+        # that snapshot remains fail-closed with LINE_FRAMING.
+        streams = {}
         for batch in response.batches:
             for item in batch.items:
                 if item.ByteSize() > _PHASE_MESSAGE_BYTES:
                     projection["reason"] = "RECEIVED_BOUND_EXCEEDED"
                     return projection
-                lines = item.data.split("\n")
-                for index, line in enumerate(lines):
-                    if not line.startswith(_PHASE_PREFIX):
+                stream = (batch.function_id, item.function_call_id,
+                          item.container_id or batch.task_id,
+                          item.input_id or batch.input_id,
+                          item.file_descriptor)
+                remainder, discarding = streams.get(stream, ("", False))
+                chunks = item.data.split("\n")
+                for index, chunk in enumerate(chunks):
+                    complete = index < len(chunks) - 1
+                    if discarding:
+                        if complete:
+                            discarding = False
                         continue
-                    if (index == len(lines) - 1 or batch.function_id != function_id
-                            or item.function_call_id != authenticated_call):
+                    line = remainder + chunk
+                    remainder = ""
+                    candidate = bool(line) and (
+                        line.startswith(_PHASE_PREFIX) or _PHASE_PREFIX.startswith(line))
+                    if not candidate:
+                        discarding = bool(line) and not complete
+                        continue
+                    validation_stage = "RESPONSE_IDENTITY"
+                    if (batch.function_id != function_id
+                            or item.function_call_id != authenticated_call
+                            or item.file_descriptor not in {
+                                api_pb2.FILE_DESCRIPTOR_STDOUT, api_pb2.FILE_DESCRIPTOR_STDERR,
+                            }):
                         raise ValueError
+                    validation_stage = "PHASE_RECORD"
+                    if len(line.encode("utf-8")) > _PHASE_RECORD_BYTES:
+                        raise ValueError
+                    if not complete:
+                        remainder = line
+                        continue
+                    validation_stage = "LINE_FRAMING"
+                    if not line.startswith(_PHASE_PREFIX):
+                        raise ValueError
+                    validation_stage = "PHASE_RECORD"
                     records.append(_phase_record(line))
                     if len(records) >= _PHASE_LIMIT:
                         projection["reason"] = "CAPPED"
                         return projection
+                streams[stream] = remainder, discarding
+        validation_stage = "LINE_FRAMING"
+        if any(remainder for remainder, _ in streams.values()):
+            raise ValueError
         projection.update(result="TRACE_READ" if records and entries < _PHASE_LIMIT
                           else "TRACE_INCONCLUSIVE",
                           reason="CAPPED" if entries == _PHASE_LIMIT else
@@ -469,6 +515,7 @@ async def inspect_phase_trace(client, binding, call_id, api_pb2):
         return projection
     except Exception:
         projection["reason"] = "MALFORMED"
+        projection["validation_stage"] = validation_stage
         return projection
 
 

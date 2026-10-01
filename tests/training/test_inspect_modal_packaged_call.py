@@ -1191,7 +1191,8 @@ def _phase_line(**changes):
 def _phase_response(lines, *, function="fu-worker", call=_CALL):
     proto = pytest.importorskip("modal_proto.api_pb2")
     return proto.AppFetchLogsResponse(batches=[proto.TaskLogsBatch(
-        function_id=function, items=[proto.TaskLogs(data=line, function_call_id=call)
+        function_id=function, items=[proto.TaskLogs(data=line, function_call_id=call,
+                                                  file_descriptor=proto.FILE_DESCRIPTOR_STDOUT)
                                     for line in lines])])
 
 
@@ -1477,3 +1478,152 @@ def test_phase_parser_matches_real_runtime_emitter_contract():
     trace.emit("CHAT_REQUEST", "RETURN", 32)
     result, _ = _inspect_trace(_phase_response([line + "\n" for line in lines]))
     assert result["result"] == "TRACE_READ" and len(result["records"]) == 2
+
+
+def test_phase_reassembles_real_emitter_print_write_chunks():
+    import contextlib
+    from tuner.execution.providers.modal.packaged_worker import _PackagedPhaseTrace
+    chunks = []
+    sink = SimpleNamespace(write=lambda value: chunks.append(value), flush=lambda: None)
+    trace = _PackagedPhaseTrace(clock=lambda: 1.0)
+    with contextlib.redirect_stdout(sink):
+        trace.emit("TRAINER_EXECUTE", "START")
+        trace.emit("CHAT_REQUEST", "RETURN", 1)
+    assert len(chunks) == 4 and chunks[1] == chunks[3] == "\n"
+    result, requests = _inspect_trace(_phase_response(chunks))
+    assert len(requests) == 1 and result["result"] == "TRACE_READ"
+    assert result["records"] == [
+        dict(phase="TRAINER_EXECUTE", edge="START", elapsed_ms=0, request_ordinal=None),
+        dict(phase="CHAT_REQUEST", edge="RETURN", elapsed_ms=0, request_ordinal=1)]
+
+
+@pytest.mark.parametrize("cut", range(1, len(diagnostic._PHASE_PREFIX) + 2))
+def test_phase_prefix_and_json_fragments_reassemble(cut):
+    line = _phase_line()
+    result, _ = _inspect_trace(_phase_response([line[:cut], line[cut:]]))
+    assert result["result"] == "TRACE_READ" and len(result["records"]) == 1
+
+
+@pytest.mark.parametrize("cut", range(1, len(diagnostic._PHASE_PREFIX) + 1))
+def test_phase_truncated_matching_prefix_is_not_proven_absence(cut):
+    result, _ = _inspect_trace(_phase_response([diagnostic._PHASE_PREFIX[:cut]]))
+    assert result["reason"] == "MALFORMED"
+    assert result["validation_stage"] == "LINE_FRAMING" and result["records"] == []
+
+
+@pytest.mark.parametrize("field", ["fd", "task", "container", "batch_input", "item_input"])
+def test_phase_interleaved_streams_reassemble_independently(field):
+    proto = pytest.importorskip("modal_proto.api_pb2")
+    first = _phase_line(phase="TRAINER_EXECUTE")
+    second = _phase_line(phase="VLLM_PREPARE")
+    response = _phase_response([first[:-1], second[:-1], "\n", "\n"])
+    batch = response.batches[0]
+    if field in {"task", "batch_input"}:
+        # Batch-level identity requires four independent protobuf batches.
+        response = proto.AppFetchLogsResponse(batches=[
+            proto.TaskLogsBatch(function_id=batch.function_id, items=[item])
+            for item in batch.items])
+        for index, source in enumerate(response.batches):
+            setattr(source, "task_id" if field == "task" else "input_id",
+                    "private-a" if index in {0, 2} else "private-b")
+    else:
+        for index, item in enumerate(batch.items):
+            second_stream = index in {1, 3}
+            if field == "fd":
+                item.file_descriptor = proto.FILE_DESCRIPTOR_STDERR if second_stream else proto.FILE_DESCRIPTOR_STDOUT
+            else:
+                setattr(item, "container_id" if field == "container" else "input_id",
+                        "private-b" if second_stream else "private-a")
+    result, requests = _inspect_trace(response)
+    assert len(requests) == 1 and result["result"] == "TRACE_READ"
+    assert [item["phase"] for item in result["records"]] == ["TRAINER_EXECUTE", "VLLM_PREPARE"]
+    assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("field", ["fd", "task", "container", "batch_input", "item_input"])
+def test_phase_mismatched_stream_fragment_cannot_complete_record(field):
+    proto = pytest.importorskip("modal_proto.api_pb2")
+    line = _phase_line()
+    response = _phase_response([line[:-1], "\n"])
+    if field in {"task", "batch_input"}:
+        batch = response.batches[0]
+        response = proto.AppFetchLogsResponse(batches=[
+            proto.TaskLogsBatch(function_id=batch.function_id, items=[item]) for item in batch.items])
+        setattr(response.batches[1], "task_id" if field == "task" else "input_id", "private")
+    else:
+        item = response.batches[0].items[1]
+        if field == "fd": item.file_descriptor = proto.FILE_DESCRIPTOR_STDERR
+        else: setattr(item, "container_id" if field == "container" else "input_id", "private")
+    result, _ = _inspect_trace(response)
+    assert result["reason"] == "MALFORMED" and result["validation_stage"] == "LINE_FRAMING"
+    assert result["records"] == [] and "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("identity", ["function", "call", "fd_unknown", "fd_unspecified", "fd_info"])
+@pytest.mark.parametrize("fragment", ["SYN", diagnostic._PHASE_PREFIX, _phase_line()])
+def test_phase_wrong_identity_matching_fragments_are_never_discarded(identity, fragment):
+    proto = pytest.importorskip("modal_proto.api_pb2")
+    response = _phase_response([fragment])
+    if identity == "function": response.batches[0].function_id = "fu-private"
+    elif identity == "call": response.batches[0].items[0].function_call_id = "fc-private"
+    else:
+        response.batches[0].items[0].file_descriptor = {
+            "fd_unknown": 99, "fd_unspecified": proto.FILE_DESCRIPTOR_UNSPECIFIED,
+            "fd_info": proto.FILE_DESCRIPTOR_INFO}[identity]
+    result, _ = _inspect_trace(response)
+    assert result["reason"] == "MALFORMED" and result["validation_stage"] == "RESPONSE_IDENTITY"
+    assert result["records"] == [] and "private" not in json.dumps(result)
+
+
+def test_phase_oversized_fragmented_record_is_rejected_without_echo():
+    line = _phase_line().rstrip("\n")
+    result, _ = _inspect_trace(_phase_response([line, " " * (513 - len(line)), "\n"]))
+    assert result["reason"] == "MALFORMED" and result["validation_stage"] == "PHASE_RECORD"
+    assert result["records"] == []
+
+
+def test_phase_fragmented_hostile_json_is_rejected_without_echo():
+    line = _phase_line(phase="private prompt")
+    result, _ = _inspect_trace(_phase_response([line[:20], line[20:100], line[100:]]))
+    assert result["reason"] == "MALFORMED" and result["validation_stage"] == "PHASE_RECORD"
+    assert result["records"] == [] and "private" not in json.dumps(result)
+
+
+def test_phase_unknown_oversized_line_is_discarded_until_its_delimiter():
+    result, _ = _inspect_trace(_phase_response([
+        "private" * 400, _phase_line(), _phase_line()]))
+    assert result["result"] == "TRACE_READ" and len(result["records"]) == 1
+    assert "private" not in json.dumps(result)
+
+
+def test_phase_malformed_response_shape_stage_is_closed():
+    result, _ = _inspect_trace(SimpleNamespace(batches=[]))
+    assert result["validation_stage"] == "RESPONSE_SHAPE"
+
+
+def test_phase_stream_uses_effective_batch_identity_for_missing_item_fields():
+    line = _phase_line()
+    response = _phase_response([line[:-1], "\n"])
+    batch = response.batches[0]
+    batch.task_id, batch.input_id = "private-container", "private-input"
+    batch.items[0].container_id, batch.items[0].input_id = batch.task_id, batch.input_id
+    # The second chunk uses the batch-level fallback rather than item fields.
+    result, _ = _inspect_trace(response)
+    assert result["result"] == "TRACE_READ" and len(result["records"]) == 1
+    assert "private" not in json.dumps(result)
+
+
+def test_phase_omitted_call_id_continuation_remains_fail_closed():
+    proto = pytest.importorskip("modal_proto.api_pb2")
+    line = _phase_line()
+    response = _phase_response([line[:-1]])
+    # The real protobuf permits an omitted/default-empty call ID, without
+    # presence tracking. The exact request filter does not supply its identity.
+    assert not proto.TaskLogs.DESCRIPTOR.fields_by_name["function_call_id"].has_presence
+    response.batches[0].items.append(proto.TaskLogs(
+        data="\n", file_descriptor=proto.FILE_DESCRIPTOR_STDOUT))
+    assert response.batches[0].items[1].function_call_id == ""
+    result, requests = _inspect_trace(response)
+    assert len(requests) == 1 and result["result"] == "TRACE_INCONCLUSIVE"
+    assert result["reason"] == "MALFORMED" and result["validation_stage"] == "LINE_FRAMING"
+    assert result["records"] == []
