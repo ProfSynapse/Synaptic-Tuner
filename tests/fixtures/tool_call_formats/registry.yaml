@@ -18,6 +18,12 @@ formats:
         type: string
         enum: [low, high]
     argument_required: [ticketRef, command]
+    prompt_bound_fields:
+      ticketRef:
+        - pattern: 'ticket:\s*(\S+)'
+          in_tag: ticket_context
+        - pattern: 'linked:\s*(\S+)'
+          in_tag: linked_tickets
 
   # Wrapper-less format: each tool is called directly.
   direct:

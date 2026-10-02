@@ -44,6 +44,19 @@ formats:
       t: "\t"
       r: "\r"
 
+    # Wrapper fields whose values the system prompt supplies. Each source is a
+    # regex with one capture group, optionally scoped to a prompt section tag;
+    # the dataset validator accepts a value only if some source yields it.
+    prompt_bound_fields:
+      sessionId:
+        - pattern: 'sessionId:\s*["'']([^"'']+)["'']'
+          in_tag: session_context
+      workspaceId:
+        - pattern: 'workspaceId:\s*["'']([^"'']+)["'']'
+          in_tag: session_context
+        - pattern: '\(id:\s*["'']([^"'']+)["'']\)'
+          in_tag: available_workspaces
+
     # LLM generation prompt lines (appended before the base prompt)
     generation_instructions:
       - "Return a single JSON object only."

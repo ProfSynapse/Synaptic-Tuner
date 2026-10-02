@@ -46,6 +46,10 @@ def build_wrapper_specs(formats: Mapping[str, Any]) -> List[Dict[str, Any]]:
     ``formats`` has the shape returned by ``load_tool_call_formats()``: format
     name -> format config. Formats without a ``wrapper_name`` call tools
     directly and contribute no spec.
+
+    Optional format keys carried into the spec:
+    - ``prompt_bound_fields``: field -> list of ``{pattern, in_tag}`` sources
+      naming where the system prompt states the field's allowed values.
     """
     specs: List[Dict[str, Any]] = []
 
@@ -75,6 +79,7 @@ def build_wrapper_specs(formats: Mapping[str, Any]) -> List[Dict[str, Any]]:
                 "string_fields": string_fields,
                 "command_escapes": _command_escapes(wrapper_name, fmt.get("command_escapes")),
                 "properties": properties,
+                "prompt_bound_fields": dict(fmt.get("prompt_bound_fields") or {}),
             }
         )
 
