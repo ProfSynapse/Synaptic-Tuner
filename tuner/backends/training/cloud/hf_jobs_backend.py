@@ -323,7 +323,12 @@ class HFJobsBackend(
             chat_template_kwargs=training_config.get("chat_template_kwargs"),
             save_steps=training_config.get("save_steps"),
             save_total_limit=training_config.get("save_total_limit"),
-            max_seq_length=training_config.get("max_seq_length") or training_config.get("max_prompt_length") or model_config.get("max_seq_length"),
+            # env-GRPO has no sequence-length flag; its lengths stay in its YAML.
+            max_seq_length=None if method == "grpo" else (
+                training_config.get("max_seq_length")
+                or training_config.get("max_prompt_length")
+                or model_config.get("max_seq_length")
+            ),
             load_in_4bit=model_config.get("load_in_4bit"),
             lora_r=config.get("lora", {}).get("r"),
             lora_alpha=config.get("lora", {}).get("lora_alpha"),

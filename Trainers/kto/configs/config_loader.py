@@ -96,7 +96,6 @@ class DatasetConfig:
     local_file: Optional[str]
     num_proc: int
     test_size: float
-    chat_template: str
 
 
 @dataclass

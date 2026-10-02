@@ -368,6 +368,27 @@ def test_build_grpo_config_wires_max_grad_norm_and_wandb_run_name():
     assert args.run_name == "grpo-run"
 
 
+def test_env_grpo_cli_wires_checkpoint_cadence_and_has_no_dead_length_flag():
+    import argparse
+
+    function = next(
+        node for node in _module_tree(TRAIN_ENV_GRPO).body
+        if isinstance(node, ast.FunctionDef) and node.name == "parse_args"
+    )
+    namespace: Dict[str, Any] = {"argparse": argparse}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(TRAIN_ENV_GRPO), "exec"), namespace)
+    args = namespace["parse_args"](["--save-steps", "10", "--save-total-limit", "3"])
+    assert (args.save_steps, args.save_total_limit) == (10, 3)
+    with pytest.raises(SystemExit):
+        namespace["parse_args"](["--max-seq-length", "4096"])
+    run_source = ast.unparse(next(
+        node for node in _module_tree(TRAIN_ENV_GRPO).body
+        if isinstance(node, ast.FunctionDef) and node.name == "run"
+    ))
+    assert "training_cfg['save_steps'] = args.save_steps" in run_source
+    assert "training_cfg['save_total_limit'] = args.save_total_limit" in run_source
+
+
 def test_env_grpo_version_dependent_defaults_are_named_and_minimal():
     assert _literal(TRAIN_ENV_GRPO, "_VERSION_DEPENDENT_GRPO_DEFAULTS") == {"max_prompt_length"}
     source = TRAIN_ENV_GRPO.read_text(encoding="utf-8")

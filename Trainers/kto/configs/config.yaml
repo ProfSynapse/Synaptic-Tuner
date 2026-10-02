@@ -56,7 +56,6 @@ dataset:
   local_file: null
   num_proc: 1
   test_size: 0.1
-  chat_template: chatml
 wandb:
   enabled: false
   project: kto-finetuning

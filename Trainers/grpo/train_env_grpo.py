@@ -200,7 +200,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=None, help="Override training.learning_rate")
     parser.add_argument("--num-epochs", type=int, default=None, help="Override training.num_train_epochs")
     parser.add_argument("--max-steps", type=int, default=None, help="Override training.max_steps")
-    parser.add_argument("--max-seq-length", type=int, default=None, help="Override model.max_seq_length")
+    parser.add_argument("--save-steps", type=int, default=None, help="Override training.save_steps")
+    parser.add_argument("--save-total-limit", type=int, default=None, help="Override training.save_total_limit")
     return parser.parse_args(argv)
 
 
@@ -231,8 +232,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         training_cfg["num_train_epochs"] = args.num_epochs
     if args.max_steps is not None:
         training_cfg["max_steps"] = args.max_steps
-    if args.max_seq_length is not None:
-        model_cfg["max_seq_length"] = args.max_seq_length
+    if args.save_steps is not None:
+        training_cfg["save_steps"] = args.save_steps
+    if args.save_total_limit is not None:
+        training_cfg["save_total_limit"] = args.save_total_limit
 
     if args.print_cloud_bootstrap:
         runtime_cfg = ((config.get("env_training") or {}).get("runtime") or {})

@@ -174,6 +174,17 @@ def test_typos_at_every_level_are_refused_together(method, tmp_path):
     assert "sede (did you mean 'seed'?)" in message
 
 
+@pytest.mark.parametrize("method", ["kto", "dpo"])
+def test_dead_dataset_chat_template_is_refused(method, tmp_path):
+    # Nothing in the KTO/DPO trainers read dataset.chat_template; it is gone.
+    loader = LOADERS[method]
+    data = copy.deepcopy(loader.load_yaml_config())
+    data["dataset"]["chat_template"] = "chatml"
+    with pytest.raises(UnknownConfigKeysError) as excinfo:
+        loader.load_config(_write(tmp_path, data))
+    assert excinfo.value.paths == ["dataset.chat_template"]
+
+
 def test_sft_nested_evolutionary_and_aux_head_typos_are_refused(tmp_path):
     loader = LOADERS["sft"]
     data = copy.deepcopy(loader.load_yaml_config())

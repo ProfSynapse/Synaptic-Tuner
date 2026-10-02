@@ -145,6 +145,14 @@ class HFCommandBuilderMixin:
         if config.max_steps is not None:
             training_args.extend(["--max-steps", str(config.max_steps)])
         if config.max_seq_length is not None:
+            if config.method == "grpo":
+                # train_env_grpo has no sequence-length setting (the model is
+                # loaded by name; prompt/completion lengths live in the YAML).
+                raise CloudProviderError(
+                    "max_seq_length is not supported for HF env-GRPO; set "
+                    "training.max_completion_length in "
+                    "Trainers/grpo/configs/env_config.yaml instead."
+                )
             training_args.extend(["--max-seq-length", str(config.max_seq_length)])
         # chat_template_kwargs is a nested mapping; serialize to the same JSON-string
         # --chat-template-kwargs flag the local lane uses (one wire format, both

@@ -136,6 +136,8 @@ head -1 <dataset_file> | python -m json.tool
 - Remove the setting or install a TRL version that supports it (check with
   `python -c "import trl; print(trl.__version__)"`). Example: TRL 0.28 removed
   GRPO `max_prompt_length`.
+- HF env-GRPO launches refuse `max_seq_length` / `--train-max-seq-length`
+  (the env trainer has no such setting; use `training.max_completion_length`).
 - Only internal defaults named in a trainer's version-dependent set (env-GRPO:
   `max_prompt_length`) are omitted on unsupported versions, with an `[INFO]`
   line. SFT/KTO/DPO pass explicit arguments, so TRL itself raises `TypeError`.

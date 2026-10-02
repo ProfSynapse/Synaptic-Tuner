@@ -59,7 +59,6 @@ def repo_root(tmp_path):
     grpo_config = {
         "model": {
             "model_name": "professorsynapse/Nexus-Quark-L2.5.28",
-            "max_seq_length": 8192,
         },
         "dataset": {
             "dataset_name": "professorsynapse/nexus-synthetic-data",

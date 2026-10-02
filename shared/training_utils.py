@@ -295,7 +295,9 @@ def apply_tier_preset(
                 args.max_steps = value
         else:
             section, attr = tier_config_map[key]
-            setattr(getattr(config, section), attr, value)
+            target = getattr(config, section)
+            field_type = typing.get_type_hints(type(target))[attr]
+            setattr(target, attr, coerce_config_value(field_type, value))
 
     print(f"Applied '{tier_name}' tier preset: {tier_config}")
     return tier_config
@@ -439,27 +441,30 @@ def dict_to_dataclass(cls, data: Dict[str, Any], *, section: str = ""):
     """
     reject_unknown_config_keys(cls, data, source=cls.__name__, prefix=section)
     fieldtypes = typing.get_type_hints(cls)
-    converted_data = {}
+    return cls(**{k: coerce_config_value(fieldtypes[k], v) for k, v in data.items()})
 
-    for k, v in data.items():
-        field_type = fieldtypes[k]
 
-        # Handle Optional types
-        if hasattr(field_type, '__origin__') and field_type.__origin__ is typing.Union:
-            # Get the non-None type from Optional
-            types = [t for t in field_type.__args__ if t is not type(None)]
-            if types:
-                field_type = types[0]
+def coerce_config_value(field_type: Any, value: Any) -> Any:
+    """Coerce a YAML value to a numeric config field's declared type.
 
-        # Convert strings to appropriate numeric types
-        if field_type == float and isinstance(v, str):
-            converted_data[k] = float(v)
-        elif field_type == int and isinstance(v, str):
-            converted_data[k] = int(v)
-        else:
-            converted_data[k] = v
+    PyYAML loads exponent-only floats such as ``5e-4`` as strings, so a
+    string given for an ``int``/``float`` (or ``Optional`` of one) field is
+    converted; every other value is returned unchanged. The single conversion
+    path for ``dict_to_dataclass`` and ``apply_tier_preset``.
+    """
+    # Handle Optional types
+    if hasattr(field_type, '__origin__') and field_type.__origin__ is typing.Union:
+        # Get the non-None type from Optional
+        types = [t for t in field_type.__args__ if t is not type(None)]
+        if types:
+            field_type = types[0]
 
-    return cls(**converted_data)
+    # Convert strings to appropriate numeric types
+    if field_type == float and isinstance(value, str):
+        return float(value)
+    if field_type == int and isinstance(value, str):
+        return int(value)
+    return value
 
 
 # ---------------------------------------------------------------------------
