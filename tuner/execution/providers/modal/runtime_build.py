@@ -86,7 +86,7 @@ class ModalBoundedOperationFailure(RuntimeError):
 class ModalBuildStageFailure(RuntimeError):
     """Closed build/capture stage for host projection, without provider text."""
 
-    __slots__ = ("stage", "reason")
+    __slots__ = ("stage", "reason", "image_id")
     _REASONS = {
         "SOURCE_WHEEL": frozenset({
             "LOCAL_BUILD_FAILED", "SOURCE_STATE_INVALID", *_SOURCE_STATE_REASONS,
@@ -101,11 +101,38 @@ class ModalBuildStageFailure(RuntimeError):
         "CAPTURE_VALIDATE": frozenset({"INVALID"}),
     }
 
-    def __init__(self, stage: str, reason: str) -> None:
+    def __init__(self, stage: str, reason: str, *, image_id: str | None = None) -> None:
         if reason not in self._REASONS.get(stage, ()):
             raise ValueError("Modal build stage diagnosis is invalid")
+        if (image_id is not None and (
+                stage != "IMAGE_BUILD" or reason != "OPERATION_FAILED"
+                or type(image_id) is not str or _IMAGE_ID.fullmatch(image_id) is None)):
+            raise ValueError("Modal build image identity is invalid")
         super().__init__("modal_build_stage_unavailable")
-        self.stage, self.reason = stage, reason
+        self.stage, self.reason, self.image_id = stage, reason, image_id
+
+
+@dataclass(frozen=True, slots=True)
+class _FailedImageBuild:
+    image_id: str | None
+
+
+def _build_image_with_failure_id(image: object, app: object) -> object:
+    try:
+        return image.build(app)
+    except Exception as error:
+        # Only the pinned SDK's exact failed-build type supplies an image
+        # identity. Never retain its message or traceback.
+        try:
+            from modal.exception import ImageBuildError
+        except ImportError:
+            raise error from None
+        if type(error) is not ImageBuildError:
+            raise
+        identity = error.image_id
+        return _FailedImageBuild(
+            identity if type(identity) is str and _IMAGE_ID.fullmatch(identity) else None
+        )
 
 
 class _CaptureOutputFailure(ValueError):
@@ -468,9 +495,17 @@ def capture_modal_build_candidate(
             for item in all_wheels:
                 image = image.add_local_file(staged / item["filename"], "/opt/synaptic-runtime/" + item["filename"], copy=True)
             image = image.run_commands(command)
-            image = _bounded(lambda: image.build(app), deadline=deadline, code="modal_training_image_build_failed")
+
+            image = _bounded(
+                lambda: _build_image_with_failure_id(image, app),
+                deadline=deadline, code="modal_training_image_build_failed",
+            )
+            if type(image) is _FailedImageBuild:
+                raise ModalBuildStageFailure("IMAGE_BUILD", "OPERATION_FAILED", image_id=image.image_id)
         except ModalBoundedOperationFailure as error:
             raise ModalBuildStageFailure("IMAGE_BUILD", error.reason) from None
+        except ModalBuildStageFailure:
+            raise
         except Exception:
             raise ModalBuildStageFailure("IMAGE_BUILD", "OPERATION_FAILED") from None
         image_id = getattr(image, "object_id", None)

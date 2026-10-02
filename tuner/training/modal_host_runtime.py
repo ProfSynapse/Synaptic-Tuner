@@ -128,20 +128,32 @@ def _closed_release_diagnosis(
 class ModalHostBootstrapUnavailable(RuntimeError):
     """Closed, non-retryable diagnosis for a known host bootstrap boundary."""
 
-    __slots__ = ("_phase", "_failure_class", "_location")
+    __slots__ = ("_phase", "_failure_class", "_location", "_build_app_id", "_image_id")
 
-    def __init__(self, diagnosis: str = "SOURCE_ARCHIVE_INVALID") -> None:
+    def __init__(self, diagnosis: str = "SOURCE_ARCHIVE_INVALID", *,
+                 build_app_id: str | None = None, image_id: str | None = None) -> None:
         if type(diagnosis) is not str or diagnosis not in _CLOSED_BOOTSTRAP_DIAGNOSTICS:
             raise ValueError("Modal bootstrap diagnosis is invalid")
+        if ((build_app_id is not None or image_id is not None) and diagnosis != "IMAGE_BUILD_OPERATION_FAILED"
+                or build_app_id is not None and (
+                    type(build_app_id) is not str
+                    or re.fullmatch(r"ap-[A-Za-z0-9]{1,64}", build_app_id) is None)
+                or image_id is not None and (
+                    type(image_id) is not str
+                    or re.fullmatch(r"im-[A-Za-z0-9]{1,64}", image_id) is None)):
+            raise ValueError("Modal bootstrap diagnostic identity is invalid")
         super().__init__("modal_host_bootstrap_unavailable")
         phase, failure_class, location = _CLOSED_BOOTSTRAP_DIAGNOSTICS[diagnosis]
         object.__setattr__(self, "_phase", phase)
         object.__setattr__(self, "_failure_class", failure_class)
         object.__setattr__(self, "_location", location)
+        object.__setattr__(self, "_build_app_id", build_app_id)
+        object.__setattr__(self, "_image_id", image_id)
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name in {"_phase", "_failure_class", "_location", "phase",
-                    "failure_class", "location", "retry_authorized"}:
+        if name in {"_phase", "_failure_class", "_location", "_build_app_id", "_image_id",
+                    "phase", "failure_class", "location", "retry_authorized",
+                    "build_app_id", "image_id"}:
             raise AttributeError("Modal bootstrap diagnosis is immutable")
         super().__setattr__(name, value)
 
@@ -156,6 +168,14 @@ class ModalHostBootstrapUnavailable(RuntimeError):
     @property
     def location(self) -> str:
         return self._location
+
+    @property
+    def build_app_id(self) -> str | None:
+        return self._build_app_id
+
+    @property
+    def image_id(self) -> str | None:
+        return self._image_id
 
     @property
     def retry_authorized(self) -> bool:
@@ -410,7 +430,8 @@ def prepare_modal_runtime_for_host(
         "volumes": names,
         "secrets": [qualification_name, token_name],
     })
-    private_storage.attempts.claim("build-" + runtime_material_intent_digest, claim)
+    build_claim_ref = "build-" + runtime_material_intent_digest
+    private_storage.attempts.claim(build_claim_ref, claim)
 
     # No credential value enters the recipe, durable claim, report, or logs.
     qualification_key = secrets.token_bytes(32)
@@ -485,7 +506,44 @@ def prepare_modal_runtime_for_host(
         except SourceArchiveInvalid:
             raise ModalHostBootstrapUnavailable() from None
         except ModalBuildStageFailure as error:
-            raise ModalHostBootstrapUnavailable(error.stage + "_" + error.reason) from None
+            build_app_id = image_id = None
+            if (type(error) is ModalBuildStageFailure
+                    and error.stage == "IMAGE_BUILD" and error.reason == "OPERATION_FAILED"):
+                try:
+                    observed_app_id = getattr(entered, "app_id", None)
+                    if (type(observed_app_id) is str
+                            and re.fullmatch(r"ap-[A-Za-z0-9]{1,64}", observed_app_id)):
+                        build_app_id = observed_app_id
+                    observed_image_id = error.image_id
+                    if (type(observed_image_id) is str
+                            and re.fullmatch(r"im-[A-Za-z0-9]{1,64}", observed_image_id)):
+                        image_id = observed_image_id
+                    if private_storage.attempts.resolve(build_claim_ref) != claim:
+                        raise ValueError
+                    diagnostic = canonical_bytes({
+                        "schema_version": "synaptic-modal-host-build-diagnostic/v1",
+                        "build_claim_ref": build_claim_ref,
+                        "build_claim_sha256": hashlib.sha256(claim).hexdigest(),
+                        "intent_digest": runtime_material_intent_digest,
+                        "failure_class": "OPERATION_FAILED",
+                        "build_app_id": build_app_id,
+                        "image_id": image_id,
+                        "retry_authorized": False,
+                    })
+                    retained = private_storage.catalog(
+                        "host-build-diagnostics-v1", encode=bytes, decode=bytes,
+                    )
+                    retained.publish_if_absent(build_claim_ref, diagnostic)
+                    if retained.resolve(build_claim_ref) != diagnostic:
+                        raise ValueError
+                except Exception:
+                    # Diagnostic retention cannot erase or broaden the consumed
+                    # build failure. No unretained identity reaches the CLI.
+                    build_app_id = image_id = None
+            raise ModalHostBootstrapUnavailable(
+                error.stage + "_" + error.reason,
+                build_app_id=build_app_id, image_id=image_id,
+            ) from None
     except BaseException as error:
         capture_failure = error
         raise

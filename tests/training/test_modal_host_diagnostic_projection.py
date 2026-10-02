@@ -61,6 +61,35 @@ def test_bootstrap_diagnosis_subclass_cannot_project_hostile_fields():
     assert _closed_bootstrap_details(HostileBootstrapError()) is None
 
 
+def test_image_build_projects_only_valid_retained_identifiers():
+    error = ModalHostBootstrapUnavailable(
+        "IMAGE_BUILD_OPERATION_FAILED",
+        build_app_id="ap-Build123", image_id="im-Failed123",
+    )
+    assert _closed_bootstrap_details(error) == {
+        "phase": "IMAGE_BUILD", "failure_class": "OPERATION_FAILED",
+        "location": "runtime_build.build_image", "retry_authorized": False,
+        "build_app_id": "ap-Build123", "image_id": "im-Failed123",
+    }
+    assert "private" not in str(error)
+    with pytest.raises(ValueError, match="identity is invalid"):
+        ModalHostBootstrapUnavailable(
+            "IMAGE_BUILD_OPERATION_FAILED", image_id="im-../private",
+        )
+    with pytest.raises(ValueError, match="identity is invalid"):
+        ModalHostBootstrapUnavailable(
+            "IMAGE_BUILD_TIMEOUT", build_app_id="ap-Build123",
+        )
+
+
+def test_image_build_unknown_failure_preserves_legacy_projection():
+    error = ModalHostBootstrapUnavailable("IMAGE_BUILD_OPERATION_FAILED")
+    assert _closed_bootstrap_details(error) == {
+        "phase": "IMAGE_BUILD", "failure_class": "OPERATION_FAILED",
+        "location": "runtime_build.build_image", "retry_authorized": False,
+    }
+
+
 def test_unknown_bootstrap_exception_has_no_details():
     assert _closed_bootstrap_details(
         RuntimeError("HF_TOKEN=private /home/owner/dataset.jsonl")

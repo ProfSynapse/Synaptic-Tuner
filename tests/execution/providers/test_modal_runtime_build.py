@@ -303,6 +303,110 @@ def test_bounded_failure_separates_timeout_and_operation_without_provider_text()
     assert failed.value.__cause__ is None
 
 
+@pytest.mark.parametrize("image_id,expected", [
+    ("im-Exact123", "im-Exact123"),
+    ("im-../HF_TOKEN", None),
+    ("im-" + "x" * 65, None),
+])
+def test_failed_image_build_retains_only_exact_sdk_identity(
+        monkeypatch, image_id, expected) -> None:
+    import sys
+    import time
+    from types import ModuleType
+    from tuner.execution.providers.modal.runtime_build import (
+        _FailedImageBuild, _bounded, _build_image_with_failure_id,
+    )
+
+    class ImageBuildError(RuntimeError):
+        def __init__(self, message, identity):
+            super().__init__(message)
+            self.image_id = identity
+
+    fake_modal = ModuleType("modal")
+    fake_exception = ModuleType("modal.exception")
+    fake_exception.ImageBuildError = ImageBuildError
+    fake_modal.exception = fake_exception
+    monkeypatch.setitem(sys.modules, "modal", fake_modal)
+    monkeypatch.setitem(sys.modules, "modal.exception", fake_exception)
+
+    class Image:
+        def build(self, app):
+            assert app == "scoped-app"
+            raise ImageBuildError("HF_TOKEN=private provider message", image_id)
+
+    result = _bounded(
+        lambda: _build_image_with_failure_id(Image(), "scoped-app"),
+        deadline=time.monotonic() + 2, code="fixed_image_build_code",
+    )
+    assert type(result) is _FailedImageBuild and result.image_id == expected
+    assert "private" not in repr(result)
+
+
+def test_non_sdk_image_error_and_timeout_keep_closed_legacy_behavior() -> None:
+    import time
+    from tuner.execution.providers.modal.runtime_build import (
+        ModalBoundedOperationFailure, ModalBuildStageFailure,
+        _bounded, _build_image_with_failure_id,
+    )
+
+    class Image:
+        def build(self, app):
+            raise ValueError("HF_TOKEN=private provider message")
+
+    with pytest.raises(ModalBoundedOperationFailure) as failed:
+        _bounded(lambda: _build_image_with_failure_id(Image(), object()),
+                 deadline=time.monotonic() + 2, code="fixed_image_build_code")
+    assert failed.value.reason == "OPERATION_FAILED"
+    assert "private" not in str(failed.value)
+    with pytest.raises(ModalBoundedOperationFailure) as timed:
+        _bounded(lambda: pytest.fail("expired image build must not start"),
+                 deadline=time.monotonic() - 1, code="fixed_image_build_code")
+    assert timed.value.reason == "TIMEOUT"
+    with pytest.raises(ValueError, match="identity is invalid"):
+        ModalBuildStageFailure("IMAGE_BUILD", "OPERATION_FAILED", image_id="im-../private")
+
+
+def test_image_build_subclass_and_foreign_identity_are_not_admitted(monkeypatch) -> None:
+    import sys
+    import time
+    from types import ModuleType
+    from tuner.execution.providers.modal.runtime_build import (
+        ModalBoundedOperationFailure, _bounded, _build_image_with_failure_id,
+    )
+
+    class ImageBuildError(RuntimeError):
+        def __init__(self, identity):
+            super().__init__("private provider text")
+            self.image_id = identity
+
+    class ChildBuildError(ImageBuildError):
+        pass
+
+    class ForeignError(RuntimeError):
+        image_id = "im-Foreign123"
+
+    fake_modal = ModuleType("modal")
+    fake_exception = ModuleType("modal.exception")
+    fake_exception.ImageBuildError = ImageBuildError
+    fake_modal.exception = fake_exception
+    monkeypatch.setitem(sys.modules, "modal", fake_modal)
+    monkeypatch.setitem(sys.modules, "modal.exception", fake_exception)
+
+    class Image:
+        def __init__(self, error):
+            self.error = error
+
+        def build(self, app):
+            raise self.error
+
+    for error in (ChildBuildError("im-Child123"), ForeignError("private")):
+        with pytest.raises(ModalBoundedOperationFailure) as caught:
+            _bounded(lambda: _build_image_with_failure_id(Image(error), object()),
+                     deadline=time.monotonic() + 2, code="fixed_image_build_code")
+        assert caught.value.reason == "OPERATION_FAILED"
+        assert "private" not in str(caught.value)
+
+
 def test_capture_cleanup_poll_deadline_reports_timeout(monkeypatch) -> None:
     from tuner.execution.providers.modal import runtime_build
 

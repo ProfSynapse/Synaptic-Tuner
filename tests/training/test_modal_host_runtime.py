@@ -478,6 +478,193 @@ def test_closed_build_stage_constructor_rejects_unreviewed_reason():
         host.ModalHostBootstrapUnavailable("IMAGE_BUILD_HOSTILE_PROVIDER_TEXT")
 
 
+@pytest.mark.parametrize("mutated_image_id,expected_image_id", [
+    (None, "im-Failed123"),
+    ("im-../HF_TOKEN=private", None),
+])
+def test_failed_image_identity_is_claim_bound_and_retained_on_owner_thread(
+        monkeypatch, mutated_image_id, expected_image_id):
+    import hashlib
+    import json
+    import threading
+    from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
+
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+
+    class Context:
+        app_id = "ap-Build123"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(_App, "run", lambda self, **kwargs: Context())
+    def fail_capture(**kwargs):
+        error = ModalBuildStageFailure(
+            "IMAGE_BUILD", "OPERATION_FAILED", image_id="im-Failed123",
+        )
+        if mutated_image_id is not None:
+            error.image_id = mutated_image_id
+        raise error
+
+    monkeypatch.setattr(host, "capture_modal_build_candidate", fail_capture)
+    owner_thread = threading.get_ident()
+
+    class Attempts:
+        def __init__(self):
+            self.entries = {}
+
+        def claim(self, ref, evidence):
+            self.entries[ref] = evidence
+            return hashlib.sha256(evidence).hexdigest()
+
+        def resolve(self, ref):
+            assert threading.get_ident() == owner_thread
+            return self.entries.get(ref)
+
+    class Catalog:
+        def __init__(self):
+            self.entries = {}
+
+        def publish_if_absent(self, ref, payload):
+            assert threading.get_ident() == owner_thread
+            assert ref not in self.entries
+            self.entries[ref] = payload
+            return True
+
+        def resolve(self, ref):
+            assert threading.get_ident() == owner_thread
+            return self.entries.get(ref)
+
+    class Storage:
+        def __init__(self):
+            self.attempts = Attempts()
+            self.build_catalog = Catalog()
+
+        def catalog(self, name, *, encode, decode):
+            assert threading.get_ident() == owner_thread
+            assert name == "host-build-diagnostics-v1" and encode is bytes and decode is bytes
+            return self.build_catalog
+
+    storage = Storage()
+    with pytest.raises(host.ModalHostBootstrapUnavailable) as caught:
+        _paid_factory_probe(storage)
+    error = caught.value
+    assert (error.phase, error.failure_class, error.build_app_id, error.image_id,
+            error.retry_authorized) == (
+        "IMAGE_BUILD", "OPERATION_FAILED", "ap-Build123", expected_image_id, False,
+    )
+    ref = "build-" + "a" * 64
+    record = json.loads(storage.build_catalog.entries[ref])
+    assert record == {
+        "schema_version": "synaptic-modal-host-build-diagnostic/v1",
+        "build_claim_ref": ref,
+        "build_claim_sha256": hashlib.sha256(storage.attempts.entries[ref]).hexdigest(),
+        "intent_digest": "a" * 64,
+        "failure_class": "OPERATION_FAILED",
+        "build_app_id": "ap-Build123",
+        "image_id": expected_image_id,
+        "retry_authorized": False,
+    }
+    assert b"HF_TOKEN" not in storage.build_catalog.entries[ref]
+
+
+def test_unretained_image_identity_does_not_project_from_failed_catalog(monkeypatch):
+    from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
+
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+
+    class Context:
+        app_id = "ap-Build123"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(_App, "run", lambda self, **kwargs: Context())
+    monkeypatch.setattr(host, "capture_modal_build_candidate", lambda **kwargs: (
+        (_ for _ in ()).throw(ModalBuildStageFailure(
+            "IMAGE_BUILD", "OPERATION_FAILED", image_id="im-Failed123"))))
+    storage = _Storage(_Attempts([]))  # No catalog: the original claim remains consumed.
+    with pytest.raises(host.ModalHostBootstrapUnavailable) as caught:
+        _paid_factory_probe(storage)
+    assert caught.value.build_app_id is None and caught.value.image_id is None
+    assert caught.value.failure_class == "OPERATION_FAILED"
+    assert tuple(storage.attempts.refs) == ("build-" + "a" * 64,)
+
+
+def test_inflight_image_timeout_cannot_publish_late_image_identity(monkeypatch):
+    import threading
+    import time
+    from tuner.execution.providers.modal.runtime_build import (
+        ModalBoundedOperationFailure, ModalBuildStageFailure, _FailedImageBuild, _bounded,
+    )
+
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+
+    class Context:
+        app_id = "ap-Build123"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(_App, "run", lambda self, **kwargs: Context())
+    release, finished = threading.Event(), threading.Event()
+
+    def late_build():
+        assert release.wait(2)
+        finished.set()
+        return _FailedImageBuild("im-Late123")
+
+    def capture(**kwargs):
+        try:
+            _bounded(late_build, deadline=time.monotonic() + 0.01,
+                     code="modal_training_image_build_failed")
+        except ModalBoundedOperationFailure as error:
+            raise ModalBuildStageFailure("IMAGE_BUILD", error.reason) from None
+
+    monkeypatch.setattr(host, "capture_modal_build_candidate", capture)
+
+    class Storage:
+        def __init__(self):
+            self.attempts = _Attempts([])
+            self.catalog_calls = 0
+
+        def catalog(self, *args, **kwargs):
+            self.catalog_calls += 1
+            raise AssertionError("timeout must not publish a diagnostic")
+
+    storage = Storage()
+    try:
+        with pytest.raises(host.ModalHostBootstrapUnavailable) as caught:
+            _paid_factory_probe(storage)
+        assert (caught.value.phase, caught.value.failure_class,
+                caught.value.build_app_id, caught.value.image_id) == (
+            "IMAGE_BUILD", "TIMEOUT", None, None,
+        )
+    finally:
+        release.set()
+    assert finished.wait(2)
+    assert storage.catalog_calls == 0
+    assert storage.attempts.refs == ["build-" + "a" * 64]
+
+
 @pytest.mark.parametrize("boundary,code,phase,failure_class", [
     ("observe", "modal_release_scope_unavailable", "RELEASE_OBSERVE", "SCOPE_UNAVAILABLE"),
     ("observe", "modal_release_observation_unavailable", "RELEASE_OBSERVE", "OBSERVATION_UNAVAILABLE"),

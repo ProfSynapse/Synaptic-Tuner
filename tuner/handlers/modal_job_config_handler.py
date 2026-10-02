@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 from pathlib import Path
+import re
 
 from tuner.handlers.base import BaseHandler
 from tuner.project import ProjectContext
@@ -52,12 +53,26 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
         admitted = closed.get(error.phase)
         if (admitted is not None and error.location == admitted[0]
                 and error.failure_class in admitted[1]):
-            return {
+            details = {
                 "phase": error.phase,
                 "failure_class": error.failure_class,
                 "location": error.location,
                 "retry_authorized": False,
             }
+            if error.phase == "IMAGE_BUILD" and error.failure_class == "OPERATION_FAILED":
+                app_id, image_id = error.build_app_id, error.image_id
+                if (app_id is not None and (
+                        type(app_id) is not str
+                        or re.fullmatch(r"ap-[A-Za-z0-9]{1,64}", app_id) is None)
+                        or image_id is not None and (
+                            type(image_id) is not str
+                            or re.fullmatch(r"im-[A-Za-z0-9]{1,64}", image_id) is None)):
+                    return None
+                if app_id is not None:
+                    details["build_app_id"] = app_id
+                if image_id is not None:
+                    details["image_id"] = image_id
+            return details
     qualification = {
         "FIXTURE_STAGE": ("UNAVAILABLE", "modal_host_qualification.stage_fixture"),
         "DISPATCH_SUBMIT": ("INDETERMINATE", "modal_host_qualification.submit_once"),
