@@ -11,7 +11,7 @@ from SynthChat.schemas.tool_response_schema import (
     _resolve_allowed_tool_names,
     _resolve_context_defaults,
 )
-from SynthChat.config.format_resolver import get_default_tool_call_format
+from SynthChat.config.format_resolver import get_default_tool_call_format, load_tool_call_formats
 
 
 def _default_fmt(**overrides):
@@ -19,6 +19,21 @@ def _default_fmt(**overrides):
     fmt = get_default_tool_call_format()
     fmt.update(overrides)
     return fmt
+
+
+def _configured_fmt(**overrides):
+    """Return the configured default tool-call format (tool_call_formats.yaml) with overrides."""
+    fmt = dict(load_tool_call_formats()["default"])
+    fmt.update(overrides)
+    return fmt
+
+
+def _wrapper_call_schema(schema):
+    tool_calls = schema["properties"]["tool_calls"]
+    return [
+        opt for opt in tool_calls["anyOf"]
+        if opt.get("type") == "array" and opt.get("minItems") == 1
+    ][0]["items"]
 
 
 # ---- _build_canonical_environment_schema ----
@@ -108,40 +123,47 @@ class TestBuildToolResponseSchema:
         fn_name = array_option["items"]["properties"]["function"]["properties"]["name"]
         assert fn_name["const"] == "myWrapper"
 
-    def test_allowed_tools_constrain_enum(self):
+    def test_builtin_default_is_native_and_does_not_constrain_tool_names(self):
+        # Without a configured wrapper each tool is its own tool_calls entry; the
+        # allowed tools are listed in the generation prompt, not the schema.
         schema = build_tool_response_schema(
             format_config=_default_fmt(),
             allowed_tools=["fileManager_read", "fileManager_write", "searchManager_search"],
         )
-        tool_calls = schema["properties"]["tool_calls"]
-        array_option = [
-            opt for opt in tool_calls["anyOf"]
-            if opt.get("type") == "array" and opt.get("minItems") == 1
-        ][0]
-        arguments = array_option["items"]["properties"]["function"]["properties"]["arguments"]
-        calls_items = arguments["properties"]["calls"]["items"]
-        agent_enum = calls_items["properties"]["agent"]["enum"]
-        tool_enum = calls_items["properties"]["tool"]["enum"]
-        assert "fileManager" in agent_enum
-        assert "searchManager" in agent_enum
-        assert "read" in tool_enum
-        assert "write" in tool_enum
-        assert "search" in tool_enum
+        call = _wrapper_call_schema(schema)
+        function = call["properties"]["function"]["properties"]
+        assert function["name"] == {"type": "string", "minLength": 1}
+        assert function["arguments"]["type"] == "object"
 
-    def test_session_and_workspace_consts(self):
+    def test_configured_wrapper_arguments_describe_configured_fields(self):
+        fmt = _configured_fmt()
         schema = build_tool_response_schema(
-            format_config=_default_fmt(),
+            format_config=fmt,
+            allowed_tools=["fileManager_read", "fileManager_write", "searchManager_search"],
             context_overrides={"sessionId": "sess_123", "workspaceId": "ws_456"},
         )
-        tool_calls = schema["properties"]["tool_calls"]
-        array_option = [
-            opt for opt in tool_calls["anyOf"]
-            if opt.get("type") == "array" and opt.get("minItems") == 1
-        ][0]
-        args = array_option["items"]["properties"]["function"]["properties"]["arguments"]
-        context = args["properties"]["context"]
-        assert context["properties"]["sessionId"]["const"] == "sess_123"
-        assert context["properties"]["workspaceId"]["const"] == "ws_456"
+        call = _wrapper_call_schema(schema)
+        function = call["properties"]["function"]["properties"]
+        assert function["name"]["const"] == fmt["wrapper_name"]
+        arguments = function["arguments"]
+        assert arguments["type"] == "string"
+        description = arguments["description"]
+        assert f"'{fmt['wrapper_name']}' wrapper payload" in description
+        configured_fields = list(fmt["argument_fields"]["properties"]) + list(fmt["extra_argument_fields"])
+        for field_name in configured_fields:
+            assert field_name in description
+
+    def test_context_overrides_name_only_configured_fields(self):
+        schema = build_tool_response_schema(
+            format_config=_default_fmt(
+                wrapper_name="myWrapper",
+                argument_fields={"properties": {"sessionId": {"type": "string"}}},
+            ),
+            context_overrides={"sessionId": "sess_123", "unknownField": "x"},
+        )
+        description = _wrapper_call_schema(schema)["properties"]["function"]["properties"]["arguments"]["description"]
+        assert description.endswith("fields: sessionId")
+        assert "unknownField" not in description
 
     def test_tool_calls_allows_null(self):
         schema = build_tool_response_schema(format_config=_default_fmt())
@@ -173,12 +195,23 @@ class TestBuildToolGenerationPrompt:
         assert "Test the tools" in prompt
 
     def test_includes_wrapper_name(self):
+        # The configured instructions carry a {wrapper_name} placeholder.
         prompt = build_tool_generation_prompt(
-            format_config=_default_fmt(wrapper_name="myWrapper"),
+            format_config=_configured_fmt(wrapper_name="myWrapper"),
             base_prompt="test",
             allowed_tools=[],
         )
-        assert "myWrapper" in prompt
+        assert "function.name is 'myWrapper'" in prompt
+        assert "{wrapper_name}" not in prompt
+
+    def test_builtin_default_prompt_names_no_wrapper(self):
+        prompt = build_tool_generation_prompt(
+            format_config=_default_fmt(),
+            base_prompt="test",
+            allowed_tools=[],
+        )
+        assert prompt.startswith("\n".join(_default_fmt()["generation_instructions"]))
+        assert "wrapper" not in prompt
 
     def test_includes_allowed_tools(self):
         prompt = build_tool_generation_prompt(
