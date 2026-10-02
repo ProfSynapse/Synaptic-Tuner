@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import json
-import shlex
+import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from utils import bump_version, find_latest_version, read_jsonl
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from shared.validation.parsing.cli_commands import CliCommandSpec, parse_cli_commands  # noqa: E402
+from shared.validation.parsing.configured_formats import match_configured_wrapper  # noqa: E402
+
 
 def get_repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return _REPO_ROOT
 
 
 def load_target_catalog(schema_path: Path) -> Dict[Tuple[str, str], Dict[str, Any]]:
@@ -33,17 +40,6 @@ def load_target_catalog(schema_path: Path) -> Dict[Tuple[str, str], Dict[str, An
             "argument_specs": arguments,
         }
     return catalog
-
-
-def build_command_lookup(
-    catalog: Dict[Tuple[str, str], Dict[str, Any]],
-) -> Dict[str, Tuple[str, str, Dict[str, Any]]]:
-    lookup: Dict[str, Tuple[str, str, Dict[str, Any]]] = {}
-    for (agent, tool), spec in catalog.items():
-        command = spec.get("command")
-        if isinstance(command, str) and command.strip():
-            lookup[command.strip()] = (agent, tool, spec)
-    return lookup
 
 
 def discover_latest_nonthinking_dataset_files(
@@ -83,148 +79,39 @@ def parse_arguments(arguments: Any) -> Dict[str, Any]:
     return {}
 
 
-def _split_cli_commands(tool_value: str) -> List[str]:
-    commands: List[str] = []
-    current: List[str] = []
-    quote: Optional[str] = None
-    escape = False
-    brace_depth = 0
-    bracket_depth = 0
-
-    for char in tool_value:
-        current.append(char)
-        if escape:
-            escape = False
-            continue
-        if char == "\\":
-            escape = True
-            continue
-        if quote:
-            if char == quote:
-                quote = None
-            continue
-        if char in {"'", '"'}:
-            quote = char
-            continue
-        if char == "{":
-            brace_depth += 1
-            continue
-        if char == "}":
-            brace_depth = max(0, brace_depth - 1)
-            continue
-        if char == "[":
-            bracket_depth += 1
-            continue
-        if char == "]":
-            bracket_depth = max(0, bracket_depth - 1)
-            continue
-        if char == "," and brace_depth == 0 and bracket_depth == 0:
-            current.pop()
-            segment = "".join(current).strip()
-            if segment:
-                commands.append(segment)
-            current = []
-
-    tail = "".join(current).strip()
-    if tail:
-        commands.append(tail)
-    return commands
-
-
-def _parse_cli_value(raw_value: str, value_type: str) -> Any:
-    lowered = (value_type or "").strip().lower()
-    if lowered.startswith("array") or lowered == "object" or lowered == "array<object>" or lowered == "array<string>":
-        try:
-            return json.loads(raw_value)
-        except json.JSONDecodeError:
-            return raw_value
-    if lowered == "boolean":
-        if raw_value.lower() in {"true", "1", "yes"}:
-            return True
-        if raw_value.lower() in {"false", "0", "no"}:
-            return False
-        return raw_value
-    if lowered == "number":
-        try:
-            return int(raw_value) if "." not in raw_value else float(raw_value)
-        except ValueError:
-            return raw_value
-    return raw_value
-
-
 def parse_cli_tool_string(
     tool_value: str,
     catalog: Dict[Tuple[str, str], Dict[str, Any]],
+    escapes: Mapping[str, str],
 ) -> List[Dict[str, Any]]:
-    command_lookup = build_command_lookup(catalog)
-    sorted_commands = sorted(command_lookup.keys(), key=lambda value: len(value.split()), reverse=True)
-    normalized: List[Dict[str, Any]] = []
-
-    for command_str in _split_cli_commands(tool_value):
-        try:
-            tokens = shlex.split(command_str)
-        except ValueError:
-            continue
-        if not tokens:
-            continue
-
-        matched_command: Optional[str] = None
-        matched_prefix_len = 0
-        for command in sorted_commands:
-            command_tokens = command.split()
-            if tokens[: len(command_tokens)] == command_tokens:
-                matched_command = command
-                matched_prefix_len = len(command_tokens)
-                break
-        if matched_command is None:
-            continue
-
-        agent, tool, spec = command_lookup[matched_command]
-        remaining = tokens[matched_prefix_len:]
-        params: Dict[str, Any] = {}
-        positional_specs = [arg for arg in spec.get("argument_specs", []) if arg.get("positional")]
-        flag_specs = {arg.get("flag"): arg for arg in spec.get("argument_specs", []) if arg.get("flag")}
-
-        positional_index = 0
-        i = 0
-        while i < len(remaining):
-            token = remaining[i]
-            if token.startswith("--"):
-                arg_spec = flag_specs.get(token)
-                if not arg_spec:
-                    i += 1
-                    continue
-                name = arg_spec["name"]
-                value_type = arg_spec.get("type", "string")
-                if value_type == "boolean":
-                    params[name] = True
-                    i += 1
-                    continue
-                if i + 1 < len(remaining):
-                    params[name] = _parse_cli_value(remaining[i + 1], value_type)
-                    i += 2
-                    continue
-                i += 1
-                continue
-
-            if positional_index < len(positional_specs):
-                arg_spec = positional_specs[positional_index]
-                params[arg_spec["name"]] = _parse_cli_value(token, arg_spec.get("type", "string"))
-                positional_index += 1
-            i += 1
-
-        normalized.append(
-            {
-                "source": "cli_wrapper",
-                "function_name": "useTools",
-                "agent": agent,
-                "tool": tool,
-                "params": params,
-                "command": matched_command,
-            }
+    """Normalize the catalog commands in a CLI command string; skip unknown ones."""
+    command_catalog = {
+        spec["command"].strip(): CliCommandSpec(
+            command=spec["command"].strip(),
+            agent=agent,
+            tool=tool,
+            arguments=tuple(spec.get("argument_specs", [])),
         )
+        for (agent, tool), spec in catalog.items()
+        if isinstance(spec.get("command"), str) and spec["command"].strip()
+    }
+    try:
+        commands = parse_cli_commands(tool_value, command_catalog, escapes)
+    except ValueError:
+        return []
 
-    return normalized
+    return [
+        {
+            "source": "cli_wrapper",
+            "function_name": "useTools",
+            "agent": command.spec.agent,
+            "tool": command.spec.tool,
+            "params": command.arguments,
+            "command": command.spec.command,
+        }
+        for command in commands
+        if command.spec is not None
+    ]
 
 
 def extract_normalized_calls(
@@ -244,7 +131,10 @@ def extract_normalized_calls(
 
             if function_name == "useTools":
                 if isinstance(arguments.get("tool"), str) and catalog is not None:
-                    normalized.extend(parse_cli_tool_string(arguments["tool"], catalog))
+                    wrapper_spec = match_configured_wrapper(arguments, function_name=function_name) or {}
+                    normalized.extend(
+                        parse_cli_tool_string(arguments["tool"], catalog, wrapper_spec.get("command_escapes") or {})
+                    )
                     continue
                 for wrapped_call in arguments.get("calls", []) or []:
                     normalized.append(

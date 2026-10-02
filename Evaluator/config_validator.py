@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import json
 import re
-import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import yaml
 
+from shared.validation.parsing.cli_commands import CliCommandSpec, parse_cli_commands
+from shared.validation.parsing.configured_formats import match_configured_wrapper
 from shared.validation.parsing.tool_call_parser import parse_gemma_tool_calls, is_gemma_tool_call
 
 
@@ -725,7 +726,7 @@ class ConfigDrivenValidator:
         wrapper = self.tool_schema.get("tool_format", {}).get("wrapper")
 
         if name == wrapper:
-            expanded = self._expand_cli_wrapper(args)
+            expanded = self._expand_cli_wrapper(name, args)
             if expanded:
                 return expanded
 
@@ -767,8 +768,8 @@ class ConfigDrivenValidator:
                 return strategy.strip()
         return None
 
-    def _build_cli_command_catalog(self) -> Dict[str, Dict[str, Any]]:
-        catalog: Dict[str, Dict[str, Any]] = {}
+    def _build_cli_command_catalog(self) -> Dict[str, CliCommandSpec]:
+        catalog: Dict[str, CliCommandSpec] = {}
         for agent, tools in self.tool_schema.get("tools", {}).items():
             for tool in tools or []:
                 if not isinstance(tool, dict):
@@ -777,82 +778,15 @@ class ConfigDrivenValidator:
                 name = str(tool.get("name", "")).strip()
                 if not command or not name:
                     continue
-                catalog[command] = {
-                    "full_name": f"{agent}_{name}",
-                    "agent": agent,
-                    "tool": name,
-                    "arguments": tool.get("arguments", []) or [],
-                }
+                catalog[command] = CliCommandSpec(
+                    command=command,
+                    agent=agent,
+                    tool=name,
+                    arguments=tuple(tool.get("arguments", []) or []),
+                )
         return catalog
 
-    def _split_cli_commands(self, tool_value: str) -> List[str]:
-        commands: List[str] = []
-        current: List[str] = []
-        quote: Optional[str] = None
-        escape = False
-        brace_depth = 0
-        bracket_depth = 0
-
-        for char in tool_value:
-            current.append(char)
-            if escape:
-                escape = False
-                continue
-            if char == "\\":
-                escape = True
-                continue
-            if quote:
-                if char == quote:
-                    quote = None
-                continue
-            if char in {"'", '"'}:
-                quote = char
-                continue
-            if char == "{":
-                brace_depth += 1
-                continue
-            if char == "}":
-                brace_depth = max(0, brace_depth - 1)
-                continue
-            if char == "[":
-                bracket_depth += 1
-                continue
-            if char == "]":
-                bracket_depth = max(0, bracket_depth - 1)
-                continue
-            if char == "," and brace_depth == 0 and bracket_depth == 0:
-                current.pop()
-                segment = "".join(current).strip()
-                if segment:
-                    commands.append(segment)
-                current = []
-
-        tail = "".join(current).strip()
-        if tail:
-            commands.append(tail)
-        return commands
-
-    def _parse_cli_value(self, raw_value: str, value_type: str) -> Any:
-        lowered = (value_type or "").strip().lower()
-        if lowered.startswith("array") or lowered == "object":
-            try:
-                return json.loads(raw_value)
-            except json.JSONDecodeError:
-                return raw_value
-        if lowered == "boolean":
-            if raw_value.lower() in {"true", "1", "yes"}:
-                return True
-            if raw_value.lower() in {"false", "0", "no"}:
-                return False
-            return raw_value
-        if lowered == "number":
-            try:
-                return int(raw_value) if "." not in raw_value else float(raw_value)
-            except ValueError:
-                return raw_value
-        return raw_value
-
-    def _expand_cli_wrapper(self, args: Dict[str, Any]) -> List[ParsedToolCall]:
+    def _expand_cli_wrapper(self, name: str, args: Dict[str, Any]) -> List[ParsedToolCall]:
         tool_value = args.get("tool")
         if not isinstance(tool_value, str) or not tool_value.strip():
             return []
@@ -866,79 +800,24 @@ class ConfigDrivenValidator:
         if not catalog:
             return []
 
-        sorted_commands = sorted(catalog.keys(), key=lambda value: len(value.split()), reverse=True)
-        parsed_calls: List[ParsedToolCall] = []
+        wrapper_spec = match_configured_wrapper(args, function_name=name) or {}
+        try:
+            commands = parse_cli_commands(tool_value, catalog, wrapper_spec.get("command_escapes") or {})
+        except ValueError:
+            return []
+        if any(command.spec is None for command in commands):
+            return []
 
-        for command_str in self._split_cli_commands(tool_value):
-            try:
-                tokens = shlex.split(command_str)
-            except ValueError:
-                return []
-            if not tokens:
-                continue
-
-            matched_command = None
-            matched_spec = None
-            matched_prefix_len = 0
-            for command in sorted_commands:
-                command_tokens = command.split()
-                if tokens[: len(command_tokens)] == command_tokens:
-                    matched_command = command
-                    matched_spec = catalog[command]
-                    matched_prefix_len = len(command_tokens)
-                    break
-
-            if matched_command is None or matched_spec is None:
-                return []
-
-            remaining = tokens[matched_prefix_len:]
-            argument_specs = matched_spec.get("arguments", [])
-            positional_specs = [arg for arg in argument_specs if arg.get("positional")]
-            flag_specs = {
-                str(arg.get("flag")).strip(): arg
-                for arg in argument_specs
-                if str(arg.get("flag", "")).strip()
-            }
-
-            parsed_args: Dict[str, Any] = {}
-            positional_index = 0
-            i = 0
-            while i < len(remaining):
-                token = remaining[i]
-                if token.startswith("--"):
-                    arg_spec = flag_specs.get(token)
-                    if not arg_spec:
-                        i += 1
-                        continue
-                    value_type = arg_spec.get("type", "string")
-                    if value_type == "boolean":
-                        parsed_args[arg_spec["name"]] = True
-                        i += 1
-                        continue
-                    if i + 1 < len(remaining):
-                        parsed_args[arg_spec["name"]] = self._parse_cli_value(remaining[i + 1], value_type)
-                        i += 2
-                        continue
-                    i += 1
-                    continue
-
-                if positional_index < len(positional_specs):
-                    arg_spec = positional_specs[positional_index]
-                    parsed_args[arg_spec["name"]] = self._parse_cli_value(token, arg_spec.get("type", "string"))
-                    positional_index += 1
-                i += 1
-
-            parsed_calls.append(
-                ParsedToolCall(
-                    name=matched_spec["full_name"],
-                    agent=matched_spec["agent"],
-                    tool=matched_spec["tool"],
-                    params=parsed_args,
-                    context=context,
-                )
+        return [
+            ParsedToolCall(
+                name=command.spec.tool_name,
+                agent=command.spec.agent,
+                tool=command.spec.tool,
+                params=command.arguments,
+                context=context,
             )
-
-        return parsed_calls
+            for command in commands
+        ]
 
     # =========================================================
     # VALIDATION METHODS

@@ -11,13 +11,17 @@ switches and instead:
 from __future__ import annotations
 
 import json
-import re
-import unicodedata
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from shared.validation.parsing.response_parser import parse_response
+from shared.validation.parsing.cli_commands import (
+    CliCommandSpec,
+    ParsedCliCommand,
+    load_cli_command_catalog,
+    parse_cli_commands,
+)
 from shared.validation.parsing.configured_formats import match_configured_wrapper
 
 from .base import EnvironmentRuntime
@@ -216,315 +220,57 @@ def format_tool_results_message(
     )
 
 
-def _cli_wrapper_spec(call) -> Optional[Dict[str, Any]]:
-    """Return the configured wrapper spec when ``call`` carries a CLI command string."""
-    args = call.arguments if isinstance(call.arguments, dict) else {}
-    wrapper_spec = match_configured_wrapper(args, function_name=getattr(call, "name", None))
+@lru_cache(maxsize=1)
+def cli_command_catalog() -> Dict[str, CliCommandSpec]:
+    """The CLI command catalog wrapped commands are expanded against."""
+    schema_path = Path(__file__).resolve().parents[2] / "cli-first-tool-schemas.json"
+    if not schema_path.exists():
+        return {}
+    try:
+        return load_cli_command_catalog(schema_path)
+    except Exception:
+        return {}
+
+
+def expand_cli_wrapper_commands(name: Optional[str], arguments: Any) -> Optional[List[ParsedCliCommand]]:
+    """Expand a configured CLI wrapper call into its catalog commands.
+
+    Returns ``None`` when the call is not a configured wrapper carrying a
+    command string, or when that string does not parse fully into catalog
+    commands; execution then treats the call as an ordinary tool call.
+    """
+    args = arguments if isinstance(arguments, dict) else {}
+    wrapper_spec = match_configured_wrapper(args, function_name=name)
     if wrapper_spec is None:
         return None
     tool_value = args.get("tool")
     if not isinstance(tool_value, str) or not tool_value.strip():
         return None
-    return wrapper_spec
-
-
-@lru_cache(maxsize=1)
-def _load_cli_command_catalog() -> Dict[str, Tuple[str, List[Dict[str, Any]]]]:
-    schema_path = Path(__file__).resolve().parents[2] / "cli-first-tool-schemas.json"
-    if not schema_path.exists():
-        return {}
-
-    try:
-        payload = json.loads(schema_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-    catalog: Dict[str, Tuple[str, List[Dict[str, Any]]]] = {}
-    for item in payload.get("tools", []):
-        if not isinstance(item, dict):
-            continue
-        agent = str(item.get("agent", "")).strip()
-        tool = str(item.get("tool", "")).strip()
-        command = str(item.get("command", "")).strip()
-        if not agent or not tool or not command:
-            continue
-        catalog[command] = (f"{agent}_{tool}", item.get("arguments", []) or [])
-    return catalog
-
-
-_DOUBLE_QUOTES = {'"': {'"'}, "\u201c": {'"', "\u201c", "\u201d"}, "\u201d": {'"', "\u201c", "\u201d"}}
-_SINGLE_QUOTES = {"'": {"'"}, "\u2018": {"'", "\u2018", "\u2019"}, "\u2019": {"'", "\u2018", "\u2019"}}
-# An undeclared token is option-shaped when its part before any ``=`` is ``--``
-# or ``--name`` with no whitespace. A value that merely starts with dashes, such
-# as ``---`` YAML front matter, is an argument, not an option.
-_OPTION_NAME = re.compile(r"--(?:[^-\s]\S*)?")
-
-
-def _is_cli_separator(char: str) -> bool:
-    return char.isspace() or unicodedata.category(char) == "Zs"
-
-
-def _tokenize_cli_commands(tool_value: str, escapes: Dict[str, str]) -> List[List[str]]:
-    """Split a CLI command sequence into commands and their argument tokens.
-
-    Tokenizing follows POSIX shell quoting, as ``shlex.split`` does: whitespace
-    separates arguments outside quotes, a backslash outside quotes takes the next
-    character literally, single quotes are literal, and inside double quotes a
-    backslash escapes ``"`` and ``\\``. Quoted text is kept exactly, including
-    newlines and other whitespace. ``escapes`` maps the character after a
-    backslash inside double quotes to its decoded text; it comes from the
-    tool-call format config, so a format without escapes keeps plain POSIX
-    semantics.
-
-    Commands are separated by commas outside quotes, braces and brackets. Curly
-    quotes outside an argument open a quoted argument that a straight or curly
-    quote of the same kind closes. Raises ``ValueError`` like ``shlex.split`` on
-    an unterminated quote or a trailing backslash.
-    """
-    commands: List[List[str]] = []
-    tokens: List[str] = []
-    buffer: List[str] = []
-    in_token = False
-    closers: Optional[set] = None
-    double_quoted = False
-    brace_depth = 0
-    bracket_depth = 0
-
-    def end_token() -> None:
-        nonlocal buffer, in_token
-        if in_token:
-            tokens.append("".join(buffer))
-        buffer = []
-        in_token = False
-
-    i = 0
-    length = len(tool_value)
-    while i < length:
-        char = tool_value[i]
-        if closers is not None:
-            if char in closers:
-                closers = None
-            elif double_quoted and char == "\\" and i + 1 < length:
-                following = tool_value[i + 1]
-                if following == "\\" or following in closers:
-                    buffer.append(following)
-                    i += 1
-                elif following in escapes:
-                    buffer.append(escapes[following])
-                    i += 1
-                else:
-                    buffer.append(char)
-            else:
-                buffer.append(char)
-            i += 1
-            continue
-
-        if char == "\\":
-            if i + 1 >= length:
-                raise ValueError("No escaped character")
-            buffer.append(tool_value[i + 1])
-            in_token = True
-            i += 2
-            continue
-        if char in _DOUBLE_QUOTES or char in _SINGLE_QUOTES:
-            double_quoted = char in _DOUBLE_QUOTES
-            closers = (_DOUBLE_QUOTES if double_quoted else _SINGLE_QUOTES)[char]
-            in_token = True
-            i += 1
-            continue
-        if _is_cli_separator(char):
-            end_token()
-            i += 1
-            continue
-        if char == "," and brace_depth == 0 and bracket_depth == 0:
-            end_token()
-            if tokens:
-                commands.append(tokens)
-            tokens = []
-            i += 1
-            continue
-        if char == "{":
-            brace_depth += 1
-        elif char == "}":
-            brace_depth = max(0, brace_depth - 1)
-        elif char == "[":
-            bracket_depth += 1
-        elif char == "]":
-            bracket_depth = max(0, bracket_depth - 1)
-        buffer.append(char)
-        in_token = True
-        i += 1
-
-    if closers is not None:
-        raise ValueError("No closing quotation")
-    end_token()
-    if tokens:
-        commands.append(tokens)
-    return commands
-
-
-def _split_cli_option(token: str, flag_specs: Dict[str, Dict[str, Any]]) -> Optional[Tuple[str, Optional[str]]]:
-    """Return ``(flag, inline_value)`` when ``token`` is an option, else ``None``."""
-    flag_token, separator, inline_value = token.partition("=")
-    if flag_token in flag_specs or _OPTION_NAME.fullmatch(flag_token):
-        return flag_token, inline_value if separator else None
-    return None
-
-
-def _parse_cli_value(raw_value: str, value_type: str) -> Any:
-    lowered = (value_type or "").strip().lower()
-    if lowered.startswith("array") or lowered == "object":
-        try:
-            return json.loads(raw_value)
-        except json.JSONDecodeError:
-            if lowered == "array<string>":
-                parts = [part.strip() for part in raw_value.split(",") if part.strip()]
-                if parts:
-                    return parts
-            return raw_value
-    if lowered == "boolean":
-        if raw_value.lower() in {"true", "1", "yes"}:
-            return True
-        if raw_value.lower() in {"false", "0", "no"}:
-            return False
-        return raw_value
-    if lowered == "number":
-        try:
-            return int(raw_value) if "." not in raw_value else float(raw_value)
-        except ValueError:
-            return raw_value
-    return raw_value
-
-
-def _validate_cli_arg_value(value: Any, spec: Dict[str, Any]) -> Optional[str]:
-    value_type = str(spec.get("type", "string") or "string").strip().lower()
-    name = str(spec.get("name", "value") or "value")
-
-    if value_type.startswith("array"):
-        if not isinstance(value, list):
-            return f"{name} must be valid JSON array"
-        if value_type == "array<object>" and any(not isinstance(item, dict) for item in value):
-            return f"{name} must be an array of objects"
-        return None
-
-    if value_type == "object" and not isinstance(value, dict):
-        return f"{name} must be valid JSON object"
-
-    if value_type == "number" and not isinstance(value, (int, float)):
-        return f"{name} must be numeric"
-
-    if value_type == "boolean" and not isinstance(value, bool):
-        return f"{name} must be boolean"
-
-    return None
-
-
-def _expand_cli_wrapper_call(call, wrapper_spec: Dict[str, Any]) -> List:
-    args = call.arguments if isinstance(call.arguments, dict) else {}
-    tool_value = args.get("tool")
-    if not isinstance(tool_value, str) or not tool_value.strip():
-        return [call]
-
-    catalog = _load_cli_command_catalog()
+    catalog = cli_command_catalog()
     if not catalog:
-        return [call]
-
-    sorted_commands = sorted(catalog.keys(), key=lambda value: len(value.split()), reverse=True)
-    expanded = []
-
+        return None
     try:
-        commands = _tokenize_cli_commands(tool_value, wrapper_spec.get("command_escapes") or {})
+        commands = parse_cli_commands(tool_value, catalog, wrapper_spec.get("command_escapes") or {})
     except ValueError:
-        return [call]
-
-    for tokens in commands:
-        matched_command = None
-        matched_spec = None
-        matched_prefix_len = 0
-        for command in sorted_commands:
-            command_tokens = command.split()
-            if tokens[: len(command_tokens)] == command_tokens:
-                matched_command = command
-                matched_spec = catalog[command]
-                matched_prefix_len = len(command_tokens)
-                break
-
-        if matched_command is None or matched_spec is None:
-            return [call]
-
-        tool_name, argument_specs = matched_spec
-        remaining = tokens[matched_prefix_len:]
-        parsed_args: Dict[str, Any] = {}
-        parse_errors: List[str] = []
-        positional_specs = [arg for arg in argument_specs if arg.get("positional")]
-        flag_specs = {
-            str(arg.get("flag")).strip(): arg
-            for arg in argument_specs
-            if str(arg.get("flag", "")).strip()
-        }
-
-        positional_index = 0
-        i = 0
-        while i < len(remaining):
-            token = remaining[i]
-            option = _split_cli_option(token, flag_specs)
-            if option is not None:
-                flag_token, inline_value = option
-                arg_spec = flag_specs.get(flag_token)
-                if not arg_spec:
-                    i += 1
-                    continue
-                value_type = arg_spec.get("type", "string")
-                if value_type == "boolean":
-                    parsed_args[arg_spec["name"]] = True
-                    i += 1
-                    continue
-                if inline_value is not None:
-                    parsed_value = _parse_cli_value(inline_value, value_type)
-                    parsed_args[arg_spec["name"]] = parsed_value
-                    validation_error = _validate_cli_arg_value(parsed_value, arg_spec)
-                    if validation_error:
-                        parse_errors.append(validation_error)
-                    i += 1
-                    continue
-                if i + 1 < len(remaining):
-                    parsed_value = _parse_cli_value(remaining[i + 1], value_type)
-                    parsed_args[arg_spec["name"]] = parsed_value
-                    validation_error = _validate_cli_arg_value(parsed_value, arg_spec)
-                    if validation_error:
-                        parse_errors.append(validation_error)
-                    i += 2
-                    continue
-                i += 1
-                continue
-
-            if positional_index < len(positional_specs):
-                arg_spec = positional_specs[positional_index]
-                parsed_value = _parse_cli_value(token, arg_spec.get("type", "string"))
-                parsed_args[arg_spec["name"]] = parsed_value
-                validation_error = _validate_cli_arg_value(parsed_value, arg_spec)
-                if validation_error:
-                    parse_errors.append(validation_error)
-                positional_index += 1
-            i += 1
-
-        if parse_errors:
-            parsed_args[CLI_PARSE_ERRORS_KEY] = parse_errors
-        expanded.append(type(call)(name=tool_name, arguments=parsed_args, raw=call.raw))
-
-    return expanded or [call]
+        return None
+    if not commands or any(command.spec is None for command in commands):
+        return None
+    return commands
 
 
 def _expand_wrapper_calls(parsed_calls) -> List:
     """Expand delegated wrapper calls into concrete tool calls."""
     expanded = []
     for call in parsed_calls:
-        wrapper_spec = _cli_wrapper_spec(call)
-        if wrapper_spec is not None:
-            expanded.extend(_expand_cli_wrapper_call(call, wrapper_spec))
+        commands = expand_cli_wrapper_commands(getattr(call, "name", None), call.arguments)
+        if commands is None:
+            expanded.append(call)
             continue
-        expanded.append(call)
-
+        for command in commands:
+            arguments = dict(command.arguments)
+            if command.errors:
+                arguments[CLI_PARSE_ERRORS_KEY] = list(command.errors)
+            expanded.append(type(call)(name=command.spec.tool_name, arguments=arguments, raw=call.raw))
     return expanded
 
 

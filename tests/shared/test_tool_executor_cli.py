@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from shared.environments import EnvironmentValidator
-from shared.environments.tool_executor import _tokenize_cli_commands
+from shared.validation.parsing.cli_commands import tokenize_cli_commands
 from SynthChat.config.format_resolver import load_tool_call_formats
 
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "cli-first-tool-schemas.json"
@@ -84,7 +84,7 @@ def _catalog_examples():
 
 @pytest.mark.parametrize("example", _catalog_examples())
 def test_tokenizer_matches_posix_shell_quoting_for_catalog_examples(example):
-    assert _tokenize_cli_commands(example, {}) == [shlex.split(example)]
+    assert tokenize_cli_commands(example, {}) == [shlex.split(example)]
 
 
 @pytest.mark.parametrize(
@@ -98,11 +98,11 @@ def test_tokenizer_matches_posix_shell_quoting_for_catalog_examples(example):
     ],
 )
 def test_tokenizer_without_escapes_is_shlex_split(command):
-    assert _tokenize_cli_commands(command, {}) == [shlex.split(command)]
+    assert tokenize_cli_commands(command, {}) == [shlex.split(command)]
 
 
 def test_tokenizer_splits_commands_on_top_level_commas_only():
-    commands = _tokenize_cli_commands(
+    commands = tokenize_cli_commands(
         'content write "a.md" "x, y", search directory "d" --paths ["A/", "B/"],content read a.md 1',
         {},
     )
@@ -117,17 +117,17 @@ def test_tokenizer_splits_commands_on_top_level_commas_only():
 def test_tokenizer_decodes_configured_escapes_inside_double_quotes_only():
     escapes = {"n": "\n", "t": "\t"}
 
-    assert _tokenize_cli_commands('content write "a.md" "a\\nb\\tc\\\\nd"', escapes) == [
+    assert tokenize_cli_commands('content write "a.md" "a\\nb\\tc\\\\nd"', escapes) == [
         ["content", "write", "a.md", "a\nb\tc\\nd"]
     ]
-    assert _tokenize_cli_commands("content write 'a.md' 'a\\nb'", escapes) == [
+    assert tokenize_cli_commands("content write 'a.md' 'a\\nb'", escapes) == [
         ["content", "write", "a.md", "a\\nb"]
     ]
 
 
 def test_tokenizer_rejects_unterminated_quotes():
     with pytest.raises(ValueError):
-        _tokenize_cli_commands('content write "a.md" "unterminated', {})
+        tokenize_cli_commands('content write "a.md" "unterminated', {})
 
 
 def test_cli_write_round_trips_multiline_frontmatter_content():
