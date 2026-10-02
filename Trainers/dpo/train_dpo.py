@@ -200,6 +200,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-file", type=str, help="Dataset file within HuggingFace dataset")
     parser.add_argument("--local-file", type=str, help="Path to local JSONL file (prompt/chosen/rejected)")
     parser.add_argument("--split-dataset", action="store_true", help="Create train/validation split")
+    parser.add_argument("--test-size", type=float, default=None, help="Validation fraction for --split-dataset (rows, or groups with --validation-group-key)")
     parser.add_argument("--validation-group-key", type=str, default=None, help="Dot-path into each raw row (e.g. metadata.scenario); with --split-dataset, rows sharing a group stay on one side of the validation split")
 
     # Training configuration
@@ -323,6 +324,8 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
         config.dataset.dataset_name = args.dataset_name
     if args.dataset_file:
         config.dataset.dataset_file = args.dataset_file
+    if args.test_size is not None:
+        config.dataset.test_size = args.test_size
     if args.validation_group_key:
         config.dataset.validation_group_key = args.validation_group_key
 

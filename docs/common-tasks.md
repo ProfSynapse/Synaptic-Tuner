@@ -127,9 +127,22 @@ cd Trainers/sft && python train_sft.py --split-dataset --validation-group-key me
 
 - Missing, null or empty values fail loudly with the row index; fewer than two
   distinct groups is an error. Unset keeps the random split byte-identical.
-- `local-run` rejects `validation_group_key` without `split_dataset: true`, and
-  the SFT loader rejects it together with `use_preassigned_splits` (prepared
-  datasets already carry their split from `prepare-dataset`).
+- The same three settings (`split_dataset`, `test_size`,
+  `validation_group_key`) are forwarded by every SFT/KTO/DPO lane with one
+  shared validation: `local-run` (recipe `dataset:`), `cloud` and
+  `cloud-pipeline` (trainer `config.yaml` plus `--train-split-dataset`,
+  `--train-test-size`, `--train-validation-group-key`), `run-experiment`
+  (`experiment.dataset.*`) and RunPod. A group key without
+  `split_dataset: true` or a `test_size` outside (0, 1) is refused before
+  anything is submitted, and the trainers refuse it again at load time.
+  `cloud-run` executes user-authored `run.steps`, so pass the trainer flags
+  (`--split-dataset --test-size --validation-group-key`) there directly.
+- The packaged Modal / TrainingAPI SFT path trains on prepared datasets with
+  preassigned splits only (`split_dataset` is fixed to false by its versioned
+  contract), so it has no grouped split.
+- The SFT loader rejects `validation_group_key` together with
+  `use_preassigned_splits` (prepared datasets already carry their split from
+  `prepare-dataset`).
 - GRPO does not create a validation split, so it has no group key.
 
 **Recommended keys** (from what the generators actually write):

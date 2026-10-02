@@ -11,6 +11,7 @@ import os
 from shared.training_utils import (
     DEFAULT_SPLIT_SEED,
     extract_dataset_group_values,
+    require_split_for_group_key,
     split_train_validation,
 )
 
@@ -252,6 +253,9 @@ def load_and_prepare_dataset(
     processed_examples = []
 
     # Read group values from the raw rows before the KTO projection drops them.
+    require_split_for_group_key(
+        split_dataset=split_dataset, test_size=test_size, validation_group_key=validation_group_key
+    )
     raw_group_values = None
     if split_dataset and test_size > 0 and validation_group_key:
         print(f"Grouping validation split by: {validation_group_key}")

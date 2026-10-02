@@ -617,6 +617,17 @@ def _canonical_group_value(value: Any) -> str:
     return str(value)
 
 
+def require_split_for_group_key(
+    *, split_dataset: bool, test_size: float, validation_group_key: Optional[str]
+) -> None:
+    """Refuse a group key that would be silently ignored (no split requested)."""
+    if validation_group_key and not (split_dataset and test_size > 0):
+        raise ValueError(
+            "validation_group_key requires split_dataset=true and test_size > 0 "
+            f"(got split_dataset={split_dataset!r}, test_size={test_size!r})."
+        )
+
+
 def extract_group_values(rows: Iterable[Mapping[str, Any]], group_key: str) -> List[str]:
     """Resolve ``group_key`` on every row; fail loudly on the first missing value.
 

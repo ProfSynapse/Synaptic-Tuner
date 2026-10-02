@@ -789,6 +789,8 @@ def parse_args(argv=None):
         dest="require_memory_efficient_loss",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument("--test-size", type=float, default=None,
+                       help="Validation fraction for --split-dataset (rows, or groups with --validation-group-key)")
     parser.add_argument("--validation-group-key", type=str, default=None,
                        help="Dot-path into each raw row (e.g. metadata.scenario); with --split-dataset, rows sharing a group stay on one side of the validation split")
 
@@ -1121,6 +1123,8 @@ def run(args: argparse.Namespace):
         config.dataset.use_preassigned_splits = args.use_preassigned_splits
     if args.require_memory_efficient_loss is not None:
         config.training.require_memory_efficient_loss = args.require_memory_efficient_loss
+    if args.test_size is not None:
+        config.dataset.test_size = args.test_size
     if args.validation_group_key:
         config.dataset.validation_group_key = args.validation_group_key
 

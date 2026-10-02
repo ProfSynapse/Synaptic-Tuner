@@ -256,6 +256,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Create train/validation split"
     )
     parser.add_argument(
+        "--test-size",
+        type=float,
+        default=None,
+        help="Validation fraction for --split-dataset (rows, or groups with --validation-group-key)"
+    )
+    parser.add_argument(
         "--validation-group-key",
         type=str,
         default=None,
@@ -602,6 +608,8 @@ def main():
         config.dataset.dataset_name = args.dataset_name
     if args.dataset_file:
         config.dataset.dataset_file = args.dataset_file
+    if args.test_size is not None:
+        config.dataset.test_size = args.test_size
     if args.validation_group_key:
         config.dataset.validation_group_key = args.validation_group_key
 

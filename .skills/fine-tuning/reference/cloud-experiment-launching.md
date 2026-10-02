@@ -37,6 +37,11 @@ This ensures:
 - `--train-init-lora-weights`
 - `--train-no-load-in-4bit`
 - `--train-lora-target-modules`
+- `--train-split-dataset` / `--train-no-split-dataset`, `--train-test-size`,
+  `--train-validation-group-key` (SFT/KTO/DPO validation split; a group key
+  without a split is refused before submission). Experiment specs set the same
+  under `experiment.dataset` (`split_dataset`, `test_size`,
+  `validation_group_key`); unset values fall back to the trainer `config.yaml`.
 
 ## Example
 

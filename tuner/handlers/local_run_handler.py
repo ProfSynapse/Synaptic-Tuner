@@ -40,6 +40,8 @@ from tuner.cloud.derived_training_image import (
     validate_verification_report,
     verify_effectful_launch,
 )
+from tuner.core.config import validation_split_flags
+from tuner.core.exceptions import ConfigurationError
 from tuner.discovery.recipes import load_recipe
 from tuner.handlers.base import BaseHandler
 from tuner.project import PathRef, ProjectContext
@@ -1316,19 +1318,19 @@ class LocalRunHandler(BaseHandler):
             )
         if sft_only and training_cfg.get("require_memory_efficient_loss") is True:
             command.append("--require-memory-efficient-loss")
-        split_dataset = bool(dataset_cfg.get("split_dataset", False))
-        if split_dataset:
-            command.append("--split-dataset")
-        # Grouped validation split (all three dispatched trainers accept the flag).
-        # A group key without a split would be silently ignored by the trainer, so
-        # reject that combination up front instead.
-        validation_group_key = dataset_cfg.get("validation_group_key")
-        if validation_group_key is not None:
-            if not split_dataset:
-                raise LocalRunError(
-                    "dataset.validation_group_key requires dataset.split_dataset: true."
+        # Validation split settings use the same flag builder and validation as
+        # the cloud lanes (a group key without split_dataset is refused).
+        try:
+            command.extend(
+                validation_split_flags(
+                    method=method,
+                    split_dataset=bool(dataset_cfg.get("split_dataset", False)),
+                    test_size=dataset_cfg.get("test_size"),
+                    validation_group_key=dataset_cfg.get("validation_group_key"),
                 )
-            _append_flag(command, "validation_group_key", str(validation_group_key))
+            )
+        except ConfigurationError as exc:
+            raise LocalRunError(str(exc)) from exc
 
         for key in (
             "batch_size",

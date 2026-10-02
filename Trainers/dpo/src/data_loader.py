@@ -22,6 +22,7 @@ from datasets import load_dataset, Dataset
 from shared.training_utils import (
     DEFAULT_SPLIT_SEED,
     extract_dataset_group_values,
+    require_split_for_group_key,
     split_train_validation,
 )
 
@@ -96,6 +97,9 @@ def load_and_prepare_dataset(
     print(f"\nRaw dataset size: {len(raw_datasets)} examples")
 
     # Read group values before the non-DPO columns (provenance) are dropped.
+    require_split_for_group_key(
+        split_dataset=split_dataset, test_size=test_size, validation_group_key=validation_group_key
+    )
     group_values = None
     if split_dataset and test_size > 0 and validation_group_key:
         print(f"Grouping validation split by: {validation_group_key}")

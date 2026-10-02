@@ -204,3 +204,30 @@ def test_config_loaders_expose_validation_group_key(tmp_path, trainer):
     custom = tmp_path / "config.yaml"
     custom.write_text(yaml.safe_dump(raw), encoding="utf-8")
     assert module.load_config(str(custom)).dataset.validation_group_key == "metadata.scenario"
+
+
+@pytest.mark.parametrize("trainer", ["sft", "kto", "dpo"])
+def test_loaders_refuse_group_key_without_split(monkeypatch, trainer):
+    loader = _load(trainer)
+    monkeypatch.setattr(loader, "load_dataset", lambda *a, **k: Dataset.from_list(_conversation_rows(label=True)))
+    with pytest.raises(ValueError, match="requires split_dataset=true"):
+        loader.load_and_prepare_dataset(
+            local_file="unused.jsonl", split_dataset=False, validation_group_key="metadata.scenario"
+        )
+
+
+@pytest.mark.parametrize("trainer", ["sft", "kto", "dpo"])
+def test_trainer_clis_expose_split_flags(trainer):
+    import ast
+
+    source = (ROOT / "Trainers" / trainer / f"train_{trainer}.py").read_text(encoding="utf-8")
+    flags = {
+        node.args[0].value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", None) == "add_argument"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+    }
+    assert {"--split-dataset", "--test-size", "--validation-group-key"} <= flags
+

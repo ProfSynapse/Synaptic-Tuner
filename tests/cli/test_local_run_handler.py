@@ -1172,10 +1172,38 @@ def test_local_run_forwards_validation_group_key_with_split(tmp_path, method):
         method=method,
         trainer=f"Trainers/{method}/train_{method}.py",
         training={"max_steps": 1},
-        dataset_config={"split_dataset": True, "validation_group_key": "metadata.scenario"},
+        dataset_config={
+            "split_dataset": True,
+            "test_size": 0.2,
+            "validation_group_key": "metadata.scenario",
+        },
     )
     assert "--split-dataset" in command
+    assert command[command.index("--test-size") + 1] == "0.2"
     assert command[command.index("--validation-group-key") + 1] == "metadata.scenario"
+
+
+def test_local_run_omits_test_size_without_split(tmp_path):
+    command = _compile_local_command(
+        tmp_path,
+        method="kto",
+        trainer="Trainers/kto/train_kto.py",
+        training={"max_steps": 1},
+        dataset_config={"test_size": 0.2},
+    )
+    assert "--test-size" not in command
+    assert "--split-dataset" not in command
+
+
+def test_local_run_rejects_out_of_range_test_size(tmp_path):
+    with pytest.raises(LocalRunError, match="test_size"):
+        _compile_local_command(
+            tmp_path,
+            method="dpo",
+            trainer="Trainers/dpo/train_dpo.py",
+            training={"max_steps": 1},
+            dataset_config={"split_dataset": True, "test_size": 1.5},
+        )
 
 
 def test_local_run_omits_validation_group_key_when_absent(tmp_path):
