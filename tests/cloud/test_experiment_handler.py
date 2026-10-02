@@ -28,6 +28,10 @@ from tuner.cloud.hf_provisioning import (
     consume_hf_source_transport,
     prepare_hf_source_transport,
 )
+from tuner.cloud.hf_provisioning_claim import (
+    build_hf_provisioning_claim,
+    build_hf_provisioning_succeeded_event,
+)
 from tuner.cloud.runtime_layout import build_runtime_layout
 from shared.experiment_tracking import StageResult
 from tuner.handlers.stages import HFEvalStageRunner, HFLossStageRunner, HFTrainingStageRunner
@@ -145,11 +149,32 @@ def _install_hf_source_transport(
     evidence_path.write_bytes(canonical_json_bytes(evidence))
     evidence_uri = service.tracking_uri(evidence_path)
     evidence_sha256 = hashlib.sha256(canonical_json_bytes(evidence)).hexdigest()
-    service.record_provisioning_acknowledged(
-        experiment,
-        uri=evidence_uri,
-        sha256=evidence_sha256,
+    # Protected HF stages require durable SUCCEEDED provisioning, which is only
+    # reachable through the claim -> terminal event chain (no provider call here).
+    claim = build_hf_provisioning_claim(
+        experiment_id=experiment.experiment_id,
+        descriptor_uri=prepared.descriptor_uri,
+        descriptor_sha256=prepared.descriptor_sha256,
+        descriptor=descriptor,
+        actor="fixture-workflow",
+        authority="protected_workflow",
+        occurred_at="2026-08-19T12:00:00Z",
     )
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        claimed = service.claim_hf_provisioning(experiment, claim)
+        service.record_hf_provisioning_succeeded(
+            experiment,
+            build_hf_provisioning_succeeded_event(
+                claimed.document,
+                claim_uri=claimed.event_uri,
+                claim_sha256=claimed.event_sha256,
+                evidence_uri=evidence_uri,
+                evidence_sha256=evidence_sha256,
+                occurred_at="2026-08-19T12:01:00Z",
+            ),
+            evidence_uri=evidence_uri,
+            evidence_sha256=evidence_sha256,
+        )
     consumed = consume_hf_source_transport(
         context,
         transport_root=prepared.root,
