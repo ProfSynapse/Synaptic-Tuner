@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import multiprocessing
+import queue
 import subprocess
 import time
 from pathlib import Path
@@ -10,18 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
-def _emit_stage_event_process(log_dir: str, index: int, start, results) -> None:
-    try:
-        from shared.cloud_stage_logging import CloudStageLogger
-
-        start.wait(timeout=20)
-        CloudStageLogger(Path(log_dir), stage="evaluation").emit(
-            f"process-{index}"
-        )
-        results.put((0, index, ""))
-    except BaseException as exc:
-        results.put((1, index, repr(exc)))
 
 from shared.experiment_tracking import Experiment, ExperimentSpec, TrackingService
 from shared.experiment_tracking.experiment_spec import DatasetSpec, EvaluationStageSpec, FeaturesStageSpec, LossStageSpec, TrainingStageSpec
@@ -1261,6 +1250,8 @@ def test_cloud_stage_event_appends_remain_parseable_under_threads(tmp_path: Path
 def test_cloud_stage_event_appends_are_serialized_across_processes(tmp_path: Path):
     from shared.cloud_stage_logging import STAGE_EVENTS_FILENAME, STAGE_SUMMARY_FILENAME
 
+    from tests.cloud._stage_event_worker import emit_stage_event_process
+
     log_dir = tmp_path / "logs"
     context = multiprocessing.get_context("spawn")
     start = context.Event()
@@ -1268,7 +1259,7 @@ def test_cloud_stage_event_appends_are_serialized_across_processes(tmp_path: Pat
     process_count = 16
     processes = [
         context.Process(
-            target=_emit_stage_event_process,
+            target=emit_stage_event_process,
             args=(str(log_dir), index, start, results),
         )
         for index in range(process_count)
@@ -1276,11 +1267,21 @@ def test_cloud_stage_event_appends_are_serialized_across_processes(tmp_path: Pat
     for process in processes:
         process.start()
     start.set()
-    received = []
+    # Wait for the condition itself (every child reported, or every child has
+    # exited and nothing is left to read), bounded by a generous deadline:
+    # spawned interpreters can start slowly when the machine is busy.
+    received = {}
+    deadline = time.monotonic() + 300
     try:
-        received = [results.get(timeout=40) for _ in range(process_count)]
+        while len(received) < process_count and time.monotonic() < deadline:
+            try:
+                code, index, error = results.get(timeout=1)
+            except queue.Empty:
+                if not any(process.is_alive() for process in processes) and results.empty():
+                    break
+                continue
+            received[index] = (code, error)
     finally:
-        deadline = time.monotonic() + 40
         for process in processes:
             process.join(timeout=max(0.0, deadline - time.monotonic()))
         for process in processes:
@@ -1288,8 +1289,12 @@ def test_cloud_stage_event_appends_are_serialized_across_processes(tmp_path: Pat
                 process.terminate()
                 process.join(timeout=5)
 
+    assert sorted(received) == list(range(process_count)), (
+        received,
+        [process.exitcode for process in processes],
+    )
     assert all(process.exitcode == 0 for process in processes)
-    assert all(code == 0 for code, _index, _error in received), received
+    assert all(code == 0 for code, _error in received.values()), received
     rows = [
         json.loads(line)
         for line in (log_dir / STAGE_EVENTS_FILENAME).read_text(encoding="utf-8").splitlines()
