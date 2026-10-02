@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import ast
+import errno
 import hashlib
 import gzip
 import inspect
 import io
 import json
+import os
+import signal
 import sys
 import tarfile
 import textwrap
@@ -1824,7 +1827,11 @@ def test_subprocess_runner_sanitizes_output_bound_and_timeout(monkeypatch) -> No
     with pytest.raises(TrainingImageLockError) as caught:
         subprocess_runner(CommandSpec(("docker",), {}, 1, 4))
     assert str(caught.value) == "COMMAND_FAILED" and "secret" not in str(caught.value)
-    assert popen_kwargs.get("creationflags") == image_lock.subprocess.CREATE_NEW_PROCESS_GROUP
+    if os.name == "nt":
+        expected_group = {"creationflags": image_lock.subprocess.CREATE_NEW_PROCESS_GROUP}
+    else:
+        expected_group = {"start_new_session": True}
+    assert {key: popen_kwargs.get(key) for key in expected_group} == expected_group
 
     process = FakeProcess()
     def timeout(timeout=None):
@@ -2381,6 +2388,7 @@ def test_runner_rejects_incomplete_readers_and_terminates_owned_tree(monkeypatch
     assert process.killed >= 1
 
 
+@pytest.mark.skipif(os.name != "nt", reason="taskkill tree termination is Windows-only")
 def test_windows_tree_termination_requests_descendants(monkeypatch) -> None:
     from tuner.cloud import hf_training_image_lock as image_lock
 
@@ -2398,6 +2406,7 @@ def test_windows_tree_termination_requests_descendants(monkeypatch) -> None:
     assert seen == [("taskkill.exe", "/PID", "1234", "/T", "/F")]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="taskkill tree termination is Windows-only")
 def test_windows_tree_termination_falls_back_when_taskkill_fails(monkeypatch) -> None:
     from tuner.cloud import hf_training_image_lock as image_lock
 
@@ -2411,6 +2420,42 @@ def test_windows_tree_termination_falls_back_when_taskkill_fails(monkeypatch) ->
     monkeypatch.setattr(
         image_lock.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=1),
     )
+    image_lock._terminate_process_tree(process)
+    assert process.killed == 1
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process groups only")
+def test_posix_tree_termination_kills_the_process_group(monkeypatch) -> None:
+    from tuner.cloud import hf_training_image_lock as image_lock
+
+    class FakeProcess:
+        pid = 1234
+        def kill(self):
+            raise AssertionError("process-group kill must be used")
+
+    seen = []
+    monkeypatch.setattr(image_lock.os, "getpgid", lambda pid: {1234: 5678}[pid])
+    monkeypatch.setattr(image_lock.os, "killpg", lambda pgid, sig: seen.append((pgid, sig)))
+    image_lock._terminate_process_tree(FakeProcess())
+    assert seen == [(5678, signal.SIGKILL)]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process groups only")
+def test_posix_tree_termination_falls_back_when_group_kill_fails(monkeypatch) -> None:
+    from tuner.cloud import hf_training_image_lock as image_lock
+
+    class FakeProcess:
+        pid = 1234
+        killed = 0
+        def kill(self):
+            self.killed += 1
+
+    def gone(pgid, sig):
+        raise ProcessLookupError(errno.ESRCH, "fixture process group is gone")
+
+    process = FakeProcess()
+    monkeypatch.setattr(image_lock.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(image_lock.os, "killpg", gone)
     image_lock._terminate_process_tree(process)
     assert process.killed == 1
 

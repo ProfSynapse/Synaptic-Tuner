@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import gzip
 import io
@@ -23,6 +24,36 @@ from tuner.cloud.hf_training_docker_archive import (
 
 DIFF_ID = "sha256:" + hashlib.sha256(b"layer").hexdigest()
 _ABSENT = object()
+
+
+def _expected_process_group_kwargs(module) -> dict[str, object]:
+    """The archive child gets its own process group on every platform."""
+    if os.name == "nt":
+        return {"creationflags": module.subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _failing_tree_stops(monkeypatch, module) -> list[tuple[object, ...]]:
+    """Record the platform's process-tree stop and make it fail.
+
+    Windows stops the tree with taskkill.exe; POSIX kills the child's process
+    group. Neither may reach a real process from a fake pid, and both must
+    fall back to Popen.kill() when the tree stop fails.
+    """
+    stops: list[tuple[object, ...]] = []
+    if os.name == "nt":
+        monkeypatch.setattr(
+            module.subprocess, "run",
+            lambda argv, **kwargs: stops.append(tuple(argv)) or SimpleNamespace(returncode=1),
+        )
+    else:
+        def killpg(pgid, sig):
+            stops.append(("killpg", pgid, sig))
+            raise ProcessLookupError(errno.ESRCH, "fixture process group is gone")
+
+        monkeypatch.setattr(module.os, "getpgid", lambda pid: pid)
+        monkeypatch.setattr(module.os, "killpg", killpg)
+    return stops
 
 
 def test_archive_phase_bound_is_frozen_at_900_seconds() -> None:
@@ -656,7 +687,8 @@ def test_save_runner_uses_exclusive_file_and_enforces_byte_bound(tmp_path: Path,
     destination = tmp_path / "archive.tar"
     save_docker_archive(command, destination)
     assert destination.read_bytes() == payload
-    assert popen_kwargs.get("creationflags") == archive_module.subprocess.CREATE_NEW_PROCESS_GROUP
+    expected_group = _expected_process_group_kwargs(archive_module)
+    assert {key: popen_kwargs.get(key) for key in expected_group} == expected_group
     with pytest.raises(DockerArchiveError, match="OUTPUT_INVALID"):
         save_docker_archive(command, destination)
     assert destination.read_bytes() == payload
@@ -688,10 +720,7 @@ def test_archive_timeout_uses_bounded_wait_and_falls_back_when_taskkill_fails(
 
     process = FakeProcess()
     monkeypatch.setattr(archive_module.subprocess, "Popen", lambda *a, **k: process)
-    monkeypatch.setattr(
-        archive_module.subprocess, "run",
-        lambda *a, **k: SimpleNamespace(returncode=1),
-    )
+    tree_stops = _failing_tree_stops(monkeypatch, archive_module)
     readings = iter((0.0, 2.0))
     monkeypatch.setattr(archive_module.time, "monotonic", lambda: next(readings, 2.0))
     with pytest.raises(DockerArchiveError, match="ARCHIVE_TIMEOUT"):
@@ -700,7 +729,7 @@ def test_archive_timeout_uses_bounded_wait_and_falls_back_when_taskkill_fails(
             tmp_path / "timed-out.tar",
         )
     assert process.waits == [10]
-    assert process.killed >= 1
+    assert len(tree_stops) >= 1 and process.killed >= 1
 
 
 def test_archive_live_stderr_reader_triggers_second_tree_stop_and_bounded_join(
@@ -733,12 +762,8 @@ def test_archive_live_stderr_reader_triggers_second_tree_stop_and_bounded_join(
             return self.joins < 2
 
     process = FakeProcess()
-    taskkills = []
     monkeypatch.setattr(archive_module.subprocess, "Popen", lambda *a, **k: process)
     monkeypatch.setattr(archive_module.threading, "Thread", ReaderThread)
-    monkeypatch.setattr(
-        archive_module.subprocess, "run",
-        lambda argv, **kwargs: taskkills.append(tuple(argv)) or SimpleNamespace(returncode=1),
-    )
+    tree_stops = _failing_tree_stops(monkeypatch, archive_module)
     save_docker_archive(DockerArchiveCommand(("docker",), {}), tmp_path / "reader.tar")
-    assert len(taskkills) >= 1 and process.killed >= 1
+    assert len(tree_stops) >= 1 and process.killed >= 1
