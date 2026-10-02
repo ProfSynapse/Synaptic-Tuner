@@ -14,7 +14,10 @@ Provide:
 
 - the private `bundle_ref` and `bundle_digest`;
 - the `structure_set_digest` and declared structure name/version;
-- the named text projection, currently `text` over the `body` field;
+- each selected context/full-document and target/body text projection, with its
+  exact structure ref (name, version, digest), projection name, and `field_ref`;
+  mark either role undecided when no projection has been selected. The minimal
+  template declares only `text` over `body` and selects no context projection;
 - declared metadata fields, currently the logical `path` in the minimal template;
 - source, processed, and document counts;
 - the snapshot manifest, plan, and outcome digests/references needed for audit;
@@ -23,6 +26,10 @@ Provide:
 
 The recipient may read the normalized items only inside the authorized private
 boundary. It must not depend on the original absolute source root.
+
+Do not describe a selected target as prose-only without checking its declared
+field selector: a projection over `document_text` includes valid YAML
+frontmatter when the source has it.
 
 ## Still undecided
 

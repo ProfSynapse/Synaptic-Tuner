@@ -86,6 +86,106 @@ assistant prose, document ordering, or the trainer. The existing seeded
 `group_hash_rank` policy remains unchanged for whole-group holdouts. Sequence-tail
 validation measures later items within known groups, not unseen-group performance.
 
+### Independent context and target projections
+
+The v2 preparation config optionally accepts a top-level `context_projection`
+with the same closed `{ "structure_ref": ..., "name": ... }` shape as
+`target_projection`. Both names resolve declared string-field projections in the
+verified bundle; each context item must match its selected context structure,
+while targets must match the target structure. For example, a declared source
+projection may retain document metadata in inputs while a separate body
+projection keeps assistant outputs prose-only. Field and projection names are
+configuration, not builder conventions. Missing, null or non-string document
+fields reject rather than silently falling back.
+
+When omitted, context uses `target_projection` and legacy serialization, row
+identities, dataset bytes and manifests remain unchanged. When explicitly
+provided, the selected context projection and resolved digest bind row and
+dataset identities even if both projections produce identical text. The public
+verifier checks that recipe, resolved projection, digest and row bindings agree.
+This option does not change source selection, document order, lineage or leakage
+safeguards; review actual complete context packages before authorizing training.
+
+### Intentional target-derived conditioning
+
+For explicitly approved conditioned writing, v2 optionally accepts
+`context_package.conditioning_policy: {"kind": "target_derived_support/v1"}`.
+A distinct-family support document may descend directly or transitively from
+**its own exact target**, in the same group. Literal target text, alternate target
+revisions, unrelated newer context and newer coancestors remain prohibited.
+Only the exact target ancestor is exempted from the revision check; only its
+descendants receive the context chronology exemption. Training contexts still
+reject held-out targets, revisions and derivatives. Keep lineage truthful: this
+is intentional outline-guided writing, not unconditioned continuation or proof
+of unseen generalization.
+
+Omission preserves legacy serialization, causal checks and identities. Enabled
+policy binds row and dataset identity. Hash-rank artifacts retain bounded full
+declared `conditioning_lineage`; sequence-tail reuses `split_lineage`. Public
+verification checks the declared graph, closure, revision/group/split relations
+and policy binding, not semantic derivation, copied prose or source truth. It
+does not reconstruct hash-rank ordering from a private seed's digest. Review
+source provenance and complete examples separately; use the existing CLI to
+publish a fresh immutable dataset.
+
+### Configured cleanup of prepared messages and context documents
+
+The v2 preparation config accepts these optional fields inside `context_package`
+(this fragment augments the required lineage, packages, prompts and target rules):
+
+```json
+{
+  "context_transforms": {
+    "drop_fenced_block_info_strings": ["widget"],
+    "drop_standalone_line_prefixes": ["<iframe", "  ![["]
+  },
+  "paragraph_gap_policy": {
+    "kind": "collapse_blank_lines/v1",
+    "group_ids": ["configured-group"]
+  }
+}
+```
+
+`context_transforms` reuses the existing `target_transforms` drop rules, but
+applies them separately to each context document before joining. Target and
+context selections remain independent. Prefix matching is literal at the start
+of a line: configured indentation matters. Selected fenced blocks must close;
+this is configured removal, not a general HTML sanitizer. Keep corpus-specific
+embed signatures in config and preserve ordinary prose and links.
+
+`paragraph_gap_policy` applies to targets and context documents whose **own**
+declared lineage `group_id` is selected, not the enclosing target row's group.
+Selectors must be unique declared groups (at most 256); context-only groups are
+valid. Outside preserved backtick/tilde fences, whitespace-only lines become
+empty and consecutive blank lines collapse to one. Fence recognition permits
+up to three leading spaces and requires the matching marker and sufficient
+closing length. Nonblank lines, their indentation, scene markers, intentional
+single line breaks and preserved fence contents remain unchanged. Retained line
+endings, including CRLF, keep their spelling. Fence state resets per document;
+normalization never runs over the joined prompt or crosses document boundaries.
+
+Explicit nulls and unknown fields reject. Context drop lists are bounded to 256
+selections each. Cleanup rejects documents left with only whitespace. Omitting
+both options preserves legacy config serialization, semantic identities and row
+bytes; raw-text v1 is unchanged. Enabled options bind into the semantic recipe
+and resulting content-addressed dataset identity.
+
+The builder validates group membership against the complete declared item
+lineage resolved to the verified source bundle. The public artifact verifier
+checks policy structure, counts/digests and semantic identity; legacy manifests
+do not expose complete context-only group membership, so verification alone
+cannot reconstruct that builder proof.
+
+Rebuild through `python tuner.py prepare-dataset --config <config.json> --json`
+to a fresh immutable publication, preserving the source bundle and previous
+dataset. Compare row/split counts, lineage and intended target/context changes;
+re-profile tokenizer lengths before consuming changed rows. If the CLI reports
+`publication_uncertain` / `parent_durability`, retain its exact records and use
+the existing `verify_prepared_dataset_v2` public API to verify the exact retained
+manifest and JSONL. Integrity verification is **not** a durability acknowledgment.
+Do not rerun publication, overwrite the artifact or weaken checks to manufacture
+that acknowledgment; preserve the uncertainty explicitly.
+
 ### Legacy conversational SFT
 
 Positive examples only. Tool-calling examples should use OpenAI-style `tool_calls`.

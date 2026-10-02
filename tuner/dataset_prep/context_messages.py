@@ -111,8 +111,11 @@ class PromptVariantV2:
 class TargetTransformsV2:
     drop_fenced_block_info_strings: tuple[str, ...] = ()
     drop_standalone_line_prefixes: tuple[str, ...] = ()
+    inline_links: str | None = None
 
     def __post_init__(self) -> None:
+        if self.inline_links is not None and (type(self.inline_links) is not str or self.inline_links != "wiki_display/v1"):
+            _invalid("inline links policy is unsupported")
         for values, label, maximum in (
             (self.drop_fenced_block_info_strings, "fenced block info string", 256),
             (self.drop_standalone_line_prefixes, "standalone line prefix", 512),
@@ -131,36 +134,83 @@ class TargetTransformsV2:
 
     @classmethod
     def from_dict(cls, value: object) -> "TargetTransformsV2":
-        item = _exact(
-            value,
-            frozenset({"drop_fenced_block_info_strings", "drop_standalone_line_prefixes"}),
-            "target transforms",
-        )
+        required = frozenset({"drop_fenced_block_info_strings", "drop_standalone_line_prefixes"})
+        if type(value) is not dict or not required <= value.keys() or value.keys() - required - {"inline_links"}:
+            _invalid("target transforms fields are invalid")
+        item = value
         fenced = item["drop_fenced_block_info_strings"]
         prefixes = item["drop_standalone_line_prefixes"]
         if type(fenced) is not list or type(prefixes) is not list:
             _invalid("target transform selections must be lists")
-        return cls(tuple(fenced), tuple(prefixes))  # type: ignore[arg-type]
+        policy = None
+        if "inline_links" in item:
+            raw_policy = _exact(item["inline_links"], frozenset({"kind"}), "inline links policy")
+            policy = raw_policy["kind"]
+            if type(policy) is not str or policy != "wiki_display/v1":
+                _invalid("inline links policy is unsupported")
+        return cls(tuple(fenced), tuple(prefixes), policy)  # type: ignore[arg-type]
 
     def hashed_recipe(self) -> dict[str, object]:
-        return {
+        result = {
             "kind": "configured_drop/v1",
             "selection_digest": _domain_digest(
                 _TRANSFORM_DOMAIN_V2,
-                {
-                    "drop_fenced_block_info_strings": list(self.drop_fenced_block_info_strings),
-                    "drop_standalone_line_prefixes": list(self.drop_standalone_line_prefixes),
-                },
+                self.to_dict(),
             ),
             "fenced_info_count": len(self.drop_fenced_block_info_strings),
             "line_prefix_count": len(self.drop_standalone_line_prefixes),
         }
+        if self.inline_links is not None:
+            result["inline_links"] = {"kind": self.inline_links}
+        return result
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        result = {
             "drop_fenced_block_info_strings": list(self.drop_fenced_block_info_strings),
             "drop_standalone_line_prefixes": list(self.drop_standalone_line_prefixes),
         }
+        if self.inline_links is not None:
+            result["inline_links"] = {"kind": self.inline_links}
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class ParagraphGapPolicyV2:
+    group_ids: tuple[str, ...]
+    kind: str = "collapse_blank_lines/v1"
+
+    def __post_init__(self) -> None:
+        if type(self.kind) is not str or self.kind != "collapse_blank_lines/v1":
+            _invalid("paragraph gap policy kind is unsupported")
+        if type(self.group_ids) is not tuple or not 1 <= len(self.group_ids) <= 256:
+            _invalid("paragraph gap groups must be a bounded nonempty tuple")
+        checked = tuple(_logical_id(value, "paragraph gap group") for value in self.group_ids)
+        if len(set(checked)) != len(checked):
+            _invalid("paragraph gap groups must be unique")
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ParagraphGapPolicyV2":
+        item = _exact(value, frozenset({"kind", "group_ids"}), "paragraph gap policy")
+        if type(item["group_ids"]) is not list:
+            _invalid("paragraph gap group_ids must be a list")
+        return cls(tuple(item["group_ids"]), item["kind"])
+
+    def to_dict(self) -> dict[str, object]:
+        return {"kind": self.kind, "group_ids": list(self.group_ids)}
+
+
+def _optional_package(value: object, required: frozenset[str], label: str) -> dict:
+    optional = frozenset({"context_transforms", "paragraph_gap_policy", "conditioning_policy"})
+    if type(value) is not dict or not required <= value.keys() or value.keys() - required - optional:
+        _invalid(f"{label} fields are invalid")
+    return value
+
+
+def _conditioning_policy(value: object) -> str:
+    item = _exact(value, frozenset({"kind"}), "conditioning policy")
+    if type(item["kind"]) is not str or item["kind"] != "target_derived_support/v1":
+        _invalid("conditioning policy is unsupported")
+    return item["kind"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,6 +369,10 @@ class DatasetPrepConfigV2:
     schema_version: str = CONFIG_SCHEMA_VERSION_V2
     format: str = MESSAGES_FORMAT
     ordering: str = "configured_whole_documents"
+    context_transforms: TargetTransformsV2 | None = None
+    paragraph_gap_policy: ParagraphGapPolicyV2 | None = None
+    context_projection: ProjectionV1 | None = None
+    conditioning_policy: str | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != CONFIG_SCHEMA_VERSION_V2 or self.format != MESSAGES_FORMAT:
@@ -329,6 +383,10 @@ class DatasetPrepConfigV2:
         object.__setattr__(self, "expected_bundle_digest", _digest(self.expected_bundle_digest, "bundle digest"))
         if type(self.target_projection) is not ProjectionV1:
             raise TypeError("target_projection must be exact ProjectionV1")
+        if self.context_projection is not None and type(self.context_projection) is not ProjectionV1:
+            raise TypeError("context_projection must be exact ProjectionV1")
+        if self.conditioning_policy is not None and (type(self.conditioning_policy) is not str or self.conditioning_policy != "target_derived_support/v1"):
+            _invalid("conditioning policy is unsupported")
         if not self.lineage or not self.packages or not self.prompt_variants:
             _invalid("lineage, packages, and prompt variants must be nonempty")
         if any(type(item) is not ItemLineageV2 for item in self.lineage):
@@ -339,19 +397,30 @@ class DatasetPrepConfigV2:
             raise TypeError("prompt_variants must contain exact PromptVariantV2 values")
         if type(self.target_transforms) is not TargetTransformsV2 or type(self.split) is not GroupSplitV2:
             raise TypeError("target_transforms and split must use exact v2 models")
+        if self.context_transforms is not None and type(self.context_transforms) is not TargetTransformsV2:
+            raise TypeError("context_transforms must be exact TargetTransformsV2")
+        if self.context_transforms is not None and any(len(values) > 256 for values in (
+            self.context_transforms.drop_fenced_block_info_strings,
+            self.context_transforms.drop_standalone_line_prefixes,
+        )):
+            _invalid("context transform selections exceed their bound")
+        if self.paragraph_gap_policy is not None:
+            if type(self.paragraph_gap_policy) is not ParagraphGapPolicyV2:
+                raise TypeError("paragraph_gap_policy must be exact ParagraphGapPolicyV2")
+            if not set(self.paragraph_gap_policy.group_ids) <= {entry.group_id for entry in self.lineage}:
+                _invalid("paragraph gap group is not declared in lineage")
 
     @classmethod
     def from_dict(cls, value: object) -> "DatasetPrepConfigV2":
-        item = _exact(
-            value,
-            frozenset({"schema_version", "source", "format", "target_projection", "context_package", "split"}),
-            "dataset prep v2 config",
-        )
+        fields = frozenset({"schema_version", "source", "format", "target_projection", "context_package", "split"})
+        if type(value) is dict and "context_projection" in value:
+            fields |= {"context_projection"}
+        item = _exact(value, fields, "dataset prep v2 config")
         source = _exact(item["source"], frozenset({"bundle_path", "expected_bundle_digest"}), "source")
         bundle_path = source["bundle_path"]
         if type(bundle_path) is not str or not bundle_path:
             _invalid("source bundle_path is invalid")
-        package = _exact(
+        package = _optional_package(
             item["context_package"],
             frozenset({"ordering", "lineage", "packages", "prompt_variants", "target_transforms"}),
             "context_package",
@@ -374,11 +443,19 @@ class DatasetPrepConfigV2:
             schema_version=item["schema_version"],  # type: ignore[arg-type]
             format=item["format"],  # type: ignore[arg-type]
             ordering=ordering["kind"],  # type: ignore[arg-type]
+            context_transforms=(TargetTransformsV2.from_dict(package["context_transforms"])
+                                if "context_transforms" in package else None),
+            paragraph_gap_policy=(ParagraphGapPolicyV2.from_dict(package["paragraph_gap_policy"])
+                                  if "paragraph_gap_policy" in package else None),
+            context_projection=(ProjectionV1.from_dict(item["context_projection"])
+                                if "context_projection" in item else None),
+            conditioning_policy=(_conditioning_policy(package["conditioning_policy"])
+                                 if "conditioning_policy" in package else None),
         )
 
     def semantic_recipe(self) -> dict[str, object]:
         lineage = [entry.to_dict() for entry in self.lineage]
-        return {
+        result = {
             "schema_version": self.schema_version,
             "format": self.format,
             "target_projection": self.target_projection.to_dict(),
@@ -392,9 +469,18 @@ class DatasetPrepConfigV2:
             },
             "split": self.split.hashed_recipe(),
         }
+        if self.context_transforms is not None:
+            result["context_package"]["context_transforms"] = self.context_transforms.hashed_recipe()
+        if self.paragraph_gap_policy is not None:
+            result["context_package"]["paragraph_gap_policy"] = self.paragraph_gap_policy.to_dict()
+        if self.context_projection is not None:
+            result["context_projection"] = self.context_projection.to_dict()
+        if self.conditioning_policy is not None:
+            result["context_package"]["conditioning_policy"] = {"kind": self.conditioning_policy}
+        return result
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "source": {
                 "bundle_path": str(self.source_bundle_path),
@@ -411,6 +497,15 @@ class DatasetPrepConfigV2:
             },
             "split": self.split.to_dict(),
         }
+        if self.context_transforms is not None:
+            result["context_package"]["context_transforms"] = self.context_transforms.to_dict()
+        if self.paragraph_gap_policy is not None:
+            result["context_package"]["paragraph_gap_policy"] = self.paragraph_gap_policy.to_dict()
+        if self.context_projection is not None:
+            result["context_projection"] = self.context_projection.to_dict()
+        if self.conditioning_policy is not None:
+            result["context_package"]["conditioning_policy"] = {"kind": self.conditioning_policy}
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -499,6 +594,69 @@ def _drop_selected_fences(text: str, selected: frozenset[str]) -> str:
     return "".join(kept)
 
 
+def _wiki_display_line(line: str) -> str:
+    kept: list[str] = []
+    offset = 0
+    while offset < len(line):
+        if (offset == 0 or line[offset - 1] in "\r\n") and (line.startswith("    ", offset) or line.startswith("\t", offset)):
+            ending = re.search(r"\r\n|\r|\n", line[offset:])
+            end = len(line) if ending is None else offset + ending.end()
+            kept.append(line[offset:end])
+            offset = end
+            continue
+        if line[offset] == "`":
+            run = re.match(r"`+", line[offset:]).group(0)
+            close = re.search(rf"(?<!`)`{{{len(run)}}}(?!`)", line[offset + len(run):])
+            end = len(line) if close is None else offset + len(run) + close.end()
+            kept.append(line[offset:end])
+            offset = end
+            continue
+        if line.startswith("[[", offset):
+            close = line.find("]]", offset + 2)
+            if close == -1:
+                kept.append(line[offset:])
+                break
+            end = close + 2
+            inner = line[offset + 2:close]
+            parts = inner.split("|")
+            protected = ((offset > 0 and line[offset - 1] in "!\\[")
+                         or (end < len(line) and line[end] == "]"))
+            simple = (1 <= len(parts) <= 2 and all(part and part == part.strip() for part in parts)
+                      and not any(char in inner for char in "[]\r\n#^/\\`"))
+            kept.append(parts[-1] if simple and not protected else line[offset:end])
+            offset = end
+            continue
+        kept.append(line[offset])
+        offset += 1
+    return "".join(kept)
+
+
+def _wiki_display(text: str) -> str:
+    kept: list[str] = []
+    pending: list[str] = []
+    fence: tuple[str, int] | None = None
+    for line in text.splitlines(keepends=True):
+        probe = line.rstrip("\r\n")
+        stripped = probe.lstrip(" ")
+        indent = len(probe) - len(stripped)
+        if fence is not None:
+            kept.append(line)
+            marker, length = fence
+            if indent <= 3 and re.fullmatch(rf"{re.escape(marker)}{{{length},}}[ \t]*", stripped):
+                fence = None
+            continue
+        match = re.fullmatch(r"(`{3,}|~{3,})([^\r\n]*)", stripped) if indent <= 3 else None
+        if match is not None:
+            kept.append(_wiki_display_line("".join(pending)))
+            pending.clear()
+            fence = (match.group(1)[0], len(match.group(1)))
+            kept.append(line)
+        else:
+            pending.append(line)
+    kept.append(_wiki_display_line("".join(pending)))
+    return "".join(kept)
+
+
 def apply_target_transforms_v2(text: str, transforms: TargetTransformsV2) -> str:
     result = _drop_selected_fences(text, frozenset(transforms.drop_fenced_block_info_strings))
     if transforms.drop_standalone_line_prefixes:
@@ -507,8 +665,51 @@ def apply_target_transforms_v2(text: str, transforms: TargetTransformsV2) -> str
             for line in result.splitlines(keepends=True)
             if not any(line.rstrip("\r\n").startswith(prefix) for prefix in transforms.drop_standalone_line_prefixes)
         )
+    if transforms.inline_links is not None:
+        result = _wiki_display(result)
     if not result:
         _invalid("target transforms removed the entire target projection")
+    return result
+
+
+def normalize_paragraph_gaps_v2(text: str) -> str:
+    """Normalize only blank lines outside preserved Markdown fences."""
+    kept: list[str] = []
+    fence: tuple[str, int] | None = None
+    blank = False
+    for line in text.splitlines(keepends=True):
+        probe = line.rstrip("\r\n")
+        ending = line[len(probe):]
+        stripped = probe.lstrip(" ")
+        indent = len(probe) - len(stripped)
+        if fence is not None:
+            kept.append(line)
+            marker, length = fence
+            if indent <= 3 and re.fullmatch(rf"{re.escape(marker)}{{{length},}}[ \t]*", stripped):
+                fence = None
+            blank = False
+            continue
+        match = re.fullmatch(r"(`{3,}|~{3,})([^\r\n]*)", stripped) if indent <= 3 else None
+        if match is not None:
+            fence = (match.group(1)[0], len(match.group(1)))
+        if not probe.strip():
+            if not blank:
+                kept.append(ending)
+            blank = True
+        else:
+            kept.append(line)
+            blank = False
+    return "".join(kept)
+
+
+def _prepare_document(text: str, group: str, config: DatasetPrepConfigV2, *, context: bool) -> str:
+    transforms = config.context_transforms if context else config.target_transforms
+    result = apply_target_transforms_v2(text, transforms) if transforms is not None else text
+    policy = config.paragraph_gap_policy
+    if policy is not None and group in policy.group_ids:
+        result = normalize_paragraph_gaps_v2(result)
+    if (config.context_transforms is not None or policy is not None) and not result.strip():
+        _invalid("configured transforms removed all document prose")
     return result
 
 
@@ -568,6 +769,8 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
     if bundle.semantic_identity.bundle_digest != config.expected_bundle_digest:
         _invalid("source bundle digest does not match expectation")
     field_ref, projection_identity, projection_digest = _resolve_projection(bundle, config.target_projection)
+    context_field, context_identity, context_digest = _resolve_projection(
+        bundle, config.context_projection or config.target_projection)
     items = {entry.item_id: entry for entry in bundle.items}
     lineage = _validate_lineage(config, frozenset(items))
     variants: dict[str, PromptVariantV2] = {}
@@ -591,15 +794,19 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
             context_lineage = lineage[context_id]
             context_ancestors = _ancestors(context_id, lineage)
             context_closure = (context_id, *context_ancestors)
-            if package.target_item_id in context_ancestors:
+            support = config.conditioning_policy is not None and package.target_item_id in context_ancestors
+            if support and context_lineage.group_id != target_lineage.group_id:
+                _invalid("target-derived support must share target group")
+            if package.target_item_id in context_ancestors and not support:
                 _invalid("context is derived from the target")
             if any(
                 lineage[member_id].revision_family == target_lineage.revision_family
-                for member_id in context_closure
+                for member_id in context_closure if not (support and member_id == package.target_item_id)
             ):
                 _invalid("context contains an alternate revision of the target")
             if any(
-                lineage[member_id].sequence > target_lineage.sequence
+                lineage[member_id].sequence > target_lineage.sequence and not (
+                    support and package.target_item_id in _ancestors(member_id, lineage))
                 for member_id in context_closure
             ):
                 _invalid("context is newer than the target")
@@ -664,10 +871,20 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
         for target in target_set:
             if any(ancestor in target_set and target_splits[ancestor] != target_splits[target] for ancestor in _ancestors(target, lineage)):
                 _invalid("derived targets cross sequence-tail splits")
+    if config.conditioning_policy is not None:
+        heldout = {target for target, split in target_splits.items() if split == "validation"}
+        heldout_families = {lineage[target].revision_family for target in heldout}
     for package in config.packages:
         package_split = target_splits[package.target_item_id]
+        if config.conditioning_policy is not None and package_split == "train" and lineage[package.target_item_id].revision_family in heldout_families:
+            _invalid("a target revision family crosses splits")
         for context_id in package.context_item_ids:
             ancestor_targets = _ancestors(context_id, lineage) & target_set
+            if config.conditioning_policy is not None and package_split == "train" and any(
+                member in heldout or lineage[member].revision_family in heldout_families
+                for member in (context_id, *_ancestors(context_id, lineage))
+            ):
+                _invalid("training context contains held-out target lineage")
             if config.split.kind == "group_hash_rank":
                 if any(target_splits[ancestor_id] != package_split for ancestor_id in ancestor_targets):
                     _invalid("context descends from a target assigned to a different split")
@@ -688,16 +905,16 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
         target = target_item.fields.get(field_ref)
         if type(target) is not str or not target:
             _invalid("target projection must be a nonempty string")
-        assistant = apply_target_transforms_v2(target, config.target_transforms)
+        assistant = _prepare_document(target, lineage[package.target_item_id].group_id, config, context=False)
         context_texts: list[str] = []
         for context_id in package.context_item_ids:
             context_item = items[context_id]
-            if _plain(context_item.structure_ref) != selected_ref:
+            if _plain(context_item.structure_ref) != context_identity["structure_ref"]:
                 _invalid("context item does not match configured projection structure")
-            text = context_item.fields.get(field_ref)
+            text = context_item.fields.get(context_field)
             if type(text) is not str or not text:
                 _invalid("context projection must be a nonempty string")
-            context_texts.append(text)
+            context_texts.append(_prepare_document(text, lineage[context_id].group_id, config, context=True))
         variant = variants[package.prompt_variant]
         user = variant.prompt + variant.separator + variant.separator.join(context_texts)
         group_id = lineage[package.target_item_id].group_id
@@ -717,6 +934,11 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
             "group_id": group_id,
             "format": MESSAGES_FORMAT,
         }
+        if config.context_projection is not None:
+            basis["context_projection"] = context_identity
+            basis["context_projection_digest"] = context_digest
+        if config.conditioning_policy is not None:
+            basis["conditioning_policy"] = {"kind": config.conditioning_policy}
         row_id = "row-" + _domain_digest(_ROW_ID_DOMAIN_V2, basis)
         messages = (
             MappingProxyType({"role": "user", "content": user}),
@@ -756,6 +978,8 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
     group_ids_sha256 = _stream_digest(tuple(sorted(group_ids)))
     recipe = config.semantic_recipe()
     split_lineage = [entry.to_dict() for entry in config.lineage] if config.split.kind == "group_sequence_tail" else None
+    conditioning_lineage = ([entry.to_dict() for entry in config.lineage]
+                            if config.conditioning_policy is not None and split_lineage is None else None)
     dataset_basis = {
         "source_bundle_digest": bundle.semantic_identity.bundle_digest,
         "source_structure_set_digest": bundle.semantic_identity.structure_set_digest,
@@ -774,6 +998,11 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
     }
     if split_lineage is not None:
         dataset_basis["split_lineage"] = split_lineage
+    if config.context_projection is not None:
+        dataset_basis["context_projection"] = context_identity
+        dataset_basis["context_projection_digest"] = context_digest
+    if conditioning_lineage is not None:
+        dataset_basis["conditioning_lineage"] = conditioning_lineage
     dataset_digest = _domain_digest(_DATASET_DOMAIN_V2, dataset_basis)
     dataset_id = "dataset-" + dataset_digest
     manifest = {
@@ -802,6 +1031,11 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
     }
     if split_lineage is not None:
         manifest["split_lineage"] = split_lineage
+    if config.context_projection is not None:
+        manifest["context_projection"] = context_identity
+        manifest["context_projection_digest"] = context_digest
+    if conditioning_lineage is not None:
+        manifest["conditioning_lineage"] = conditioning_lineage
     manifest_raw = _canonical_bytes(manifest)
     identity = DatasetSemanticIdentityV1(
         dataset_id,

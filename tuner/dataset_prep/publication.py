@@ -56,6 +56,9 @@ from .context_messages import (
     ROW_SCHEMA_VERSION_V2,
     DatasetPrepConfigV2,
     ItemLineageV2,
+    ParagraphGapPolicyV2,
+    _optional_package,
+    _conditioning_policy,
     build_prepared_dataset_v2,
     _DATASET_DOMAIN_V2,
     _LINEAGE_DOMAIN_V2,
@@ -956,16 +959,27 @@ def _verify_bytes_v1(
     return VerifiedPreparedDatasetV1(path, identity)
 
 
-def _validate_recipe_v2(value: object) -> dict[str, object]:
-    recipe = _exact(
-        value,
-        frozenset({"schema_version", "format", "target_projection", "context_package", "split"}),
-        "v2 recipe",
-    )
+def _transform_recipe_fields(value: object) -> frozenset[str]:
+    fields = frozenset({"kind", "selection_digest", "fenced_info_count", "line_prefix_count"})
+    if type(value) is dict and "inline_links" in value:
+        policy = _exact(value["inline_links"], frozenset({"kind"}), "inline links policy")
+        if type(policy["kind"]) is not str or policy["kind"] != "wiki_display/v1":
+            _invalid("inline links policy is unsupported")
+        fields |= {"inline_links"}
+    return fields
+
+
+def _validate_recipe_v2(value: object) -> dict:
+    fields = frozenset({"schema_version", "format", "target_projection", "context_package", "split"})
+    if type(value) is dict and "context_projection" in value:
+        fields |= {"context_projection"}
+    recipe = _exact(value, fields, "v2 recipe")
+    if "context_projection" in recipe:
+        ProjectionV1.from_dict(recipe["context_projection"])
     if recipe["schema_version"] != CONFIG_SCHEMA_VERSION_V2 or recipe["format"] != MESSAGES_FORMAT:
         _invalid("v2 recipe version or format is unsupported")
     ProjectionV1.from_dict(recipe["target_projection"])
-    package = _exact(
+    package = _optional_package(
         recipe["context_package"],
         frozenset({"ordering", "lineage_digest", "lineage_count", "package_count", "prompt_variants", "target_transforms"}),
         "v2 context_package recipe",
@@ -995,7 +1009,7 @@ def _validate_recipe_v2(value: object) -> dict[str, object]:
         _invalid("v2 prompt variant names are duplicated")
     transforms = _exact(
         package["target_transforms"],
-        frozenset({"kind", "selection_digest", "fenced_info_count", "line_prefix_count"}),
+        _transform_recipe_fields(package["target_transforms"]),
         "v2 target transforms",
     )
     if transforms["kind"] != "configured_drop/v1":
@@ -1003,6 +1017,23 @@ def _validate_recipe_v2(value: object) -> dict[str, object]:
     _digest(transforms["selection_digest"], "target transform digest")
     _nonnegative_int(transforms["fenced_info_count"], "fenced info count", MAX_ROWS)
     _nonnegative_int(transforms["line_prefix_count"], "line prefix count", MAX_ROWS)
+    if "context_transforms" in package:
+        context_transforms = _exact(
+            package["context_transforms"],
+            _transform_recipe_fields(package["context_transforms"]),
+            "v2 context transforms",
+        )
+        if context_transforms["kind"] != "configured_drop/v1":
+            _invalid("v2 context transforms are unsupported")
+        _digest(context_transforms["selection_digest"], "context transform digest")
+        _nonnegative_int(context_transforms["fenced_info_count"], "fenced info count", 256)
+        _nonnegative_int(context_transforms["line_prefix_count"], "line prefix count", 256)
+    if "paragraph_gap_policy" in package:
+        # Context-only groups are legitimate. Membership is proved by the
+        # builder's authenticated full lineage, unavailable in legacy manifests.
+        ParagraphGapPolicyV2.from_dict(package["paragraph_gap_policy"])
+    if "conditioning_policy" in package:
+        _conditioning_policy(package["conditioning_policy"])
     raw_split = recipe["split"]
     if type(raw_split) is not dict or raw_split.get("kind") not in ("group_hash_rank", "group_sequence_tail"):
         _invalid("v2 split kind is unsupported")
@@ -1031,9 +1062,10 @@ def _validate_recipe_v2(value: object) -> dict[str, object]:
 
 def _verify_sequence_tail(
     manifest: dict[str, object], recipe: dict[str, object],
-    rows: list[tuple[str, str, str, tuple[str, ...]]], item_count: int,
+    rows: list[tuple[str, str, str, tuple[str, ...]]], item_count: int, *, tail: bool = True,
 ) -> None:
-    raw_lineage = manifest["split_lineage"]
+    conditioned = "conditioning_policy" in recipe["context_package"]
+    raw_lineage = manifest["split_lineage" if tail else "conditioning_lineage"]
     expected_count = recipe["context_package"]["lineage_count"]
     if type(raw_lineage) is not list or len(raw_lineage) != expected_count or len(raw_lineage) > item_count:
         _invalid("sequence-tail lineage count is invalid")
@@ -1077,7 +1109,7 @@ def _verify_sequence_tail(
     allocations = recipe["split"]["allocations"]
     train_weight, validation_weight = (item["weight"] for item in allocations)
     total_weight = train_weight + validation_weight
-    for group_targets in groups.values():
+    for group_targets in (groups.values() if tail else ()):
         ordered = sorted(group_targets, key=lambda target: (by_id[target].sequence, target))
         count = len(ordered)
         validation_base = count * validation_weight // total_weight
@@ -1100,7 +1132,7 @@ def _verify_sequence_tail(
     heldout = {target for target, (_, split, _) in targets.items() if split == "validation"}
     families = {by_id[target].revision_family for target in heldout}
     for target, (_, split, contexts) in targets.items():
-        if split == "train" and by_id[target].revision_family in families:
+        if (tail or conditioned) and split == "train" and by_id[target].revision_family in families:
             _invalid("sequence-tail target revision family crosses splits")
         if any(
             parent in targets and (
@@ -1113,16 +1145,25 @@ def _verify_sequence_tail(
             if context not in by_id:
                 _invalid("sequence-tail context lineage is unresolved")
             context_members = (context, *closure(context))
-            if any(by_id[member].sequence > by_id[target].sequence for member in context_members):
+            support = conditioned and target in closure(context)
+            if context == target or (target in closure(context) and not support):
+                _invalid("context contains its target")
+            if support and by_id[context].group_id != by_id[target].group_id:
+                _invalid("target-derived support crosses groups")
+            if any(by_id[member].sequence > by_id[target].sequence and not (
+                support and target in closure(member)) for member in context_members):
                 _invalid("sequence-tail context is newer than its target")
-            if any(by_id[member].revision_family == by_id[target].revision_family for member in context_members):
+            if any(by_id[member].revision_family == by_id[target].revision_family
+                   for member in context_members if not (support and member == target)):
                 _invalid("sequence-tail context duplicates target revision")
             if any(
                 member in targets and by_id[member].group_id != by_id[target].group_id
-                for member in context_members
+                for member in (context_members if tail else (context,))
             ):
                 _invalid("sequence-tail referenced target crosses groups")
-            if split == "train" and any(
+            if not tail and any(member in targets and targets[member][1] != split for member in closure(context)):
+                _invalid("context target ancestry crosses splits")
+            if (tail or conditioned) and split == "train" and any(
                 member in heldout or by_id[member].revision_family in families
                 for member in context_members
             ):
@@ -1140,9 +1181,17 @@ def _verify_bytes_v2(
     raw_recipe = raw_manifest.get("recipe")
     raw_split = raw_recipe.get("split") if type(raw_recipe) is dict else None
     tail = type(raw_split) is dict and raw_split.get("kind") == "group_sequence_tail"
+    raw_package = raw_recipe.get("context_package") if type(raw_recipe) is dict else None
+    conditioned = type(raw_package) is dict and "conditioning_policy" in raw_package
+    manifest_fields = _MANIFEST_FIELDS_V2 | (frozenset({"split_lineage"}) if tail else frozenset())
+    if conditioned and not tail:
+        manifest_fields |= {"conditioning_lineage"}
+    separate_context = type(raw_recipe) is dict and "context_projection" in raw_recipe
+    if separate_context:
+        manifest_fields |= {"context_projection", "context_projection_digest"}
     manifest = _exact(
         raw_manifest,
-        _MANIFEST_FIELDS_V2 | frozenset({"split_lineage"}) if tail else _MANIFEST_FIELDS_V2,
+        manifest_fields,
         "v2 manifest",
     )
     if manifest["schema_version"] != ARTIFACT_SCHEMA_VERSION_V2 or manifest["format"] != MESSAGES_FORMAT:
@@ -1181,6 +1230,16 @@ def _verify_bytes_v2(
     recipe = _validate_recipe_v2(manifest["recipe"])
     if recipe["target_projection"] != projection_config.to_dict():
         _invalid("v2 recipe projection does not match resolved projection")
+    if separate_context:
+        context_projection = _exact(manifest["context_projection"], frozenset({"structure_ref", "name", "field_ref"}), "v2 context projection")
+        context_config = ProjectionV1.from_dict({"structure_ref": context_projection["structure_ref"], "name": context_projection["name"]})
+        if type(context_projection["field_ref"]) is not str or not context_projection["field_ref"]:
+            _invalid("v2 context projection field_ref is invalid")
+        context_digest = _digest(manifest["context_projection_digest"], "context projection digest")
+        if _domain_digest(_PROJECTION_DOMAIN_V2, context_projection) != context_digest:
+            _invalid("v2 context projection digest is invalid")
+        if recipe["context_projection"] != context_config.to_dict():
+            _invalid("v2 context recipe projection differs")
     prompt_variants = {
         entry["name"]: entry for entry in recipe["context_package"]["prompt_variants"]
     }
@@ -1281,6 +1340,8 @@ def _verify_bytes_v2(
                 "target_item_id": target_item_id,
                 "context_item_ids": context_item_ids,
                 "target_projection": projection,
+                **({"context_projection": context_projection, "context_projection_digest": context_digest} if separate_context else {}),
+                **({"conditioning_policy": recipe["context_package"]["conditioning_policy"]} if conditioned else {}),
                 "prompt_variant": entry["prompt_variant"],
                 "prompt_template_sha256": entry["prompt_template_sha256"],
                 "separator_sha256": entry["separator_sha256"],
@@ -1295,7 +1356,7 @@ def _verify_bytes_v2(
         prior_split = observed_groups.setdefault(group_id, split)
         if not tail and prior_split != split:
             _invalid("v2 group crosses declared splits")
-        if tail:
+        if tail or conditioned:
             tail_rows.append((target_item_id, group_id, split, tuple(context_item_ids)))
         row_ids.append(row_id)
         observed_counts[split] += 1
@@ -1313,8 +1374,8 @@ def _verify_bytes_v2(
         _invalid("v2 row IDs digest is invalid")
     if recipe["context_package"]["package_count"] != row_count:
         _invalid("v2 recipe package count is inconsistent")
-    if tail:
-        _verify_sequence_tail(manifest, recipe, tail_rows, item_count)
+    if tail or conditioned:
+        _verify_sequence_tail(manifest, recipe, tail_rows, item_count, tail=tail)
 
     basis = {
         "source_bundle_digest": bundle_digest,
@@ -1334,6 +1395,11 @@ def _verify_bytes_v2(
     }
     if tail:
         basis["split_lineage"] = manifest["split_lineage"]
+    if conditioned and not tail:
+        basis["conditioning_lineage"] = manifest["conditioning_lineage"]
+    if separate_context:
+        basis["context_projection"] = context_projection
+        basis["context_projection_digest"] = context_digest
     if _domain_digest(_DATASET_DOMAIN_V2, basis) != dataset_digest:
         _invalid("v2 dataset digest is invalid")
     identity = DatasetSemanticIdentityV1(

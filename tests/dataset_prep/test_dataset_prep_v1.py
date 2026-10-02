@@ -94,7 +94,23 @@ def _config(bundle, structure: StructureSet, *, ordering=None, split=None) -> Da
     )
 
 
-def _rows(path: Path) -> list[dict[str, object]]:
+@pytest.mark.parametrize("option", ["context_transforms", "paragraph_gap_policy", "context_projection", "conditioning_policy"])
+def test_v1_rejects_v2_cleanup_options(tmp_path, option):
+    structure, bundle = _bundle(tmp_path)
+    raw = {
+        "schema_version": "syntunia-dataset-prep/v1",
+        "source": {"bundle_path": str(bundle.path), "expected_bundle_digest": bundle.semantic_identity.bundle_digest},
+        "format": "raw_text",
+        "projection": {"structure_ref": structure.structures[0].ref.to_dict(), "name": "text"},
+        "ordering": {"kind": "source_order"},
+        "split": {"kind": "none"},
+    }
+    raw[option] = {}
+    with pytest.raises(DatasetPrepValidationError):
+        DatasetPrepConfigV1.from_dict(raw)
+
+
+def _rows(path: Path) -> list[dict]:
     return [json.loads(line) for line in (path / "dataset.jsonl").read_text(encoding="utf-8").splitlines()]
 
 
