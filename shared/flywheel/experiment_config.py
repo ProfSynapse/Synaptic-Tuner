@@ -19,6 +19,51 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG_PATH = Path("configs/flywheel/experiment_loop.yaml")
 
+_SHARED_OVERRIDE_FLAGS = {
+    "learning_rate": "--learning-rate",
+    "r": "--lora-r",
+    "lora_alpha": "--lora-alpha",
+    "lora_dropout": "--lora-dropout",
+    "num_train_epochs": "--num-epochs",
+    "batch_size": "--batch-size",
+    "per_device_train_batch_size": "--batch-size",
+    "gradient_accumulation_steps": "--gradient-accumulation",
+    "seed": "--seed",
+    "max_seq_length": "--max-seq-length",
+    "max_steps": "--max-steps",
+}
+
+# Hyperparameters the experiment loop can vary (search_space keys and keys of
+# the flat base config at base_config_path), mapped to the trainer CLI flag that
+# applies them. A key without a flag on the chosen trainer is refused rather
+# than written somewhere the trainer never reads.
+TRAINER_OVERRIDE_FLAGS: Dict[str, Dict[str, str]] = {
+    "sft": {
+        **_SHARED_OVERRIDE_FLAGS,
+        "evolutionary.candidates": "--evolutionary-candidates",
+        "evolutionary.noise_scale": "--evolutionary-noise-scale",
+        "evolutionary.max_grad_norm": "--evolutionary-max-grad-norm",
+        "evolutionary.eval_frequency": "--evolutionary-eval-frequency",
+        "evolutionary.warmup_steps": "--evolutionary-warmup-steps",
+    },
+    "kto": {**_SHARED_OVERRIDE_FLAGS, "beta": "--beta"},
+}
+
+# Boolean hyperparameters: True passes the flag; False passes nothing, which
+# keeps the trainer config default (evolutionary is disabled in
+# Trainers/sft/configs/config.yaml).
+TRAINER_BOOLEAN_OVERRIDE_FLAGS: Dict[str, Dict[str, str]] = {
+    "sft": {"evolutionary.enabled": "--evolutionary-enabled"},
+    "kto": {},
+}
+
+
+def unsupported_override_keys(trainer_type: str, keys: List[str]) -> List[str]:
+    """Return the keys the trainer has no CLI override flag for."""
+    flags = TRAINER_OVERRIDE_FLAGS.get(trainer_type, {})
+    booleans = TRAINER_BOOLEAN_OVERRIDE_FLAGS.get(trainer_type, {})
+    return sorted(key for key in keys if key not in flags and key not in booleans)
+
 
 @dataclass
 class ExperimentConfig:
@@ -104,6 +149,13 @@ class ExperimentConfig:
                 issues.append(
                     f"search_space['{param}'] must be a non-empty list"
                 )
+        unsupported = unsupported_override_keys(self.trainer_type, list(self.search_space))
+        if self.trainer_type in TRAINER_OVERRIDE_FLAGS and unsupported:
+            issues.append(
+                f"search_space keys {unsupported} have no {self.trainer_type} "
+                f"trainer CLI flag; supported: "
+                f"{sorted({**TRAINER_OVERRIDE_FLAGS[self.trainer_type], **TRAINER_BOOLEAN_OVERRIDE_FLAGS[self.trainer_type]})}"
+            )
 
         return issues
 

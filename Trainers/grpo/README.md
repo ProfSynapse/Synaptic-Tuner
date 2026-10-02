@@ -52,11 +52,18 @@ Edit `Trainers/grpo/configs/config.yaml`:
 - GRPO/GSPO training hyperparameters
 - Reward configuration (built-in + custom)
 
+Unknown keys are refused at load time (`GRPO_CONFIG_SCHEMA` in `train_grpo.py`,
+`ENV_GRPO_CONFIG_SCHEMA` in `train_env_grpo.py`), and any setting the installed
+TRL `GRPOConfig` does not accept (including `training.extra_args`) raises
+instead of being dropped.
+
 ## Rewards
 
 Rewards are defined in YAML under `rewards`:
-- `rewards.items`: list of built-in reward components with weights/params
-- `rewards.custom`: optional custom reward functions (module import or file path)
+- `rewards.items`: list of rubric reward components (`name`, `weight`); the
+  rubric YAMLs in `configs/rewards/` hold all scoring settings
+- `rewards.custom`: optional custom reward functions loaded from a Python
+  `file` (`enabled`, `file`, `functions: [{name, weight}]`)
 
 Custom reward functions should accept:
 ```python

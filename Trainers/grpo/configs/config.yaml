@@ -94,12 +94,6 @@ dataset:
   num_proc: 1
   prompt_column: "prompt"
 
-# Schema Configuration
-# Defines how to parse tool calls and context from model output
-schema:
-  # Path to tool schema YAML (relative to repo root or absolute)
-  tool_schema_path: "../../Evaluator/config/tool_schema.yaml"
-
 # Rewards Configuration
 # - All rewards are YAML-driven (configs/rewards/*.yaml)
 # - Scoring compares model output against ground truth from dataset
@@ -109,33 +103,26 @@ rewards:
     # Primary reward: Full args comparison (context + tool + params)
     - name: "args_match"
       weight: 1.0
-      params: {}  # Uses ground_truth_args_json from dataset
 
     # Secondary: Ensure valid JSON structure
     - name: "json_structure"
       weight: 0.3
-      params:
-        reward_value: 0.3
 
     # Secondary: Ensure tool call format is correct
     - name: "format"
       weight: 0.2
-      params:
-        reward_value: 0.2
 
     # Optional: Structural fitness via FitnessEvaluator
     # Validates tool call parses, JSON valid, required fields present
     # Complements semantic rewards above with structural checks
     - name: "structural_fitness"
       weight: 0.3
-      params: {}
 
   # Custom reward functions (optional)
   custom:
     enabled: false
-    module: null     # e.g. "my_project.rewards"
     file: null       # e.g. "./my_rewards.py" (relative to Trainers/grpo/)
-    functions: []    # list of {name, weight, params}
+    functions: []    # list of {name, weight}
 
 # Weights & Biases (optional)
 wandb:

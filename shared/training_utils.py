@@ -8,16 +8,26 @@ and train_grpo.py. Each function previously existed in two or three
 trainer scripts with cosmetic or minor behavioral drift.
 
 Used by: Trainers/sft/train_sft.py, Trainers/kto/train_kto.py,
-         Trainers/grpo/train_grpo.py
+         Trainers/dpo/train_dpo.py, Trainers/grpo/train_grpo.py,
+         Trainers/grpo/train_env_grpo.py and the trainer config loaders.
+
+Config strictness lives here too: ``reject_unknown_config_keys`` refuses YAML
+keys a trainer does not declare, and ``build_trainer_config`` refuses trainer
+arguments the installed TRL config class does not accept. Both exist so a typo
+or an unsupported setting fails loudly instead of silently changing a run.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import difflib
+import inspect
 import json
 import os
 import re
+import typing
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 
 def setup_wandb() -> bool:
@@ -41,6 +51,21 @@ def setup_wandb() -> bool:
     except Exception as e:
         print(f"[WARN] W&B: Login failed ({e})")
         return False
+
+
+def apply_wandb_destination(project: Optional[str], entity: Optional[str]) -> None:
+    """Route the run's W&B logging to the configured project and entity.
+
+    Trainers report to W&B through transformers' ``WandbCallback``, which takes
+    the project from ``WANDB_PROJECT`` and lets ``wandb.init`` take the entity
+    from ``WANDB_ENTITY``. Without this, ``wandb.project`` / ``wandb.entity``
+    in a trainer YAML were accepted but never reached W&B. A null value leaves
+    the corresponding environment variable untouched.
+    """
+    if project:
+        os.environ["WANDB_PROJECT"] = str(project)
+    if entity:
+        os.environ["WANDB_ENTITY"] = str(entity)
 
 
 def extract_previous_log_entries(checkpoint_path: str) -> List[dict]:
@@ -247,6 +272,8 @@ def apply_tier_preset(
 
     Raises:
         FileNotFoundError: If the tier YAML file does not exist
+        UnknownConfigKeysError: If the tier YAML names a key the trainer's
+            tier_config_map does not route (it would otherwise be ignored)
     """
     import yaml as _yaml
 
@@ -255,16 +282,294 @@ def apply_tier_preset(
         raise FileNotFoundError(f"Tier config not found: {tier_path}")
 
     with open(tier_path) as f:
-        tier_config = _yaml.safe_load(f)
+        tier_config = _yaml.safe_load(f) or {}
+
+    tier_schema: Dict[str, Any] = {key: None for key in tier_config_map}
+    tier_schema["max_steps"] = None  # routed through args, see below
+    reject_unknown_config_keys(tier_schema, tier_config, source=str(tier_path))
 
     for key, value in tier_config.items():
         if key == "max_steps":
             # max_steps is handled via args, not config
             if getattr(args, "max_steps", None) is None:
                 args.max_steps = value
-        elif key in tier_config_map:
+        else:
             section, attr = tier_config_map[key]
-            setattr(getattr(config, section), attr, value)
+            target = getattr(config, section)
+            field_type = typing.get_type_hints(type(target))[attr]
+            setattr(target, attr, coerce_config_value(field_type, value))
 
     print(f"Applied '{tier_name}' tier preset: {tier_config}")
     return tier_config
+
+
+# ---------------------------------------------------------------------------
+# Config key strictness
+# ---------------------------------------------------------------------------
+#
+# A config *schema* is either a config dataclass (its fields are the declared
+# keys; fields typed as another dataclass are walked as nested sections) or a
+# plain literal:
+#
+#   * ``None``            a leaf; its value is not walked (scalars, lists, and
+#                         free-form mappings such as ``training.extra_args``)
+#   * ``{key: schema}``   a closed mapping; only these keys are accepted
+#   * ``[schema]``        a list whose mapping items each follow ``schema``
+#
+# Literal schemas stay ``ast.literal_eval``-able so tests can read them from a
+# trainer module without importing its GPU stack.
+
+MAX_REPORTED_UNKNOWN_KEYS = 20
+
+
+class UnknownConfigKeysError(ValueError):
+    """A config names keys its trainer schema does not declare."""
+
+    def __init__(self, source: str, unknown: List[Tuple[str, Optional[str]]]):
+        self.source = source
+        self.unknown = list(unknown)
+        self.paths = [path for path, _ in self.unknown]
+        shown = self.unknown[:MAX_REPORTED_UNKNOWN_KEYS]
+        lines = [
+            f"{source}: {len(self.unknown)} config key(s) are not declared by the "
+            "trainer schema:"
+        ]
+        for path, suggestion in shown:
+            hint = f" (did you mean '{suggestion}'?)" if suggestion else ""
+            lines.append(f"  - {path}{hint}")
+        hidden = len(self.unknown) - len(shown)
+        if hidden > 0:
+            lines.append(f"  ... and {hidden} more")
+        lines.append(
+            "Unknown keys are refused so a typo or unsupported setting cannot "
+            "silently change a training run. Fix the spelling or remove the key."
+        )
+        super().__init__("\n".join(lines))
+
+
+def _unwrap_optional(annotation: Any) -> Any:
+    args = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+    origin = typing.get_origin(annotation)
+    is_union = origin is typing.Union or type(annotation).__name__ == "UnionType"
+    if is_union and len(args) == 1:
+        return args[0]
+    return annotation
+
+
+def config_schema_from_dataclass(cls: type) -> Dict[str, Any]:
+    """Return the literal key schema a (nested) config dataclass declares."""
+    hints = typing.get_type_hints(cls)
+    schema: Dict[str, Any] = {}
+    for item in dataclasses.fields(cls):
+        annotation = _unwrap_optional(hints.get(item.name, item.type))
+        if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
+            schema[item.name] = config_schema_from_dataclass(annotation)
+        else:
+            schema[item.name] = None
+    return schema
+
+
+def find_unknown_config_keys(
+    schema: Any, data: Any, *, prefix: str = ""
+) -> List[Tuple[str, Optional[str]]]:
+    """List ``(dotted_path, suggestion)`` for every undeclared key in ``data``.
+
+    Values whose type does not match the schema shape (e.g. a scalar where a
+    section is expected) are not walked; type errors belong to the loader.
+    """
+    if isinstance(schema, type) and dataclasses.is_dataclass(schema):
+        schema = config_schema_from_dataclass(schema)
+    if schema is None:
+        return []
+    if isinstance(schema, list):
+        if len(schema) != 1:
+            raise ValueError("a list schema must hold exactly one item schema")
+        if not isinstance(data, list):
+            return []
+        found: List[Tuple[str, Optional[str]]] = []
+        for index, item in enumerate(data):
+            found.extend(find_unknown_config_keys(schema[0], item, prefix=f"{prefix}[{index}]"))
+        return found
+    if not isinstance(schema, Mapping):
+        raise TypeError(f"unsupported config schema node: {schema!r}")
+    if not isinstance(data, Mapping):
+        return []
+    declared = [str(key) for key in schema]
+    found = []
+    for key, value in data.items():
+        name = str(key)
+        path = f"{prefix}.{name}" if prefix else name
+        if key not in schema:
+            close = difflib.get_close_matches(name, declared, n=1)
+            found.append((path, close[0] if close else None))
+            continue
+        found.extend(find_unknown_config_keys(schema[key], value, prefix=path))
+    return found
+
+
+def reject_unknown_config_keys(
+    schema: Any,
+    data: Any,
+    *,
+    source: str,
+    prefix: str = "",
+    extra_top_level_keys: Iterable[str] = (),
+) -> None:
+    """Raise ``UnknownConfigKeysError`` if ``data`` has any undeclared key.
+
+    ``extra_top_level_keys`` admits top-level keys that another component owns
+    and validates (the trainer does not read them); callers must name that
+    owner next to the set they pass.
+    """
+    if isinstance(schema, type) and dataclasses.is_dataclass(schema):
+        schema = config_schema_from_dataclass(schema)
+    extra = tuple(extra_top_level_keys)
+    if extra:
+        if not isinstance(schema, Mapping):
+            raise TypeError("extra_top_level_keys requires a mapping schema")
+        schema = {**schema, **{key: None for key in extra}}
+    unknown = find_unknown_config_keys(schema, data, prefix=prefix)
+    if unknown:
+        raise UnknownConfigKeysError(source, unknown)
+
+
+def dict_to_dataclass(cls, data: Dict[str, Any], *, section: str = ""):
+    """Convert one config section mapping to its dataclass, refusing unknown keys.
+
+    Numeric fields given as strings (YAML parses ``5e-6`` as a string) are
+    coerced to ``int``/``float``. ``section`` prefixes reported key paths.
+    """
+    reject_unknown_config_keys(cls, data, source=cls.__name__, prefix=section)
+    fieldtypes = typing.get_type_hints(cls)
+    return cls(**{k: coerce_config_value(fieldtypes[k], v) for k, v in data.items()})
+
+
+def coerce_config_value(field_type: Any, value: Any) -> Any:
+    """Coerce a YAML value to a numeric config field's declared type.
+
+    PyYAML loads exponent-only floats such as ``5e-4`` as strings, so a
+    string given for an ``int``/``float`` (or ``Optional`` of one) field is
+    converted; every other value is returned unchanged. The single conversion
+    path for ``dict_to_dataclass`` and ``apply_tier_preset``.
+    """
+    # Handle Optional types
+    if hasattr(field_type, '__origin__') and field_type.__origin__ is typing.Union:
+        # Get the non-None type from Optional
+        types = [t for t in field_type.__args__ if t is not type(None)]
+        if types:
+            field_type = types[0]
+
+    # Convert strings to appropriate numeric types
+    if field_type == float and isinstance(value, str):
+        return float(value)
+    if field_type == int and isinstance(value, str):
+        return int(value)
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Trainer (TRL) config construction
+# ---------------------------------------------------------------------------
+
+
+class UnsupportedTrainerArgumentError(ValueError):
+    """The installed trainer library does not accept a configured argument."""
+
+    def __init__(self, message: str, arguments: List[str]):
+        self.arguments = list(arguments)
+        super().__init__(message)
+
+
+def installed_package_version(package: str) -> str:
+    """Return the installed distribution version of ``package`` or ``unknown``."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version(package)
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def accepted_config_parameters(config_cls: type) -> frozenset:
+    """Keyword arguments ``config_cls(...)`` accepts.
+
+    Explicit ``__init__`` parameters, plus the dataclass fields when ``__init__``
+    forwards ``**kwargs`` (Unsloth's patched TRL configs subclass the TRL
+    dataclass this way).
+    """
+    parameters = inspect.signature(config_cls.__init__).parameters
+    keyword_kinds = (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    named = {
+        name
+        for name, parameter in parameters.items()
+        if name != "self" and parameter.kind in keyword_kinds
+    }
+    forwards_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+    if forwards_kwargs and dataclasses.is_dataclass(config_cls):
+        named |= {item.name for item in dataclasses.fields(config_cls) if item.init}
+    return frozenset(named)
+
+
+def partition_trainer_kwargs(
+    config_cls: type,
+    kwargs: Mapping[str, Any],
+    *,
+    origins: Mapping[str, str],
+    version_dependent_defaults: Iterable[str] = (),
+    library: str = "trl",
+    installed_version: Optional[str] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Split ``kwargs`` into what ``config_cls`` accepts and what may be omitted.
+
+    ``origins`` maps every argument that came from the user (YAML keys, method
+    switches, CLI overrides) to the config path that set it. An unsupported
+    argument raises ``UnsupportedTrainerArgumentError`` naming it and the
+    installed ``library`` version, unless it is an internal default (absent
+    from ``origins``) listed in ``version_dependent_defaults``; only those are
+    omitted. Returns ``(accepted_kwargs, omitted_names)``.
+    """
+    accepted = accepted_config_parameters(config_cls)
+    optional_defaults = set(version_dependent_defaults)
+    unsupported = [name for name in kwargs if name not in accepted]
+    rejected = [name for name in unsupported if name in origins or name not in optional_defaults]
+    if rejected:
+        version = installed_version or installed_package_version(library)
+        lines = [
+            f"{config_cls.__name__} in the installed {library} {version} does not "
+            f"accept {len(rejected)} configured argument(s):"
+        ]
+        for name in rejected:
+            origin = origins.get(name)
+            lines.append(f"  - {name} (set by {origin})" if origin else f"  - {name} (internal default)")
+        lines.append(
+            f"Remove the setting or install a {library} version that supports it; "
+            "unsupported settings are refused instead of silently dropped."
+        )
+        raise UnsupportedTrainerArgumentError("\n".join(lines), rejected)
+    omitted = [name for name in unsupported if name not in rejected]
+    return {k: v for k, v in kwargs.items() if k not in omitted}, omitted
+
+
+def build_trainer_config(
+    config_cls: type,
+    kwargs: Mapping[str, Any],
+    *,
+    origins: Mapping[str, str],
+    version_dependent_defaults: Iterable[str] = (),
+    library: str = "trl",
+):
+    """Construct ``config_cls`` after ``partition_trainer_kwargs`` validation."""
+    accepted, omitted = partition_trainer_kwargs(
+        config_cls,
+        kwargs,
+        origins=origins,
+        version_dependent_defaults=version_dependent_defaults,
+        library=library,
+    )
+    if omitted:
+        print(
+            f"[INFO] {config_cls.__name__} in {library} "
+            f"{installed_package_version(library)} has no {omitted}; omitting "
+            "these version-dependent internal defaults"
+        )
+    return config_cls(**accepted)

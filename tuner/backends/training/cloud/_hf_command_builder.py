@@ -23,6 +23,11 @@ from tuner.handlers.stages._util import hf_verified_source_steps
 
 from .base_cloud import load_project_deps
 
+# Methods whose trainer accepts the HF Jobs run/artifact flags built below
+# (grpo runs train_env_grpo.py). tests/contract/test_trainer_argv_contract.py
+# parses every built command with the real trainer argparse.
+HF_TRAINER_METHODS = ("sft", "kto", "dpo", "grpo")
+
 
 class HFCommandBuilderMixin:
     """Methods for building training commands sent to HF Jobs containers."""
@@ -81,6 +86,11 @@ class HFCommandBuilderMixin:
         Returns:
             Shell command string to pass as ["bash", "-c", command]
         """
+        if config.method not in HF_TRAINER_METHODS:
+            raise CloudProviderError(
+                f"HF Jobs training supports {', '.join(HF_TRAINER_METHODS)}; the "
+                f"{config.method} trainer does not accept the HF Jobs run/artifact flags."
+            )
         preparation = getattr(self, "source_preparation", None)
         if preparation is None:
             raise CloudProviderError("HF Jobs secure source preparation is required before command compilation.")
@@ -145,6 +155,14 @@ class HFCommandBuilderMixin:
         if config.max_steps is not None:
             training_args.extend(["--max-steps", str(config.max_steps)])
         if config.max_seq_length is not None:
+            if config.method == "grpo":
+                # train_env_grpo has no sequence-length setting (the model is
+                # loaded by name; prompt/completion lengths live in the YAML).
+                raise CloudProviderError(
+                    "max_seq_length is not supported for HF env-GRPO; set "
+                    "training.max_completion_length in "
+                    "Trainers/grpo/configs/env_config.yaml instead."
+                )
             training_args.extend(["--max-seq-length", str(config.max_seq_length)])
         # chat_template_kwargs is a nested mapping; serialize to the same JSON-string
         # --chat-template-kwargs flag the local lane uses (one wire format, both

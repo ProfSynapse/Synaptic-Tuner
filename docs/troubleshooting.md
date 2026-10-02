@@ -116,6 +116,37 @@ head -1 <dataset_file> | python -m json.tool
 
 ### Training Issues
 
+**"N config key(s) are not declared by the trainer schema"**
+- The SFT/KTO/DPO loaders, both GRPO entrypoints, and tier presets refuse any
+  YAML key the trainer does not read, at any nesting level, instead of
+  silently using a default.
+- The error lists each offending dotted path (e.g. `training.lerning_rate`,
+  `rewards.items[0].wieght`) with a "did you mean" suggestion. Fix the
+  spelling or delete the key; there is no override.
+- A key that is genuinely consumed must be declared: a dataclass field in
+  `Trainers/{sft,kto,dpo}/configs/config_loader.py`, or `GRPO_CONFIG_SCHEMA` /
+  `ENV_GRPO_CONFIG_SCHEMA` in `Trainers/grpo/train_grpo.py` /
+  `train_env_grpo.py` (`tests/trainers/grpo/test_grpo_config_keys.py` checks
+  those against the keys the code reads).
+
+**"GRPOConfig in the installed trl X does not accept ... argument(s)"**
+- A setting from your YAML (a `training.*` key, `training.extra_args.*`, or a
+  switch such as `training.use_gspo` -> `importance_sampling_level`) is not
+  supported by the installed TRL. It is no longer dropped silently.
+- Remove the setting or install a TRL version that supports it (check with
+  `python -c "import trl; print(trl.__version__)"`). Example: TRL 0.28 removed
+  GRPO `max_prompt_length`.
+- HF env-GRPO launches refuse `max_seq_length` / `--train-max-seq-length`
+  (the env trainer has no such setting; use `training.max_completion_length`).
+- Launchers refuse settings their target trainer has no flag for: HF Jobs
+  training accepts only sft/kto/dpo/grpo, local-run accepts `model.revision`
+  only for sft, and experiment-loop search keys must map to a trainer flag.
+  `tests/contract/test_trainer_argv_contract.py` parses every launcher's
+  argv with the real trainer parsers.
+- Only internal defaults named in a trainer's version-dependent set (env-GRPO:
+  `max_prompt_length`) are omitted on unsupported versions, with an `[INFO]`
+  line. SFT/KTO/DPO pass explicit arguments, so TRL itself raises `TypeError`.
+
 **"Training logs not appearing"**
 - Check `logs/training_latest.jsonl` exists in run directory
 - Verify `run_dir` path in callbacks configuration

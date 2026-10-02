@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.training_utils import (
+    UnknownConfigKeysError,
     apply_tier_preset,
     build_base_lineage,
     extract_previous_log_entries,
@@ -473,11 +474,11 @@ class TestApplyTierPreset:
 
         assert args.max_steps == 500  # Preserved user value
 
-    def test_unknown_keys_ignored(self, tmp_path):
-        """Keys not in tier_config_map should be silently skipped."""
+    def test_unknown_keys_refused(self, tmp_path):
+        """Keys not in tier_config_map are refused, not silently skipped."""
         configs_dir = self._make_tier_yaml(
             tmp_path, "quick",
-            {"unknown_key": 42, "learning_rate": 1e-3},
+            {"lerning_rate": 1e-3, "learning_rate": 1e-3},
         )
 
         config = self.FakeConfig()
@@ -485,9 +486,55 @@ class TestApplyTierPreset:
         args = MagicMock()
         args.max_steps = None
 
-        apply_tier_preset(config, "quick", tier_map, args, configs_dir)
+        with pytest.raises(UnknownConfigKeysError) as excinfo:
+            apply_tier_preset(config, "quick", tier_map, args, configs_dir)
 
-        assert config.training.learning_rate == 1e-3
+        assert excinfo.value.paths == ["lerning_rate"]
+        assert "did you mean 'learning_rate'" in str(excinfo.value)
+        assert config.training.learning_rate == 2e-4  # nothing applied
+
+    def test_exponent_numbers_are_coerced_to_field_types(self, tmp_path):
+        """YAML loads `5e-4` as a string; tiers coerce it like the loaders do."""
+        tiers_dir = tmp_path / "tiers"
+        tiers_dir.mkdir()
+        (tiers_dir / "quick.yaml").write_text(
+            "learning_rate: 5e-4\nnum_epochs: '2'\n", encoding="utf-8"
+        )
+        config = self.FakeConfig()
+        tier_map = {
+            "learning_rate": ("training", "learning_rate"),
+            "num_epochs": ("training", "num_epochs"),
+        }
+        args = MagicMock()
+        args.max_steps = None
+
+        apply_tier_preset(config, "quick", tier_map, args, tmp_path)
+
+        assert config.training.learning_rate == 5e-4
+        assert isinstance(config.training.learning_rate, float)
+        assert config.training.num_epochs == 2
+
+    def test_checked_in_tiers_yield_float_learning_rates(self):
+        """Shipped tiers write `5e-4`-style rates that load as strings."""
+        import yaml
+
+        root = Path(__file__).resolve().parents[2]
+        tier_paths = sorted(root.glob("Trainers/*/configs/tiers/*.yaml"))
+        assert tier_paths
+        raw_rates = []
+        for tier_path in tier_paths:
+            config = self.FakeConfig()
+            args = MagicMock()
+            args.max_steps = 0
+            raw = yaml.safe_load(tier_path.read_text(encoding="utf-8"))
+            raw_rates.append(raw["learning_rate"])
+            tier_map = {"learning_rate": ("training", "learning_rate")}
+            tier_map.update({key: ("training", "warmup_ratio") for key in raw
+                             if key not in {"learning_rate", "max_steps"}})
+            # Route the other keys at a float field so only the LR is asserted.
+            apply_tier_preset(config, tier_path.stem, tier_map, args, tier_path.parent.parent)
+            assert isinstance(config.training.learning_rate, float), tier_path
+        assert any(isinstance(rate, str) for rate in raw_rates)
 
     def test_raises_for_missing_tier_file(self, tmp_path):
         """Should raise FileNotFoundError for non-existent tier."""
@@ -506,7 +553,10 @@ class TestApplyTierPreset:
         )
 
         config = self.FakeConfig()
-        tier_map = {"learning_rate": ("training", "learning_rate")}
+        tier_map = {
+            "learning_rate": ("training", "learning_rate"),
+            "num_epochs": ("training", "num_epochs"),
+        }
         args = MagicMock()
         args.max_steps = None
 

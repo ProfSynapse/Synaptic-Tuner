@@ -57,8 +57,6 @@ experiment_loop:
     r: [8, 16, 32, 64]
     lora_alpha: [16, 32, 64, 128]
     num_train_epochs: [1, 2]
-    warmup_ratio: [0.02, 0.05, 0.1]
-    weight_decay: [0.0, 0.01, 0.05]
     evolutionary.enabled: [true, false]
     evolutionary.noise_scale: [0.01, 0.03, 0.05]
 ```
@@ -70,7 +68,13 @@ Each key maps to a list of candidate values. The advisor/surrogate picks one val
 - **learning_rate** — Most impactful hyperparameter
 - **r / lora_alpha** — LoRA rank and scaling
 - **num_train_epochs** — Duration
-- **warmup_ratio / weight_decay** — Regularization
+
+Every key (and every key of the flat `base_config_path` YAML) must map to a
+trainer CLI flag (`TRAINER_OVERRIDE_FLAGS` in
+`shared/flywheel/experiment_config.py`); others, such as `warmup_ratio` or
+`weight_decay`, are refused by `validate()` instead of being ignored. Each
+experiment's values are passed to the trainer as flags; `config.yaml` in the
+experiment directory is only the record.
 - **evolutionary.\*** — Gradient noise evolution settings
 
 ---

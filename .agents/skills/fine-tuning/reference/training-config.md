@@ -2,6 +2,13 @@
 
 Full YAML configuration reference for all training methods.
 
+Trainer configs are strict: the SFT/KTO/DPO loaders, both GRPO entrypoints and
+tier presets refuse any key the trainer does not read (every dotted path is
+listed with a "did you mean" hint), and a YAML setting the installed TRL config
+class does not accept raises instead of being dropped. `wandb.project` and
+`wandb.entity` are applied via `WANDB_PROJECT` / `WANDB_ENTITY` when W&B is on.
+See `docs/troubleshooting.md` for both errors.
+
 ---
 
 ## Local Docker Job Config (`Trainers/recipes/*.yaml` with `target: local`)

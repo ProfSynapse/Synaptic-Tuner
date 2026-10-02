@@ -63,6 +63,7 @@ from shared.cloud_artifacts import (
 from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
 from shared.training_utils import (
     setup_wandb,
+    apply_wandb_destination,
     extract_previous_log_entries,
     save_training_lineage,
     build_base_lineage,
@@ -181,7 +182,8 @@ def build_training_lineage(
     return enrich_training_lineage(lineage, args=args)
 
 
-def main():
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Build the KTO CLI parser (pure argparse; no ML imports)."""
     parser = argparse.ArgumentParser(description="KTO Training on RTX 3090")
 
     # Model configuration
@@ -332,6 +334,8 @@ def main():
         type=int,
         help="Override the training random seed (config.seed)"
     )
+    parser.add_argument("--save-steps", type=int, help="Override training.save_steps")
+    parser.add_argument("--save-total-limit", type=int, help="Override training.save_total_limit")
     parser.add_argument(
         "--beta",
         type=float,
@@ -429,6 +433,11 @@ def main():
         help="Enable detailed debug logging to diagnose freezes/hangs"
     )
 
+    return parser
+
+
+def main():
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     # Process friendly model selection flags
@@ -618,6 +627,10 @@ def main():
     # config default — the handler forwards explicit zeros (provenance: no silent override).
     if args.seed is not None:
         config.seed = args.seed
+    if args.save_steps is not None:
+        config.training.save_steps = args.save_steps
+    if args.save_total_limit is not None:
+        config.training.save_total_limit = args.save_total_limit
     if args.beta is not None:
         config.training.beta = args.beta
     if args.num_epochs is not None:
@@ -638,7 +651,8 @@ def main():
         if args.wandb_project:
             config.wandb_project = args.wandb_project
         elif not hasattr(config, 'wandb_project') or not config.wandb_project:
-            config.wandb_project = "kto-training"  # Default project name
+            # Default project name; an exported WANDB_PROJECT still wins.
+            config.wandb_project = os.environ.get("WANDB_PROJECT") or "kto-training"
 
         if args.wandb_run_name:
             config.wandb_run_name = args.wandb_run_name
@@ -647,6 +661,8 @@ def main():
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
             config.wandb_run_name = f"{args.model_size}-{timestamp}"
+    if config.use_wandb:
+        apply_wandb_destination(config.wandb.project, config.wandb.entity)
 
     if not args.hf_token:
         args.hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
