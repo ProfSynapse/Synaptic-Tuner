@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import io
+import json
 from pathlib import Path
 
 import pytest
@@ -48,6 +50,104 @@ def _evaluation() -> dict:
             },
         },
     }
+
+
+def _three_complete_synthetic_contexts() -> dict:
+    config = _evaluation()
+    cases = []
+    for index, series in enumerate(("alpha", "beta", "gamma"), start=1):
+        cases.append({
+            "id": "chapter_" + series,
+            "question": (
+                f"Write chapter {index} from these complete notes.\n\n"
+                + "雪" * 1000 + "\n\n" + "Context paragraph. " * 14000
+            ),
+            "correct": {
+                "assertions": [
+                    {"type": "length_min", "path": "$.content", "value": 1},
+                    {"type": "jsonpath_equals",
+                     "path": "$.raw_api_message.choices[0].finish_reason",
+                     "value": "stop"},
+                ],
+            },
+        })
+    config["evaluation"]["scenarios"] = cases
+    config["evaluation"]["max_cases"] = 3
+    config["evaluation"]["generation"]["max_tokens"] = None
+    config["evaluation"]["vllm"]["max_model_len"] = 98304
+    return config
+
+
+def test_three_complete_unicode_contexts_compile_and_reach_trainer_intact():
+    from Trainers.sft.runtime_v1 import read_bounded_workload
+    from tuner.training.post_training import validate_post_training_config
+    from tuner.training.recipes import MAX_WORKLOAD_BYTES
+
+    evaluation = _three_complete_synthetic_contexts()
+    encoded = json.dumps(
+        evaluation, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8")
+    assert 512 * 1024 < len(encoded) < 1024 * 1024
+    assert validate_post_training_config(evaluation) == evaluation
+    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    config = _config(replace(recipe, post_training=evaluation))
+    workload = compile_packaged_sft_workload(resolved_config=config)
+    assert 256 * 1024 < len(workload.canonical_bytes) < MAX_WORKLOAD_BYTES
+    assert read_bounded_workload(io.BytesIO(workload.canonical_bytes)) == workload.canonical_bytes
+    actual = workload.document["configuration"]["document"]["post_training"]
+    assert [case["question"] for case in actual["evaluation"]["scenarios"]] == [
+        case["question"] for case in evaluation["evaluation"]["scenarios"]
+    ]
+    assert actual["evaluation"]["generation"]["max_tokens"] is None
+
+
+def test_three_large_contexts_round_trip_coordinator_material():
+    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1
+    from tuner.training import default_recipe_registry
+    from tuner.training.contracts import ResolvedTrainingRequest, TrainingRequest
+    from tuner.training.packaged_boundary import (
+        derive_packaged_coordinator_material, parse_packaged_coordinator_material,
+    )
+    from tests.training.test_packaged_execution_material import packaged_fixture
+
+    training_input, components = packaged_fixture()
+    config_value = components.resolved_config.to_dict()
+    config_value["post_training"] = _three_complete_synthetic_contexts()
+    config = CanonicalDocument.from_mapping(config_value)
+    workload = compile_packaged_sft_workload(resolved_config=config)
+    release = PackagedTrainingRuntimeReleaseV1.from_dict(
+        components.execution_context.to_dict()["runtime_release"],
+    )
+    provider = _provider(release)
+    original = components.execution_source
+    execution = PackagedExecutionBindingV1.build(
+        run_ref=original.run_ref, runtime_release=release,
+        provider_runtime_binding=provider,
+        prepared_input_ref=original.prepared_input_ref,
+        prepared_input_revision=original.prepared_input_revision,
+        prepared_input_content_digest=original.prepared_input_content_digest,
+        prepared_input_size_bytes=original.prepared_input_size_bytes,
+        prepared_input_format=original.prepared_input_format,
+        workload_digest=workload.fingerprint,
+        configuration_digest=packaged_configuration_digest(config),
+        artifact_policy_digest=original.artifact_policy_digest,
+    )
+    resolved = ResolvedTrainingRequest(
+        TrainingRequest(CanonicalDocument.from_mapping(training_input.to_dict())),
+        execution, components.execution_context, config,
+        CanonicalDocument(workload.canonical_bytes.decode("utf-8")),
+        components.runtime, components.resources, components.artifact_policy,
+    )
+    recipes = default_recipe_registry()
+    material = derive_packaged_coordinator_material(
+        resolved, recipes, request_id="request-large-context",
+        project_ref="project-large-context", run_id=execution.run_ref,
+    )
+    assert 1024 * 1024 < len(material.canonical_bytes) < 2 * 1024 * 1024
+    restored = parse_packaged_coordinator_material(material.canonical_bytes, recipes)
+    assert restored.canonical_bytes == material.canonical_bytes
+    assert restored.resolved_config_bytes == material.resolved_config_bytes
+    assert restored.workload_bytes == workload.canonical_bytes
 
 
 def _config(recipe):
@@ -266,7 +366,7 @@ def test_prompt_payload_still_rejects_one_byte_beyond_aggregate_bound():
     case = config["evaluation"]["scenarios"][0]
     case["question"] = ""
     overhead = len(json.dumps(config, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8"))
-    case["question"] = "x" * (128 * 1024 - overhead)
+    case["question"] = "x" * (1024 * 1024 - overhead)
     assert validate_post_training_config(config) == config
     case["question"] += "x"
     with pytest.raises(ValueError, match="bounded JSON"):

@@ -12,7 +12,7 @@ from tuner.project.execution_source import ExecutionSourceV1
 
 
 WORKLOAD_FINGERPRINT_DOMAIN = b"synaptic-training-workload/v1\0"
-MAX_WORKLOAD_BYTES = 256 * 1024
+MAX_WORKLOAD_BYTES = 1024 * 1024
 
 
 def selected_execution_mode(config: CanonicalDocument, *, required: bool = True) -> str:

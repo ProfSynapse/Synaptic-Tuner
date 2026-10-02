@@ -11,12 +11,14 @@ from tuner.training.packaged_compilation import (
     compile_packaged_sft_workload, packaged_configuration_digest,
 )
 from tests.runtime.test_packaged_sft_execution import FakeRunner, material, prepare, seal
-from tests.training.test_modal_post_training_compilation import _evaluation
+from tests.training.test_modal_post_training_compilation import (
+    _evaluation, _three_complete_synthetic_contexts,
+)
 
 
-def _opt_in(material):
+def _opt_in(material, evaluation=None):
     config = seam._document(material["workload_bytes"])["configuration"]["document"]
-    config["post_training"] = _evaluation()
+    config["post_training"] = _evaluation() if evaluation is None else evaluation
     compiled = compile_packaged_sft_workload(
         resolved_config=CanonicalDocument.from_mapping(config),
     )
@@ -39,6 +41,19 @@ def _opt_in(material):
     )
     material["workload_bytes"] = compiled.canonical_bytes
     return material
+
+
+def test_three_large_unicode_contexts_admit_through_packaged_worker(material, seal):
+    expected = _three_complete_synthetic_contexts()
+    _opt_in(material, expected)
+    assert len(material["workload_bytes"]) > 256 * 1024
+    admitted = seam.admit_packaged_sft(**material)
+    actual = seam._document(
+        admitted.workload_bytes, seam.MAX_WORKLOAD_BYTES,
+    )["configuration"]["document"]["post_training"]
+    assert [case["question"] for case in actual["evaluation"]["scenarios"]] == [
+        case["question"] for case in expected["evaluation"]["scenarios"]
+    ]
 
 
 def test_post_training_uses_one_preparation_and_context_expires(material, seal):

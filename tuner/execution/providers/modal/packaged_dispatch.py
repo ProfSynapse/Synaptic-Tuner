@@ -33,7 +33,7 @@ from .packaged_staging import ModalPackagedStageReceipt
 
 MODAL_PACKAGED_DISPATCH_SCHEMA = "synaptic-modal-packaged-dispatch/v1"
 MODAL_PACKAGED_DISPATCH_V2_SCHEMA = "synaptic-modal-packaged-dispatch/v2"
-MAX_MODAL_PACKAGED_DISPATCH_BYTES = 1024 * 1024
+MAX_MODAL_PACKAGED_DISPATCH_BYTES = 2 * 1024 * 1024
 _PURPOSE = "modal-packaged-dispatch/v1"
 _V2_PURPOSE = "modal-packaged-dispatch/v2"
 _MARKER_NAME = re.compile(r"^\.synaptic-volume-marker-[0-9a-f]{32}$")

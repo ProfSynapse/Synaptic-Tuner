@@ -129,6 +129,28 @@ def test_round_trip_binds_exact_stage_command_and_eight_members():
     assert plan["workload_fingerprint"] == plan["workload_digest"]
 
 
+def test_three_complete_unicode_contexts_round_trip_bundle_transport():
+    from tests.training.test_modal_post_training_compilation import (
+        _three_complete_synthetic_contexts,
+    )
+
+    binding, material, recipes, policy, closure = _fixture(
+        config_extra={"post_training": _three_complete_synthetic_contexts()},
+    )
+    bundle = ModalCoordinatorBundle.build(
+        binding, material, recipes, log_terminal_policy=policy,
+        worker_closure_manifest=closure,
+    )
+    members = {member.name: member.content for member in bundle.members}
+    assert 1024 * 1024 < len(members["resolved-material.json"]) < 2 * 1024 * 1024
+    assert len(members["workload.json"]) < 1024 * 1024
+    parsed = ModalCoordinatorBundle.parse_transport(
+        bundle.transport_bytes, binding=binding, recipes=recipes,
+    )
+    assert parsed == bundle
+    assert {member.name: member.content for member in parsed.members} == members
+
+
 def test_bundle_has_no_submit_or_invocation_authority():
     value = _bundle()
     encoded = value.canonical_bytes

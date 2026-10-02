@@ -9,7 +9,7 @@ import re
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
 _VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){1,3}(?:[A-Za-z0-9.+-]*)\Z")
-_MAX_CONFIG_BYTES = 128 * 1024
+_MAX_CONFIG_BYTES = 1024 * 1024
 
 
 def _fields(value: object, required: set[str], label: str) -> dict:

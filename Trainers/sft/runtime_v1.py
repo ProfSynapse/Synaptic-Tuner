@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Mapping, Protocol, runtime_checkable
 
 
-MAX_WORKLOAD_BYTES = 256 * 1024
+MAX_WORKLOAD_BYTES = 1024 * 1024
 MAX_LINEAGE_BYTES = 4 * 1024 * 1024
 EXECUTION_SOURCE_SCHEMA = "synaptic-execution-source/v1"
 RUNTIME_SCHEMA = "synaptic-training-runtime/v1"

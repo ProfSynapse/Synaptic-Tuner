@@ -45,7 +45,7 @@ from .resolution import VerifiedModalDeploymentIdentityV1
 
 MAX_TRANSPORT_BYTES = 8_388_608
 MAX_CANONICAL_BYTES = 6_291_456
-MAX_MEMBER_BYTES = 1_048_576
+MAX_MEMBER_BYTES = 2_097_152
 MAX_MEMBER_TOTAL_BYTES = 4_194_304
 BUNDLE_SCHEMA = "synaptic-modal-coordinator-bundle/v2"
 PREPARED_BUNDLE_SCHEMA = "synaptic-modal-coordinator-bundle/v3"

@@ -133,7 +133,7 @@ def _canonical_document(value: Mapping[str, object]) -> str:
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("document must contain only JSON values") from exc
-    if len(encoded.encode("utf-8")) > 512 * 1024:
+    if len(encoded.encode("utf-8")) > 1024 * 1024:
         raise ValueError("document exceeds its byte bound")
     if not isinstance(json.loads(encoded), dict):  # pragma: no cover - mapping invariant
         raise ValueError("document must encode a JSON object")
@@ -176,11 +176,11 @@ def _json_object(pairs):
     return result
 
 
-def bounded_json_object(payload: str) -> dict[str, object]:
-    if type(payload) is not str or len(payload) > 512 * 1024:
+def bounded_json_object(payload: str, *, maximum_bytes: int = 512 * 1024) -> dict[str, object]:
+    if type(payload) is not str or len(payload) > maximum_bytes:
         raise ValueError("document exceeds its byte bound")
     try:
-        if len(payload.encode("utf-8")) > 512 * 1024:
+        if len(payload.encode("utf-8")) > maximum_bytes:
             raise ValueError("document exceeds its byte bound")
         value = json.loads(payload, object_pairs_hook=_json_object)
     except (UnicodeError, json.JSONDecodeError, RecursionError):
@@ -200,7 +200,7 @@ class CanonicalDocument:
     def __post_init__(self) -> None:
         if not isinstance(self.canonical_json, str):
             raise TypeError("canonical_json must be a string")
-        value = bounded_json_object(self.canonical_json)
+        value = bounded_json_object(self.canonical_json, maximum_bytes=1024 * 1024)
         object.__setattr__(self, "canonical_json", _canonical_document(value))
 
     @classmethod

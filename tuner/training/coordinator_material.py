@@ -18,7 +18,7 @@ from .recipes import CompiledWorkload, RecipeRegistry, compile_execution_workloa
 
 
 _SCHEMA = "synaptic-coordinator-resolved-material/v1"
-_MAX_MATERIAL_BYTES = 512 * 1024
+_MAX_MATERIAL_BYTES = 2 * 1024 * 1024
 _FIELDS = frozenset({
     "schema_version", "request_id", "project_ref", "run_id", "request",
     "execution_source", "execution_context", "resolved_config", "workload",
@@ -147,7 +147,9 @@ class CoordinatorResolvedMaterial:
         if type(payload) is not bytes or not payload or len(payload) > _MAX_MATERIAL_BYTES:
             raise ValueError("coordinator material bytes are invalid")
         try:
-            document = bounded_json_object(payload.decode("utf-8"))
+            document = bounded_json_object(
+                payload.decode("utf-8"), maximum_bytes=_MAX_MATERIAL_BYTES,
+            )
         except (UnicodeError, json.JSONDecodeError) as exc:
             raise ValueError("coordinator material is invalid JSON") from exc
         if _canonical(document) != payload or type(document) is not dict or frozenset(document) != _FIELDS:

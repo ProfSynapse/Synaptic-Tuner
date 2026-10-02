@@ -6,6 +6,7 @@ from dataclasses import replace
 import hashlib
 import hashlib
 import json
+import base64
 
 import pytest
 
@@ -29,6 +30,10 @@ from tuner.execution.providers.modal.packaged_dispatch import (
 )
 from tuner.execution.providers.modal.packaged_staging import ModalPackagedStageReceipt
 from tuner.training.packaged_compilation import compile_packaged_sft_workload
+from tuner.training.modal_recipe import load_modal_sft_recipe
+from tests.training.test_modal_post_training_compilation import (
+    RECIPE, PROFILES, _config, _three_complete_synthetic_contexts,
+)
 
 from tests.execution.providers.test_modal_packaged_binding import _binding
 
@@ -337,3 +342,115 @@ def test_noncanonical_tampered_or_oversize_frames_are_rejected() -> None:
         parse_modal_packaged_dispatch(
             b"x" * (MAX_MODAL_PACKAGED_DISPATCH_BYTES + 1), Auth(),
         )
+
+
+def test_large_unicode_workload_base64_fits_dispatch_frame_bound():
+    from tuner.execution.providers.modal.packaged_dispatch import (
+        _canonical, _object, _packaged_workload,
+    )
+
+    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    config = _config(replace(recipe, post_training=_three_complete_synthetic_contexts()))
+    workload = compile_packaged_sft_workload(resolved_config=config)
+    assert _packaged_workload(workload.canonical_bytes) == workload
+    encoded_workload = base64.urlsafe_b64encode(workload.canonical_bytes).decode("ascii")
+    frame = _canonical({"workload_b64": encoded_workload})
+    assert 1024 * 1024 < len(frame) < MAX_MODAL_PACKAGED_DISPATCH_BYTES
+    assert _object(frame)["workload_b64"] == encoded_workload
+
+
+def test_full_authenticated_dispatch_round_trips_large_unicode_workload():
+    from synaptic_tuner.api.v1.providers import ProviderRef
+    from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest
+    from tuner.execution.foundation_v2.commands import build_stage_command
+    from tuner.execution.foundation_v2.executors import ExecutorDescriptorV1
+    from tuner.execution.foundation_v2.preparation import CanonicalPreparationV2
+    from tuner.execution.foundation_v2.references import ExecutionScopeV1
+    from tuner.runtime.releases import PackagedExecutionBindingV1
+    from tuner.training.contracts import CanonicalDocument
+    from tuner.training.packaged_compilation import packaged_configuration_digest
+    from tests.execution.providers.test_modal_packaged_binding import _release_and_execution
+
+    release, facts, provider, original, components = _release_and_execution(PREPARED_PAYLOAD)
+    config_dict = components.resolved_config.to_dict()
+    config_dict["post_training"] = _three_complete_synthetic_contexts()
+    config = CanonicalDocument.from_mapping(config_dict)
+    workload = compile_packaged_sft_workload(resolved_config=config)
+    execution = PackagedExecutionBindingV1.build(
+        run_ref=original.run_ref, runtime_release=release,
+        provider_runtime_binding=provider,
+        prepared_input_ref=original.prepared_input_ref,
+        prepared_input_revision=original.prepared_input_revision,
+        prepared_input_content_digest=original.prepared_input_content_digest,
+        prepared_input_size_bytes=original.prepared_input_size_bytes,
+        prepared_input_format=original.prepared_input_format,
+        workload_digest=workload.fingerprint,
+        configuration_digest=packaged_configuration_digest(config),
+        artifact_policy_digest=original.artifact_policy_digest,
+    )
+    namespace = domain_digest(
+        "synaptic-modal-namespace/v1",
+        canonical_bytes({"workspace_ref": facts.workspace_ref,
+                         "environment_ref": facts.environment_ref}),
+    )
+    preparation = CanonicalPreparationV2.build(
+        provider=ProviderRef("modal", "modal-packaged-v1"),
+        scope=ExecutionScopeV1(facts.account_ref, namespace),
+        project_ref="project", run_id=execution.run_ref,
+        plan_fingerprint="1" * 64, source_digest=execution.binding_digest,
+        workload_digest=execution.workload_digest, runtime_digest="2" * 64,
+        resource_digest="3" * 64, artifact_contract_digest="4" * 64,
+        quote_digest="5" * 64, secret_requirements_digest="6" * 64,
+        execution_binding_digest="7" * 64,
+    )
+    stage = build_stage_command(
+        preparation, "nonce",
+        CanonicalProviderPayloadV1.build(
+            "modal", "stage-payload/v2", execution.workload_digest,
+        ),
+        ExecutorDescriptorV1("modal", "modal-packaged-executor", "0.1.0"),
+    )
+    predecessor = StagePredecessorV2(
+        preparation.provider.provider_id, preparation.provider.profile_ref,
+        preparation.scope.account_ref, preparation.scope.namespace_ref,
+        preparation.project_ref, preparation.run_id,
+        preparation.plan_fingerprint, preparation.preparation_digest,
+        preparation.workload_digest, stage.operation.effect.effect_id,
+        "8" * 64, "9" * 64,
+    )
+    submit = build_submit_command(
+        preparation, "submit-nonce",
+        CanonicalProviderPayloadV1.build(
+            "modal", "submit-payload/v2", workload.fingerprint,
+        ),
+        stage.executor, predecessor,
+    )
+    binding = ModalPackagedCommandBinding(
+        submit.canonical_bytes, release.canonical_bytes(),
+        provider.canonical_bytes(), facts.canonical_bytes,
+        execution.canonical_bytes(),
+    )
+    receipt_path = operation_path(
+        predecessor.stage_effect_id, "input", "prepared",
+        execution.prepared_input_content_digest, "payload.bin",
+    )
+    receipt = ModalPackagedStageReceipt(
+        predecessor.stage_effect_id, execution.binding_digest,
+        facts.artifact_volume_id, receipt_path,
+        execution.prepared_input_size_bytes,
+        execution.prepared_input_content_digest,
+        provider_entry_identity(
+            facts.artifact_volume_id, receipt_path,
+            execution.prepared_input_size_bytes,
+        ),
+    )
+    signer = Auth()
+    payload = build_modal_packaged_dispatch(
+        binding, receipt, workload.canonical_bytes,
+        components.artifact_policy, signer, key_ref="dispatch-key",
+    )
+    assert 1024 * 1024 < len(payload) < MAX_MODAL_PACKAGED_DISPATCH_BYTES
+    parsed = parse_modal_packaged_dispatch(payload, signer)
+    assert parsed.workload_bytes == workload.canonical_bytes
+    assert parsed.execution_binding.workload_digest == workload.fingerprint
+    assert parsed.execution_binding.configuration_digest == packaged_configuration_digest(config)

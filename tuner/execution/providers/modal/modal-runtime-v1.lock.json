@@ -214,7 +214,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_bundle_py": {
       "path": "tuner/execution/providers/modal/coordinator_bundle.py",
-      "sha256": "8fee0cc9fabcc3a78ae1f1871b55e343e8cb74423734793905be2d702fcff60a"
+      "sha256": "5d8a10d2c4a0dce83174eeca202c377730820ced6945be6f7717e3a0cfd91eb0"
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_dispatch_py": {
       "path": "tuner/execution/providers/modal/coordinator_dispatch.py",
@@ -318,7 +318,7 @@
     },
     "bootstrap__tuner__runtime__manifests__offline-sft-worker-v1_json": {
       "path": "tuner/runtime/manifests/offline-sft-worker-v1.json",
-      "sha256": "72b2ecb4028cb03c281244305a68e89cc88fb8954851c9a021f2e580f54e3c1b"
+      "sha256": "dc5f15ce9040ed5536a0cc53a110d783f8bdc3abccbaaa88f2792d30ca42cdb5"
     },
     "bootstrap__tuner__runtime__offline_sft_worker_py": {
       "path": "tuner/runtime/offline_sft_worker.py",
@@ -330,11 +330,11 @@
     },
     "bootstrap__tuner__training__contracts_py": {
       "path": "tuner/training/contracts.py",
-      "sha256": "a05a9e407d4b66800ae3ec5dfdbb81a00b4cd9e9ce7270c7619863ae023af95e"
+      "sha256": "91c4d66d9810cc0471981c3d4ef4b54feaed5b92eb41a468f31201f8111303b5"
     },
     "bootstrap__tuner__training__coordinator_material_py": {
       "path": "tuner/training/coordinator_material.py",
-      "sha256": "33c931a6629e1a2ccf2a91e6191a640fbb4f377a1e1138fc8c0b7b3e0ca57160"
+      "sha256": "c563aa3b1fbd940ddd3b8e56e4f33de70675cb831e938175f40debc0645fd9c7"
     },
     "bootstrap__tuner__training__methods____init___py": {
       "path": "tuner/training/methods/__init__.py",
@@ -346,7 +346,7 @@
     },
     "bootstrap__tuner__training__recipes_py": {
       "path": "tuner/training/recipes.py",
-      "sha256": "0b589222259c854d1c26e630cd2c716ca1204740a3407c5bf49ab7273c0f55f3"
+      "sha256": "bb844ed4883f00ccea9936eebad50c466e6e4bc148e88aa680d93121edf67dcc"
     },
     "bootstrap__tuner__training__resolution_py": {
       "path": "tuner/training/resolution.py",
@@ -390,7 +390,7 @@
     },
     "sft_runtime": {
       "path": "Trainers/sft/runtime_v1.py",
-      "sha256": "60a36dbda7cbebec893cbfaef637e12637fe5c31bfbebce461c7ed1146726d77"
+      "sha256": "5aaa78841ef90d982679ebe6712daa7af3edccf1d7dd0a2828418076b0642bfc"
     }
   },
   "ml_stack": {

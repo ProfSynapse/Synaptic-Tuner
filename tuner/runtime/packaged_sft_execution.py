@@ -31,6 +31,7 @@ from tuner.training.contracts import ArtifactPolicy, CanonicalDocument
 from tuner.training.packaged_compilation import (
     compile_packaged_sft_workload, packaged_artifact_policy_digest,
 )
+from tuner.training.recipes import MAX_WORKLOAD_BYTES
 
 LINEAGE_SCHEMA = "synaptic-packaged-sft-training-lineage/v1"
 TERMINAL_SCHEMA = "synaptic-packaged-sft-terminal/v1"
@@ -454,7 +455,7 @@ def _admit_contracts(release, provider_binding, execution, workload_bytes, polic
     provider_binding = ProviderRuntimeBindingV1.from_dict(provider_binding.to_dict())
     execution = PackagedExecutionBindingV1.from_dict(execution.to_dict())
     execution.validate_bindings(release, provider_binding)
-    document = _document(workload_bytes)
+    document = _document(workload_bytes, MAX_WORKLOAD_BYTES)
     compiled = compile_packaged_sft_workload(resolved_config=CanonicalDocument.from_mapping(document["configuration"]["document"]))
     config = compiled.document["configuration"]["document"]
     # This trainer has one exact tokenizer/model snapshot and a finite CLI
@@ -864,7 +865,7 @@ def _invocation_spec(admitted, workload, snapshot, dataset_path, model_snapshot=
         args.remove("--require-memory-efficient-loss")
     child = {"release": admitted.release.to_dict(), "release_digest": admitted.release.manifest_digest, "arguments": args,
         "provider_binding": admitted.provider_binding.to_dict(), "execution_binding": admitted.execution.to_dict(),
-        "workload": _document(admitted.workload_bytes),
+        "workload": _document(admitted.workload_bytes, MAX_WORKLOAD_BYTES),
         "artifact_policy": {"required_kinds": list(admitted.artifact_policy.required_kinds), "retain_checkpoints": admitted.artifact_policy.retain_checkpoints},
         "paths": {name: str(getattr(paths, name)) for name in paths.__dataclass_fields__},
         "environment": list(admitted.environment), "model_snapshot": model_snapshot}
@@ -1276,7 +1277,7 @@ def verify_packaged_sft_artifacts(*, admitted, inventory_bytes, terminal_bytes):
             or evidence.get("cwd") != str(admitted.paths.tmp)):
         raise ValueError("PACKAGED_ARTIFACT_REJECTED")
     _document(contents["training_metrics"], 4 * 1024 * 1024)
-    model_ref = _document(admitted.workload_bytes)["configuration"]["document"]["model"]["ref"]
+    model_ref = _document(admitted.workload_bytes, MAX_WORKLOAD_BYTES)["configuration"]["document"]["model"]["ref"]
     for role, kind in (("final_model", "model"), ("tokenizer", "tokenizer")):
         path, size, digest = contents[role]
         with path.open("rb") as stream:
