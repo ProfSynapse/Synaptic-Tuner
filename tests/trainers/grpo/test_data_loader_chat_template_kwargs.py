@@ -1,15 +1,10 @@
 """chat_template_kwargs passthrough for GRPO prompt formatting."""
 
-from pathlib import Path
-import sys
-
 from datasets import Dataset
 
+from tests.trainers._trainer_import import load_trainer_module
 
-GRPO_SRC = Path(__file__).resolve().parents[3] / "Trainers" / "grpo" / "src"
-sys.path.insert(0, str(GRPO_SRC))
-
-import data_loader  # noqa: E402
+data_loader = load_trainer_module("grpo", "data_loader")
 
 
 class RecordingTokenizer:

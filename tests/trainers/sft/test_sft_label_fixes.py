@@ -25,18 +25,19 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "Trainers" / "sft" / "src"))
 
 pytest.importorskip("datasets")
 
 from datasets import Dataset  # noqa: E402
 
-import preprocessing  # noqa: E402
 from shared.sft_preprocessing import (  # noqa: E402
     DEFAULT_MAX_DROPPED_ROW_FRACTION,
     cached_end_of_turn_tokens,
     materialize_sft_example,
 )
+from tests.trainers._trainer_import import load_trainer_module  # noqa: E402
+
+preprocessing = load_trainer_module("sft", "preprocessing")
 
 
 class _AddedToken:
@@ -334,7 +335,7 @@ def scratch_dir():
 
 
 def test_grouped_split_group_values_follow_dropped_rows(scratch_dir):
-    import data_loader
+    data_loader = load_trainer_module("sft", "data_loader")
 
     tokenizer = ChatTokenizer(eos_token="<|im_end|>")
     rows = [_row("x" * 60, "drop me", group="A")]

@@ -1,14 +1,11 @@
 import json
-import sys
-from pathlib import Path
 
 import pytest
 from datasets import Dataset
 
-ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "Trainers" / "sft" / "src"))
+from tests.trainers._trainer_import import load_trainer_module
 
-import data_loader
+data_loader = load_trainer_module("sft", "data_loader")
 
 
 class _FakeTokenizer:
