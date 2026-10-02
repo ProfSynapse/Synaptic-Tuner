@@ -6,6 +6,8 @@ from pathlib import Path
 import yaml
 
 from Evaluator.config_loader import ConfigLoader
+from Evaluator.protocols import BackendResponse
+from Evaluator.runner import evaluate_cases
 from shared.environments import EnvironmentValidator
 from SynthChat.config.format_resolver import load_tool_call_formats
 
@@ -132,3 +134,77 @@ def test_vault_gym_cases_render_mocked_workspace_system_prompt():
     assert '<selected_workspace name="Alpha Lab" id="ws_1732300800000_alphalab">' in system_prompt
     assert "Templates/daily-note.md" in system_prompt
     assert "Projects/Alpha/meeting-notes.md" in system_prompt
+
+
+class _SequenceClient:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = 0
+
+    def chat(self, messages):
+        message = self._responses[self.calls]
+        self.calls += 1
+        return BackendResponse(message=message, raw={"message": message}, latency_s=0.1)
+
+
+def _cli_quote(value: str) -> str:
+    """Double-quote ``value`` for the CLI command string (escape ``\\`` and ``"``)."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def test_vault_gym_create_daily_note_passes_with_a_direct_multiline_write():
+    _, prompt_case = _load_vault_case("vault_create_daily_note")
+    daily_note = (
+        "---\n"
+        "title: 2026-03-15\n"
+        "type: daily\n"
+        "tags:\n"
+        "  - journal\n"
+        "mood: focused\n"
+        "---\n"
+        "# Daily Note\n"
+        "\n"
+        "## Focus\n"
+        '- Ship the "alpha" review\n'
+        "\n"
+        "## Linked Notes\n"
+        "- [[Projects/Alpha/meeting-notes]]\n"
+    )
+    note_path = "Journal/Daily/2026-03-15.md"
+    # The case's preferred scoring path: search directory -> content read -> content write.
+    client = _SequenceClient(
+        [
+            _configured_tool_response(prompt_case, 'search directory "daily-note" --paths \'["Templates/"]\''),
+            _configured_tool_response(prompt_case, 'content read "Templates/daily-note.md" 1'),
+            _configured_tool_response(
+                prompt_case,
+                f"content write {_cli_quote(note_path)} {_cli_quote(daily_note)}",
+            ),
+        ]
+    )
+
+    record = evaluate_cases(
+        [prompt_case],
+        client=client,
+        environment_validator=EnvironmentValidator(backend="local"),
+    )[0]
+
+    assert record.environment is not None
+    assert record.environment.passed is True, record.environment.issues
+    assert [tool.name for tool in record.environment.executed_tools] == [
+        "searchManager_directory",
+        "contentManager_read",
+        "contentManager_write",
+    ]
+    assert record.environment.executed_tools[-1].arguments["content"] == daily_note
+    # The case's environment assertions (front matter type/mood/tags and the
+    # meeting-notes link) hold, so the agentic loop stops after the write.
+    assert record.environment.episode_trace is not None
+    assert record.environment.episode_trace.stop_reason == "environment_passed"
+    assert client.calls == 3
+    # The scoring paths name CLI commands, so the wrapper calls are scored as the
+    # commands they carry: search directory -> content read -> content write.
+    assert record.scoring is not None
+    assert record.scoring.matched_path == "template-driven-daily-note"
+    assert record.scoring.matched_tier == "preferred"
+    assert record.score == 1.0

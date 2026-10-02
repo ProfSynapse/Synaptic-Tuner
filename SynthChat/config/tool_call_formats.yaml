@@ -33,6 +33,17 @@ formats:
     # Required top-level fields inside function.arguments
     argument_required: [sessionId, workspaceId, memory, goal, tool]
 
+    # Backslash escapes decoded inside double-quoted arguments of the `tool`
+    # CLI command string, on top of POSIX shell quoting (\" and \\). The CLI
+    # schema (cli-first-tool-schemas.json) tells models to write multi-line
+    # content with newline characters (\n); a literal backslash-n in the decoded
+    # command string is that same newline. Formats without this key keep plain
+    # POSIX quoting.
+    command_escapes:
+      n: "\n"
+      t: "\t"
+      r: "\r"
+
     # LLM generation prompt lines (appended before the base prompt)
     generation_instructions:
       - "Return a single JSON object only."

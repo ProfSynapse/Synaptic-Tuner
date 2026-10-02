@@ -21,6 +21,25 @@ def _decode_lenient_cli_string(value: str) -> str:
     )
 
 
+def _command_escapes(wrapper_name: str, raw: Any) -> Dict[str, str]:
+    """Validate a format's ``command_escapes``: escape character -> decoded text."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"tool-call format {wrapper_name!r}: command_escapes must be a mapping")
+    escapes: Dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or len(key) != 1 or key in {"\\", '"'}:
+            raise ValueError(
+                f"tool-call format {wrapper_name!r}: command_escapes key {key!r} must be one character "
+                "other than a backslash or double quote"
+            )
+        if not isinstance(value, str):
+            raise ValueError(f"tool-call format {wrapper_name!r}: command_escapes[{key!r}] must be a string")
+        escapes[key] = value
+    return escapes
+
+
 @lru_cache(maxsize=1)
 def get_configured_wrapper_specs() -> List[Dict[str, Any]]:
     specs: List[Dict[str, Any]] = []
@@ -50,6 +69,7 @@ def get_configured_wrapper_specs() -> List[Dict[str, Any]]:
                 "required_fields": required_fields,
                 "field_names": field_names,
                 "string_fields": string_fields,
+                "command_escapes": _command_escapes(wrapper_name, fmt.get("command_escapes")),
             }
         )
 

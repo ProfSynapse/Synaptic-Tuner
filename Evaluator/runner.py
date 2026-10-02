@@ -29,6 +29,7 @@ from shared.verifiers.builtins.retrieval_verifier import (
     RetrievalValidationResult,
     RetrievalVerifier,
 )
+from shared.environments.tool_executor import cli_command_catalog, expand_cli_wrapper_commands
 from shared.verifiers.builtins.tool_sequence import evaluate_tool_sequence
 from .prompt_sets import PromptCase
 from .protocols import BackendClient
@@ -952,7 +953,7 @@ def _run_path_scoring(
     if not isinstance(paths, list) or not paths:
         return None
 
-    tool_names = [tc.name for tc in (validator_result.tool_calls if validator_result else [])]
+    tool_name_levels = _scoring_tool_name_levels(validator_result.tool_calls if validator_result else [])
     matches: List[PathScoreMatch] = []
     max_score = 0.0
     best_score = 0.0
@@ -967,7 +968,7 @@ def _run_path_scoring(
         max_score = max(max_score, score_value)
         matched, reasons = _matches_scoring_path(
             path_cfg=path_cfg,
-            tool_names=tool_names,
+            tool_names=_tool_names_for_path(path_cfg, tool_name_levels),
             validator_result=validator_result,
             behavior_result=behavior_result,
             environment_result=environment_result,
@@ -997,6 +998,63 @@ def _run_path_scoring(
         matched_tier=best_tier,
         matches=matches,
     )
+
+
+_PATH_TOOL_NAME_KEYS = ("all_tools", "any_tools", "ordered_tools", "first_tool", "first_tool_any_of")
+
+
+@dataclass(frozen=True)
+class _ScoringToolNames:
+    """Observed tool calls named at each level a scoring path may be written in."""
+
+    calls: List[str]
+    commands: List[str]
+    tools: List[str]
+
+
+def _scoring_tool_name_levels(tool_calls: Sequence[ToolCall]) -> _ScoringToolNames:
+    """Name the observed calls as called, as CLI commands and as concrete tools.
+
+    A configured CLI wrapper call is expanded into its commands the same way the
+    environment executor expands it; any other call keeps its own name at every
+    level.
+    """
+    calls: List[str] = []
+    commands: List[str] = []
+    tools: List[str] = []
+    for tool_call in tool_calls:
+        calls.append(tool_call.name)
+        expanded = expand_cli_wrapper_commands(tool_call.name, tool_call.arguments)
+        if expanded is None:
+            commands.append(tool_call.name)
+            tools.append(tool_call.name)
+            continue
+        commands.extend(command.spec.command for command in expanded)
+        tools.extend(command.spec.tool_name for command in expanded)
+    return _ScoringToolNames(calls=calls, commands=commands, tools=tools)
+
+
+def _tool_names_for_path(path_cfg: Mapping[str, Any], levels: _ScoringToolNames) -> List[str]:
+    """Pick the level of tool names a scoring path's configured names are written in.
+
+    A path naming CLI catalog commands (``content write``) is matched against the
+    expanded commands, one naming catalog tools (``contentManager_write``) against
+    the expanded tools, and any other path, including one with only call counts,
+    against the calls as made.
+    """
+    named: set[str] = set()
+    for key in _PATH_TOOL_NAME_KEYS:
+        value = path_cfg.get(key)
+        values = value if isinstance(value, list) else [value]
+        named.update(str(item).strip() for item in values if item is not None and str(item).strip())
+    if not named:
+        return levels.calls
+    catalog = cli_command_catalog()
+    if named & set(catalog):
+        return levels.commands
+    if named & {spec.tool_name for spec in catalog.values()}:
+        return levels.tools
+    return levels.calls
 
 
 def _matches_scoring_path(
