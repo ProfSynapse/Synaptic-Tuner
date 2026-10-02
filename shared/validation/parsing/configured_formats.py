@@ -7,7 +7,7 @@ import re
 from functools import lru_cache
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from SynthChat.config.format_resolver import load_tool_call_formats
+from SynthChat.config.format_resolver import load_tool_call_formats, required_argument_fields
 
 
 def _decode_lenient_cli_string(value: str) -> str:
@@ -68,7 +68,7 @@ def build_wrapper_specs(formats: Mapping[str, Any]) -> List[Dict[str, Any]]:
         argument_fields = fmt.get("argument_fields") or {}
         properties = dict(argument_fields.get("properties") or {})
         properties.update(fmt.get("extra_argument_fields") or {})
-        required_fields = list(fmt.get("argument_required") or argument_fields.get("required") or [])
+        required_fields = required_argument_fields(fmt)
         field_names = list(properties.keys())
         command_field = str(fmt.get("command_field") or "").strip() or None
         if command_field is not None and command_field not in properties:

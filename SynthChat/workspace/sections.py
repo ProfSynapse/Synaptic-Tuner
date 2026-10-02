@@ -9,6 +9,7 @@ Usage: Called by workspace/renderer.py to construct each prompt section.
 
 from typing import Any, Dict, List, Optional
 
+from ..config.format_resolver import required_argument_fields
 from ..schemas.tool_response_schema import resolve_wrapper_name
 
 
@@ -66,25 +67,29 @@ def _render_available_tools(
     """Render available tools section.
 
     Reads the instruction line from format_config["available_tools_instruction"]
-    and substitutes {context_required_csv} with the comma-separated context field list.
+    and substitutes {required_fields_csv} with the format's required argument
+    fields. A template that names required fields is omitted when the format
+    requires none.
     """
     if not isinstance(tool_schema, dict):
         return ""
 
     wrapper_name = _tool_wrapper_name(tool_schema, format_config)
 
-    instruction_template = format_config.get(
+    instruction_template = str(format_config.get(
         "available_tools_instruction",
-        "Required wrapper context fields: {context_required_csv}.",
-    )
-    ctx_fields = format_config.get("context_fields") or {}
-    context_required = ctx_fields.get("required") or []
-    context_csv = ", ".join(str(f) for f in context_required)
-    instruction = str(instruction_template).replace("{context_required_csv}", context_csv)
+        "Required wrapper fields: {required_fields_csv}.",
+    ))
+    required_fields = required_argument_fields(format_config)
+    instruction = instruction_template.replace("{required_fields_csv}", ", ".join(required_fields))
+    if "{required_fields_csv}" in instruction_template and not required_fields:
+        instruction = ""
 
     # A format without a wrapper (native tool calls) gets no wrapper line.
     lines: List[str] = [f"Use the `{wrapper_name}` wrapper for tool calls."] if wrapper_name else []
-    lines.extend([instruction, ""])
+    if instruction:
+        lines.append(instruction)
+    lines.append("")
 
     tools = tool_schema.get("tools") or {}
     for agent in sorted(tools.keys()):

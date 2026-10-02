@@ -151,6 +151,25 @@ class TestRenderAvailableTools:
         assert f"Use the `{fmt['wrapper_name']}` wrapper for tool calls." in result
         assert "fileManager:" in result
 
+    def test_required_fields_line_lists_configured_required_fields(self):
+        schema = {"tools": {"fileManager": [{"name": "read", "params": {"required": ["path"]}}]}}
+        fmt = _configured_tool_fmt()
+        assert "{required_fields_csv}" in fmt["available_tools_instruction"]
+        result = _render_available_tools(schema, fmt)
+        expected = fmt["available_tools_instruction"].replace(
+            "{required_fields_csv}", ", ".join(fmt["argument_required"])
+        )
+        assert expected in result.splitlines()
+
+    def test_required_fields_line_omitted_without_required_fields(self):
+        schema = {"tools": {"fileManager": [{"name": "read", "params": {"required": ["path"]}}]}}
+        fmt = dict(_configured_tool_fmt(), argument_required=[], argument_fields={})
+        result = _render_available_tools(schema, fmt)
+        prefix = fmt["available_tools_instruction"].split("{required_fields_csv}", 1)[0]
+        assert prefix not in result
+        assert f"Use the `{fmt['wrapper_name']}` wrapper for tool calls." in result
+        assert "fileManager:" in result
+
     def test_custom_wrapper_in_output(self):
         schema = {
             "tool_format": {"wrapper": "myWrapper"},

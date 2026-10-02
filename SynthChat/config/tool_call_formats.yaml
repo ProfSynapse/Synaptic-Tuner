@@ -78,17 +78,15 @@ formats:
       - "Use content as null when the response is tool-only."
       - "When the task is already complete, when clarification is needed, or when you are asked for a final confirmation, respond with text instead of calling tools."
 
-    # Instruction line for the available_tools section of workspace prompts
+    # Instruction line for the available_tools section of workspace prompts.
+    # {required_fields_csv} lists argument_required; a line naming it is
+    # omitted for a format that requires no fields.
     available_tools_instruction: >-
-      Required wrapper fields: {context_required_csv}.
+      Required wrapper fields: {required_fields_csv}.
 
   # -- Example: Plain OpenAI-style tool calls (no wrapper) --
   openai_native:
     wrapper_name: null  # No wrapper -- each tool gets its own tool_calls entry
-
-    context_fields:
-      required: []
-      properties: {}
 
     call_item: null  # Not used -- tools are called directly
 
@@ -113,11 +111,6 @@ formats:
   # -- Example: MCP-style tool calls --
   mcp_style:
     wrapper_name: use_mcp_tool
-
-    context_fields:
-      required: [server_name]
-      properties:
-        server_name: { type: string, minLength: 1 }
 
     call_item:
       properties:
