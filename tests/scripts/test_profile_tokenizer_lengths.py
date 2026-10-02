@@ -127,6 +127,34 @@ def test_checked_in_qwen_example_matches_current_profiler_contract():
     }
 
 
+def test_lock_refresh_keeps_the_checked_in_example_runnable(tmp_path):
+    # Run the real maintenance tool on a temp copy: a legitimate lock refresh
+    # must carry the example pin with it, and the profiler must accept the
+    # refreshed pair while still refusing the pin it had before the refresh.
+    spec = importlib.util.spec_from_file_location("regen_lock", Path("scripts/regenerate_modal_runtime_lock.py").resolve())
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    root = tmp_path / "repository"
+    for relative in [tool.LOCK_RELATIVE, tool.EXAMPLE_PIN_RELATIVE, *tool.LOCKED_FILES.values()]:
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_bytes(Path(relative).read_bytes())
+    changed = root / tool.LOCKED_FILES["modal_worker_source"]
+    changed.write_bytes(changed.read_bytes() + b"\n")
+
+    module = _load_module()
+    stale = module.validate_config(module.load_config(root / tool.EXAMPLE_PIN_RELATIVE))
+    stale["runtime"]["lock_path"] = str(root / tool.LOCK_RELATIVE)
+    assert tool.regenerate(root, write=True) == 0
+    assert tool.regenerate(root) == 0
+
+    refreshed = module.validate_config(module.load_config(root / tool.EXAMPLE_PIN_RELATIVE))
+    refreshed["runtime"]["lock_path"] = str(root / tool.LOCK_RELATIVE)
+    commitment = module._load_runtime_commitment(refreshed["runtime"])
+    assert commitment["runtime_lock_sha256"] == hashlib.sha256((root / tool.LOCK_RELATIVE).read_bytes()).hexdigest()
+    with pytest.raises(module.ProfilerError, match="RUNTIME_LOCK_DIGEST_MISMATCH"):
+        module._load_runtime_commitment(stale["runtime"])
+
+
 def test_profile_binds_modal_lock_capsule_offline_and_exact_histograms(tmp_path, monkeypatch):
     rows = [{"secret": "x " * count} for count in range(1, 101)]
     module, result, calls = _profile(tmp_path, monkeypatch, rows)
