@@ -122,10 +122,10 @@ def test_default_none_forwards_no_kwargs_byte_identical():
 
 def test_prompt_completion_forwards_kwargs_to_single_prompt_render():
     # In prompt_completion mode the prompt is rendered ONCE
-    # (add_generation_prompt=True) and the completion is encoded raw (no template),
-    # so there is exactly one apply_chat_template call and it must carry the
-    # forwarded kwargs — the new branch must not introduce a kwargs-divergent
-    # render relative to the full_conversation path.
+    # (add_generation_prompt=True) and the completion is encoded raw (no template).
+    # The only other render is the one-time end-of-turn probe that picks the
+    # completion terminal. Both must carry the forwarded kwargs — the branch must
+    # not introduce a kwargs-divergent render relative to the full_conversation path.
     class _RecordingTokenizerWithEos(_RecordingTokenizer):
         eos_token_id = 7
 
@@ -140,9 +140,8 @@ def test_prompt_completion_forwards_kwargs_to_single_prompt_render():
         prompt_render="prompt_completion",
     )
 
-    assert len(tokenizer.calls) == 1
-    assert tokenizer.calls[0]["add_generation_prompt"] is True
-    assert tokenizer.calls[0]["kwargs"] == {"enable_thinking": False}
+    assert [call["add_generation_prompt"] for call in tokenizer.calls] == [True, False]
+    assert all(call["kwargs"] == {"enable_thinking": False} for call in tokenizer.calls)
 
 
 def test_preprocessing_wrappers_thread_chat_template_kwargs():

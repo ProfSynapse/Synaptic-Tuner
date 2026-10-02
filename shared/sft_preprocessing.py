@@ -215,6 +215,42 @@ def cached_end_of_turn_tokens(
     return per_tokenizer[key]
 
 
+_EOS_TERMINAL_FALLBACK_LOGGED: set[int] = set()
+
+
+def prompt_completion_terminal_id(
+    tokenizer: Any, chat_template_kwargs: dict[str, Any] | None = None
+) -> int:
+    """Token that closes a prompt_completion target: the template's end-of-turn.
+
+    Derived by :func:`derive_end_of_turn_tokens` (never a hardcoded literal), so
+    the completion ends exactly as the chat template ends an assistant turn. When
+    the template renders no end-of-turn token, eos_token_id is used and the
+    fallback is logged once per tokenizer/kwargs. Loud if neither exists.
+    """
+    end_of_turn = cached_end_of_turn_tokens(tokenizer, chat_template_kwargs)
+    if end_of_turn.rendered_by_template:
+        return end_of_turn.token_ids[0]
+    encoder = encoder_of(tokenizer)
+    eos_id = getattr(encoder, "eos_token_id", None)
+    if eos_id is None:
+        eos_id = getattr(tokenizer, "eos_token_id", None)
+    if eos_id is None:
+        raise ValueError(
+            "prompt_render='prompt_completion' requires a chat template that renders an "
+            "end-of-turn token or a tokenizer that defines eos_token_id (the completion "
+            "terminal is derived from them, never hardcoded)."
+        )
+    if id(end_of_turn) not in _EOS_TERMINAL_FALLBACK_LOGGED:
+        _EOS_TERMINAL_FALLBACK_LOGGED.add(id(end_of_turn))
+        print(
+            "prompt_completion: the chat template renders no end-of-turn token after "
+            f"assistant content ({end_of_turn.detail or end_of_turn.source}); closing "
+            "completions with eos_token_id."
+        )
+    return int(eos_id)
+
+
 def hash_jsonl_line(line: str) -> str:
     return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()[:8]
 
@@ -511,7 +547,8 @@ def materialize_sft_example(
     # newline around the header), so the masked boundary is not the generation
     # anchor. The "prompt_completion" branch instead builds input_ids from the
     # add_generation_prompt=True prompt render — so the prompt ends EXACTLY at the
-    # generation anchor — followed by the raw completion plus a derived terminal,
+    # generation anchor — followed by the raw completion plus the template's
+    # end-of-turn token (eos_token_id when the template renders none),
     # masking the prompt segment to -100. It is gated strictly behind the
     # non-default flag AND an assistant final turn, so every existing caller is
     # byte-identical. template_kwargs are forwarded into the prompt-half render
@@ -533,19 +570,7 @@ def materialize_sft_example(
                 "message content to be a string after sanitization, got "
                 f"{type(completion_text).__name__}."
             )
-        # Terminal is DERIVED from the tokenizer (never a hardcoded literal) so the
-        # completion closes with the model's own end-of-turn id. Read from the
-        # encoder whose vocabulary produced the ids, falling back to the outer
-        # tokenizer (Processor wrappers proxy this); loud if neither defines it.
-        terminal_id = getattr(_encoder, "eos_token_id", None)
-        if terminal_id is None:
-            terminal_id = getattr(tokenizer, "eos_token_id", None)
-        if terminal_id is None:
-            raise ValueError(
-                "prompt_render='prompt_completion' requires the tokenizer to define "
-                "eos_token_id (the completion terminal is derived from it, never "
-                "hardcoded)."
-            )
+        terminal_id = prompt_completion_terminal_id(tokenizer, template_kwargs)
         completion_ids = (
             _encoder.encode(completion_text, add_special_tokens=False) + [terminal_id]
         )

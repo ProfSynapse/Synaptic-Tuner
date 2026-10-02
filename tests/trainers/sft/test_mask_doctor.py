@@ -254,19 +254,40 @@ def test_unexpected_full_sequence_fallback_is_reported():
     assert _check(report, "full_sequence_fallback")["count"] == 0
 
 
-def test_prompt_completion_eos_that_is_not_end_of_turn_fails():
-    # The prompt_completion path appends eos_token_id; here eos is not the
-    # template's end-of-turn token, so the trained span ends with the wrong stop.
-    tokenizer = FakeChatTokenizer(eos_token="<eos>")
-    report = _diagnose([_row("hi", "hello")], tokenizer=tokenizer, prompt_render="prompt_completion")
+def test_prompt_completion_closes_with_template_end_of_turn_even_when_eos_differs():
+    # The prompt_completion path closes the completion with the template's
+    # end-of-turn token, so an eos that differs from it no longer matters.
+    for eos_token in ("<eos>", "<|im_end|>"):
+        report = _diagnose(
+            [_row("hi", "hello")],
+            tokenizer=FakeChatTokenizer(eos_token=eos_token),
+            prompt_render="prompt_completion",
+        )
+        assert _check(report, "missing_end_of_turn")["count"] == 0
+        assert report["success"] is True
+
+
+def test_wrong_trained_terminator_is_a_hard_failure(monkeypatch):
+    # Any trained span that ends with a token other than the derived end-of-turn
+    # is reported (simulated here; the real preprocessing paths now close turns
+    # with the template's terminator).
+    from shared.sft_preprocessing import PreparedSFTExample
+
+    tokenizer = FakeChatTokenizer()
+    ids = tokenizer.encode("<|im_start|>assistant\nhello<eos>")
+
+    def fake_row(row, **_kwargs):
+        return PreparedSFTExample(
+            input_ids=ids, attention_mask=[1] * len(ids), labels=[-100] * 3 + ids[3:],
+            example_format="messages", loss_mask_mode="assistant_only",
+            truncation_applied=False, untruncated_length=len(ids),
+        )
+
+    monkeypatch.setattr(mask_doctor, "materialize_sft_row", fake_row)
+    report = _diagnose([_row("hi", "hello")], tokenizer=tokenizer)
     assert _check(report, "missing_end_of_turn")["status"] == "fail"
     assert report["end_of_turn_mismatches"] == [{"index": 0, "trained_span_ends_with": "<eos>"}]
-    assert report["flagged_rows"][0]["failures"] == ["missing_end_of_turn"]
-
-    # Same path with eos == end-of-turn token passes.
-    report = _diagnose([_row("hi", "hello")], prompt_render="prompt_completion")
-    assert _check(report, "missing_end_of_turn")["count"] == 0
-    assert report["success"] is True
+    assert report["success"] is False
 
 
 def test_doubled_bos_is_a_hard_failure():

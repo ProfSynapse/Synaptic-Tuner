@@ -188,7 +188,9 @@ SYNAPTIC_TEST_QWEN35_TOKENIZER_ARTIFACT=/private/verified/tokenizer.artifact \
 ```
 
 The artifact-backed case checks the exact pinned template hash, generation
-scaffold, prompt mask, and prose-plus-EOS target. Without that explicit local
+scaffold, prompt mask, and prose-plus-terminal target (the terminal is the
+template's end-of-turn token, which is `eos_token_id` for that tokenizer when
+the two coincide). Without that explicit local
 artifact it skips; the generic contract/transport cases still run. This checks
 token placement, not live GPU execution or writing quality.
 
@@ -257,13 +259,17 @@ the head reads an off-anchor representation.
 
 Set `training.prompt_render: prompt_completion` for a faithful boundary: the row's
 `input_ids` are built from the `add_generation_prompt=True` prompt render followed
-by the raw completion plus the tokenizer's derived terminal (`eos_token_id`), with
-the prompt segment masked to `-100` when `completion_only_loss: true` (with
-`completion_only_loss: false` every token is trained). The prompt then ends
-exactly at the generation anchor, so the existing `end_of_prompt` read is
-faithful. The completion terminal is `eos_token_id`, not the chat template's
-end-of-turn token; when they differ, `doctor sft-mask` reports
-`missing_end_of_turn`.
+by the raw completion plus the chat template's end-of-turn token, with the
+prompt segment masked to `-100` when `completion_only_loss: true` (with
+`completion_only_loss: false` every token is trained). The terminal is derived
+from the template (the special token it renders after assistant content, the
+same derivation `doctor sft-mask` uses); only when the template renders none does
+it fall back to `eos_token_id`, logged once. Where `eos_token_id` already is the
+end-of-turn token the rows are byte-identical to the earlier eos-terminated
+construction; where they differ (for example eos `<|endoftext|>` vs turn end
+`<|im_end|>`), the completion now ends with the turn terminator. The prompt then
+ends exactly at the generation anchor, so the existing `end_of_prompt` read is
+faithful.
 
 ```yaml
 training:

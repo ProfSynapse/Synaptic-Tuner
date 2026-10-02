@@ -1273,8 +1273,9 @@ def run(args: argparse.Namespace):
     loss_mask_mode = "assistant_only" if config.training.completion_only_loss else "full_sequence"
     preprocessing_metadata = {
         # 2: assistant-only labels stop at the final end-of-turn token,
-        # prompt_completion honours completion_only_loss, and untrainable rows
-        # are dropped. Losses are not directly comparable with version 1 runs.
+        # prompt_completion closes with the template's end-of-turn token and
+        # honours completion_only_loss, and untrainable rows are dropped.
+        # Losses are not directly comparable with version 1 runs.
         "contract_version": 2,
         "dataset_representation": "tokenized",
         "loss_mask_mode": loss_mask_mode,

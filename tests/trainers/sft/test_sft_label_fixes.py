@@ -128,6 +128,53 @@ def test_prompt_completion_honours_completion_only_loss(assistant_only_loss):
 
 
 # ---------------------------------------------------------------------------
+# prompt_completion closes with the template's end-of-turn token
+# ---------------------------------------------------------------------------
+
+
+def _prompt_completion(tokenizer, assistant_only_loss=True):
+    return materialize_sft_example(
+        tokenizer=tokenizer,
+        record=_row("hi", "hello"),
+        max_seq_length=512,
+        assistant_only_loss=assistant_only_loss,
+        prompt_render="prompt_completion",
+    )
+
+
+def test_prompt_completion_is_byte_identical_when_eos_is_end_of_turn():
+    # eos == <|im_end|>: the historical construction was prompt render + raw
+    # completion + eos_token_id; the template-derived terminal is the same id.
+    tokenizer = ChatTokenizer(eos_token="<|im_end|>")
+    prompt_ids = tokenizer.encode(
+        tokenizer.apply_chat_template(_row("hi")["messages"][:1], add_generation_prompt=True)
+    )
+    historical_ids = prompt_ids + tokenizer.encode("hello") + [tokenizer.eos_token_id]
+    historical_labels = [-100] * len(prompt_ids) + tokenizer.encode("hello") + [tokenizer.eos_token_id]
+
+    prepared = _prompt_completion(tokenizer)
+    assert prepared.input_ids == historical_ids
+    assert prepared.labels == historical_labels
+
+
+def test_prompt_completion_uses_end_of_turn_not_eos_when_they_differ():
+    tokenizer = ChatTokenizer(eos_token="<eos>")
+    prepared = _prompt_completion(tokenizer)
+    assert prepared.input_ids[-1] == IM_END
+    assert EOS not in prepared.input_ids
+    assert tokenizer.decode(_trained(prepared)) == "hello<|im_end|>"
+
+
+def test_prompt_completion_falls_back_to_eos_and_logs_once(capsys):
+    tokenizer = ChatTokenizer(eos_token="<eos>", turn_end="\n")  # renders no terminator
+    first = _prompt_completion(tokenizer)
+    second = _prompt_completion(tokenizer)
+    assert first.input_ids[-1] == EOS and second.input_ids[-1] == EOS
+    out = capsys.readouterr().out
+    assert out.count("closing completions with eos_token_id") == 1
+
+
+# ---------------------------------------------------------------------------
 # Default render: nothing after the final end-of-turn token is trained
 # ---------------------------------------------------------------------------
 

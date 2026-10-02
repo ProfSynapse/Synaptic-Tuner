@@ -267,8 +267,9 @@ dropped-row counts after dataset preparation.
 
 **SFT label change (preprocessing contract version 2).** Assistant-only labels
 now stop at the final turn's end-of-turn token (the template's trailing newline
-after it is masked); `prompt_render: prompt_completion` honours
-`completion_only_loss: false`; and rows with no supervised tokens left after
+after it is masked); `prompt_render: prompt_completion` closes completions with
+the template's end-of-turn token instead of `eos_token_id` (identical when they
+coincide) and honours `completion_only_loss: false`; and rows with no supervised tokens left after
 truncation, or whose assistant-only mask stopped before the end of the prompt
 render, are dropped with a logged count. The run fails when dropped rows exceed
 `training.max_dropped_row_fraction` (default `0.01`). Losses and checkpoints
