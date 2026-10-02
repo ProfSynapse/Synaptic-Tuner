@@ -124,7 +124,7 @@ validations:
   #         memory: string
   #         goal: string
   #       query: string
-  #   error: "Tool validation failed"
+  #   error: "Tool validation failed: {details}"   # {tool_name} and {details} available
 
 # =============================================================================
 # JUDGE PROMPT
@@ -201,7 +201,7 @@ output_schema:
 #
 # 1. Validation order: validations run first, then judge
 # 2. Auto-fail: validation errors set score to 0.0 automatically
-# 3. Error interpolation: use {field}, {min}, {max}, {actual}, {value}
+# 3. Error interpolation: use {field}, {min}, {max}, {actual}, {value}; tools rules use {tool_name}, {details}
 # 4. Scope determines content type:
 #    - system_prompt: raw string
 #    - thinking: parsed dict from JSON in <thinking> tags

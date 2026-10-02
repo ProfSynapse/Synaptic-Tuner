@@ -27,6 +27,7 @@ validations:
             params: object
 
           # Per-agent tool manifests
+          _subtool_keys: {group: agent, tool: tool, params: params}
           _subtools:
             # =================================================================
             # vaultManager - File/folder operations

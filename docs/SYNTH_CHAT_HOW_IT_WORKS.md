@@ -246,7 +246,7 @@ The system interleaves examples in **True/False/True/False** pattern:
                    │
                    ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 5. Validate Response (using validate_syngen.py)              │
+│ 5. Validate Response (using shared/validation/dataset_validator.py)              │
 │                                                               │
 │    Check:                                                     │
 │    ✓ Context object present and first                        │
@@ -405,7 +405,7 @@ Now that you understand how it works, you can:
 
 1. **Run it:** `./Tools/run_selfplay.sh --quick`
 2. **Inspect output:** `head -5 Datasets/syngen_selfplay_*.jsonl | jq`
-3. **Check validation:** `python tools/validate_syngen.py Datasets/syngen_selfplay_*.jsonl`
+3. **Check validation:** `python -m shared.validation.dataset_validator Datasets/syngen_selfplay_*.jsonl`
 4. **Train with it:** `cd Trainers/kto && python train_kto.py --local-file ../../Datasets/syngen_selfplay_*.jsonl`
 
 ## Customization Ideas

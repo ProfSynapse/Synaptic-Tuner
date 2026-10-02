@@ -119,7 +119,7 @@ Examples span diverse workspace scenarios:
 
 ## Next Steps
 
-1. Schema validation: `python tools/validate_syngen.py Datasets/behavior_datasets/workspace_awareness/pairs_v1.0.jsonl`
+1. Schema validation: `python -m shared.validation.dataset_validator Datasets/behavior_datasets/workspace_awareness/pairs_v1.0.jsonl`
 2. Manual review of new examples for quality
 3. Create interleaved version for training
 4. Update README.md status checklist

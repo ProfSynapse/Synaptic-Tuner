@@ -367,6 +367,7 @@ judge_prompt: |
      - tools:
          useTools:
            calls:
+             _subtool_keys: {group: agent, tool: tool, params: params}
              _subtools:
                vaultLibrarian:
                  batchFileOperation:
@@ -476,6 +477,7 @@ validations:
             agent: string
             tool: string
             params: object
+          _subtool_keys: {group: agent, tool: tool, params: params}
           _subtools:
             vaultLibrarian:
               searchContent:

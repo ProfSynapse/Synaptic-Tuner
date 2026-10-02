@@ -172,7 +172,7 @@ workspace_id = f"ws_{timestamp}_{new_chars}"
 
 ## Validation
 ```bash
-python tools/validate_syngen.py Datasets/behavior_datasets/ask_first/pairs_v1.0.jsonl
+python -m shared.validation.dataset_validator Datasets/behavior_datasets/ask_first/pairs_v1.0.jsonl
 ```
 
 Expected:

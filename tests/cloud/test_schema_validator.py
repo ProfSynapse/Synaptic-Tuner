@@ -138,3 +138,24 @@ def test_validate_assistant_response_recovers_malformed_qwen_tool_call():
     assert result.passed is False
     assert [tool.name for tool in result.tool_calls] == ["batchTools"]
     assert any("malformed <tool_call> JSON recovered heuristically" in issue.message for issue in result.issues)
+
+
+def test_validate_assistant_response_accepts_wrapperless_direct_call():
+    # A direct tool call matches no configured wrapper, so none of the wrapper
+    # fields from SynthChat/config/tool_call_formats.yaml are required of it.
+    response = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {"name": "notes_read", "arguments": '{"path": "notes/a.md"}'},
+            }
+        ],
+    }
+
+    result = validate_assistant_response(response)
+
+    assert result.passed is True
+    assert [issue.message for issue in result.issues if issue.level == "ERROR"] == []
+    assert [tool.name for tool in result.tool_calls] == ["notes_read"]

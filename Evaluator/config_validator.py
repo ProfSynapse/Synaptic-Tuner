@@ -787,22 +787,23 @@ class ConfigDrivenValidator:
         return catalog
 
     def _expand_cli_wrapper(self, name: str, args: Dict[str, Any]) -> List[ParsedToolCall]:
-        tool_value = args.get("tool")
-        if not isinstance(tool_value, str) or not tool_value.strip():
+        wrapper_spec = match_configured_wrapper(args, function_name=name) or {}
+        command_field = wrapper_spec.get("command_field")
+        command_value = args.get(command_field) if command_field else None
+        if not isinstance(command_value, str) or not command_value.strip():
             return []
 
         context = {
             key: value
             for key, value in args.items()
-            if key not in {"tool", "strategy"}
+            if key not in {command_field, "strategy"}
         }
         catalog = self._build_cli_command_catalog()
         if not catalog:
             return []
 
-        wrapper_spec = match_configured_wrapper(args, function_name=name) or {}
         try:
-            commands = parse_cli_commands(tool_value, catalog, wrapper_spec.get("command_escapes") or {})
+            commands = parse_cli_commands(command_value, catalog, wrapper_spec.get("command_escapes") or {})
         except ValueError:
             return []
         if any(command.spec is None for command in commands):

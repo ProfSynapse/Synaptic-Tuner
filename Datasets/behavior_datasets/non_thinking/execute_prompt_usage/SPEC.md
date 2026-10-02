@@ -165,7 +165,7 @@ Should be:
 
 Run standard validator:
 ```bash
-python tools/validate_syngen.py Datasets/execute_prompt_usage/pairs_v1.0.jsonl
+python -m shared.validation.dataset_validator Datasets/execute_prompt_usage/pairs_v1.0.jsonl
 ```
 
 ## Scenarios to Cover

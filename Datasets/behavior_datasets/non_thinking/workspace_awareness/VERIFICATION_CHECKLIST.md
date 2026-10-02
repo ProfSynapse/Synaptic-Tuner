@@ -91,7 +91,7 @@
 
 1. ⬜ Run schema validation:
    ```bash
-   python tools/validate_syngen.py \
+   python -m shared.validation.dataset_validator \
      Datasets/behavior_datasets/workspace_awareness/pairs_v1.0.jsonl
    ```
 

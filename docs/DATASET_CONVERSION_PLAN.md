@@ -68,4 +68,4 @@ The user requested that the training data *not* rely on a complex system prompt 
 1.  **Develop Script:** Write `scripts/convert_dataset.py` (requires an API key for the Teacher Model).
 2.  **Dry Run:** Process 10 examples and inspect the output.
 3.  **Full Run:** Process the entire dataset (~6.8k lines).
-4.  **Verify:** Run `Tools/validate_syngen.py` (or a new validator) on the new dataset.
+4.  **Verify:** Run `shared/validation/dataset_validator.py` (or a new validator) on the new dataset.
