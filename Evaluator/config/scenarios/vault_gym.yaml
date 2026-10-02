@@ -40,17 +40,20 @@ defaults:
       changing existing notes. Include sessionId, workspaceId, memory, goal, and the CLI command string in useTools calls. Finish with concise
       text after tool work.
   environment:
+    # The environment allowlist matches the concrete tools that wrapped CLI
+    # commands expand to (cli-first-tool-schemas.json: agent_tool), not the
+    # command strings themselves.
     allowed_tools:
-    - storage create-folder
-    - storage open
-    - storage move
-    - storage archive
-    - storage list
-    - content read
-    - content write
-    - content replace
-    - search content
-    - search directory
+    - storageManager_createFolder
+    - storageManager_open
+    - storageManager_move
+    - storageManager_archive
+    - storageManager_list
+    - contentManager_read
+    - contentManager_write
+    - contentManager_replace
+    - searchManager_content
+    - searchManager_directory
     max_steps: 6
     execution:
       strict_schema: true
