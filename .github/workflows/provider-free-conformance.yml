@@ -213,7 +213,7 @@ jobs:
           import tuner.execution.providers.modal.inference_run_chat
           PY
 
-      - name: Check source hashes without refreshing the runtime lock
+      - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
         run: |
           python -B scripts/regenerate_offline_sft_worker_closure.py
           python -B scripts/regenerate_modal_runtime_lock.py

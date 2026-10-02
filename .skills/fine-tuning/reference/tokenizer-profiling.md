@@ -21,7 +21,13 @@ The directory is prepared privately and committed as one native no-replace renam
 exact SHA-256. The profiler validates that lock against the runtime-lock schema
 and requires the installed `transformers.__version__` to equal the lock's
 committed Transformers version. Missing, stale, or mismatched evidence fails
-closed before tokenizer loading.
+closed before tokenizer loading. The pin is always a literal digest; there is no
+"use the current lock" shortcut for real runs. The checked-in example
+`configs/qwen35_4b_token_profile.yaml` is kept in step by
+`scripts/regenerate_modal_runtime_lock.py`: its check mode reports the example as
+stale and `--write` rewrites only its `expected_lock_sha256` line. After a lock
+refresh, run `python3 .skills/scripts/sync_skill_trees.py` to refresh the mirrors.
+Your own configs are never touched; update their pin when you adopt a new lock.
 
 `input.jsonl_path` is required. Select exactly one input mode:
 
