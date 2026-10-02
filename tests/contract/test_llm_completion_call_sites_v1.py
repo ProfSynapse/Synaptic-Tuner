@@ -35,6 +35,7 @@ WRAPPER = {"chat": "LLMCompletionV1", "structured_output": "LLMStructuredV1"}
 BASE_CLIENT_CONSUMERS = frozenset({
     "Evaluator/shared_llm_adapters.py",
     "SynthChat/llm/caller.py",
+    "SynthChat/scripts/structured_document_bakeoff.py",
     "SynthChat/services/core/improvement_service.py",
     "SynthChat/services/core/judge_service.py",
     "SynthChat/services/privacy_preprocess.py",
