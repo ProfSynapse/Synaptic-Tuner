@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from SynthChat.config.format_resolver import load_tool_call_formats
 
@@ -40,10 +40,14 @@ def _command_escapes(wrapper_name: str, raw: Any) -> Dict[str, str]:
     return escapes
 
 
-@lru_cache(maxsize=1)
-def get_configured_wrapper_specs() -> List[Dict[str, Any]]:
+def build_wrapper_specs(formats: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Derive wrapper specs from a tool-call format registry.
+
+    ``formats`` has the shape returned by ``load_tool_call_formats()``: format
+    name -> format config. Formats without a ``wrapper_name`` call tools
+    directly and contribute no spec.
+    """
     specs: List[Dict[str, Any]] = []
-    formats = load_tool_call_formats()
 
     for _, fmt in (formats or {}).items():
         if not isinstance(fmt, dict):
@@ -70,17 +74,33 @@ def get_configured_wrapper_specs() -> List[Dict[str, Any]]:
                 "field_names": field_names,
                 "string_fields": string_fields,
                 "command_escapes": _command_escapes(wrapper_name, fmt.get("command_escapes")),
+                "properties": properties,
             }
         )
 
     return specs
 
 
-def match_configured_wrapper(args: Any, function_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+@lru_cache(maxsize=1)
+def get_configured_wrapper_specs() -> List[Dict[str, Any]]:
+    """Wrapper specs for the engine's configured tool-call formats."""
+    return build_wrapper_specs(load_tool_call_formats())
+
+
+def match_configured_wrapper(
+    args: Any,
+    function_name: Optional[str] = None,
+    specs: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return the wrapper spec ``args`` belongs to, or None for a direct tool call.
+
+    ``specs`` defaults to the configured registry; pass ``build_wrapper_specs``
+    output to match against a different tool-call format registry.
+    """
     if not isinstance(args, dict):
         return None
 
-    for spec in get_configured_wrapper_specs():
+    for spec in get_configured_wrapper_specs() if specs is None else specs:
         if function_name and function_name == spec["wrapper_name"]:
             return spec
         required = spec["required_fields"]

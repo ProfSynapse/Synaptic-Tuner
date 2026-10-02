@@ -317,6 +317,16 @@ Quick JSONL structure check (no LLM needed):
 
 ```bash
 python3 scripts/validate_syngen.py Datasets/your_dataset.jsonl
+
+# Validate wrapper calls against a host's own tool-call format registry
+python3 scripts/validate_syngen.py Datasets/your_dataset.jsonl \
+  --tool-call-formats path/to/tool_call_formats.yaml
 ```
 
 Checks: valid JSON, conversation structure, tool schemas, parameter validation.
+Wrapper checks are config-first: a call whose name matches a `wrapper_name` in
+the tool-call format registry (default `SynthChat/config/tool_call_formats.yaml`)
+must carry that format's `argument_required` fields, and each field must satisfy
+its configured property schema (`type`, `minLength`, `enum`, ...). Calls that
+match no configured wrapper are direct (wrapper-less) calls and need no wrapper
+fields.

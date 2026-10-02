@@ -16,38 +16,17 @@ from ..template_utils import _make_json_safe
 try:
     from shared.agentic_judge import AgenticTurnJudge
     from shared.agentic_loop import AgenticModelResponse, run_environment_episode
-    from Evaluator.schema_validator import ValidationResult, ValidatorIssue, validate_assistant_response
+    from Evaluator.schema_validator import validate_assistant_response
 except ImportError:
     AgenticTurnJudge = None
     AgenticModelResponse = None
     run_environment_episode = None
-    ValidationResult = None
-    ValidatorIssue = None
     validate_assistant_response = None
 
 
 def validate_agentic_synthchat_response(message: Any):
-    """Relax eval-only generator-format checks for synthetic loop rollouts."""
-    result = validate_assistant_response(message, None)
-    filtered_issues = []
-    for issue in result.issues:
-        message_text = str(issue.message)
-        if "does not match generator format" in message_text:
-            continue
-        filtered_issues.append(issue)
-
-    passed = all(str(issue.level).lower() != "error" for issue in filtered_issues)
-    return ValidationResult(
-        passed=passed,
-        issues=[
-            issue
-            if isinstance(issue, ValidatorIssue)
-            else ValidatorIssue(level=getattr(issue, "level", "ERROR"), message=getattr(issue, "message", str(issue)))
-            for issue in filtered_issues
-        ],
-        tool_calls=result.tool_calls,
-        context_validation=None,
-    )
+    """Validate a synthetic loop response structurally, without eval-context ID checks."""
+    return validate_assistant_response(message, None)
 
 
 def build_turn_judge_template_vars(

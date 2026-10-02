@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validator for synthetic Claudesidian tool-calling datasets in ChatML format.
+Validator for synthetic tool-calling datasets in ChatML format.
 
 Validates JSONL files with the following structure:
 {
@@ -12,8 +12,16 @@ Validates JSONL files with the following structure:
   "label": true  // optional (true = desirable, false = undesirable)
 }
 
+Wrapper argument checks are config-first: a tool call whose name (or argument
+set) matches a wrapper in the tool-call format registry
+(SynthChat/config/tool_call_formats.yaml by default) must carry that format's
+required argument fields, each satisfying its configured property schema. Calls
+that match no configured wrapper are direct (wrapper-less) tool calls and are
+only checked against the tool schemas.
+
 Usage:
     python3 .skills/synthetic-data-generation/scripts/validate_syngen.py Synthetic\\ Conversations/syngen_toolset_v1.0.0.jsonl
+    python3 .skills/synthetic-data-generation/scripts/validate_syngen.py data.jsonl --tool-call-formats host/tool_call_formats.yaml
 """
 from __future__ import annotations
 
@@ -23,10 +31,13 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Tuple, Dict, Any, Optional
+from typing import Iterable, List, Tuple, Dict, Any, Optional, Sequence
 
-SESSION_ID_RE = re.compile(r"^session_\d{13}_[a-z0-9]+$")
-WORKSPACE_ID_RE = re.compile(r"^ws_\d{13}_[a-z0-9]+$")
+from jsonschema import Draft202012Validator
+
+from SynthChat.config.format_resolver import load_tool_call_formats
+from shared.validation.parsing.configured_formats import build_wrapper_specs, match_configured_wrapper
+
 # Labels are now boolean: true = desirable, false = undesirable
 ALLOWED_ROLES = {"system", "user", "assistant"}
 MIN_TOOL_CALLS = 2
@@ -548,32 +559,53 @@ def extract_json_block(text: str, start_index: int) -> Tuple[str, int]:
     raise ValueError("Unterminated JSON block")
 
 
-def validate_context(args: dict, report: ExampleReport) -> None:
-    if not isinstance(args, dict) or not args:
-        report.add("ERROR", "Arguments must be a JSON object")
+def validate_wrapper_arguments(
+    tool_name: str,
+    args: Any,
+    report: ExampleReport,
+    tool_call_num: int,
+    wrapper_specs: Optional[Sequence[Dict[str, Any]]] = None,
+) -> None:
+    """Check a tool call's arguments against the configured wrapper it uses.
+
+    The wrapper is resolved with the shared ``match_configured_wrapper`` helper
+    (by function name, then by argument set). ``wrapper_specs`` defaults to the
+    configured tool-call format registry; pass ``build_wrapper_specs(formats)``
+    to validate against another registry. A call that matches no wrapper is a
+    direct tool call and has no wrapper fields to check.
+    """
+    if not isinstance(args, dict):
+        report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Arguments must be a JSON object")
         return
 
-    required_fields = ["sessionId", "workspaceId", "memory", "goal", "tool"]
-    for field_name in required_fields:
+    spec = match_configured_wrapper(args, function_name=tool_name, specs=wrapper_specs)
+    if spec is None:
+        return
+
+    wrapper_name = spec["wrapper_name"]
+    for field_name in spec["required_fields"]:
         if field_name not in args:
-            report.add("ERROR", f"Missing required '{field_name}' field in arguments")
+            report.add(
+                "ERROR",
+                f"Tool call #{tool_call_num} ({wrapper_name}): Missing required '{field_name}' field in arguments",
+            )
 
-    if "sessionId" not in args:
-        report.add("ERROR", "Missing required 'sessionId' field in arguments")
-    else:
-        sess_id = args.get("sessionId")
-        if isinstance(sess_id, str) and not SESSION_ID_RE.match(sess_id):
-            report.add("ERROR", f"sessionId '{sess_id}' does not match generator format")
-
-    if "workspaceId" not in args:
-        report.add("ERROR", "Missing required 'workspaceId' field in arguments")
-    else:
-        ws_id = args.get("workspaceId")
-        if isinstance(ws_id, str) and ws_id != "default" and not WORKSPACE_ID_RE.match(ws_id):
-            report.add("ERROR", f"workspaceId '{ws_id}' does not match generator format")
+    properties = {name: prop for name, prop in spec["properties"].items() if isinstance(prop, dict)}
+    property_validator = Draft202012Validator({"type": "object", "properties": properties})
+    for error in sorted(property_validator.iter_errors(args), key=lambda e: [str(part) for part in e.path]):
+        field_path = ".".join(str(part) for part in error.path)
+        report.add(
+            "ERROR",
+            f"Tool call #{tool_call_num} ({wrapper_name}): Invalid wrapper field '{field_path}' - {error.message}",
+        )
 
 
-def validate_assistant_content(content: str, report: ExampleReport, system_ctx: Optional[SystemPromptContext] = None) -> None:
+def validate_assistant_content(
+    content: str,
+    report: ExampleReport,
+    system_ctx: Optional[SystemPromptContext] = None,
+    wrapper_specs: Optional[Sequence[Dict[str, Any]]] = None,
+) -> None:
     """Validate assistant message content, including tool calls if present.
 
     Supports multiple formats:
@@ -614,7 +646,7 @@ def validate_assistant_content(content: str, report: ExampleReport, system_ctx: 
     for idx, (tool_name, args) in enumerate(tool_calls, 1):
         if not tool_name:
             report.add("ERROR", f"Tool call #{idx} missing name")
-        validate_context(args, report)
+        validate_wrapper_arguments(tool_name, args, report, idx, wrapper_specs)
         # Validate against actual tool schema
         validate_tool_against_schema(tool_name, args, report, idx)
         # Validate IDs match system prompt context
@@ -622,7 +654,12 @@ def validate_assistant_content(content: str, report: ExampleReport, system_ctx: 
             validate_ids_match_system_prompt(tool_name, args, system_ctx, report, idx)
 
 
-def validate_assistant_message_openai(msg: dict, report: ExampleReport, system_ctx: Optional[SystemPromptContext] = None) -> None:
+def validate_assistant_message_openai(
+    msg: dict,
+    report: ExampleReport,
+    system_ctx: Optional[SystemPromptContext] = None,
+    wrapper_specs: Optional[Sequence[Dict[str, Any]]] = None,
+) -> None:
     """Validate OpenAI format assistant message with tool_calls array."""
     tool_calls_array = msg.get("tool_calls")
     if not isinstance(tool_calls_array, list):
@@ -647,7 +684,7 @@ def validate_assistant_message_openai(msg: dict, report: ExampleReport, system_c
     for idx, (tool_name, args) in enumerate(tool_calls, 1):
         if not tool_name:
             report.add("ERROR", f"Tool call #{idx} missing name")
-        validate_context(args, report)
+        validate_wrapper_arguments(tool_name, args, report, idx, wrapper_specs)
         # Validate against actual tool schema
         validate_tool_against_schema(tool_name, args, report, idx)
         # Validate IDs match system prompt context
@@ -655,7 +692,11 @@ def validate_assistant_message_openai(msg: dict, report: ExampleReport, system_c
             validate_ids_match_system_prompt(tool_name, args, system_ctx, report, idx)
 
 
-def validate_example(idx: int, example: dict) -> ExampleReport:
+def validate_example(
+    idx: int,
+    example: dict,
+    wrapper_specs: Optional[Sequence[Dict[str, Any]]] = None,
+) -> ExampleReport:
     label = example.get("label")
     report = ExampleReport(index=idx, label=label)
     conversations = example.get("conversations")
@@ -680,11 +721,11 @@ def validate_example(idx: int, example: dict) -> ExampleReport:
             # Check format: OpenAI (tool_calls array) or ChatML (content string)
             if "tool_calls" in msg:
                 # OpenAI format
-                validate_assistant_message_openai(msg, report, system_ctx)
+                validate_assistant_message_openai(msg, report, system_ctx, wrapper_specs)
             else:
                 # ChatML format
                 content = msg.get("content", "")
-                validate_assistant_content(content, report, system_ctx)
+                validate_assistant_content(content, report, system_ctx, wrapper_specs)
 
     # Label is optional in ChatML format
     # Labels should now be boolean: true = desirable, false = undesirable
@@ -695,18 +736,30 @@ def validate_example(idx: int, example: dict) -> ExampleReport:
     return report
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate Claudesidian synthetic data JSONL files")
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    parser = argparse.ArgumentParser(description="Validate synthetic tool-calling JSONL files")
     parser.add_argument("path", type=Path, help="Path to JSONL file")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--tool-call-formats",
+        type=Path,
+        default=None,
+        help="Tool-call format registry YAML (default: SynthChat/config/tool_call_formats.yaml)",
+    )
+    args = parser.parse_args(argv)
 
     if not args.path.exists():
         sys.exit(f"File not found: {args.path}")
 
+    wrapper_specs = None
+    if args.tool_call_formats is not None:
+        if not args.tool_call_formats.is_file():
+            sys.exit(f"Tool-call format registry not found: {args.tool_call_formats}")
+        wrapper_specs = build_wrapper_specs(load_tool_call_formats(str(args.tool_call_formats)))
+
     reports: List[ExampleReport] = []
     try:
         for idx, payload in load_jsonl(args.path):
-            reports.append(validate_example(idx, payload))
+            reports.append(validate_example(idx, payload, wrapper_specs))
     except ValueError as exc:
         sys.exit(str(exc))
 
