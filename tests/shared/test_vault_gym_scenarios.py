@@ -202,3 +202,9 @@ def test_vault_gym_create_daily_note_passes_with_a_direct_multiline_write():
     assert record.environment.episode_trace is not None
     assert record.environment.episode_trace.stop_reason == "environment_passed"
     assert client.calls == 3
+    # The scoring paths name CLI commands, so the wrapper calls are scored as the
+    # commands they carry: search directory -> content read -> content write.
+    assert record.scoring is not None
+    assert record.scoring.matched_path == "template-driven-daily-note"
+    assert record.scoring.matched_tier == "preferred"
+    assert record.score == 1.0

@@ -163,3 +163,73 @@ def test_scoring_falls_back_to_lower_configured_path():
     assert record.scoring.matched_tier == "acceptable"
     assert record.scoring.awarded_score == 0.4
     assert record.scoring.normalized_score == 0.4
+
+
+def _wrapper_response(tool_value):
+    return {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "useTools",
+                    "arguments": json.dumps(
+                        {
+                            "sessionId": "session_1732300800000_eval01234",
+                            "workspaceId": "ws_1732300800000_atlasroll",
+                            "memory": "Find the template, then write the note.",
+                            "goal": "Create the daily note.",
+                            "tool": tool_value,
+                        }
+                    ),
+                },
+            }
+        ]
+    }
+
+
+def _path_results(tool_value, paths):
+    case = PromptCase(
+        case_id="score_levels_case",
+        question="Create today's daily note.",
+        metadata={"scoring": {"paths": paths}},
+    )
+    record = evaluate_cases([case], client=_FakeClient(_wrapper_response(tool_value)))[0]
+    assert record.scoring is not None
+    return {match.name: match.matched for match in record.scoring.matches}
+
+
+def test_scoring_paths_match_at_the_level_their_tool_names_are_written_in():
+    tool_value = (
+        'search directory "daily-note" --paths \'["Templates/"]\', '
+        'content read "Templates/daily-note.md" 1, '
+        'content write "Journal/Daily/2026-03-15.md" "---\\ntype: daily\\n---\\n"'
+    )
+    paths = [
+        {
+            "name": "cli-commands",
+            "score": 1.0,
+            "ordered_tools": ["search directory", "content read", "content write"],
+            "first_tool": "search directory",
+            "min_tool_calls": 3,
+        },
+        {"name": "cli-commands-wrong-order", "score": 0.9, "ordered_tools": ["content write", "content read"]},
+        {"name": "catalog-tools", "score": 0.8, "all_tools": ["searchManager_directory", "contentManager_write"]},
+        {"name": "wrapper-calls", "score": 0.5, "all_tools": ["useTools"], "max_tool_calls": 1},
+        {"name": "call-count-only", "score": 0.2, "min_tool_calls": 2},
+    ]
+
+    assert _path_results(tool_value, paths) == {
+        "cli-commands": True,
+        "cli-commands-wrong-order": False,
+        "catalog-tools": True,
+        "wrapper-calls": True,
+        "call-count-only": False,
+    }
+
+
+def test_scoring_command_paths_do_not_match_an_unparseable_wrapper_command():
+    paths = [{"name": "cli-commands", "score": 1.0, "all_tools": ["content write"]}]
+
+    assert _path_results('content write "Journal/Daily/2026-03-15.md" "unterminated', paths) == {
+        "cli-commands": False,
+    }
