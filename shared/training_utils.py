@@ -9,7 +9,8 @@ trainer scripts with cosmetic or minor behavioral drift.
 
 Used by: Trainers/sft/train_sft.py, Trainers/kto/train_kto.py,
          Trainers/dpo/train_dpo.py, Trainers/grpo/train_grpo.py,
-         Trainers/grpo/train_env_grpo.py and the trainer config loaders.
+         Trainers/grpo/train_env_grpo.py, the trainer config loaders, and the
+         SFT/KTO/DPO data loaders (validation split helpers).
 
 Config strictness lives here too: ``reject_unknown_config_keys`` refuses YAML
 keys a trainer does not declare, and ``build_trainer_config`` refuses trainer
@@ -23,11 +24,13 @@ import dataclasses
 import difflib
 import inspect
 import json
+import math
 import os
+import random
 import re
 import typing
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
 def setup_wandb() -> bool:
@@ -573,3 +576,148 @@ def build_trainer_config(
             "these version-dependent internal defaults"
         )
     return config_cls(**accepted)
+
+
+# ---------------------------------------------------------------------------
+# Train/validation split (SFT, KTO, DPO data loaders)
+# ---------------------------------------------------------------------------
+#
+# A plain random row split puts near-duplicate variants of one scenario,
+# template, seed or transcript on both sides, which makes validation loss look
+# better than it is. With ``validation_group_key`` (a dot-path into the raw row,
+# e.g. ``metadata.scenario``) every row sharing a group value lands on the same
+# side and ``test_size`` is applied over groups. The assignment is deterministic
+# for a given seed and set of group values, independent of row order. Without a
+# group key the split is the historical ``train_test_split(seed=42)``.
+#
+# Kept in this module (a member of the offline SFT worker closure) and free of
+# non-stdlib imports so the packaged trainer can execute it without widening
+# the closure.
+
+DEFAULT_SPLIT_SEED = 42
+
+
+_MISSING = object()
+
+
+def _get_dotted(record: Any, dotted_path: str) -> Any:
+    current = record
+    for segment in dotted_path.split("."):
+        if not isinstance(current, Mapping) or segment not in current:
+            return _MISSING
+        current = current[segment]
+    return current
+
+
+def _canonical_group_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True, ensure_ascii=False)
+    return str(value)
+
+
+def extract_group_values(rows: Iterable[Mapping[str, Any]], group_key: str) -> List[str]:
+    """Resolve ``group_key`` on every row; fail loudly on the first missing value.
+
+    A value that is absent, ``None`` (HF ``datasets`` fills absent struct keys
+    with ``None``) or an empty/whitespace string counts as missing.
+    """
+    if not isinstance(group_key, str) or not group_key.strip():
+        raise ValueError("validation_group_key must be a non-empty dot-path string.")
+    values: List[str] = []
+    for index, row in enumerate(rows):
+        value = _get_dotted(row, group_key)
+        if value is _MISSING or value is None or (isinstance(value, str) and not value.strip()):
+            raise ValueError(
+                f"validation_group_key={group_key!r} is missing, null or empty on row "
+                f"index {index}. Every row must carry a group value when grouped "
+                "validation splitting is enabled."
+            )
+        values.append(_canonical_group_value(value))
+    return values
+
+
+def extract_dataset_group_values(dataset: Any, group_key: str) -> List[str]:
+    """Like :func:`extract_group_values` for a HF ``datasets.Dataset``.
+
+    Only the top-level column the dot-path starts with is materialized.
+    """
+    top_level = group_key.split(".", 1)[0] if isinstance(group_key, str) else ""
+    if top_level not in dataset.column_names:
+        if len(dataset) == 0:
+            return []
+        raise ValueError(
+            f"validation_group_key={group_key!r} is missing on row index 0: the dataset "
+            f"has no {top_level!r} column (columns: {dataset.column_names})."
+        )
+    return extract_group_values(dataset.select_columns([top_level]).to_list(), group_key)
+
+
+def grouped_split_indices(
+    group_values: Sequence[str],
+    test_size: float,
+    seed: int = DEFAULT_SPLIT_SEED,
+) -> Tuple[List[int], List[int]]:
+    """Assign whole groups to train or validation.
+
+    ``ceil(test_size * n_groups)`` groups (at least one, at most ``n_groups - 1``)
+    go to validation. Groups are sorted before the seeded shuffle so the result
+    depends only on the seed and the set of group values.
+
+    Returns:
+        ``(train_indices, validation_indices)``, each in ascending row order.
+    """
+    if not 0 < test_size < 1:
+        raise ValueError(f"test_size must be in (0, 1) for a grouped split, got {test_size!r}.")
+    unique_groups = sorted(set(group_values))
+    if len(unique_groups) < 2:
+        raise ValueError(
+            f"Grouped validation split needs at least 2 distinct groups; found "
+            f"{len(unique_groups)}. Choose a finer validation_group_key or disable it."
+        )
+    rng = random.Random(seed)
+    shuffled = list(unique_groups)
+    rng.shuffle(shuffled)
+    n_test = min(len(shuffled) - 1, max(1, math.ceil(test_size * len(shuffled))))
+    test_groups = set(shuffled[:n_test])
+    train_indices: List[int] = []
+    test_indices: List[int] = []
+    for index, value in enumerate(group_values):
+        (test_indices if value in test_groups else train_indices).append(index)
+    return train_indices, test_indices
+
+
+def split_train_validation(
+    dataset: Any,
+    *,
+    test_size: float,
+    seed: int = DEFAULT_SPLIT_SEED,
+    group_values: Optional[Sequence[str]] = None,
+) -> Tuple[Any, Any]:
+    """Split a HF ``Dataset`` into train/validation.
+
+    Args:
+        dataset: ``datasets.Dataset`` to split.
+        test_size: Validation fraction (of rows when ungrouped, of groups when grouped).
+        seed: Split seed.
+        group_values: Optional per-row group values aligned with ``dataset`` rows
+            (see :func:`extract_dataset_group_values`). ``None`` keeps the random
+            row split.
+    """
+    if group_values is None:
+        split = dataset.train_test_split(test_size=test_size, seed=seed)
+        return split["train"], split["test"]
+    if len(group_values) != len(dataset):
+        raise ValueError(
+            f"group_values has {len(group_values)} entries but the dataset has "
+            f"{len(dataset)} rows; they must be aligned."
+        )
+    train_indices, test_indices = grouped_split_indices(group_values, test_size, seed)
+    n_groups = len(set(group_values))
+    n_test_groups = len({group_values[i] for i in test_indices})
+    print(
+        f"  Grouped split: {n_groups} groups -> {n_groups - n_test_groups} train / "
+        f"{n_test_groups} validation"
+    )
+    return dataset.select(train_indices), dataset.select(test_indices)

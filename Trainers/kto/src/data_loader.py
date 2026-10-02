@@ -8,6 +8,12 @@ from datasets import load_dataset, Dataset
 import random
 import os
 
+from shared.training_utils import (
+    DEFAULT_SPLIT_SEED,
+    extract_dataset_group_values,
+    split_train_validation,
+)
+
 
 def interleave_dataset(dataset: Dataset, seed: int = 42) -> Dataset:
     """
@@ -195,7 +201,8 @@ def load_and_prepare_dataset(
     local_file: Optional[str] = None,
     num_proc: int = 1,
     test_size: float = 0.1,
-    split_dataset: bool = False
+    split_dataset: bool = False,
+    validation_group_key: Optional[str] = None,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare dataset for KTO training.
@@ -207,6 +214,10 @@ def load_and_prepare_dataset(
         num_proc: Number of processes for dataset loading (1 for Windows)
         test_size: Fraction of data for validation
         split_dataset: Whether to create train/val split
+        validation_group_key: Optional dot-path into the raw row (e.g.
+            ``metadata.seed_id``). When set and splitting, all rows sharing a
+            group value land on the same side and ``test_size`` applies over
+            groups. Missing values fail loudly with the raw row index.
 
     Returns:
         Tuple of (train_dataset, eval_dataset or None)
@@ -240,10 +251,19 @@ def load_and_prepare_dataset(
     print("\nConverting ChatML to KTO format...")
     processed_examples = []
 
-    for example in raw_datasets:
+    # Read group values from the raw rows before the KTO projection drops them.
+    raw_group_values = None
+    if split_dataset and test_size > 0 and validation_group_key:
+        print(f"Grouping validation split by: {validation_group_key}")
+        raw_group_values = extract_dataset_group_values(raw_datasets, validation_group_key)
+    group_values = [] if raw_group_values is not None else None
+
+    for raw_index, example in enumerate(raw_datasets):
         kto_example = prepare_kto_format(example)
         if kto_example:
             processed_examples.append(kto_example)
+            if raw_group_values is not None:
+                group_values.append(raw_group_values[raw_index])
 
     # Calculate statistics
     desirable = sum(1 for ex in processed_examples if ex["label"])
@@ -266,9 +286,12 @@ def load_and_prepare_dataset(
     eval_dataset = None
     if split_dataset and test_size > 0:
         print(f"\nCreating train/validation split ({1-test_size:.0%}/{test_size:.0%})")
-        split = train_dataset.train_test_split(test_size=test_size, seed=42)
-        train_dataset = split["train"]
-        eval_dataset = split["test"]
+        train_dataset, eval_dataset = split_train_validation(
+            train_dataset,
+            test_size=test_size,
+            seed=DEFAULT_SPLIT_SEED,
+            group_values=group_values,
+        )
 
         print(f"  Training set: {len(train_dataset)} examples")
         print(f"  Validation set: {len(eval_dataset)} examples")

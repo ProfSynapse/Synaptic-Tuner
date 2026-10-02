@@ -1,0 +1,58 @@
+# Defaults for `python tuner.py check-contamination`.
+#
+# Paths accept the project path schemes (engine://, project://, artifact://,
+# config://). Plain relative paths resolve against the engine root in standalone
+# mode and against this file in host-project mode; CLI paths resolve against the
+# invocation directory. CLI flags override the matching keys:
+#   --train-data (repeatable)            replaces train_datasets
+#   --eval-source / --eval-text          replace eval.sources / eval.text_sources
+#   --ngram / --threshold / --min-item-tokens / --top-k / --report-dir
+#
+# Metric: for each eval item, the highest fraction of its unique word n-grams
+# that occur in any single training row (after NFKC + lowercase + punctuation
+# stripping + whitespace collapse). Items at or above `threshold`, or whose
+# prompt exactly duplicates a training user turn, are flagged and make the
+# command exit with code 2.
+
+ngram: 8
+threshold: 0.5
+# Items shorter than `ngram` words but with at least this many words are
+# scored with one whole-item n-gram; shorter items get the exact-duplicate
+# check only.
+min_item_tokens: 4
+# Number of (eval item, training row) pairs listed in the report.
+top_k: 20
+# Message roles whose text is indexed from each training row. Tool calls are
+# rendered to text with the SFT preprocessing renderer before indexing.
+train_roles: [system, user, assistant, tool]
+# A timestamped sub-directory holding contamination_report.json is created here
+# (the engine's scratch/ in standalone mode, the host's artifact root otherwise).
+report_dir: artifact://scratch/contamination
+
+# Training JSONL files (SFT messages / prompt_completion, KTO, DPO, prompt-only).
+# Usually passed with --train-data instead.
+train_datasets: []
+
+eval:
+  # Evaluator config dir used to render scenario system templates. When unset,
+  # a scenario under <dir>/scenarios/ uses <dir> as its config dir.
+  config_dir: engine://Evaluator/config
+  # Include the scenario system prompt in the prompt text. Off by default:
+  # shared system boilerplate would dominate the n-grams.
+  include_system: false
+  # Dot-paths into each loaded PromptCase.metadata whose string leaves form a
+  # separate "reference" eval item (for example a prompt set's reference
+  # answer field). Empty means prompt text only.
+  reference_fields: []
+  # Evaluator scenario YAMLs or prompt sets (.json/.jsonl), loaded with the
+  # Evaluator's own loaders.
+  sources:
+    - engine://Evaluator/config/scenarios/tool_prompts.yaml
+    - engine://Evaluator/config/scenarios/behavior_prompts.yaml
+    - engine://Evaluator/config/scenarios/vault_gym.yaml
+    - engine://Evaluator/config/scenarios/labkit_epistemic_humility_smoke.yaml
+  # Plain JSONL eval text: one object per line.
+  #   - path: Datasets/some_holdout.jsonl
+  #     text_field: text      # dot-path, default "text"
+  #     id_field: id          # dot-path, default "id"
+  text_sources: []

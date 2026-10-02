@@ -128,6 +128,7 @@ def build_training_lineage(
             "source": dataset_source,
             "train_examples": len(train_dataset),
             "eval_examples": len(eval_dataset) if eval_dataset else 0,
+            "validation_group_key": config.dataset.validation_group_key,
         },
         run_dir=run_dir,
         trainer=trainer,
@@ -199,6 +200,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-file", type=str, help="Dataset file within HuggingFace dataset")
     parser.add_argument("--local-file", type=str, help="Path to local JSONL file (prompt/chosen/rejected)")
     parser.add_argument("--split-dataset", action="store_true", help="Create train/validation split")
+    parser.add_argument("--validation-group-key", type=str, default=None, help="Dot-path into each raw row (e.g. metadata.scenario); with --split-dataset, rows sharing a group stay on one side of the validation split")
 
     # Training configuration
     parser.add_argument("--output-dir", type=str, help="Override output directory")
@@ -321,6 +323,8 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
         config.dataset.dataset_name = args.dataset_name
     if args.dataset_file:
         config.dataset.dataset_file = args.dataset_file
+    if args.validation_group_key:
+        config.dataset.validation_group_key = args.validation_group_key
 
     if args.batch_size is not None:
         config.training.per_device_train_batch_size = args.batch_size
@@ -477,6 +481,7 @@ def main():
         num_proc=config.dataset.num_proc,
         test_size=config.dataset.test_size,
         split_dataset=args.split_dataset,
+        validation_group_key=config.dataset.validation_group_key,
     )
 
     # Validate dataset (prompt/chosen/rejected structure). DPO is paired and

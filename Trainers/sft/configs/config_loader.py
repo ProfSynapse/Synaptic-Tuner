@@ -124,6 +124,10 @@ class DatasetConfig:
     # Consume row-level train/validation assignments from an authoritative
     # prepared dataset instead of creating a random split.
     use_preassigned_splits: bool = False
+    # Optional dot-path into each raw row (e.g. "metadata.scenario"). When set
+    # and a validation split is created, rows sharing a group value stay on the
+    # same side and test_size applies over groups. None ⇒ random row split.
+    validation_group_key: Optional[str] = None
 
 
 @dataclass

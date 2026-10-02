@@ -318,7 +318,7 @@
     },
     "bootstrap__tuner__runtime__manifests__offline-sft-worker-v1_json": {
       "path": "tuner/runtime/manifests/offline-sft-worker-v1.json",
-      "sha256": "db4cc7be0be4a212cdd1d225be85398ea935ee29f908b7780692b07ef4569a35"
+      "sha256": "a9e317002e889168ee8ff37a4947f4851d5a0afd1743743636f3d61452e93c03"
     },
     "bootstrap__tuner__runtime__offline_sft_worker_py": {
       "path": "tuner/runtime/offline_sft_worker.py",

@@ -532,6 +532,7 @@ def build_training_lineage(
             "train_examples": len(train_dataset),
             "eval_examples": len(eval_dataset) if eval_dataset else 0,
             "filter_desirable": config.dataset.filter_desirable,
+            "validation_group_key": config.dataset.validation_group_key,
         },
         run_dir=run_dir,
         trainer=trainer,
@@ -788,6 +789,8 @@ def parse_args(argv=None):
         dest="require_memory_efficient_loss",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument("--validation-group-key", type=str, default=None,
+                       help="Dot-path into each raw row (e.g. metadata.scenario); with --split-dataset, rows sharing a group stay on one side of the validation split")
 
     # W&B tracking
     parser.add_argument("--wandb", action="store_true",
@@ -1118,6 +1121,8 @@ def run(args: argparse.Namespace):
         config.dataset.use_preassigned_splits = args.use_preassigned_splits
     if args.require_memory_efficient_loss is not None:
         config.training.require_memory_efficient_loss = args.require_memory_efficient_loss
+    if args.validation_group_key:
+        config.dataset.validation_group_key = args.validation_group_key
 
     # W&B setup
     if args.wandb:
@@ -1316,6 +1321,7 @@ def run(args: argparse.Namespace):
         aux_token_position=aux_head_cfg.token_position if aux_head_enabled else None,
         use_preassigned_splits=getattr(config.dataset, "use_preassigned_splits", False),
         preparation_metadata=dataset_preparation_metadata,
+        validation_group_key=config.dataset.validation_group_key,
     )
     prepared_dataset_format = dataset_preparation_metadata.get("dataset_format")
     if prepared_dataset_format in {"raw_text", "messages"}:

@@ -14,6 +14,11 @@ from shared.sft_preprocessing import (
     detect_sft_record_format,
     is_authoritative_preassigned_sft_record,
 )
+from shared.training_utils import (
+    DEFAULT_SPLIT_SEED,
+    extract_dataset_group_values,
+    split_train_validation,
+)
 
 
 def _map_num_proc(num_proc: int) -> Optional[int]:
@@ -37,7 +42,8 @@ def load_and_prepare_dataset(
     split_dataset: bool = False,
     filter_desirable: bool = False,
     tokenizer: Any = None,
-    apply_chat_template: bool = False
+    apply_chat_template: bool = False,
+    validation_group_key: Optional[str] = None,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare dataset for SFT training.
@@ -53,6 +59,10 @@ def load_and_prepare_dataset(
         tokenizer: Tokenizer for applying chat template (required if apply_chat_template=True)
         apply_chat_template: If True, preprocesses dataset into a canonical `text`
             column using the active chat template
+        validation_group_key: Optional dot-path into the raw row (e.g.
+            ``metadata.scenario``). When set and splitting, all rows sharing a
+            group value land on the same side and ``test_size`` applies over
+            groups. Missing values fail loudly with the row index.
 
     Returns:
         Tuple of (train_dataset, eval_dataset or None)
@@ -96,6 +106,12 @@ def load_and_prepare_dataset(
         print(f"Filtered: {original_size} → {filtered_count} examples")
         print(f"Removed: {original_size - filtered_count} undesirable examples")
 
+    # Read group values from the raw rows before any preprocessing drops columns.
+    group_values = None
+    if split_dataset and test_size > 0 and validation_group_key:
+        print(f"\nGrouping validation split by: {validation_group_key}")
+        group_values = extract_dataset_group_values(raw_datasets, validation_group_key)
+
     # Apply chat template preprocessing when requested. This produces a stable
     # `text` dataset shape that works across newer TRL/Unsloth stacks for both
     # packed and non-packed SFT runs.
@@ -133,9 +149,12 @@ def load_and_prepare_dataset(
     eval_dataset = None
     if split_dataset and test_size > 0:
         print(f"\nCreating train/validation split ({1-test_size:.0%}/{test_size:.0%})")
-        split = train_dataset.train_test_split(test_size=test_size, seed=42)
-        train_dataset = split["train"]
-        eval_dataset = split["test"]
+        train_dataset, eval_dataset = split_train_validation(
+            train_dataset,
+            test_size=test_size,
+            seed=DEFAULT_SPLIT_SEED,
+            group_values=group_values,
+        )
 
         print(f"  Training set: {len(train_dataset)} examples")
         print(f"  Validation set: {len(eval_dataset)} examples")
@@ -165,6 +184,7 @@ def load_and_prepare_tokenized_dataset(
     aux_token_position: str | int | None = None,
     use_preassigned_splits: bool = False,
     preparation_metadata: Optional[dict[str, str]] = None,
+    validation_group_key: Optional[str] = None,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare dataset into explicit tokenized SFT features.
@@ -175,6 +195,11 @@ def load_and_prepare_tokenized_dataset(
 
     ``aux_target_field`` (optional) names a per-row column to carry through as an
     ``aux_target`` feature for the auxiliary readout head. None ⇒ unchanged.
+
+    ``validation_group_key`` (optional) is a dot-path into the raw row; when set
+    and splitting, the validation split keeps every group on one side (see
+    :func:`shared.training_utils.split_train_validation`). Group values are read
+    before tokenization drops the raw columns.
     """
     print("=" * 60)
     print("LOADING ENCODED DATASET FOR SFT")
@@ -231,6 +256,17 @@ def load_and_prepare_tokenized_dataset(
             use_preassigned_splits=use_preassigned_splits,
         )
 
+    if validation_group_key and use_preassigned_splits:
+        raise ValueError(
+            "dataset.validation_group_key applies to the split_dataset split; it cannot "
+            "be combined with dataset.use_preassigned_splits=true."
+        )
+    # Read group values from the raw rows before tokenization drops the columns.
+    group_values = None
+    if split_dataset and test_size > 0 and validation_group_key:
+        print(f"\nGrouping validation split by: {validation_group_key}")
+        group_values = extract_dataset_group_values(raw_datasets, validation_group_key)
+
     print("\nPreparing explicit encoded SFT features...")
     eval_dataset = None
     records = [raw_datasets[index] for index in range(len(raw_datasets))]
@@ -286,9 +322,12 @@ def load_and_prepare_tokenized_dataset(
 
     if not use_preassigned_splits and split_dataset and test_size > 0:
         print(f"\nCreating train/validation split ({1-test_size:.0%}/{test_size:.0%})")
-        split = train_dataset.train_test_split(test_size=test_size, seed=42)
-        train_dataset = split["train"]
-        eval_dataset = split["test"]
+        train_dataset, eval_dataset = split_train_validation(
+            train_dataset,
+            test_size=test_size,
+            seed=DEFAULT_SPLIT_SEED,
+            group_values=group_values,
+        )
 
         print(f"  Training set: {len(train_dataset)} examples")
         print(f"  Validation set: {len(eval_dataset)} examples")

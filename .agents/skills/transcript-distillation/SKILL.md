@@ -93,6 +93,7 @@ text-first shape used by SFT/KTO/DPO/GRPO projections:
   "failure_labels": ["tool_error", "user_corrected", ...],
   "source_example_id": "claude_main:<file>:<turn>",
   "metadata": {
+    "session_id": "claude_main:<file>",   // shared by every turn row of a transcript
     "quality_tier": "gold|silver|bronze",
     "session_outcome": ["clean_build", "committed"],
     "good_path": true,
@@ -100,6 +101,12 @@ text-first shape used by SFT/KTO/DPO/GRPO projections:
   }
 }
 ```
+
+Turn rows from one session share most of their context window, so a random
+row-level validation split leaks. When training with `split_dataset`, set
+`dataset.validation_group_key: metadata.session_id` (SFT/KTO rows) or
+`provenance.prompt_key` (DPO projections) so whole sessions/prompt buckets land
+on one side; see `docs/common-tasks.md` "Grouped validation split".
 
 Build a dataset from it by filtering on `metadata.quality_tier` and/or `label`:
 SFT on `label==true` gold rows; route `label==null` (borderline) rows to an

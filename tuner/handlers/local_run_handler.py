@@ -1316,8 +1316,19 @@ class LocalRunHandler(BaseHandler):
             )
         if sft_only and training_cfg.get("require_memory_efficient_loss") is True:
             command.append("--require-memory-efficient-loss")
-        if bool(dataset_cfg.get("split_dataset", False)):
+        split_dataset = bool(dataset_cfg.get("split_dataset", False))
+        if split_dataset:
             command.append("--split-dataset")
+        # Grouped validation split (all three dispatched trainers accept the flag).
+        # A group key without a split would be silently ignored by the trainer, so
+        # reject that combination up front instead.
+        validation_group_key = dataset_cfg.get("validation_group_key")
+        if validation_group_key is not None:
+            if not split_dataset:
+                raise LocalRunError(
+                    "dataset.validation_group_key requires dataset.split_dataset: true."
+                )
+            _append_flag(command, "validation_group_key", str(validation_group_key))
 
         for key in (
             "batch_size",

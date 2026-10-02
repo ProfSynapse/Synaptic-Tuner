@@ -63,6 +63,7 @@ Explicit CLI flags override tier defaults.
 | `--dataset-name STR` | HuggingFace dataset |
 | `--dataset-file STR` | File within HF dataset |
 | `--split-dataset` | Create train/val split |
+| `--validation-group-key PATH` | Dot-path into each row; keeps groups on one side of the split |
 
 ### Utility
 | Flag | Description |

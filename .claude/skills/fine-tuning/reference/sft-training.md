@@ -48,6 +48,7 @@ Explicit CLI flags (e.g., `--learning-rate`) override tier defaults.
 | `--dataset-file STR` | Specific file in HF dataset | config value |
 | `--local-file PATH` | Local JSONL file (overrides HF) | — |
 | `--split-dataset` | Create train/validation split | false |
+| `--validation-group-key PATH` | Dot-path into each row; keeps groups on one side of the split | config value (null) |
 | `--use-preassigned-splits` | Consume declared raw-text train/validation splits | false |
 
 ### Experiment Tracking
