@@ -12,13 +12,22 @@ from SynthChat.workspace.sections import (
     _tool_wrapper_name,
 )
 from SynthChat.workspace.renderer import render_workspace_prompt
-from SynthChat.config.format_resolver import get_default_tool_call_format, load_workspace_formats
+from SynthChat.config.format_resolver import (
+    get_default_tool_call_format,
+    load_tool_call_formats,
+    load_workspace_formats,
+)
 
 
 def _default_tool_fmt(**overrides):
     fmt = get_default_tool_call_format()
     fmt.update(overrides)
     return fmt
+
+
+def _configured_tool_fmt():
+    """The configured default tool-call format from tool_call_formats.yaml."""
+    return load_tool_call_formats()["default"]
 
 
 def _default_ws_fmt():
@@ -29,8 +38,14 @@ def _default_ws_fmt():
 # ---- _tool_wrapper_name ----
 
 class TestToolWrapperName:
-    def test_default_name(self):
-        assert _tool_wrapper_name(None, _default_tool_fmt()) == "useTools"
+    def test_builtin_default_has_no_wrapper(self):
+        # The code default is format-agnostic: no wrapper unless config names one.
+        assert _tool_wrapper_name(None, _default_tool_fmt()) == ""
+
+    def test_configured_default_format_supplies_wrapper(self):
+        fmt = _configured_tool_fmt()
+        assert fmt["wrapper_name"]
+        assert _tool_wrapper_name(None, fmt) == fmt["wrapper_name"]
 
     def test_custom_wrapper_via_config(self):
         assert _tool_wrapper_name(None, _default_tool_fmt(wrapper_name="customWrapper")) == "customWrapper"
@@ -42,10 +57,10 @@ class TestToolWrapperName:
         fmt.pop("wrapper_name", None)
         result = _tool_wrapper_name(schema, fmt)
         # resolve_wrapper_name checks format_config first; if not present, checks tool_schema
-        assert result in ("useTools", "schemaWrapper")
+        assert result == "schemaWrapper"
 
     def test_no_tool_format(self):
-        assert _tool_wrapper_name({}, _default_tool_fmt()) == "useTools"
+        assert _tool_wrapper_name({}, _default_tool_fmt()) == ""
 
 
 # ---- _build_wrapped_section ----
@@ -123,9 +138,18 @@ class TestRenderAvailableTools:
         }
         result = _render_available_tools(schema, _default_tool_fmt())
         assert "fileManager:" in result
-        assert "read" in result
-        assert "write" in result
-        assert "useTools" in result  # default wrapper
+        assert "- read: required [path] optional [-]" in result
+        assert "- write: required [path, content] optional [-]" in result
+        assert _default_tool_fmt()["available_tools_instruction"] in result
+        # No wrapper is configured, so no wrapper instruction is rendered.
+        assert "wrapper for tool calls" not in result
+
+    def test_renders_configured_wrapper(self):
+        schema = {"tools": {"fileManager": [{"name": "read", "params": {"required": ["path"]}}]}}
+        fmt = _configured_tool_fmt()
+        result = _render_available_tools(schema, fmt)
+        assert f"Use the `{fmt['wrapper_name']}` wrapper for tool calls." in result
+        assert "fileManager:" in result
 
     def test_custom_wrapper_in_output(self):
         schema = {
