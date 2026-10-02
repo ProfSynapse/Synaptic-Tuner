@@ -213,8 +213,17 @@ dataset:
   num_proc: 1                       # Must be 1 on Windows/WSL
   test_size: 0.1                    # Validation split ratio
   split_dataset: false
+  validation_group_key: null        # Dot-path (e.g. metadata.scenario); keeps groups on one side
   filter_desirable: false           # SFT doesn't need filtering
 ```
+
+`validation_group_key` (SFT, KTO, DPO; forwarded by `local-run` as
+`--validation-group-key`) replaces the random row split with a grouped one:
+`test_size` is applied over distinct group values, every row of a group lands
+on the same side, and the assignment is deterministic for the split seed (42).
+A missing/null/empty value fails with the row index; it requires
+`split_dataset: true` and cannot be combined with `use_preassigned_splits`.
+Recommended keys per data source are in `docs/common-tasks.md` section 1c.
 
 ### Evolutionary Section (Experimental)
 ```yaml
@@ -308,6 +317,7 @@ dataset:
   local_file: ../../Datasets/behavior_merged_kto_v1.5_balanced.jsonl
   num_proc: 1
   test_size: 0.1
+  validation_group_key: null        # Same grouped split as SFT (with --split-dataset)
 ```
 
 ---

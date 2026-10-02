@@ -101,6 +101,67 @@ python tuner.py local-run --job-config <yaml> --yes                # Skip confir
 
 ---
 
+## 1c. Grouped Validation Split
+
+With `split_dataset: true` the SFT, KTO and DPO loaders carve a validation set
+out of the training file. The default is a random row split
+(`train_test_split(seed=42)`), which puts near-duplicate variants of one
+scenario, seed fixture or transcript on both sides and makes validation loss
+optimistic. Set `dataset.validation_group_key` to a dot-path into the raw row
+and every row sharing that value lands on the same side; `test_size` is then
+applied over groups (`ceil(test_size * n_groups)` groups go to validation,
+chosen deterministically from the seed).
+
+```yaml
+# Trainers/recipes/<recipe>.yaml (local-run forwards it as --validation-group-key)
+dataset:
+  local_file: Datasets/kto/vault_shared_seed_dynamic_roles_kto_20260316.jsonl
+  split_dataset: true
+  validation_group_key: scenario_id
+```
+
+```bash
+# Direct trainer use
+cd Trainers/sft && python train_sft.py --split-dataset --validation-group-key metadata.scenario
+```
+
+- Missing, null or empty values fail loudly with the row index; fewer than two
+  distinct groups is an error. Unset keeps the random split byte-identical.
+- The same three settings (`split_dataset`, `test_size`,
+  `validation_group_key`) are forwarded by every SFT/KTO/DPO lane with one
+  shared validation: `local-run` (recipe `dataset:`), `cloud` and
+  `cloud-pipeline` (trainer `config.yaml` plus `--train-split-dataset`,
+  `--train-test-size`, `--train-validation-group-key`), `run-experiment`
+  (`experiment.dataset.*`) and RunPod. A group key without
+  `split_dataset: true` or a `test_size` outside (0, 1) is refused before
+  anything is submitted, and the trainers refuse it again at load time.
+  `cloud-run` executes user-authored `run.steps`, so pass the trainer flags
+  (`--split-dataset --test-size --validation-group-key`) there directly.
+- The packaged Modal / TrainingAPI SFT path trains on prepared datasets with
+  preassigned splits only (`split_dataset` is fixed to false by its versioned
+  contract), so it has no grouped split.
+- The SFT loader rejects `validation_group_key` together with
+  `use_preassigned_splits` (prepared datasets already carry their split from
+  `prepare-dataset`).
+- GRPO does not create a validation split, so it has no group key.
+
+**Recommended keys** (from what the generators actually write):
+
+| Rows produced by | Key | Groups |
+|------------------|-----|--------|
+| SynthChat `generate` (canonical rollouts) | `metadata.scenario` | One scenario template per group (strict template holdout) |
+| SynthChat rollouts, keeping shared-seed variants together | `metadata.environment_seed.seed_id` | One environment seed fixture per group (coarser: several scenarios share a seed) |
+| `project_rollout_datasets.py` KTO/SFT/GRPO projections | `scenario_id` (or `metadata.seed_id`) | Template; `metadata.seed_id` also keeps all turn rows of an episode together |
+| Transcript distillation (`distill.py`) | `metadata.session_id` | One transcript per group; turn rows of a session share most of their context |
+| Transcript distillation DPO projection | `provenance.prompt_key` | All chosen x rejected pairs of one prompt bucket |
+
+The legacy checked-in SFT files (`Datasets/nonthinking_tools_sft_*.jsonl`,
+`sft_train_67pct_12.25.jsonl`) carry no per-row group metadata, so a grouped
+split is not available for them; regenerate with metadata or keep the random
+split.
+
+---
+
 ## 2. Uploading to HuggingFace
 
 **Via CLI (Recommended):**
@@ -270,6 +331,51 @@ START: User wants to improve dataset quality
 ```bash
 python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/your_dataset.jsonl
 ```
+
+---
+
+## 5b. Checking Train/Eval Contamination (`check-contamination`)
+
+Before trusting eval numbers, check that eval prompts are not sitting in the
+training data. For every eval item the command reports the highest fraction of
+its word 8-grams found in any single training row (after NFKC, lowercase,
+punctuation stripping and whitespace collapse), plus exact duplicate prompts.
+
+```bash
+# Default eval sources (all Evaluator scenarios) from configs/contamination/default.yaml
+python tuner.py check-contamination --train-data Datasets/nonthinking_tools_sft_04.22.26.jsonl
+
+# Several datasets, explicit sources, JSON output
+python tuner.py check-contamination \
+  --train-data Datasets/nonthinking_tools_sft_04.22.26.jsonl \
+  --train-data Datasets/kto/vault_shared_seed_dynamic_roles_kto_20260316.jsonl \
+  --eval-source Evaluator/config/scenarios/behavior_prompts.yaml \
+  --eval-text Datasets/my_holdout.jsonl --threshold 0.5 --json
+
+# Write the training set minus flagged rows (+ <out>.removed.json sidecar)
+python tuner.py check-contamination --train-data Datasets/my_sft.jsonl \
+  --write-decontaminated scratch/decontam/my_sft.decontaminated.jsonl
+```
+
+- Training rows: any trainer format (SFT `messages`/`conversations`,
+  `prompt`/`completion`, KTO rows with `label`, prepared `raw_text`, DPO
+  `prompt`/`chosen`/`rejected`, prompt-only GRPO), read with the SFT
+  preprocessing format detection and tool-call rendering.
+- Eval sources: Evaluator scenario YAMLs and prompt sets (`.json`/`.jsonl`)
+  loaded with the Evaluator's own loaders, plus plain JSONL text
+  (`--eval-text`, field via `--eval-text-field` or `eval.text_sources`).
+  `eval.reference_fields` adds reference text (dot-paths into the case
+  metadata) as separate items.
+- Exit codes: `0` nothing flagged, `2` at least one item at/above `--threshold`
+  or exactly duplicated in training, `1` error. A timestamped
+  `contamination_report.json` is written under `scratch/contamination/` (the
+  host artifact root in host-project mode) or `--report-dir`.
+- Knobs (`ngram`, `threshold`, `min_item_tokens`, `top_k`, `train_roles`,
+  sources) live in `configs/contamination/default.yaml`; pass
+  `--contamination-config` for a project-specific file.
+- `--write-decontaminated` never edits the source. For KTO data, rows are
+  removed individually, so re-check label balance (the KTO trainer re-interleaves
+  at load time).
 
 ---
 

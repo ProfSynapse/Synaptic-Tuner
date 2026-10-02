@@ -17,7 +17,7 @@ import yaml
 from shared.utilities.paths import get_canonical_trainer_dir_name
 from shared.utilities.unique_ids import unique_utc_timestamp
 from tuner.cloud import HF_BUCKET_SYNC_OVERLAY_PACKAGES
-from tuner.core.config import CloudTrainingConfig
+from tuner.core.config import CloudTrainingConfig, validation_split_flags
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.stages._util import hf_verified_source_steps
 
@@ -164,6 +164,14 @@ class HFCommandBuilderMixin:
                     "Trainers/grpo/configs/env_config.yaml instead."
                 )
             training_args.extend(["--max-seq-length", str(config.max_seq_length)])
+        training_args.extend(
+            validation_split_flags(
+                method=config.method,
+                split_dataset=config.split_dataset,
+                test_size=config.test_size,
+                validation_group_key=config.validation_group_key,
+            )
+        )
         # chat_template_kwargs is a nested mapping; serialize to the same JSON-string
         # --chat-template-kwargs flag the local lane uses (one wire format, both
         # lanes). sft-only: dpo/kto template internally via TRL and expose no flag.

@@ -550,3 +550,24 @@ class TestGeneratePodName:
         # Timestamp format: YYYYMMDD-HHMMSS
         parts = name.split("-")
         assert len(parts) >= 3
+
+
+class TestRunPodValidationSplitForwarding:
+    def test_startup_command_forwards_grouped_split(self, repo_root, clean_env):
+        backend = RunPodBackend(repo_root)
+        config = _cloud_config(
+            method="kto", split_dataset=True, test_size=0.2, validation_group_key="scenario_id"
+        )
+        cmd = backend._build_startup_command(config, {})
+        assert "python train_kto.py" in cmd
+        assert cmd.endswith("--split-dataset --test-size 0.2 --validation-group-key scenario_id")
+
+    def test_startup_command_unchanged_without_split(self, repo_root, clean_env):
+        backend = RunPodBackend(repo_root)
+        cmd = backend._build_startup_command(_cloud_config(test_size=0.1), {})
+        assert "--split-dataset" not in cmd and "--test-size" not in cmd
+
+    def test_startup_command_refuses_group_key_without_split(self, repo_root, clean_env):
+        backend = RunPodBackend(repo_root)
+        with pytest.raises(ConfigurationError, match="requires dataset.split_dataset"):
+            backend._build_startup_command(_cloud_config(validation_group_key="scenario_id"), {})

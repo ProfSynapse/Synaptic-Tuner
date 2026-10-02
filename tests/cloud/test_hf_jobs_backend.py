@@ -987,3 +987,49 @@ class TestParseTimeout:
     def test_case_insensitive(self):
         assert _parse_timeout("4H") == 4.0
         assert _parse_timeout("90M") == 1.5
+
+
+class TestHFJobsValidationSplitForwarding:
+    """split_dataset / test_size / validation_group_key reach the HF trainer argv."""
+
+    @pytest.mark.parametrize("method", ["sft", "kto", "dpo"])
+    def test_command_forwards_grouped_split(self, repo_root, method):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method=method, split_dataset=True, test_size=0.2, validation_group_key="metadata.scenario"
+        )
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+        assert f"python train_{method}.py" in cmd
+        assert " --split-dataset --test-size 0.2 --validation-group-key metadata.scenario" in cmd
+
+    def test_command_omits_split_flags_when_unset(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        cmd = backend._build_training_command(_cloud_config(test_size=0.1), timestamp="20260314_181946")
+        assert "--split-dataset" not in cmd
+        assert "--test-size" not in cmd
+        assert "--validation-group-key" not in cmd
+
+    def test_command_refuses_group_key_without_split(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(validation_group_key="metadata.scenario")
+        with pytest.raises(ConfigurationError, match="requires dataset.split_dataset"):
+            backend._build_training_command(config, timestamp="20260314_181946")
+
+    def test_load_config_reads_trainer_dataset_split_settings(self, repo_root, canonical_repo_source):
+        import yaml
+
+        config_path = repo_root / "Trainers" / "sft" / "configs" / "config.yaml"
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        raw["dataset"].update(
+            {"split_dataset": True, "test_size": 0.25, "validation_group_key": "metadata.seed_id"}
+        )
+        config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        backend = HFJobsBackend(repo_root)
+        with patch(
+            "tuner.backends.training.cloud.hf_jobs_backend.resolve_repo_source",
+            return_value=canonical_repo_source,
+        ):
+            config = backend.load_config("sft")
+        assert (config.split_dataset, config.test_size, config.validation_group_key) == (
+            True, 0.25, "metadata.seed_id",
+        )

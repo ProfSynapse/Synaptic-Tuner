@@ -291,3 +291,62 @@ class CloudTrainingConfig(TrainingConfig):
     evolutionary_cache_baseline: Optional[bool] = None
     evolutionary_log_candidates: Optional[bool] = None
     evolutionary_log_selected: Optional[bool] = None
+    # Validation split settings forwarded to the SFT/KTO/DPO trainers (see
+    # validation_split_flags). None ⇒ the remote trainer uses its config.yaml.
+    split_dataset: Optional[bool] = None
+    test_size: Optional[float] = None
+    validation_group_key: Optional[str] = None
+
+
+VALIDATION_SPLIT_METHODS = ("sft", "kto", "dpo")
+
+
+def validation_split_flags(
+    *,
+    method: str,
+    split_dataset: Optional[bool],
+    test_size: Optional[float],
+    validation_group_key: Optional[str],
+) -> List[str]:
+    """Trainer argv for the validation split settings, validated once for every lane.
+
+    Shared by local-run, HF Jobs (cloud, cloud-pipeline, run-experiment) and
+    RunPod so each lane forwards ``split_dataset`` / ``test_size`` /
+    ``validation_group_key`` identically and refuses the same invalid
+    combinations. Nothing is emitted unless a split is requested, so existing
+    commands are unchanged; ``--test-size`` is only emitted with a split.
+
+    Raises:
+        ConfigurationError: a group key without ``split_dataset: true``, a
+            ``test_size`` outside (0, 1), or split settings for a method whose
+            trainer creates no validation split.
+    """
+    from tuner.core.exceptions import ConfigurationError
+
+    group_key = None if validation_group_key is None else str(validation_group_key).strip()
+    if validation_group_key is not None and not group_key:
+        raise ConfigurationError("dataset.validation_group_key must be a non-empty dot-path.")
+    # test_size alone is not a request: trainer configs always carry one and it
+    # only matters once a split is enabled.
+    requested = bool(split_dataset) or group_key is not None
+    if not requested:
+        return []
+    if method not in VALIDATION_SPLIT_METHODS:
+        raise ConfigurationError(
+            f"Validation split settings are not supported for method '{method}' "
+            f"(supported: {', '.join(VALIDATION_SPLIT_METHODS)})."
+        )
+    if group_key is not None and split_dataset is not True:
+        raise ConfigurationError("dataset.validation_group_key requires dataset.split_dataset: true.")
+    if test_size is not None:
+        if isinstance(test_size, bool) or not isinstance(test_size, (int, float)) or not 0 < float(test_size) < 1:
+            raise ConfigurationError(f"dataset.test_size must be a number in (0, 1), got {test_size!r}.")
+    flags: List[str] = []
+    if split_dataset:
+        flags.append("--split-dataset")
+        if test_size is not None:
+            flags.extend(["--test-size", str(float(test_size))])
+        if group_key is not None:
+            flags.extend(["--validation-group-key", group_key])
+    return flags
+

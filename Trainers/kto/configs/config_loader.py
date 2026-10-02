@@ -96,6 +96,10 @@ class DatasetConfig:
     local_file: Optional[str]
     num_proc: int
     test_size: float
+    # Optional dot-path into each raw row (e.g. "metadata.scenario"). When set
+    # and a validation split is created, rows sharing a group value stay on the
+    # same side and test_size applies over groups. None ⇒ random row split.
+    validation_group_key: Optional[str] = None
 
 
 @dataclass

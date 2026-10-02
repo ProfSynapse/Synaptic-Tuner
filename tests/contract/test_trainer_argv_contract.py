@@ -141,7 +141,18 @@ HF_ALL_OPTIONAL = dict(
     evolutionary_log_selected=False,
     publish_final_model=True,
     publish_target_repo="org/model",
+    split_dataset=True,
+    test_size=0.2,
+    validation_group_key="metadata.scenario",
 )
+# Validation split settings exist only for the SFT/KTO/DPO trainers.
+NO_SPLIT = dict(split_dataset=None, test_size=None, validation_group_key=None)
+
+
+def _assert_split_forwarded(args: argparse.Namespace) -> None:
+    assert (args.split_dataset, args.test_size, args.validation_group_key) == (
+        True, 0.2, "metadata.scenario",
+    )
 
 
 def _hf_command(method: str, **overrides) -> str:
@@ -157,12 +168,78 @@ def _hf_command(method: str, **overrides) -> str:
 @pytest.mark.parametrize("method", ["sft", "kto", "dpo"])
 def test_hf_jobs_trainer_argv_is_accepted(method):
     command = _hf_command(method)
-    assert_trainer_accepts(method, _split_trainer_argv(command, f"train_{method}.py"), f"HF Jobs {method}")
+    args = assert_trainer_accepts(method, _split_trainer_argv(command, f"train_{method}.py"), f"HF Jobs {method}")
+    _assert_split_forwarded(args)
+
+
+@pytest.mark.parametrize("method", ["sft", "kto", "dpo"])
+def test_cloud_pipeline_split_overrides_reach_the_trainer(method):
+    # cloud / cloud-pipeline: --train-* split overrides -> HF Jobs trainer argv.
+    from tuner.backends.training.cloud.hf_jobs_backend import HFJobsBackend
+    from tuner.cli.parser import create_parser
+    from tuner.handlers.cloud_train_handler import CloudTrainHandler
+
+    cli = create_parser().parse_args([
+        "cloud-pipeline", "--json", "--train-split-dataset", "--train-test-size", "0.2",
+        "--train-validation-group-key", "metadata.scenario",
+    ])
+    trainer_dir = ROOT / "Trainers" / method
+    config = _cloud_config(
+        method=method, config_path=trainer_dir / "configs" / "config.yaml", trainer_dir=trainer_dir,
+    )
+    config = CloudTrainHandler(args=cli)._apply_training_overrides(config)
+    command = HFJobsBackend(ROOT)._build_training_command(config, timestamp="20260101_000000")
+    args = assert_trainer_accepts(method, _split_trainer_argv(command, f"train_{method}.py"), f"cloud-pipeline {method}")
+    _assert_split_forwarded(args)
+
+
+@pytest.mark.parametrize("method", ["sft", "kto", "dpo"])
+def test_run_experiment_dataset_split_reaches_the_trainer(method, monkeypatch, tmp_path):
+    # run-experiment: experiment.dataset split settings -> HF training stage -> trainer argv.
+    from shared.experiment_tracking.experiment_spec import ExperimentSpec
+    from tuner.backends.training.cloud.hf_jobs_backend import HFJobsBackend
+    from tuner.handlers.stages import hf_training_stage
+
+    trainer_dir = ROOT / "Trainers" / method
+    backend = HFJobsBackend(ROOT)
+    built = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _prepare_source(config, run_id):
+        built["command"] = backend._build_training_command(config, timestamp="20260101_000000")
+        raise _Stop
+
+    backend.load_config = lambda m: _cloud_config(
+        method=m, config_path=trainer_dir / "configs" / "config.yaml", trainer_dir=trainer_dir,
+    )
+    backend.prepare_source = _prepare_source
+    monkeypatch.setattr(hf_training_stage.TrainingBackendRegistry, "get", lambda *a, **k: backend)
+    spec = ExperimentSpec.from_dict({"experiment": {
+        "name": "contract", "provider": "hf_jobs", "method": method,
+        "dataset": {
+            "source": "org/data", "file": "train.jsonl", "split_dataset": True,
+            "test_size": 0.2, "validation_group_key": "metadata.scenario",
+        },
+        "training": {"model_name": "org/model"},
+    }})
+    tracking = SimpleNamespace(
+        project_context=None, base_dir=tmp_path, tracking_uri=lambda path: "tracking://x",
+    )
+    runner = hf_training_stage.HFTrainingStageRunner(repo_root=ROOT, tracking_service=tracking)
+    monkeypatch.setattr(runner, "_recover_existing_training", lambda **_: None)
+    with pytest.raises(_Stop):
+        runner.run(spec, SimpleNamespace(experiment_id="exp-1", source_transport_state=None))
+    args = assert_trainer_accepts(
+        method, _split_trainer_argv(built["command"], f"train_{method}.py"), f"run-experiment {method}",
+    )
+    _assert_split_forwarded(args)
 
 
 def test_hf_jobs_env_grpo_argv_is_accepted():
     # max_seq_length has no env-GRPO meaning and is refused by the builder.
-    command = _hf_command("grpo", max_seq_length=None)
+    command = _hf_command("grpo", max_seq_length=None, **NO_SPLIT)
     argv = _split_trainer_argv(command, "train_env_grpo.py")
     args = assert_trainer_accepts("env_grpo", argv, "HF Jobs env-GRPO")
     assert (args.seed, args.save_steps, args.save_total_limit) == (7, 10, 2)
@@ -190,9 +267,11 @@ def test_runpod_trainer_argv_is_accepted(method):
     config = _cloud_config(
         method=method, provider="runpod", artifact_mount_path="/workspace",
         publish_final_model=True, publish_target_repo="org/model",
+        split_dataset=True, test_size=0.2, validation_group_key="metadata.scenario",
     )
     command = backend._build_startup_command(config, {})
-    assert_trainer_accepts(method, _split_trainer_argv(command, f"train_{method}.py"), f"RunPod {method}")
+    args = assert_trainer_accepts(method, _split_trainer_argv(command, f"train_{method}.py"), f"RunPod {method}")
+    _assert_split_forwarded(args)
 
 
 # ---------------------------------------------------------------------------
@@ -229,12 +308,16 @@ def test_local_run_trainer_argv_is_accepted(method, tmp_path):
             "out_activation": "sigmoid", "input_norm": "none", "lm_loss_weight": 0.0,
             "head_lr": 1e-4,
         },
-        dataset_config={"split_dataset": True, "name": "org/data", "file": "train.jsonl"},
+        dataset_config={
+            "split_dataset": True, "test_size": 0.2, "validation_group_key": "metadata.scenario",
+            "name": "org/data", "file": "train.jsonl",
+        },
         model_config=model_config,
     )
     script = f"train_{method}.py"
     argv = command[command.index(script) + 1:]
-    assert_trainer_accepts(method, argv, f"local-run {method}")
+    args = assert_trainer_accepts(method, argv, f"local-run {method}")
+    _assert_split_forwarded(args)
 
 
 @pytest.mark.parametrize("method", ["kto", "dpo"])

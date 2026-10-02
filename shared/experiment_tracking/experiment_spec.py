@@ -18,6 +18,11 @@ class DatasetSpec:
     source: str
     file: str
     hash: str = ""
+    # Validation split forwarded to the SFT/KTO/DPO trainer. None ⇒ the trainer
+    # config.yaml value applies; a group key requires split_dataset: true.
+    split_dataset: Optional[bool] = None
+    test_size: Optional[float] = None
+    validation_group_key: Optional[str] = None
 
     @property
     def identifier(self) -> str:

@@ -109,6 +109,30 @@ def builtin_descriptors() -> tuple[CapabilityDescriptor, ...]:
             supports=_supports(),
         ),
         CapabilityDescriptor(
+            id="dataset.contamination-check",
+            summary=(
+                "Report word n-gram containment of configured eval prompts inside training "
+                "datasets; exits 2 when an item reaches the threshold or is an exact duplicate."
+            ),
+            command=("check-contamination",),
+            inputs=(
+                {"name": "contamination_config", "type": "path", "access": "read", "required": False},
+                {"name": "train_data", "type": "path", "access": "read", "required": False},
+                {"name": "eval_source", "type": "path", "access": "read", "required": False},
+                {"name": "eval_text", "type": "path", "access": "read", "required": False},
+                {"name": "report_dir", "type": "path", "access": "write", "required": False},
+                {"name": "write_decontaminated", "type": "path", "access": "write", "required": False},
+            ),
+            outputs=(
+                {"kind": "contamination_report", "root": "artifact"},
+                {"kind": "decontaminated_jsonl", "root": "external"},
+            ),
+            effects=_effects(write=True, network=False, gpu="none"),
+            confirmation={"required": False},
+            resumable=False,
+            supports=_supports(),
+        ),
+        CapabilityDescriptor(
             id="cloud.launch",
             summary="Submit a config-defined training job to Hugging Face Jobs.",
             command=("cloud-run",),

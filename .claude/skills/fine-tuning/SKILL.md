@@ -35,6 +35,8 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
 | Analyze/prune dataset from loss | `python3 scripts/prune_dataset_from_loss.py --dataset-path ... --experiment-id ... --analyze-only` |
+| Train/eval contamination check | `python tuner.py check-contamination --train-data Datasets/<train>.jsonl` |
+| Grouped validation split | recipe `dataset: {split_dataset: true, validation_group_key: metadata.scenario}` |
 | Standalone prompt optimization | `python tuner.py prompt-optimize --prompt-opt-config configs/prompt_optimization/NAME.yaml` |
 | Prompt-optimize SynthChat generation | `python -m SynthChat.run generate --prompt-opt-config configs/prompt_optimization/NAME.yaml [options]` |
 | Analyze bucket-backed run | `python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/` |

@@ -15,6 +15,7 @@ Routes top-level commands to their handlers:
   - status: StatusHandler (system status overview)
   - doctor: DoctorHandler (system diagnostics with recommendations)
   - list: ListHandler (resource discovery)
+  - check-contamination: ContaminationHandler (train/eval n-gram leakage check)
   - (none): MainMenuHandler (interactive menu)
 
 Args are passed to handlers to support global flags like --json.
@@ -114,6 +115,12 @@ def route_command(args: Namespace, context: ProjectContext | None = None) -> int
         from tuner.handlers.dataset_prepare_handler import DatasetPrepareHandler
         return DatasetPrepareHandler(args=args, context=context).handle()
 
+    # Local train/eval leakage check over datasets and eval configs; routed with
+    # the other dataset commands, ahead of the runtime handler imports.
+    if command == "check-contamination":
+        from tuner.handlers.contamination_handler import ContaminationHandler
+        return ContaminationHandler(args=args, context=context).handle()
+
     if command == "batch-generate":
         from tuner.handlers.batch_generate_handler import BatchGenerateHandler
         return _bind_context(BatchGenerateHandler(args=args), context).handle()
@@ -212,7 +219,7 @@ def route_command(args: Namespace, context: ProjectContext | None = None) -> int
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, cloud, cloud-run, local-run, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, bucket, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, experiment-loop, prompt-optimize, surgery, status, doctor, list)",
+                "message": "JSON mode requires a command (train, cloud, cloud-run, local-run, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, bucket, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, experiment-loop, prompt-optimize, surgery, status, doctor, list, check-contamination)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()

@@ -23,6 +23,26 @@ The evaluator does not hardcode a specific tool family, manager id, wrapper name
 | Eval with environment runtime | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --env-backend local` |
 | Eval with LLM judge | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --judge --judge-rubrics tool_call_quality` |
 | Eval + upload to HF | `python -m Evaluator.cli --backend unsloth --model PATH --upload-to-hf user/model` |
+| Train/eval contamination check | `python tuner.py check-contamination --train-data Datasets/<train>.jsonl [--eval-source <scenario.yaml>] [--json]` |
+
+## Contamination Check Before Trusting Scores
+
+Run `python tuner.py check-contamination` whenever a training set or the eval
+scenarios change. It loads eval prompts with the Evaluator's own scenario and
+prompt-set loaders and reports, per item, the highest fraction of its word
+8-grams found in any single training row (normalized: NFKC, lowercase,
+punctuation stripped, whitespace collapsed) plus exact duplicate prompts.
+
+- Defaults and eval sources live in `configs/contamination/default.yaml`
+  (all scenarios under `Evaluator/config/scenarios/`); override with
+  `--eval-source`, `--eval-text` (plain JSONL), `--ngram`, `--threshold`,
+  `--min-item-tokens`, `--top-k` or `--contamination-config`.
+- Exit `2` means an item reached the threshold (default 0.5) or is an exact
+  duplicate; treat its scores as contaminated. `--write-decontaminated <path>`
+  writes the training set minus flagged rows plus a `.removed.json` sidecar.
+- Reports land in `scratch/contamination/<timestamp>/contamination_report.json`
+  (or `--report-dir`). Do not edit datasets or scenarios to make the check pass
+  without the user's decision.
 
 ## Status System
 

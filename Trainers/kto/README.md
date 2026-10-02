@@ -366,6 +366,7 @@ kto/
 --dataset-file FILE              Dataset file within HF dataset
 --local-file PATH                Path to local JSONL file
 --split-dataset                  Create train/validation split
+--validation-group-key PATH      Keep rows sharing this dot-path value on one side of the split
 --output-dir DIR                 Override output directory
 --batch-size SIZE                Override batch size
 --gradient-accumulation STEPS    Override gradient accumulation

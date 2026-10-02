@@ -88,6 +88,7 @@ def _primary_config_path(args, invocation_cwd: Path) -> Path | None:
         "gates_config",
         "flywheel_config",
         "export_config",
+        "contamination_config",
     ):
         raw = getattr(args, name, None)
         if not raw or "://" in str(raw):

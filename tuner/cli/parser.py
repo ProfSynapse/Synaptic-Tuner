@@ -286,6 +286,7 @@ Commands:
   prepare-dataset  Convert one verified bundle into a private training dataset
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
+  check-contamination  N-gram containment of eval prompts inside training data
 
 Flywheel Subcommands:
   flywheel status       Show flywheel system status
@@ -336,13 +337,15 @@ Examples:
   python tuner.py ml train --config path/to/config.yaml
   python tuner.py ml list-configs      # Show available configs
   python tuner.py list models --json   # List models as JSON
+  python tuner.py check-contamination --train-data Datasets/my_sft.jsonl
+  python tuner.py check-contamination --train-data Datasets/my_sft.jsonl --eval-source Evaluator/config/scenarios/tool_prompts.yaml --threshold 0.5 --json
 """
     )
 
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "modal-runtime-release", "ingest", "prepare-dataset", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "modal-runtime-release", "ingest", "prepare-dataset", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment", "check-contamination"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -625,6 +628,11 @@ Examples:
     parser.add_argument("--train-num-epochs", type=int, help="Override epochs for cloud/cloud-pipeline training.")
     parser.add_argument("--train-max-steps", type=int, help="Override max training steps for cloud/cloud-pipeline training.")
     parser.add_argument("--train-max-seq-length", type=int, help="Override max sequence length for cloud/cloud-pipeline training.")
+    parser.add_argument("--train-split-dataset", action="store_true", dest="train_split_dataset", help="Create a train/validation split in cloud/cloud-pipeline SFT/KTO/DPO training.")
+    parser.add_argument("--train-no-split-dataset", action="store_false", dest="train_split_dataset", help="Disable the train/validation split for cloud/cloud-pipeline training.")
+    parser.set_defaults(train_split_dataset=None)
+    parser.add_argument("--train-test-size", type=float, help="Validation fraction (of rows, or of groups with a group key) for cloud/cloud-pipeline training.")
+    parser.add_argument("--train-validation-group-key", help="Dot-path into each row; keeps groups on one side of the cloud/cloud-pipeline validation split (requires --train-split-dataset or split_dataset in the trainer config).")
     parser.add_argument("--train-lora-r", type=int, help="Override LoRA rank for cloud/cloud-pipeline SFT training.")
     parser.add_argument("--train-lora-alpha", type=int, help="Override LoRA alpha for cloud/cloud-pipeline SFT training.")
     parser.add_argument("--train-lora-dropout", type=float, help="Override LoRA dropout for cloud/cloud-pipeline SFT training.")
@@ -792,6 +800,60 @@ Examples:
         "--prompt-opt-output-dir",
         dest="prompt_opt_output_dir",
         help="Override output directory for prompt optimization artifacts.",
+    )
+
+    # check-contamination flags (train/eval leakage check). Defaults live in
+    # configs/contamination/default.yaml; these override it.
+    parser.add_argument(
+        "--contamination-config",
+        dest="contamination_config",
+        help="Contamination check config YAML (default: configs/contamination/default.yaml).",
+    )
+    parser.add_argument(
+        "--train-data",
+        dest="train_data",
+        action="append",
+        help="Training JSONL to check (repeatable; replaces the config's train_datasets).",
+    )
+    parser.add_argument(
+        "--eval-source",
+        dest="eval_source",
+        action="append",
+        help="Evaluator scenario YAML or prompt set .json/.jsonl (repeatable; replaces the config's eval sources).",
+    )
+    parser.add_argument(
+        "--eval-text",
+        dest="eval_text",
+        action="append",
+        help="Plain JSONL of eval text, one object per line (repeatable; replaces the config's eval sources).",
+    )
+    parser.add_argument(
+        "--eval-text-field",
+        dest="eval_text_field",
+        help="Field (dot-path) holding the text in --eval-text files (default: text).",
+    )
+    parser.add_argument("--ngram", type=int, help="Word n-gram size for check-contamination (default from config: 8).")
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        help="Containment at/above which an eval item is flagged; any flag exits 2 (default from config: 0.5).",
+    )
+    parser.add_argument(
+        "--min-item-tokens",
+        dest="min_item_tokens",
+        type=int,
+        help="Shortest eval item (words) still scored by containment (default from config: 4).",
+    )
+    parser.add_argument("--top-k", dest="top_k", type=int, help="Top (eval item, training row) pairs to report.")
+    parser.add_argument(
+        "--report-dir",
+        dest="report_dir",
+        help="Directory for the timestamped contamination report (default from config: scratch/contamination).",
+    )
+    parser.add_argument(
+        "--write-decontaminated",
+        dest="write_decontaminated",
+        help="Write training data minus flagged rows: a .jsonl file (one --train-data) or a directory, plus a .removed.json sidecar.",
     )
 
     # list-runs filters (unified tracking registry)
