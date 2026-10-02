@@ -206,11 +206,25 @@ def _optional_package(value: object, required: frozenset[str], label: str) -> di
     return value
 
 
-def _conditioning_policy(value: object) -> str:
-    item = _exact(value, frozenset({"kind"}), "conditioning policy")
-    if type(item["kind"]) is not str or item["kind"] != "target_derived_support/v1":
+def _conditioning_policy(value: object) -> tuple[str, tuple[str, ...]]:
+    if type(value) is not dict:
+        _invalid("conditioning policy is invalid")
+    kind = value.get("kind")
+    if type(kind) is not str:
         _invalid("conditioning policy is unsupported")
-    return item["kind"]
+    if kind == "target_derived_support/v1":
+        _exact(value, frozenset({"kind"}), "conditioning policy")
+        return kind, ()
+    if kind != "declared_retrospective_support/v1":
+        _invalid("conditioning policy is unsupported")
+    item = _exact(value, frozenset({"kind", "support_item_ids"}), "conditioning policy")
+    raw_ids = item["support_item_ids"]
+    if type(raw_ids) is not list or not 1 <= len(raw_ids) <= 256:
+        _invalid("retrospective support IDs must be a bounded nonempty list")
+    ids = tuple(_item_id(value, "retrospective support item") for value in raw_ids)
+    if ids != tuple(sorted(set(ids))):
+        _invalid("retrospective support IDs must be sorted and unique")
+    return kind, ids
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,6 +387,7 @@ class DatasetPrepConfigV2:
     paragraph_gap_policy: ParagraphGapPolicyV2 | None = None
     context_projection: ProjectionV1 | None = None
     conditioning_policy: str | None = None
+    retrospective_support_item_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version != CONFIG_SCHEMA_VERSION_V2 or self.format != MESSAGES_FORMAT:
@@ -385,8 +400,19 @@ class DatasetPrepConfigV2:
             raise TypeError("target_projection must be exact ProjectionV1")
         if self.context_projection is not None and type(self.context_projection) is not ProjectionV1:
             raise TypeError("context_projection must be exact ProjectionV1")
-        if self.conditioning_policy is not None and (type(self.conditioning_policy) is not str or self.conditioning_policy != "target_derived_support/v1"):
+        if self.conditioning_policy is not None and (
+            type(self.conditioning_policy) is not str or self.conditioning_policy not in (
+                "target_derived_support/v1", "declared_retrospective_support/v1"
+            )
+        ):
             _invalid("conditioning policy is unsupported")
+        if type(self.retrospective_support_item_ids) is not tuple:
+            _invalid("retrospective support IDs must be a tuple")
+        if self.conditioning_policy == "declared_retrospective_support/v1":
+            _conditioning_policy({"kind": self.conditioning_policy,
+                                  "support_item_ids": list(self.retrospective_support_item_ids)})
+        elif self.retrospective_support_item_ids:
+            _invalid("retrospective support IDs require the retrospective policy")
         if not self.lineage or not self.packages or not self.prompt_variants:
             _invalid("lineage, packages, and prompt variants must be nonempty")
         if any(type(item) is not ItemLineageV2 for item in self.lineage):
@@ -431,6 +457,8 @@ class DatasetPrepConfigV2:
         if type(lineage) is not list or type(packages) is not list or type(variants) is not list:
             _invalid("context_package collections must be lists")
         ordering = _exact(package["ordering"], frozenset({"kind"}), "context package ordering")
+        policy_kind, support_ids = (_conditioning_policy(package["conditioning_policy"])
+                                    if "conditioning_policy" in package else (None, ()))
         return cls(
             source_bundle_path=Path(bundle_path),
             expected_bundle_digest=source["expected_bundle_digest"],  # type: ignore[arg-type]
@@ -449,8 +477,8 @@ class DatasetPrepConfigV2:
                                   if "paragraph_gap_policy" in package else None),
             context_projection=(ProjectionV1.from_dict(item["context_projection"])
                                 if "context_projection" in item else None),
-            conditioning_policy=(_conditioning_policy(package["conditioning_policy"])
-                                 if "conditioning_policy" in package else None),
+            conditioning_policy=policy_kind,
+            retrospective_support_item_ids=support_ids,
         )
 
     def semantic_recipe(self) -> dict[str, object]:
@@ -476,7 +504,10 @@ class DatasetPrepConfigV2:
         if self.context_projection is not None:
             result["context_projection"] = self.context_projection.to_dict()
         if self.conditioning_policy is not None:
-            result["context_package"]["conditioning_policy"] = {"kind": self.conditioning_policy}
+            policy = {"kind": self.conditioning_policy}
+            if self.conditioning_policy == "declared_retrospective_support/v1":
+                policy["support_item_ids"] = list(self.retrospective_support_item_ids)
+            result["context_package"]["conditioning_policy"] = policy
         return result
 
     def to_dict(self) -> dict[str, object]:
@@ -504,7 +535,10 @@ class DatasetPrepConfigV2:
         if self.context_projection is not None:
             result["context_projection"] = self.context_projection.to_dict()
         if self.conditioning_policy is not None:
-            result["context_package"]["conditioning_policy"] = {"kind": self.conditioning_policy}
+            policy = {"kind": self.conditioning_policy}
+            if self.conditioning_policy == "declared_retrospective_support/v1":
+                policy["support_item_ids"] = list(self.retrospective_support_item_ids)
+            result["context_package"]["conditioning_policy"] = policy
         return result
 
 
@@ -783,6 +817,18 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
     if len(targets) != len(set(targets)):
         _invalid("target item references must be unique")
     target_set = frozenset(targets)
+    retrospective_ids = frozenset(config.retrospective_support_item_ids)
+    if retrospective_ids:
+        if any(target not in lineage for target in target_set):
+            _invalid("target item reference is unresolved")
+        target_families = {lineage[target].revision_family for target in target_set}
+        used_contexts = {context for package in config.packages for context in package.context_item_ids}
+        if not retrospective_ids <= used_contexts or any(
+            support_id not in lineage or support_id in target_set
+            or lineage[support_id].revision_family in target_families
+            for support_id in retrospective_ids
+        ):
+            _invalid("retrospective support selection is not a used non-target lineage item")
     for package in config.packages:
         references = (package.target_item_id, *package.context_item_ids)
         if any(reference not in items or reference not in lineage for reference in references):
@@ -794,22 +840,28 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
             context_lineage = lineage[context_id]
             context_ancestors = _ancestors(context_id, lineage)
             context_closure = (context_id, *context_ancestors)
-            support = config.conditioning_policy is not None and package.target_item_id in context_ancestors
-            if support and context_lineage.group_id != target_lineage.group_id:
+            own_support = config.conditioning_policy is not None and package.target_item_id in context_ancestors
+            retrospective_support = context_id in retrospective_ids
+            if (own_support or retrospective_support) and context_lineage.group_id != target_lineage.group_id:
                 _invalid("target-derived support must share target group")
-            if package.target_item_id in context_ancestors and not support:
+            if package.target_item_id in context_ancestors and not own_support:
                 _invalid("context is derived from the target")
             if any(
                 lineage[member_id].revision_family == target_lineage.revision_family
-                for member_id in context_closure if not (support and member_id == package.target_item_id)
+                for member_id in context_closure if not (own_support and member_id == package.target_item_id)
             ):
                 _invalid("context contains an alternate revision of the target")
             if any(
-                lineage[member_id].sequence > target_lineage.sequence and not (
-                    support and package.target_item_id in _ancestors(member_id, lineage))
+                lineage[member_id].sequence > target_lineage.sequence and not retrospective_support and not (
+                    own_support and package.target_item_id in _ancestors(member_id, lineage))
                 for member_id in context_closure
             ):
                 _invalid("context is newer than the target")
+            if retrospective_support and any(
+                member_id in target_set and lineage[member_id].group_id != target_lineage.group_id
+                for member_id in context_closure
+            ):
+                _invalid("retrospective support target ancestry crosses groups")
             if context_id in target_set and context_lineage.group_id != target_lineage.group_id:
                 _invalid("a referenced target would cross group-safe splits")
 
@@ -879,24 +931,30 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
         if config.conditioning_policy is not None and package_split == "train" and lineage[package.target_item_id].revision_family in heldout_families:
             _invalid("a target revision family crosses splits")
         for context_id in package.context_item_ids:
+            retrospective_support = context_id in retrospective_ids
             ancestor_targets = _ancestors(context_id, lineage) & target_set
-            if config.conditioning_policy is not None and package_split == "train" and any(
+            if config.conditioning_policy is not None and package_split == "train" and not retrospective_support and any(
                 member in heldout or lineage[member].revision_family in heldout_families
                 for member in (context_id, *_ancestors(context_id, lineage))
             ):
                 _invalid("training context contains held-out target lineage")
             if config.split.kind == "group_hash_rank":
-                if any(target_splits[ancestor_id] != package_split for ancestor_id in ancestor_targets):
+                if not retrospective_support and any(target_splits[ancestor_id] != package_split for ancestor_id in ancestor_targets):
                     _invalid("context descends from a target assigned to a different split")
             else:
                 closure = (context_id, *_ancestors(context_id, lineage))
                 if any(item in target_set and lineage[item].group_id != lineage[package.target_item_id].group_id for item in closure):
                     _invalid("context target lineage crosses groups")
-                if package_split == "train" and any(item in heldout or lineage[item].revision_family in heldout_families for item in closure):
+                if package_split == "train" and not retrospective_support and any(item in heldout or lineage[item].revision_family in heldout_families for item in closure):
                     _invalid("training context contains held-out target lineage")
 
     rows: list[SftMessagesRowV2] = []
     manifest_lineage: list[dict[str, object]] = []
+    policy_basis = None
+    if config.conditioning_policy is not None:
+        policy_basis = {"kind": config.conditioning_policy}
+        if retrospective_ids:
+            policy_basis["support_item_ids"] = list(config.retrospective_support_item_ids)
     selected_ref = config.target_projection.structure_ref.to_dict()
     for package in config.packages:
         target_item = items[package.target_item_id]
@@ -937,8 +995,8 @@ def build_prepared_dataset_v2(bundle: LoadedNormalizedBundleV1, config: DatasetP
         if config.context_projection is not None:
             basis["context_projection"] = context_identity
             basis["context_projection_digest"] = context_digest
-        if config.conditioning_policy is not None:
-            basis["conditioning_policy"] = {"kind": config.conditioning_policy}
+        if policy_basis is not None:
+            basis["conditioning_policy"] = policy_basis
         row_id = "row-" + _domain_digest(_ROW_ID_DOMAIN_V2, basis)
         messages = (
             MappingProxyType({"role": "user", "content": user}),

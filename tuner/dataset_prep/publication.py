@@ -1064,7 +1064,10 @@ def _verify_sequence_tail(
     manifest: dict[str, object], recipe: dict[str, object],
     rows: list[tuple[str, str, str, tuple[str, ...]]], item_count: int, *, tail: bool = True,
 ) -> None:
-    conditioned = "conditioning_policy" in recipe["context_package"]
+    raw_policy = recipe["context_package"].get("conditioning_policy")
+    conditioned = raw_policy is not None
+    policy_kind, support_ids = (_conditioning_policy(raw_policy) if conditioned else (None, ()))
+    retrospective_ids = frozenset(support_ids)
     raw_lineage = manifest["split_lineage" if tail else "conditioning_lineage"]
     expected_count = recipe["context_package"]["lineage_count"]
     if type(raw_lineage) is not list or len(raw_lineage) != expected_count or len(raw_lineage) > item_count:
@@ -1106,6 +1109,15 @@ def _verify_sequence_tail(
             _invalid("sequence-tail target lineage is invalid")
         targets[target_id] = (group_id, split, contexts)
         groups.setdefault(group_id, []).append(target_id)
+    if retrospective_ids:
+        target_families = {by_id[target].revision_family for target in targets}
+        used_contexts = {context for _, _, _, contexts in rows for context in contexts}
+        if not retrospective_ids <= used_contexts or any(
+            support_id not in by_id or support_id in targets
+            or by_id[support_id].revision_family in target_families
+            for support_id in retrospective_ids
+        ):
+            _invalid("retrospective support selection is not a used non-target lineage item")
     allocations = recipe["split"]["allocations"]
     train_weight, validation_weight = (item["weight"] for item in allocations)
     total_weight = train_weight + validation_weight
@@ -1145,25 +1157,31 @@ def _verify_sequence_tail(
             if context not in by_id:
                 _invalid("sequence-tail context lineage is unresolved")
             context_members = (context, *closure(context))
-            support = conditioned and target in closure(context)
-            if context == target or (target in closure(context) and not support):
+            own_support = conditioned and target in closure(context)
+            retrospective_support = context in retrospective_ids
+            if context == target or (target in closure(context) and not own_support):
                 _invalid("context contains its target")
-            if support and by_id[context].group_id != by_id[target].group_id:
+            if (own_support or retrospective_support) and by_id[context].group_id != by_id[target].group_id:
                 _invalid("target-derived support crosses groups")
-            if any(by_id[member].sequence > by_id[target].sequence and not (
-                support and target in closure(member)) for member in context_members):
+            if retrospective_support and any(
+                member in targets and by_id[member].group_id != by_id[target].group_id
+                for member in context_members
+            ):
+                _invalid("retrospective support target ancestry crosses groups")
+            if any(by_id[member].sequence > by_id[target].sequence and not retrospective_support and not (
+                own_support and target in closure(member)) for member in context_members):
                 _invalid("sequence-tail context is newer than its target")
             if any(by_id[member].revision_family == by_id[target].revision_family
-                   for member in context_members if not (support and member == target)):
+                   for member in context_members if not (own_support and member == target)):
                 _invalid("sequence-tail context duplicates target revision")
             if any(
                 member in targets and by_id[member].group_id != by_id[target].group_id
                 for member in (context_members if tail else (context,))
             ):
                 _invalid("sequence-tail referenced target crosses groups")
-            if not tail and any(member in targets and targets[member][1] != split for member in closure(context)):
+            if not tail and not retrospective_support and any(member in targets and targets[member][1] != split for member in closure(context)):
                 _invalid("context target ancestry crosses splits")
-            if (tail or conditioned) and split == "train" and any(
+            if (tail or conditioned) and split == "train" and not retrospective_support and any(
                 member in heldout or by_id[member].revision_family in families
                 for member in context_members
             ):

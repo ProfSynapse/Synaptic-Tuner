@@ -986,8 +986,17 @@ the generated drafts for the author's review. A nonempty reply and natural stop
 are mechanical checks, not a writing-quality judgment; no LLM judge or prompt
 variation suite is required for that workflow. Private inline scenarios may live
 in a gitignored recipe loaded by the existing `train --job-config` command.
-The 128 KiB aggregate JSON bound covers prompt fields; there is no separate
-per-message byte ceiling. Model context and bounded HTTP transport still apply.
+The post-training evaluation configuration, canonical training configuration,
+and compiled workload each have a 1 MiB serialized bound. Enclosing coordinator
+material, the Modal ordinary bundle member, and the signed packaged dispatch
+each have a 2 MiB bound; JSON escaping and signed/encoded envelope overhead count.
+Check the complete serialized recipe before submission rather than truncating or
+silently narrowing prompts. These are transport limits, not a per-message token
+budget or proof that a model fits the context. The separate serving limits remain
+1 MiB per HTTP request and response and 64 KiB retained per-case response;
+`max_tokens: null` removes only the request-level output-token ceiling. See
+[full-context transport review](../../../docs/review/full-context-evaluation-transport.md)
+for the verified boundaries and provider-free tests.
 Same-job requests reuse the existing evaluator's concurrent runner against one
 vLLM server and adapter, with workers bounded by the configured `max_num_seqs`
 and case count. Results retain case order and requests drain before GPU cleanup.

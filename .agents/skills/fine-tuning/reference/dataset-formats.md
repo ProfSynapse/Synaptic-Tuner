@@ -75,7 +75,9 @@ requested ratio; inspect the actual per-group counts before launch.
 
 Target revision families and target derivation chains cannot cross splits.
 Training contexts cannot contain held-out targets or their revision/derivative
-lineage. Validation contexts may include earlier training targets, matching a
+lineage unless an exact support item is explicitly declared under the
+retrospective-conditioning policy below. Validation contexts may include
+earlier training targets, matching a
 next-item prediction workflow. Conflicting lineage fails rather than silently
 moving examples. The manifest retains bounded ID-only split lineage so artifact
 verification can independently recompute assignments and leakage checks.
@@ -127,6 +129,40 @@ and policy binding, not semantic derivation, copied prose or source truth. It
 does not reconstruct hash-rank ordering from a private seed's digest. Review
 source provenance and complete examples separately; use the existing CLI to
 publish a fresh immutable dataset.
+
+### Declared retrospective support documents
+
+For an explicitly approved full-document planning context, v2 also accepts a
+closed, opt-in `context_package.conditioning_policy`:
+
+```json
+{"kind":"declared_retrospective_support/v1","support_item_ids":["item-<64hex>"]}
+```
+
+`support_item_ids` must be sorted, unique, nonempty, at most 256 exact item IDs,
+and every ID must resolve in the verified source bundle and actually appear as
+a context item. A listed support item cannot itself be a selected target or
+share a revision family with any selected target. Only those declared items
+receive the retrospective-context exception: their truthful ancestry may
+include multiple chapter targets, including later and validation chapters.
+Retain all known `derived_from` edges and assign a causal ordering rank no
+earlier than every declared ancestor. Do not invent missing source IDs or label
+a retrospective document independent to make preparation pass.
+The policy kind and exact support-ID list bind row and dataset identities; the
+public verifier checks the declared graph, ancestry closure, and allowed
+exception against that binding. Verification cannot prove the source's semantic
+truth or detect every copied passage.
+
+The exception concerns the selected support item's per-row chronology and
+split checks; it does not exempt literal target prose, alternate revisions,
+other newer contexts, lineage cycles, source graph causality, or group/revision
+integrity. Own-target outlines remain permitted under this policy without
+adding each outline to `support_item_ids`. Omitting a conditioning policy keeps
+the strict default; `target_derived_support/v1` remains the narrower option.
+Review the actual support content and label evaluation with retrospective
+planning documents as **conditioned drafting**, not blind prediction of held-out
+story events. A structurally verified artifact does not establish that its
+source prose is free of copied target passages.
 
 ### Configured cleanup of prepared messages and context documents
 
