@@ -226,8 +226,8 @@ def score_legacy_fields(
         pred_tool: Predicted tool name.
         gt_args: Parsed ground-truth args (expects ``context`` / ``calls``).
         gt_tool: Ground-truth tool name.
-        comparison: Rubric ``comparison`` config (``context_fields`` /
-            ``call_fields``).
+        comparison: Rubric ``comparison`` config (``context_fields``). Use the
+            ``mappings`` scheme to choose which call fields are compared.
         weights: Scoring ``weights`` config (``context_match`` / ``tool_match`` /
             ``params_match``).
     """

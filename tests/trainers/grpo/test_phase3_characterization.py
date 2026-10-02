@@ -152,7 +152,7 @@ class TestScoreWeightedCharacterization:
                 "weights": {"context_match": 0.4, "tool_match": 0.3, "params_match": 0.3},
             },
             "ground_truth": {"field": "ground_truth_args_json", "parse": "json"},
-            "comparison": {"context_fields": ["userId"], "call_fields": []},
+            "comparison": {"context_fields": ["userId"]},
         }
         rb = _make_rubric(cfg)
         data = {"tool_name": "agent_x", "parsed_args": {"userId": "u1", "query": "hi"}}
