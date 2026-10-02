@@ -243,6 +243,7 @@ validations:
 |-----|-------------|
 | `tools` | Tool name -> argument schema (`field: type`, nested objects, `_required`, `_additionalProperties`, `_item_schema`, `_subtools`) |
 | `_item_schema` | Marks the value as an array; every item must match this schema or type name (nest it for arrays of arrays) |
+| `_subtools` / `_subtool_keys` | On an `_item_schema` array: `_subtools` maps group -> tool -> params schema, and `_subtool_keys` (required with it) names the item fields holding the group, tool and params, e.g. `{group: agent, tool: tool, params: params}` |
 | `error` | Template applied to every failure of the rule: `{tool_name}` is the called tool, `{details}` the specific failure. Default: `Tool '{tool_name}': {details}` |
 
 ## Validation Type Summary

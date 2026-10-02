@@ -327,6 +327,7 @@ validations:
             agent: string
             tool: string
             params: object
+          _subtool_keys: {group: agent, tool: tool, params: params}
           _subtools:
             vaultManager:
               moveNote:

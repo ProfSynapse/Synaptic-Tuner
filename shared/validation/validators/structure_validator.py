@@ -21,6 +21,10 @@ except ImportError:
 # Message for each tools-validation failure when the rule sets no `error`.
 DEFAULT_TOOL_ERROR_TEMPLATE = "Tool '{tool_name}': {details}"
 
+# Roles a `_subtool_keys` mapping assigns to fields of each array item: the
+# `_subtools` manifest is keyed group -> tool -> params schema.
+SUBTOOL_KEY_ROLES = ("group", "tool", "params")
+
 
 class StructureValidator:
     """Validates data against a flat list of validation rules."""
@@ -330,10 +334,14 @@ class StructureValidator:
             _item_schema: {...} or type   -> the value is an array; each item
                                              must match this schema or type
             _subtools:                    -> subtool manifests for validating calls
-              agentName:
+              groupName:
                 toolName:
                   _required: [param1]
                   param1: type
+            _subtool_keys:                -> required with _subtools: the item
+              group: itemField               fields naming the group, the tool
+              tool: itemField                and the params object
+              params: itemField
 
         Supported types: string, number, boolean, array, object
 
@@ -341,7 +349,7 @@ class StructureValidator:
             data: Data to validate
             schema: Schema definition
             path: Current path for nested fields
-            subtools: Subtool manifests passed down for calls validation
+            subtools: Subtool manifest and keys passed down for calls validation
 
         Returns:
             List of failure details
@@ -359,7 +367,7 @@ class StructureValidator:
         required_fields = schema.get("_required")
 
         # Get subtools manifest (for validating calls array)
-        schema_subtools = schema.get("_subtools", subtools)
+        schema_subtools = self._subtools_of(schema, subtools, path)
 
         # Get defined fields (excluding special keys starting with _)
         defined_fields = {k for k in schema.keys() if not k.startswith("_")}
@@ -424,7 +432,7 @@ class StructureValidator:
             return [f"Field '{label}' must be an array"]
 
         item_schema = schema["_item_schema"]
-        item_subtools = schema.get("_subtools", subtools)
+        item_subtools = self._subtools_of(schema, subtools, path)
         errors = []
 
         for i, item in enumerate(value):
@@ -437,6 +445,18 @@ class StructureValidator:
 
         return errors
 
+    def _subtools_of(self, schema: Dict, inherited: Optional[Dict], path: str) -> Optional[Dict]:
+        """Return the subtool manifest and item keys in force at ``schema``."""
+        if "_subtools" not in schema:
+            return inherited
+        keys = schema.get("_subtool_keys")
+        if not isinstance(keys, dict) or sorted(keys) != sorted(SUBTOOL_KEY_ROLES):
+            raise ValueError(
+                f"'_subtools' at '{path or 'arguments'}' requires '_subtool_keys' mapping "
+                f"{', '.join(SUBTOOL_KEY_ROLES)} to item fields"
+            )
+        return {"manifest": schema["_subtools"], "keys": keys}
+
     def _validate_subtool_params(
         self,
         call_item: Dict,
@@ -444,11 +464,12 @@ class StructureValidator:
         path: str
     ) -> List[str]:
         """
-        Validate params for a specific agent/tool combination.
+        Validate params for a specific group/tool combination.
 
         Args:
-            call_item: A single call item with {agent, tool, params}
-            subtools: Subtool manifests {agentName: {toolName: {schema}}}
+            call_item: A single array item; ``subtools['keys']`` names its
+                group, tool and params fields
+            subtools: ``{"manifest": {group: {tool: schema}}, "keys": {...}}``
             path: Current path for error messages
 
         Returns:
@@ -456,12 +477,15 @@ class StructureValidator:
         """
         errors = []
 
-        agent = call_item.get("agent", "")
-        subtool = call_item.get("tool", "")
-        params = call_item.get("params", {})
+        keys = subtools["keys"]
+        agent = call_item.get(keys["group"], "")
+        subtool = call_item.get(keys["tool"], "")
+        params = call_item.get(keys["params"], {})
+        if not isinstance(params, dict):
+            params = {}
 
-        # Look up schema for this agent/tool
-        agent_manifest = subtools.get(agent)
+        # Look up schema for this group/tool
+        agent_manifest = subtools["manifest"].get(agent)
         if not agent_manifest:
             # Agent not in manifest - could be valid if manifest is partial
             return errors

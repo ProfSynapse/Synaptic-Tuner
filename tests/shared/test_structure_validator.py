@@ -155,8 +155,9 @@ def test_item_schema_items_still_check_subtool_params():
         for subtool, schema in tools.items()
         if schema.get("_required")
     )
+    keys = calls_schema["_subtool_keys"]
     item = {key: ({} if kind == "object" else "x") for key, kind in calls_schema["_item_schema"].items()}
-    item.update({"agent": agent, "tool": subtool, "params": {}})
+    item.update({keys["group"]: agent, keys["tool"]: subtool, keys["params"]: {}})
 
     _, errors = _validate([rule], _call(tool_name, {calls_field: [item]}))
 
@@ -165,3 +166,41 @@ def test_item_schema_items_still_check_subtool_params():
         details=f"{calls_field}[0] - '{agent}.{subtool}' missing required param '{param}'",
     )
     assert expected in errors
+
+
+def _steps_schema(rule_name):
+    return _tool_rule(RULES[rule_name])["tools"]["batchJob"]["steps"]
+
+
+def _step(group, tool, params):
+    keys = _steps_schema("subtools")["_subtool_keys"]
+    return {keys["group"]: group, keys["tool"]: tool, keys["params"]: params}
+
+
+def test_subtool_keys_select_the_item_fields():
+    manifest = _steps_schema("subtools")["_subtools"]
+    group, tools = next(iter(manifest.items()))
+    tool, schema = next(iter(tools.items()))
+    first, second = schema["_required"]
+
+    _, errors = _validate(
+        RULES["subtools"],
+        _call("batchJob", {"steps": [
+            _step(group, tool, {first: "a"}),
+            _step(group, tool, {first: 1, second: "b"}),
+            _step(group, "unlisted", {}),
+        ]}),
+    )
+
+    assert [error.split(": ", 1)[1] for error in errors] == [
+        f"steps[0] - '{group}.{tool}' missing required param '{second}'",
+        f"steps[1] - '{group}.{tool}' param '{first}' must be string, got int",
+        f"Unknown subtool '{group}.unlisted'. Valid tools for {group}: {list(tools)}",
+    ]
+
+
+def test_subtools_without_subtool_keys_is_a_config_error():
+    assert "_subtool_keys" not in _steps_schema("missing_subtool_keys")
+
+    with pytest.raises(ValueError, match="requires '_subtool_keys'"):
+        _validate(RULES["missing_subtool_keys"], _call("batchJob", {"steps": [{"module": "files"}]}))

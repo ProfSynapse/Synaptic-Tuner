@@ -33,9 +33,14 @@ formats:
     # Required top-level fields inside function.arguments
     argument_required: [sessionId, workspaceId, memory, goal, tool]
 
-    # Backslash escapes decoded inside double-quoted arguments of the `tool`
-    # CLI command string, on top of POSIX shell quoting (\" and \\). The CLI
-    # schema (cli-first-tool-schemas.json) tells models to write multi-line
+    # Argument field holding the free-form CLI command string. Recovery of
+    # malformed wrapper JSON reads it up to the next declared field, and the
+    # environment executor expands it into concrete tool calls.
+    command_field: tool
+
+    # Backslash escapes decoded inside double-quoted arguments of the
+    # command_field CLI command string, on top of POSIX shell quoting (\" and
+    # \\). The CLI schema (cli-first-tool-schemas.json) tells models to write multi-line
     # content with newline characters (\n); a literal backslash-n in the decoded
     # command string is that same newline. Formats without this key keep plain
     # POSIX quoting.

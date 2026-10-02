@@ -243,14 +243,15 @@ def expand_cli_wrapper_commands(name: Optional[str], arguments: Any) -> Optional
     wrapper_spec = match_configured_wrapper(args, function_name=name)
     if wrapper_spec is None:
         return None
-    tool_value = args.get("tool")
-    if not isinstance(tool_value, str) or not tool_value.strip():
+    command_field = wrapper_spec.get("command_field")
+    command_value = args.get(command_field) if command_field else None
+    if not isinstance(command_value, str) or not command_value.strip():
         return None
     catalog = cli_command_catalog()
     if not catalog:
         return None
     try:
-        commands = parse_cli_commands(tool_value, catalog, wrapper_spec.get("command_escapes") or {})
+        commands = parse_cli_commands(command_value, catalog, wrapper_spec.get("command_escapes") or {})
     except ValueError:
         return None
     if not commands or any(command.spec is None for command in commands):

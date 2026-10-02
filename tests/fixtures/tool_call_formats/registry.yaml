@@ -18,6 +18,7 @@ formats:
         type: string
         enum: [low, high]
     argument_required: [ticketRef, command]
+    command_field: command
     prompt_bound_fields:
       ticketRef:
         - pattern: 'ticket:\s*(\S+)'

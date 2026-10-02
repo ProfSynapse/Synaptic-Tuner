@@ -22,3 +22,31 @@ untemplated:
       batchJob:
         _required: [owner]
         owner: string
+
+# `_subtools` manifest on an array; `_subtool_keys` names the item fields
+# holding the group, the tool and the params object.
+subtools:
+  - tools:
+      batchJob:
+        steps:
+          _item_schema:
+            module: string
+            action: string
+            options: object
+          _subtool_keys: {group: module, tool: action, params: options}
+          _subtools:
+            files:
+              copy:
+                _required: [source, target]
+                source: string
+                target: string
+
+missing_subtool_keys:
+  - tools:
+      batchJob:
+        steps:
+          _item_schema:
+            module: string
+          _subtools:
+            files:
+              copy: {}
