@@ -14,7 +14,6 @@ Examples:
 import argparse
 import hashlib
 import json
-import random
 import re
 import sys
 from pathlib import Path
@@ -284,7 +283,7 @@ PROMPT_TEMPLATES = [
 
     # Template 5: Collaborative tone
     lambda ctx: "\n\n".join(filter(None, [
-        f"Can you help me write the next scene in my book?",
+        "Can you help me write the next scene in my book?",
         f"Book: \"{ctx['book']}\"\nChapter: \"{ctx['chapter']}\"\nPOV: {ctx['pov']}",
         f"What's happening: {ctx['description']}" if ctx['description'] else None,
         f"Include if possible:\n{ctx['entities_list']}" if ctx['entities_list'] else None,
@@ -328,7 +327,7 @@ PROMPT_TEMPLATES = [
 
     # Template 10: Workshop/outline style
     lambda ctx: "\n\n".join(filter(None, [
-        f"Scene outline:",
+        "Scene outline:",
         f"- Novel: {ctx['book']}",
         f"- Chapter: {ctx['chapter']}",
         f"- POV: {ctx['pov']}",
@@ -366,7 +365,7 @@ PROMPT_TEMPLATES = [
 
     # Template 14: Instructions style
     lambda ctx: "\n\n".join(filter(None, [
-        f"Please write the following scene:",
+        "Please write the following scene:",
         f"Book: \"{ctx['book']}\"",
         f"Chapter: \"{ctx['chapter']}\"",
         f"Narrator: {ctx['pov']}",
@@ -387,7 +386,7 @@ PROMPT_TEMPLATES = [
 
     # Template 16: Dialogue-like
     lambda ctx: "\n\n".join(filter(None, [
-        f"I'm stuck on a scene. Can you write it for me?",
+        "I'm stuck on a scene. Can you write it for me?",
         f"It's chapter \"{ctx['chapter']}\" of my book \"{ctx['book']}\". {ctx['pov']} is the narrator.",
         f"What happens: {ctx['description']}" if ctx['description'] else None,
         ctx['continue_inline'],
@@ -424,7 +423,7 @@ PROMPT_TEMPLATES = [
 
     # Template 20: Compose style
     lambda ctx: "\n\n".join(filter(None, [
-        f"Compose the next scene in my story.",
+        "Compose the next scene in my story.",
         f"Novel: \"{ctx['book']}\" | Chapter: \"{ctx['chapter']}\" | Voice: {ctx['pov']}",
         f"Scene summary: {ctx['description']}" if ctx['description'] else None,
         f"Key elements: {ctx['entities_brief']}" if ctx['entities_brief'] else None,
@@ -450,7 +449,7 @@ PROMPT_TEMPLATES = [
 
     # Template 23: Task-oriented
     lambda ctx: "\n\n".join(filter(None, [
-        f"Task: Write a scene",
+        "Task: Write a scene",
         f"Book: {ctx['book']}",
         f"Chapter: {ctx['chapter']}",
         f"POV: {ctx['pov']}",
@@ -461,7 +460,7 @@ PROMPT_TEMPLATES = [
 
     # Template 24: Gentle request
     lambda ctx: "\n\n".join(filter(None, [
-        f"Would you mind helping me write a scene?",
+        "Would you mind helping me write a scene?",
         f"It's for \"{ctx['book']}\", specifically chapter \"{ctx['chapter']}\". The narrator is {ctx['pov']}.",
         f"Here's what should happen: {ctx['description']}" if ctx['description'] else None,
         ctx['position_casual'],
@@ -514,7 +513,7 @@ PROMPT_TEMPLATES = [
 
     # Template 30: Flow state
     lambda ctx: "\n\n".join(filter(None, [
-        f"Keep the story going.",
+        "Keep the story going.",
         f"\"{ctx['book']}\" - chapter \"{ctx['chapter']}\" - {ctx['pov']} narrating.",
         ctx['description'] if ctx['description'] else None,
         ctx['continue_quote'],

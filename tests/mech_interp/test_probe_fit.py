@@ -1,9 +1,7 @@
 """CPU tests for linear readout fitting and direction freezing (synthetic data)."""
 
-import json
 
 import numpy as np
-import pytest
 
 from MechInterp.probe.fit import (
     fit_pca,

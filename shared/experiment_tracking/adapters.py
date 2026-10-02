@@ -335,7 +335,6 @@ def eval_to_run_record(
         A RunRecord populated from the evaluation lineage.
     """
     results = lineage.get("results_summary", {})
-    perf = lineage.get("performance", {})
 
     pass_rate = results.get("overall_pass_rate")
 

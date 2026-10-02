@@ -17,10 +17,9 @@ import random
 import re
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -500,7 +499,6 @@ class ExperimentLoop:
 
     def _select_next_config(self) -> Dict[str, Any]:
         """Choose the next hyperparameter configuration to try."""
-        import pandas as pd
 
         strategy = self.config.search_strategy
         n_completed = len(self.results)

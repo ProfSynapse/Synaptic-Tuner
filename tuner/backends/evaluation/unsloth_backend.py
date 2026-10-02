@@ -88,7 +88,7 @@ class UnslothBackend(IEvaluationBackend):
             - (False, "error message") if Unsloth is not available
         """
         try:
-            from unsloth import FastLanguageModel
+            from unsloth import FastLanguageModel  # noqa: F401  availability probe
             return True, ""
         except ImportError:
             return False, (

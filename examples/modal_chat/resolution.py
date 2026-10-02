@@ -11,7 +11,6 @@ import stat
 from synaptic_tuner.api.v1 import load_training_input_contract_v1
 from synaptic_tuner.api.v1._contract import contract_digest
 from synaptic_tuner.api.v1.results import TrainingRunRef
-from synaptic_tuner.api.v1.training_input import TrainingInputV1
 from tuner.dataset_prep import (
     DatasetPrepValidationError,
     ROW_SCHEMA_VERSION,

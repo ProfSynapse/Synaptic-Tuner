@@ -15,12 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
-from typing import Any
 
 from .catalog import DatasetVersion, LogCatalog
 from .cleaner import CleaningResult, DataCleaner
@@ -365,7 +362,6 @@ class FlywheelOrchestrator:
 
     def status(self) -> FlywheelStatus:
         """Return current flywheel status (sync method for CLI use)."""
-        import asyncio as _aio
 
         status = FlywheelStatus()
 

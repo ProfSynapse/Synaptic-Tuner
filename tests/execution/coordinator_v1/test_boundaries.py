@@ -3,9 +3,7 @@ import sys
 from dataclasses import replace
 import pytest
 from tuner.execution.coordinator_v1 import model, ports, state_machine
-from tuner.execution.coordinator_v1.model import (AuthenticatedArtifactVerificationReceiptV1,
- BoundCancellationRefV1, FoundationEffectBindingV1, FoundationEffectOutcomeV1,
- WorkflowRecordV1)
+from tuner.execution.coordinator_v1.model import (WorkflowRecordV1)
 
 def test_evidence_records_are_ordinary_exact_frozen_dataclasses():
  from .test_state_machine import planned

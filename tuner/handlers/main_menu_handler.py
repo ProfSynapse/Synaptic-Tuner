@@ -206,9 +206,9 @@ class MainMenuHandler(BaseHandler):
             # Dispatch to appropriate handler
             if choice == "experiment-loop":
                 from tuner.cli.router import _handle_experiment_loop
-                exit_code = _handle_experiment_loop(self.args, False)
+                _handle_experiment_loop(self.args, False)
             elif (handler := handlers.get(choice)):
-                exit_code = handler.handle()
+                handler.handle()
                 # Continue to next iteration regardless of exit code
                 # This allows user to try again after errors
             else:

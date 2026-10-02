@@ -7,7 +7,6 @@ from .authority import AuthenticatedReconciliationGrantV1
 from .canonical import DiagnosticCode, FoundationError, canonical_bytes, digest_text, domain_digest, exact_integer, safe_ref
 from .commands import parse_exact_command
 from .executors import AdapterDescriptorV1, ReconciliationResolutionRequestV2, ResolvedAdapterV2
-from .observations import ProviderObservationV1
 from .receipts import InvalidEvidenceContentV2, InvalidEvidenceSiteV2, ReceiptContentV2
 from .repository import EffectRecordV2, ReconciliationOwnershipV2, _revalidate_effect_record_v2_canonical
 

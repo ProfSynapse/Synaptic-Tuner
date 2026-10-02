@@ -6,7 +6,6 @@ Handles ChatML to KTO format conversion.
 from typing import Dict, List, Optional, Tuple
 from datasets import load_dataset, Dataset
 import random
-import os
 
 from shared.training_utils import (
     DEFAULT_SPLIT_SEED,
@@ -63,7 +62,7 @@ def interleave_dataset(dataset: Dataset, seed: int = 42) -> Dataset:
         interleaved_indices.append(f)
 
     print(f"  Interleaved: {min_count} True, {min_count} False ({len(interleaved_indices)} total)")
-    print(f"  Pattern: T,F,T,F,... (guarantees mixed batches)")
+    print("  Pattern: T,F,T,F,... (guarantees mixed batches)")
 
     return dataset.select(interleaved_indices)
 
@@ -95,10 +94,10 @@ def balance_dataset(dataset: Dataset, seed: int = 42) -> Dataset:
 
     # Determine minority and majority
     if true_count > false_count:
-        majority, minority = "True", "False"
+        majority = "True"
         majority_indices, minority_indices = true_indices, false_indices
     else:
-        majority, minority = "False", "True"
+        majority = "False"
         majority_indices, minority_indices = false_indices, true_indices
 
     # Sample from majority to match minority count
@@ -273,7 +272,7 @@ def load_and_prepare_dataset(
     desirable = sum(1 for ex in processed_examples if ex["label"])
     undesirable = len(processed_examples) - desirable
 
-    print(f"\nProcessed dataset:")
+    print("\nProcessed dataset:")
     print(f"  Total: {len(processed_examples)} examples")
     print(f"  Desirable (True): {desirable}")
     print(f"  Undesirable (False): {undesirable}")
@@ -344,7 +343,7 @@ def validate_kto_dataset(dataset: Dataset) -> bool:
     true_count = sum(labels)
     false_count = len(labels) - true_count
 
-    print(f"\nLabel distribution:")
+    print("\nLabel distribution:")
     print(f"  True: {true_count} ({true_count/len(labels)*100:.1f}%)")
     print(f"  False: {false_count} ({false_count/len(labels)*100:.1f}%)")
 

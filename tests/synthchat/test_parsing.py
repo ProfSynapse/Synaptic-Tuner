@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import pytest
 from SynthChat.parsing import (
     _normalize_generated_assertion,
     normalize_generated_environment,

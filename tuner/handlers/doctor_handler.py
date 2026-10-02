@@ -451,7 +451,7 @@ class DoctorHandler(BaseHandler):
                         gpu_mem = props.total_memory / (1024**3)  # Convert to GB
                         self._gpu_info = {"name": gpu_name, "memory_gb": gpu_mem}
                         section.add(CheckResult(
-                            name=f"GPU detected",
+                            name="GPU detected",
                             status=STATUS_OK,
                             message=f"{gpu_name} ({gpu_mem:.0f}GB)"
                         ))
@@ -973,7 +973,6 @@ except Exception as e:
         """Print the doctor command header."""
         try:
             from rich.console import Console
-            from rich.text import Text
             console = Console()
             console.print()
             console.print("  [bold cyan]Running diagnostics...[/bold cyan]")
@@ -985,9 +984,6 @@ except Exception as e:
         """Print the diagnostic report."""
         try:
             from rich.console import Console
-            from rich.panel import Panel
-            from rich.table import Table
-            from rich import box
 
             console = Console()
 

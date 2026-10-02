@@ -33,13 +33,9 @@ from tuner.execution.providers.modal.packaged_binding import (
 from tuner.execution.providers.modal.runtime_release_deployment import (
     ExplicitModal154ReleaseDeploymentReader,
     ModalRuntimeReleaseDeployer,
-    ModalRuntimeReleaseDeploymentError,
     ModalRuntimeReleaseDeploymentFactsV1,
     ModalRuntimeReleaseDeploymentObservationV1,
     ModalRuntimeReleaseDeploymentPlanV1,
-    ModalRuntimeReleaseFunctionFactV1,
-    ModalRuntimeReleaseSecretFactV1,
-    ModalRuntimeReleaseVolumeFactV1,
 )
 
 

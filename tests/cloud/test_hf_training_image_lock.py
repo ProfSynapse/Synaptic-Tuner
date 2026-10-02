@@ -2897,7 +2897,6 @@ def test_capture_lock_contention_creates_no_candidate_or_archive(tmp_path: Path,
 def test_capture_preserves_archive_race_file_it_did_not_own(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    from tuner.cloud import hf_training_image_lock as image_lock
     from tuner.cloud.hf_training_docker_archive import DockerArchiveError
 
     docker, config, documents, image = _warm_inputs(tmp_path, monkeypatch)
@@ -2932,7 +2931,6 @@ def test_capture_preserves_archive_race_file_it_did_not_own(
 
 
 def test_capture_missing_cache_fails_closed_without_pull_or_save(tmp_path: Path, monkeypatch) -> None:
-    from tuner.cloud import hf_training_image_lock as image_lock
 
     docker, config, documents, image = _warm_inputs(tmp_path, monkeypatch)
     output = tmp_path / "external" / "lock.candidate.json"

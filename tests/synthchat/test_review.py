@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import pytest
 from SynthChat.review import (
     build_environment_generation_review_payload,
     build_stage_judge_template_vars,

@@ -8,14 +8,9 @@ Purpose: Verify all surgery operations, config loading, and edge cases
 from __future__ import annotations
 
 import json
-import math
 import os
 import shutil
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -27,7 +22,6 @@ from shared.evolutionary.lora_surgery import (
     LoRASurgeon,
     OperationResult,
     SurgeryConfig,
-    SurgeryResult,
     copy_adapter,
     find_lora_pairs,
     get_layer_indices,

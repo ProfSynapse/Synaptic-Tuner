@@ -15,7 +15,7 @@ from tuner.execution.providers.docker_provider_v1.model import (
     AuthenticatedDockerArtifactInventoryV1, AuthenticatedDockerLogPageV1,
     DockerArtifactChunkV1, DockerArtifactEOFV1, DockerArtifactEntryV1,
     DockerArtifactInventoryV1, DockerCommandBindingV1, DockerEffectIdentityV1,
-    DockerLogPageV1, DockerLogReadRequestV1, DockerLookupDispositionV1, DockerLookupResultV1,
+    DockerLogPageV1, DockerLookupDispositionV1, DockerLookupResultV1,
     DockerLogTerminalPhaseV1, DockerProviderError, DockerRunPhaseV1,
     PreparedDockerPlanV1, labels_for,
 )
@@ -63,7 +63,6 @@ class ReadPort:
         entries = available[:request.limit]
         truncated = len(entries) < len(available)
         generation = request.generation + self.log_generation_delta
-        cursor_floor = 0 if request.after_sequence is None else request.after_sequence
         high_watermark = all_entries[-1].sequence if all_entries else 0
         stream_digest = domain_digest(
             "synaptic-docker-log-stream/v1",

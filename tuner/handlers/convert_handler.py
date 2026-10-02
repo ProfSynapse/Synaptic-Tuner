@@ -12,7 +12,7 @@ Supports:
 
 import sys
 from pathlib import Path
-from typing import Optional, List
+from typing import List
 
 from .base import BaseHandler
 from tuner.discovery import CheckpointDiscovery

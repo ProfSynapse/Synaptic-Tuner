@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 
 import yaml
 
-from shared.utilities.paths import TRAINING_METHODS, get_trainer_root, iter_training_output_dirs
+from shared.utilities.paths import TRAINING_METHODS, get_trainer_root
 from tuner.discovery.training_runs import TrainingRunDiscovery
 from tuner.project import ProjectContext
 

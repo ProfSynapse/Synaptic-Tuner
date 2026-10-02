@@ -485,7 +485,7 @@ class TestEvaluateCheckpointsE2E:
         evaluator = CheckpointEvaluator(
             str(run_dir), backend, "tool_prompts.yaml"
         )
-        report = await evaluator.evaluate_checkpoints(top_n=0)
+        await evaluator.evaluate_checkpoints(top_n=0)
 
         best_dir = run_dir / "best_checkpoint"
         assert best_dir.exists()

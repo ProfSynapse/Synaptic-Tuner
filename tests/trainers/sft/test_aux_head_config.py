@@ -17,7 +17,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "Trainers" / "sft" / "configs"))
 
-import config_loader  # noqa: E402
 from config_loader import (  # noqa: E402
     AuxHeadConfig,
     Config,

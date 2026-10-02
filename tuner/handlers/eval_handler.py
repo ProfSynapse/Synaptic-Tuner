@@ -58,7 +58,7 @@ try:
     from Evaluator.config_loader import load_yaml_scenarios
     from Evaluator.client_factory import create_client, create_settings
     from Evaluator.runner import evaluate_cases
-    from Evaluator.reporting import build_run_payload, write_json, render_markdown, console_summary
+    from Evaluator.reporting import build_run_payload, write_json, render_markdown
     _EVALUATOR_AVAILABLE = True
 except ImportError:
     _EVALUATOR_AVAILABLE = False
@@ -611,7 +611,7 @@ class EvalHandler(BaseHandler):
             # List models
             models = backend.list_models()
             if not models:
-                print_error(f"No models found.")
+                print_error("No models found.")
                 if backend_choice == "lmstudio":
                     print_info("Make sure LM Studio server is running on http://localhost:1234")
                 elif backend_choice == "llamacpp":

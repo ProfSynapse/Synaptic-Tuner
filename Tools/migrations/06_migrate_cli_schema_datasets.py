@@ -19,7 +19,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 from cli_schema_rules import IN_SCOPE_NONTHINKING_AGENTS
 from cli_schema_utils import (
     discover_latest_nonthinking_dataset_files,
-    extract_normalized_calls,
     get_repo_root,
     load_jsonl_with_line_numbers,
     load_target_catalog,

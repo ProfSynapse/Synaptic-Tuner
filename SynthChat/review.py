@@ -8,7 +8,7 @@ Usage: Called by SynthChatGenerator during each stage of generation to evaluate
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from .stage_gates import run_stage_gates
 from .template_utils import _make_json_safe

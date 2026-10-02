@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shlex
-from argparse import Namespace
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,7 +11,7 @@ from shared.utilities.env import get_hf_token, load_env_file
 from tuner.cloud import RUNTIME_LAYOUT_SCHEMA, decode_hf_job_label, load_huggingface_hub
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
-from tuner.ui import BOX, confirm, print_config, print_error, print_header, print_info, print_success, print_table
+from tuner.ui import confirm, print_config, print_error, print_header, print_info, print_success, print_table
 
 
 class CloudJobsHandler(BaseHandler):

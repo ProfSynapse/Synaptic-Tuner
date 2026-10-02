@@ -68,7 +68,7 @@ def test_baseline_arm_maps_all_rows_to_zero(tmp_path):
 
 def test_score_selection_arm_activates_above_threshold(tmp_path):
     arm = ArmConfig(name="primary", strength=2.0, score_field="selection_score", threshold=1.0)
-    cfg = _mk_config(tmp_path, [arm])
+    _mk_config(tmp_path, [arm])
     strengths = cell_mod.resolve_arm_strengths(arm, _rows(), {arm.name: arm})
     assert set(strengths) == {"a", "c"}
     assert all(v == 2.0 for v in strengths.values())

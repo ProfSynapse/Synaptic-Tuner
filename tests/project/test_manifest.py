@@ -74,9 +74,9 @@ def test_host_source_writable_root_is_rejected(tmp_path: Path) -> None:
     host.mkdir()
     path = host / "synaptic.yaml"
     path.write_text(
-        f"""schema_version: synaptic-project/v1
-project: {{id: test, name: Test}}
-engine: {{requires: '>=1', api: v1}}
+        """schema_version: synaptic-project/v1
+project: {id: test, name: Test}
+engine: {requires: '>=1', api: v1}
 paths:
   artifacts: project://configs
 """,

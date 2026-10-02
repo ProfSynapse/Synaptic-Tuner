@@ -1,6 +1,5 @@
 """CPU tests for the intervention hook math."""
 
-import numpy as np
 import pytest
 import torch
 

@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from tuner.execution.foundation_v2.canonical import canonical_bytes
 import tuner.execution.providers.modal.runtime_release_qualification as qualification
 from tuner.execution.providers.modal.packaged_staging import ModalPackagedStageReceipt
 from tuner.execution.providers.modal.runtime_release_qualification import (

@@ -1,7 +1,6 @@
 """Tests for Trainers/ml/evaluation/ — metrics computation and report building."""
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import pytest
 from sklearn.linear_model import LogisticRegression

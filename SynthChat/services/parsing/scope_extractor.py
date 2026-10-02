@@ -8,7 +8,7 @@ import json
 import re
 from typing import Optional, Any, List, Dict
 
-from .conversation_parser import ParsedConversation, ConversationParser
+from .conversation_parser import ConversationParser
 from ...config import ScopeConfig
 from ...utils.logger import ImproveLogger
 

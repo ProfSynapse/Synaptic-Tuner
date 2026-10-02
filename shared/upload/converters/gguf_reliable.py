@@ -31,7 +31,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional
 from contextlib import contextmanager
 
 # Brand colors for spinners
@@ -41,7 +41,6 @@ PURPLE = "#93278F"
 # Try to import Rich for nice spinners
 try:
     from rich.console import Console
-    from rich.spinner import Spinner
     from rich.live import Live
     from rich.text import Text
     RICH_AVAILABLE = True
@@ -237,7 +236,7 @@ class ReliableGGUFConverter:
         self._quantizer_path = None
         self._converter_path = None
 
-        print(f"  ✓ llama.cpp built successfully")
+        print("  ✓ llama.cpp built successfully")
         return True
 
     def is_vision_model(self, model_path: Path) -> bool:
@@ -377,12 +376,12 @@ class ReliableGGUFConverter:
                 tokenizer,
                 save_method="merged_16bit",
             )
-            print(f"  ✓ Merged model saved")
+            print("  ✓ Merged model saved")
 
         except ImportError:
             # Fallback to PEFT merge
             print("  Using PEFT for merge (Unsloth not available)...")
-            from peft import PeftModel, AutoPeftModelForCausalLM
+            from peft import AutoPeftModelForCausalLM
             from transformers import AutoTokenizer
 
             model = AutoPeftModelForCausalLM.from_pretrained(
@@ -396,7 +395,7 @@ class ReliableGGUFConverter:
 
             model.save_pretrained(str(merged_dir))
             tokenizer.save_pretrained(str(merged_dir))
-            print(f"  ✓ Merged model saved")
+            print("  ✓ Merged model saved")
 
         return merged_dir
 
@@ -441,7 +440,7 @@ class ReliableGGUFConverter:
                 )
 
             if result.returncode != 0:
-                print(f"  ✗ Conversion failed:")
+                print("  ✗ Conversion failed:")
                 print(f"    {result.stderr[:500]}")
                 return False
 
@@ -454,7 +453,7 @@ class ReliableGGUFConverter:
             return True
 
         except subprocess.TimeoutExpired:
-            print(f"  ✗ Conversion timed out")
+            print("  ✗ Conversion timed out")
             return False
         except Exception as e:
             print(f"  ✗ Conversion error: {e}")
@@ -499,7 +498,7 @@ class ReliableGGUFConverter:
                 )
 
             if result.returncode != 0:
-                print(f"  ✗ Quantization failed:")
+                print("  ✗ Quantization failed:")
                 print(f"    {result.stderr[:500]}")
                 return False
 
@@ -512,7 +511,7 @@ class ReliableGGUFConverter:
             return True
 
         except subprocess.TimeoutExpired:
-            print(f"  ✗ Quantization timed out")
+            print("  ✗ Quantization timed out")
             return False
         except Exception as e:
             print(f"  ✗ Quantization error: {e}")
@@ -619,7 +618,7 @@ class ReliableGGUFConverter:
                     print("    This model can still be used for text-only inference")
 
             # Step 3: Create quantizations
-            print(f"\n[3/4] Creating quantizations...")
+            print("\n[3/4] Creating quantizations...")
 
             for quant in quantizations:
                 quant_upper = quant.upper()
@@ -629,7 +628,7 @@ class ReliableGGUFConverter:
                     created_files.append(quant_file)
 
             # Step 4: Summary
-            print(f"\n[4/4] Summary")
+            print("\n[4/4] Summary")
             print("=" * 60)
             print(f"✓ Created {len(created_files)} GGUF files:")
             for f in created_files:
@@ -643,7 +642,7 @@ class ReliableGGUFConverter:
         finally:
             # Cleanup temp files
             if cleanup_temp and temp_dir.exists():
-                print(f"\nCleaning up temp files...")
+                print("\nCleaning up temp files...")
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 print(f"✓ Cleaned up {temp_dir}")
 

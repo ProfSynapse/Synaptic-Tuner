@@ -14,4 +14,4 @@ from shared.validation.dataset_validator import *  # noqa: F401,F403
 
 
 if __name__ == "__main__":
-    main()
+    main()  # noqa: F405  provided by the re-exported validator module

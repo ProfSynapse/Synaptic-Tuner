@@ -6,7 +6,6 @@ from pathlib import Path
 from SynthChat.services.rubric_runner import RubricRunner
 from SynthChat.utils.dataset_scanner import DatasetScanner
 from SynthChat.utils.yaml_loader import load_config, load_yaml
-from SynthChat.utils.logger import ImproveLogger
 from shared.llm import create_client, LLMError
 from shared.ui import (
     print_menu,

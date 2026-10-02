@@ -6,7 +6,7 @@ Creates comprehensive HuggingFace model cards from training lineage.
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from ..core.interfaces import IDocumentationGenerator
 

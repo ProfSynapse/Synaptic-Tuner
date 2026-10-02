@@ -26,7 +26,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.paths import TRAINING_METHODS, get_trainer_root
 from tuner.cloud import (
     CloudJobSpec,
@@ -34,10 +33,8 @@ from tuner.cloud import (
     build_bash_command,
     build_hf_job_secrets,
     load_huggingface_hub,
-    resolve_hf_bucket_id,
 )
 from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
-from tuner.ui import print_config
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
@@ -509,7 +506,7 @@ class HFJobsBackend(
                 else:
                     return None  # Still running
 
-            except Exception as e:
+            except Exception:
                 # Let poll_until_done handle persistent vs transient classification
                 raise
 

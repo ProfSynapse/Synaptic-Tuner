@@ -505,17 +505,17 @@ def main():
     if eval_dataset:
         print(f"Validation: {len(eval_dataset)} examples")
     effective_batch = config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps
-    print(f"\nBatch configuration:")
+    print("\nBatch configuration:")
     print(f"  Batch size: {config.training.per_device_train_batch_size}")
     print(f"  Gradient accumulation: {config.training.gradient_accumulation_steps}")
     print(f"  Effective batch size: {effective_batch}")
-    print(f"\nHyperparameters:")
+    print("\nHyperparameters:")
     print(f"  Learning rate: {config.training.learning_rate}")
     print(f"  Beta: {config.training.beta}")
     print(f"  Loss type: {config.training.loss_type}")
     print(f"  Warmup ratio: {config.training.warmup_ratio}")
     print(f"  Max length: {config.training.max_length}")
-    print(f"\nLoRA configuration:")
+    print("\nLoRA configuration:")
     print(f"  Rank: {config.lora.r}")
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
@@ -528,7 +528,6 @@ def main():
         return
 
     # ---- Heavy path: only reached for a real run (model load + training) ----
-    import torch
     from unsloth import is_bfloat16_supported
     from trl import DPOConfig, DPOTrainer
 

@@ -25,7 +25,7 @@ from tuner.execution.coordinator_v1.model import (
 )
 from tuner.execution.coordinator_v1.stores import CoordinatorStoreCode, CoordinatorStoreError
 
-from .test_state_machine import BASIS, CONTEXT, DESC, D, PLAN, PROVIDER
+from .test_state_machine import BASIS, DESC, D, PROVIDER
 from .test_strong_cas import workflow_store
 
 

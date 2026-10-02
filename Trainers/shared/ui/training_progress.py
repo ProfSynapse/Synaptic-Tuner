@@ -18,7 +18,7 @@ from typing import Optional
 from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
-from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, SpinnerColumn
+from rich.progress import Progress, BarColumn, TextColumn, SpinnerColumn
 from rich.table import Table
 from rich.text import Text
 from rich.align import Align
@@ -207,7 +207,7 @@ class TrainingProgressDisplay:
             console=self.console,
             expand=True
         )
-        task_id = progress.add_task("Training", total=stats.total_steps, completed=stats.current_step)
+        progress.add_task("Training", total=stats.total_steps, completed=stats.current_step)
 
         # Build stats table
         table = Table.grid(padding=(0, 3))

@@ -28,7 +28,6 @@ import os
 import shlex
 import time
 import yaml
-from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
@@ -327,7 +326,7 @@ class RunPodBackend(ITrainingBackend):
             cost_per_hr = pod.get("costPerHr", "unknown")
             print(f"\nPod created: {pod_id}")
             print(f"  Cost: ${cost_per_hr}/hr")
-            print(f"  Status: Starting...\n")
+            print("  Status: Starting...\n")
 
             # Wait for pod to reach RUNNING status
             self._wait_for_pod_running(runpod, pod_id)

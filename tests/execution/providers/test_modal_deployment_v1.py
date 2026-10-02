@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from tuner.execution.providers.modal.deployment_v1 import (
-    APP_NAME, ARTIFACT_MOUNT, BOOTSTRAP_SOURCE_MODULES, CONTROL_MOUNT,
     ModalDeploymentSpecV1,
 )
 from tuner.execution.providers.modal.deployment_identity import modal_function_name

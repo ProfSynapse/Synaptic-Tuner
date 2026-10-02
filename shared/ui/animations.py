@@ -19,7 +19,7 @@ from typing import Optional, Callable, List, Tuple
 def _ensure_asciimatics_installed():
     """Auto-install asciimatics if not present."""
     try:
-        import asciimatics
+        import asciimatics  # noqa: F401  availability probe
         return True
     except ImportError:
         print("Installing asciimatics for terminal animations...")

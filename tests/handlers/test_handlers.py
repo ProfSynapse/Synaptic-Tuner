@@ -5,7 +5,6 @@ and at least one error-path test.
 """
 
 from argparse import Namespace
-from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 from dataclasses import dataclass
 

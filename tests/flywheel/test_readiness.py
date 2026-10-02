@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from shared.flywheel.catalog import DatasetVersion, InferenceLogRecord, LogFilter
+from shared.flywheel.catalog import DatasetVersion, InferenceLogRecord
 from shared.flywheel.config import FlywheelConfig
 from shared.flywheel.readiness import ReadinessChecker, ReadinessReport
 

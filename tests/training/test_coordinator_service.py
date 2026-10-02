@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 
 import pytest
 
@@ -177,7 +176,7 @@ def test_start_projects_exact_durable_workflow_and_restart(monkeypatch):
 
 def test_real_coordinator_reconcile_required_is_durable_acceptance():
     from tests.execution.coordinator_v1.test_start_reconcile_service import (
-        CONTEXT, DESC, PLAN, Harness, PlanningStore, preflight,
+        DESC, PLAN, Harness, PlanningStore, preflight,
     )
     from tuner.execution.foundation_v2.observations import ObservationDisposition
 

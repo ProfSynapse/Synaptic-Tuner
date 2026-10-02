@@ -232,7 +232,6 @@ def score_legacy_fields(
             ``params_match``).
     """
     context_fields = comparison.get("context_fields", [])
-    call_fields = comparison.get("call_fields", [])
 
     context_weight = weights.get("context_match", 0.4)
     tool_weight = weights.get("tool_match", 0.3)

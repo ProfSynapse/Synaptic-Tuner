@@ -10,7 +10,6 @@ import json
 
 from unittest.mock import AsyncMock
 
-import pytest
 
 from shared.flywheel.catalog import InferenceLogRecord
 from shared.flywheel.config import FlywheelConfig

@@ -1,7 +1,6 @@
 """Tests for gradient clipping in evolutionary training."""
 import math
 
-import pytest
 import torch
 
 from shared.evolutionary.candidate_generator import CandidateGenerator

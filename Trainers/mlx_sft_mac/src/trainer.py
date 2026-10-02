@@ -7,12 +7,11 @@ import time
 import math
 import json
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional
 from dataclasses import dataclass
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
-import numpy as np
 
 from data_loader import SFTDataLoader, SFTDataset
 
@@ -395,7 +394,7 @@ class SFTTrainer:
                     is_best = val_loss < self.state.best_val_loss
                     if is_best:
                         self.state.best_val_loss = val_loss
-                        print(f"  New best validation loss!")
+                        print("  New best validation loss!")
 
                 # Checkpointing
                 if self.state.global_step % self.save_steps == 0:
@@ -418,7 +417,7 @@ class SFTTrainer:
 
         # Training complete
         total_time = time.time() - training_start
-        print(f"\nTraining complete!")
+        print("\nTraining complete!")
         print(f"  Total steps: {self.state.global_step}")
         print(f"  Total time: {total_time / 60:.1f} minutes")
         if self.state.best_val_loss < float('inf'):

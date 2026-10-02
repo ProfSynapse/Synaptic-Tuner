@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from shared.flywheel.catalog import InferenceLogRecord, LogFilter
+from shared.flywheel.catalog import InferenceLogRecord
 from shared.flywheel.cleaner import CleaningResult, DataCleaner, NoOpPIIDetector
 from shared.flywheel.config import FlywheelConfig
 from shared.flywheel.judge import FlywheelJudgeOutcome
@@ -312,7 +312,6 @@ class TestDataCleanerScoring:
         mock_catalog.update_score = AsyncMock()
 
         cfg = FlywheelConfig()
-        scores = iter([0.1, 0.5, 0.9])
 
         with patch(
             "shared.flywheel.cleaner.FitnessEvaluator"

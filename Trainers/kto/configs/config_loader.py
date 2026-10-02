@@ -5,7 +5,7 @@ Loads config.yaml and converts to Python dataclass objects
 
 import yaml
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Any, Dict
 
 from shared.training_utils import dict_to_dataclass, reject_unknown_config_keys

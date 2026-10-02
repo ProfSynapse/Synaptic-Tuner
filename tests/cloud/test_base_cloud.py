@@ -9,9 +9,6 @@ Covers:
 - get_gpu_display_name: known/unknown
 """
 
-import os
-import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,7 +19,6 @@ from tuner.backends.training.cloud.base_cloud import (
     get_gpu_display_name,
     load_cloud_config,
     load_named_image_profiles,
-    load_gpu_pricing,
     poll_until_done,
     resolve_repo_source,
     resolve_repo_url,

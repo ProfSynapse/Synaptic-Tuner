@@ -40,6 +40,6 @@ __all__ = [
 # Lazy imports for surgery (requires torch + safetensors)
 def __getattr__(name):
     if name in ("LoRASurgeon", "SurgeryConfig", "SurgeryResult", "OperationResult"):
-        from .surgery import LoRASurgeon, SurgeryConfig, SurgeryResult, OperationResult
+        from .surgery import LoRASurgeon, SurgeryConfig, SurgeryResult, OperationResult  # noqa: F401  returned via locals()
         return locals()[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

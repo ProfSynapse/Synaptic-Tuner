@@ -875,7 +875,7 @@ def run_mlc_evaluation(
         print(f"  Model:  {model_name}")
         print(f"  Server: http://localhost:{port}")
         print()
-        print(f"  Open this URL in Chrome/Edge (WebGPU required):")
+        print("  Open this URL in Chrome/Edge (WebGPU required):")
         print(f"  {url}")
         print()
         print("  Press Ctrl+C to stop the server")

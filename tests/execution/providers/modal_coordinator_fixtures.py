@@ -3,7 +3,6 @@
 from dataclasses import replace
 
 from synaptic_tuner.api.v1.results import TrainingRunRef
-from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.foundation_v2.commands import parse_exact_command
 from tuner.execution.foundation_v2.references import ProviderStageRefV1
 from tuner.execution.providers.modal.coordinator_binding import ModalCommandBinding

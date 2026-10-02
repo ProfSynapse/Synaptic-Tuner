@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 # Use relative imports (this module is part of shared.upload.cli)
-from ..platform.windows_patches import ensure_windows_compatibility, ensure_vl_compatibility
+from ..platform.windows_patches import ensure_windows_compatibility
 from ..core.config import (
     UploadConfig,
     SaveConfig,
@@ -183,7 +183,7 @@ def gguf_only_mode(hf_repo: str, quantizations: list, token: str):
     # Check GGUF dependencies (run.sh should have installed them)
     print("[0/5] Checking GGUF dependencies...")
     try:
-        from gguf.vocab import MistralTokenizerType
+        from gguf.vocab import MistralTokenizerType  # noqa: F401  availability probe
         print("  ✓ Dependencies ready")
     except ImportError:
         print("  ⚠ Warning: MistralTokenizerType not found")
@@ -206,13 +206,13 @@ def gguf_only_mode(hf_repo: str, quantizations: list, token: str):
     temp_dir = tempfile.mkdtemp(dir=str(temp_base))
 
     try:
-        print(f"[2/5] Saving model to temp directory...")
+        print("[2/5] Saving model to temp directory...")
         print(f"  Location: {temp_dir}")
         model.save_pretrained(temp_dir)
         tokenizer.save_pretrained(temp_dir)
         print("  ✓ Model saved")
 
-        print(f"\n[3/5] Converting to GGUF format...")
+        print("\n[3/5] Converting to GGUF format...")
         print("  This may take 10-15 minutes depending on quantizations...")
         print("  Note: Skipping vision components (text-only training)")
 
@@ -235,7 +235,7 @@ def gguf_only_mode(hf_repo: str, quantizations: list, token: str):
             base_gguf = Path(temp_dir) / f"{model_name}.gguf"
 
             # Convert to f16 GGUF (base conversion, no vision)
-            print(f"  Converting to f16 GGUF...")
+            print("  Converting to f16 GGUF...")
             convert_args = [
                 str(temp_dir),
                 "--outfile", str(base_gguf),
@@ -388,7 +388,7 @@ def main(args=None):
     )
 
     try:
-        result = orchestrator.execute()
+        orchestrator.execute()
         orchestrator.print_summary()
         return 0
     except Exception as e:

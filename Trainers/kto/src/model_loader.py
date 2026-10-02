@@ -2,7 +2,7 @@
 Model loading with Unsloth optimizations for RTX 3090.
 """
 
-from unsloth import FastLanguageModel, is_bfloat16_supported
+from unsloth import FastLanguageModel
 from typing import Tuple, Optional
 import torch
 
@@ -80,7 +80,7 @@ def load_model_and_tokenizer(
     is_vl = _is_vision_model(model_name)
 
     if is_vl and VISION_MODEL_AVAILABLE:
-        print(f"✓ Detected Vision-Language model, using FastVisionModel")
+        print("✓ Detected Vision-Language model, using FastVisionModel")
         model, tokenizer = FastVisionModel.from_pretrained(
             model_name=model_name,
             max_seq_length=max_seq_length,
@@ -217,7 +217,7 @@ def apply_lora_adapters(
     total_params = sum(p.numel() for p in model.parameters())
     trainable_pct = 100 * trainable_params / total_params
 
-    print(f"\n✓ LoRA adapters applied")
+    print("\n✓ LoRA adapters applied")
     print(f"Trainable parameters: {trainable_params:,} ({trainable_pct:.2f}%)")
     print(f"Total parameters: {total_params:,}")
     print("=" * 60)

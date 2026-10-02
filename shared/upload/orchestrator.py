@@ -19,8 +19,6 @@ from .core.config import (
     ConversionConfig,
     DocumentationConfig,
 )
-from .core.types import ModelPath
-from .core.exceptions import UploadError
 from .strategies.registry import SaveStrategyRegistry
 from .converters.registry import ConverterRegistry
 from .uploaders.registry import UploaderRegistry
@@ -103,7 +101,7 @@ class UploadOrchestrator:
                 self._upload_converted_files()
 
             # Step 4: Generate documentation
-            docs = self._generate_documentation()
+            self._generate_documentation()
 
             # Step 5: Upload documentation
             self._upload_documentation()
@@ -351,12 +349,12 @@ class UploadOrchestrator:
         print("=" * 60)
         print(f"\nLocal artifacts saved to: {self.output_dir}")
         print(f"HuggingFace model: https://huggingface.co/{self.upload_config.repo_id}")
-        print(f"\nDirectory structure:")
+        print("\nDirectory structure:")
         print(f"  {self.output_dir}/")
 
         for fmt in self.formats_created:
             subdir = fmt.replace("_", "-") if fmt not in ["lora", "gguf"] else fmt
             print(f"  ├── {subdir}/")
 
-        print(f"  ├── upload_manifest.json")
-        print(f"  └── README.md")
+        print("  ├── upload_manifest.json")
+        print("  └── README.md")

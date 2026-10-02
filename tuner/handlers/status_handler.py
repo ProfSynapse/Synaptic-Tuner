@@ -17,23 +17,17 @@ This handler checks and displays:
 import json
 import os
 import platform
-import subprocess
 import sys
 from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from tuner.handlers.base import BaseHandler
 from tuner.project import ProjectContext
 from tuner.utils.environment import detect_environment
-from tuner.utils.conda import UNSLOTH_ENV, get_conda_python
+from tuner.utils.conda import UNSLOTH_ENV
 
 # Import shared UI components
 from shared.ui import (
-    print_header,
-    print_info,
-    print_error,
-    print_success,
     console,
     RICH_AVAILABLE,
     COLORS,

@@ -51,7 +51,7 @@ class TestTaggerErrorHandling:
     @pytest.mark.asyncio
     async def test_single_record_error_does_not_abort_batch(self):
         """One record raising in _classify_by_rules -> error counted, others proceed."""
-        from shared.flywheel.tagger import AutoTagger, TaggingResult
+        from shared.flywheel.tagger import AutoTagger
 
         good_record = _make_record(
             "good-1",

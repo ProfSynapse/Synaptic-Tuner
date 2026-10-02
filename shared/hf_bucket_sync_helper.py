@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 
 
 def _normalize_token(token: str | None) -> str | None:

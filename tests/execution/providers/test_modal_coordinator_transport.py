@@ -9,7 +9,6 @@ from tuner.execution.foundation_v2.commands import build_cancel_command, parse_e
 from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.observations import ObservationDisposition
 from tuner.execution.foundation_v2.references import CancellationRefV1, ProviderRunRefV1
-from tuner.execution.providers.modal.binding import ModalClientBinding
 from tuner.execution.providers.modal.coordinator_binding import ModalCommandBinding, _NoPreflightClock
 from tuner.execution.providers.modal.coordinator_adapter import ModalPreparationAdapter
 from tuner.execution.providers.modal.coordinator_staging import modal_stage_provider_ref

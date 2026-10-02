@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 import hashlib
-import hashlib
 import json
 
 import pytest
@@ -22,7 +21,6 @@ from tuner.execution.providers.modal.contracts import (
 from tuner.execution.providers.modal.packaged_dispatch import (
     MAX_MODAL_PACKAGED_DISPATCH_BYTES,
     ModalPackagedDispatch,
-    ModalPackagedVolumeMarker,
     ModalPackagedVolumeMarker,
     build_modal_packaged_dispatch,
     parse_modal_packaged_dispatch,
@@ -121,59 +119,6 @@ def test_builds_one_bounded_canonical_argument_and_round_trips_exactly() -> None
     assert parsed.workload_bytes == workload
     assert parsed.environment == (("PATH", "/usr/bin:/bin"),)
     assert len(auth.signed) == len(auth.verified) == 1
-
-
-def _markers(binding):
-    facts = binding.provider_facts
-    roles = (("control", facts.control_volume_id), ("artifacts", facts.artifact_volume_id))
-    if facts.model_cache_volume_id is not None:
-        roles += (("model_cache", facts.model_cache_volume_id),)
-    return tuple(ModalPackagedVolumeMarker(
-        role, volume_id, ".synaptic-volume-marker-" + format(index, "032x"),
-        hashlib.sha256(bytes([index]) * 32).hexdigest(),
-    ) for index, (role, volume_id) in enumerate(roles, 1))
-
-
-def test_v2_frame_binds_exact_mount_markers_without_raw_values() -> None:
-    binding, receipt, workload, policy = _case()
-    markers = _markers(binding)
-    auth = Auth()
-    payload = build_modal_packaged_dispatch(
-        binding, receipt, workload, policy, auth, key_ref="dispatch-key",
-        volume_markers=markers,
-    )
-    parsed = parse_modal_packaged_dispatch(payload, auth)
-    assert parsed.schema_version == "synaptic-modal-packaged-dispatch/v2"
-    assert parsed.volume_markers == markers
-    assert auth.signed[0][0] == auth.verified[0][0] == "modal-packaged-dispatch/v2"
-    assert b'"value_hex"' not in payload
-    for index in range(1, len(markers) + 1):
-        assert bytes([index]) * 32 not in payload
-
-
-@pytest.mark.parametrize("fault", ("missing", "role", "id", "name", "digest"))
-def test_v2_rejects_incomplete_or_aliased_mount_markers(fault) -> None:
-    binding, receipt, workload, policy = _case()
-    markers = list(_markers(binding))
-    if fault == "missing":
-        markers.pop()
-    elif fault == "role":
-        markers[1] = replace(markers[1], role="control")
-    elif fault == "id":
-        markers[1] = replace(markers[1], volume_id=markers[0].volume_id)
-    elif fault == "name":
-        markers[1] = replace(markers[1], marker_name=markers[0].marker_name)
-    else:
-        markers[1] = replace(markers[1], value_sha256=markers[0].value_sha256)
-    auth = Auth()
-    with pytest.raises(ValueError, match="marker"):
-        ModalPackagedDispatch(
-            binding.command_bytes, binding.runtime_release, binding.provider_binding,
-            binding.provider_facts, binding.execution_binding, receipt, workload,
-            policy, (), "dispatch-key", tuple(markers),
-            "synaptic-modal-packaged-dispatch/v2",
-        )
-    assert auth.signed == []
 
 
 def _markers(binding):

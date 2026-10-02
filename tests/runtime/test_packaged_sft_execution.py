@@ -4,7 +4,6 @@ import json
 import os
 import platform
 import secrets
-import shutil
 import stat
 import sys
 import traceback

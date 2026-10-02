@@ -17,7 +17,7 @@ from SynthChat.services.privacy_preprocess import (
 )
 from SynthChat.services.pseudonymizer import Pseudonymizer
 from SynthChat.utils.docs_loader import DocFile
-from shared.llm.usage import LLMCompletionV1, LLMStructuredV1
+from shared.llm.usage import LLMCompletionV1
 
 
 class _FakeLLMClient:

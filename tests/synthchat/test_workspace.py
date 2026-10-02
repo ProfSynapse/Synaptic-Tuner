@@ -1,8 +1,6 @@
 """Tests for SynthChat.workspace — renderer, sections, and fixture helpers."""
 from __future__ import annotations
 
-import json
-import pytest
 from SynthChat.workspace.sections import (
     _build_selected_workspace_section,
     _build_wrapped_section,

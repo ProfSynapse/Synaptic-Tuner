@@ -171,7 +171,6 @@ def _build_selected_workspace_json(
     format_config: Dict[str, Any],
 ) -> str:
     """Build the JSON payload for selected_workspace using config-defined fields."""
-    from .fixture_helpers import _workspace_structure_from_fixture
 
     matched_workspace = None
     for ws in available_workspaces:

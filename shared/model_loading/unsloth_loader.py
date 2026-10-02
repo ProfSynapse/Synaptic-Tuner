@@ -4,7 +4,7 @@ Unsloth model loader implementation.
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 from .base import BaseModelLoader
 from ..upload.core.types import ModelPath
@@ -253,7 +253,7 @@ class UnslothModelLoader(BaseModelLoader):
         gguf_files = []
 
         # Always create f16 base first
-        print(f"  Creating f16 (full precision) GGUF...")
+        print("  Creating f16 (full precision) GGUF...")
         f16_path = output_dir / f"{model_name}.gguf"
         model.save_pretrained_gguf(
             str(output_dir),

@@ -23,7 +23,6 @@ from tuner.execution.coordinator_v1.model import (
     ProviderRunObservationContentV1,
     ProviderRunPhaseV1,
     VerificationVerdictV1,
-    WorkflowPhaseV1,
 )
 from tuner.execution.coordinator_v1.operations import RunOperationsV1
 from tuner.execution.coordinator_v1.cursors import (

@@ -6,7 +6,7 @@ import hashlib
 import configparser
 import os
 import re
-import tempfile  # compatibility seam; bootstrap_core uses the same stdlib module object
+import tempfile  # noqa: F401  compatibility seam; bootstrap_core uses the same stdlib module object
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,7 +18,6 @@ from tuner.project.context import ProjectContext
 from tuner.project.manifest import load_project_manifest
 from tuner.project.secrets import SecretResolver, SecretRef, resolve_secret
 from tuner.project.source_bundle import (
-    GitSource,
     RepositoryLocation,
     SourceLock,
     resolve_relative_repository_url,

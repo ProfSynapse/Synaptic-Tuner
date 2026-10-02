@@ -3,6 +3,6 @@
 # Importing this module triggers registration of all bundled wrappers.
 
 from .registry import AlgorithmWrapper, get_algorithm, list_algorithms
-from . import lightgbm_wrapper  # Triggers @register_algorithm("lightgbm")
+from . import lightgbm_wrapper  # noqa: F401  Triggers @register_algorithm("lightgbm")
 
 __all__ = ["AlgorithmWrapper", "get_algorithm", "list_algorithms"]

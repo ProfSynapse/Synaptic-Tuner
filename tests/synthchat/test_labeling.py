@@ -1,7 +1,6 @@
 """Tests for SynthChat.labeling — metadata label construction and classification."""
 from __future__ import annotations
 
-import pytest
 from SynthChat.labeling import (
     _classify_environment_issue,
     _derive_kto_candidate_label,

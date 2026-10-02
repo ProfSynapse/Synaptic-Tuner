@@ -1,8 +1,6 @@
 """Tests for SynthChat.schemas — JSON schema construction for environments and tool responses."""
 from __future__ import annotations
 
-import json
-import pytest
 from SynthChat.schemas.environment_schema import (
     _build_canonical_environment_generation_prompt,
     _build_canonical_environment_schema,

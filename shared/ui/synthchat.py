@@ -10,7 +10,7 @@ from typing import Optional, List
 from threading import Event
 
 from .theme import COLORS, BOX
-from .console import console, RICH_AVAILABLE, clear_screen
+from .console import console, RICH_AVAILABLE
 
 
 @dataclass

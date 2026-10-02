@@ -5,9 +5,8 @@ via fire-and-forget _log_inference task.
 """
 from __future__ import annotations
 
-import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI

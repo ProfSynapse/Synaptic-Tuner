@@ -8,7 +8,7 @@ import math
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 

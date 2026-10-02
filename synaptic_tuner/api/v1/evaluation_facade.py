@@ -34,7 +34,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Protocol
 
-from ._contract import contract_digest, digest_text, exact_fields, exact_integer, required_text
+from ._contract import contract_digest, digest_text, exact_fields, required_text
 from ._timestamps import require_rfc3339
 from .observations import (
     ObservationFamily,

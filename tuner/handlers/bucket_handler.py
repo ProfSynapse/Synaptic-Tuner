@@ -5,7 +5,6 @@ Bucket artifact read/list handler.
 from __future__ import annotations
 
 import json
-from argparse import Namespace
 from pathlib import Path
 from typing import Any, Optional
 

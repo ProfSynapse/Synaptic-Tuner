@@ -23,7 +23,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _CT_PATH = REPO_ROOT / "Trainers" / "ace_step" / "src" / "config_translation.py"

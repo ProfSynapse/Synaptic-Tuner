@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import multiprocessing
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -1072,7 +1071,7 @@ def test_loss_stage_runner_recovers_embedded_eval_losses_without_resubmitting(tm
     )
 
     with patch.object(runner, "_download_results", return_value=losses_dir):
-        with patch("tuner.handlers.stages.hf_loss_stage.HFJobExecutor.submit") as mock_submit:
+        with patch("tuner.handlers.stages.hf_loss_stage.HFJobExecutor.submit"):
             result = runner.run(spec=None, experiment=experiment, previous=previous)
 
     assert result.status == "completed"

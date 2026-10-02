@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Protocol
 
-from ._contract import exact_integer, required_text
+from ._contract import required_text
 from .execution import AuthorizationRequirement, ExecutionGrant
 
 if TYPE_CHECKING:  # ``api/v1/secrets.py`` re-exports from ``tuner.project``; typing only.

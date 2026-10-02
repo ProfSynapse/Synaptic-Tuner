@@ -10,7 +10,7 @@ Used by: All handlers for user interaction
 
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 # Try importing from shared UI first
 SHARED_UI_AVAILABLE = False

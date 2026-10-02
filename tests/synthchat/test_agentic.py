@@ -1,8 +1,6 @@
 """Tests for SynthChat.agentic — turn judge template building and episode helpers."""
 from __future__ import annotations
 
-import json
-import pytest
 from SynthChat.agentic.episode import (
     build_turn_judge,
     build_turn_judge_template_vars,

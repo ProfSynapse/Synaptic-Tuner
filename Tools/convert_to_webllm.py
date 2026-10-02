@@ -19,7 +19,6 @@ Usage:
 import os
 import sys
 import json
-import shutil
 import argparse
 import pathlib
 import subprocess
@@ -142,7 +141,6 @@ def convert_to_mlc(model_path: Path, output_path: Path, quantization: str, model
     mlc_output.mkdir(parents=True, exist_ok=True)
 
     # Use CLI modules directly
-    from mlc_llm.cli import convert_weight, gen_config
 
     print(f"Converting weights with {quantization} quantization...")
     print(f"  Model: {model_path}")

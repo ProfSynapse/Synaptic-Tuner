@@ -3,8 +3,7 @@ import pytest
 from synaptic_tuner.api.v1.planning import ProviderPlanContextV1, ProviderPlanRef, TrainingPlan, TrainingPlanBasisV1
 from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderDescriptor, ProviderRef
 from synaptic_tuner.api.v1.results import TrainingRunRef, TrainingRunState, VerifiedArtifact
-from tuner.execution.coordinator_v1.model import (ArtifactManifestV1, ArtifactVerificationContentV1,
- AuthenticatedArtifactVerificationReceiptV1, AuthenticatedFoundationRecordAssessmentV1,
+from tuner.execution.coordinator_v1.model import (ArtifactManifestV1, AuthenticatedArtifactVerificationReceiptV1, AuthenticatedFoundationRecordAssessmentV1,
  FoundationRecordAssessmentContentV1, ReceiptAssessmentV1, ReceiptFreshnessV1,
  AuthenticatedProviderRunObservationV1, ProviderRunObservationContentV1,
  EffectIntentV1, ProviderReadPurposeV1, ProviderRunPhaseV1, ProviderRunReadRequestV1, VerificationVerdictV1, WorkflowPhaseV1, WorkflowRecordV1)

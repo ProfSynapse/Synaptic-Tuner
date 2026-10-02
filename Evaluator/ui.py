@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import List, Sequence, Optional, Dict, Any
+from typing import List, Sequence
 
 # Add shared to path for UI components
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -59,7 +59,7 @@ def rich_summary(records: Sequence[EvaluationRecord]) -> None:
 
     # Overall summary panel
     summary_text = Text()
-    summary_text.append(f"\nEvaluated ", style="white")
+    summary_text.append("\nEvaluated ", style="white")
     summary_text.append(f"{stats['total']}", style=f"bold {COLORS['aqua']}")
     summary_text.append(" tests: ", style="white")
     summary_text.append(f"{stats['passed']} passed", style="bold green")
@@ -71,7 +71,7 @@ def rich_summary(records: Sequence[EvaluationRecord]) -> None:
     # Schema pass rate
     schema_rate = stats.get('schema_pass_rate', 0) * 100
     rate_style = COLORS['aqua'] if schema_rate >= 90 else ("yellow" if schema_rate >= 70 else COLORS['orange'])
-    summary_text.append(f"Schema Pass Rate: ", style="white")
+    summary_text.append("Schema Pass Rate: ", style="white")
     summary_text.append(f"{schema_rate:.1f}%", style=f"bold {rate_style}")
     summary_text.append(f" ({stats['schema_passed']}/{stats['total']})", style="dim")
 
@@ -79,12 +79,12 @@ def rich_summary(records: Sequence[EvaluationRecord]) -> None:
     if stats.get('behavior_tested', 0) > 0:
         beh_rate = stats.get('behavior_pass_rate', 0) * 100
         beh_style = COLORS['aqua'] if beh_rate >= 90 else ("yellow" if beh_rate >= 70 else COLORS['orange'])
-        summary_text.append(f"\nBehavior Pass Rate: ", style="white")
+        summary_text.append("\nBehavior Pass Rate: ", style="white")
         summary_text.append(f"{beh_rate:.1f}%", style=f"bold {beh_style}")
         summary_text.append(f" ({stats['behavior_passed']}/{stats['behavior_tested']})", style="dim")
 
     if stats.get('request_errors', 0) > 0:
-        summary_text.append(f"\n\nRequest Errors: ", style="white")
+        summary_text.append("\n\nRequest Errors: ", style="white")
         summary_text.append(f"{stats['request_errors']}", style="bold red")
 
     console.print(Panel(
@@ -255,7 +255,7 @@ def rich_failure_details(records: Sequence[EvaluationRecord], max_display: int =
                 details.append("\n\nBehavior Issues:", style="bold yellow")
                 for issue in record.behavior.issues:
                     if not issue.passed:
-                        details.append(f"\n  [FAIL] ", style="red")
+                        details.append("\n  [FAIL] ", style="red")
                         details.append(f"{issue.check}: ", style=COLORS['sky'])
                         details.append(issue.message, style="white")
 
@@ -279,6 +279,9 @@ def rich_failure_details(records: Sequence[EvaluationRecord], max_display: int =
             box=box.ROUNDED,
         ))
 
+    if len(failed) > max_display:
+        console.print(f"  [dim]... and {len(failed) - max_display} more failures[/dim]\n")
+
 
 def _expected_for_display(case) -> List[str]:
     correct = case.metadata.get("correct")
@@ -291,9 +294,6 @@ def _expected_for_display(case) -> List[str]:
             return names
     name = correct.get("name")
     return [str(name)] if name else []
-
-    if len(failed) > max_display:
-        console.print(f"  [dim]... and {len(failed) - max_display} more failures[/dim]\n")
 
 
 def print_evaluation_header(
@@ -312,7 +312,7 @@ def print_evaluation_header(
     """
     if not RICH_AVAILABLE:
         print(f"\n{'=' * 60}")
-        print(f"  Model Evaluation")
+        print("  Model Evaluation")
         print(f"{'=' * 60}")
         print(f"  Model: {model_name}")
         print(f"  Backend: {backend}")
@@ -323,14 +323,14 @@ def print_evaluation_header(
         return
 
     header_text = Text()
-    header_text.append(f"\n  Model:    ", style=COLORS['sky'])
+    header_text.append("\n  Model:    ", style=COLORS['sky'])
     header_text.append(f"{model_name}\n", style="bold white")
-    header_text.append(f"  Backend:  ", style=COLORS['sky'])
+    header_text.append("  Backend:  ", style=COLORS['sky'])
     header_text.append(f"{backend}\n", style="white")
-    header_text.append(f"  Tests:    ", style=COLORS['sky'])
+    header_text.append("  Tests:    ", style=COLORS['sky'])
     header_text.append(f"{total_tests}\n", style="white")
     if scenario_file:
-        header_text.append(f"  Scenario: ", style=COLORS['sky'])
+        header_text.append("  Scenario: ", style=COLORS['sky'])
         header_text.append(f"{Path(scenario_file).name}", style="dim")
 
     title = Text()

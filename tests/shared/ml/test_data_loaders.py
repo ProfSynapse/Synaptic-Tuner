@@ -1,7 +1,6 @@
 """Tests for shared/ml/data_loaders.py — multi-format dataset loading."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pandas as pd
