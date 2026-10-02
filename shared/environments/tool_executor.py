@@ -11,7 +11,7 @@ switches and instead:
 from __future__ import annotations
 
 import json
-import shlex
+import re
 import unicodedata
 from functools import lru_cache
 from pathlib import Path
@@ -216,15 +216,16 @@ def format_tool_results_message(
     )
 
 
-def _looks_like_cli_wrapper_call(call) -> bool:
+def _cli_wrapper_spec(call) -> Optional[Dict[str, Any]]:
+    """Return the configured wrapper spec when ``call`` carries a CLI command string."""
     args = call.arguments if isinstance(call.arguments, dict) else {}
-    if not isinstance(args, dict):
-        return False
     wrapper_spec = match_configured_wrapper(args, function_name=getattr(call, "name", None))
     if wrapper_spec is None:
-        return False
+        return None
     tool_value = args.get("tool")
-    return isinstance(tool_value, str) and bool(tool_value.strip())
+    if not isinstance(tool_value, str) or not tool_value.strip():
+        return None
+    return wrapper_spec
 
 
 @lru_cache(maxsize=1)
@@ -251,72 +252,123 @@ def _load_cli_command_catalog() -> Dict[str, Tuple[str, List[Dict[str, Any]]]]:
     return catalog
 
 
-def _split_cli_commands(tool_value: str) -> List[str]:
-    tool_value = _normalize_cli_whitespace(tool_value)
-    commands: List[str] = []
-    current: List[str] = []
-    quote: Optional[str] = None
-    escape = False
+_DOUBLE_QUOTES = {'"': {'"'}, "\u201c": {'"', "\u201c", "\u201d"}, "\u201d": {'"', "\u201c", "\u201d"}}
+_SINGLE_QUOTES = {"'": {"'"}, "\u2018": {"'", "\u2018", "\u2019"}, "\u2019": {"'", "\u2018", "\u2019"}}
+# An undeclared token is option-shaped when its part before any ``=`` is ``--``
+# or ``--name`` with no whitespace. A value that merely starts with dashes, such
+# as ``---`` YAML front matter, is an argument, not an option.
+_OPTION_NAME = re.compile(r"--(?:[^-\s]\S*)?")
+
+
+def _is_cli_separator(char: str) -> bool:
+    return char.isspace() or unicodedata.category(char) == "Zs"
+
+
+def _tokenize_cli_commands(tool_value: str, escapes: Dict[str, str]) -> List[List[str]]:
+    """Split a CLI command sequence into commands and their argument tokens.
+
+    Tokenizing follows POSIX shell quoting, as ``shlex.split`` does: whitespace
+    separates arguments outside quotes, a backslash outside quotes takes the next
+    character literally, single quotes are literal, and inside double quotes a
+    backslash escapes ``"`` and ``\\``. Quoted text is kept exactly, including
+    newlines and other whitespace. ``escapes`` maps the character after a
+    backslash inside double quotes to its decoded text; it comes from the
+    tool-call format config, so a format without escapes keeps plain POSIX
+    semantics.
+
+    Commands are separated by commas outside quotes, braces and brackets. Curly
+    quotes outside an argument open a quoted argument that a straight or curly
+    quote of the same kind closes. Raises ``ValueError`` like ``shlex.split`` on
+    an unterminated quote or a trailing backslash.
+    """
+    commands: List[List[str]] = []
+    tokens: List[str] = []
+    buffer: List[str] = []
+    in_token = False
+    closers: Optional[set] = None
+    double_quoted = False
     brace_depth = 0
     bracket_depth = 0
 
-    for char in tool_value:
-        current.append(char)
-        if escape:
-            escape = False
+    def end_token() -> None:
+        nonlocal buffer, in_token
+        if in_token:
+            tokens.append("".join(buffer))
+        buffer = []
+        in_token = False
+
+    i = 0
+    length = len(tool_value)
+    while i < length:
+        char = tool_value[i]
+        if closers is not None:
+            if char in closers:
+                closers = None
+            elif double_quoted and char == "\\" and i + 1 < length:
+                following = tool_value[i + 1]
+                if following == "\\" or following in closers:
+                    buffer.append(following)
+                    i += 1
+                elif following in escapes:
+                    buffer.append(escapes[following])
+                    i += 1
+                else:
+                    buffer.append(char)
+            else:
+                buffer.append(char)
+            i += 1
             continue
+
         if char == "\\":
-            escape = True
+            if i + 1 >= length:
+                raise ValueError("No escaped character")
+            buffer.append(tool_value[i + 1])
+            in_token = True
+            i += 2
             continue
-        if quote:
-            if char == quote:
-                quote = None
+        if char in _DOUBLE_QUOTES or char in _SINGLE_QUOTES:
+            double_quoted = char in _DOUBLE_QUOTES
+            closers = (_DOUBLE_QUOTES if double_quoted else _SINGLE_QUOTES)[char]
+            in_token = True
+            i += 1
             continue
-        if char in {"'", '"'}:
-            quote = char
+        if _is_cli_separator(char):
+            end_token()
+            i += 1
+            continue
+        if char == "," and brace_depth == 0 and bracket_depth == 0:
+            end_token()
+            if tokens:
+                commands.append(tokens)
+            tokens = []
+            i += 1
             continue
         if char == "{":
             brace_depth += 1
-            continue
-        if char == "}":
+        elif char == "}":
             brace_depth = max(0, brace_depth - 1)
-            continue
-        if char == "[":
+        elif char == "[":
             bracket_depth += 1
-            continue
-        if char == "]":
+        elif char == "]":
             bracket_depth = max(0, bracket_depth - 1)
-            continue
-        if char == "," and brace_depth == 0 and bracket_depth == 0:
-            current.pop()
-            segment = "".join(current).strip()
-            if segment:
-                commands.append(segment)
-            current = []
+        buffer.append(char)
+        in_token = True
+        i += 1
 
-    tail = "".join(current).strip()
-    if tail:
-        commands.append(tail)
+    if closers is not None:
+        raise ValueError("No closing quotation")
+    end_token()
+    if tokens:
+        commands.append(tokens)
     return commands
 
 
-def _normalize_cli_whitespace(value: str) -> str:
-    if not isinstance(value, str):
-        return value
-    quote_map = {
-        "\u2018": "'",
-        "\u2019": "'",
-        "\u201c": '"',
-        "\u201d": '"',
-    }
-    normalized_chars: List[str] = []
-    for char in value:
-        char = quote_map.get(char, char)
-        if char.isspace() or unicodedata.category(char) == "Zs":
-            normalized_chars.append(" ")
-        else:
-            normalized_chars.append(char)
-    return "".join(normalized_chars)
+def _split_cli_option(token: str, flag_specs: Dict[str, Dict[str, Any]]) -> Optional[Tuple[str, Optional[str]]]:
+    """Return ``(flag, inline_value)`` when ``token`` is an option, else ``None``."""
+    flag_token, separator, inline_value = token.partition("=")
+    if flag_token in flag_specs or _OPTION_NAME.fullmatch(flag_token):
+        return flag_token, inline_value if separator else None
+    return None
 
 
 def _parse_cli_value(raw_value: str, value_type: str) -> Any:
@@ -367,7 +419,7 @@ def _validate_cli_arg_value(value: Any, spec: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _expand_cli_wrapper_call(call) -> List:
+def _expand_cli_wrapper_call(call, wrapper_spec: Dict[str, Any]) -> List:
     args = call.arguments if isinstance(call.arguments, dict) else {}
     tool_value = args.get("tool")
     if not isinstance(tool_value, str) or not tool_value.strip():
@@ -380,14 +432,12 @@ def _expand_cli_wrapper_call(call) -> List:
     sorted_commands = sorted(catalog.keys(), key=lambda value: len(value.split()), reverse=True)
     expanded = []
 
-    for command_str in _split_cli_commands(tool_value):
-        try:
-            tokens = shlex.split(command_str)
-        except ValueError:
-            return [call]
-        if not tokens:
-            continue
+    try:
+        commands = _tokenize_cli_commands(tool_value, wrapper_spec.get("command_escapes") or {})
+    except ValueError:
+        return [call]
 
+    for tokens in commands:
         matched_command = None
         matched_spec = None
         matched_prefix_len = 0
@@ -417,11 +467,9 @@ def _expand_cli_wrapper_call(call) -> List:
         i = 0
         while i < len(remaining):
             token = remaining[i]
-            if token.startswith("--"):
-                flag_token = token
-                inline_value = None
-                if "=" in token:
-                    flag_token, inline_value = token.split("=", 1)
+            option = _split_cli_option(token, flag_specs)
+            if option is not None:
+                flag_token, inline_value = option
                 arg_spec = flag_specs.get(flag_token)
                 if not arg_spec:
                     i += 1
@@ -471,8 +519,9 @@ def _expand_wrapper_calls(parsed_calls) -> List:
     """Expand delegated wrapper calls into concrete tool calls."""
     expanded = []
     for call in parsed_calls:
-        if _looks_like_cli_wrapper_call(call):
-            expanded.extend(_expand_cli_wrapper_call(call))
+        wrapper_spec = _cli_wrapper_spec(call)
+        if wrapper_spec is not None:
+            expanded.extend(_expand_cli_wrapper_call(call, wrapper_spec))
             continue
         expanded.append(call)
 
