@@ -77,18 +77,28 @@ def _final_command_correct(pattern):
     }
 
 
+def _cli_quote(value):
+    """Double-quote a CLI argument, escaping ``\\`` and ``"``; newlines stay literal."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def test_multistep_environment_loop_feeds_tool_results_back_to_model():
-    # CLI command strings are single-line (the local executor normalises their
-    # whitespace), so the multi-line note is built by copying the template and
-    # replacing single lines rather than by writing it in one command.
+    daily_note = (
+        "---\n"
+        "title: 2026-03-15\n"
+        "type: daily\n"
+        "tags:\n"
+        "  - journal\n"
+        "mood: focused\n"
+        "---\n"
+        "# Daily Note\n\n"
+        "## Linked Notes\n"
+        "- [[Projects/Alpha/meeting-notes]]\n"
+    )
     responses = [
         _tool_response('search directory "daily-note" --paths \'["Templates/"]\''),
         _tool_response('content read "Templates/daily-note.md" 1'),
-        _tool_response(
-            'storage copy "Templates/daily-note.md" "Journal/Daily/2026-03-15.md"',
-            'content replace "Journal/Daily/2026-03-15.md" "mood: neutral" "mood: focused" 6 6',
-            'content replace "Journal/Daily/2026-03-15.md" "- none" "- [[Projects/Alpha/meeting-notes]]" 11 11',
-        ),
+        _tool_response(f'content write "Journal/Daily/2026-03-15.md" {_cli_quote(daily_note)} --overwrite'),
         {"content": "Done. The daily note is created."},
     ]
     client = _SequenceClient(
@@ -110,14 +120,13 @@ def test_multistep_environment_loop_feeds_tool_results_back_to_model():
                 "allowed_tools": [
                     "searchManager_directory",
                     "contentManager_read",
-                    "storageManager_copy",
-                    "contentManager_replace",
+                    "contentManager_write",
                 ],
-                "max_steps": 6,
+                "max_steps": 4,
                 "loop": {
                     "enabled": True,
                     "max_turns": 4,
-                    "max_tool_steps": 6,
+                    "max_tool_steps": 4,
                     "stop_on_text_response": True,
                 },
                 "fixture": {
@@ -131,7 +140,7 @@ def test_multistep_environment_loop_feeds_tool_results_back_to_model():
                                 "tags": ["journal"],
                                 "mood": "neutral",
                             },
-                            "body": "# Daily Note\n\n## Linked Notes\n- none\n",
+                            "body": "# Daily Note\n\n## Linked Notes\n",
                         },
                         {
                             "path": "Projects/Alpha/meeting-notes.md",
@@ -163,10 +172,9 @@ def test_multistep_environment_loop_feeds_tool_results_back_to_model():
     assert [tool.name for tool in record.environment.executed_tools] == [
         "searchManager_directory",
         "contentManager_read",
-        "storageManager_copy",
-        "contentManager_replace",
-        "contentManager_replace",
+        "contentManager_write",
     ]
+    assert record.environment.executed_tools[-1].arguments["content"] == daily_note
     assert record.environment.episode_trace is not None
     assert record.environment.episode_trace.total_turns == 4
     assert record.environment.episode_trace.stop_reason == "text_response"
@@ -359,8 +367,8 @@ def test_agentic_loop_can_recover_after_a_bad_first_step():
             _tool_response('content read "Journal/Daily/2026-03-15.md" 1'),
             _tool_response('search directory "daily-note" --paths \'["Templates/"]\''),
             _tool_response(
-                'storage copy "Templates/daily-note.md" "Journal/Daily/2026-03-15.md"',
-                'content replace "Journal/Daily/2026-03-15.md" "mood: neutral" "mood: focused" 4 4',
+                'content write "Journal/Daily/2026-03-15.md" '
+                + _cli_quote("---\ntitle: 2026-03-15\ntype: daily\nmood: focused\n---\n# Daily Note\n")
             ),
         ],
         expected_substrings=[
@@ -374,13 +382,12 @@ def test_agentic_loop_can_recover_after_a_bad_first_step():
         question="Create today's daily note.",
         metadata={
             "system": "Loop system prompt",
-            "correct": _final_command_correct(r'^storage copy .*, content replace "Journal/Daily/2026-03-15\.md"'),
+            "correct": _final_command_correct(r'^content write "Journal/Daily/2026-03-15\.md" "---\n'),
             "environment": {
                 "allowed_tools": [
                     "contentManager_read",
                     "searchManager_directory",
-                    "storageManager_copy",
-                    "contentManager_replace",
+                    "contentManager_write",
                 ],
                 "max_steps": 4,
                 "loop": {
@@ -395,7 +402,7 @@ def test_agentic_loop_can_recover_after_a_bad_first_step():
                     "notes": [
                         {
                             "path": "Templates/daily-note.md",
-                            "frontmatter": {"title": "Daily Note Template", "type": "daily", "mood": "neutral"},
+                            "frontmatter": {"title": "Daily Note Template", "type": "daily"},
                             "body": "# Daily Note\n",
                         }
                     ],
