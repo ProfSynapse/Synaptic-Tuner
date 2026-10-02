@@ -27,7 +27,10 @@ pytest.importorskip("datasets")
 
 import mask_doctor  # noqa: E402
 import preprocessing  # noqa: E402
-from shared.sft_preprocessing import materialize_sft_example  # noqa: E402
+from shared.sft_preprocessing import (  # noqa: E402
+    derive_end_of_turn_tokens,
+    materialize_sft_example,
+)
 
 
 class _AddedToken:
@@ -129,11 +132,11 @@ def _check(report, name):
 
 
 # ---------------------------------------------------------------------------
-# Preprocessing diagnostics (labels unchanged)
+# Preprocessing diagnostics
 # ---------------------------------------------------------------------------
 
 
-def test_diagnostic_fields_on_clean_row_do_not_change_labels():
+def test_diagnostic_fields_on_clean_row():
     tokenizer = FakeChatTokenizer()
     prepared = materialize_sft_example(
         tokenizer=tokenizer, record=_row("hi", "hello"), max_seq_length=512, assistant_only_loss=True
@@ -142,7 +145,12 @@ def test_diagnostic_fields_on_clean_row_do_not_change_labels():
         tokenizer.apply_chat_template(_row("hi")["messages"][:1], add_generation_prompt=True)
     )
     assert prepared.labels[: len(prompt)] == [-100] * len(prompt)
-    assert prepared.labels[len(prompt):] == prepared.input_ids[len(prompt):]
+    # The reply through its end-of-turn token is trained; the template's
+    # trailing newline after <|im_end|> is not.
+    assert prepared.labels[len(prompt):-1] == prepared.input_ids[len(prompt):-1]
+    assert prepared.input_ids[-2:] == [FakeChatTokenizer.SPECIAL["<|im_end|>"], ord("\n")]
+    assert prepared.labels[-1] == -100
+    assert prepared.drop_reason is None
     assert prepared.prompt_token_count == len(prompt)
     assert prepared.masked_prefix_length == len(prompt)
     assert prepared.mask_prefix_mismatch is False
@@ -160,6 +168,7 @@ def test_diagnostic_fields_record_early_divergence_and_fallback():
     assert diverging.mask_prefix_mismatch is True
     assert diverging.masked_prefix_length == 1 + len("Date: 0")
     assert diverging.mask_divergence_expected_token == ord("2")
+    assert diverging.drop_reason == "mask_prefix_mismatch"
 
     fallback = materialize_sft_example(
         tokenizer=FakeChatTokenizer(),
@@ -173,36 +182,27 @@ def test_diagnostic_fields_record_early_divergence_and_fallback():
 
 
 # ---------------------------------------------------------------------------
-# End-of-turn derivation
+# End-of-turn derivation (shared with the trainer)
 # ---------------------------------------------------------------------------
 
 
 def test_end_of_turn_is_derived_from_the_template_not_eos():
     tokenizer = FakeChatTokenizer(eos_token="<eos>")
-    spec = mask_doctor.derive_end_of_turn_tokens(
-        tokenizer, chat_template_kwargs=None, probe_user="q", probe_assistant="probe answer"
-    )
+    spec = derive_end_of_turn_tokens(tokenizer)
     assert spec.token_ids == [FakeChatTokenizer.SPECIAL["<|im_end|>"]]
     assert spec.source == "chat_template"
 
 
 def test_end_of_turn_falls_back_to_eos_when_template_emits_nothing():
     tokenizer = FakeChatTokenizer(eos_token="<eos>", turn_end="\n")
-    spec = mask_doctor.derive_end_of_turn_tokens(
-        tokenizer, chat_template_kwargs=None, probe_user="q", probe_assistant="probe answer"
-    )
+    spec = derive_end_of_turn_tokens(tokenizer)
     assert spec.token_ids == [FakeChatTokenizer.SPECIAL["<eos>"]]
     assert spec.source == "eos_token"
 
 
 def test_end_of_turn_probe_receives_chat_template_kwargs():
     tokenizer = FakeChatTokenizer()
-    mask_doctor.derive_end_of_turn_tokens(
-        tokenizer,
-        chat_template_kwargs={"enable_thinking": False},
-        probe_user="q",
-        probe_assistant="a",
-    )
+    derive_end_of_turn_tokens(tokenizer, chat_template_kwargs={"enable_thinking": False})
     assert tokenizer.calls[-1] == {"enable_thinking": False}
 
 
@@ -218,22 +218,31 @@ def test_clean_dataset_passes():
     assert report["summary"]["rows_analyzed"] == 2
 
 
-def test_early_divergence_is_a_hard_prefix_mismatch_failure():
+def test_early_divergence_is_reported_and_counted_as_a_trainer_drop():
     report = _diagnose([_row("hi", "hello")], tokenizer=FakeChatTokenizer(diverge_early=True))
     check = _check(report, "mask_prefix_mismatch")
-    assert check["status"] == "fail" and check["count"] == 1 and check["rows"] == [0]
+    assert check["status"] == "warn" and check["count"] == 1 and check["rows"] == [0]
     divergence = report["mask_divergences"][0]
     assert divergence["input_token"] == "1"
     assert divergence["expected_prompt_token"] == "2"
     assert divergence["prompt_tokens_trained"] > 0
+    dropped = _check(report, "dropped_rows")
+    assert dropped["status"] == "fail" and dropped["by_reason"]["mask_prefix_mismatch"] == 1
     assert report["success"] is False
 
 
-def test_zero_trained_tokens_is_a_hard_failure():
+def test_zero_trained_tokens_counts_toward_the_dropped_row_threshold():
     # max_seq_length cuts inside the prompt: every kept position is masked.
-    report = _diagnose([_row("a long question " * 4, "x")], max_seq_length=20)
-    assert _check(report, "zero_trained_tokens")["status"] == "fail"
-    assert report["success"] is False
+    long_row = _row("a long question " * 4, "x")
+    rows = [long_row] + [_row("hi", f"answer {index}") for index in range(9)]
+    report = _diagnose(rows, max_seq_length=40)
+    assert _check(report, "zero_trained_tokens")["count"] == 1
+    dropped = _check(report, "dropped_rows")
+    assert dropped["count"] == 1 and dropped["fraction"] == 0.1
+    assert dropped["status"] == "fail"  # 10% > default 1%
+    report = _diagnose(rows, max_seq_length=40, max_dropped_row_fraction=0.2)
+    assert _check(report, "dropped_rows")["status"] == "warn"
+    assert report["success"] is True
 
 
 def test_unexpected_full_sequence_fallback_is_reported():
@@ -302,33 +311,23 @@ def test_preview_marks_masked_and_trained_tokens_and_divergence():
     assert any(token["trained"] for token in preview["tokens"])
     assert any(not token["trained"] for token in preview["tokens"])
     text = mask_doctor.format_report(report)
-    assert "[FAIL] mask_prefix_mismatch: 1" in text
-    assert "Result: FAIL" in text
+    assert "[WARN] mask_prefix_mismatch: 1" in text
+    assert "[FAIL] dropped_rows: 1" in text
+    assert "Result: FAIL" in text and "dropped_rows" in text
 
 
 def test_materialize_sft_row_is_the_prepare_sft_dataset_path():
     from datasets import Dataset
 
-    tokenizer = FakeChatTokenizer(diverge_early=True)
+    tokenizer = FakeChatTokenizer()
     rows = [_row("hi", "hello"), {"messages": [{"role": "user", "content": "x"}]}]
     prepared = preprocessing.prepare_sft_dataset(
-        Dataset.from_list(rows),
-        tokenizer=tokenizer,
-        max_seq_length=512,
-        include_mask_diagnostics=True,
+        Dataset.from_list(rows), tokenizer=tokenizer, max_seq_length=512
     )
+    assert prepared.column_names == ["input_ids", "attention_mask", "labels"]
     for index, row in enumerate(rows):
         single = preprocessing.materialize_sft_row(row, tokenizer=tokenizer, max_seq_length=512)
         assert prepared[index]["labels"] == single.labels
-    assert preprocessing.summarize_mask_diagnostics(prepared) == {
-        "rows": 2,
-        "mask_prefix_mismatch": 1,
-        "mask_fallback_full_sequence": 1,
-    }
-    default = preprocessing.prepare_sft_dataset(
-        Dataset.from_list(rows), tokenizer=tokenizer, max_seq_length=512
-    )
-    assert default.column_names == ["input_ids", "attention_mask", "labels"]
 
 
 # ---------------------------------------------------------------------------
@@ -349,19 +348,17 @@ def _write_jsonl(path: Path, rows) -> Path:
     return path
 
 
-def test_data_loader_logs_prefix_mismatch_count(scratch_dir, capsys):
+def test_data_loader_refuses_prefix_mismatch_rows(scratch_dir, capsys):
     import data_loader
 
     dataset_path = _write_jsonl(scratch_dir / "rows.jsonl", [_row("hi", "hello"), _row("q", "a")])
-    train, _ = data_loader.load_and_prepare_tokenized_dataset(
-        local_file=str(dataset_path),
-        tokenizer=FakeChatTokenizer(diverge_early=True),
-        max_seq_length=512,
-    )
-    out = capsys.readouterr().out
-    assert "2/2 prefix-mismatch rows" in out
-    assert "WARNING: 2 row(s) stopped assistant-only masking" in out
-    assert train.column_names == ["input_ids", "attention_mask", "labels"]
+    with pytest.raises(preprocessing.DroppedRowsError, match="mask_prefix_mismatch=2"):
+        data_loader.load_and_prepare_tokenized_dataset(
+            local_file=str(dataset_path),
+            tokenizer=FakeChatTokenizer(diverge_early=True),
+            max_seq_length=512,
+        )
+    assert "dropped 2/2 rows" in capsys.readouterr().out
 
 
 def _handler_args(dataset: Path | None, **overrides) -> Namespace:
@@ -470,7 +467,7 @@ def test_dataset_contract_failure_is_reported(scratch_dir):
     assert contract["status"] == "fail"
     assert "use_preassigned_splits" in contract["error"]
     assert report["success"] is False
-    assert "dataset contract failed" in mask_doctor.format_report(report)
+    assert "failed checks: dataset_contract" in mask_doctor.format_report(report)
 
 
 def test_raw_text_rows_end_with_eos(scratch_dir):
@@ -547,10 +544,10 @@ def test_doctor_config_refuses_unknown_keys(scratch_dir):
     from shared.training_utils import UnknownConfigKeysError
 
     config = mask_doctor.load_doctor_config()
-    assert config.sample_size > 0 and config.probe.assistant
+    assert config.sample_size > 0
 
     bad = scratch_dir / "mask_doctor.yaml"
-    bad.write_text("sample_sise: 10\nprobe:\n  asistant: x\n", encoding="utf-8")
+    bad.write_text("sample_sise: 10\nextra_end_of_turn_tokens: []\n", encoding="utf-8")
     with pytest.raises(UnknownConfigKeysError) as excinfo:
         mask_doctor.load_doctor_config(bad)
-    assert excinfo.value.paths == ["sample_sise", "probe.asistant"]
+    assert excinfo.value.paths == ["sample_sise", "extra_end_of_turn_tokens"]

@@ -7,12 +7,12 @@ from datasets import load_dataset, Dataset
 
 from preprocessing import (
     ASSISTANT_ONLY,
-    MASK_DIAGNOSTIC_COLUMNS,
+    SOURCE_INDEX_COLUMN,
     load_and_prepare_sft_dataset,
     sanitize_conversations as sanitize_prepared_conversations,
-    summarize_mask_diagnostics,
 )
 from shared.sft_preprocessing import (
+    DEFAULT_MAX_DROPPED_ROW_FRACTION,
     detect_sft_record_format,
     is_authoritative_preassigned_sft_record,
 )
@@ -221,29 +221,6 @@ def load_raw_sft_dataset(
     return raw_datasets
 
 
-def log_mask_diagnostics(summary: dict, loss_mask_mode: str) -> None:
-    """Print the aggregate loss-mask diagnostics for a prepared SFT dataset."""
-    rows = summary["rows"]
-    mismatched = summary["mask_prefix_mismatch"]
-    fallback = summary["mask_fallback_full_sequence"]
-    print(
-        f"\nLoss mask diagnostics ({loss_mask_mode}): "
-        f"{mismatched}/{rows} prefix-mismatch rows, "
-        f"{fallback}/{rows} full-sequence fallback rows"
-    )
-    if mismatched:
-        print(
-            f"WARNING: {mismatched} row(s) stopped assistant-only masking before the end "
-            "of the prompt render, so prompt tokens are trained. Inspect with "
-            "`python tuner.py doctor sft-mask`."
-        )
-    if fallback:
-        print(
-            f"WARNING: {fallback} row(s) do not end with an assistant turn and were "
-            "trained with full-sequence loss."
-        )
-
-
 def load_and_prepare_tokenized_dataset(
     dataset_name: Optional[str] = None,
     data_files: Optional[str] = None,
@@ -263,6 +240,7 @@ def load_and_prepare_tokenized_dataset(
     use_preassigned_splits: bool = False,
     preparation_metadata: Optional[dict[str, str]] = None,
     validation_group_key: Optional[str] = None,
+    max_dropped_row_fraction: float = DEFAULT_MAX_DROPPED_ROW_FRACTION,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare dataset into explicit tokenized SFT features.
@@ -294,7 +272,8 @@ def load_and_prepare_tokenized_dataset(
         filter_desirable=filter_desirable,
     )
 
-    def _prepare(dataset: Dataset) -> Dataset:
+    def _prepare(dataset: Dataset) -> Tuple[Dataset, list]:
+        """Tokenize ``dataset``; return it and the input index of each kept row."""
         prepared = load_and_prepare_sft_dataset(
             dataset=dataset,
             tokenizer=tokenizer,
@@ -308,10 +287,11 @@ def load_and_prepare_tokenized_dataset(
             assistant_only_loss_requested=assistant_only_loss_requested,
             aux_token_position=aux_token_position,
             use_preassigned_splits=use_preassigned_splits,
-            include_mask_diagnostics=True,
+            max_dropped_row_fraction=max_dropped_row_fraction,
+            keep_source_index=True,
         )
-        log_mask_diagnostics(summarize_mask_diagnostics(prepared), loss_mask_mode)
-        return prepared.remove_columns(list(MASK_DIAGNOSTIC_COLUMNS))
+        kept = list(prepared[SOURCE_INDEX_COLUMN])
+        return prepared.remove_columns([SOURCE_INDEX_COLUMN]), kept
 
     if validation_group_key and use_preassigned_splits:
         raise ValueError(
@@ -371,14 +351,18 @@ def load_and_prepare_tokenized_dataset(
             raise ValueError(
                 "Preassigned splits require a non-empty declared validation split."
             )
-        train_dataset = _prepare(train_rows)
-        eval_dataset = _prepare(validation_rows)
+        train_dataset, _ = _prepare(train_rows)
+        eval_dataset, _ = _prepare(validation_rows)
         if preparation_metadata is not None:
             preparation_metadata["dataset_format"] = next(iter(formats))
         print(f"  Training set: {len(train_dataset)} examples")
         print(f"  Validation set: {len(eval_dataset)} examples")
     else:
-        train_dataset = _prepare(raw_datasets)
+        train_dataset, kept_rows = _prepare(raw_datasets)
+        if group_values is not None:
+            # Untrainable rows were dropped; keep group values aligned with the
+            # rows that remain.
+            group_values = [group_values[index] for index in kept_rows]
 
     if not use_preassigned_splits and split_dataset and test_size > 0:
         print(f"\nCreating train/validation split ({1-test_size:.0%}/{test_size:.0%})")

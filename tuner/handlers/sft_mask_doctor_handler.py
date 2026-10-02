@@ -177,6 +177,7 @@ def resolve_settings(
         assistant_only_loss_requested=bool(config.training.assistant_only_loss),
         aux_token_position=aux_head.token_position if aux_enabled else None,
         use_preassigned_splits=bool(getattr(config.dataset, "use_preassigned_splits", False)),
+        max_dropped_row_fraction=float(config.training.max_dropped_row_fraction),
         sample_size=int(sample_size if sample_size is not None else doctor_config.sample_size),
         seed=int(seed if seed is not None else doctor_config.seed),
         preview_rows=_parse_preview_rows(getattr(args, "preview_rows", None)),

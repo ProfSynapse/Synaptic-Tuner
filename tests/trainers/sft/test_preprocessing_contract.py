@@ -108,11 +108,13 @@ def test_prepare_sft_dataset_returns_dataset_with_explicit_token_columns():
 
 
 def test_prepare_sft_dataset_truncates_overlong_examples_deterministically():
+    # Truncation cuts inside the completion, so the row keeps supervised tokens.
+    # (A row whose whole target is cut is dropped instead; see test_mask_doctor.)
     raw_dataset = Dataset.from_list(
         [
             {
                 "messages": [
-                    {"role": "user", "content": "x" * 80},
+                    {"role": "user", "content": "x" * 8},
                     {"role": "assistant", "content": "y" * 80},
                 ]
             }
@@ -130,6 +132,7 @@ def test_prepare_sft_dataset_truncates_overlong_examples_deterministically():
     row = prepared_dataset[0]
     assert len(row["input_ids"]) <= 32
     assert len(row["input_ids"]) == len(row["labels"])
+    assert any(label != -100 for label in row["labels"])
 
 
 # ---------------------------------------------------------------------------

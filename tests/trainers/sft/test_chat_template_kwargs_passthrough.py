@@ -91,10 +91,13 @@ def test_chat_template_kwargs_forwarded_to_both_call_sites():
         chat_template_kwargs={"enable_thinking": False},
     )
 
-    # Two render calls: full-sequence (add_generation_prompt=False) and the
-    # prompt-only loss-mask prefix (add_generation_prompt=True). BOTH must carry
-    # the forwarded kwarg so the loss-mask prefix matches the eval-time prompt.
-    assert len(tokenizer.calls) == 2
+    # Three render calls: full-sequence (add_generation_prompt=False), the
+    # prompt-only loss-mask prefix (add_generation_prompt=True), and the one-time
+    # end-of-turn probe (add_generation_prompt=False) that locates the final
+    # turn's terminator. ALL must carry the forwarded kwarg so the loss-mask
+    # prefix and the terminator match the eval-time template.
+    assert len(tokenizer.calls) == 3
+    assert all(call["kwargs"] == {"enable_thinking": False} for call in tokenizer.calls)
     full_call = next(c for c in tokenizer.calls if c["add_generation_prompt"] is False)
     prompt_call = next(c for c in tokenizer.calls if c["add_generation_prompt"] is True)
     assert full_call["kwargs"] == {"enable_thinking": False}
@@ -112,7 +115,7 @@ def test_default_none_forwards_no_kwargs_byte_identical():
         # chat_template_kwargs omitted ⇒ default None ⇒ no extra kwargs.
     )
 
-    assert len(tokenizer.calls) == 2
+    assert len(tokenizer.calls) == 3  # full render, prompt render, end-of-turn probe
     for call in tokenizer.calls:
         assert call["kwargs"] == {}
 

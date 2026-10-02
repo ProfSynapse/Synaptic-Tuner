@@ -16,14 +16,21 @@ authoritative prepared-row rules) runs over the whole loaded dataset first.
 Checks and severities:
     dataset_contract                 fail  the trainer would reject the dataset
     row_error                        fail  preprocessing raised for the row
-    zero_trained_tokens              fail  every label is -100
-    mask_prefix_mismatch             fail  masking stopped before the end of the
-                                           prompt render (prompt tokens trained)
+    zero_trained_tokens              warn  every label is -100; the trainer
+                                           drops the row
+    mask_prefix_mismatch             warn  masking stopped before the end of the
+                                           prompt render; the trainer drops the
+                                           row instead of training prompt tokens
+    dropped_rows                     fail  rows the trainer drops exceed
+                                           training.max_dropped_row_fraction
+                                           (the training run would fail)
     full_sequence_fallback           fail  assistant-only loss requested but the
                                            row ends without an assistant turn
                                            (configurable: fail_on_full_sequence_fallback)
-    missing_end_of_turn              fail  trained span does not end with a
-                                           derived end-of-turn token (eos_token
+    missing_end_of_turn              fail  trained span does not end with the
+                                           end-of-turn token derived by
+                                           shared.sft_preprocessing (the trainer
+                                           uses the same derivation; eos_token
                                            for raw_text rows, which append it)
     doubled_bos                      fail  the sequence starts with BOS twice
     truncation                       warn  truncation rate above the threshold
@@ -40,15 +47,24 @@ import math
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import yaml
 
+from shared.sft_preprocessing import (
+    DROP_NO_SUPERVISED_TOKENS,
+    DROP_REASONS,
+    derive_end_of_turn_tokens,
+    encoder_of,
+    is_whitespace_token,
+    token_text,
+)
 from shared.training_utils import dict_to_dataclass, reject_unknown_config_keys
 
 from data_loader import load_raw_sft_dataset
 from preprocessing import (
     ASSISTANT_ONLY,
+    dropped_row_fraction_exceeded,
     materialize_sft_row,
     normalize_sft_example,
     validate_sft_dataset_contract,
@@ -69,12 +85,23 @@ CHECK_ORDER = (
         "before materializing any row.",
     ),
     ("row_error", FAIL, "Preprocessing raised for these rows (training would crash)."),
-    ("zero_trained_tokens", FAIL, "No position carries a label; the row trains nothing."),
+    (
+        "zero_trained_tokens",
+        WARN,
+        "No position carries a label (often truncation inside the prompt); the trainer "
+        "drops the row.",
+    ),
     (
         "mask_prefix_mismatch",
-        FAIL,
+        WARN,
         "The full render diverged from the add_generation_prompt render before the prompt "
-        "ended, so masking stopped early and prompt tokens are trained.",
+        "ended; the trainer drops the row instead of training prompt tokens.",
+    ),
+    (
+        "dropped_rows",
+        FAIL,
+        "Rows the trainer drops exceed training.max_dropped_row_fraction, so the training "
+        "run fails.",
     ),
     (
         "full_sequence_fallback",
@@ -121,6 +148,7 @@ class MaskDoctorSettings:
     assistant_only_loss_requested: bool = False
     aux_token_position: str | int | None = None
     use_preassigned_splits: bool = False
+    max_dropped_row_fraction: float = 0.01
     sample_size: int = 200
     seed: int = 0
     preview_rows: list[int] | None = None
@@ -141,37 +169,13 @@ class MaskDoctorSettings:
             "assistant_only_loss_requested": self.assistant_only_loss_requested,
             "aux_token_position": self.aux_token_position,
             "use_preassigned_splits": self.use_preassigned_splits,
+            "max_dropped_row_fraction": self.max_dropped_row_fraction,
             "sample_size": self.sample_size,
             "seed": self.seed,
             "preview_rows": self.preview_rows,
             "preview_count": self.preview_count,
             "sources": list(self.sources),
         }
-
-
-@dataclass
-class EndOfTurnSpec:
-    """Token ids accepted as the end of a trained assistant span."""
-
-    token_ids: list[int]
-    source: str
-    detail: str = ""
-
-    def to_dict(self, encoder: Any) -> dict[str, Any]:
-        return {
-            "token_ids": list(self.token_ids),
-            "tokens": [_token_text(encoder, token_id) for token_id in self.token_ids],
-            "source": self.source,
-            "detail": self.detail,
-        }
-
-
-@dataclass
-class ProbeConfig:
-    """Probe conversation used to derive the template's end-of-turn suffix."""
-
-    user: str = "mask doctor probe question"
-    assistant: str = "mask doctor probe answer"
 
 
 @dataclass
@@ -185,8 +189,6 @@ class MaskDoctorConfig:
     max_listed_rows: int = 20
     fail_on_full_sequence_fallback: bool = True
     truncation_warn_rate: float = 0.01
-    extra_end_of_turn_tokens: list[str] = field(default_factory=list)
-    probe: ProbeConfig = field(default_factory=ProbeConfig)
 
 
 def load_doctor_config(path: str | Path | None = None) -> MaskDoctorConfig:
@@ -197,134 +199,7 @@ def load_doctor_config(path: str | Path | None = None) -> MaskDoctorConfig:
     if not isinstance(data, dict):
         raise ValueError(f"Mask doctor config must be a YAML mapping: {config_path}")
     reject_unknown_config_keys(MaskDoctorConfig, data, source=str(config_path))
-    probe = dict_to_dataclass(ProbeConfig, data.get("probe") or {}, section="probe")
-    top = {key: value for key, value in data.items() if key != "probe"}
-    config = dict_to_dataclass(MaskDoctorConfig, top)
-    config.probe = probe
-    config.extra_end_of_turn_tokens = list(config.extra_end_of_turn_tokens or [])
-    return config
-
-
-# ---------------------------------------------------------------------------
-# Tokenizer helpers
-# ---------------------------------------------------------------------------
-
-
-def _encoder_of(tokenizer: Any) -> Any:
-    # Same Processor -> Tokenizer unwrap as shared.sft_preprocessing.
-    return getattr(tokenizer, "tokenizer", tokenizer)
-
-
-def _token_text(encoder: Any, token_id: int) -> str:
-    try:
-        return encoder.decode([token_id])
-    except Exception:  # noqa: BLE001 - display only
-        return f"<id:{token_id}>"
-
-
-def _special_token_ids(encoder: Any) -> set[int]:
-    ids: set[int] = set(getattr(encoder, "all_special_ids", None) or [])
-    added = getattr(encoder, "added_tokens_decoder", None) or {}
-    for token_id, token in added.items():
-        if getattr(token, "special", False):
-            ids.add(int(token_id))
-    return ids
-
-
-def _is_whitespace_token(encoder: Any, token_id: int) -> bool:
-    return _token_text(encoder, token_id).strip() == ""
-
-
-def derive_end_of_turn_tokens(
-    tokenizer: Any,
-    *,
-    chat_template_kwargs: dict[str, Any] | None,
-    probe_user: str,
-    probe_assistant: str,
-    extra_tokens: Iterable[str] = (),
-) -> EndOfTurnSpec:
-    """Derive the assistant end-of-turn token(s) from the chat template itself.
-
-    A probe conversation is rendered with the trainer's template kwargs; the
-    special tokens emitted after the assistant content are the template's
-    end-of-turn terminators. When the template emits no special token there,
-    the last non-whitespace suffix token is used, and when it emits nothing at
-    all, eos_token. ``extra_tokens`` (from config) are added on top.
-    """
-    encoder = _encoder_of(tokenizer)
-    eos_id = getattr(encoder, "eos_token_id", None)
-    if eos_id is None:
-        eos_id = getattr(tokenizer, "eos_token_id", None)
-
-    token_ids: list[int] = []
-    source = "eos_token"
-    detail = ""
-    try:
-        render = tokenizer.apply_chat_template(
-            [
-                {"role": "user", "content": probe_user},
-                {"role": "assistant", "content": probe_assistant},
-            ],
-            tokenize=False,
-            add_generation_prompt=False,
-            **(chat_template_kwargs or {}),
-        )
-    except Exception as exc:  # noqa: BLE001 - reported, then fall back to eos
-        render = None
-        detail = f"probe render failed: {exc}"
-
-    if render is not None:
-        position = render.rfind(probe_assistant)
-        if position < 0:
-            detail = "probe assistant text not found in the template render"
-        else:
-            head = render[: position + len(probe_assistant)]
-            full_ids = encoder.encode(render, add_special_tokens=False)
-            head_ids = encoder.encode(head, add_special_tokens=False)
-            common = 0
-            for left, right in zip(full_ids, head_ids):
-                if left != right:
-                    break
-                common += 1
-            suffix_ids = list(full_ids[common:])
-            special_ids = _special_token_ids(encoder)
-            special_suffix = [token_id for token_id in suffix_ids if token_id in special_ids]
-            visible_suffix = [
-                token_id for token_id in suffix_ids if not _is_whitespace_token(encoder, token_id)
-            ]
-            suffix_text = render[position + len(probe_assistant):]
-            if special_suffix:
-                token_ids = list(dict.fromkeys(special_suffix))
-                source = "chat_template"
-                detail = f"special tokens after assistant content: {suffix_text!r}"
-            elif visible_suffix:
-                token_ids = [visible_suffix[-1]]
-                source = "chat_template_text"
-                detail = f"no special token after assistant content: {suffix_text!r}"
-            else:
-                detail = f"template emits no end-of-turn after assistant content: {suffix_text!r}"
-
-    if not token_ids:
-        if eos_id is None:
-            raise ValueError(
-                "Cannot derive an end-of-turn token: the chat template emits none after "
-                "assistant content and the tokenizer defines no eos_token_id."
-            )
-        token_ids = [int(eos_id)]
-        source = "eos_token"
-
-    for token_text in extra_tokens:
-        ids = encoder.encode(str(token_text), add_special_tokens=False)
-        if len(ids) != 1:
-            raise ValueError(
-                f"extra_end_of_turn_tokens entry {token_text!r} must encode to exactly one "
-                f"token id, got {ids}."
-            )
-        if ids[0] not in token_ids:
-            token_ids.append(ids[0])
-            source = f"{source}+config"
-
-    return EndOfTurnSpec(token_ids=token_ids, source=source, detail=detail)
+    return dict_to_dataclass(MaskDoctorConfig, data)
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +222,7 @@ class RowResult:
     masked_prefix_length: int = 0
     divergence: dict[str, Any] | None = None
     fallback_reason: str | None = None
+    drop_reason: str | None = None
     end_of_turn_index: int | None = None
     unexpected_terminator: str | None = None
     untrained_assistant_turns: int = 0
@@ -368,6 +244,7 @@ class RowResult:
             "masked_prefix_length": self.masked_prefix_length,
             "divergence": self.divergence,
             "fallback_reason": self.fallback_reason,
+            "drop_reason": self.drop_reason,
             "unexpected_terminator": self.unexpected_terminator,
             "untrained_assistant_turns": self.untrained_assistant_turns,
         }
@@ -379,11 +256,11 @@ def analyze_row(
     *,
     tokenizer: Any,
     settings: MaskDoctorSettings,
-    end_of_turn: EndOfTurnSpec,
+    end_of_turn: Any,
     fail_on_fallback: bool = True,
 ) -> RowResult:
     """Materialize one row through the trainer path and evaluate every check."""
-    encoder = _encoder_of(tokenizer)
+    encoder = encoder_of(tokenizer)
     result = RowResult(index=index)
     try:
         # raw_text rows normalize to text only (no messages).
@@ -415,9 +292,10 @@ def analyze_row(
     result.prompt_token_count = prepared.prompt_token_count
     result.masked_prefix_length = prepared.masked_prefix_length
     result.fallback_reason = prepared.mask_fallback_reason
+    result.drop_reason = prepared.drop_reason
 
-    if not trained:
-        result.failures.append("zero_trained_tokens")
+    if prepared.drop_reason == DROP_NO_SUPERVISED_TOKENS:
+        result.warnings.append("zero_trained_tokens")
 
     if prepared.mask_prefix_mismatch:
         stop = prepared.masked_prefix_length
@@ -426,15 +304,15 @@ def analyze_row(
             "position": stop,
             "prompt_token_count": prepared.prompt_token_count,
             "prompt_tokens_trained": (prepared.prompt_token_count or 0) - stop,
-            "input_token": _token_text(encoder, input_ids[stop]) if stop < len(input_ids) else None,
-            "expected_prompt_token": _token_text(encoder, expected) if expected is not None else None,
+            "input_token": token_text(encoder, input_ids[stop]) if stop < len(input_ids) else None,
+            "expected_prompt_token": token_text(encoder, expected) if expected is not None else None,
         }
-        result.failures.append("mask_prefix_mismatch")
+        result.warnings.append("mask_prefix_mismatch")
 
     if prepared.mask_fallback_reason is not None:
         (result.failures if fail_on_fallback else result.warnings).append("full_sequence_fallback")
 
-    if trained:
+    if trained and prepared.drop_reason is None:
         # raw_text rows bypass the chat template and close with eos_token.
         accepted = end_of_turn.token_ids
         if prepared.example_format == "raw_text":
@@ -443,14 +321,14 @@ def analyze_row(
                 eos_id = getattr(tokenizer, "eos_token_id", None)
             accepted = [eos_id]
         position = trained[-1]
-        while position > trained[0] and _is_whitespace_token(encoder, input_ids[position]):
+        while position > trained[0] and is_whitespace_token(encoder, input_ids[position]):
             position -= 1
         if input_ids[position] in accepted:
             result.end_of_turn_index = position
         elif prepared.truncation_applied and trained[-1] == len(input_ids) - 1:
             result.warnings.append("terminator_lost_to_truncation")
         else:
-            result.unexpected_terminator = _token_text(encoder, input_ids[position])
+            result.unexpected_terminator = token_text(encoder, input_ids[position])
             result.failures.append("missing_end_of_turn")
 
     bos_id = getattr(encoder, "bos_token_id", None)
@@ -489,12 +367,12 @@ def _segments(labels: list[int]) -> list[tuple[bool, int, int]]:
 
 def build_preview(result: RowResult, tokenizer: Any, segment_tokens: int) -> dict[str, Any]:
     """Token-by-token view of one row: which positions are masked and which trained."""
-    encoder = _encoder_of(tokenizer)
+    encoder = encoder_of(tokenizer)
     tokens = [
         {
             "position": position,
             "id": token_id,
-            "text": _token_text(encoder, token_id),
+            "text": token_text(encoder, token_id),
             "trained": result.labels[position] != -100,
         }
         for position, token_id in enumerate(result.input_ids)
@@ -574,14 +452,15 @@ def diagnose_rows(
     ``contract_error`` is the trainer's dataset-level contract failure, if any
     (see :func:`run_mask_doctor`); it is a hard failure of the whole dataset.
     """
-    encoder = _encoder_of(tokenizer)
+    encoder = encoder_of(tokenizer)
     end_of_turn = derive_end_of_turn_tokens(
-        tokenizer,
-        chat_template_kwargs=settings.chat_template_kwargs,
-        probe_user=doctor_config.probe.user,
-        probe_assistant=doctor_config.probe.assistant,
-        extra_tokens=doctor_config.extra_end_of_turn_tokens,
+        tokenizer, chat_template_kwargs=settings.chat_template_kwargs
     )
+    if not end_of_turn.token_ids:
+        raise ValueError(
+            "Cannot derive an end-of-turn token: the chat template emits none after "
+            f"assistant content and the tokenizer defines no eos_token_id ({end_of_turn.detail})."
+        )
     fail_on_fallback = bool(doctor_config.fail_on_full_sequence_fallback)
     max_listed = int(doctor_config.max_listed_rows)
     truncation_warn_rate = float(doctor_config.truncation_warn_rate)
@@ -610,6 +489,28 @@ def diagnose_rows(
                     "rows": [],
                     "description": description,
                     "error": contract_error,
+                }
+            )
+            continue
+        if name == "dropped_rows":
+            hits = [result for result in results if result.drop_reason is not None]
+            fraction = (len(hits) / analyzed) if analyzed else 0.0
+            exceeded = dropped_row_fraction_exceeded(
+                len(hits), analyzed, settings.max_dropped_row_fraction
+            )
+            checks.append(
+                {
+                    "name": name,
+                    "status": FAIL if exceeded else (WARN if hits else OK),
+                    "count": len(hits),
+                    "rows": [result.index for result in hits[:max_listed]],
+                    "description": description,
+                    "fraction": round(fraction, 4),
+                    "max_fraction": settings.max_dropped_row_fraction,
+                    "by_reason": {
+                        reason: sum(1 for result in hits if result.drop_reason == reason)
+                        for reason in DROP_REASONS
+                    },
                 }
             )
             continue
@@ -657,7 +558,7 @@ def diagnose_rows(
     ]
 
     return {
-        "success": not hard_failures and contract_error is None,
+        "success": not _fail_names(checks),
         "settings": settings.to_dict(),
         "tokenizer": {
             "eos_token": getattr(encoder, "eos_token", None),
@@ -778,6 +679,12 @@ def format_report(report: dict[str, Any]) -> str:
         extra = ""
         if check["name"] == "dataset_contract" and check.get("error"):
             extra = f" ({check['error']})"
+        elif check["name"] == "dropped_rows":
+            reasons = ", ".join(f"{key}={value}" for key, value in check["by_reason"].items())
+            extra = (
+                f" ({check['fraction']:.2%} of analyzed rows, maximum "
+                f"{check['max_fraction']:.2%}; {reasons})"
+            )
         elif check["name"] == "truncation":
             extra = f" (rate {check['rate']:.2%}, warn above {check['warn_rate']:.2%})"
         elif check["name"] == "earlier_assistant_turns_untrained" and check["count"]:
@@ -809,12 +716,10 @@ def format_report(report: dict[str, Any]) -> str:
             + (
                 "PASS (no hard failures)"
                 if report["success"]
-                else f"FAIL ({summary['rows_with_hard_failures']} row(s) with hard failures"
-                + (
-                    "; dataset contract failed)"
-                    if report["checks"][0]["status"] == FAIL
-                    else ")"
-                )
+                else f"FAIL ({summary['rows_with_hard_failures']} row(s) with hard failures; "
+                + "failed checks: "
+                + ", ".join(check["name"] for check in report["checks"] if check["status"] == FAIL)
+                + ")"
             ),
         ]
     )

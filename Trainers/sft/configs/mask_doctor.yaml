@@ -25,15 +25,6 @@ fail_on_full_sequence_fallback: true
 # max_seq_length.
 truncation_warn_rate: 0.01
 
-# End-of-turn terminators are derived from the tokenizer: the special tokens a
-# chat template emits after an assistant message's content (for example the
-# token that closes a turn), falling back to eos_token when the template emits
-# none. List extra token strings here only when a template closes assistant
-# turns with a token the probe render cannot reveal. Each must encode to one id.
-extra_end_of_turn_tokens: []
-
-# Probe conversation used to derive the template's end-of-turn suffix. The
-# assistant text only needs to be distinctive so it can be located in the render.
-probe:
-  user: "mask doctor probe question"
-  assistant: "mask doctor probe answer"
+# End-of-turn tokens are not configured here: the doctor and the SFT trainer
+# share one derivation from the chat template (shared/sft_preprocessing.py).
+# The dropped-row threshold is the trainer's training.max_dropped_row_fraction.

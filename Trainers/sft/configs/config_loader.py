@@ -8,6 +8,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional, Any, Dict
 
+from shared.sft_preprocessing import DEFAULT_MAX_DROPPED_ROW_FRACTION
 from shared.training_utils import dict_to_dataclass, reject_unknown_config_keys
 
 
@@ -109,6 +110,11 @@ class SFTTrainingConfig:
     # recipes retain their historical behavior; long-context recipes should
     # enable it explicitly.
     require_memory_efficient_loss: bool = False
+    # SFT preprocessing drops rows it cannot train correctly (every label masked,
+    # e.g. truncation removed the whole target; or assistant-only masking that
+    # stopped before the end of the prompt render) and fails the run when the
+    # dropped fraction exceeds this value.
+    max_dropped_row_fraction: float = DEFAULT_MAX_DROPPED_ROW_FRACTION
 
 
 @dataclass

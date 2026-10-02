@@ -1272,7 +1272,10 @@ def run(args: argparse.Namespace):
 
     loss_mask_mode = "assistant_only" if config.training.completion_only_loss else "full_sequence"
     preprocessing_metadata = {
-        "contract_version": 1,
+        # 2: assistant-only labels stop at the final end-of-turn token,
+        # prompt_completion honours completion_only_loss, and untrainable rows
+        # are dropped. Losses are not directly comparable with version 1 runs.
+        "contract_version": 2,
         "dataset_representation": "tokenized",
         "loss_mask_mode": loss_mask_mode,
         "tool_call_mode": "render_text",
@@ -1326,6 +1329,7 @@ def run(args: argparse.Namespace):
         use_preassigned_splits=getattr(config.dataset, "use_preassigned_splits", False),
         preparation_metadata=dataset_preparation_metadata,
         validation_group_key=config.dataset.validation_group_key,
+        max_dropped_row_fraction=config.training.max_dropped_row_fraction,
     )
     prepared_dataset_format = dataset_preparation_metadata.get("dataset_format")
     if prepared_dataset_format in {"raw_text", "messages"}:
