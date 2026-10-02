@@ -195,7 +195,7 @@ Generate 140 examples (70 pairs):
 ## Validation
 
 ```bash
-python tools/validate_syngen.py Datasets/context_efficiency/pairs_v1.0.jsonl
+python -m shared.validation.dataset_validator Datasets/context_efficiency/pairs_v1.0.jsonl
 ```
 
 ## File Format

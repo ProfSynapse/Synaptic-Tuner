@@ -81,7 +81,7 @@ Only change sessionId and workspaceId.
 ## Validation
 After processing, run:
 ```bash
-python tools/validate_syngen.py Datasets/behavior_datasets/response_patterns/text_only_pairs_v1.2.jsonl
+python -m shared.validation.dataset_validator Datasets/behavior_datasets/response_patterns/text_only_pairs_v1.2.jsonl
 ```
 
 Expected: 0 ID mismatch errors.

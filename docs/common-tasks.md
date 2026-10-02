@@ -307,7 +307,7 @@ START: User wants to improve dataset quality
     |
     v
 [3] Validate dataset first:
-    Run: python3 .skills/synethetic-data-generation/scripts/validate_syngen.py <dataset_file>
+    Run: python3 -m shared.validation.dataset_validator <dataset_file>
     |
     +-- VALIDATION FAILED --> Fix JSON/format errors first
     |
@@ -329,7 +329,7 @@ START: User wants to improve dataset quality
 ## 5. Validating Datasets
 
 ```bash
-python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/your_dataset.jsonl
+python3 -m shared.validation.dataset_validator Datasets/your_dataset.jsonl
 ```
 
 ### Checking SFT loss masking (`doctor sft-mask`)

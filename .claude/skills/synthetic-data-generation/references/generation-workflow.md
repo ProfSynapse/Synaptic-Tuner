@@ -17,7 +17,7 @@ Generate, improve, validate, sanitize, and evaluate synthetic training datasets 
 | Sanitize docs or JSONL | `python -m SynthChat.run sanitize -i PATH --privacy-profile PROFILE [options]` |
 | Evaluate model | `python -m Evaluator.cli --model NAME [options]` |
 | Project rollouts → SFT/KTO/GRPO | `python SynthChat/scripts/project_rollout_datasets.py --input ROLLOUT.jsonl --canonical-output ... --kto-output ... --grpo-output ... [--sft-output ...] [--filter-config FILTER.yaml]` |
-| Structural check | `python3 scripts/validate_syngen.py FILE` |
+| Structural check | `python3 -m shared.validation.dataset_validator FILE` |
 | JSONL → Markdown | `./scripts/jsonl_to_markdown.sh data.jsonl` |
 | Combine datasets | `./scripts/combine_datasets.sh -o out.jsonl FILE1 FILE2` |
 | Interactive menu | `bash run.sh` |
@@ -379,7 +379,12 @@ Key config files:
 To add a new tool-call format, add a named entry to `tool_call_formats.yaml`
 and reference it from your scenario YAML. No code changes should be needed
 unless you are adding a genuinely reusable runtime capability that cannot be
-expressed in config.
+expressed in config. Optional keys on a wrapper format:
+- `command_field` — the argument field holding a free-form command string;
+  malformed-JSON recovery and the environment executor read it.
+- `prompt_bound_fields` — field -> list of `{pattern, in_tag}` sources naming
+  where the system prompt states the field's allowed values; the dataset
+  validator rejects values no source yields.
 
 ## Tips
 

@@ -313,20 +313,27 @@ python -m Evaluator.cli --model my-model --backend lmstudio \
 
 ## Structural Validator
 
-Quick JSONL structure check (no LLM needed):
+Quick JSONL structure check (no LLM needed), run from the engine root:
 
 ```bash
-python3 scripts/validate_syngen.py Datasets/your_dataset.jsonl
+python3 -m shared.validation.dataset_validator Datasets/your_dataset.jsonl
 
-# Validate wrapper calls against a host's own tool-call format registry
-python3 scripts/validate_syngen.py Datasets/your_dataset.jsonl \
-  --tool-call-formats path/to/tool_call_formats.yaml
+# Validate against a host's own tool-call format registry and tool schema catalog
+python3 -m shared.validation.dataset_validator Datasets/your_dataset.jsonl \
+  --tool-call-formats path/to/tool_call_formats.yaml \
+  --tool-schemas path/to/tool_schemas.json
 ```
 
 Checks: valid JSON, conversation structure, tool schemas, parameter validation.
-Wrapper checks are config-first: a call whose name matches a `wrapper_name` in
-the tool-call format registry (default `SynthChat/config/tool_call_formats.yaml`)
-must carry that format's `argument_required` fields, and each field must satisfy
-its configured property schema (`type`, `minLength`, `enum`, ...). Calls that
-match no configured wrapper are direct (wrapper-less) calls and need no wrapper
-fields.
+All tool-call checks are config-first:
+- A call whose name matches a `wrapper_name` in the tool-call format registry
+  (default `SynthChat/config/tool_call_formats.yaml`) must carry that format's
+  `argument_required` fields, and each field must satisfy its configured
+  property schema (`type`, `minLength`, `enum`, ...). Fields listed under the
+  format's `prompt_bound_fields` must hold a value the system prompt states
+  (each source is a `pattern` with one capture group, optionally scoped by
+  `in_tag`). Calls that match no configured wrapper are direct (wrapper-less)
+  calls and need no wrapper fields.
+- Every call is checked against its entry in the tool schema catalog (default
+  the engine's `Tools/tool_schemas.json`): `required_params` must be present
+  and arguments not declared in `parameters` are warned about.

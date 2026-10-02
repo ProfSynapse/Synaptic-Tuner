@@ -546,7 +546,7 @@ User asking for next step after seeing results:
 Each pair must pass:
 
 1. ✅ **Schema validation**
-   - Run: `python tools/validate_syngen.py <file.jsonl>`
+   - Run: `python -m shared.validation.dataset_validator <file.jsonl>`
    - All examples must pass
 
 2. ✅ **Pair structure**

@@ -96,7 +96,7 @@ curl https://openrouter.ai/api/v1/models \
 **"Dataset validation failed"**
 ```bash
 # Run validation to see specific errors
-python3 .skills/synethetic-data-generation/scripts/validate_syngen.py <file>
+python3 -m shared.validation.dataset_validator <file>
 
 # Common fixes:
 # - Check JSON syntax (missing commas, quotes)
@@ -277,7 +277,7 @@ curl http://localhost:1234/v1/chat/completions \
 python -m SynthChat.services.rubric_runner --list
 
 # 3. Validate input file format
-python3 .skills/synethetic-data-generation/scripts/validate_syngen.py <input_file>
+python3 -m shared.validation.dataset_validator <input_file>
 
 # 4. Run with verbose logging
 python -m SynthChat.services.rubric_runner \

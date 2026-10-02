@@ -80,7 +80,7 @@ Datasets/tools_datasets/reports/cli_schema/
 
 Structural validation:
 ```bash
-python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/tools_datasets/non_thinking/contentManager/tools_v2.3.jsonl
+python3 -m shared.validation.dataset_validator Datasets/tools_datasets/non_thinking/contentManager/tools_v2.3.jsonl
 ```
 
 Generation smoke test:

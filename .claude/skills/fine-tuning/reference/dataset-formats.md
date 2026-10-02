@@ -230,7 +230,7 @@ Current canonical versions:
 ## Validation
 
 ```bash
-python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/my_dataset.jsonl
+python3 -m shared.validation.dataset_validator Datasets/my_dataset.jsonl
 ```
 
 Before SFT, check the loss mask the trainer will actually build for this

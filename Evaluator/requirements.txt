@@ -17,5 +17,5 @@ faiss-cpu
 # - LM Studio (https://lmstudio.ai/) - for local model serving
 #
 # The evaluator validates tool calls against schemas defined in:
-# - tools/tool_schemas.json (47 tools across 5 agent categories)
-# - tools/validate_syngen.py (validation logic)
+# - Tools/tool_schemas.json (tool schema catalog)
+# - shared/validation/dataset_validator.py (validation logic)

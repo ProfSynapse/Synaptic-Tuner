@@ -55,12 +55,12 @@ prompts:
 
 | Aspect | Tool Calling | Essay Style |
 |--------|-------------|-------------|
-| **Primary validation** | Deterministic schema checking (`validate_syngen.py`) | LLM-judged rubric scoring (SynthChat validate) |
+| **Primary validation** | Deterministic schema checking (`shared/validation/dataset_validator.py`) | LLM-judged rubric scoring (SynthChat validate) |
 | **What's checkable automatically** | JSON structure, required fields, ID patterns, tool existence | Format presence (has overview? has tone?), section count |
 | **What needs human review** | Edge cases in tool selection logic | Voice accuracy, dialectical quality, specificity |
 | **Improvement mechanism** | Schema fix scripts + SynthChat improve | SynthChat improve with quality rubrics |
 | **Common structural errors** | Missing context fields, wrong tool name, empty `memory` | Generic headings, too many sections, third-person address |
-| **Validation command** | `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py FILE` | `python -m SynthChat.run validate -i FILE --rubrics essay_*` |
+| **Validation command** | `python3 -m shared.validation.dataset_validator FILE` | `python -m SynthChat.run validate -i FILE --rubrics essay_*` |
 
 ### Validation Confidence
 

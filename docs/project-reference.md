@@ -137,7 +137,7 @@ tail -f sft_output/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 | Environment setup | X | | `./setup_env.sh` |
 | Dependency install | X | | `./run.sh doctor --fix` |
 | List resources | X | | `./run.sh list *` |
-| Dataset validation | X | | `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py` |
+| Dataset validation | X | | `python3 -m shared.validation.dataset_validator` |
 | Train/eval contamination check | X | | `python tuner.py check-contamination --train-data <jsonl>`; exit 2 when an eval item is flagged |
 | System diagnostics | X | | `./run.sh doctor` |
 | SFT loss-mask check | X | | `python tuner.py doctor sft-mask --dataset-path ... --model ...` (or `--sft-config`); tokenizer only, thresholds in `Trainers/sft/configs/mask_doctor.yaml` |
@@ -167,6 +167,6 @@ tail -f sft_output/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 
 - Check script help: `python script.py --help`
 - Run dry runs: `python train_sft.py --dry-run`
-- Validate first: `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py dataset.jsonl`
+- Validate first: `python3 -m shared.validation.dataset_validator dataset.jsonl`
 
 **Key Principle:** Use the bash scripts (`./run.sh`, `setup.sh`, etc.) rather than direct Python when possible - they handle environment setup, dependency checks, and provide better UX.

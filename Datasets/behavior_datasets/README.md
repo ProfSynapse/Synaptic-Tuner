@@ -62,7 +62,7 @@ Run **both validators** on each dataset:
 
 ```bash
 # Validator 1: Schema and structure
-python tools/validate_syngen.py Datasets/behavior_datasets/{behavior_name}/pairs_v1.0.jsonl
+python -m shared.validation.dataset_validator Datasets/behavior_datasets/{behavior_name}/pairs_v1.0.jsonl
 
 # Validator 2: Behavior-specific (when implemented)
 python tools/validate_behavior_pairs.py \
@@ -144,7 +144,7 @@ Combined dataset:
 Before considering a behavior dataset "complete":
 
 **Schema Validation:**
-- [ ] `validate_syngen.py` passes with 0 errors
+- [ ] `shared/validation/dataset_validator.py` passes with 0 errors
 - [ ] All tools exist in tool_schemas.json
 - [ ] All required parameters present
 - [ ] All context objects complete
@@ -220,7 +220,7 @@ less Datasets/BEHAVIOR_RUBRIC_GUIDE.md
 # (Use generation template from guide)
 
 # 5. Validate
-python tools/validate_syngen.py \
+python -m shared.validation.dataset_validator \
   Datasets/behavior_datasets/intellectual_humility/pairs_v1.0.jsonl
 
 # 6. Review sample
@@ -239,5 +239,5 @@ python tools/interleave_dataset.py \
 - **Master Rubric Guide:** `../BEHAVIOR_RUBRIC_GUIDE.md`
 - **YAML Rubrics:** `../behavior_rubrics/`
 - **Tool Schemas:** `../../tools/tool_schemas.json`
-- **Validator:** `../../tools/validate_syngen.py`
+- **Validator:** `../../shared/validation/dataset_validator.py`
 - **Training Guide:** `../../Trainers/kto/README.md`
