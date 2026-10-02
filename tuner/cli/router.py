@@ -75,6 +75,21 @@ def _run_status(handler_cls, args, context, json_mode) -> int:
 
 
 def _run_doctor(handler_cls, args, context, json_mode) -> int:
+    subcommand = getattr(args, "subcommand", None)
+    if subcommand is not None:
+        # `doctor <subcommand>` runs its own lazily imported handler. An unknown
+        # subcommand is refused instead of silently running system diagnostics.
+        route = DOCTOR_SUBCOMMAND_ROUTES.get(subcommand)
+        if route is None:
+            _emit_error(
+                json_mode,
+                f"Unknown doctor subcommand {subcommand!r}. Available: "
+                + ", ".join(DOCTOR_SUBCOMMAND_ROUTES)
+                + " (or none for system diagnostics).",
+                "UNKNOWN_SUBCOMMAND",
+            )
+            return 2
+        return _run_target(route.target, route.run, args, context, json_mode)
     return handler_cls(
         json_output=json_mode,
         auto_fix=getattr(args, "doctor_fix", False),
@@ -201,6 +216,11 @@ COMMAND_ROUTES: dict[str, Route] = {
     "surgery": Route(_H + "surgery_handler:SurgeryHandler", _run_bound),
 }
 
+# `doctor <subcommand>` routes (dispatched by _run_doctor).
+DOCTOR_SUBCOMMAND_ROUTES: dict[str, Route] = {
+    "sft-mask": Route(_H + "sft_mask_doctor_handler:SFTMaskDoctorHandler", _run_with_context),
+}
+
 # `train --job-config` is a managed-provider job, not the interactive trainer.
 TRAIN_JOB_CONFIG_ROUTE = Route(
     _H + "modal_job_config_handler:ModalJobConfigHandler", _run_with_context
@@ -213,6 +233,8 @@ def iter_route_targets():
     """Yield (label, target) for every route, including the train variant and the menu."""
     for command, route in COMMAND_ROUTES.items():
         yield command, route.target
+    for subcommand, route in DOCTOR_SUBCOMMAND_ROUTES.items():
+        yield f"doctor {subcommand}", route.target
     yield "train --job-config", TRAIN_JOB_CONFIG_ROUTE.target
     yield "(no command)", MAIN_MENU_TARGET
 

@@ -332,6 +332,71 @@ START: User wants to improve dataset quality
 python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/your_dataset.jsonl
 ```
 
+### Checking SFT loss masking (`doctor sft-mask`)
+
+Before an SFT run, check that the loss mask does what you expect for this
+dataset and tokenizer. The doctor runs the trainer's dataset contract check and
+a row sample through the same preprocessing the SFT trainer uses
+(`materialize_sft_row`) with only the tokenizer loaded: no model weights, no
+GPU, no torch. It accepts legacy conversation rows and `prepare-dataset`
+outputs alike.
+
+```bash
+# Name the dataset and tokenizer; everything else comes from the default trainer config
+python tuner.py doctor sft-mask \
+  --dataset-path Datasets/your_dataset.jsonl \
+  --model <tokenizer-id-or-local-path> \
+  --max-seq-length 4096 \
+  --chat-template-kwargs '{"enable_thinking": false}' \
+  --sample-size 500 --preview-rows 0,17
+
+# Reuse a run's trainer config (YAML, or a .py exposing Config() like train_sft.py --config)
+python tuner.py doctor sft-mask --sft-config Trainers/sft/configs/config.yaml --json
+```
+
+Settings resolve the way `train_sft.py` resolves them: the trainer config
+(`--sft-config`, default `Trainers/sft/configs/config.yaml`, whose relative
+`local_file` is resolved from `Trainers/sft/`), then explicit flags (`--model`,
+`--dataset-path`, `--max-seq-length`, `--chat-template-kwargs`,
+`--prompt-render`, `--no-completion-only`). Defaults and thresholds (sample
+size, preview length, truncation warning rate) live in
+`Trainers/sft/configs/mask_doctor.yaml`. The end-of-turn token comes from the
+same template derivation the trainer uses, and the dropped-row threshold is the
+trainer's `training.max_dropped_row_fraction`.
+
+| Check | Severity | Meaning |
+|-------|----------|---------|
+| `dataset_contract` | fail | The trainer's dataset-level contract rejects the dataset (format mixing, raw-text or authoritative-row rules) |
+| `row_error` | fail | Preprocessing raised for the row; training would crash |
+| `zero_trained_tokens` | warn | Every label is -100 (often truncation inside the prompt); the trainer drops the row |
+| `mask_prefix_mismatch` | warn | The full render diverged from the `add_generation_prompt` render before the prompt ended; the trainer drops the row instead of training prompt tokens |
+| `dropped_rows` | fail | Rows the trainer would drop exceed `training.max_dropped_row_fraction`, so the training run would fail |
+| `full_sequence_fallback` | fail | Assistant-only loss requested, but the row does not end with an assistant turn, so every token is trained |
+| `missing_end_of_turn` | fail | The trained span does not end with the end-of-turn token derived from the chat template (`eos_token` when the template emits none, and for raw-text rows) |
+| `doubled_bos` | fail | The sequence starts with BOS twice |
+| `truncation` | warn | Truncation rate above `truncation_warn_rate`; p50/p95/max lengths are reported against `max_seq_length` |
+| `terminator_lost_to_truncation` | warn | Truncation cut the end-of-turn token from the trained span |
+| `earlier_assistant_turns_untrained` | info | Multi-turn rows where only the final assistant turn is trained |
+
+Exit codes: `0` no hard failures, `1` hard failures, `2` setup error (bad
+flags, missing dataset, tokenizer without a chat template). Token previews
+print one `[token]` per position, grouped into `MASK` (label -100) and `TRAIN`
+(supervised) segments, and mark where masking stopped. Rows with hard failures
+are previewed first unless `--preview-rows` names rows. Training runs log the
+same dropped-row counts (per reason) and the full-sequence-fallback count after
+dataset preparation.
+
+**SFT label change (preprocessing contract version 2).** Assistant-only labels
+now stop at the final turn's end-of-turn token (the template's trailing newline
+after it is masked); `prompt_render: prompt_completion` closes completions with
+the template's end-of-turn token instead of `eos_token_id` (identical when they
+coincide) and honours `completion_only_loss: false`; and rows with no supervised tokens left after
+truncation, or whose assistant-only mask stopped before the end of the prompt
+render, are dropped with a logged count. The run fails when dropped rows exceed
+`training.max_dropped_row_fraction` (default `0.01`). Losses and checkpoints
+from runs before this change are not directly comparable with later runs;
+`training_lineage.json` records `dataset.preprocessing.contract_version: 2`.
+
 ---
 
 ## 5b. Checking Train/Eval Contamination (`check-contamination`)

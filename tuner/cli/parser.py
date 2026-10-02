@@ -271,7 +271,7 @@ Commands:
   modelops    Model operations (run, merge, convert, upload)
   ml          Traditional ML training (LightGBM, XGBoost, sklearn)
   status      System status overview (use --json for structured output)
-  doctor      System diagnostics (use --fix to auto-fix issues)
+  doctor      System diagnostics (use --fix to auto-fix issues); 'doctor sft-mask' checks SFT loss masking
   flywheel    Data flywheel (self-improving training pipeline)
   experiment-loop  Autonomous hyperparameter search (LLM + surrogate)
   prompt-optimize Deterministic config-first prompt optimization
@@ -297,6 +297,12 @@ Flywheel Subcommands:
   flywheel logs         Show inference log statistics
   flywheel versions     List staged dataset versions
   flywheel export-fixtures --export-config <yaml> --output <yaml>
+
+Doctor Subcommands:
+  doctor              System diagnostics (environment, GPU, dependencies, backends)
+  doctor sft-mask     Run a dataset sample through the real SFT preprocessing path with
+                      only the tokenizer loaded and report loss-mask problems
+                      (exit 1 on hard failures, 2 on setup errors; --json for structured output)
 
 List Subcommands:
   list datasets   List available JSONL datasets
@@ -332,6 +338,8 @@ Examples:
   python tuner.py prepare-dataset --config <config.json> --json
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
+  python tuner.py doctor sft-mask --dataset-path Datasets/my_sft.jsonl --model <tokenizer-id-or-path>
+  python tuner.py doctor sft-mask --sft-config Trainers/sft/configs/config.yaml --json
   python tuner.py list datasets    # List datasets
   python tuner.py ml                   # Interactive ML training
   python tuner.py ml train --config path/to/config.yaml
@@ -445,6 +453,43 @@ Examples:
         action="store_true",
         dest="doctor_fix",
         help="Auto-fix simple issues (only used with 'doctor' command)"
+    )
+    # doctor sft-mask flags. Settings resolve like the SFT trainer: trainer config
+    # (--sft-config, default Trainers/sft/configs/config.yaml) < explicit flags
+    # (--model, --dataset-path, --max-seq-length, --chat-template-kwargs,
+    # --prompt-render, --no-completion-only).
+    parser.add_argument(
+        "--sft-config",
+        dest="sft_config",
+        help="SFT trainer config (YAML, or .py with Config()) whose preprocessing settings to reuse (doctor sft-mask).",
+    )
+    parser.add_argument(
+        "--chat-template-kwargs",
+        dest="chat_template_kwargs",
+        help='JSON object forwarded to apply_chat_template as the SFT trainer does, e.g. \'{"enable_thinking": false}\' (doctor sft-mask).',
+    )
+    parser.add_argument(
+        "--prompt-render",
+        dest="prompt_render",
+        choices=["full_conversation", "prompt_completion"],
+        help="SFT render/masking strategy to check (doctor sft-mask; default from the trainer config).",
+    )
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        dest="sample_size",
+        help="Rows to sample, 0 = all (doctor sft-mask; default from Trainers/sft/configs/mask_doctor.yaml).",
+    )
+    parser.add_argument(
+        "--preview-rows",
+        dest="preview_rows",
+        help="Comma-separated dataset row indices to show token-by-token (doctor sft-mask).",
+    )
+    parser.add_argument(
+        "--preview-count",
+        type=int,
+        dest="preview_count",
+        help="Rows to preview when --preview-rows is not given; failing rows first (doctor sft-mask).",
     )
 
     # ML-specific flags
@@ -897,12 +942,12 @@ Examples:
         help="Skip a stage in run-experiment. May be repeated.",
     )
     parser.add_argument("--base-dir", default=".tracking", help="Tracking base directory")
-    parser.add_argument("--model", help="Model path for inference")
+    parser.add_argument("--model", help="Model path for inference (doctor sft-mask: tokenizer id or local path)")
     parser.add_argument("--model-revision", dest="model_revision", help="Model commit SHA/revision for reproducible inference loads")
     parser.add_argument("--tokenizer-revision", dest="tokenizer_revision", help="Tokenizer commit SHA/revision for reproducible inference loads")
-    parser.add_argument("--dataset-path", help="Path to jsonl dataset")
-    parser.add_argument("--max-seq-length", type=int, default=2048, help="Max sequence length")
-    parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking")
+    parser.add_argument("--dataset-path", help="Path to jsonl dataset (doctor sft-mask: local dataset to check)")
+    parser.add_argument("--max-seq-length", type=int, default=None, help="Max sequence length (doctor sft-mask: overrides the trainer config)")
+    parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking (doctor sft-mask: check full-sequence loss)")
     parser.add_argument("--base-model-name", help="Base model name for experiment")
     parser.add_argument("--dataset-hash", help="Dataset hash for experiment")
 

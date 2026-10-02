@@ -1,0 +1,30 @@
+# Defaults and thresholds for `python tuner.py doctor sft-mask`.
+#
+# The doctor runs a dataset sample through the real SFT preprocessing path
+# (Trainers/sft/src/preprocessing.py::materialize_sft_row) with only the
+# tokenizer loaded and reports loss-mask problems. CLI flags override these.
+
+# Rows to sample from the dataset (0 = every row). Sampling is deterministic.
+sample_size: 200
+seed: 0
+
+# Token-by-token previews: how many rows to show when --preview-rows is not
+# given (rows with hard failures are chosen first), and how many tokens to keep
+# at each end of a long masked/trained segment.
+preview_count: 2
+preview_segment_tokens: 32
+
+# Maximum row indices listed per check in the report.
+max_listed_rows: 20
+
+# Rows that request assistant-only loss but do not end with an assistant turn
+# fall back to full-sequence loss (every token trained). Treat as a hard failure.
+fail_on_full_sequence_fallback: true
+
+# Warn when more than this fraction of sampled rows is truncated by
+# max_seq_length.
+truncation_warn_rate: 0.01
+
+# End-of-turn tokens are not configured here: the doctor and the SFT trainer
+# share one derivation from the chat template (shared/sft_preprocessing.py).
+# The dropped-row threshold is the trainer's training.max_dropped_row_fraction.

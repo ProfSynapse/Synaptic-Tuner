@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+import weakref
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 
@@ -24,9 +25,230 @@ class PreparedSFTExample:
     loss_mask_mode: LossMaskMode
     truncation_applied: bool
     source_hash: str | None = None
+    # Mask diagnostics. Descriptive only: training never reads these, and they
+    # never alter input_ids/labels. They let the SFT mask doctor and the data
+    # loader summary surface silent masking failures without re-implementing
+    # the masking logic.
+    #   untruncated_length: token count before max_seq_length truncation.
+    #   prompt_token_count: tokens in the add_generation_prompt=True render of
+    #       messages[:-1] (None when no prompt render was made).
+    #   masked_prefix_length: leading positions whose label is -100.
+    #   mask_prefix_mismatch: the full render diverged from the prompt render
+    #       before the prompt render ended, so masking stopped early and the
+    #       remaining prompt tokens carry real labels.
+    #   mask_divergence_expected_token: the prompt-render token expected at the
+    #       divergence index (input_ids holds the full-render token there).
+    #   mask_fallback_reason: why assistant-only loss was requested but the
+    #       row was materialized with full-sequence loss.
+    #   drop_reason: why this row must not be trained (see DROP_REASONS);
+    #       prepare_sft_dataset drops such rows and enforces the configured
+    #       maximum dropped fraction. None = trainable.
+    untruncated_length: int = 0
+    prompt_token_count: int | None = None
+    masked_prefix_length: int = 0
+    mask_prefix_mismatch: bool = False
+    mask_divergence_expected_token: int | None = None
+    mask_fallback_reason: str | None = None
+    drop_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# Rows that must not be trained. ``no_supervised_tokens``: every label is -100
+# (typically truncation removed the whole target). ``mask_prefix_mismatch``: the
+# full render diverged from the add_generation_prompt render before the prompt
+# ended, so assistant-only masking would train prompt tokens.
+DROP_NO_SUPERVISED_TOKENS = "no_supervised_tokens"
+DROP_MASK_PREFIX_MISMATCH = "mask_prefix_mismatch"
+DROP_REASONS = (DROP_NO_SUPERVISED_TOKENS, DROP_MASK_PREFIX_MISMATCH)
+# Default for training.max_dropped_row_fraction: the run fails when more than
+# this fraction of rows is dropped for the reasons above.
+DEFAULT_MAX_DROPPED_ROW_FRACTION = 0.01
+
+# Probe conversation used to read the chat template's assistant end-of-turn
+# suffix. The assistant text only needs to be distinctive in the render.
+END_OF_TURN_PROBE_USER = "sft end-of-turn probe question"
+END_OF_TURN_PROBE_ASSISTANT = "sft end-of-turn probe answer"
+
+
+@dataclass
+class EndOfTurnSpec:
+    """Token ids that close an assistant turn, derived from the chat template.
+
+    ``source`` is ``chat_template`` (special tokens the template emits after the
+    assistant content), ``chat_template_text`` (no special token; the last visible
+    suffix token), ``eos_token`` (the template emits nothing after the content)
+    or ``none`` (nothing derivable and no eos_token).
+    """
+
+    token_ids: list[int] = field(default_factory=list)
+    source: str = "none"
+    detail: str = ""
+
+    @property
+    def rendered_by_template(self) -> bool:
+        return self.source in {"chat_template", "chat_template_text"}
+
+    def to_dict(self, encoder: Any) -> dict[str, Any]:
+        return {
+            "token_ids": list(self.token_ids),
+            "tokens": [token_text(encoder, token_id) for token_id in self.token_ids],
+            "source": self.source,
+            "detail": self.detail,
+        }
+
+
+def encoder_of(tokenizer: Any) -> Any:
+    """Unwrap Processor -> Tokenizer (processors lack encode/decode)."""
+    return getattr(tokenizer, "tokenizer", tokenizer)
+
+
+def token_text(encoder: Any, token_id: int) -> str:
+    try:
+        return encoder.decode([token_id])
+    except Exception:  # noqa: BLE001 - display only
+        return f"<id:{token_id}>"
+
+
+def special_token_ids(encoder: Any) -> set[int]:
+    ids: set[int] = set(getattr(encoder, "all_special_ids", None) or [])
+    added = getattr(encoder, "added_tokens_decoder", None) or {}
+    for token_id, token in added.items():
+        if getattr(token, "special", False):
+            ids.add(int(token_id))
+    return ids
+
+
+def is_whitespace_token(encoder: Any, token_id: int) -> bool:
+    return token_text(encoder, token_id).strip() == ""
+
+
+def derive_end_of_turn_tokens(
+    tokenizer: Any, *, chat_template_kwargs: dict[str, Any] | None = None
+) -> EndOfTurnSpec:
+    """Derive the assistant end-of-turn token(s) from the chat template itself.
+
+    A fixed probe conversation is rendered with the run's template kwargs; the
+    special tokens the template emits after the assistant content are its
+    end-of-turn terminators. When it emits no special token there, the last
+    visible suffix token is used; when it emits nothing, eos_token. No model
+    family is hardcoded. Shared by SFT preprocessing and the SFT mask doctor.
+    """
+    encoder = encoder_of(tokenizer)
+    eos_id = getattr(encoder, "eos_token_id", None)
+    if eos_id is None:
+        eos_id = getattr(tokenizer, "eos_token_id", None)
+
+    detail = ""
+    try:
+        render = tokenizer.apply_chat_template(
+            [
+                {"role": "user", "content": END_OF_TURN_PROBE_USER},
+                {"role": "assistant", "content": END_OF_TURN_PROBE_ASSISTANT},
+            ],
+            tokenize=False,
+            add_generation_prompt=False,
+            **(chat_template_kwargs or {}),
+        )
+    except Exception as exc:  # noqa: BLE001 - reported, then fall back to eos
+        render = None
+        detail = f"probe render failed: {exc}"
+
+    if render is not None:
+        position = render.rfind(END_OF_TURN_PROBE_ASSISTANT)
+        if position < 0:
+            detail = "probe assistant text not found in the template render"
+        else:
+            head = render[: position + len(END_OF_TURN_PROBE_ASSISTANT)]
+            full_ids = encoder.encode(render, add_special_tokens=False)
+            head_ids = encoder.encode(head, add_special_tokens=False)
+            common = 0
+            for left, right in zip(full_ids, head_ids):
+                if left != right:
+                    break
+                common += 1
+            suffix_ids = list(full_ids[common:])
+            special = special_token_ids(encoder)
+            special_suffix = [token_id for token_id in suffix_ids if token_id in special]
+            visible_suffix = [
+                token_id for token_id in suffix_ids if not is_whitespace_token(encoder, token_id)
+            ]
+            suffix_text = render[position + len(END_OF_TURN_PROBE_ASSISTANT):]
+            if special_suffix:
+                return EndOfTurnSpec(
+                    list(dict.fromkeys(special_suffix)),
+                    "chat_template",
+                    f"special tokens after assistant content: {suffix_text!r}",
+                )
+            if visible_suffix:
+                return EndOfTurnSpec(
+                    [visible_suffix[-1]],
+                    "chat_template_text",
+                    f"no special token after assistant content: {suffix_text!r}",
+                )
+            detail = f"template emits no end-of-turn after assistant content: {suffix_text!r}"
+
+    if eos_id is None:
+        return EndOfTurnSpec([], "none", detail or "no end-of-turn token and no eos_token_id")
+    return EndOfTurnSpec([int(eos_id)], "eos_token", detail)
+
+
+_END_OF_TURN_CACHE: "weakref.WeakKeyDictionary[Any, dict[str, EndOfTurnSpec]]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def cached_end_of_turn_tokens(
+    tokenizer: Any, chat_template_kwargs: dict[str, Any] | None = None
+) -> EndOfTurnSpec:
+    """Per-tokenizer memo of :func:`derive_end_of_turn_tokens` (one probe render)."""
+    key = json.dumps(chat_template_kwargs or {}, sort_keys=True, default=repr)
+    try:
+        per_tokenizer = _END_OF_TURN_CACHE.setdefault(tokenizer, {})
+    except TypeError:  # not weak-referenceable: derive every time
+        return derive_end_of_turn_tokens(tokenizer, chat_template_kwargs=chat_template_kwargs)
+    if key not in per_tokenizer:
+        per_tokenizer[key] = derive_end_of_turn_tokens(
+            tokenizer, chat_template_kwargs=chat_template_kwargs
+        )
+    return per_tokenizer[key]
+
+
+_EOS_TERMINAL_FALLBACK_LOGGED: set[int] = set()
+
+
+def prompt_completion_terminal_id(
+    tokenizer: Any, chat_template_kwargs: dict[str, Any] | None = None
+) -> int:
+    """Token that closes a prompt_completion target: the template's end-of-turn.
+
+    Derived by :func:`derive_end_of_turn_tokens` (never a hardcoded literal), so
+    the completion ends exactly as the chat template ends an assistant turn. When
+    the template renders no end-of-turn token, eos_token_id is used and the
+    fallback is logged once per tokenizer/kwargs. Loud if neither exists.
+    """
+    end_of_turn = cached_end_of_turn_tokens(tokenizer, chat_template_kwargs)
+    if end_of_turn.rendered_by_template:
+        return end_of_turn.token_ids[0]
+    encoder = encoder_of(tokenizer)
+    eos_id = getattr(encoder, "eos_token_id", None)
+    if eos_id is None:
+        eos_id = getattr(tokenizer, "eos_token_id", None)
+    if eos_id is None:
+        raise ValueError(
+            "prompt_render='prompt_completion' requires a chat template that renders an "
+            "end-of-turn token or a tokenizer that defines eos_token_id (the completion "
+            "terminal is derived from them, never hardcoded)."
+        )
+    if id(end_of_turn) not in _EOS_TERMINAL_FALLBACK_LOGGED:
+        _EOS_TERMINAL_FALLBACK_LOGGED.add(id(end_of_turn))
+        print(
+            "prompt_completion: the chat template renders no end-of-turn token after "
+            f"assistant content ({end_of_turn.detail or end_of_turn.source}); closing "
+            "completions with eos_token_id."
+        )
+    return int(eos_id)
 
 
 def hash_jsonl_line(line: str) -> str:
@@ -304,6 +526,7 @@ def materialize_sft_example(
             loss_mask_mode="full_sequence",
             truncation_applied=truncation_applied,
             source_hash=source_hash,
+            untruncated_length=len(full_tokens),
         )
 
     messages, example_format = normalize_sft_messages(record)
@@ -324,7 +547,8 @@ def materialize_sft_example(
     # newline around the header), so the masked boundary is not the generation
     # anchor. The "prompt_completion" branch instead builds input_ids from the
     # add_generation_prompt=True prompt render — so the prompt ends EXACTLY at the
-    # generation anchor — followed by the raw completion plus a derived terminal,
+    # generation anchor — followed by the raw completion plus the template's
+    # end-of-turn token (eos_token_id when the template renders none),
     # masking the prompt segment to -100. It is gated strictly behind the
     # non-default flag AND an assistant final turn, so every existing caller is
     # byte-identical. template_kwargs are forwarded into the prompt-half render
@@ -346,19 +570,7 @@ def materialize_sft_example(
                 "message content to be a string after sanitization, got "
                 f"{type(completion_text).__name__}."
             )
-        # Terminal is DERIVED from the tokenizer (never a hardcoded literal) so the
-        # completion closes with the model's own end-of-turn id. Read from the
-        # encoder whose vocabulary produced the ids, falling back to the outer
-        # tokenizer (Processor wrappers proxy this); loud if neither defines it.
-        terminal_id = getattr(_encoder, "eos_token_id", None)
-        if terminal_id is None:
-            terminal_id = getattr(tokenizer, "eos_token_id", None)
-        if terminal_id is None:
-            raise ValueError(
-                "prompt_render='prompt_completion' requires the tokenizer to define "
-                "eos_token_id (the completion terminal is derived from it, never "
-                "hardcoded)."
-            )
+        terminal_id = prompt_completion_terminal_id(tokenizer, template_kwargs)
         completion_ids = (
             _encoder.encode(completion_text, add_special_tokens=False) + [terminal_id]
         )
@@ -372,9 +584,13 @@ def materialize_sft_example(
         truncation_applied = len(full_ids) > max_seq_length
         input_ids = list(full_ids[:max_seq_length])
         attention_mask = [1] * len(input_ids)
-        # Mask the prompt segment; every completion token (incl. the terminal)
-        # carries a real label. Right-trim mirrors the full-conversation contract.
-        labels = ([-100] * len(prompt_ids) + completion_ids)[:max_seq_length]
+        # Mask the prompt segment only when assistant-only loss is requested;
+        # with completion_only_loss=false every token is trained, as on the
+        # full-conversation path. Right-trim mirrors the full-conversation contract.
+        if assistant_only_loss:
+            labels = ([-100] * len(prompt_ids) + completion_ids)[:max_seq_length]
+        else:
+            labels = list(input_ids)
         if authoritative_messages and not any(label != -100 for label in labels):
             raise ValueError(
                 "authoritative message prompt_completion rows require at least one "
@@ -385,9 +601,13 @@ def materialize_sft_example(
             attention_mask=attention_mask,
             labels=labels,
             example_format=example_format,
-            loss_mask_mode="assistant_only",
+            loss_mask_mode="assistant_only" if assistant_only_loss else "full_sequence",
             truncation_applied=truncation_applied,
             source_hash=source_hash,
+            untruncated_length=len(full_ids),
+            prompt_token_count=len(prompt_ids),
+            masked_prefix_length=min(len(prompt_ids), len(labels)) if assistant_only_loss else 0,
+            drop_reason=_no_supervision_reason(labels),
         )
 
     full_str = tokenizer.apply_chat_template(
@@ -403,6 +623,11 @@ def materialize_sft_example(
     labels = list(input_ids)
 
     loss_mask_mode: LossMaskMode = "full_sequence"
+    prompt_token_count: int | None = None
+    masked_prefix_length = 0
+    mask_prefix_mismatch = False
+    mask_divergence_expected_token: int | None = None
+    mask_fallback_reason: str | None = None
     if assistant_only_loss and messages[-1].get("role") == "assistant":
         prompt_str = tokenizer.apply_chat_template(
             messages[:-1],
@@ -411,13 +636,34 @@ def materialize_sft_example(
             **template_kwargs,
         )
         prompt_tokens = _encoder.encode(prompt_str, add_special_tokens=False)
+        prompt_token_count = len(prompt_tokens)
         mask_len = min(len(prompt_tokens), len(labels))
         for idx in range(mask_len):
             if labels[idx] == prompt_tokens[idx]:
                 labels[idx] = -100
+                masked_prefix_length = idx + 1
             else:
+                mask_prefix_mismatch = True
+                mask_divergence_expected_token = prompt_tokens[idx]
                 break
         loss_mask_mode = "assistant_only"
+        # Tokens the template emits after the final assistant turn's end-of-turn
+        # token (e.g. a trailing newline) are not part of the reply; mask them.
+        # Search only the final turn (at/after the prompt render) of the
+        # untruncated render, so an earlier turn's terminator is never used.
+        end_of_turn = cached_end_of_turn_tokens(tokenizer, template_kwargs)
+        if end_of_turn.rendered_by_template:
+            for position in range(len(full_tokens) - 1, len(prompt_tokens) - 1, -1):
+                if full_tokens[position] in end_of_turn.token_ids:
+                    for trailing in range(position + 1, len(labels)):
+                        labels[trailing] = -100
+                    break
+    elif assistant_only_loss:
+        mask_fallback_reason = "final_message_not_assistant"
+
+    drop_reason = (
+        DROP_MASK_PREFIX_MISMATCH if mask_prefix_mismatch else _no_supervision_reason(labels)
+    )
 
     return PreparedSFTExample(
         input_ids=input_ids,
@@ -427,4 +673,15 @@ def materialize_sft_example(
         loss_mask_mode=loss_mask_mode,
         truncation_applied=truncation_applied,
         source_hash=source_hash,
+        untruncated_length=len(full_tokens),
+        prompt_token_count=prompt_token_count,
+        masked_prefix_length=masked_prefix_length,
+        mask_prefix_mismatch=mask_prefix_mismatch,
+        mask_divergence_expected_token=mask_divergence_expected_token,
+        mask_fallback_reason=mask_fallback_reason,
+        drop_reason=drop_reason,
     )
+
+
+def _no_supervision_reason(labels: list[int]) -> str | None:
+    return None if any(label != -100 for label in labels) else DROP_NO_SUPERVISED_TOKENS

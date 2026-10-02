@@ -188,7 +188,9 @@ SYNAPTIC_TEST_QWEN35_TOKENIZER_ARTIFACT=/private/verified/tokenizer.artifact \
 ```
 
 The artifact-backed case checks the exact pinned template hash, generation
-scaffold, prompt mask, and prose-plus-EOS target. Without that explicit local
+scaffold, prompt mask, and prose-plus-terminal target (the terminal is the
+template's end-of-turn token, which is `eos_token_id` for that tokenizer when
+the two coincide). Without that explicit local
 artifact it skips; the generic contract/transport cases still run. This checks
 token placement, not live GPU execution or writing quality.
 
@@ -257,9 +259,17 @@ the head reads an off-anchor representation.
 
 Set `training.prompt_render: prompt_completion` for a faithful boundary: the row's
 `input_ids` are built from the `add_generation_prompt=True` prompt render followed
-by the raw completion plus the tokenizer's derived terminal (`eos_token_id`), with
-the prompt segment masked to `-100`. The prompt then ends exactly at the
-generation anchor, so the existing `end_of_prompt` read is faithful.
+by the raw completion plus the chat template's end-of-turn token, with the
+prompt segment masked to `-100` when `completion_only_loss: true` (with
+`completion_only_loss: false` every token is trained). The terminal is derived
+from the template (the special token it renders after assistant content, the
+same derivation `doctor sft-mask` uses); only when the template renders none does
+it fall back to `eos_token_id`, logged once. Where `eos_token_id` already is the
+end-of-turn token the rows are byte-identical to the earlier eos-terminated
+construction; where they differ (for example eos `<|endoftext|>` vs turn end
+`<|im_end|>`), the completion now ends with the turn terminator. The prompt then
+ends exactly at the generation anchor, so the existing `end_of_prompt` read is
+faithful.
 
 ```yaml
 training:
@@ -306,7 +316,14 @@ The `aux_head` block flows through **both** launch paths:
 
 1. **Choose runtime**: prefer `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes` for repeatable local Docker runs; use direct `cd Trainers/sft && python train_sft.py ...` for tight trainer iteration.
 2. **Prepare dataset**: use conversational JSONL for chat semantics, or run
-   `prepare-dataset` for a verified `syntunia-sft-row/v1` raw-text artifact
+   `prepare-dataset` for a verified `syntunia-sft-row/v1` raw-text artifact.
+   Then check loss masking with the target tokenizer:
+   `python tuner.py doctor sft-mask --sft-config <trainer-config> --model <tokenizer> --dataset-path <jsonl>`
+   (tokenizer only, no GPU; exit 1 on hard failures such as too many dropped
+   rows or a wrong end-of-turn token). See `dataset-formats.md` → Validation.
+   Preprocessing contract version 2 changed SFT labels (end-of-turn stop,
+   dropped untrainable rows, `training.max_dropped_row_fraction`); losses from
+   earlier runs are not directly comparable.
 3. **Test setup**: set `run.dry_run: true` in local-run YAML or use `python train_sft.py --model-size 7b --tier quick --dry-run`
 4. **Quick iteration**: cap `training.max_steps` in local-run YAML or use `--tier quick`
 5. **Production run**: remove the step cap and use the intended `training`, `model`, `dataset`, and `lora` settings in YAML

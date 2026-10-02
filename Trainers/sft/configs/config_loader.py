@@ -8,6 +8,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional, Any, Dict
 
+from shared.sft_preprocessing import DEFAULT_MAX_DROPPED_ROW_FRACTION
 from shared.training_utils import dict_to_dataclass, reject_unknown_config_keys
 
 
@@ -99,7 +100,8 @@ class SFTTrainingConfig:
     #       add_generation_prompt=False and derive the assistant-only mask by a
     #       prefix match. Byte-identical to historical behavior.
     #   "prompt_completion" — build input_ids from the add_generation_prompt=True
-    #       prompt render followed by the raw completion + derived terminal, with
+    #       prompt render followed by the raw completion + the template's
+    #       end-of-turn token (eos_token_id when it renders none), with
     #       the prompt segment masked to -100. Lives here (not on AuxHeadConfig)
     #       because it REPLACES the assistant_only masking region rather than
     #       configuring the head; see shared.sft_preprocessing.materialize_sft_example.
@@ -109,6 +111,11 @@ class SFTTrainingConfig:
     # recipes retain their historical behavior; long-context recipes should
     # enable it explicitly.
     require_memory_efficient_loss: bool = False
+    # SFT preprocessing drops rows it cannot train correctly (every label masked,
+    # e.g. truncation removed the whole target; or assistant-only masking that
+    # stopped before the end of the prompt render) and fails the run when the
+    # dropped fraction exceeds this value.
+    max_dropped_row_fraction: float = DEFAULT_MAX_DROPPED_ROW_FRACTION
 
 
 @dataclass

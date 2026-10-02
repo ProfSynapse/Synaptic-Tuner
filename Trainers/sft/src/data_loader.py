@@ -7,10 +7,12 @@ from datasets import load_dataset, Dataset
 
 from preprocessing import (
     ASSISTANT_ONLY,
+    SOURCE_INDEX_COLUMN,
     load_and_prepare_sft_dataset,
     sanitize_conversations as sanitize_prepared_conversations,
 )
 from shared.sft_preprocessing import (
+    DEFAULT_MAX_DROPPED_ROW_FRACTION,
     detect_sft_record_format,
     is_authoritative_preassigned_sft_record,
 )
@@ -170,48 +172,20 @@ def load_and_prepare_dataset(
     return train_dataset, eval_dataset
 
 
-def load_and_prepare_tokenized_dataset(
+def load_raw_sft_dataset(
     dataset_name: Optional[str] = None,
     data_files: Optional[str] = None,
     local_file: Optional[str] = None,
     num_proc: int = 1,
-    test_size: float = 0.1,
-    split_dataset: bool = False,
     filter_desirable: bool = False,
-    tokenizer: Any = None,
-    max_seq_length: int = 2048,
-    loss_mask_mode: str = ASSISTANT_ONLY,
-    chat_template_kwargs: Optional[dict] = None,
-    aux_target_field: Optional[str] = None,
-    prompt_render: str = "full_conversation",
-    assistant_only_loss_requested: bool = False,
-    aux_token_position: str | int | None = None,
-    use_preassigned_splits: bool = False,
-    preparation_metadata: Optional[dict[str, str]] = None,
-    validation_group_key: Optional[str] = None,
-) -> Tuple[Dataset, Optional[Dataset]]:
+) -> Dataset:
     """
-    Load and prepare dataset into explicit tokenized SFT features.
+    Load the raw SFT rows exactly as the tokenized trainer path sees them.
 
-    This is the repo-owned prepared-dataset path for trainers that want to
-    consume ``input_ids`` / ``attention_mask`` / ``labels`` directly instead of
-    relying on implicit TRL preprocessing behavior.
-
-    ``aux_target_field`` (optional) names a per-row column to carry through as an
-    ``aux_target`` feature for the auxiliary readout head. None ⇒ unchanged.
-
-    ``validation_group_key`` (optional) is a dot-path into the raw row; when set
-    and splitting, the validation split keeps every group on one side (see
-    :func:`shared.training_utils.split_train_validation`). Group values are read
-    before tokenization drops the raw columns.
+    Shared by :func:`load_and_prepare_tokenized_dataset` and the SFT mask doctor
+    so both read the same rows (Arrow schema unification, the ``conversations``
+    -> ``messages`` rename and the optional ``label=True`` filter included).
     """
-    print("=" * 60)
-    print("LOADING ENCODED DATASET FOR SFT")
-    print("=" * 60)
-
-    if tokenizer is None:
-        raise ValueError("tokenizer is required for tokenized dataset preparation")
-
     if local_file:
         print(f"Loading from local file: {local_file}")
         raw_datasets = load_dataset("json", data_files=local_file, split="train")
@@ -244,8 +218,63 @@ def load_and_prepare_tokenized_dataset(
         print(f"Filtered: {original_size} → {filtered_count} examples")
         print(f"Removed: {original_size - filtered_count} undesirable examples")
 
-    def _prepare(dataset: Dataset) -> Dataset:
-        return load_and_prepare_sft_dataset(
+    return raw_datasets
+
+
+def load_and_prepare_tokenized_dataset(
+    dataset_name: Optional[str] = None,
+    data_files: Optional[str] = None,
+    local_file: Optional[str] = None,
+    num_proc: int = 1,
+    test_size: float = 0.1,
+    split_dataset: bool = False,
+    filter_desirable: bool = False,
+    tokenizer: Any = None,
+    max_seq_length: int = 2048,
+    loss_mask_mode: str = ASSISTANT_ONLY,
+    chat_template_kwargs: Optional[dict] = None,
+    aux_target_field: Optional[str] = None,
+    prompt_render: str = "full_conversation",
+    assistant_only_loss_requested: bool = False,
+    aux_token_position: str | int | None = None,
+    use_preassigned_splits: bool = False,
+    preparation_metadata: Optional[dict[str, str]] = None,
+    validation_group_key: Optional[str] = None,
+    max_dropped_row_fraction: float = DEFAULT_MAX_DROPPED_ROW_FRACTION,
+) -> Tuple[Dataset, Optional[Dataset]]:
+    """
+    Load and prepare dataset into explicit tokenized SFT features.
+
+    This is the repo-owned prepared-dataset path for trainers that want to
+    consume ``input_ids`` / ``attention_mask`` / ``labels`` directly instead of
+    relying on implicit TRL preprocessing behavior.
+
+    ``aux_target_field`` (optional) names a per-row column to carry through as an
+    ``aux_target`` feature for the auxiliary readout head. None ⇒ unchanged.
+
+    ``validation_group_key`` (optional) is a dot-path into the raw row; when set
+    and splitting, the validation split keeps every group on one side (see
+    :func:`shared.training_utils.split_train_validation`). Group values are read
+    before tokenization drops the raw columns.
+    """
+    print("=" * 60)
+    print("LOADING ENCODED DATASET FOR SFT")
+    print("=" * 60)
+
+    if tokenizer is None:
+        raise ValueError("tokenizer is required for tokenized dataset preparation")
+
+    raw_datasets = load_raw_sft_dataset(
+        dataset_name=dataset_name,
+        data_files=data_files,
+        local_file=local_file,
+        num_proc=num_proc,
+        filter_desirable=filter_desirable,
+    )
+
+    def _prepare(dataset: Dataset) -> Tuple[Dataset, list]:
+        """Tokenize ``dataset``; return it and the input index of each kept row."""
+        prepared = load_and_prepare_sft_dataset(
             dataset=dataset,
             tokenizer=tokenizer,
             max_seq_length=max_seq_length,
@@ -258,7 +287,11 @@ def load_and_prepare_tokenized_dataset(
             assistant_only_loss_requested=assistant_only_loss_requested,
             aux_token_position=aux_token_position,
             use_preassigned_splits=use_preassigned_splits,
+            max_dropped_row_fraction=max_dropped_row_fraction,
+            keep_source_index=True,
         )
+        kept = list(prepared[SOURCE_INDEX_COLUMN])
+        return prepared.remove_columns([SOURCE_INDEX_COLUMN]), kept
 
     if validation_group_key and use_preassigned_splits:
         raise ValueError(
@@ -318,14 +351,18 @@ def load_and_prepare_tokenized_dataset(
             raise ValueError(
                 "Preassigned splits require a non-empty declared validation split."
             )
-        train_dataset = _prepare(train_rows)
-        eval_dataset = _prepare(validation_rows)
+        train_dataset, _ = _prepare(train_rows)
+        eval_dataset, _ = _prepare(validation_rows)
         if preparation_metadata is not None:
             preparation_metadata["dataset_format"] = next(iter(formats))
         print(f"  Training set: {len(train_dataset)} examples")
         print(f"  Validation set: {len(eval_dataset)} examples")
     else:
-        train_dataset = _prepare(raw_datasets)
+        train_dataset, kept_rows = _prepare(raw_datasets)
+        if group_values is not None:
+            # Untrainable rows were dropped; keep group values aligned with the
+            # rows that remain.
+            group_values = [group_values[index] for index in kept_rows]
 
     if not use_preassigned_splits and split_dataset and test_size > 0:
         print(f"\nCreating train/validation split ({1-test_size:.0%}/{test_size:.0%})")
