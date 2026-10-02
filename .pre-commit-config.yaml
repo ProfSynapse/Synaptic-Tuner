@@ -1,0 +1,37 @@
+# Check-only hooks. Nothing here rewrites files: no formatters, no
+# trailing-whitespace or end-of-file fixers.
+#   pip install pre-commit && pre-commit install
+#   pre-commit run --all-files
+# Keep the ruff rev in step with the ruff version used by .github/workflows/ci.yml.
+# .agents/ and .claude/ are generated mirrors of .skills/ (see sync_skill_trees.py).
+exclude: ^(\.agents|\.claude)/
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff-check
+        # Selection and excludes come from [tool.ruff] in pyproject.toml.
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        # Legacy rubric drafts under Datasets/behavior_rubrics/ are not valid
+        # YAML; Datasets/ holds data artifacts and is also excluded from ruff.
+        # SynthChat/scenarios/destructive.yaml repeats `storageManager_archive`
+        # with different weights inside one `tools:` map (the last value wins
+        # when loaded). Remove it from this exclude once its owner fixes it.
+        exclude: ^(Datasets/|SynthChat/scenarios/destructive\.yaml$)
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        # Tracked dataset artifacts under Datasets/ are intentionally large.
+        args: [--maxkb=2048]
+        exclude: ^Datasets/
+
+  - repo: https://github.com/Mateusz-Grzelinski/actionlint-py
+    rev: v1.7.9.24
+    hooks:
+      - id: actionlint
