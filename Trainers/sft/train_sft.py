@@ -237,6 +237,7 @@ from transformers import Trainer
 from trl import SFTConfig
 
 from configs.config_loader import (
+    PROTECTED_RECIPE_ENVELOPE_KEYS,
     get_3b_config,
     get_7b_config,
     get_13b_config,
@@ -269,6 +270,7 @@ from shared.cloud_artifacts import (
 from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
 from shared.training_utils import (
     setup_wandb,
+    apply_wandb_destination,
     extract_previous_log_entries,
     save_training_lineage,
     build_base_lineage,
@@ -892,7 +894,9 @@ def run(args: argparse.Namespace):
     if args.protected_smoke_config:
         if not args.protected_smoke_evidence or args.config or args.model_size:
             raise ValueError("Protected smoke config is exclusive to protected evidence mode")
-        config = load_config(args.protected_smoke_config)
+        config = load_config(
+            args.protected_smoke_config, envelope_keys=PROTECTED_RECIPE_ENVELOPE_KEYS
+        )
         print("Loading protected YAML configuration")
     elif args.config:
         # Custom config file
@@ -1122,6 +1126,8 @@ def run(args: argparse.Namespace):
             config.wandb_project = args.wandb_project
         if config.use_wandb and args.wandb_run_name:
             config.wandb_run_name = args.wandb_run_name
+    if config.use_wandb:
+        apply_wandb_destination(config.wandb.project, config.wandb.entity)
 
     # Protected anonymous loads never consult ambient credentials. Ordinary
     # training retains the historical token fallback.
@@ -1415,6 +1421,7 @@ def run(args: argparse.Namespace):
         "save_total_limit": config.training.save_total_limit,
         "dataloader_num_workers": config.training.dataloader_num_workers,
         "dataloader_pin_memory": config.training.dataloader_pin_memory,
+        "group_by_length": config.training.group_by_length,
         "eval_strategy": config.training.eval_strategy if eval_dataset else "no",
         "eval_steps": config.training.eval_steps if eval_dataset else None,
         "report_to": "wandb" if config.use_wandb else "none",

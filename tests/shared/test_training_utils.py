@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.training_utils import (
+    UnknownConfigKeysError,
     apply_tier_preset,
     build_base_lineage,
     extract_previous_log_entries,
@@ -473,11 +474,11 @@ class TestApplyTierPreset:
 
         assert args.max_steps == 500  # Preserved user value
 
-    def test_unknown_keys_ignored(self, tmp_path):
-        """Keys not in tier_config_map should be silently skipped."""
+    def test_unknown_keys_refused(self, tmp_path):
+        """Keys not in tier_config_map are refused, not silently skipped."""
         configs_dir = self._make_tier_yaml(
             tmp_path, "quick",
-            {"unknown_key": 42, "learning_rate": 1e-3},
+            {"lerning_rate": 1e-3, "learning_rate": 1e-3},
         )
 
         config = self.FakeConfig()
@@ -485,9 +486,12 @@ class TestApplyTierPreset:
         args = MagicMock()
         args.max_steps = None
 
-        apply_tier_preset(config, "quick", tier_map, args, configs_dir)
+        with pytest.raises(UnknownConfigKeysError) as excinfo:
+            apply_tier_preset(config, "quick", tier_map, args, configs_dir)
 
-        assert config.training.learning_rate == 1e-3
+        assert excinfo.value.paths == ["lerning_rate"]
+        assert "did you mean 'learning_rate'" in str(excinfo.value)
+        assert config.training.learning_rate == 2e-4  # nothing applied
 
     def test_raises_for_missing_tier_file(self, tmp_path):
         """Should raise FileNotFoundError for non-existent tier."""
@@ -506,7 +510,10 @@ class TestApplyTierPreset:
         )
 
         config = self.FakeConfig()
-        tier_map = {"learning_rate": ("training", "learning_rate")}
+        tier_map = {
+            "learning_rate": ("training", "learning_rate"),
+            "num_epochs": ("training", "num_epochs"),
+        }
         args = MagicMock()
         args.max_steps = None
 

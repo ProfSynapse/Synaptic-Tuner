@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import difflib
 import os
 from pathlib import Path
 from types import MappingProxyType
@@ -34,8 +35,13 @@ MODAL_SFT_ACCELERATOR_RATE_KEYS = MappingProxyType({
 def _section(value: object, allowed: set[str], name: str) -> dict:
     if type(value) is not dict or any(type(key) is not str for key in value):
         raise ValueError(f"{name} must be an object")
-    if set(value) - allowed:
-        raise ValueError(f"{name} contains unsupported fields")
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        named = []
+        for key in unknown:
+            close = difflib.get_close_matches(key, sorted(allowed), n=1)
+            named.append(f"{name}.{key}" + (f" (did you mean '{close[0]}'?)" if close else ""))
+        raise ValueError(f"{name} contains unsupported fields: {', '.join(named)}")
     return value
 
 

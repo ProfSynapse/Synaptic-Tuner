@@ -134,13 +134,22 @@ checks:
     value: "expected text"
 ```
 
-Or load from Python:
+Or load Python functions from a file via the trainer config (`rewards.custom`;
+module-path loading and per-item `params` are not supported and are refused):
 ```yaml
-name: custom_reward
-weight: 0.5
-source: module  # or "file"
-module: my_rewards.custom_fn
+rewards:
+  custom:
+    enabled: true
+    file: "./my_rewards.py"        # relative to Trainers/grpo/
+    functions:
+      - name: custom_fn
+        weight: 0.5
 ```
+
+Both GRPO entrypoints refuse YAML keys they do not read (`GRPO_CONFIG_SCHEMA` /
+`ENV_GRPO_CONFIG_SCHEMA`), and any `training.*` / `training.extra_args.*`
+setting the installed TRL `GRPOConfig` does not accept raises instead of being
+dropped (e.g. TRL 0.28 removed `max_prompt_length`).
 
 ---
 

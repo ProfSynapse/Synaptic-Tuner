@@ -88,6 +88,12 @@ def test_recipe_rejects_unapproved_authority_and_incompatible_controls(monkeypat
         _load(monkeypatch, mutation)
 
 
+def test_recipe_names_unsupported_fields_with_suggestions(monkeypatch):
+    with pytest.raises(ValueError) as excinfo:
+        _load(monkeypatch, lambda data: data["training"].update(lerning_rate=1e-4))
+    assert "training.lerning_rate (did you mean 'learning_rate'?)" in str(excinfo.value)
+
+
 def test_recipe_accepts_reviewed_a100_option(monkeypatch):
     recipe = _load(monkeypatch, lambda data: data["job"].update(accelerator="A100-80GB"))
     assert recipe.accelerator == "A100-80GB"

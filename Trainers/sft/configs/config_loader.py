@@ -8,6 +8,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional, Any, Dict
 
+from shared.training_utils import dict_to_dataclass, reject_unknown_config_keys
+
 
 def load_yaml_config(config_path: str = None) -> Dict[str, Any]:
     """
@@ -237,40 +239,6 @@ class Config:
         self.wandb.run_name = value
 
 
-def dict_to_dataclass(cls, data: Dict[str, Any]):
-    """
-    Convert dictionary to dataclass instance.
-    Handles type conversion for numeric fields that might be strings.
-    """
-    import typing
-
-    fieldtypes = {f.name: f.type for f in cls.__dataclass_fields__.values()}
-    converted_data = {}
-
-    for k, v in data.items():
-        if k not in fieldtypes:
-            continue
-
-        field_type = fieldtypes[k]
-
-        # Handle Optional types
-        if hasattr(field_type, '__origin__') and field_type.__origin__ is typing.Union:
-            # Get the non-None type from Optional
-            types = [t for t in field_type.__args__ if t is not type(None)]
-            if types:
-                field_type = types[0]
-
-        # Convert strings to appropriate numeric types
-        if field_type == float and isinstance(v, str):
-            converted_data[k] = float(v)
-        elif field_type == int and isinstance(v, str):
-            converted_data[k] = int(v)
-        else:
-            converted_data[k] = v
-
-    return cls(**converted_data)
-
-
 def load_evolutionary_config(evo_data: Dict[str, Any]) -> EvolutionaryConfig:
     """Load evolutionary config from YAML dict."""
     if not evo_data:
@@ -432,24 +400,43 @@ def load_aux_head_config(aux_data: Dict[str, Any]) -> AuxHeadConfig:
     )
 
 
-def load_config(config_path: str = None) -> Config:
+# Top-level keys of the protected HF training-smoke recipe envelope
+# (Trainers/recipes/protected/*.yaml). They are owned and validated by
+# tuner/cloud/hf_training_smoke_workload.validate_recipe; the trainer does not
+# read them. train_sft passes this set only on its protected-smoke path.
+PROTECTED_RECIPE_ENVELOPE_KEYS = ("schema_version", "name", "runtime_lock", "protected")
+
+
+def load_config(config_path: str = None, *, envelope_keys=()) -> Config:
     """
     Load YAML config and convert to Config dataclass.
 
+    Every key, at every nesting level, must be declared by the Config dataclass
+    tree; anything else raises UnknownConfigKeysError listing each offending
+    dotted path (with a "did you mean" suggestion).
+
     Args:
         config_path: Path to config.yaml
+        envelope_keys: Extra top-level keys owned and validated by another
+            component (see PROTECTED_RECIPE_ENVELOPE_KEYS)
 
     Returns:
         Config object with all settings
     """
     yaml_config = load_yaml_config(config_path)
+    reject_unknown_config_keys(
+        Config,
+        yaml_config,
+        source=str(config_path or Path(__file__).parent / "config.yaml"),
+        extra_top_level_keys=envelope_keys,
+    )
 
     # Convert each section to dataclass
-    model_config = dict_to_dataclass(ModelConfig, yaml_config['model'])
-    lora_config = dict_to_dataclass(LoRAConfig, yaml_config['lora'])
-    training_config = dict_to_dataclass(SFTTrainingConfig, yaml_config['training'])
-    dataset_config = dict_to_dataclass(DatasetConfig, yaml_config['dataset'])
-    wandb_config = dict_to_dataclass(WandbConfig, yaml_config.get('wandb', {}))
+    model_config = dict_to_dataclass(ModelConfig, yaml_config['model'], section='model')
+    lora_config = dict_to_dataclass(LoRAConfig, yaml_config['lora'], section='lora')
+    training_config = dict_to_dataclass(SFTTrainingConfig, yaml_config['training'], section='training')
+    dataset_config = dict_to_dataclass(DatasetConfig, yaml_config['dataset'], section='dataset')
+    wandb_config = dict_to_dataclass(WandbConfig, yaml_config.get('wandb', {}), section='wandb')
     evolutionary_config = load_evolutionary_config(yaml_config.get('evolutionary', {}))
     aux_head_config = load_aux_head_config(yaml_config.get('aux_head', {}))
 

@@ -2,9 +2,9 @@
 
 Location: tests/trainers/sft/test_aux_head_config.py
 
-Guards the silent-drop gotcha: the aux_head block is only honored because
-AuxHeadConfig is a real dataclass field on Config (dict_to_dataclass drops
-unknown keys). Also verifies absent ⇒ off and the loud layer-required check.
+Guards the field wiring: the aux_head block is only accepted because
+AuxHeadConfig is a real dataclass field on Config (the loader refuses
+undeclared keys). Also verifies absent ⇒ off and the loud layer-required check.
 """
 
 from __future__ import annotations
@@ -242,7 +242,7 @@ def test_validate_coherence_accepts_layer_when_enabled():
 
 def test_config_has_real_aux_head_field_so_block_is_not_silently_dropped():
     # The whole point: aux_head must be a declared field on Config, otherwise
-    # dict_to_dataclass-style loading would silently ignore the YAML block.
+    # the strict loader would refuse the YAML block as an unknown key.
     field_names = {f.name for f in Config.__dataclass_fields__.values()}
     assert "aux_head" in field_names
     assert Config.__dataclass_fields__["aux_head"].type is AuxHeadConfig

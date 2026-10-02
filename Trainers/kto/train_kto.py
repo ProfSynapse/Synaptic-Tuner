@@ -63,6 +63,7 @@ from shared.cloud_artifacts import (
 from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
 from shared.training_utils import (
     setup_wandb,
+    apply_wandb_destination,
     extract_previous_log_entries,
     save_training_lineage,
     build_base_lineage,
@@ -638,7 +639,8 @@ def main():
         if args.wandb_project:
             config.wandb_project = args.wandb_project
         elif not hasattr(config, 'wandb_project') or not config.wandb_project:
-            config.wandb_project = "kto-training"  # Default project name
+            # Default project name; an exported WANDB_PROJECT still wins.
+            config.wandb_project = os.environ.get("WANDB_PROJECT") or "kto-training"
 
         if args.wandb_run_name:
             config.wandb_run_name = args.wandb_run_name
@@ -647,6 +649,8 @@ def main():
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
             config.wandb_run_name = f"{args.model_size}-{timestamp}"
+    if config.use_wandb:
+        apply_wandb_destination(config.wandb.project, config.wandb.entity)
 
     if not args.hf_token:
         args.hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")

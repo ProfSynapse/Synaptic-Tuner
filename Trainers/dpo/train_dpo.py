@@ -384,13 +384,18 @@ def main():
         if args.wandb_project:
             config.wandb_project = args.wandb_project
         elif not getattr(config, "wandb_project", None):
-            config.wandb_project = "dpo-training"
+            # Default project name; an exported WANDB_PROJECT still wins.
+            config.wandb_project = os.environ.get("WANDB_PROJECT") or "dpo-training"
         if args.wandb_run_name:
             config.wandb_run_name = args.wandb_run_name
         elif not getattr(config, "wandb_run_name", None):
             from datetime import datetime
             ts = datetime.now().strftime("%Y%m%d_%H%M")
             config.wandb_run_name = f"{args.model_size or 'dpo'}-{ts}"
+    if config.use_wandb:
+        from shared.training_utils import apply_wandb_destination
+
+        apply_wandb_destination(config.wandb.project, config.wandb.entity)
 
     if not args.hf_token:
         args.hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
