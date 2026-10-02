@@ -2,7 +2,7 @@
 Model loader registry.
 """
 
-from typing import Dict, List, Optional, Type
+from typing import Dict, List, Type
 
 from .base import BaseModelLoader
 

@@ -195,7 +195,11 @@ def test_parent_chain_swap_after_preflight_fails_closed(tmp_path, monkeypatch):
     except OSError:
         moved.rename(parent)
         pytest.skip("symlink creation is unavailable")
-    with pytest.raises(CloudProviderError, match="links or reparse"):
+    # The post-claim reader holds no-follow handles down the ancestor chain:
+    # POSIX refuses the swapped link at open (ELOOP) and Windows rejects the
+    # reparse point on its held handle.
+    refusal = "reparse points" if os.name == "nt" else "could not be read safely"
+    with pytest.raises(CloudProviderError, match=refusal):
         _read_claimed_hf_token(claim)
 
 

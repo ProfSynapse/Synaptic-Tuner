@@ -12,9 +12,6 @@ Architecture:
 """
 
 import json
-import re
-import random
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Mapping, Sequence
@@ -31,15 +28,12 @@ from .template_utils import (
     _render_template_object,
     _task_context_template_vars,
     _user_generation_style_instructions,
-    _clean_path,
 )
 from .targets import (
     _normalize_target_spec,
-    _extract_shared_seed_spec,
     _apply_stage_review_result,
 )
 from .workspace.renderer import render_workspace_prompt
-from .workspace.sections import _tool_wrapper_name
 from .schemas.environment_schema import (
     _build_canonical_environment_schema,
     _build_canonical_environment_generation_prompt,
@@ -53,9 +47,6 @@ from .schemas.tool_response_schema import (
 )
 from .labeling import (
     build_metadata_labels,
-    _slugify_label,
-    _classify_environment_issue,
-    _derive_kto_candidate_label,
 )
 from .config.format_resolver import (
     load_tool_call_formats,

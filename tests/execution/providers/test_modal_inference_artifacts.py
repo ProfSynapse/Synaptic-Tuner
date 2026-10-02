@@ -3,7 +3,6 @@
 from __future__ import annotations
 from dataclasses import replace
 import hashlib, os
-from pathlib import Path
 import pytest
 from tuner.execution.providers.modal.contracts import (
     ArtifactMemberV1,

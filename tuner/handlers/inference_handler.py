@@ -13,14 +13,12 @@ This handler implements the inference workflow:
 """
 
 import json
-import os
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
-from shared.utilities.paths import get_trainer_root, iter_training_output_dirs
+from shared.utilities.paths import get_trainer_root
 from tuner.handlers.base import BaseHandler
 
 # Import shared UI components
@@ -30,7 +28,6 @@ from shared.ui import (
     print_config,
     print_info,
     print_error,
-    print_success,
     confirm,
     prompt,
     console,
@@ -263,7 +260,7 @@ class InferenceHandler(BaseHandler):
             "-ngl", "99",  # Offload all layers to GPU
         ]
 
-        print_info(f"Starting llama.cpp...")
+        print_info("Starting llama.cpp...")
         print_info(f"Model: {model.path}")
         print_info("GPU layers: all")
         print()
@@ -299,7 +296,7 @@ class InferenceHandler(BaseHandler):
         python = self.get_conda_python()
         cmd = [python, str(inference_script), str(model.path)]
 
-        print_info(f"Loading model with Unsloth...")
+        print_info("Loading model with Unsloth...")
         print_info(f"Path: {model.path}")
         print()
 

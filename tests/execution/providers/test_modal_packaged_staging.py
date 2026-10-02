@@ -27,7 +27,6 @@ from tuner.training.contracts import RetainedTrainingInputStreamLease
 
 from tests.execution.providers.test_modal_packaged_binding import _release_and_execution
 from tests.execution.providers.test_modal_sdk154_adapter import (
-    Entry,
     FakeVolume,
     Upload,
     make_facade,

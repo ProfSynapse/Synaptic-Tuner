@@ -9,11 +9,10 @@ Validates data against a flat list of validation rules:
 
 import json
 import re
-from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 
 try:
-    from jsonschema import validate, ValidationError
+    from jsonschema import validate, ValidationError  # noqa: F401  probe sets HAS_JSONSCHEMA
     HAS_JSONSCHEMA = True
 except ImportError:
     HAS_JSONSCHEMA = False
@@ -259,7 +258,6 @@ class StructureValidator:
             List of error messages (empty if valid)
         """
         tools_manifest = validation.get("tools", {})
-        error_template = validation.get("error", "Tool '{tool_name}': {details}")
 
         # Get tool calls from data
         tool_calls = data.get("tool_calls", [])
@@ -342,9 +340,6 @@ class StructureValidator:
 
         # Get required fields list (if specified, only these are required)
         required_fields = schema.get("_required")
-
-        # Get item schema for arrays
-        item_schema = schema.get("_item_schema")
 
         # Get subtools manifest (for validating calls array)
         schema_subtools = schema.get("_subtools", subtools)

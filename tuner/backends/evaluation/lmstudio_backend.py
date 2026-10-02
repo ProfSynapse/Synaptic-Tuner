@@ -152,7 +152,7 @@ class LMStudioBackend(IEvaluationBackend):
                         f"http://{host}:1234/v1/models",
                         headers={"Content-Type": "application/json"}
                     )
-                    with urllib.request.urlopen(req, timeout=5) as response:
+                    with urllib.request.urlopen(req, timeout=5):
                         # Server responded, but no models
                         return False, "LM Studio running but no models loaded"
                 except urllib.error.URLError:

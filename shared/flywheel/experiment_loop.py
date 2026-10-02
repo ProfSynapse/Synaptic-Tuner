@@ -17,10 +17,9 @@ import random
 import re
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -274,8 +273,12 @@ class SurrogateModel:
         if self._pipeline is None or not self.available:
             return {}
         lgbm_model = self._pipeline.named_steps["lgbm"]
+        # The default "split" importance type yields integer split counts.
         importances = lgbm_model.feature_importances_
-        return dict(zip(self._feature_names, importances.tolist()))
+        return {
+            name: float(value)
+            for name, value in zip(self._feature_names, importances.tolist())
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +503,6 @@ class ExperimentLoop:
 
     def _select_next_config(self) -> Dict[str, Any]:
         """Choose the next hyperparameter configuration to try."""
-        import pandas as pd
 
         strategy = self.config.search_strategy
         n_completed = len(self.results)

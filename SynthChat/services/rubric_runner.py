@@ -19,7 +19,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.llm import create_client
 from shared.llm.config import LLMConfig
 from SynthChat.engine import ImprovementEngine, ImprovementResult
-from SynthChat.services.data import RubricRepository
 from SynthChat.utils.logger import ImproveLogger
 
 

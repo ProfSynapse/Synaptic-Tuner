@@ -15,7 +15,6 @@ from .cli_utils import (
 )
 from .config import EvaluatorConfig, LMStudioSettings, PromptFilter, expand_path
 from .client_factory import create_client
-from .shared_llm_adapters import SharedLMStudioAdapter as LMStudioClient
 from .protocols import BackendError as LMStudioError
 from .prompt_sets import load_prompt_cases
 from .reporting import build_run_payload, console_summary, render_markdown, write_json

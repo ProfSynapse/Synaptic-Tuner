@@ -1,9 +1,8 @@
 """Additional cloud_loss_job tests: error recovery, malformed data, missing args."""
 
-import json
 from argparse import Namespace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

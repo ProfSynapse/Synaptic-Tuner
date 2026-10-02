@@ -208,7 +208,7 @@ def print_summary(results: List, output_file: Path):
     passed_pct = (passed / total * 100) if total else 0
     failed_pct = (failed / total * 100) if total else 0
 
-    print(f"\n=== Summary ===")
+    print("\n=== Summary ===")
     print(f"Total generated: {total}")
     print(f"Passed: {passed} ({passed_pct:.1f}%)")
     print(f"Failed: {failed} ({failed_pct:.1f}%)")

@@ -3,7 +3,6 @@
 import json
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from ..core.models import LabelingSession
@@ -241,21 +240,21 @@ class ProgressTracker:
         last_updated = progress.get("last_updated", "Unknown")
 
         print(f"\n{'='*60}")
-        print(f"Progress Summary")
+        print("Progress Summary")
         print(f"{'='*60}")
         print(f"Input file: {progress['input_file']}")
         print(f"Output file: {progress['output_file']}")
         print(f"Last updated: {last_updated}")
-        print(f"")
+        print("")
         print(f"Total processed: {total_processed}")
         print(f"  Labeled: {labeled_count}")
         print(f"  Skipped: {skipped_count}")
         print(f"Last line: {progress.get('last_line', 0)}")
-        print(f"")
+        print("")
 
         categories = progress.get("categories_used", {})
         if categories:
-            print(f"Categories used:")
+            print("Categories used:")
             for tag, count in sorted(categories.items(), key=lambda x: x[1], reverse=True):
                 print(f"  {tag}: {count}")
         else:

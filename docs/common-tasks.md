@@ -483,3 +483,28 @@ START: User wants to evaluate a model
 [4] Run evaluation:
     python -m Evaluator.cli --model <model> --prompt-set <scenarios>
 ```
+
+---
+
+## 7. Linting and Running the Test Suite (CI parity)
+
+`.github/workflows/ci.yml` runs ruff (pyflakes `F` rules only, configured in
+`pyproject.toml`) and the full pytest suite on CPU, split into three shards
+(`core`, `modal-inference-a-l`, `modal-inference-m-z`).
+
+```bash
+# Lint and repository hygiene checks (check-only; nothing is rewritten)
+pip install pre-commit && pre-commit install
+pre-commit run --all-files
+
+# CPU test environment, as CI installs it
+pip install 'torch>=2,<3' --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements-ci-tests.txt -e .
+
+# One CI shard, exactly as CI runs it
+bash scripts/ci_pytest_shard.sh core
+```
+
+Run pytest with its temporary directory outside the checkout (the default
+`/tmp` on a CI runner); several tests assert that they are not writing inside
+the engine checkout.

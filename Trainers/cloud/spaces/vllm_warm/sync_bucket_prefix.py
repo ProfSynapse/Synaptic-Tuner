@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Download a bucket prefix into a local directory for warm Space runtimes."""
+"""Download a bucket prefix into a local directory for warm Space runtimes.
+
+The Space image runs this script with a dedicated ``huggingface_hub>=1.0`` venv
+(``/opt/bucket-sync-venv``, see ``Dockerfile.tmpl``) because Buckets need a
+newer Hub client than the transformers 4.x stack allows. Only the sync itself
+needs that client, so it is imported where it is used; URI parsing stays
+importable alongside the pinned ``huggingface-hub<1.0`` engine environment.
+"""
 
 from __future__ import annotations
 
 import argparse
 import os
 from pathlib import Path
-
-from huggingface_hub import sync_bucket
 
 
 def parse_bucket_uri(uri: str) -> tuple[str, str]:
@@ -26,6 +31,8 @@ def parse_bucket_uri(uri: str) -> tuple[str, str]:
 
 
 def sync_bucket_prefix(source_uri: str, dest_dir: Path) -> None:
+    from huggingface_hub import sync_bucket
+
     token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
     dest_dir.mkdir(parents=True, exist_ok=True)
     sync_bucket(source_uri, str(dest_dir), token=token)

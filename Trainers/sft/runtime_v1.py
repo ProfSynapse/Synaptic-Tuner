@@ -1363,7 +1363,7 @@ def build_trainer_invocation(
     output_root = trainer_root / "output"
     run_dir = output_root / "runtime-v1"
     final_model_dir = run_dir / "final_model"
-    trainer_path = _require_contained_regular(
+    _require_contained_regular(
         roots.engine / "Trainers" / "sft" / "train_sft.py",
         roots.engine,
         label="SFT trainer",

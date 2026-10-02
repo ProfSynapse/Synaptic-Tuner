@@ -74,7 +74,7 @@ def prepare_dataset_for_mlx_lm(source_path: str, output_dir: Path, train_split: 
     from mlx_lm import load
     _, tokenizer = load("mlx-community/Qwen3-0.6B-4bit")
 
-    print(f"Preparing dataset for mlx_lm...")
+    print("Preparing dataset for mlx_lm...")
     print(f"  Source: {source_path}")
 
     # Load data
@@ -233,13 +233,13 @@ def main():
     print("=" * 60)
     print(f"Model: {config['model']['name']}")
     print(f"Dataset: {train_count} train, {valid_count} valid examples")
-    print(f"\nBatch configuration:")
+    print("\nBatch configuration:")
     print(f"  Batch size: {batch_size}")
     print(f"  Iterations: {iters}")
-    print(f"\nHyperparameters:")
+    print("\nHyperparameters:")
     print(f"  Learning rate: {config['training']['learning_rate']}")
     print(f"  Max sequence length: {config['data']['max_seq_length']}")
-    print(f"\nLoRA configuration:")
+    print("\nLoRA configuration:")
     print(f"  Rank: {config['lora']['rank']}")
     print(f"  Alpha (scale): {config['lora']['alpha']}")
     print("=" * 60 + "\n")
@@ -325,7 +325,7 @@ def main():
     with open(lineage_path, 'w') as f:
         json.dump(lineage, f, indent=2)
 
-    print(f"\n[OK] Training complete!")
+    print("\n[OK] Training complete!")
     print(f"  Adapters saved to: {adapter_path}")
     print(f"  Lineage saved to: {lineage_path}")
     print(f"  Training time: {lineage['results']['training_time_formatted']}")

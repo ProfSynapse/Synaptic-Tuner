@@ -255,7 +255,6 @@ from src.training_callbacks import (
     MetricsTableCallback,
     CheckpointMonitorCallback,
     LiveDashboardCallback,
-    suppress_training_logs,
     DASHBOARD_AVAILABLE,
 )
 from shared.cloud_artifacts import (
@@ -267,7 +266,6 @@ from shared.cloud_artifacts import (
     sync_directory_to_hf_bucket,
     write_manifest,
 )
-from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
 from shared.training_utils import (
     setup_wandb,
     apply_wandb_destination,
@@ -1177,7 +1175,6 @@ def run(args: argparse.Namespace):
         checkpoints_dir = run_paths.checkpoints_dir
         logs_dir = run_paths.logs_dir
         final_model_path = run_paths.final_model_dir
-        lineage_path = run_paths.lineage_path
         manifest_path = run_paths.manifest_path
         for path in (run_dir, checkpoints_dir, logs_dir):
             path.mkdir(parents=True, exist_ok=True)
@@ -1200,7 +1197,6 @@ def run(args: argparse.Namespace):
         checkpoints_dir = run_dir / "checkpoints"
         logs_dir = run_dir / "logs"
         final_model_path = run_dir / "final_model"
-        lineage_path = run_dir / "training_lineage.json"
         checkpoints_dir.mkdir(parents=True, exist_ok=True)
         logs_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = None
@@ -1460,29 +1456,29 @@ def run(args: argparse.Namespace):
     print(f"Dataset: {len(train_dataset)} examples")
     if eval_dataset:
         print(f"Validation: {len(eval_dataset)} examples")
-    print(f"\nBatch configuration:")
+    print("\nBatch configuration:")
     print(f"  Batch size: {config.training.per_device_train_batch_size}")
     print(f"  Gradient accumulation: {config.training.gradient_accumulation_steps}")
     effective_batch = config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps
     print(f"  Effective batch size: {effective_batch}")
-    print(f"\nHyperparameters:")
+    print("\nHyperparameters:")
     print(f"  Learning rate: {config.training.learning_rate}")
     print(f"  Warmup ratio: {config.training.warmup_ratio}")
     print(f"  Max sequence length: {config.training.max_seq_length}")
     print(f"  Number of epochs: {config.training.num_train_epochs}")
-    print(f"\nLoRA configuration:")
+    print("\nLoRA configuration:")
     print(f"  Rank: {config.lora.r}")
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
-    print(f"\nSFT-specific:")
+    print("\nSFT-specific:")
     print("  Packing: False (explicit pre-encoded dataset path)")
     print(f"  Completion-only loss: {config.training.completion_only_loss}")
-    print(f"\nOptimizations:")
+    print("\nOptimizations:")
     print(f"  Optimizer: {config.training.optim}")
     print(f"  FP16: {training_args.fp16}")
     print(f"  BF16: {training_args.bf16}")
     print(f"  Gradient checkpointing: {config.training.gradient_checkpointing}")
-    print(f"\nCheckpointing & Logging:")
+    print("\nCheckpointing & Logging:")
     print(f"  Log metrics every: {config.training.logging_steps} steps")
     print(f"  Save checkpoint every: {config.training.save_steps} steps")
     print(f"  Keep last: {config.training.save_total_limit} checkpoints")
@@ -1612,7 +1608,7 @@ def run(args: argparse.Namespace):
                 tokenizer=tokenizer,
                 events_path=logs_dir / "evolutionary_events.jsonl",
             )
-            print(f"[OK] Evolutionary training enabled:")
+            print("[OK] Evolutionary training enabled:")
             print(f"     Strategy: {config.evolutionary.strategy.type}")
             print(f"     Candidates: {config.evolutionary.candidates}")
             print(f"     Selection: {config.evolutionary.selection.method}")
@@ -1636,7 +1632,6 @@ def run(args: argparse.Namespace):
     training_start_time = time.time()
 
     # Use evolutionary wrapper if enabled, otherwise standard training
-    training_failed = False
     failure_message = None
     try:
         if evo_wrapper:
@@ -1646,7 +1641,6 @@ def run(args: argparse.Namespace):
             _mark_packaged_runtime_phase("TRAIN_CALL")
             trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     except Exception as exc:
-        training_failed = True
         failure_message = str(exc)
         if manifest_path:
             write_manifest(
@@ -1746,7 +1740,7 @@ def run(args: argparse.Namespace):
         )
         print(f"[aux_head] saved sidecar (aux_head.safetensors + aux_head_config.json) to: {final_model_path}")
 
-    print(f"\n[OK] Training complete!")
+    print("\n[OK] Training complete!")
     print(f"  Model saved to: {final_model_path}")
     print(f"  Logs saved to: {logs_dir}/")
 
@@ -1787,7 +1781,6 @@ def run(args: argparse.Namespace):
             from shared.experiment_tracking.lineage_enrichment import build_loss_lineage, write_json as write_lineage_json
             
             # Switch to eval mode
-            import torch
             model.eval()
             
             # Unsloth for_inference to optimize inference speed
@@ -1796,7 +1789,7 @@ def run(args: argparse.Namespace):
             
             dataset_path = config.data.train_dataset
             if not Path(dataset_path).exists():
-                dataset_path = Path(_REPO_ROOT) / dataset_path
+                dataset_path = Path(__file__).parent.parent.parent / dataset_path
                 
             losses = compute_per_example_losses(
                 model=model,

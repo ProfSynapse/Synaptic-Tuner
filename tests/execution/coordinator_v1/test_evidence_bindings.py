@@ -1,6 +1,6 @@
 from dataclasses import replace
 import pytest
-from tuner.execution.coordinator_v1.model import EffectIntentV1, WorkflowPhaseV1
+from tuner.execution.coordinator_v1.model import WorkflowPhaseV1
 from tuner.execution.coordinator_v1.state_machine import WorkflowTransitionError
 from tuner.execution.foundation_v2.canonical import DiagnosticCode
 from tuner.execution.foundation_v2.repository import DispatchState, EffectState, InvalidEvidenceAdmissionV2, ReceiptAdmissionV2, ReceiptFreshnessV2
@@ -34,7 +34,7 @@ def test_terminal_and_invalid_code_histories_are_snapshot_bound():
  current,raw=stage_source(); foundation=record(raw,EffectState.FOUND,STAGE_REF)
  with pytest.raises(ValueError):replace(foundation,terminal_content_digests=())
  indeterminate=record(raw,EffectState.INDETERMINATE)
- reconciled=apply_stage_effect_record(current,indeterminate,Auth())
+ apply_stage_effect_record(current,indeterminate,Auth())
  with pytest.raises(ValueError):replace(indeterminate,invalid_codes=(DiagnosticCode.EVIDENCE_INVALID,))
 
 def test_exact_foundation_replay_after_phase_advancement_is_identity():

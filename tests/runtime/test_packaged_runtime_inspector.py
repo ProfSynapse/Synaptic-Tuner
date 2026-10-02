@@ -4,7 +4,6 @@ import hashlib
 import importlib.metadata
 import itertools
 import json
-import sysconfig
 from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZipFile

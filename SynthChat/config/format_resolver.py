@@ -6,10 +6,9 @@ Purpose: Resolve which tool-call format, workspace format, and label mappings
 Usage: Called by generator.py at generation time to resolve per-scenario configs.
 """
 
-import os
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from ..utils.yaml_loader import load_yaml
 

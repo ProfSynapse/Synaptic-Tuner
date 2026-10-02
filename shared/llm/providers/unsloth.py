@@ -20,9 +20,8 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 import json
 import re
-import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from ..base import BaseLLMClient
 from ..exceptions import LLMError, LLMConnectionError

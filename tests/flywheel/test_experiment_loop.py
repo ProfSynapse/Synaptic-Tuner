@@ -13,7 +13,6 @@ Tests for the autonomous experiment loop:
 """
 from __future__ import annotations
 
-import json
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -511,7 +510,6 @@ class TestPhaseTransition:
         assert set(config.keys()) == set(sample_config.search_space.keys())
 
     def test_phase1_uses_llm(self, sample_config, sample_results):
-        import pandas as pd
 
         sample_config.search_strategy = "llm_surrogate"
         sample_config.surrogate_phase_threshold = 10
@@ -529,7 +527,6 @@ class TestPhaseTransition:
         assert config["learning_rate"] == 2e-4
 
     def test_phase2_uses_surrogate(self, sample_config):
-        import pandas as pd
 
         # Create enough results to pass threshold
         sample_config.search_strategy = "llm_surrogate"
@@ -617,7 +614,7 @@ class TestMaxStepsEnforcement:
         with patch("shared.flywheel.experiment_loop.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stderr="")
 
-            result = loop._run_single_experiment(
+            loop._run_single_experiment(
                 "exp_test", {"learning_rate": 1e-4},
             )
 

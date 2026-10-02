@@ -23,13 +23,11 @@ Usage:
 
 import json
 import os
-import shutil
 import subprocess
-import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple
 from contextlib import contextmanager
 
 # Brand colors for spinners
@@ -282,7 +280,7 @@ print("OK")
             print(f"  ✓ {msg}")
             return True
 
-        print(f"  MLC-LLM not found. Installing...")
+        print("  MLC-LLM not found. Installing...")
 
         try:
             # Detect CUDA version and select appropriate packages
@@ -309,7 +307,7 @@ print("OK")
             # Verify installation
             available, msg = self.check_mlc_available()
             if available:
-                print(f"  ✓ MLC-LLM installed successfully")
+                print("  ✓ MLC-LLM installed successfully")
                 return True
             else:
                 print(f"  ✗ Installation verification failed: {msg}")
@@ -402,11 +400,11 @@ main(['{model_path}', '--quantization', '{quantization}', '-o', '{output_dir}'])
                 )
 
             if result.returncode != 0:
-                print(f"  ✗ Weight conversion failed:")
+                print("  ✗ Weight conversion failed:")
                 print(f"    {result.stderr[:500]}")
                 return False
 
-            print(f"  ✓ Weights converted to MLC format")
+            print("  ✓ Weights converted to MLC format")
             return True
 
         except subprocess.TimeoutExpired:
@@ -458,7 +456,7 @@ main(['{model_path}', '--quantization', '{quantization}', '--conv-template', '{c
                 )
 
             if result.returncode != 0:
-                print(f"  ✗ Config generation failed:")
+                print("  ✗ Config generation failed:")
                 print(f"    {result.stderr[:500]}")
                 return False
 
@@ -517,13 +515,13 @@ main(['{model_path}', '--quantization', '{quantization}', '--conv-template', '{c
 
         if key not in PREBUILT_WASMS:
             print(f"  ⚠ No prebuilt WASM available for {model_type} {model_size} {quantization}")
-            print(f"    Available architectures: qwen3, llama, mistral, phi")
+            print("    Available architectures: qwen3, llama, mistral, phi")
             return False
 
         wasm_file = PREBUILT_WASMS[key]
         url = f"{PREBUILT_WASM_BASE}/{wasm_file}"
 
-        print(f"  Downloading prebuilt WASM from WebLLM...")
+        print("  Downloading prebuilt WASM from WebLLM...")
         print(f"    {wasm_file}")
 
         try:
@@ -539,7 +537,7 @@ main(['{model_path}', '--quantization', '{quantization}', '--conv-template', '{c
                 return False
 
             if not output_path.exists() or output_path.stat().st_size < 1000:
-                print(f"  ✗ Download produced invalid file")
+                print("  ✗ Download produced invalid file")
                 return False
 
             size_mb = output_path.stat().st_size / (1024 * 1024)
@@ -597,7 +595,7 @@ main(['{config_path}', '--device', 'webgpu', '--system-lib-prefix', '{safe_prefi
                 )
 
             if result.returncode != 0:
-                print(f"  ✗ WebGPU compilation failed (TVM error)")
+                print("  ✗ WebGPU compilation failed (TVM error)")
 
                 # Attempt prebuilt fallback if model_path provided
                 if model_path:
@@ -747,7 +745,7 @@ model.save_pretrained_merged(output_path, tokenizer, save_method="merged_16bit")
 print("Done!")
 '''
 
-                print(f"  Merging via Unsloth (subprocess)...")
+                print("  Merging via Unsloth (subprocess)...")
                 try:
                     with branded_spinner("Merging LoRA adapters"):
                         result = subprocess.run(
@@ -764,7 +762,7 @@ print("Done!")
 
                     # Verify merge succeeded
                     if not any(merged_path.glob("*.safetensors")):
-                        print(f"  ✗ Merge produced no output files")
+                        print("  ✗ Merge produced no output files")
                         return []
 
                     print("  ✓ LoRA merged via Unsloth")
@@ -820,7 +818,7 @@ print("Done!")
                 print("\n  Step 3/3: Skipping WASM compilation")
 
         # Summary
-        print(f"\n" + "=" * 60)
+        print("\n" + "=" * 60)
         print("CONVERSION COMPLETE")
         print("=" * 60)
         print(f"✓ Created {len(created_paths)} outputs:")

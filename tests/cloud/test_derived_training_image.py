@@ -222,8 +222,11 @@ def test_windows_build_environment_rejects_path_separator_in_docker_directory(
 
 
 def test_build_and_capture_bind_buildkit_digest_and_runtime_provenance(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Exercise the Docker Desktop (Windows) layout, where Buildx is bound
+    # through a private config directory, on every host platform.
+    monkeypatch.setattr(derived_image, "_WINDOWS", True)
     profile_path = _profile(tmp_path / "profile.yaml")
     profile = load_profile(profile_path)
     resources = tmp_path / "docker-install" / "resources"
@@ -341,8 +344,9 @@ def test_build_and_capture_bind_buildkit_digest_and_runtime_provenance(
 
 
 def test_windows_build_rejects_buildx_replacement_during_command(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(derived_image, "_WINDOWS", True)
     profile_path = _profile(tmp_path / "profile.yaml")
     resources = tmp_path / "docker-install" / "resources"
     docker = resources / "bin" / "docker.exe"

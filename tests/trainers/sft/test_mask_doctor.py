@@ -21,16 +21,17 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "Trainers" / "sft" / "src"))
 
 pytest.importorskip("datasets")
 
-import mask_doctor  # noqa: E402
-import preprocessing  # noqa: E402
 from shared.sft_preprocessing import (  # noqa: E402
     derive_end_of_turn_tokens,
     materialize_sft_example,
 )
+from tests.trainers._trainer_import import load_trainer_module  # noqa: E402
+
+mask_doctor = load_trainer_module("sft", "mask_doctor")
+preprocessing = load_trainer_module("sft", "preprocessing")
 
 
 class _AddedToken:
@@ -370,7 +371,7 @@ def _write_jsonl(path: Path, rows) -> Path:
 
 
 def test_data_loader_refuses_prefix_mismatch_rows(scratch_dir, capsys):
-    import data_loader
+    data_loader = load_trainer_module("sft", "data_loader")
 
     dataset_path = _write_jsonl(scratch_dir / "rows.jsonl", [_row("hi", "hello"), _row("q", "a")])
     with pytest.raises(preprocessing.DroppedRowsError, match="mask_prefix_mismatch=2"):

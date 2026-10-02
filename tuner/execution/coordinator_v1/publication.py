@@ -2556,7 +2556,7 @@ class PublicationOperationsV1:
                 current = self._get(command.publication_id)
             return self._project(current)
         try:
-            committed = self._store.complete_transfer(
+            self._store.complete_transfer(
                 ownership, receipt, False, self._now())
         except Exception:
             try:

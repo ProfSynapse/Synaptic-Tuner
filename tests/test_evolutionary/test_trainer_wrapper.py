@@ -1,9 +1,8 @@
 """Tests for EvolutionaryTrainerWrapper — init, train flow, evaluation, and state tracking."""
 
 import json
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
-from typing import Dict, Any, List, Optional
 
 import pytest
 import torch

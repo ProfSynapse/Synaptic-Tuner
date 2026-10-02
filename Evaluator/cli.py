@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,7 +18,6 @@ import yaml
 # Rich console for colored output (optional)
 try:
     from rich.console import Console
-    from rich.text import Text
     _console = Console()
     _RICH_AVAILABLE = True
 except ImportError:
@@ -29,7 +27,7 @@ except ImportError:
 # Import live dashboard and UI components
 try:
     from shared.ui import LiveEvaluationDashboard, RICH_AVAILABLE as _SHARED_RICH
-    from .ui import rich_summary, rich_failure_details, print_evaluation_header
+    from .ui import rich_summary, rich_failure_details
     _DASHBOARD_AVAILABLE = True
 except ImportError:
     _DASHBOARD_AVAILABLE = False
@@ -692,7 +690,6 @@ def main(
     # Load display configuration
     display_config = load_display_config(config_dir)
     labels = display_config.get("labels", {})
-    colors = display_config.get("colors", {})
 
     # Get settings kwargs for host/port overrides
     settings_kwargs = build_settings_kwargs(args)
@@ -1134,7 +1131,7 @@ def main(
                 repo_id=repo_id,
                 token=hf_token,
             )
-            print(f"  ✓ evaluation_lineage.json uploaded")
+            print("  ✓ evaluation_lineage.json uploaded")
 
             # Update model card if requested
             if args.update_model_card:
@@ -1161,7 +1158,7 @@ def main(
                         repo_id=repo_id,
                         token=hf_token,
                     )
-                    print(f"  ✓ README.md updated with evaluation results")
+                    print("  ✓ README.md updated with evaluation results")
 
                 except Exception as e:
                     print(f"  ⚠️  Could not update README: {e}")

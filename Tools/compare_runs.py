@@ -9,7 +9,6 @@ into a stable feature matrix (features.csv).
 import argparse
 import sys
 from pathlib import Path
-import json
 import logging
 
 import pandas as pd

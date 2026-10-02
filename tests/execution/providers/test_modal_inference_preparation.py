@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 from dataclasses import replace
-import hashlib
 import pytest
 from tuner.execution.foundation_v2.canonical import (
     canonical_bytes,

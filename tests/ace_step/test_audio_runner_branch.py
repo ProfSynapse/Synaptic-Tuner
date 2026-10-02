@@ -16,7 +16,7 @@ from Evaluator.runner import (
     _evaluate_audio_case,
     _evaluate_single_case,
 )
-from shared.verifiers.builtins.audio_verifier import AudioConfig, AudioThresholds
+from shared.verifiers.builtins.audio_verifier import AudioConfig
 
 
 def _case(audio_config: dict) -> PromptCase:

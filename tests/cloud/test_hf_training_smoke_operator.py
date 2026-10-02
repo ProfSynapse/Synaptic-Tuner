@@ -3,7 +3,6 @@ from __future__ import annotations
 import builtins
 from datetime import datetime, timezone
 import io
-import json
 import sys
 import traceback
 from pathlib import Path

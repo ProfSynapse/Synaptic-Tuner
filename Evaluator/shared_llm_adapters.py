@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from shared.llm import create_client, LLMError
 from shared.llm.base import BaseLLMClient
@@ -19,7 +19,6 @@ from shared.cloud_stage_logging import stage_logger_from_env
 
 from .config import LMStudioSettings, OllamaSettings, OpenRouterSettings, OpenAIResponsesSettings, UnslothSettings
 from .protocols import BackendError, BackendResponse
-from .base_client import extract_message_content
 
 
 class SharedLLMAdapter:

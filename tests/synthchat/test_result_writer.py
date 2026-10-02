@@ -5,7 +5,6 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
 from SynthChat.result_writer import (
     StreamingResultWriter,
     generate_output_path,

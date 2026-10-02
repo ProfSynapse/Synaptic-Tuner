@@ -19,7 +19,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 # GRPO is not supported on native Windows (use WSL2 or Linux)
 if sys.platform == "win32":
@@ -47,7 +47,7 @@ init_trainer_env(apply_windows_patches=False)
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-import torch  # noqa: E402
+import torch  # noqa: E402, F401  torch must initialize before unsloth
 
 from unsloth import is_bfloat16_supported  # noqa: E402
 from unsloth.chat_templates import get_chat_template  # noqa: E402

@@ -44,7 +44,7 @@ def test_copied_root_and_replaced_marker_fail_closed(tmp_path: Path):
 
 def test_root_identity_rejects_wrong_expected_id_without_mutation(tmp_path: Path):
     root = tmp_path / "tracking"
-    identity = ensure_tracking_root_identity(root)
+    ensure_tracking_root_identity(root)
     before = (root / MARKER_NAME).read_bytes()
     with pytest.raises(TrackingRootIdentityError, match="does not match"):
         require_tracking_root_identity(root, "f" * 64)

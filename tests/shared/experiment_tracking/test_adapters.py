@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
 from shared.experiment_tracking.adapters import (
     eval_to_run_record,

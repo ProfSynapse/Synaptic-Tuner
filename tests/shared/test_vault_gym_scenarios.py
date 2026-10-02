@@ -7,6 +7,7 @@ import yaml
 
 from Evaluator.config_loader import ConfigLoader
 from shared.environments import EnvironmentValidator
+from SynthChat.config.format_resolver import load_tool_call_formats
 
 
 VAULT_GYM_PATH = (
@@ -28,14 +29,31 @@ def _load_vault_case(case_id: str):
     raise AssertionError(f"Missing vault gym case: {case_id}")
 
 
-def _use_tools_response(calls: list[dict]) -> dict:
+def _configured_tool_response(prompt_case, *commands: str) -> dict:
+    """Build one wrapper call in the configured default tool-call format.
+
+    The wrapper name and required argument fields come from
+    SynthChat/config/tool_call_formats.yaml; the session and workspace IDs come
+    from the case's expected context.
+    """
+    tool_call_format = load_tool_call_formats()["default"]
+    expected_context = prompt_case.metadata["expected_context"]
+    arguments = {
+        "sessionId": expected_context["session_id"],
+        "workspaceId": expected_context["workspace_id"],
+        "memory": "Vault gym regression check.",
+        "goal": prompt_case.question,
+        "tool": ", ".join(commands),
+    }
+    missing = set(tool_call_format["argument_required"]) - set(arguments)
+    assert not missing, f"configured tool-call format requires {sorted(missing)}"
     return {
         "tool_calls": [
             {
                 "type": "function",
                 "function": {
-                    "name": "useTools",
-                    "arguments": json.dumps({"calls": calls}),
+                    "name": tool_call_format["wrapper_name"],
+                    "arguments": json.dumps(arguments),
                 },
             }
         ]
@@ -57,26 +75,16 @@ def test_vault_gym_archive_empty_folder_case_passes_with_verified_delete():
     _, prompt_case = _load_vault_case("vault_archive_empty_test_folder")
     validator = EnvironmentValidator(backend="local")
 
-    response = _use_tools_response(
-        [
-            {
-                "agent": "storageManager",
-                "tool": "list",
-                "params": {"path": "Projects/test/"},
-            },
-            {
-                "agent": "storageManager",
-                "tool": "archive",
-                "params": {"path": "Projects/test/", "recursive": True},
-            },
-        ]
+    response = _configured_tool_response(
+        prompt_case,
+        'storage list "Projects/test/"',
+        'storage archive "Projects/test/"',
     )
 
     result = validator.validate_response(
         system_prompt=prompt_case.metadata["system"],
         response=response,
         environment_config=prompt_case.metadata["environment"],
-        expected_tools=prompt_case.expected_tools,
     )
 
     assert result.passed is True
@@ -90,53 +98,29 @@ def test_vault_gym_update_production_endpoint_case_passes_with_search_read_updat
     _, prompt_case = _load_vault_case("vault_update_production_endpoint_note")
     validator = EnvironmentValidator(backend="local")
 
-    updated_note = """---
-title: Production Config
-type: config
-environment: production
----
-api_base_url: https://api.prod.example.com
-retry_policy: exponential
-owner: platform
-"""
-
-    response = _use_tools_response(
-        [
-            {
-                "agent": "searchManager",
-                "tool": "searchContent",
-                "params": {"query": "api.old.example.com", "path": "Operations/"},
-            },
-            {
-                "agent": "contentManager",
-                "tool": "read",
-                "params": {"path": "Operations/production-config.md", "startLine": 1},
-            },
-            {
-                "agent": "contentManager",
-                "tool": "update",
-                "params": {
-                    "path": "Operations/production-config.md",
-                    "content": updated_note,
-                    "startLine": 1,
-                    "overwrite": True,
-                },
-            },
-        ]
+    # The scenario's preferred scoring path: search content -> content read -> content replace.
+    response = _configured_tool_response(
+        prompt_case,
+        'search content "api.old.example.com" --paths \'["Operations/"]\'',
+        'content read "Operations/production-config.md" 1',
+        (
+            'content replace "Operations/production-config.md" '
+            '"api_base_url: https://api.old.example.com" '
+            '"api_base_url: https://api.prod.example.com" 6 6'
+        ),
     )
 
     result = validator.validate_response(
         system_prompt=prompt_case.metadata["system"],
         response=response,
         environment_config=prompt_case.metadata["environment"],
-        expected_tools=prompt_case.expected_tools,
     )
 
     assert result.passed is True
     assert [tool.name for tool in result.executed_tools] == [
-        "searchManager_searchContent",
+        "searchManager_content",
         "contentManager_read",
-        "contentManager_update",
+        "contentManager_replace",
     ]
 
 

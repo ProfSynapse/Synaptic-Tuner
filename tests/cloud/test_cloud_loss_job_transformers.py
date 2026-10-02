@@ -1,7 +1,7 @@
 import json
 from argparse import Namespace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from shared.experiment_tracking.schema import LossResult
 

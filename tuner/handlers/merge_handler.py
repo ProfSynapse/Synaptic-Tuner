@@ -36,10 +36,9 @@ from tuner.ui import (
     print_config,
     print_menu,
     confirm,
-    COLORS,
     BOX,
 )
-from shared.ui import spinner, info_panel
+from shared.ui import spinner
 
 
 class MergeHandler(BaseHandler):

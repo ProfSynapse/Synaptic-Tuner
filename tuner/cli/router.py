@@ -361,7 +361,6 @@ def _handle_experiment_loop(args: Namespace, json_mode: bool) -> int:
 
     completed = [r for r in results if r.status == "completed"]
     if json_mode:
-        from dataclasses import asdict
         output = {
             "success": True,
             "total_experiments": len(results),
@@ -372,7 +371,7 @@ def _handle_experiment_loop(args: Namespace, json_mode: bool) -> int:
         }
         print(json.dumps(output, indent=2))
     else:
-        print(f"\nExperiment loop complete.")
+        print("\nExperiment loop complete.")
         print(f"  Total: {len(results)}, Completed: {len(completed)}")
         print(f"  Best score: {loop.best_score:.4f}")
         if loop.best_config:

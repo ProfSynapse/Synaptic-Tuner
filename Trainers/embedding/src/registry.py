@@ -26,7 +26,7 @@ rather than silently mis-loading a model downstream.
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, Mapping
 

@@ -306,7 +306,7 @@ def test_concrete_assessment_is_consumed_by_stage_reducer_without_translation():
 
 def test_execute_rejects_return_reload_mismatch_and_raw_errors_are_closed():
     facade, command, repository, grants, receipts, invalid, _, assessments, evidence = composed()
-    durable = facade.execute(command.canonical_bytes, execution_grant(grants, command), now_epoch=150)
+    facade.execute(command.canonical_bytes, execution_grant(grants, command), now_epoch=150)
     other, other_command, _, other_grants, _, _, _, _, _ = composed(
         disposition=ObservationDisposition.INDETERMINATE
     )

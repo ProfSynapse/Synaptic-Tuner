@@ -38,7 +38,6 @@ from trl import KTOConfig, KTOTrainer
 from src.kto_s_trainer import KTOSTrainer
 
 from configs.config_loader import (
-    Config,
     load_config
 )
 from src.data_loader import load_and_prepare_dataset, validate_kto_dataset, print_dataset_samples
@@ -49,7 +48,7 @@ from src.model_loader import (
     check_gpu_memory
 )
 from src.training_callbacks import LiveDashboardCallback, MetricsTableCallback, CheckpointMonitorCallback, TwoStageLRCallback, DASHBOARD_AVAILABLE, RICH_AVAILABLE
-from src.adaptive_memory import AdaptiveMemoryManager, get_adaptive_settings
+from src.adaptive_memory import get_adaptive_settings
 from src.debug_logger import TrainingDebugger
 from shared.cloud_artifacts import (
     HFBucketSyncCallback,
@@ -60,7 +59,6 @@ from shared.cloud_artifacts import (
     sync_directory_to_hf_bucket,
     write_manifest,
 )
-from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
 from shared.training_utils import (
     setup_wandb,
     apply_wandb_destination,
@@ -626,7 +624,7 @@ def main():
         config.training.gradient_accumulation_steps = adaptive_settings["gradient_accumulation"]
         if adaptive_settings.get("gradient_checkpointing"):
             config.training.gradient_checkpointing = True
-        print(f"✓ Automatically adjusted settings:")
+        print("✓ Automatically adjusted settings:")
         print(f"  Batch size: {adaptive_settings['batch_size']}")
         print(f"  Gradient accumulation: {adaptive_settings['gradient_accumulation']}")
         print(f"  Effective batch size: {adaptive_settings['batch_size'] * adaptive_settings['gradient_accumulation']}")
@@ -800,31 +798,31 @@ def main():
     print(f"Dataset: {len(train_dataset)} examples")
     if eval_dataset:
         print(f"Validation: {len(eval_dataset)} examples")
-    print(f"\nBatch configuration:")
+    print("\nBatch configuration:")
     print(f"  Batch size: {config.training.per_device_train_batch_size}")
     print(f"  Gradient accumulation: {config.training.gradient_accumulation_steps}")
     effective_batch = config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps
     print(f"  Effective batch size: {effective_batch}")
-    print(f"\nHyperparameters:")
+    print("\nHyperparameters:")
     print(f"  Learning rate: {config.training.learning_rate}")
     if config.training.use_two_stage_lr:
         reduced_lr = config.training.learning_rate * config.training.lr_reduction_factor
-        print(f"  Two-stage LR: ENABLED")
+        print("  Two-stage LR: ENABLED")
         print(f"    - Steps 1-{config.training.lr_reduction_step}: {config.training.learning_rate:.2e}")
         print(f"    - Steps {config.training.lr_reduction_step+1}+: {reduced_lr:.2e} ({config.training.lr_reduction_factor:.1%} reduction)")
     print(f"  Beta: {config.training.beta}")
     print(f"  Warmup ratio: {config.training.warmup_ratio}")
     print(f"  Max length: {config.training.max_length}")
-    print(f"\nLoRA configuration:")
+    print("\nLoRA configuration:")
     print(f"  Rank: {config.lora.r}")
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
-    print(f"\nOptimizations:")
+    print("\nOptimizations:")
     print(f"  Optimizer: {config.training.optim}")
     print(f"  FP16: {training_args.fp16}")
     print(f"  BF16: {training_args.bf16}")
     print(f"  Gradient checkpointing: {config.training.gradient_checkpointing}")
-    print(f"\nCheckpointing & Logging:")
+    print("\nCheckpointing & Logging:")
     print(f"  Log metrics every: {config.training.logging_steps} steps")
     print(f"  Save checkpoint every: {config.training.save_steps} steps")
     print(f"  Keep last: {config.training.save_total_limit} checkpoints")
@@ -934,8 +932,6 @@ def main():
 
     # Monkey-patch the forward method to use index_select instead of list indexing
     # This fixes CUDA errors with large vocab models like Qwen3-VL (151K vocab)
-    original_forward = trainer.forward
-
     def patched_forward(model, batch):
         """Patched forward that uses index_select for large vocab compatibility."""
         # Run the KL computation first

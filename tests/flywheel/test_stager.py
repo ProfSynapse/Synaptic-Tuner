@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from shared.flywheel.catalog import DatasetVersion, InferenceLogRecord, LogFilter
+from shared.flywheel.catalog import DatasetVersion, InferenceLogRecord
 from shared.flywheel.config import FlywheelConfig
 from shared.flywheel.stager import DatasetStager, StagingResult
 
@@ -425,7 +425,7 @@ class TestDatasetStagerVersioning:
         stager = DatasetStager(catalog, FlywheelConfig(), datasets_dir=tmp_path / "ds")
 
         with patch.object(stager, "_register_flywheel_cycle", return_value="run-1"):
-            result = await stager.stage_dataset()
+            await stager.stage_dataset()
 
         catalog.create_dataset_version.assert_called_once()
         version_arg = catalog.create_dataset_version.call_args[0][0]

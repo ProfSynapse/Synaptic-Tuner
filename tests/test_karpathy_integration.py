@@ -12,16 +12,14 @@ Tests cross-implementation interactions between:
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 import yaml
 
 from shared.evolutionary.config import EvolutionaryConfig
 from shared.flywheel.experiment_config import ExperimentConfig
 from shared.flywheel.experiment_loop import ExperimentLoop, ExperimentResult
-from shared.evolutionary.lora_surgery import LoRASurgeon, SurgeryConfig, SurgeryResult
+from shared.evolutionary.lora_surgery import LoRASurgeon, SurgeryConfig
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +155,6 @@ class TestSurgeryEvalBackend:
         )
 
         # alpha_sweep is async, test the signature
-        import asyncio
         import inspect
         assert inspect.iscoroutinefunction(surgeon.alpha_sweep)
 

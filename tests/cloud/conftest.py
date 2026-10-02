@@ -9,10 +9,7 @@ Provides:
 - GPU pricing cache reset between tests
 """
 
-import os
 import subprocess
-import textwrap
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest

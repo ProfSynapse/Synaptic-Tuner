@@ -16,7 +16,6 @@ from tuner.execution.foundation_v2.commands import parse_exact_command
 from tuner.execution.providers.modal.coordinator_binding import ModalCommandBinding
 from tuner.execution.providers.modal.coordinator_staging import (
     ModalFoundationVolumeWriter,
-    ModalStageMaterial,
     prepare_modal_foundation_stage,
 )
 from tuner.execution.providers.modal.prepared_input import MountedPreparedInputDescriptor

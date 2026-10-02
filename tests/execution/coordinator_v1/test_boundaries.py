@@ -1,11 +1,12 @@
 import inspect
+import json
+import subprocess
 import sys
 from dataclasses import replace
+from pathlib import Path
 import pytest
 from tuner.execution.coordinator_v1 import model, ports, state_machine
-from tuner.execution.coordinator_v1.model import (AuthenticatedArtifactVerificationReceiptV1,
- BoundCancellationRefV1, FoundationEffectBindingV1, FoundationEffectOutcomeV1,
- WorkflowRecordV1)
+from tuner.execution.coordinator_v1.model import (WorkflowRecordV1)
 
 def test_evidence_records_are_ordinary_exact_frozen_dataclasses():
  from .test_state_machine import planned
@@ -35,7 +36,19 @@ def test_coordinator_import_is_provider_sdk_and_storage_neutral():
  sources="\n".join(inspect.getsource(x) for x in (model,ports,state_machine)).lower()
  assert "sqlite" not in sources
  assert "huggingface_hub" not in sources and "modal" not in sources and "runpod" not in sources
- assert not any(name.startswith(("huggingface_hub","modal","runpod")) for name in sys.modules)
+ # Import in a fresh interpreter: this pytest process has already loaded the
+ # provider SDKs for other tests, which says nothing about the coordinator.
+ program=(
+  "import json,sys\n"
+  "import tuner.execution.coordinator_v1.model\n"
+  "import tuner.execution.coordinator_v1.ports\n"
+  "import tuner.execution.coordinator_v1.state_machine\n"
+  "print(json.dumps(sorted(n for n in sys.modules if n.startswith(('huggingface_hub','modal','runpod')))))\n"
+ )
+ result=subprocess.run([sys.executable,"-B","-c",program],cwd=Path(__file__).resolve().parents[3],
+                       capture_output=True,text=True,timeout=120)
+ assert result.returncode==0,result.stderr
+ assert json.loads(result.stdout)==[]
 
 def test_package_root_remains_unexported():
  import tuner.execution.coordinator_v1 as package

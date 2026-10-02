@@ -1,0 +1,40 @@
+# CPU-only environment for running the full pytest suite in CI
+# (.github/workflows/ci.yml). Install torch first from the CPU wheel index:
+#   pip install 'torch>=2,<3' --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements-ci-tests.txt -e .
+# GPU-only stacks (unsloth, vllm, bitsandbytes, xformers, mlx) and provider
+# SDKs (modal) are deliberately absent; tests that need them skip themselves.
+
+pytest>=8,<9
+pytest-asyncio>=0.23,<1
+
+PyYAML>=6,<7
+jsonschema>=4.18,<5
+referencing
+numpy>=1.24,<3
+pandas>=2,<3
+requests>=2.32,<3
+python-dotenv>=1,<2
+packaging>=23,<27
+tqdm
+rich
+psutil
+
+# ML / data
+scikit-learn
+lightgbm
+joblib
+safetensors
+tokenizers
+# transformers 4.x keeps huggingface-hub<1.0, matching the training stack.
+transformers>=4.45,<5
+# transformers.Trainer needs accelerate on PyTorch (aux-head trainer tests).
+accelerate>=0.26
+huggingface-hub<1.0
+datasets
+
+# Flywheel / proxy (requirements-flywheel.txt)
+aiosqlite>=0.20,<1
+fastapi>=0.115,<1
+httpx>=0.27,<1
+pydantic>=2,<3

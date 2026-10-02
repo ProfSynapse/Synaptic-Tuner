@@ -25,7 +25,6 @@ from tuner.discovery import (
     DatasetDiscovery,
     DatasetInfo,
     TrainingRunDiscovery,
-    CheckpointDiscovery,
     RubricDiscovery,
     RubricInfo,
     PromptSetDiscovery,
@@ -241,8 +240,6 @@ class ListHandler(BaseHandler):
 
     def _display_models_rich(self, base_models, finetuned_models):
         """Display models using rich formatting."""
-        from rich.panel import Panel
-        from rich.text import Text
 
         print_header("AVAILABLE MODELS", "Base models and fine-tuned adapters")
 

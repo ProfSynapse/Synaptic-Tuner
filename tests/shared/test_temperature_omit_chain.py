@@ -25,7 +25,6 @@ guard:
 
 from __future__ import annotations
 
-import pytest
 
 from Evaluator.client_factory import create_settings
 from Evaluator.config import OpenAIResponsesSettings

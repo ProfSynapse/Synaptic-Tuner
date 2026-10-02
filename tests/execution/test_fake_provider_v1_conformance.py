@@ -586,7 +586,7 @@ def test_each_profile_runs_real_cancel_found_and_is_idempotent(provider_id) -> N
 @pytest.mark.parametrize("provider_id", PROFILES)
 def test_each_profile_restores_exact_phase_after_cancel_final_absence(provider_id) -> None:
     stack = ProfileStack(provider_id, policies={"cancel": "absent"})
-    queued = stack.coordinator.start(stack.plan, stack.preflight())
+    stack.coordinator.start(stack.plan, stack.preflight())
     restored = stack.operations.cancel(stack.run, "requested")
     assert restored.state.value == "queued"
     retained = stack.workflows.get(stack.run)

@@ -11,22 +11,17 @@ implications. Tests focus on:
 - _build_startup_command does not leak tokens
 """
 
-import os
 import subprocess
-import time
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tuner.backends.training.cloud.runpod_backend import (
     RunPodBackend,
-    _DEFAULT_TRAINING_TIMEOUT,
-    _POLL_INTERVAL,
-    _POD_STARTUP_TIMEOUT,
 )
 from tuner.backends.training.cloud.base_cloud import RepoSource
-from tuner.core.config import CloudTrainingConfig, TrainingConfig
+from tuner.core.config import CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 from tuner.project.source_bundle import GitSource, RepositoryLocation
 

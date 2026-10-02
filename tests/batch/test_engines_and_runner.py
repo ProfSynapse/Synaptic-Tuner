@@ -30,7 +30,7 @@ pytest.importorskip("safetensors.torch")
 from transformers import LlamaConfig, LlamaForCausalLM, PreTrainedTokenizerFast  # noqa: E402
 from tokenizers import Tokenizer, models, pre_tokenizers  # noqa: E402
 
-from tuner.batch.engines.base import GenerateItem, CaptureItem, GenerateResult, OutOfMemoryError  # noqa: E402
+from tuner.batch.engines.base import GenerateItem, CaptureItem, OutOfMemoryError  # noqa: E402
 from tuner.batch.engines.hf_batched import (  # noqa: E402
     HFBatchedCaptureEngine,
     HFBatchedGenerateEngine,

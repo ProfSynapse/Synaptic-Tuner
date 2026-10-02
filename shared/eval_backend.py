@@ -9,7 +9,6 @@ import json
 import logging
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)

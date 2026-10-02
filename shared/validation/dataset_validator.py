@@ -554,9 +554,9 @@ def validate_context(args: dict, report: ExampleReport) -> None:
         return
 
     required_fields = ["sessionId", "workspaceId", "memory", "goal", "tool"]
-    for field in required_fields:
-        if field not in args:
-            report.add("ERROR", f"Missing required '{field}' field in arguments")
+    for field_name in required_fields:
+        if field_name not in args:
+            report.add("ERROR", f"Missing required '{field_name}' field in arguments")
 
     if "sessionId" not in args:
         report.add("ERROR", "Missing required 'sessionId' field in arguments")
@@ -725,7 +725,7 @@ def main() -> None:
     if TOOL_SCHEMAS:
         print(f"✓ Schema validation enabled ({len(TOOL_SCHEMAS)} tool schemas loaded)\n", file=sys.stderr)
     else:
-        print(f"⚠ Schema validation disabled (tool_schemas.json not found)\n", file=sys.stderr)
+        print("⚠ Schema validation disabled (tool_schemas.json not found)\n", file=sys.stderr)
 
     # Count label=false examples separately for informational purposes
     label_false_count = len([r for r in reports if r.label is False])

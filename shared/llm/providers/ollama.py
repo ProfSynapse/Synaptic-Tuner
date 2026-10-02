@@ -170,7 +170,7 @@ class OllamaClient(BaseLLMClient):
             response.raise_for_status()
             return response.json()
 
-        except requests.exceptions.ConnectionError as e:
+        except requests.exceptions.ConnectionError:
             raise LLMConnectionError(
                 f"Cannot connect to Ollama at {self.base_url}\n"
                 f"Make sure Ollama is running: ollama serve"

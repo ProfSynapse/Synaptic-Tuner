@@ -11,7 +11,7 @@ Usage: Called by SynthChat.modes.generate when --workers > 1.
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from shared.environments import EnvironmentValidator
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import multiprocessing
-import os
+import queue
 import subprocess
 import time
 from pathlib import Path
@@ -11,18 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
-def _emit_stage_event_process(log_dir: str, index: int, start, results) -> None:
-    try:
-        from shared.cloud_stage_logging import CloudStageLogger
-
-        start.wait(timeout=20)
-        CloudStageLogger(Path(log_dir), stage="evaluation").emit(
-            f"process-{index}"
-        )
-        results.put((0, index, ""))
-    except BaseException as exc:
-        results.put((1, index, repr(exc)))
 
 from shared.experiment_tracking import Experiment, ExperimentSpec, TrackingService
 from shared.experiment_tracking.experiment_spec import DatasetSpec, EvaluationStageSpec, FeaturesStageSpec, LossStageSpec, TrainingStageSpec
@@ -39,6 +27,10 @@ from tuner.cloud.hf_provisioning import (
     canonical_json_bytes,
     consume_hf_source_transport,
     prepare_hf_source_transport,
+)
+from tuner.cloud.hf_provisioning_claim import (
+    build_hf_provisioning_claim,
+    build_hf_provisioning_succeeded_event,
 )
 from tuner.cloud.runtime_layout import build_runtime_layout
 from shared.experiment_tracking import StageResult
@@ -157,11 +149,32 @@ def _install_hf_source_transport(
     evidence_path.write_bytes(canonical_json_bytes(evidence))
     evidence_uri = service.tracking_uri(evidence_path)
     evidence_sha256 = hashlib.sha256(canonical_json_bytes(evidence)).hexdigest()
-    service.record_provisioning_acknowledged(
-        experiment,
-        uri=evidence_uri,
-        sha256=evidence_sha256,
+    # Protected HF stages require durable SUCCEEDED provisioning, which is only
+    # reachable through the claim -> terminal event chain (no provider call here).
+    claim = build_hf_provisioning_claim(
+        experiment_id=experiment.experiment_id,
+        descriptor_uri=prepared.descriptor_uri,
+        descriptor_sha256=prepared.descriptor_sha256,
+        descriptor=descriptor,
+        actor="fixture-workflow",
+        authority="protected_workflow",
+        occurred_at="2026-08-19T12:00:00Z",
     )
+    with service.hf_provisioning_execution_lock(experiment.experiment_id):
+        claimed = service.claim_hf_provisioning(experiment, claim)
+        service.record_hf_provisioning_succeeded(
+            experiment,
+            build_hf_provisioning_succeeded_event(
+                claimed.document,
+                claim_uri=claimed.event_uri,
+                claim_sha256=claimed.event_sha256,
+                evidence_uri=evidence_uri,
+                evidence_sha256=evidence_sha256,
+                occurred_at="2026-08-19T12:01:00Z",
+            ),
+            evidence_uri=evidence_uri,
+            evidence_sha256=evidence_sha256,
+        )
     consumed = consume_hf_source_transport(
         context,
         transport_root=prepared.root,
@@ -1072,7 +1085,7 @@ def test_loss_stage_runner_recovers_embedded_eval_losses_without_resubmitting(tm
     )
 
     with patch.object(runner, "_download_results", return_value=losses_dir):
-        with patch("tuner.handlers.stages.hf_loss_stage.HFJobExecutor.submit") as mock_submit:
+        with patch("tuner.handlers.stages.hf_loss_stage.HFJobExecutor.submit"):
             result = runner.run(spec=None, experiment=experiment, previous=previous)
 
     assert result.status == "completed"
@@ -1262,6 +1275,8 @@ def test_cloud_stage_event_appends_remain_parseable_under_threads(tmp_path: Path
 def test_cloud_stage_event_appends_are_serialized_across_processes(tmp_path: Path):
     from shared.cloud_stage_logging import STAGE_EVENTS_FILENAME, STAGE_SUMMARY_FILENAME
 
+    from tests.cloud._stage_event_worker import emit_stage_event_process
+
     log_dir = tmp_path / "logs"
     context = multiprocessing.get_context("spawn")
     start = context.Event()
@@ -1269,7 +1284,7 @@ def test_cloud_stage_event_appends_are_serialized_across_processes(tmp_path: Pat
     process_count = 16
     processes = [
         context.Process(
-            target=_emit_stage_event_process,
+            target=emit_stage_event_process,
             args=(str(log_dir), index, start, results),
         )
         for index in range(process_count)
@@ -1277,11 +1292,21 @@ def test_cloud_stage_event_appends_are_serialized_across_processes(tmp_path: Pat
     for process in processes:
         process.start()
     start.set()
-    received = []
+    # Wait for the condition itself (every child reported, or every child has
+    # exited and nothing is left to read), bounded by a generous deadline:
+    # spawned interpreters can start slowly when the machine is busy.
+    received = {}
+    deadline = time.monotonic() + 300
     try:
-        received = [results.get(timeout=40) for _ in range(process_count)]
+        while len(received) < process_count and time.monotonic() < deadline:
+            try:
+                code, index, error = results.get(timeout=1)
+            except queue.Empty:
+                if not any(process.is_alive() for process in processes) and results.empty():
+                    break
+                continue
+            received[index] = (code, error)
     finally:
-        deadline = time.monotonic() + 40
         for process in processes:
             process.join(timeout=max(0.0, deadline - time.monotonic()))
         for process in processes:
@@ -1289,8 +1314,12 @@ def test_cloud_stage_event_appends_are_serialized_across_processes(tmp_path: Pat
                 process.terminate()
                 process.join(timeout=5)
 
+    assert sorted(received) == list(range(process_count)), (
+        received,
+        [process.exitcode for process in processes],
+    )
     assert all(process.exitcode == 0 for process in processes)
-    assert all(code == 0 for code, _index, _error in received), received
+    assert all(code == 0 for code, _error in received.values()), received
     rows = [
         json.loads(line)
         for line in (log_dir / STAGE_EVENTS_FILENAME).read_text(encoding="utf-8").splitlines()

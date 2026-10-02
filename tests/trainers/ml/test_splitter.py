@@ -4,7 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from Trainers.ml.config import TrainingConfig
 from Trainers.ml.data.splitter import load_and_split

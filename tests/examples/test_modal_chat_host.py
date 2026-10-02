@@ -13,7 +13,6 @@ from synaptic_tuner.api.v1.training_facade import (
 from tuner.execution.foundation_v2.authority import GrantAuthorityV2
 
 from examples.modal_chat.authority import ModalChatAuthorityError
-from examples.modal_chat.artifacts import ModalChatArtifactVerifier
 from examples.modal_chat.host import (
     ModalChatHostError,
     _AuthorizationSlot,

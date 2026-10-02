@@ -272,7 +272,8 @@ def prove_read_only_volume(huggingface_hub: Any, spec: HFVerifiedVolumeSpec) -> 
     try:
         volume = volume_type(**kwargs)
         to_dict = getattr(volume, "to_dict", None)
-        wire = to_dict() if callable(to_dict) else None
+        if callable(to_dict):
+            to_dict()
     except Exception as exc:
         raise CloudProviderError("Installed huggingface_hub Volume contract could not be constructed.") from exc
     validate_read_only_volume_object(volume, spec)

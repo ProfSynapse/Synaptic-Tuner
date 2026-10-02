@@ -13,12 +13,11 @@ from synaptic_tuner.api.v1.execution import PreparedTrainingInputIdentity
 from synaptic_tuner.api.v1.training_input import TrainingInputV1
 from tuner.project.context import ProjectContext
 from tuner.runtime.releases import PackagedExecutionBindingV1, PackagedTrainingRuntimeReleaseV1
-from tuner.training import TrainingService, default_recipe_registry
+from tuner.training import default_recipe_registry
 from tuner.training.contracts import (
     ArtifactPolicy, CanonicalDocument, ResolvedTrainingComponents, ResourceSpec,
     RuntimeSpec, TrainingRequest, compile_training_plan_for_execution_v1,
 )
-from tuner.training.coordinator_material import CoordinatorResolvedMaterial
 from tuner.training.packaged_boundary import (
     create_execution_training_service,
     derive_packaged_coordinator_material as derive_coordinator_material,

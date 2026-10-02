@@ -29,7 +29,6 @@ from tuner.execution.coordinator_v1.publication import (
     DestinationArtifactV1,
     DestinationInventoryV1,
     LookupOutcomeV1,
-    LookupRecoveryPermitV1,
     PublicationCodeV1,
     PublicationCommandV1,
     PublicationErrorV1,
@@ -38,7 +37,6 @@ from tuner.execution.coordinator_v1.publication import (
     PublicationPhaseV1,
     PublicationRecordV1,
     StrongInMemoryPublicationStoreV1,
-    TransferOwnershipV1,
 )
 
 
@@ -939,7 +937,6 @@ def test_recovering_an_orphaned_transfer_is_lookup_only() -> None:
     admission = store.begin_transfer(
         command.publication_id, claim.record_digest, "2026-08-27T12:00:01Z"
     )
-    admitted = admission.record
     store.mark_orphaned(admission.ownership)
     checked = service.verify(PublicationRef(command.publication_id,
                                             command.destination_ref))
@@ -962,7 +959,7 @@ def test_lookup_outcomes_are_closed_terminal_and_never_retry(mode, phase) -> Non
     service, store, _, _, _, adapter = _stack(mode="raise_after_effect")
     result = service.publish(PublicationRequest(RUN, "opaque/local-like"))
     adapter.mode = mode
-    recovered = service.publish(PublicationRequest(RUN, "opaque/local-like"))
+    service.publish(PublicationRequest(RUN, "opaque/local-like"))
     record = store.get(result.publication.publication_id)
     assert record.phase is phase
     assert adapter.publish_calls == 1

@@ -10,7 +10,7 @@ Used by: LoRASurgeon, all operation classes, surgery_handler, tests.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 

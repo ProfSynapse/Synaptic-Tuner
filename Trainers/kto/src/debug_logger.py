@@ -6,7 +6,6 @@ Helps diagnose where training freezes or hangs
 import torch
 import time
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 

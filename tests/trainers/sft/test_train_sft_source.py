@@ -475,3 +475,27 @@ def test_train_sft_guards_locked_model_ref_before_training_starts() -> None:
     assert source.index("trainer.save_model(") < source.index(
         'document["base_model_name_or_path"] = locked_ref'
     )
+
+
+def test_train_sft_loss_hook_resolves_relative_dataset_against_repo_root() -> None:
+    # The post-training loss hook once referenced an undefined _REPO_ROOT; the
+    # NameError was swallowed and per-example losses were silently skipped. It
+    # must resolve relative datasets with the same repo-root expression the
+    # module uses for its sys.path bootstrap.
+    path = REPO_ROOT / "Trainers" / "sft" / "train_sft.py"
+    source = path.read_text(encoding="utf-8")
+    repo_root_expr = "Path(__file__).parent.parent.parent"
+    assert f"sys.path.insert(0, str({repo_root_expr}))" in source
+
+    fallbacks = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Assign)
+        and [ast.unparse(target) for target in node.targets] == ["dataset_path"]
+        and isinstance(node.value, ast.BinOp)
+        and isinstance(node.value.op, ast.Div)
+        and ast.unparse(node.value.right) == "dataset_path"
+    ]
+    assert [ast.unparse(node.value.left) for node in fallbacks] == [repo_root_expr]
+    assert path.parent.parent.parent == REPO_ROOT
+    assert "_REPO_ROOT" not in source

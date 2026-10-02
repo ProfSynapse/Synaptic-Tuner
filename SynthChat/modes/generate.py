@@ -189,7 +189,7 @@ def generate_mode(
                 "targets": [key for key in shared_seed_spec["targets"] if key in targets],
             }
 
-    print(f"\nGeneration targets:")
+    print("\nGeneration targets:")
     total_examples = 0
     if shared_seed_spec:
         shared_targets = set(shared_seed_spec.get("targets") or targets.keys())

@@ -912,7 +912,6 @@ class TestEnsureHostCacheDirs:
                 raise OSError("disk full")
 
         # Patch mkdir on the derived target path to raise.
-        import tuner.handlers.local_run_handler as mod
 
         original_mkdir = Path.mkdir
 

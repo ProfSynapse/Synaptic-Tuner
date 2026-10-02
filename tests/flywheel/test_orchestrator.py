@@ -1,11 +1,11 @@
 """Tests for shared.flywheel.orchestrator — FlywheelOrchestrator pipeline."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from shared.flywheel.catalog import DatasetVersion, LogFilter
+from shared.flywheel.catalog import DatasetVersion
 from shared.flywheel.cleaner import CleaningResult
 from shared.flywheel.config import FlywheelConfig
 from shared.flywheel.orchestrator import (
@@ -379,7 +379,7 @@ class TestRetrainModeSelection:
         with patch.object(orch, "_run_training", return_value=TrainingResult(
             success=True, adapter_path="/adapters/v001",
         )) as mock_train, patch.object(orch, "_start_vllm", return_value=True):
-            result = await orch.run_cycle(
+            await orch.run_cycle(
                 retrain_mode=RetrainMode.HOT_SWAP,
             )
 

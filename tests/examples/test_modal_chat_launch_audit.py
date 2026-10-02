@@ -225,6 +225,8 @@ def test_public_chat_capability_denial_precedes_credentials_storage_and_cloud(
 def test_public_chat_exact_read_capabilities_pass_the_precloud_gate(
     monkeypatch,
 ):
+    # Past the gate, execute() imports the Modal SDK before local storage.
+    pytest.importorskip("modal")
     monkeypatch.setattr(launch, "_check_launcher_python", lambda: None)
     monkeypatch.setattr(
         coordinator_adapter,

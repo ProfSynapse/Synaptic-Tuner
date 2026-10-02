@@ -2,7 +2,6 @@ from dataclasses import replace
 import pytest
 from tuner.execution.coordinator_v1.model import ProviderRunPhaseV1, WorkflowPhaseV1
 from tuner.execution.coordinator_v1.state_machine import WorkflowTransitionError, apply_provider_observation
-from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.foundation_v2.repository import EffectState, ReconciliationGrantBindingV2, ReconciliationOwnershipV2
 from .test_state_machine import Auth, apply_stage_effect_record, record, stage_source
 from .test_state_machine import ObservationAuth, observation, queued_evidence

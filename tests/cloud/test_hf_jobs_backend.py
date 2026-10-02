@@ -10,7 +10,6 @@ Covers:
 - _parse_timeout: hours, minutes, bare numbers, invalid
 """
 
-import os
 import shlex
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -19,9 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tuner.backends.training.cloud.hf_jobs_backend import (
-    DEFAULT_FLAVOR,
     DEFAULT_IMAGE,
-    DEFAULT_TIMEOUT,
     HFJobsBackend,
     _parse_timeout,
 )

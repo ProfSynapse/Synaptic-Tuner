@@ -3,7 +3,7 @@ Model loading and LoRA application for MLX SFT training.
 Uses mlx_lm for model loading and custom LoRA implementation.
 """
 
-from typing import List, Tuple, Any, Optional
+from typing import List, Tuple, Any
 from pathlib import Path
 import mlx.core as mx
 import mlx.nn as nn

@@ -5,13 +5,11 @@ config-validation dry-run contract without the ML stack.
 """
 
 import json
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "Trainers" / "dpo" / "src"))
+from tests.trainers._trainer_import import load_trainer_module
 
-import data_loader  # noqa: E402
+data_loader = load_trainer_module("dpo", "data_loader")
 
 
 def _write_jsonl(path: Path, rows):

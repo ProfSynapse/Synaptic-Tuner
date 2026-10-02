@@ -7,7 +7,6 @@ from dataclasses import fields
 from threading import Lock
 from synaptic_tuner.api.v1.results import VerifiedArtifact
 
-from synaptic_tuner.api.v1.runs_facade import RunLogEntry
 
 from ...coordinator_v1.model import (
     ArtifactManifestV1,
@@ -40,11 +39,9 @@ from .model import (
     DockerLookupResultV1,
     DockerProviderError,
     DockerRunPhaseV1,
-    DockerLogTerminalPhaseV1,
     DockerLogPageV1,
     DockerLogReadRequestV1,
     MAX_LOG_BYTES,
-    MAX_LOG_ENTRIES,
     labels_for,
 )
 from .effects import _resolve_authenticated_binding

@@ -646,6 +646,7 @@ class TestRunRegistryEdgeCases:
             assert list(path.parent.glob("*.init")) == []
             assert list(path.parent.glob("*.tmp")) == []
 
+    @pytest.mark.skipif(os.name != "nt", reason="Windows sharing-violation replace retry")
     def test_registry_replace_retries_transient_windows_failure(self, tmp_path: Path, monkeypatch):
         path = tmp_path / "registry.jsonl"
         RunRegistry(path).register_run(
@@ -675,6 +676,7 @@ class TestRunRegistryEdgeCases:
         ]
         assert list(tmp_path.glob("*.tmp")) == []
 
+    @pytest.mark.skipif(os.name != "nt", reason="Windows sharing-violation replace retry")
     def test_registry_replace_timeout_preserves_old_bytes_and_cleans_temp(
         self, tmp_path: Path, monkeypatch
     ):

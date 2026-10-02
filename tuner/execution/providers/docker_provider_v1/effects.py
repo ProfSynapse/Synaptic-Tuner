@@ -12,7 +12,6 @@ from ...foundation_v2.executors import (
     mint_resolved_adapter,
     mint_resolved_executor,
 )
-from ...foundation_v2.identities import EffectKind
 from ...foundation_v2.observations import ObservationDisposition, ProviderObservationV1
 from ...foundation_v2.preparation import CanonicalPreparationV2
 from ...foundation_v2.references import (

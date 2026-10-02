@@ -82,11 +82,9 @@ def _render_available_tools(
     context_csv = ", ".join(str(f) for f in context_required)
     instruction = str(instruction_template).replace("{context_required_csv}", context_csv)
 
-    lines: List[str] = [
-        f"Use the `{wrapper_name}` wrapper for tool calls.",
-        instruction,
-        "",
-    ]
+    # A format without a wrapper (native tool calls) gets no wrapper line.
+    lines: List[str] = [f"Use the `{wrapper_name}` wrapper for tool calls."] if wrapper_name else []
+    lines.extend([instruction, ""])
 
     tools = tool_schema.get("tools") or {}
     for agent in sorted(tools.keys()):
