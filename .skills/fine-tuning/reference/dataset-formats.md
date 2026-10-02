@@ -233,6 +233,36 @@ Current canonical versions:
 python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/my_dataset.jsonl
 ```
 
+Before SFT, check the loss mask the trainer will actually build for this
+dataset and tokenizer. `doctor sft-mask` runs the trainer's dataset contract
+check and a row sample through its own preprocessing (`materialize_sft_row`)
+with only the tokenizer loaded, so it needs no GPU or model weights. It works on
+legacy conversation rows and on `prepare-dataset` outputs (raw text and
+authoritative messages):
+
+```bash
+# Reuse the trainer config's model, dataset, max_seq_length, chat_template_kwargs and prompt_render
+python tuner.py doctor sft-mask --sft-config Trainers/sft/configs/config.yaml
+
+# Explicit flags override the trainer config, as train_sft.py flags do
+python tuner.py doctor sft-mask --dataset-path Datasets/my_dataset.jsonl \
+  --model <tokenizer-id-or-path> --max-seq-length 4096 \
+  --chat-template-kwargs '{"enable_thinking": false}' --preview-rows 0,12 --json
+```
+
+Hard failures (exit 1): a dataset the trainer's contract would reject,
+preprocessing errors (including authoritative rows that do not fit), rows with
+zero trained tokens, masks that stop before the end of the prompt render (prompt
+tokens trained), assistant-only rows that fall back to full-sequence loss,
+trained spans that do not end with the template's end-of-turn token (`eos_token`
+for raw text), and doubled BOS. Warnings: truncation rate above the configured
+threshold (p50/p95/max lengths are reported) and end-of-turn tokens lost to
+truncation. Info: multi-turn rows whose earlier assistant turns are untrained.
+Thresholds and defaults live in `Trainers/sft/configs/mask_doctor.yaml`. Fix
+the data, `max_seq_length`, `chat_template_kwargs` or `prompt_render` until it
+passes; do not launch SFT on a failing report. Training runs also log the
+prefix-mismatch and fallback counts after dataset preparation.
+
 Use the migration pipeline for corpus refreshes instead of ad hoc rewriting:
 
 ```bash

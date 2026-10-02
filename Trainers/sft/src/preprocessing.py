@@ -21,6 +21,13 @@ from shared.sft_preprocessing import (
 ASSISTANT_ONLY = "assistant_only"
 FULL_SEQUENCE = "full_sequence"
 
+# Per-row mask diagnostic columns emitted by prepare_sft_dataset when
+# include_mask_diagnostics=True. They describe how the loss mask was derived and
+# never influence labels; callers summarize and then drop them before training.
+MASK_PREFIX_MISMATCH_COLUMN = "_mask_prefix_mismatch"
+MASK_FALLBACK_COLUMN = "_mask_fallback_full_sequence"
+MASK_DIAGNOSTIC_COLUMNS = (MASK_PREFIX_MISMATCH_COLUMN, MASK_FALLBACK_COLUMN)
+
 
 def sanitize_conversations(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sanitize_messages_for_chat_template(messages)
@@ -92,28 +99,46 @@ def materialize_sft_features(
     )
 
 
-def prepare_sft_dataset(
-    dataset: Dataset,
+def materialize_sft_row(
+    example: dict[str, Any],
     *,
     tokenizer: Any,
     max_seq_length: int,
     loss_mask_mode: str = ASSISTANT_ONLY,
-    backend: str = "trl_unsloth",
     chat_template_kwargs: dict[str, Any] | None = None,
-    aux_target_field: str | None = None,
+    prompt_render: str = "full_conversation",
+) -> PreparedSFTExample:
+    """Materialize one raw dataset row exactly as the SFT trainer does.
+
+    This is the single per-row hop used by :func:`prepare_sft_dataset` (and so by
+    every SFT training run). The SFT mask doctor calls it directly so it inspects
+    the real masking path rather than a re-implementation.
+    """
+    normalized = normalize_sft_example(example)
+    return materialize_sft_features(
+        normalized,
+        tokenizer=tokenizer,
+        max_seq_length=max_seq_length,
+        loss_mask_mode=loss_mask_mode,
+        chat_template_kwargs=chat_template_kwargs,
+        prompt_render=prompt_render,
+    )
+
+
+def validate_sft_dataset_contract(
+    dataset: Dataset,
+    *,
+    loss_mask_mode: str = ASSISTANT_ONLY,
     prompt_render: str = "full_conversation",
     assistant_only_loss_requested: bool = False,
     aux_token_position: str | int | None = None,
     use_preassigned_splits: bool = False,
-) -> Dataset:
-    del backend  # The contract is backend-agnostic; callers choose the trainer separately.
+) -> None:
+    """Enforce the dataset-level SFT row contract (raises ``ValueError``).
 
-    # ``remove_columns=dataset.column_names`` (below) drops every original column
-    # AFTER ``_materialize`` runs, so any per-row directive (e.g. the aux_head
-    # target) must be READ HERE and threaded into the returned dict to survive —
-    # extending only the collator is too late. When ``aux_target_field`` is None
-    # the returned dict is exactly {input_ids, attention_mask, labels}, identical
-    # to the feature-off behavior.
+    :func:`prepare_sft_dataset` runs this before materializing any row; the SFT
+    mask doctor runs it too, so a dataset the trainer would reject is reported.
+    """
     dataset_formats = {detect_sft_record_format(dataset[index]) for index in range(len(dataset))}
     authoritative_rows = [
         is_authoritative_preassigned_sft_record(dataset[index]) for index in range(len(dataset))
@@ -148,10 +173,58 @@ def prepare_sft_dataset(
                 "with aux_head token_position='end_of_prompt'."
             )
 
+
+def summarize_mask_diagnostics(dataset: Dataset) -> dict[str, int]:
+    """Aggregate the per-row mask diagnostic columns of a prepared dataset."""
+    return {
+        "rows": len(dataset),
+        "mask_prefix_mismatch": int(sum(bool(v) for v in dataset[MASK_PREFIX_MISMATCH_COLUMN])),
+        "mask_fallback_full_sequence": int(sum(bool(v) for v in dataset[MASK_FALLBACK_COLUMN])),
+    }
+
+
+def prepare_sft_dataset(
+    dataset: Dataset,
+    *,
+    tokenizer: Any,
+    max_seq_length: int,
+    loss_mask_mode: str = ASSISTANT_ONLY,
+    backend: str = "trl_unsloth",
+    chat_template_kwargs: dict[str, Any] | None = None,
+    aux_target_field: str | None = None,
+    prompt_render: str = "full_conversation",
+    assistant_only_loss_requested: bool = False,
+    aux_token_position: str | int | None = None,
+    use_preassigned_splits: bool = False,
+    include_mask_diagnostics: bool = False,
+) -> Dataset:
+    """Materialize every row into input_ids / attention_mask / labels.
+
+    ``include_mask_diagnostics`` adds the ``MASK_DIAGNOSTIC_COLUMNS`` boolean
+    columns (prefix mismatch and unexpected full-sequence fallback per row). They
+    are descriptive only; summarize them with :func:`summarize_mask_diagnostics`
+    and drop them before handing the dataset to a trainer.
+    """
+    del backend  # The contract is backend-agnostic; callers choose the trainer separately.
+
+    validate_sft_dataset_contract(
+        dataset,
+        loss_mask_mode=loss_mask_mode,
+        prompt_render=prompt_render,
+        assistant_only_loss_requested=assistant_only_loss_requested,
+        aux_token_position=aux_token_position,
+        use_preassigned_splits=use_preassigned_splits,
+    )
+
+    # ``remove_columns=dataset.column_names`` (below) drops every original column
+    # AFTER ``_materialize`` runs, so any per-row directive (e.g. the aux_head
+    # target) must be READ HERE and threaded into the returned dict to survive —
+    # extending only the collator is too late. When ``aux_target_field`` is None
+    # and diagnostics are off, the returned dict is exactly
+    # {input_ids, attention_mask, labels}, identical to the feature-off behavior.
     def _materialize(example: dict[str, Any]) -> dict[str, Any]:
-        normalized = normalize_sft_example(example)
-        prepared = materialize_sft_features(
-            normalized,
+        prepared = materialize_sft_row(
+            example,
             tokenizer=tokenizer,
             max_seq_length=max_seq_length,
             loss_mask_mode=loss_mask_mode,
@@ -165,6 +238,9 @@ def prepare_sft_dataset(
         }
         if aux_target_field is not None:
             materialized["aux_target"] = _read_aux_target(example, aux_target_field)
+        if include_mask_diagnostics:
+            materialized[MASK_PREFIX_MISMATCH_COLUMN] = prepared.mask_prefix_mismatch
+            materialized[MASK_FALLBACK_COLUMN] = prepared.mask_fallback_reason is not None
         return materialized
 
     return dataset.map(
@@ -213,6 +289,7 @@ def load_and_prepare_sft_dataset(
     assistant_only_loss_requested: bool = False,
     aux_token_position: str | int | None = None,
     use_preassigned_splits: bool = False,
+    include_mask_diagnostics: bool = False,
 ) -> Dataset:
     del num_proc
     del include_text
@@ -227,4 +304,5 @@ def load_and_prepare_sft_dataset(
         assistant_only_loss_requested=assistant_only_loss_requested,
         aux_token_position=aux_token_position,
         use_preassigned_splits=use_preassigned_splits,
+        include_mask_diagnostics=include_mask_diagnostics,
     )

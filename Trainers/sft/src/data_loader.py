@@ -7,8 +7,10 @@ from datasets import load_dataset, Dataset
 
 from preprocessing import (
     ASSISTANT_ONLY,
+    MASK_DIAGNOSTIC_COLUMNS,
     load_and_prepare_sft_dataset,
     sanitize_conversations as sanitize_prepared_conversations,
+    summarize_mask_diagnostics,
 )
 from shared.sft_preprocessing import (
     detect_sft_record_format,
@@ -170,6 +172,78 @@ def load_and_prepare_dataset(
     return train_dataset, eval_dataset
 
 
+def load_raw_sft_dataset(
+    dataset_name: Optional[str] = None,
+    data_files: Optional[str] = None,
+    local_file: Optional[str] = None,
+    num_proc: int = 1,
+    filter_desirable: bool = False,
+) -> Dataset:
+    """
+    Load the raw SFT rows exactly as the tokenized trainer path sees them.
+
+    Shared by :func:`load_and_prepare_tokenized_dataset` and the SFT mask doctor
+    so both read the same rows (Arrow schema unification, the ``conversations``
+    -> ``messages`` rename and the optional ``label=True`` filter included).
+    """
+    if local_file:
+        print(f"Loading from local file: {local_file}")
+        raw_datasets = load_dataset("json", data_files=local_file, split="train")
+    elif dataset_name:
+        print(f"Loading from HuggingFace: {dataset_name}")
+        if data_files:
+            print(f"Using file: {data_files}")
+            raw_datasets = load_dataset(
+                dataset_name,
+                data_files=data_files,
+                num_proc=num_proc
+            )
+        else:
+            raw_datasets = load_dataset(dataset_name, num_proc=num_proc)
+        raw_datasets = raw_datasets["train"]
+    else:
+        raise ValueError("Must provide either dataset_name or local_file")
+
+    print(f"\nRaw dataset size: {len(raw_datasets)} examples")
+
+    if "conversations" in raw_datasets.column_names and "messages" not in raw_datasets.column_names:
+        print("Converting 'conversations' key to 'messages' (TRL 0.15.0+ requirement)")
+        raw_datasets = raw_datasets.rename_column("conversations", "messages")
+
+    if filter_desirable and "label" in raw_datasets.column_names:
+        print("\nFiltering for desirable examples (label=True)...")
+        original_size = len(raw_datasets)
+        raw_datasets = raw_datasets.filter(lambda x: x["label"] == True)
+        filtered_count = len(raw_datasets)
+        print(f"Filtered: {original_size} → {filtered_count} examples")
+        print(f"Removed: {original_size - filtered_count} undesirable examples")
+
+    return raw_datasets
+
+
+def log_mask_diagnostics(summary: dict, loss_mask_mode: str) -> None:
+    """Print the aggregate loss-mask diagnostics for a prepared SFT dataset."""
+    rows = summary["rows"]
+    mismatched = summary["mask_prefix_mismatch"]
+    fallback = summary["mask_fallback_full_sequence"]
+    print(
+        f"\nLoss mask diagnostics ({loss_mask_mode}): "
+        f"{mismatched}/{rows} prefix-mismatch rows, "
+        f"{fallback}/{rows} full-sequence fallback rows"
+    )
+    if mismatched:
+        print(
+            f"WARNING: {mismatched} row(s) stopped assistant-only masking before the end "
+            "of the prompt render, so prompt tokens are trained. Inspect with "
+            "`python tuner.py doctor sft-mask`."
+        )
+    if fallback:
+        print(
+            f"WARNING: {fallback} row(s) do not end with an assistant turn and were "
+            "trained with full-sequence loss."
+        )
+
+
 def load_and_prepare_tokenized_dataset(
     dataset_name: Optional[str] = None,
     data_files: Optional[str] = None,
@@ -212,40 +286,16 @@ def load_and_prepare_tokenized_dataset(
     if tokenizer is None:
         raise ValueError("tokenizer is required for tokenized dataset preparation")
 
-    if local_file:
-        print(f"Loading from local file: {local_file}")
-        raw_datasets = load_dataset("json", data_files=local_file, split="train")
-    elif dataset_name:
-        print(f"Loading from HuggingFace: {dataset_name}")
-        if data_files:
-            print(f"Using file: {data_files}")
-            raw_datasets = load_dataset(
-                dataset_name,
-                data_files=data_files,
-                num_proc=num_proc
-            )
-        else:
-            raw_datasets = load_dataset(dataset_name, num_proc=num_proc)
-        raw_datasets = raw_datasets["train"]
-    else:
-        raise ValueError("Must provide either dataset_name or local_file")
-
-    print(f"\nRaw dataset size: {len(raw_datasets)} examples")
-
-    if "conversations" in raw_datasets.column_names and "messages" not in raw_datasets.column_names:
-        print("Converting 'conversations' key to 'messages' (TRL 0.15.0+ requirement)")
-        raw_datasets = raw_datasets.rename_column("conversations", "messages")
-
-    if filter_desirable and "label" in raw_datasets.column_names:
-        print("\nFiltering for desirable examples (label=True)...")
-        original_size = len(raw_datasets)
-        raw_datasets = raw_datasets.filter(lambda x: x["label"] == True)
-        filtered_count = len(raw_datasets)
-        print(f"Filtered: {original_size} → {filtered_count} examples")
-        print(f"Removed: {original_size - filtered_count} undesirable examples")
+    raw_datasets = load_raw_sft_dataset(
+        dataset_name=dataset_name,
+        data_files=data_files,
+        local_file=local_file,
+        num_proc=num_proc,
+        filter_desirable=filter_desirable,
+    )
 
     def _prepare(dataset: Dataset) -> Dataset:
-        return load_and_prepare_sft_dataset(
+        prepared = load_and_prepare_sft_dataset(
             dataset=dataset,
             tokenizer=tokenizer,
             max_seq_length=max_seq_length,
@@ -258,7 +308,10 @@ def load_and_prepare_tokenized_dataset(
             assistant_only_loss_requested=assistant_only_loss_requested,
             aux_token_position=aux_token_position,
             use_preassigned_splits=use_preassigned_splits,
+            include_mask_diagnostics=True,
         )
+        log_mask_diagnostics(summarize_mask_diagnostics(prepared), loss_mask_mode)
+        return prepared.remove_columns(list(MASK_DIAGNOSTIC_COLUMNS))
 
     if validation_group_key and use_preassigned_splits:
         raise ValueError(

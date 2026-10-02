@@ -24,6 +24,27 @@ class PreparedSFTExample:
     loss_mask_mode: LossMaskMode
     truncation_applied: bool
     source_hash: str | None = None
+    # Mask diagnostics. Descriptive only: training never reads these, and they
+    # never alter input_ids/labels. They let the SFT mask doctor and the data
+    # loader summary surface silent masking failures without re-implementing
+    # the masking logic.
+    #   untruncated_length: token count before max_seq_length truncation.
+    #   prompt_token_count: tokens in the add_generation_prompt=True render of
+    #       messages[:-1] (None when no prompt render was made).
+    #   masked_prefix_length: leading positions whose label is -100.
+    #   mask_prefix_mismatch: the full render diverged from the prompt render
+    #       before the prompt render ended, so masking stopped early and the
+    #       remaining prompt tokens carry real labels.
+    #   mask_divergence_expected_token: the prompt-render token expected at the
+    #       divergence index (input_ids holds the full-render token there).
+    #   mask_fallback_reason: why assistant-only loss was requested but the
+    #       row was materialized with full-sequence loss.
+    untruncated_length: int = 0
+    prompt_token_count: int | None = None
+    masked_prefix_length: int = 0
+    mask_prefix_mismatch: bool = False
+    mask_divergence_expected_token: int | None = None
+    mask_fallback_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -304,6 +325,7 @@ def materialize_sft_example(
             loss_mask_mode="full_sequence",
             truncation_applied=truncation_applied,
             source_hash=source_hash,
+            untruncated_length=len(full_tokens),
         )
 
     messages, example_format = normalize_sft_messages(record)
@@ -388,6 +410,9 @@ def materialize_sft_example(
             loss_mask_mode="assistant_only",
             truncation_applied=truncation_applied,
             source_hash=source_hash,
+            untruncated_length=len(full_ids),
+            prompt_token_count=len(prompt_ids),
+            masked_prefix_length=min(len(prompt_ids), len(labels)),
         )
 
     full_str = tokenizer.apply_chat_template(
@@ -403,6 +428,11 @@ def materialize_sft_example(
     labels = list(input_ids)
 
     loss_mask_mode: LossMaskMode = "full_sequence"
+    prompt_token_count: int | None = None
+    masked_prefix_length = 0
+    mask_prefix_mismatch = False
+    mask_divergence_expected_token: int | None = None
+    mask_fallback_reason: str | None = None
     if assistant_only_loss and messages[-1].get("role") == "assistant":
         prompt_str = tokenizer.apply_chat_template(
             messages[:-1],
@@ -411,13 +441,19 @@ def materialize_sft_example(
             **template_kwargs,
         )
         prompt_tokens = _encoder.encode(prompt_str, add_special_tokens=False)
+        prompt_token_count = len(prompt_tokens)
         mask_len = min(len(prompt_tokens), len(labels))
         for idx in range(mask_len):
             if labels[idx] == prompt_tokens[idx]:
                 labels[idx] = -100
+                masked_prefix_length = idx + 1
             else:
+                mask_prefix_mismatch = True
+                mask_divergence_expected_token = prompt_tokens[idx]
                 break
         loss_mask_mode = "assistant_only"
+    elif assistant_only_loss:
+        mask_fallback_reason = "final_message_not_assistant"
 
     return PreparedSFTExample(
         input_ids=input_ids,
@@ -427,4 +463,10 @@ def materialize_sft_example(
         loss_mask_mode=loss_mask_mode,
         truncation_applied=truncation_applied,
         source_hash=source_hash,
+        untruncated_length=len(full_tokens),
+        prompt_token_count=prompt_token_count,
+        masked_prefix_length=masked_prefix_length,
+        mask_prefix_mismatch=mask_prefix_mismatch,
+        mask_divergence_expected_token=mask_divergence_expected_token,
+        mask_fallback_reason=mask_fallback_reason,
     )

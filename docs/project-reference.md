@@ -140,6 +140,7 @@ tail -f sft_output/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 | Dataset validation | X | | `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py` |
 | Train/eval contamination check | X | | `python tuner.py check-contamination --train-data <jsonl>`; exit 2 when an eval item is flagged |
 | System diagnostics | X | | `./run.sh doctor` |
+| SFT loss-mask check | X | | `python tuner.py doctor sft-mask --dataset-path ... --model ...` (or `--sft-config`); tokenizer only, thresholds in `Trainers/sft/configs/mask_doctor.yaml` |
 | Training (SFT/KTO) | | X | Needs dataset choice, model size |
 | Local Docker training | | X | `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml`; UID-agnostic, persistent-container mode |
 | Evaluation | | X | Needs model path, scenario set |

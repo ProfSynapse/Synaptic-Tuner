@@ -306,7 +306,11 @@ The `aux_head` block flows through **both** launch paths:
 
 1. **Choose runtime**: prefer `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes` for repeatable local Docker runs; use direct `cd Trainers/sft && python train_sft.py ...` for tight trainer iteration.
 2. **Prepare dataset**: use conversational JSONL for chat semantics, or run
-   `prepare-dataset` for a verified `syntunia-sft-row/v1` raw-text artifact
+   `prepare-dataset` for a verified `syntunia-sft-row/v1` raw-text artifact.
+   Then check loss masking with the target tokenizer:
+   `python tuner.py doctor sft-mask --sft-config <trainer-config> --model <tokenizer> --dataset-path <jsonl>`
+   (tokenizer only, no GPU; exit 1 on hard failures such as prompt tokens
+   trained or a wrong end-of-turn token). See `dataset-formats.md` → Validation.
 3. **Test setup**: set `run.dry_run: true` in local-run YAML or use `python train_sft.py --model-size 7b --tier quick --dry-run`
 4. **Quick iteration**: cap `training.max_steps` in local-run YAML or use `--tier quick`
 5. **Production run**: remove the step cap and use the intended `training`, `model`, `dataset`, and `lora` settings in YAML
