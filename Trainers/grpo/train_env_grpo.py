@@ -111,6 +111,7 @@ ENV_GRPO_CONFIG_SCHEMA = {
             "python_packages": None,
         },
     },
+    "seed": None,
     "rewards": {
         "success_reward": None,
         "failure_penalty": None,
@@ -202,6 +203,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=None, help="Override training.max_steps")
     parser.add_argument("--save-steps", type=int, default=None, help="Override training.save_steps")
     parser.add_argument("--save-total-limit", type=int, default=None, help="Override training.save_total_limit")
+    parser.add_argument("--seed", type=int, default=None, help="Override seed (GRPOConfig.seed)")
     return parser.parse_args(argv)
 
 
@@ -236,6 +238,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         training_cfg["save_steps"] = args.save_steps
     if args.save_total_limit is not None:
         training_cfg["save_total_limit"] = args.save_total_limit
+    if args.seed is not None:
+        config["seed"] = args.seed
 
     if args.print_cloud_bootstrap:
         runtime_cfg = ((config.get("env_training") or {}).get("runtime") or {})
@@ -403,9 +407,14 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         "use_vllm": bool(training_cfg.get("use_vllm", False)),
         "vllm_mode": str(training_cfg.get("vllm_mode", "colocate")),
     }
+    if config.get("seed") is not None:
+        # GRPOConfig.seed drives transformers.set_seed for the whole run.
+        grpo_kwargs["seed"] = int(config["seed"])
     # Arguments the YAML (or a CLI override written into it) set; any of these
     # the installed GRPOConfig rejects raises instead of being dropped.
     grpo_origins = {name: f"training.{name}" for name in grpo_kwargs if name in training_cfg}
+    if "seed" in grpo_kwargs:
+        grpo_origins["seed"] = "seed"
     extra_args = training_cfg.get("extra_args") or {}
     if not isinstance(extra_args, dict):
         raise TypeError("training.extra_args must be a mapping/dict")

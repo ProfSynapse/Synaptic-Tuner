@@ -221,6 +221,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gradient-accumulation", type=int, help="Override gradient_accumulation_steps")
     parser.add_argument("--learning-rate", type=float, help="Override learning rate")
     parser.add_argument("--seed", type=int, help="Override the training random seed (config.seed)")
+    parser.add_argument("--save-steps", type=int, help="Override training.save_steps")
+    parser.add_argument("--save-total-limit", type=int, help="Override training.save_total_limit")
     parser.add_argument("--beta", type=float, help="Override DPO beta parameter (controls KL regularization strength)")
     parser.add_argument("--loss-type", type=str, help="Override DPO loss variant (default: sigmoid = vanilla DPO)")
     parser.add_argument("--num-epochs", type=int, help="Override number of training epochs")
@@ -330,6 +332,10 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
     # config default — the handler forwards explicit zeros (provenance: no silent override).
     if args.seed is not None:
         config.seed = args.seed
+    if args.save_steps is not None:
+        config.training.save_steps = args.save_steps
+    if args.save_total_limit is not None:
+        config.training.save_total_limit = args.save_total_limit
     if args.beta is not None:
         config.training.beta = args.beta
     if args.loss_type:

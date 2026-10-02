@@ -138,6 +138,11 @@ head -1 <dataset_file> | python -m json.tool
   GRPO `max_prompt_length`.
 - HF env-GRPO launches refuse `max_seq_length` / `--train-max-seq-length`
   (the env trainer has no such setting; use `training.max_completion_length`).
+- Launchers refuse settings their target trainer has no flag for: HF Jobs
+  training accepts only sft/kto/dpo/grpo, local-run accepts `model.revision`
+  only for sft, and experiment-loop search keys must map to a trainer flag.
+  `tests/contract/test_trainer_argv_contract.py` parses every launcher's
+  argv with the real trainer parsers.
 - Only internal defaults named in a trainer's version-dependent set (env-GRPO:
   `max_prompt_length`) are omitted on unsupported versions, with an `[INFO]`
   line. SFT/KTO/DPO pass explicit arguments, so TRL itself raises `TypeError`.

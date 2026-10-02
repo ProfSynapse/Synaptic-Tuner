@@ -26,7 +26,12 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from shared.flywheel.experiment_config import ExperimentConfig
+from shared.flywheel.experiment_config import (
+    TRAINER_BOOLEAN_OVERRIDE_FLAGS,
+    TRAINER_OVERRIDE_FLAGS,
+    ExperimentConfig,
+    unsupported_override_keys,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -344,6 +349,30 @@ def _trainer_script(trainer_type: str) -> str:
     return scripts[trainer_type]
 
 
+def _trainer_override_args(trainer_type: str, merged: Dict[str, Any]) -> List[str]:
+    """Translate merged hyperparameters into the trainer's CLI flags.
+
+    Raises ``ValueError`` for any key the trainer has no flag for, so a
+    searched or base hyperparameter is never silently ignored.
+    """
+    flat = _flatten_config(merged)
+    unsupported = unsupported_override_keys(trainer_type, list(flat))
+    if unsupported:
+        raise ValueError(
+            f"Experiment hyperparameters {unsupported} have no {trainer_type} "
+            "trainer CLI flag and would be ignored; remove them from "
+            "search_space / base_config_path"
+        )
+    argv: List[str] = []
+    for key, value in flat.items():
+        if key in TRAINER_BOOLEAN_OVERRIDE_FLAGS[trainer_type]:
+            if value:
+                argv.append(TRAINER_BOOLEAN_OVERRIDE_FLAGS[trainer_type][key])
+            continue
+        argv.extend([TRAINER_OVERRIDE_FLAGS[trainer_type][key], str(value)])
+    return argv
+
+
 def _extract_training_loss(run_dir: Path) -> float:
     """Best-effort extraction of final training loss from a run directory.
 
@@ -572,13 +601,15 @@ class ExperimentLoop:
         base_config: Dict[str, Any] = {}
         if self.config.base_config_path:
             base_path = Path(self.config.base_config_path)
-            if base_path.exists():
-                from shared.utilities import load_yaml
-                base_config = load_yaml(base_path)
+            if not base_path.exists():
+                raise FileNotFoundError(f"base_config_path not found: {base_path}")
+            from shared.utilities import load_yaml
+            base_config = load_yaml(base_path)
 
         # Merge overrides
         merged = _merge_config_overrides(base_config, config_overrides)
         merged["max_steps"] = self.config.max_steps_per_experiment
+        trainer_args = _trainer_override_args(self.config.trainer_type, merged)
 
         # Write temp config
         output_dir = Path(self.config.output_dir) / experiment_id
@@ -595,11 +626,9 @@ class ExperimentLoop:
 
         # Run training subprocess
         script = _trainer_script(self.config.trainer_type)
-        cmd = [
-            sys.executable, script,
-            "--config", str(config_file),
-            "--max-steps", str(self.config.max_steps_per_experiment),
-        ]
+        # config.yaml above is the experiment record; the trainer receives the
+        # same values as CLI flags (it has no flat-hyperparameter config file).
+        cmd = [sys.executable, script, *trainer_args]
 
         # Optionally pass dataset
         if self.config.dataset_path:

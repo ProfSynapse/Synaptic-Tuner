@@ -23,6 +23,11 @@ from tuner.handlers.stages._util import hf_verified_source_steps
 
 from .base_cloud import load_project_deps
 
+# Methods whose trainer accepts the HF Jobs run/artifact flags built below
+# (grpo runs train_env_grpo.py). tests/contract/test_trainer_argv_contract.py
+# parses every built command with the real trainer argparse.
+HF_TRAINER_METHODS = ("sft", "kto", "dpo", "grpo")
+
 
 class HFCommandBuilderMixin:
     """Methods for building training commands sent to HF Jobs containers."""
@@ -81,6 +86,11 @@ class HFCommandBuilderMixin:
         Returns:
             Shell command string to pass as ["bash", "-c", command]
         """
+        if config.method not in HF_TRAINER_METHODS:
+            raise CloudProviderError(
+                f"HF Jobs training supports {', '.join(HF_TRAINER_METHODS)}; the "
+                f"{config.method} trainer does not accept the HF Jobs run/artifact flags."
+            )
         preparation = getattr(self, "source_preparation", None)
         if preparation is None:
             raise CloudProviderError("HF Jobs secure source preparation is required before command compilation.")

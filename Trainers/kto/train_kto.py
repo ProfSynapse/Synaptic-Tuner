@@ -182,7 +182,8 @@ def build_training_lineage(
     return enrich_training_lineage(lineage, args=args)
 
 
-def main():
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Build the KTO CLI parser (pure argparse; no ML imports)."""
     parser = argparse.ArgumentParser(description="KTO Training on RTX 3090")
 
     # Model configuration
@@ -333,6 +334,8 @@ def main():
         type=int,
         help="Override the training random seed (config.seed)"
     )
+    parser.add_argument("--save-steps", type=int, help="Override training.save_steps")
+    parser.add_argument("--save-total-limit", type=int, help="Override training.save_total_limit")
     parser.add_argument(
         "--beta",
         type=float,
@@ -430,6 +433,11 @@ def main():
         help="Enable detailed debug logging to diagnose freezes/hangs"
     )
 
+    return parser
+
+
+def main():
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     # Process friendly model selection flags
@@ -619,6 +627,10 @@ def main():
     # config default — the handler forwards explicit zeros (provenance: no silent override).
     if args.seed is not None:
         config.seed = args.seed
+    if args.save_steps is not None:
+        config.training.save_steps = args.save_steps
+    if args.save_total_limit is not None:
+        config.training.save_total_limit = args.save_total_limit
     if args.beta is not None:
         config.training.beta = args.beta
     if args.num_epochs is not None:

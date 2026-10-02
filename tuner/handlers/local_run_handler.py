@@ -1174,11 +1174,15 @@ class LocalRunHandler(BaseHandler):
 
         command = ["python", trainer_file]
         _append_flag(command, "model_name", model_cfg.get("name") or model_cfg.get("model_name"))
-        _append_flag(
-            command,
-            "model_revision",
-            model_cfg.get("revision") or model_cfg.get("model_revision"),
-        )
+        model_revision = model_cfg.get("revision") or model_cfg.get("model_revision")
+        if model_revision is not None and not sft_only:
+            # Only train_sft.py pins and verifies a Hub revision; the dpo/kto
+            # trainers would reject --model-revision, so refuse the setting here.
+            raise LocalRunError(
+                f"model.revision is supported only for run.method=sft; the {method} "
+                "trainer has no revision pin. Remove model.revision."
+            )
+        _append_flag(command, "model_revision", model_revision)
         if runtime_profile is not None:
             _append_flag(command, "runtime_profile_name", runtime_profile["name"])
             _append_flag(
