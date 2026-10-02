@@ -20,10 +20,7 @@ repos:
         args: [--allow-multiple-documents]
         # Legacy rubric drafts under Datasets/behavior_rubrics/ are not valid
         # YAML; Datasets/ holds data artifacts and is also excluded from ruff.
-        # SynthChat/scenarios/destructive.yaml repeats `storageManager_archive`
-        # with different weights inside one `tools:` map (the last value wins
-        # when loaded). Remove it from this exclude once its owner fixes it.
-        exclude: ^(Datasets/|SynthChat/scenarios/destructive\.yaml$)
+        exclude: ^Datasets/
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
