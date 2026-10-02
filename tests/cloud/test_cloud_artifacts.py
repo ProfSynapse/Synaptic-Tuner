@@ -58,8 +58,11 @@ def test_resolve_repo_provenance_detached_head_leaves_branch_unset(_no_repo_env,
     assert branch is None  # "HEAD" is not a useful branch label
 
 
-def test_resolve_repo_provenance_non_git_returns_none(_no_repo_env, tmp_path):
+def test_resolve_repo_provenance_non_git_returns_none(_no_repo_env, tmp_path, monkeypatch):
     # A directory that is not a git repo and no env contract -> nothing to record.
+    # Stop git discovery at tmp_path so a pytest basetemp inside a checkout
+    # (the repository's scratch/ convention) cannot supply an enclosing repo.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     assert resolve_repo_provenance(tmp_path) == (None, None)
 
 

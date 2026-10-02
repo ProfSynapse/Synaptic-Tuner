@@ -198,7 +198,7 @@ class TestFlywheelHandler:
         mock_config.datasets_dir = "flywheel_datasets"
 
         with patch.object(handler, "_load_config", return_value=mock_config):
-            with patch.object(type(handler), "repo_root", new_callable=PropertyMock, return_value=tmp_path):
+            with patch.object(type(handler), "engine_root", new_callable=PropertyMock, return_value=tmp_path):
                 code = handler.handle()
 
         assert code == 0
@@ -216,7 +216,7 @@ class TestFlywheelHandler:
         (v1 / "train.jsonl").write_text('{"a":1}\n{"a":2}\n', encoding="utf-8")
 
         with patch.object(handler, "_load_config", return_value=mock_config):
-            with patch.object(type(handler), "repo_root", new_callable=PropertyMock, return_value=tmp_path):
+            with patch.object(type(handler), "engine_root", new_callable=PropertyMock, return_value=tmp_path):
                 code = handler.handle()
 
         assert code == 0

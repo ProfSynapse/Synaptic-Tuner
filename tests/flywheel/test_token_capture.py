@@ -2,7 +2,8 @@
 
 Covers the optional completion token-id / logprob capture added for a future
 GRPO feed: extraction, record serialization back-compat, the capture config
-gate, proxy logprob injection, and stager pass-through.
+gate, proxy logprob injection, and how the stager exposes captured tokens to
+filters while keeping static-GRPO rows in the trainer's exact schema.
 """
 from __future__ import annotations
 
@@ -152,32 +153,41 @@ def test_inject_logprobs_passes_through_bad_json():
 
 
 # ---------------------------------------------------------------------------
-# Stager pass-through
+# Stager: token fields stay addressable, static-GRPO rows stay exact
 # ---------------------------------------------------------------------------
 
 def _stager():
     return DatasetStager(catalog=AsyncMock(), config=FlywheelConfig())
 
 
-def test_grpo_example_includes_token_fields_when_present():
+def _tool_call_content(**extra):
+    return {
+        "messages": [{"role": "user", "content": "hi"}],
+        "response_content": "",
+        "tool_calls": [{"function": {"name": "search", "arguments": "{\"q\":\"x\"}"}}],
+        **extra,
+    }
+
+
+def test_filter_view_exposes_captured_token_fields_under_content():
+    record = InferenceLogRecord(log_id="a", timestamp="t", model_id="m", fitness_score=0.7)
+    content = _tool_call_content(completion_token_ids=[3, 4], completion_logprobs=[-0.1, -0.2])
+    view = DatasetStager._filter_view(record, content)
+    assert view["content"]["completion_token_ids"] == [3, 4]
+    assert view["content"]["completion_logprobs"] == [-0.1, -0.2]
+
+
+def test_static_grpo_example_does_not_carry_token_fields():
+    """The static-GRPO trainer row is exact; captured tokens are not part of it."""
     stager = _stager()
     record = InferenceLogRecord(log_id="a", timestamp="t", model_id="m", fitness_score=0.7)
-    content = {
-        "messages": [{"role": "user", "content": "hi"}],
-        "response_content": "ok",
-        "completion_token_ids": [3, 4],
-        "completion_logprobs": [-0.1, -0.2],
+    with_tokens = stager._format_grpo_example(
+        record,
+        _tool_call_content(completion_token_ids=[3, 4], completion_logprobs=[-0.1, -0.2]),
+    )
+    without_tokens = stager._format_grpo_example(record, _tool_call_content())
+    assert with_tokens == without_tokens == {
+        "prompt": [{"role": "user", "content": "hi"}],
+        "ground_truth_tool": "search",
+        "ground_truth_args_json": "{\"q\":\"x\"}",
     }
-    example = stager._format_grpo_example(record, content)
-    assert example["completion_token_ids"] == [3, 4]
-    assert example["completion_logprobs"] == [-0.1, -0.2]
-    assert "reward" in example and "conversations" in example
-
-
-def test_grpo_example_omits_token_fields_when_absent():
-    stager = _stager()
-    record = InferenceLogRecord(log_id="a", timestamp="t", model_id="m", fitness_score=0.5)
-    content = {"messages": [{"role": "user", "content": "hi"}], "response_content": "ok"}
-    example = stager._format_grpo_example(record, content)
-    assert "completion_token_ids" not in example
-    assert "completion_logprobs" not in example

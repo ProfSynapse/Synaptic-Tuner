@@ -468,6 +468,10 @@ def test_provenance_verification_rejects_symlink_and_incomplete_reference(tmp_pa
         link.symlink_to(outside)
     except OSError:
         pytest.skip("Symlinks are unavailable in this environment")
+    # A contained URI whose final component is a link must be refused as a link.
+    experiment.resolved_config_uri = (
+        "tracking://experiments/integrity/resolved-config.json"
+    )
     experiment.resolved_config_sha256 = hashlib.sha256(outside.read_bytes()).hexdigest()
     with pytest.raises(ProvenanceIntegrityError, match="symlinks"):
         service.verify_experiment_provenance(experiment)
