@@ -217,6 +217,34 @@ validations:
 | `validate_in` | Tags in target to search |
 | `error` | Message with `{value}` interpolation |
 
+### Tool Manifest Validation
+
+Validate each `tool_calls` entry's arguments against a per-tool schema.
+
+```yaml
+validations:
+  - tools:
+      YOUR_TOOL_NAME:
+        _required: [owner, steps]     # only these fields are required
+        _additionalProperties: false  # reject fields not listed here
+        owner: string
+        options:                      # nested object
+          dryRun: boolean
+        steps:                        # array whose items match _item_schema
+          _item_schema:
+            action: string
+        labels:
+          _item_schema: string        # array of scalars
+    error: "YOUR_TOOL_NAME validation failed: {details}"
+```
+
+**Keys:**
+| Key | Description |
+|-----|-------------|
+| `tools` | Tool name -> argument schema (`field: type`, nested objects, `_required`, `_additionalProperties`, `_item_schema`, `_subtools`) |
+| `_item_schema` | Marks the value as an array; every item must match this schema or type name (nest it for arrays of arrays) |
+| `error` | Template applied to every failure of the rule: `{tool_name}` is the called tool, `{details}` the specific failure. Default: `Tool '{tool_name}': {details}` |
+
 ## Validation Type Summary
 
 | Type | Key | Purpose |
@@ -227,6 +255,7 @@ validations:
 | Regex | `match` + `type: regex` | Regex pattern match |
 | Contains | `match` (no type) | Simple text contains |
 | Cross-scope | `cross_scope` | Validate across scopes |
+| Tool manifest | `tools` | Validate tool-call arguments per tool |
 
 ## Complete Examples
 

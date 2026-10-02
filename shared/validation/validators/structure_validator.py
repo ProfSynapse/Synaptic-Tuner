@@ -18,6 +18,10 @@ except ImportError:
     HAS_JSONSCHEMA = False
 
 
+# Message for each tools-validation failure when the rule sets no `error`.
+DEFAULT_TOOL_ERROR_TEMPLATE = "Tool '{tool_name}': {details}"
+
+
 class StructureValidator:
     """Validates data against a flat list of validation rules."""
 
@@ -46,6 +50,10 @@ class StructureValidator:
                     - match: Pattern to find in text
                     - type: Optional "regex" for regex matching (default: contains)
                     - error: User-defined error message
+                Tools validation (tools key):
+                    - tools: Manifest of tool name -> argument schema
+                    - error: Optional template applied to every failure of the
+                      rule; placeholders {tool_name} and {details}
                 Cross-scope (cross_scope key):
                     - Handled separately by CrossScopeValidator
             raw_content: Raw text content for pattern validation
@@ -252,12 +260,17 @@ class StructureValidator:
                     field2: type
                     nested:
                       subfield: type
-                error: Optional error template
+                    listField:
+                      _item_schema: {...} or type
+                error: Optional template applied to every failure of this rule.
+                    {tool_name} is the called tool and {details} the specific
+                    failure. Defaults to DEFAULT_TOOL_ERROR_TEMPLATE.
 
         Returns:
             List of error messages (empty if valid)
         """
         tools_manifest = validation.get("tools", {})
+        error_template = validation.get("error", DEFAULT_TOOL_ERROR_TEMPLATE)
 
         # Get tool calls from data
         tool_calls = data.get("tool_calls", [])
@@ -268,40 +281,40 @@ class StructureValidator:
         errors = []
 
         for tool_call in tool_calls:
-            # Extract tool name and arguments
-            function_data = tool_call.get("function", {})
-            tool_name = function_data.get("name", "")
-            args_str = function_data.get("arguments", "{}")
-
-            # Parse arguments
-            try:
-                if isinstance(args_str, str):
-                    args = json.loads(args_str)
-                else:
-                    args = args_str
-            except json.JSONDecodeError:
-                errors.append(f"Tool '{tool_name}': Invalid JSON in arguments")
-                continue
-
-            # Check if tool exists in manifest
-            if tool_name not in tools_manifest:
-                errors.append(f"Unknown tool: '{tool_name}' not in manifest")
-                continue
-
-            # Get schema for this tool
-            tool_schema = tools_manifest[tool_name]
-
-            # Validate arguments against schema
-            schema_errors = self._validate_against_schema(args, tool_schema, tool_name)
-            errors.extend(schema_errors)
+            tool_name, details = self._tool_call_failures(tool_call, tools_manifest)
+            errors.extend(
+                self._format_error(error_template, {"tool_name": tool_name, "details": detail})
+                for detail in details
+            )
 
         return errors
 
+    def _tool_call_failures(self, tool_call: Dict, tools_manifest: Dict) -> Tuple[str, List[str]]:
+        """Return the tool name and the failure details for one tool call."""
+        function_data = tool_call.get("function", {})
+        tool_name = function_data.get("name", "")
+        args_str = function_data.get("arguments", "{}")
+
+        # Parse arguments
+        try:
+            if isinstance(args_str, str):
+                args = json.loads(args_str)
+            else:
+                args = args_str
+        except json.JSONDecodeError:
+            return tool_name, ["Invalid JSON in arguments"]
+
+        # Check if tool exists in manifest
+        if tool_name not in tools_manifest:
+            return tool_name, [f"Unknown tool '{tool_name}' (not in manifest)"]
+
+        # Validate arguments against the tool's schema
+        return tool_name, self._validate_against_schema(args, tools_manifest[tool_name])
+
     def _validate_against_schema(
         self,
-        data: Dict,
+        data: Any,
         schema: Dict,
-        tool_name: str,
         path: str = "",
         subtools: Optional[Dict] = None
     ) -> List[str]:
@@ -314,7 +327,8 @@ class StructureValidator:
               subfield: type   -> nested field validation
             _additionalProperties: false  -> no extra fields allowed
             _required: [field1, field2]   -> only these fields are required
-            _item_schema: {...}           -> schema for array items
+            _item_schema: {...} or type   -> the value is an array; each item
+                                             must match this schema or type
             _subtools:                    -> subtool manifests for validating calls
               agentName:
                 toolName:
@@ -326,13 +340,16 @@ class StructureValidator:
         Args:
             data: Data to validate
             schema: Schema definition
-            tool_name: Tool name for error messages
             path: Current path for nested fields
             subtools: Subtool manifests passed down for calls validation
 
         Returns:
-            List of error messages
+            List of failure details
         """
+        # An array schema: validate the items, not object fields
+        if "_item_schema" in schema:
+            return self._validate_items(data, schema, path, subtools)
+
         errors = []
 
         # Check for additionalProperties constraint
@@ -360,57 +377,63 @@ class StructureValidator:
             # Check field exists (respect _required list if specified)
             if value is None:
                 if required_fields is None or field in required_fields:
-                    errors.append(f"Tool '{tool_name}': Missing required field '{field_path}'")
+                    errors.append(f"Missing required field '{field_path}'")
                 continue
 
-            # If expected is a dict with _item_schema, it's an array with item validation
-            if isinstance(expected, dict) and "_item_schema" in expected:
-                if not isinstance(value, list):
-                    errors.append(f"Tool '{tool_name}': Field '{field_path}' must be an array")
-                else:
-                    # Validate each item in the array
-                    nested_item_schema = expected.get("_item_schema", {})
-                    nested_subtools = expected.get("_subtools", schema_subtools)
-
-                    for i, item in enumerate(value):
-                        item_path = f"{field_path}[{i}]"
-                        item_errors = self._validate_against_schema(
-                            item, nested_item_schema, tool_name, item_path, nested_subtools
-                        )
-                        errors.extend(item_errors)
-
-                        # If this is a calls array, validate params against subtool schema
-                        if nested_subtools and isinstance(item, dict):
-                            subtool_errors = self._validate_subtool_params(
-                                item, nested_subtools, tool_name, item_path
-                            )
-                            errors.extend(subtool_errors)
-
-            # If expected is a dict, it's a nested object schema
-            elif isinstance(expected, dict):
-                if not isinstance(value, dict):
-                    errors.append(f"Tool '{tool_name}': Field '{field_path}' must be an object")
-                else:
-                    # Recurse into nested schema
-                    nested_errors = self._validate_against_schema(
-                        value, expected, tool_name, field_path, schema_subtools
-                    )
-                    errors.extend(nested_errors)
-
-            # If expected is a string, it's a type name
-            elif isinstance(expected, str):
-                if not self._check_type(value, expected):
-                    errors.append(
-                        f"Tool '{tool_name}': Field '{field_path}' must be {expected}, "
-                        f"got {type(value).__name__}"
-                    )
+            errors.extend(self._validate_schema_value(value, expected, field_path, schema_subtools))
 
         # Check for extra fields if additionalProperties is false
         if not allow_additional and isinstance(data, dict):
             extra_fields = set(data.keys()) - defined_fields
             for extra in extra_fields:
                 extra_path = f"{path}.{extra}" if path else extra
-                errors.append(f"Tool '{tool_name}': Unexpected field '{extra_path}' (additionalProperties: false)")
+                errors.append(f"Unexpected field '{extra_path}' (additionalProperties: false)")
+
+        return errors
+
+    def _validate_schema_value(
+        self,
+        value: Any,
+        expected: Any,
+        path: str,
+        subtools: Optional[Dict],
+    ) -> List[str]:
+        """Validate one value against a type name or a nested object/array schema."""
+        if isinstance(expected, str):
+            if not self._check_type(value, expected):
+                return [f"Field '{path}' must be {expected}, got {type(value).__name__}"]
+            return []
+
+        if isinstance(expected, dict):
+            if "_item_schema" not in expected and not isinstance(value, dict):
+                return [f"Field '{path}' must be an object"]
+            return self._validate_against_schema(value, expected, path, subtools)
+
+        return []
+
+    def _validate_items(
+        self,
+        value: Any,
+        schema: Dict,
+        path: str,
+        subtools: Optional[Dict],
+    ) -> List[str]:
+        """Validate an array whose items must match ``schema['_item_schema']``."""
+        label = path or "arguments"
+        if not isinstance(value, list):
+            return [f"Field '{label}' must be an array"]
+
+        item_schema = schema["_item_schema"]
+        item_subtools = schema.get("_subtools", subtools)
+        errors = []
+
+        for i, item in enumerate(value):
+            item_path = f"{label}[{i}]"
+            errors.extend(self._validate_schema_value(item, item_schema, item_path, item_subtools))
+
+            # If this is a calls array, validate params against subtool schema
+            if item_subtools and isinstance(item, dict):
+                errors.extend(self._validate_subtool_params(item, item_subtools, item_path))
 
         return errors
 
@@ -418,7 +441,6 @@ class StructureValidator:
         self,
         call_item: Dict,
         subtools: Dict,
-        tool_name: str,
         path: str
     ) -> List[str]:
         """
@@ -427,11 +449,10 @@ class StructureValidator:
         Args:
             call_item: A single call item with {agent, tool, params}
             subtools: Subtool manifests {agentName: {toolName: {schema}}}
-            tool_name: Parent tool name for error messages
             path: Current path for error messages
 
         Returns:
-            List of error messages
+            List of failure details
         """
         errors = []
 
@@ -450,7 +471,7 @@ class StructureValidator:
             # Tool not in agent manifest - report as unknown
             valid_tools = list(agent_manifest.keys())
             errors.append(
-                f"Tool '{tool_name}': Unknown subtool '{agent}.{subtool}'. "
+                f"Unknown subtool '{agent}.{subtool}'. "
                 f"Valid tools for {agent}: {valid_tools}"
             )
             return errors
@@ -462,7 +483,7 @@ class StructureValidator:
         for param in required_params:
             if param not in params:
                 errors.append(
-                    f"Tool '{tool_name}': {path} - '{agent}.{subtool}' "
+                    f"{path} - '{agent}.{subtool}' "
                     f"missing required param '{param}'"
                 )
 
@@ -475,7 +496,7 @@ class StructureValidator:
                 value = params[param]
                 if isinstance(expected_type, str) and not self._check_type(value, expected_type):
                     errors.append(
-                        f"Tool '{tool_name}': {path} - '{agent}.{subtool}' "
+                        f"{path} - '{agent}.{subtool}' "
                         f"param '{param}' must be {expected_type}, got {type(value).__name__}"
                     )
 

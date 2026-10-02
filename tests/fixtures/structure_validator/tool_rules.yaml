@@ -1,0 +1,24 @@
+# Rubric-style `tools` validation rules for StructureValidator tests.
+# Tool names and fields are deliberately unrelated to the bundled toy wrapper.
+
+templated:
+  - tools:
+      batchJob:
+        _required: [owner, steps]
+        owner: string
+        steps:
+          _item_schema:
+            action: string
+            options: object
+        labels:
+          _item_schema: string
+        grid:
+          _item_schema:
+            _item_schema: number
+    error: "batch rule failed for {tool_name}: {details}"
+
+untemplated:
+  - tools:
+      batchJob:
+        _required: [owner]
+        owner: string

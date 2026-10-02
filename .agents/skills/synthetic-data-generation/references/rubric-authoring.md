@@ -106,8 +106,17 @@ validations:
       YOUR_WRAPPER_NAME:
         _required: [FIELD_A, FIELD_B]
         _additionalProperties: false
+        FIELD_A: string
+        FIELD_B: string
+        FIELD_LIST:
+          _item_schema: string   # array; every item must match this schema or type
     error: "Configured wrapper validation failed: {details}"
 ```
+
+`_required` only applies to fields declared in the manifest, so declare every
+field the wrapper accepts. `error` is a template applied to every failure of the
+rule: `{tool_name}` is the called tool and `{details}` the specific failure
+(default `Tool '{tool_name}': {details}`).
 
 ### Cross-Scope ID Validation
 
