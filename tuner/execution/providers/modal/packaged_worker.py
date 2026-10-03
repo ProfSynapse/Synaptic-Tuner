@@ -599,7 +599,10 @@ class ModalPackagedWorker:
         from tuner.training.recipes import canonical_json_bytes
         effect_id = dispatch.submit_command.operation.effect.effect_id
         configured = json.loads(dispatch.workload_bytes)["configuration"]["document"]["post_training"]
-        from tuner.runtime.post_training_eval import validate_evaluation_record, MAX_EVALUATION_RECORD_BYTES
+        from tuner.runtime.post_training_eval import (
+            canonical_evaluation_document_bytes, validate_evaluation_record,
+            MAX_EVALUATION_RECORD_BYTES,
+        )
         validate_evaluation_record(record, config=configured)
         document = {
             "schema_version": "synaptic-modal-packaged-evaluation/v1",
@@ -611,7 +614,7 @@ class ModalPackagedWorker:
             "post_training_sha256": hashlib.sha256(canonical_json_bytes(configured)).hexdigest(),
             "evaluation": record,
         }
-        raw = canonical_json_bytes(document)
+        raw = canonical_evaluation_document_bytes(document)
         if len(raw) > MAX_EVALUATION_RECORD_BYTES:
             raise ValueError("packaged evaluation record exceeds bound")
         tag = self._signer.sign("modal-packaged-evaluation/v1", raw, dispatch.key_ref)

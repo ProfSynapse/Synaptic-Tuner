@@ -65,9 +65,9 @@ class CallbackExecutor(Executor):
         return result
 
 
-def _worker(tmp_path, monkeypatch):
+def _worker(tmp_path, monkeypatch, *, signer=None):
     binding, receipt, original_workload, policy = _case()
-    auth, signer = Auth(), Signer()
+    auth, signer = Auth(), signer if signer is not None else Signer()
     original = parse_modal_packaged_dispatch(
         build_modal_packaged_dispatch(binding, receipt, original_workload, policy, auth,
                                       key_ref="dispatch-key", environment=(("PATH", "/usr/bin:/bin"),)),
@@ -125,6 +125,86 @@ def test_worker_commits_training_before_evaluation_and_retains_record(tmp_path, 
     assert json.loads(evaluation.read_bytes())["evaluation"]["gate_passed"] is True
 
 
+def test_worker_publishes_large_unicode_response_without_truncation(tmp_path, monkeypatch):
+    binding, worker, _, roots, opted = _worker(tmp_path, monkeypatch)
+    config = json.loads(opted)["configuration"]["document"]["post_training"]
+    unit = "The moon rose over the sea. "
+    prose = unit * ((post_training_eval.MAX_EVALUATION_RESPONSE_BYTES - 512) // len(unit)) + "🌙"
+    assert post_training_eval.MAX_EVALUATION_RESPONSE_BYTES - 1024 < len(prose.encode("utf-8")) < post_training_eval.MAX_EVALUATION_RESPONSE_BYTES
+
+    def evaluate(_config, **kwargs):
+        record = _record(config, workload_digest=kwargs["bindings"]["workload_digest"],
+                         adapter_digest=kwargs["bindings"]["adapter_digest"])
+        record["cases"][0]["response"] = prose
+        return record
+
+    monkeypatch.setattr(post_training_eval, "execute_post_training_evaluation", evaluate)
+    result = worker(b"dispatch", "fc-1", commit_artifacts=lambda: None,
+                    commit_control=lambda: None)
+    assert result["status_code"] == "completed"
+    effect = binding.command.operation.effect.effect_id
+    raw = (roots.artifacts / f"operations/{effect}/evaluation/record.json").read_bytes()
+    assert post_training_eval.MAX_EVALUATION_RESPONSE_BYTES < len(raw) < post_training_eval.MAX_EVALUATION_RECORD_BYTES
+    assert json.loads(raw)["evaluation"]["cases"][0]["response"] == prose
+
+
+def test_worker_signed_large_evaluation_round_trips_through_reader(tmp_path, monkeypatch):
+    class DigestAuth:
+        def sign(self, purpose, payload, key_ref):
+            return hashlib.sha256(payload).digest()
+
+        def verify(self, purpose, payload, tag, key_ref):
+            return (purpose == "modal-packaged-evaluation/v1"
+                    and key_ref == "dispatch-key"
+                    and tag == hashlib.sha256(payload).digest())
+
+    auth = DigestAuth()
+    binding, worker, _, roots, opted = _worker(tmp_path, monkeypatch, signer=auth)
+    config = json.loads(opted)["configuration"]["document"]["post_training"]
+    compiled = compile_packaged_sft_workload(
+        resolved_config=CanonicalDocument.from_mapping(json.loads(opted)["configuration"]["document"]))
+    unit = "A luminous harbor answered. "
+    prose = unit * ((post_training_eval.MAX_EVALUATION_RESPONSE_BYTES - 512) // len(unit)) + "🌙"
+    assert 64 * 1024 < len(prose.encode("utf-8")) < post_training_eval.MAX_EVALUATION_RESPONSE_BYTES
+    retained = {}
+
+    def evaluate(_config, **kwargs):
+        retained["adapter_digest"] = kwargs["bindings"]["adapter_digest"]
+        record = _record(config, workload_digest=compiled.fingerprint,
+                         adapter_digest=retained["adapter_digest"])
+        record["cases"][0]["response"] = prose
+        return record
+
+    monkeypatch.setattr(post_training_eval, "execute_post_training_evaluation", evaluate)
+    assert worker(b"dispatch", "fc-1", commit_artifacts=lambda: None,
+                  commit_control=lambda: None)["status_code"] == "completed"
+    effect = binding.command.operation.effect.effect_id
+    raw = (roots.artifacts / f"operations/{effect}/evaluation/record.json").read_bytes()
+    tag = (roots.artifacts / f"operations/{effect}/evaluation/record.mac").read_bytes()
+    completion_raw = (roots.control / f"operations/{effect}/evidence/packaged-completion.json").read_bytes()
+    completion = SimpleNamespace(
+        effect_id=effect, provider_job_ref="fc-1",
+        completion_digest=hashlib.sha256(completion_raw).hexdigest(),
+        members=(SimpleNamespace(role="final_model", sha256=retained["adapter_digest"]),),
+    )
+    # _worker changes only its in-memory workload to isolate worker publication;
+    # project the matching compiled fingerprint for the reader's exact binding.
+    reader_binding = SimpleNamespace(
+        execution_binding=SimpleNamespace(workload_digest=compiled.fingerprint,
+                                          binding_digest=binding.execution_binding.binding_digest),
+        command_digest=binding.command_digest, provider_facts=binding.provider_facts,
+    )
+    reader = ModalPackagedReader.__new__(ModalPackagedReader)
+    reader._facade, reader._verifier, reader._key_ref = ReadFacade(raw, tag), auth, "dispatch-key"
+    monkeypatch.setattr(ModalPackagedReader, "observe_completion",
+                        lambda self, _binding, *, provider_job_ref: completion)
+    readback = reader.read_evaluation(reader_binding, provider_job_ref="fc-1",
+                                      workload_bytes=opted)
+    assert readback == raw
+    assert len(readback) > 64 * 1024
+    assert json.loads(readback)["evaluation"]["cases"][0]["response"] == prose
+
+
 def test_worker_evaluation_failure_keeps_training_completion(tmp_path, monkeypatch):
     binding, worker, executor, roots, _ = _worker(tmp_path, monkeypatch)
     events = []
@@ -174,23 +254,31 @@ def test_reader_requires_signed_record_bound_to_exact_workload_and_adapter(monke
         effect_id="effect", provider_job_ref="fc-1", completion_digest="d" * 64,
         members=(SimpleNamespace(role="final_model", sha256="e" * 64),),
     )
-    payload = canonical_bytes({
+    record = _record(config, workload_digest=compiled.fingerprint,
+                     adapter_digest="e" * 64)
+    unit = "A distant bell answered. "
+    large_response = unit * ((post_training_eval.MAX_EVALUATION_RESPONSE_BYTES - 512) // len(unit)) + "🔔"
+    assert post_training_eval.MAX_EVALUATION_RESPONSE_BYTES - 1024 < len(large_response.encode("utf-8")) < post_training_eval.MAX_EVALUATION_RESPONSE_BYTES
+    record["cases"][0]["response"] = large_response
+    payload = post_training_eval.canonical_evaluation_document_bytes({
         "schema_version": "synaptic-modal-packaged-evaluation/v1",
         "effect_id": "effect", "command_digest": binding.command_digest,
         "provider_job_ref": "fc-1", "execution_binding_digest": "b" * 64,
         "training_completion_sha256": completion.completion_digest,
         "post_training_sha256": hashlib.sha256(canonical_bytes(config)).hexdigest(),
-        "evaluation": _record(config, workload_digest=compiled.fingerprint,
-                              adapter_digest="e" * 64),
+        "evaluation": record,
     })
+    assert len(payload) > post_training_eval.MAX_EVALUATION_RESPONSE_BYTES
     reader = ModalPackagedReader.__new__(ModalPackagedReader)
     reader._facade = ReadFacade(payload, hashlib.sha256(payload).digest())
     reader._verifier = ReadVerifier()
     reader._key_ref = "key"
     monkeypatch.setattr(ModalPackagedReader, "observe_completion",
                         lambda self, _binding, *, provider_job_ref: completion)
-    assert reader.read_evaluation(binding, provider_job_ref="fc-1",
-                                  workload_bytes=compiled.canonical_bytes) == payload
+    readback = reader.read_evaluation(binding, provider_job_ref="fc-1",
+                                      workload_bytes=compiled.canonical_bytes)
+    assert readback == payload
+    assert json.loads(readback)["evaluation"]["cases"][0]["response"] == large_response
     reader._facade = ReadFacade(payload, b"wrong")
     with pytest.raises(ValueError, match="authentication"):
         reader.read_evaluation(binding, provider_job_ref="fc-1",

@@ -233,7 +233,10 @@ class ModalPackagedReader:
         from tuner.training.packaged_compilation import compile_packaged_sft_workload
         from tuner.training.contracts import CanonicalDocument
         from tuner.training.post_training import validate_post_training_config
-        from tuner.runtime.post_training_eval import MAX_EVALUATION_RECORD_BYTES, validate_evaluation_record
+        from tuner.runtime.post_training_eval import (
+            canonical_evaluation_document_bytes, MAX_EVALUATION_RECORD_BYTES,
+            validate_evaluation_record,
+        )
         workload = json.loads(workload_bytes)
         compiled = compile_packaged_sft_workload(
             resolved_config=CanonicalDocument.from_mapping(workload["configuration"]["document"]))
@@ -262,7 +265,7 @@ class ModalPackagedReader:
             "post_training_sha256": hashlib.sha256(canonical_json_bytes(config)).hexdigest(),
         }
         if (type(document) is not dict or set(document) != {*expected, "evaluation"}
-                or canonical_json_bytes(document) != raw
+                or canonical_evaluation_document_bytes(document) != raw
                 or any(document[key] != value for key, value in expected.items())):
             raise ValueError("packaged evaluation binding mismatch")
         record = validate_evaluation_record(document["evaluation"], config=config)

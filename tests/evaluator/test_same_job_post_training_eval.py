@@ -1073,9 +1073,85 @@ def test_cleanup_uncertainty_cannot_return_success(tmp_path: Path, monkeypatch):
     assert caught.value.cleanup_lease is not None
 
 
+def test_large_unicode_response_survives_complete_evaluation_record(tmp_path: Path, monkeypatch):
+    prose = ("A quiet star crossed the harbor. ✨\n" * 4096)
+    assert 64 * 1024 < len(prose.encode("utf-8")) < post_training_eval.MAX_EVALUATION_RESPONSE_BYTES
+    config = _config()
+    config["evaluation"]["max_cases"] = 1
+    config["evaluation"]["scenarios"] = config["evaluation"]["scenarios"][:1]
+    config["evaluation"]["scenarios"][0]["correct"]["assertions"][0]["value"] = prose
+    config["evaluation"]["generation"]["max_tokens"] = None
+
+    class Lease:
+        served_model_name = "new-adapter"
+        host, port = "127.0.0.1", 8000
+
+        def close(self):
+            return True
+
+    class Client:
+        def __init__(self, settings, **kwargs):
+            assert settings.max_tokens is None
+            assert kwargs["max_response_bytes"] == post_training_eval.MAX_EVALUATION_RESPONSE_BYTES
+
+        def chat(self, messages):
+            return BackendResponse(message=prose, raw={}, latency_s=0.1)
+
+    monkeypatch.setattr(vllm_runtime, "start_vllm_runtime", lambda *args, **kwargs: Lease())
+    monkeypatch.setattr(vllm_client, "VLLMClient", Client)
+    record = post_training_eval.execute_post_training_evaluation(
+        config, base_model_path=tmp_path, adapter_path=tmp_path,
+        tokenizer_path=tmp_path, validate=lambda: None, environment={},
+        cwd=tmp_path, python_executable=sys.executable, bindings=_bindings(),
+    )
+    assert record["status"] == "completed" and record["gate_passed"] is True
+    assert record["cases"][0]["response"] == prose
+    assert post_training_eval.validate_evaluation_record(
+        json.loads(json.dumps(record, ensure_ascii=False)), config=config,
+        bindings=_bindings(),
+    )["cases"][0]["response"] == prose
+
+
+def test_evaluation_response_utf8_byte_boundary_is_closed():
+    maximum = post_training_eval.MAX_EVALUATION_RESPONSE_BYTES
+    exactly = "é" * (maximum // 2)
+    assert len(exactly.encode("utf-8")) == maximum
+    assert post_training_eval._response(exactly) == exactly
+    with pytest.raises(ValueError, match="bound"):
+        post_training_eval._response(exactly + "é")
+    config = _config()
+    record = {
+        "schema_version": "synaptic-post-training-evaluation/v1",
+        "status": "completed", "gate_passed": True, "failure_code": None,
+        "case_count": 2, "passed_count": 2, "pass_rate": 1.0,
+        "min_pass_rate": 1.0, "bindings": _bindings(),
+        "cases": [{"id": item["id"], "status": "pass", "response": "ready",
+                   "latency_seconds": 0.1, "matched_path": "default", "error_code": None}
+                  for item in config["evaluation"]["scenarios"]],
+    }
+    record["cases"][0]["response"] = exactly
+    post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
+    record["cases"][0]["response"] = exactly + "é"
+    with pytest.raises(ValueError, match="response"):
+        post_training_eval.validate_evaluation_record(record, config=config, bindings=_bindings())
+
+
+def test_evaluation_document_canonical_bytes_preserve_legacy_and_16m_bound():
+    from tuner.training.recipes import canonical_json_bytes
+    small = {"response": "The quiet harbor 🌙", "value": 1}
+    assert post_training_eval.canonical_evaluation_document_bytes(small) == canonical_json_bytes(small)
+    maximum = post_training_eval.MAX_EVALUATION_RECORD_BYTES
+    overhead = len(post_training_eval.canonical_evaluation_document_bytes({"response": ""}))
+    exact = {"response": "x" * (maximum - overhead)}
+    assert len(post_training_eval.canonical_evaluation_document_bytes(exact)) == maximum
+    exact["response"] += "x"
+    with pytest.raises(ValueError, match="aggregate bound"):
+        post_training_eval.canonical_evaluation_document_bytes(exact)
+
+
 @pytest.mark.parametrize("message,expected_code", [
     (RuntimeError("private backend detail"), "evaluation_error"),
-    ("x" * (64 * 1024 + 1), "oversized_response"),
+    ("x" * (post_training_eval.MAX_EVALUATION_RESPONSE_BYTES + 1), "oversized_response"),
 ], ids=["backend-error", "oversized-response"])
 def test_failed_generation_has_closed_code_and_cannot_pass_zero_gate(
     tmp_path: Path, monkeypatch, message, expected_code

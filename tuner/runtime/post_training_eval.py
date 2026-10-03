@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import json
 from contextlib import contextmanager
 from pathlib import Path
 import re
@@ -16,7 +17,7 @@ from tuner.training.post_training import validate_post_training_config
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _BINDING_KEYS = {"workload_digest", "model_snapshot_digest", "adapter_digest"}
-_RESPONSE_BYTES = 64 * 1024
+MAX_EVALUATION_RESPONSE_BYTES = 1 << 20
 _REQUEST_FAILURE_CODES = frozenset({
     "request_timeout", "request_connection", "request_transport", "request_validation",
     "request_backend", "request_unknown", "http_other", "http_400", "http_401",
@@ -217,9 +218,25 @@ def _response(value: object) -> str | None:
     if type(value) is not str:
         return None
     encoded = value.encode("utf-8", errors="replace")
-    if len(encoded) > _RESPONSE_BYTES:
+    if len(encoded) > MAX_EVALUATION_RESPONSE_BYTES:
         raise ValueError("evaluation response exceeds its bound")
     return value
+
+
+def canonical_evaluation_document_bytes(value: Mapping[str, object]) -> bytes:
+    """Canonical evaluation publication bytes under the aggregate record bound."""
+    if not isinstance(value, Mapping):
+        raise TypeError("evaluation document root must be a mapping")
+    try:
+        encoded = json.dumps(
+            value, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise ValueError("evaluation document is not finite canonical JSON") from exc
+    if not encoded or len(encoded) > MAX_EVALUATION_RECORD_BYTES:
+        raise ValueError("evaluation document exceeds its aggregate bound")
+    return encoded
 
 
 def execute_post_training_evaluation(
@@ -345,7 +362,8 @@ def execute_post_training_evaluation(
                 client = VLLMClient(
                     settings, timeout=remaining, retries=0,
                     trust_environment=False, allow_redirects=False,
-                    max_request_bytes=1 << 20, max_response_bytes=1 << 20,
+                    max_request_bytes=1 << 20,
+                    max_response_bytes=MAX_EVALUATION_RESPONSE_BYTES,
                 )
                 # Requests uses connect/read inactivity timeouts, not a total
                 # wall-clock deadline. Drain and close its transport normally,
@@ -495,7 +513,7 @@ def validate_evaluation_record(
             raise ValueError("evaluation case outcome is invalid")
         if case["response"] is not None and (
             type(case["response"]) is not str
-            or len(case["response"].encode("utf-8")) > _RESPONSE_BYTES
+            or len(case["response"].encode("utf-8")) > MAX_EVALUATION_RESPONSE_BYTES
         ):
             raise ValueError("evaluation response is invalid")
         latency = case["latency_seconds"]
