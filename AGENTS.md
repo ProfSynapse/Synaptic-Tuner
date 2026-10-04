@@ -4,6 +4,8 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Fine-Tuning Workflow Discipline
 
+- Runtime profiles MUST be configuration-driven. Recipes select named profiles; profile data declares exact model/revision/method compatibility, immutable image/inventory and associated build configuration. Planning and execution must resolve the same bound selection. Never add model-specific profile constants, switches or fallback mappings to a launcher. A candidate profile permits qualification, not a claim of successful model/hardware qualification; retain independent smoke evidence before promotion.
+
 - For any task in this repo, begin by loading the most relevant canonical skill from `.skills/`. For fine-tuning, cloud training, evaluation, experiment-loop, checkpoint-eval, model-selection, or dataset-publishing work, that starting point is usually the `fine-tuning` skill.
 - `.skills/` is the canonical skill source for this repo. `.agents/skills` and `.claude/skills` are synced copies and must match it exactly.
 - After changing canonical skills, run `python3 .skills/scripts/sync_skill_trees.py` and verify with `python3 .skills/scripts/sync_skill_trees.py --check`.
@@ -177,7 +179,15 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - Treat mounted Volume paths as hostile shared storage: on the locked Linux runtime, traverse and open through retained parent directory descriptors (`dir_fd`/openat semantics) so ancestor substitution cannot redirect I/O; bounded reads must reject symlink/reparse leaves and compare file identity across the read, while writes remain exclusive and collision-failing.
 - A self-consistent provider observation cannot override the packaged image, SDK, Python, dependency, wrapper, worker, SFT runtime, or ML-stack lock. No live preflight or paid smoke may run until the provider-free barrier and independent review are green.
 
-## Cloud Artifact UX
+## Cloud Artifact and Evaluation UX
+
+- Keep evaluation response retention aligned with its admitted HTTP byte budget,
+  and serialize the signed evaluation envelope with its evaluation-specific
+  aggregate bound, not the smaller workload-document bound. Test complete UTF-8
+  responses through execution, publication and authenticated readback, including
+  byte-boundary rejection and legacy canonical-byte compatibility. A null output
+  token budget does not remove finite context, deadline or transport bounds.
+  Do not replay training to recover an evaluation-only or local readback failure.
 
 - Modal artifact downloads must pass the shared per-artifact bound, not the
   aggregate artifact-set bound. Pinned SDK file blocks may exceed the public

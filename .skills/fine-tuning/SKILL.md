@@ -98,6 +98,12 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 
 ## CLI Discipline
 
+- Runtime profiles are configuration-driven: the recipe selects a named profile, and profile data binds exact model/revision/method compatibility, immutable image/inventory and its build configuration. Planning and execution must use the same bound selection. Never introduce model-specific profile switches or fallback maps in launcher code. Adding a candidate model profile is not successful GPU qualification; retain the exact smoke evidence before promotion. Check adapter artifact size as well as VRAM before a larger-model launch.
+- Modal packaged training has a shared generic artifact policy of 512 MiB per file and 768 MiB for the complete artifact set. Use the shared per-file bound for downloads and the aggregate bound for inventory admission; keep both checks and end-to-end hashes when sizing a larger adapter. The limit change does not qualify a candidate model or GPU.
+- Retain bounded optional generation finish reason and token usage for diagnosing why an evaluation response stopped. Neither field is a writing-quality score; review completed text separately.
+- Modal packaged training has a shared generic artifact policy of 512 MiB per file and 768 MiB for the complete artifact set. Use the shared per-file bound for downloads and the aggregate bound for inventory admission; keep both checks and end-to-end hashes when sizing a larger adapter. The limit change does not qualify a candidate model or GPU.
+- Retain bounded optional generation finish reason and token usage for diagnosing why an evaluation response stopped. Neither field is a writing-quality score; review completed text separately.
+
 - Never cancel a job, delete bucket artifacts, remove files, or relaunch a cost-incurring cloud run unless the user has explicitly approved that exact action in the current conversation.
 - Treat cancel/delete/relaunch as irreversible or materially destructive operator actions. Do not infer permission from surrounding context or from a user's broader goal.
 - Do not guess command names or flags from memory.

@@ -226,7 +226,7 @@
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_producer_py": {
       "path": "tuner/execution/providers/modal/coordinator_producer.py",
-      "sha256": "7cf35df7e9ed4a005fd742bba3597d5d720811d12edc661131a3af81ea319cd6"
+      "sha256": "da590543f77cff711191f11785ac028973ef8698dc3eb8d9a4de15e41ac04a78"
     },
     "bootstrap__tuner__execution__providers__modal__coordinator_wire_py": {
       "path": "tuner/execution/providers/modal/coordinator_wire.py",
