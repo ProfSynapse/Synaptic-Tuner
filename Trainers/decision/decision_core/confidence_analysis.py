@@ -21,6 +21,19 @@ Brier, AUROC(confidence -> correct) with a bootstrap floor, AURC, the
 confident-wrong / underconfident-right pair, the confidence-over-chance gap on
 ablated twins,
 split-conformal LAC sets per kind, and ordinal intervals for score questions.
+
+Optional extras (config-driven):
+  directions  external frozen directions (``mechinterp-direction/v1`` JSON from
+              MechInterp.probe.fit.freeze_direction) scored on every TEST row's
+              <answer> state; AUROC vs correctness / prior knowledge per direction
+  export      per-row option probabilities and raw scores in test_rows.jsonl, and
+              (opt-in) the TEST <answer> states as test_states.npz
+
+Layer convention: a "layer" here is an index into the decoder's
+``output_hidden_states`` tuple -- 0 is the embedding output, i >= 1 is the output
+of decoder block i (``layers[i - 1]``); in HF Llama/Qwen-style decoders the last
+index usually carries the final norm. MechInterp.extraction captures the same
+tuple, so a direction frozen at index i there is scored at index i here.
 """
 
 from __future__ import annotations
@@ -109,6 +122,26 @@ class OutputSection:
 
 
 @dataclass
+class ExportSection:
+    states: bool = False   # write test_states.npz: <answer> states of TEST rows (float16)
+    layers: Any = None     # null -> every captured layer; else a subset of the captured indices
+    per_row: bool = True   # add option probabilities and raw scores to test_rows.jsonl
+
+
+@dataclass
+class DirectionSpec:
+    """An external frozen direction (``mechinterp-direction/v1`` JSON) to score TEST rows along."""
+
+    name: str = ""
+    path: str = ""
+    layer: int | None = None  # hidden-state index (capture.layers convention); null -> the JSON's layer
+
+
+DIRECTION_SCHEMA = "mechinterp-direction/v1"
+_DIRECTION_NAME_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
+
+
+@dataclass
 class ConfidenceAnalysisConfig:
     checkpoint: str = ""
     data: DataSection = field(default_factory=DataSection)
@@ -119,9 +152,39 @@ class ConfidenceAnalysisConfig:
     thresholds: ThresholdSection = field(default_factory=ThresholdSection)
     bootstrap: BootstrapSection = field(default_factory=BootstrapSection)
     output: OutputSection = field(default_factory=OutputSection)
+    export: ExportSection = field(default_factory=ExportSection)
+    directions: list[DirectionSpec] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _parse_directions(path: str | Path, value: Any) -> list[DirectionSpec]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{path}: 'directions' must be a list of {{name, path, layer?}} mappings")
+    allowed = {f.name for f in fields(DirectionSpec)}
+    out: list[DirectionSpec] = []
+    for i, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError(f"{path}: directions[{i}] must be a mapping")
+        bad = sorted(set(item) - allowed)
+        if bad:
+            raise ValueError(f"{path}: unknown key(s) in directions[{i}]: {bad}")
+        name, dpath, layer = str(item.get("name") or ""), str(item.get("path") or ""), item.get("layer")
+        if not name or not set(name) <= _DIRECTION_NAME_CHARS:
+            raise ValueError(f"{path}: directions[{i}].name must be non-empty [A-Za-z0-9_.-], got {name!r}")
+        if not dpath:
+            raise ValueError(f"{path}: directions[{i}] ({name}) needs a path")
+        if layer is not None and (isinstance(layer, bool) or not isinstance(layer, int) or layer < 0):
+            raise ValueError(f"{path}: directions[{i}] ({name}).layer must be a hidden-state index >= 0")
+        out.append(DirectionSpec(name=name, path=dpath, layer=layer))
+    names = [d.name for d in out]
+    dup = sorted({n for n in names if names.count(n) > 1})
+    if dup:
+        raise ValueError(f"{path}: duplicate direction name(s) {dup}")
+    return out
 
 
 def load_analysis_config(path: str | Path) -> ConfidenceAnalysisConfig:
@@ -134,6 +197,9 @@ def load_analysis_config(path: str | Path) -> ConfidenceAnalysisConfig:
     for name, value in raw.items():
         if name == "checkpoint":
             cfg.checkpoint = str(value or "")
+            continue
+        if name == "directions":
+            cfg.directions = _parse_directions(path, value)
             continue
         section = getattr(cfg, name)
         if not isinstance(value, dict):
@@ -149,6 +215,22 @@ def load_analysis_config(path: str | Path) -> ConfidenceAnalysisConfig:
         raise ValueError(f"{path}: data.files is empty")
     if cfg.data.fit_fraction + cfg.data.cal_fraction >= 1.0:
         raise ValueError("data.fit_fraction + data.cal_fraction must leave rows for TEST")
+    ex = cfg.export
+    if not isinstance(ex.states, bool) or not isinstance(ex.per_row, bool):
+        raise ValueError(f"{path}: export.states and export.per_row must be true/false")
+    if ex.layers is not None:
+        if (not isinstance(ex.layers, list) or not ex.layers
+                or any(isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in ex.layers)):
+            raise ValueError(f"{path}: export.layers must be null or a non-empty list of hidden-state indices")
+        if cfg.capture.layers != "all":
+            missing = sorted(set(ex.layers) - {int(x) for x in cfg.capture.layers})
+            if missing:
+                raise ValueError(f"{path}: export.layers {missing} are not in capture.layers")
+    if cfg.capture.layers != "all":
+        captured = {int(x) for x in cfg.capture.layers}
+        for d in cfg.directions:
+            if d.layer is not None and d.layer not in captured:
+                raise ValueError(f"{path}: directions {d.name!r} layer {d.layer} is not in capture.layers")
     return cfg
 
 
@@ -281,6 +363,115 @@ def paired_auroc_diff(labels: np.ndarray, a: np.ndarray, b: np.ndarray, n_boot: 
     return {"diff": point, "ci95": [float(lo), float(hi)], "n_boot_used": len(diffs)}
 
 
+# --------------------------------------------------------------------------
+# External frozen directions
+# --------------------------------------------------------------------------
+
+DIRECTION_SCORE_RULE = "logistic_decision_value: raw_norm * (h @ vector) + intercept  (== h @ coef + intercept)"
+
+
+def load_direction(spec: DirectionSpec, path: Path, hidden_size: int | None = None) -> dict:
+    """Load and sanity-check a frozen direction written by ``MechInterp.probe.fit.freeze_direction``."""
+    from MechInterp.probe.fit import load_frozen_direction
+
+    if not path.is_file():
+        raise FileNotFoundError(f"direction {spec.name!r}: no file at {path}")
+    rec = load_frozen_direction(path)
+    if rec.get("schema_version") != DIRECTION_SCHEMA:
+        raise ValueError(f"direction {spec.name!r}: {path} has schema_version {rec.get('schema_version')!r}, "
+                         f"expected {DIRECTION_SCHEMA!r}")
+    missing = [k for k in ("vector", "intercept") if rec.get(k) is None]
+    if rec.get("normalized") and rec.get("raw_norm") is None:
+        missing.append("raw_norm")
+    if spec.layer is None and rec.get("layer") is None:
+        missing.append("layer")
+    if missing:
+        raise ValueError(f"direction {spec.name!r}: {path} lacks field(s) {missing}")
+    dim = int(np.asarray(rec["vector"]).size)
+    if rec.get("hidden_dim") is not None and int(rec["hidden_dim"]) != dim:
+        raise ValueError(f"direction {spec.name!r}: vector has {dim} dims but hidden_dim says {rec['hidden_dim']}")
+    if rec.get("mu") is not None and np.asarray(rec["mu"]).size != dim:
+        raise ValueError(f"direction {spec.name!r}: mu and vector dimensions differ")
+    if hidden_size is not None and dim != hidden_size:
+        raise ValueError(f"direction {spec.name!r}: vector dimension {dim} != the model's hidden size {hidden_size}")
+    rec["resolved_layer"] = int(spec.layer if spec.layer is not None else rec["layer"])
+    return rec
+
+
+def score_direction(record: dict, X: np.ndarray) -> np.ndarray:
+    """Score rows with a frozen direction's own logistic decision function.
+
+    ``freeze_direction`` fits ``score(h) = h @ coef + intercept`` and stores
+    ``vector = coef / raw_norm`` when ``normalized``. Undoing that scale gives
+    back exactly the score its ``sigma`` and ``calibration`` class statistics
+    were computed on, so per-row values are comparable with the JSON. It equals
+    ``raw_norm * ((h - mu) @ vector)`` plus a constant, so AUROCs match the
+    mu-centred projection on the unit vector.
+    """
+    vector = np.asarray(record["vector"], dtype=np.float64)
+    if X.shape[1] != vector.size:
+        raise ValueError(f"direction vector has {vector.size} dims, captured states have {X.shape[1]}")
+    scale = float(record["raw_norm"]) if record.get("normalized") else 1.0
+    return scale * (X.astype(np.float64) @ vector) + float(record["intercept"])
+
+
+def score_directions(directions: list[tuple[DirectionSpec, dict]], states: dict[int, np.ndarray]
+                     ) -> dict[str, np.ndarray]:
+    """Score captured <answer> states along each loaded direction; fail loudly on layer / size mismatch."""
+    out: dict[str, np.ndarray] = {}
+    for spec, rec in directions:
+        layer = rec["resolved_layer"]
+        if layer not in states:
+            raise ValueError(f"direction {spec.name!r}: hidden-state index {layer} was not captured "
+                             f"(captured: {sorted(states)}; set capture.layers or directions[].layer)")
+        dim, size = states[layer].shape[1], int(np.asarray(rec["vector"]).size)
+        if size != dim:
+            raise ValueError(f"direction {spec.name!r}: vector dimension {size} != the model's hidden size {dim}")
+        out[spec.name] = score_direction(rec, states[layer])
+    return out
+
+
+def _moments(x: np.ndarray) -> dict:
+    return {"n": int(x.size), "mean": float(x.mean()) if x.size else float("nan"),
+            "std": float(x.std()) if x.size else float("nan")}
+
+
+def direction_block(score: np.ndarray, record: dict, spec: DirectionSpec, ok_t: np.ndarray, r1: np.ndarray,
+                    knowledge: list[Any], boot: BootstrapSection) -> dict:
+    """AUROCs and class-conditioned moments of one external direction's score on TEST rows."""
+    block: dict[str, Any] = {
+        "path": spec.path,
+        "layer": record["resolved_layer"],
+        "source_layer": record.get("layer"),
+        "score_rule": DIRECTION_SCORE_RULE,
+        "n": int(score.size),
+        "auroc_correct": auroc(ok_t, score),
+        "auroc_correct_minus_r1": paired_auroc_diff(ok_t, score, r1, boot.n_boot, boot.seed),
+        "by_correctness": {"correct": _moments(score[ok_t == 1]), "wrong": _moments(score[ok_t == 0])},
+    }
+    ku = np.array([i for i, lab in enumerate(knowledge) if lab in ("known", "unknown")], dtype=int)
+    if ku.size:
+        y_ku = np.array([1 if knowledge[i] == "known" else 0 for i in ku])
+        block["auroc_known_vs_unknown"] = auroc(y_ku, score[ku])
+        block["auroc_known_vs_unknown_minus_r1"] = paired_auroc_diff(y_ku, score[ku], r1[ku], boot.n_boot,
+                                                                     boot.seed)
+        block["by_knowledge"] = {name: _moments(score[[i for i, lab in enumerate(knowledge) if lab == name]])
+                                 for name in ("known", "unknown", "ambiguous")
+                                 if any(lab == name for lab in knowledge)}
+    return block
+
+
+def export_arrays(states: dict[int, np.ndarray], layers: Any, n_rows: int) -> dict[str, np.ndarray]:
+    """test_states.npz payload: ``L{i}`` (n_rows, d) float16 per hidden-state index, plus ``row_index``."""
+    chosen = sorted(states) if layers is None else [int(x) for x in layers]
+    missing = [i for i in chosen if i not in states]
+    if missing:
+        raise ValueError(f"export.layers {missing} were not captured (captured: {sorted(states)})")
+    out = {f"L{i}": states[i].astype(np.float16) for i in chosen}
+    out["row_index"] = np.arange(n_rows, dtype=np.int64)
+    return out
+
+
 def confidence_block(conf: np.ndarray, correct: np.ndarray, probs_for_ece: list[np.ndarray],
                      labels: list[int], th: ThresholdSection, boot: BootstrapSection) -> dict:
     from MechInterp.stats.gates import auroc_floor
@@ -368,11 +559,21 @@ def ordinal_interval_block(probs: list[np.ndarray], labels: list[int], kinds: li
     return out
 
 
-def analyze(model: Any, cfg: ConfidenceAnalysisConfig, repo_root: Path) -> tuple[dict, list[dict]]:
-    """Run every confidence arm. Returns (report, per-row TEST records)."""
+def analyze(model: Any, cfg: ConfidenceAnalysisConfig, repo_root: Path
+            ) -> tuple[dict, list[dict], dict[str, np.ndarray]]:
+    """Run every confidence arm.
+
+    Returns (report, per-row TEST records, test_states.npz arrays -- empty
+    unless ``export.states``). Record ``row_index`` i is TEST row i and the
+    npz ``row_index`` entry that holds its states.
+    """
     def resolve(p: str) -> Path:
         q = Path(p)
         return q if q.is_absolute() else repo_root / q
+
+    # Load external directions before any forward pass so a bad file fails fast.
+    hidden_size = _hidden_size(model)
+    directions = [(d, load_direction(d, resolve(d.path), hidden_size)) for d in cfg.directions]
 
     rows = stratified_sample(load_examples([resolve(f) for f in cfg.data.files]), cfg.data.max_rows, cfg.data.seed)
     fit_rows, cal_rows, test_rows = split_fit_cal_test(rows, cfg.data.fit_fraction, cfg.data.cal_fraction,
@@ -420,7 +621,9 @@ def analyze(model: Any, cfg: ConfidenceAnalysisConfig, repo_root: Path) -> tuple
     r1_cal = np.array([p.max() for p in probs["cal"]])
     stack = LogisticRegression(C=1.0, max_iter=1000).fit(
         np.column_stack([_logit(r1_cal), dial_score["cal"]]), F["cal"]["correct"])
-    p_stack = stack.predict_proba(np.column_stack([_logit(r1), dial_score["test"]]))[:, 1]
+    stack_X_test = np.column_stack([_logit(r1), dial_score["test"]])
+    p_stack = stack.predict_proba(stack_X_test)[:, 1]
+    stack_score = stack.decision_function(stack_X_test)
 
     report: dict[str, Any] = {
         "schema": "decision-confidence-analysis/v1",
@@ -476,28 +679,48 @@ def analyze(model: Any, cfg: ConfidenceAnalysisConfig, repo_root: Path) -> tuple
         report["readout_as_gate_auroc"] = auroc(
             np.concatenate([np.ones(len(test_rows)), np.zeros(len(test_rows))]), np.concatenate([r1, maxp]))
 
-    knowledge = knowledge_block(fit_rows, test_rows, splits, r1, dial_score["test"], ok_t, cfg)
+    knowledge, ku_probe_score = knowledge_block(fit_rows, test_rows, splits, r1, dial_score["test"], ok_t, cfg)
     if knowledge:
         report["knowledge"] = knowledge
 
+    test_states = splits["test"].states
+    direction_scores = score_directions(directions, test_states)
+    if directions:
+        know_t = [r.meta.get("knowledge") if r.meta else None for r in test_rows]
+        report["directions"] = {spec.name: direction_block(direction_scores[spec.name], rec, spec, ok_t, r1,
+                                                           know_t, boot)
+                                for spec, rec in directions}
+
+    arrays = export_arrays(test_states, cfg.export.layers, len(test_rows)) if cfg.export.states else {}
+
     records = []
     for i, r in enumerate(test_rows):
-        rec = {"task": r.task, "kind": r.kind, "n_options": r.n_options, "gold": r.label,
+        rec = {"row_index": i, "task": r.task, "kind": r.kind, "n_options": r.n_options, "gold": r.label,
                "pred": test["pred"][i], "correct": int(ok_t[i]), "conf_r0": float(r0[i]),
                "conf_r1": float(r1[i]), "p_dial": float(p_dial_test[i]), "p_stack": float(p_stack[i])}
         if cfg.ablation.enabled:
             rec["ablated_max_prob"] = float(probs["test_ablated"][i].max())
             rec["ablated_pred"] = int(np.argmax(probs["test_ablated"][i]))
+        if cfg.export.per_row:
+            rec["probs_r0"] = [float(x) for x in raw["test"][i]]      # canonical option order
+            rec["probs_r1"] = [float(x) for x in probs["test"][i]]
+            rec["dial_score"] = float(dial_score["test"][i])          # probe decision value (logit)
+            rec["stack_score"] = float(stack_score[i])                # stacker decision value (logit)
+            rec["ku_probe_score"] = None if ku_probe_score is None else float(ku_probe_score[i])
+            rec["direction_scores"] = {n: float(s[i]) for n, s in direction_scores.items()}
         if r.meta:
             rec["meta"] = r.meta
         records.append(rec)
-    return report, records
+    return report, records, arrays
 
 
 def knowledge_block(fit_rows: list[DecisionExample], test_rows: list[DecisionExample],
                     splits: dict[str, Capture], r1: np.ndarray, dial_test: np.ndarray,
-                    ok_t: np.ndarray, cfg: ConfidenceAnalysisConfig) -> dict:
+                    ok_t: np.ndarray, cfg: ConfidenceAnalysisConfig) -> tuple[dict, np.ndarray | None]:
     """Confidence vs a *prior* knowledge label on each row.
+
+    Returns (block, known-vs-unknown probe score for every TEST row, or None
+    when that probe was not fit).
 
     Present only when rows carry ``meta.knowledge`` (``known`` / ``unknown`` /
     ``ambiguous``), supplied by an external labeling protocol that records
@@ -507,7 +730,7 @@ def knowledge_block(fit_rows: list[DecisionExample], test_rows: list[DecisionExa
     """
     labels = [r.meta.get("knowledge") for r in test_rows]
     if not any(lab in ("known", "unknown") for lab in labels):
-        return {}
+        return {}, None
     th = cfg.thresholds
     chance = np.array([1.0 / r.n_options for r in test_rows])
     groups = {}
@@ -529,6 +752,7 @@ def knowledge_block(fit_rows: list[DecisionExample], test_rows: list[DecisionExa
                                                      th.ece_bins),
         }
     out: dict[str, Any] = {"groups": groups}
+    ku_score_all: np.ndarray | None = None
 
     ku = np.array([i for i, lab in enumerate(labels) if lab in ("known", "unknown")], dtype=int)
     y_ku = np.array([1 if labels[i] == "known" else 0 for i in ku])
@@ -542,7 +766,8 @@ def knowledge_block(fit_rows: list[DecisionExample], test_rows: list[DecisionExa
         if fit_idx.size >= 20 and fit_y.min() != fit_y.max():
             fit_states = {k: v[fit_idx] for k, v in splits["fit"].states.items()}
             ku_probe = run_probes(fit_states, fit_y, cfg.probe, cfg.data.seed)
-            ku_score = _score(ku_probe["probe"], splits["test"].states[ku_probe["best_layer"]])[ku]
+            ku_score_all = _score(ku_probe["probe"], splits["test"].states[ku_probe["best_layer"]])
+            ku_score = ku_score_all[ku]
             out["ku_probe"] = {k: v for k, v in ku_probe.items() if k != "probe"}
             out["ku_probe"]["test_auroc_known_vs_unknown"] = auroc(y_ku, ku_score)
             out["ku_probe_minus_readout"] = paired_auroc_diff(y_ku, ku_score, r1[ku], cfg.bootstrap.n_boot,
@@ -561,7 +786,14 @@ def knowledge_block(fit_rows: list[DecisionExample], test_rows: list[DecisionExa
                           "known_share": float(np.mean([labels[i] == "known" for i in np.flatnonzero(bins == b)]))}
             for b in range(4) if (bins == b).any()
         }
-    return out
+    return out, ku_score_all
+
+
+def _hidden_size(model: Any) -> int | None:
+    try:
+        return int(model._inner().config.hidden_size)
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 def _score(probe: dict, X: np.ndarray) -> np.ndarray:

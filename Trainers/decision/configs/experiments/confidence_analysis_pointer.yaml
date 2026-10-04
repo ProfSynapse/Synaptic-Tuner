@@ -44,3 +44,18 @@ bootstrap:
 
 output:
   output_root: decision_output/confidence
+
+export:
+  states: false           # true -> test_states.npz: TEST <answer> states, keys L{i} (float16) + row_index
+  layers: null            # null -> every captured layer; or a subset of capture.layers, e.g. [12, 18]
+  per_row: true           # test_rows.jsonl gains probs_r0 / probs_r1 (canonical option order),
+                          # dial_score, stack_score, ku_probe_score, direction_scores
+
+# External frozen directions (mechinterp-direction/v1 JSON from MechInterp.probe.fit.freeze_direction),
+# scored on every TEST row's <answer> state; each adds a directions.<name> block to the report.
+# layer: hidden-state index as in capture.layers (0 = embeddings, i = output of decoder block i);
+# omit it to use the layer recorded in the JSON. Under local-run, add the JSON to the recipe's setup.copy.
+directions: []
+#  - name: my_direction
+#    path: path/to/direction.json   # repo-relative or absolute
+#    layer: 18

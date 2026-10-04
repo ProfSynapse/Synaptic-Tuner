@@ -143,6 +143,66 @@ python tuner.py local-run --job-config Trainers/recipes/decision_confidence_anal
 Config: `configs/experiments/confidence_analysis_*.yaml`. The checkpoint can be
 `latest:<run root>`.
 
+Outputs, under `<output_root>/<timestamp>/`:
+
+- `confidence_report.json`: every arm and metric.
+- `analysis_config.json`: the resolved config.
+- `test_rows.jsonl`: one record per TEST row, keyed by `row_index`. With
+  `export.per_row: true` (the default) each record also carries:
+  - `probs_r0` / `probs_r1`: raw and calibrated option probabilities, in
+    canonical option order
+  - `dial_score`, `stack_score`: the P-dial probe's and the stacker's decision
+    values (logits; `p_dial` and `p_stack` are their sigmoids)
+  - `ku_probe_score`: the known-vs-unknown probe's decision value, or `null`
+    when that probe was not fit
+  - `direction_scores`: `{name: score}` for each external direction
+- `test_states.npz` (only with `export.states: true`): the `<answer>` hidden
+  states of TEST rows, one float16 `(n_test, hidden_size)` array `L{i}` per
+  hidden-state index, plus `row_index`. `export.layers` limits it to a subset of
+  the captured layers.
+
+**Layer indices.** Everywhere in this config (`capture.layers`,
+`export.layers`, `directions[].layer`) a layer is an index into the decoder's
+`output_hidden_states` tuple: `0` is the embedding output and `i >= 1` is the
+output of decoder block `i` (`layers[i - 1]`). In HF Llama/Qwen-style decoders
+the last index usually carries the final norm. `MechInterp.extraction` captures
+the same tuple, so a direction frozen at index `i` there is scored at index `i`
+here. The states come from the decision model with its LoRA adapter applied.
+
+**External directions.** `directions` lists frozen directions to score TEST
+rows along:
+
+```yaml
+directions:
+  - name: my_direction
+    path: path/to/direction.json   # repo-relative or absolute
+    layer: 18                      # optional; overrides the JSON's layer
+```
+
+Each `path` is a `mechinterp-direction/v1` JSON written by
+`MechInterp.probe.fit.freeze_direction`. The score is the direction's own
+logistic decision value, `raw_norm * (h @ vector) + intercept` for a normalized
+vector, which is exactly `h @ coef + intercept`. It is the score that the JSON's
+`sigma` and `calibration` class statistics describe, so per-row values can be
+compared with them. It ranks rows exactly like the `mu`-centred projection on
+the unit vector, so the AUROCs are the same either way.
+
+Each direction adds a `directions.<name>` block:
+
+- `layer`, `source_layer` (from the JSON), `score_rule`, `n`
+- `auroc_correct`: AUROC against the model's own correctness on all TEST rows
+- `auroc_correct_minus_r1`: paired-bootstrap AUROC difference against the
+  calibrated readout (R1)
+- `by_correctness`: `n` / `mean` / `std` of the score on correct and wrong rows
+- when rows carry `meta.knowledge`: `auroc_known_vs_unknown`,
+  `auroc_known_vs_unknown_minus_r1` and `by_knowledge`
+
+The run fails before any forward pass if a file is missing, has another
+schema, or its vector does not match the model's hidden size. It fails after
+capture if the direction's layer was not captured. Under `local-run`, add each
+direction file to the recipe's `setup.copy`. `--dry-run` also loads and checks
+the direction files.
+
 ## Status and gaps
 
 - The recipe pins (`transformers==5.17.0`, `peft==0.21.0`) follow the

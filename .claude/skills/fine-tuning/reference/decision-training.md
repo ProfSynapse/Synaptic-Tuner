@@ -128,6 +128,31 @@ Thresholds, splits, layers and alphas live in
 prior-knowledge label in `meta.knowledge` (`known` / `unknown` / `ambiguous`,
 from an external labeling protocol) also get a `knowledge` block in the report.
 
+Optional outputs (see `Trainers/decision/README.md` for the full field list):
+
+- **`export.per_row`** (default `true`): `test_rows.jsonl` records gain
+  `row_index`, `probs_r0` / `probs_r1` (canonical option order), `dial_score`,
+  `stack_score`, `ku_probe_score` (`null` if that probe was not fit) and
+  `direction_scores`.
+- **`export.states`** (default `false`): writes `test_states.npz` with the TEST
+  `<answer>` states, keyed `L{i}` (float16) plus `row_index`. `export.layers`
+  picks a subset of the captured layers to keep the file small.
+- **`directions`** (default `[]`): a list of `{name, path, layer?}`. Each `path`
+  is a `mechinterp-direction/v1` JSON from `MechInterp.probe.fit.freeze_direction`.
+  Every TEST row is scored with the direction's own logistic decision value,
+  `raw_norm * (h @ vector) + intercept`, the scale its `sigma` describes. Each
+  direction adds a `directions.<name>` report block:
+  - AUROC against correctness, and against `meta.knowledge` when present
+  - a paired-bootstrap difference against R1
+  - class-conditioned mean and std of the score
+
+  A missing file, wrong schema, uncaptured layer or hidden-size mismatch is a
+  hard error. Under `local-run`, add the JSON to the recipe's `setup.copy`.
+
+A layer index is a position in the decoder's `output_hidden_states` tuple:
+`0` is the embeddings and `i` is the output of decoder block `i`. This is the
+same convention as `capture.layers` and `MechInterp.extraction`.
+
 ## Gotchas
 
 - Qwen3.5 needs transformers 5.x. The recipes overlay `transformers==5.17.0` and

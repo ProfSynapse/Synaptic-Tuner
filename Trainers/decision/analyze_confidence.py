@@ -9,7 +9,9 @@ Recipe:   Trainers/recipes/decision_confidence_analysis_*.yaml
 
 Read-only over a trained final_model. Writes to <output_root>/<timestamp>/:
     confidence_report.json   every arm + metric (see decision_core/confidence_analysis.py)
-    test_rows.jsonl          per-row TEST records (confidence per arm, ablated twin)
+    test_rows.jsonl          per-row TEST records (confidence per arm, ablated twin; with
+                             export.per_row also option probabilities, raw scores, direction scores)
+    test_states.npz          export.states only: <answer> states of TEST rows (L{i} + row_index)
     analysis_config.json     the resolved config
 
 Usage:
@@ -32,6 +34,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from decision_core.confidence_analysis import (  # noqa: E402
     load_analysis_config,
+    load_direction,
     split_fit_cal_test,
     stratified_sample,
 )
@@ -81,6 +84,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"rows: fit {len(fit):,} | cal {len(cal):,} | test {len(test):,} "
           f"(ablated twins: {'on' if cfg.ablation.enabled else 'off'})")
     if args.dry_run:
+        for d in cfg.directions:
+            rec = load_direction(d, _resolve(d.path))
+            print(f"direction {d.name}: {len(rec['vector'])}-d at hidden-state index {rec['resolved_layer']}")
         print(f"checkpoint spec: {cfg.checkpoint}")
         print("Dry run OK.")
         return 0
@@ -97,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg.checkpoint = str(ckpt)
     print(f"checkpoint: {ckpt}")
     model = DecisionModel.load(ckpt, device="cuda" if torch.cuda.is_available() else "cpu")
-    report, records = analyze(model, cfg, REPO_ROOT)
+    report, records, arrays = analyze(model, cfg, REPO_ROOT)
 
     out = _resolve(cfg.output.output_root) / (args.run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S"))
     out.mkdir(parents=True, exist_ok=True)
@@ -106,6 +112,10 @@ def main(argv: list[str] | None = None) -> int:
     with open(out / "test_rows.jsonl", "w", encoding="utf-8") as fh:
         for rec in records:
             fh.write(json.dumps(rec) + "\n")
+    if arrays:
+        import numpy as np
+
+        np.savez_compressed(out / "test_states.npz", **arrays)
 
     arms = report["arms"]
     print(f"\nTEST accuracy {report['test_accuracy']:.4f} (abstention 0%)")
@@ -135,6 +145,12 @@ def main(argv: list[str] | None = None) -> int:
                          f"(layer {k['ku_probe']['best_layer']}; diff {d['diff']:+.4f} "
                          f"CI95 [{d['ci95'][0]:+.4f}, {d['ci95'][1]:+.4f}])")
             print(line)
+    for name, d in report.get("directions", {}).items():
+        line = (f"  direction {name} (layer {d['layer']}): AUROC correct {d['auroc_correct']:.4f} "
+                f"(minus R1 {d['auroc_correct_minus_r1']['diff']:+.4f})")
+        if "auroc_known_vs_unknown" in d:
+            line += f" | known-vs-unknown {d['auroc_known_vs_unknown']:.4f}"
+        print(line)
     print(f"\nReport: {out / 'confidence_report.json'}")
     return 0
 
