@@ -35,6 +35,7 @@ from tuner.execution.providers.modal.packaged_worker import (
 from tuner.execution.providers.modal.model_snapshot import prepare_model_snapshot
 from tuner.execution.providers.modal.runtime_release_qualification import ModalRuntimeReleaseQualificationReceiptV1
 from tuner.runtime.releases import PackagedExecutionBindingV1
+from tuner.runtime_profiles import load_runtime_profile
 from tuner.training.contracts import CanonicalDocument, ResolvedTrainingComponents, ResourceSpec, RuntimeSpec
 from tuner.training.input_preparation import (
     PUBLISHED_PREPARED_DATASET_NORMALIZER_V1,
@@ -59,7 +60,7 @@ from tuner.training.modal_host_runtime import (
 )
 from tuner.training.modal_host_scope import observe_modal_host_scope, open_modal_host_scope
 from tuner.training.modal_host_storage import ModalHostStorageV1
-from tuner.training.modal_recipe import ModalSFTRecipePlanV1
+from tuner.training.modal_recipe import ModalSFTRecipePlanV1, resolve_modal_sft_build
 from tuner.training.packaged_compilation import (
     PACKAGED_CONTEXT_SCHEMA, compile_packaged_sft_workload,
     packaged_artifact_policy_digest, packaged_configuration_digest,
@@ -306,6 +307,18 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
                        storage: ModalHostStorageV1, effect_id: str,
                        modal_profile: str, modal_environment: str,
                        builder_cache_root: Path):
+    profiles_root = context.engine_root / "Trainers" / "runtime_profiles"
+    admitted = load_runtime_profile(plan.recipe.runtime_profile, profiles_root).resolve(
+        model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision,
+        method="sft",
+    )
+    profile_path, build_intent = resolve_modal_sft_build(
+        admitted, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision,
+    )
+    if (admitted.profile_sha256 != plan.profile_sha256
+            or admitted.image != plan.profile_base_image
+            or build_intent["intent_digest"] != plan.runtime_material_intent_digest):
+        raise ModalStandaloneRunUnavailable("modal_runtime_profile_changed")
     secrets_port = _HostSecrets({
         "SYNAPTIC_TRAIN_AUTHORITY_KEY": secrets.token_hex(32),
         "SYNAPTIC_TRAIN_READER_KEY": secrets.token_hex(32),
@@ -315,8 +328,6 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
     client, client_binding = open_modal_host_scope(
         sdk=modal, profile=modal_profile, environment_name=modal_environment,
     )
-    profile_path = (context.engine_root / "Trainers" / "image_profiles"
-                    / "qwen35_4b_packaged_sft_3360351c" / "profile.yaml")
     runtime = prepare_modal_runtime_for_host(
         sdk=modal, client=client, client_binding=client_binding,
         profile_path=profile_path,

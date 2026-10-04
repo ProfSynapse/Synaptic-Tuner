@@ -26,6 +26,7 @@ def test_qwen35_sft_v1_binds_captured_complete_inventory() -> None:
         "Qwen/Qwen3.5-4B": ("851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",)
     }
     assert profile.methods == ("sft",)
+    assert profile.packaged_build_profile == "qwen35_4b_packaged_sft_3360351c"
     assert profile.distribution_count == 327
     assert profile.runtime_facts == {
         "architecture": "x86_64",
@@ -118,6 +119,33 @@ def test_runtime_profile_schema_v1_rejects_non_sft_methods(tmp_path: Path) -> No
 
     with pytest.raises(RuntimeProfileError, match="supports only method sft"):
         load_runtime_profile("qwen35-sft-v1", tmp_path)
+
+
+@pytest.mark.parametrize("name", ["../other", "other/profile", "C:\\other", ".hidden", "name.yaml"])
+def test_runtime_profile_rejects_unsafe_build_profile_name(tmp_path: Path, name: str) -> None:
+    profile = yaml.safe_load((PROFILES / "qwen35-sft-v1.yaml").read_text(encoding="utf-8"))
+    profile["runtime"]["packaged_build_profile"] = name
+    (tmp_path / "qwen35-sft-v1.yaml").write_text(
+        yaml.safe_dump(profile, sort_keys=False), encoding="utf-8"
+    )
+    with pytest.raises(RuntimeProfileError, match="build profile name is invalid"):
+        load_runtime_profile("qwen35-sft-v1", tmp_path)
+
+
+def test_runtime_profile_without_modal_build_remains_valid_but_cannot_plan_modal(
+    tmp_path: Path,
+) -> None:
+    profile = yaml.safe_load((PROFILES / "qwen35-sft-v1.yaml").read_text(encoding="utf-8"))
+    del profile["runtime"]["packaged_build_profile"]
+    (tmp_path / "qwen35-sft-v1.yaml").write_text(
+        yaml.safe_dump(profile, sort_keys=False), encoding="utf-8"
+    )
+    (tmp_path / "qwen35-sft-v1.inventory.json").write_bytes(
+        (PROFILES / "qwen35-sft-v1.inventory.json").read_bytes()
+    )
+    admitted = load_runtime_profile("qwen35-sft-v1", tmp_path)
+    with pytest.raises(RuntimeProfileError, match="no packaged Modal build profile"):
+        admitted.modal_build_profile_path(tmp_path.parent / "image_profiles")
 
 
 def _write_mutated_inventory(tmp_path: Path, mutate) -> None:

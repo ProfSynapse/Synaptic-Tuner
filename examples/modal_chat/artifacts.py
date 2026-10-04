@@ -18,6 +18,7 @@ from tuner.execution.coordinator_v1.model import (
 from tuner.execution.coordinator_v1.state_machine import provider_run_read_request
 from tuner.execution.foundation_v2.canonical import canonical_bytes, safe_ref
 from tuner.execution.providers.modal.coordinator_reader import ModalCoordinatorRunReader
+from tuner.execution.providers.modal.coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
 
 
 class ModalChatArtifactError(RuntimeError):
@@ -48,7 +49,7 @@ class ModalChatArtifactVerifier:
         key_ref: str,
         key: bytes,
         clock: object,
-        maximum_total_bytes: int = 256 * 1024 * 1024,
+        maximum_total_bytes: int = MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_total_bytes,
     ) -> None:
         for value, names in (
             (
@@ -69,7 +70,7 @@ class ModalChatArtifactVerifier:
             raise TypeError("artifact verification clock is required")
         if (
             type(maximum_total_bytes) is not int
-            or not 1 <= maximum_total_bytes <= 2**63 - 1
+            or not 1 <= maximum_total_bytes <= MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_total_bytes
         ):
             raise ValueError("artifact verification bound is invalid")
         self._reader = None

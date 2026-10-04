@@ -211,7 +211,7 @@ def test_entire_inventory_shape_is_rejected_before_copy(monkeypatch, mutation):
 
 def test_training_artifact_policy_admits_large_lora_metadata_without_large_allocation(monkeypatch):
     invocation, signer = _invocation(monkeypatch)
-    large_size = 162 * 1024 * 1024
+    large_size = 320 * 1024 * 1024
     inventory, _ = _inventory(
         invocation,
         mutate=lambda document: document["artifacts"][0].update(
@@ -224,13 +224,13 @@ def test_training_artifact_policy_admits_large_lora_metadata_without_large_alloc
     )
     members = MountedModalCoordinatorProducer(signer)._inventory(invocation)
     assert members[0].size == large_size
-    assert large_size > 64 * 1024 * 1024
+    assert large_size > 192 * 1024 * 1024
     assert large_size <= MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes
 
 
 def test_training_artifact_policy_has_reviewed_exact_limits():
-    assert MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes == 192 * 1024 * 1024
-    assert MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_total_bytes == 256 * 1024 * 1024
+    assert MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes == 512 * 1024 * 1024
+    assert MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_total_bytes == 768 * 1024 * 1024
 
 
 def test_training_artifact_policy_rejects_per_artifact_and_aggregate_overflow(monkeypatch):
@@ -250,7 +250,7 @@ def test_training_artifact_policy_rejects_per_artifact_and_aggregate_overflow(mo
     with pytest.raises(ValueError, match="invalid artifact size"):
         producer._inventory(invocation)
 
-    each_size = 52 * 1024 * 1024
+    each_size = 160 * 1024 * 1024
     inventory, _ = _inventory(
         invocation,
         mutate=lambda document: [

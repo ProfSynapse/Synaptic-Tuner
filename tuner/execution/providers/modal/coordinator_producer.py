@@ -34,8 +34,8 @@ from .worker_ports import ModalProcessResult
 
 
 MODAL_TRAINING_ARTIFACT_BOUNDS_V1 = BoundsPolicyV1(
-    max_artifact_bytes=192 * 1024 * 1024,
-    max_artifact_total_bytes=256 * 1024 * 1024,
+    max_artifact_bytes=512 * 1024 * 1024,
+    max_artifact_total_bytes=768 * 1024 * 1024,
 )
 
 

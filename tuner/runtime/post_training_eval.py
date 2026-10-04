@@ -26,6 +26,9 @@ _REQUEST_FAILURE_CODES = frozenset({
 })
 MAX_EVALUATION_RECORD_BYTES = 16 * 1024 * 1024
 _FAILURE_CODES = {"deadline", "incomplete", "startup_failed", "runtime_failed", "identity_changed", "gate_failed", "oversized_response", "evaluation_error"}
+_FINISH_REASONS = frozenset({"stop", "length", "tool_calls", "content_filter", "function_call"})
+_USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens")
+_MAX_TOKEN_COUNT = 2**53 - 1
 
 
 class PostTrainingCleanupUnresolved(RuntimeError):
@@ -223,6 +226,26 @@ def _response(value: object) -> str | None:
     return value
 
 
+def _completion_metadata(raw: object) -> tuple[str | None, dict[str, int | None]]:
+    """Retain only closed, bounded diagnostics from an actual API reply."""
+    finish_reason = None
+    usage = {key: None for key in _USAGE_KEYS}
+    if type(raw) is not dict:
+        return finish_reason, usage
+    choices = raw.get("choices")
+    if type(choices) is list and choices and type(choices[0]) is dict:
+        candidate = choices[0].get("finish_reason")
+        if type(candidate) is str and candidate in _FINISH_REASONS:
+            finish_reason = candidate
+    reported = raw.get("usage")
+    if type(reported) is dict:
+        for key in _USAGE_KEYS:
+            candidate = reported.get(key)
+            if type(candidate) is int and 0 <= candidate <= _MAX_TOKEN_COUNT:
+                usage[key] = candidate
+    return finish_reason, usage
+
+
 def canonical_evaluation_document_bytes(value: Mapping[str, object]) -> bytes:
     """Canonical evaluation publication bytes under the aggregate record bound."""
     if not isinstance(value, Mapping):
@@ -409,6 +432,7 @@ def execute_post_training_evaluation(
                         error_code = typed_code.value
                 except Exception:
                     pass
+            finish_reason, token_usage = _completion_metadata(result.raw_response)
             record["cases"].append({
                 "id": case.case_id,
                 "status": status,
@@ -421,6 +445,8 @@ def execute_post_training_evaluation(
                 ),
                 "matched_path": matched_path,
                 "error_code": error_code,
+                "finish_reason": finish_reason,
+                "token_usage": token_usage,
             })
             validate()
             if failure_code is None and time.monotonic() >= deadline:
@@ -507,10 +533,23 @@ def validate_evaluation_record(
         raise ValueError("evaluation case records are invalid")
     expected_ids = [item["id"] for item in expected["scenarios"]]
     for index, case in enumerate(cases):
-        if type(case) is not dict or set(case) != {
+        required_fields = {
             "id", "status", "response", "latency_seconds", "matched_path", "error_code",
-        } or case["id"] != expected_ids[index] or case["status"] not in ("pass", "fail"):
+        }
+        optional_fields = {"finish_reason", "token_usage"}
+        if type(case) is not dict or not required_fields <= set(case) or set(case) - required_fields - optional_fields or case["id"] != expected_ids[index] or case["status"] not in ("pass", "fail"):
             raise ValueError("evaluation case outcome is invalid")
+        if "finish_reason" in case and case["finish_reason"] is not None and (
+            type(case["finish_reason"]) is not str or case["finish_reason"] not in _FINISH_REASONS
+        ):
+            raise ValueError("evaluation finish reason is invalid")
+        if "token_usage" in case:
+            usage = case["token_usage"]
+            if type(usage) is not dict or set(usage) != set(_USAGE_KEYS) or any(
+                value is not None and (type(value) is not int or not 0 <= value <= _MAX_TOKEN_COUNT)
+                for value in usage.values()
+            ):
+                raise ValueError("evaluation token usage is invalid")
         if case["response"] is not None and (
             type(case["response"]) is not str
             or len(case["response"].encode("utf-8")) > MAX_EVALUATION_RESPONSE_BYTES

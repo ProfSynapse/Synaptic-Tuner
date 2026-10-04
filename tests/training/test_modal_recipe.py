@@ -24,7 +24,9 @@ from tuner.training.input_preparation import (
     PublishedPreparedDatasetNormalizerV1,
     TrainingInputPreparationServiceV1, default_dataset_format_verifiers_v1,
 )
-from tuner.training.modal_recipe import load_modal_sft_recipe, plan_modal_sft_recipe
+from tuner.training.modal_recipe import (load_modal_sft_recipe, plan_modal_sft_recipe,
+                                         resolve_modal_sft_build)
+from tuner.runtime_profiles import load_runtime_profile
 from tuner.handlers.train_handler import TrainHandler
 from tuner.training.packaged_compilation import compile_packaged_sft_workload
 
@@ -64,6 +66,69 @@ def test_recipe_maps_to_exact_public_and_packaged_sft_controls():
     )
     assert recipe.maximum_cost_minor_units == 200
     assert workload.fingerprint
+
+
+def test_third_named_profile_selects_its_declared_packaged_build(tmp_path, monkeypatch):
+    profiles = tmp_path / "Trainers" / "runtime_profiles"
+    images = tmp_path / "Trainers" / "image_profiles" / "third_packaged_build"
+    profiles.mkdir(parents=True)
+    images.mkdir(parents=True)
+    document = yaml.safe_load((PROFILES / "qwen35-sft-v1.yaml").read_text(encoding="utf-8"))
+    document["name"] = "third-sft-profile"
+    document["runtime"]["packaged_build_profile"] = "third_packaged_build"
+    (profiles / "third-sft-profile.yaml").write_text(
+        yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
+    )
+    (profiles / "qwen35-sft-v1.inventory.json").write_bytes(
+        (PROFILES / "qwen35-sft-v1.inventory.json").read_bytes()
+    )
+    source_build = ROOT / "Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c/profile.yaml"
+    (images / "profile.yaml").write_bytes(source_build.read_bytes())
+    from tuner.training import modal_recipe
+    recipe_document = deepcopy(yaml.safe_load(RECIPE.read_text(encoding="utf-8")))
+    recipe_document["job"]["runtime_profile"] = "third-sft-profile"
+    monkeypatch.setattr(modal_recipe, "load_recipe", lambda _path, _runner: recipe_document)
+    recipe = load_modal_sft_recipe(RECIPE, profiles_root=profiles)
+    assert recipe.runtime_profile == "third-sft-profile"
+    profile = load_runtime_profile(recipe.runtime_profile, profiles)
+    build_path, intent = resolve_modal_sft_build(profile, profiles, recipe.model.ref,
+                                                  recipe.model.revision)
+    assert build_path == images / "profile.yaml"
+    assert intent["base_image"].removeprefix("docker.io/") == profile.image
+
+
+@pytest.mark.parametrize("change,match", [
+    (lambda build: build.update(base_image=build["base_image"][:-1] +
+                                ("0" if build["base_image"][-1] != "0" else "1")),
+     "intent differs"),
+    (lambda build: build["packaged_runtime"]["capabilities"]["compatibility"].update(
+        models=[{"ref": "Qwen/Qwen3.5-4B", "revision": "0" * 40}]), "capability differs"),
+    (lambda build: build["packaged_runtime"]["capabilities"]["compatibility"].update(
+        methods=["kto"]), "capability differs"),
+    (lambda build: build["packaged_runtime"]["capabilities"]["contracts"].update(
+        workload_schema="other-workload"), "capability differs"),
+])
+def test_modal_build_rejects_mismatched_profile(tmp_path, change, match):
+    profiles = tmp_path / "Trainers" / "runtime_profiles"
+    images = tmp_path / "Trainers" / "image_profiles" / "selected"
+    profiles.mkdir(parents=True)
+    images.mkdir(parents=True)
+    document = yaml.safe_load((PROFILES / "qwen35-sft-v1.yaml").read_text(encoding="utf-8"))
+    document["runtime"]["packaged_build_profile"] = "selected"
+    (profiles / "qwen35-sft-v1.yaml").write_text(
+        yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
+    )
+    (profiles / "qwen35-sft-v1.inventory.json").write_bytes(
+        (PROFILES / "qwen35-sft-v1.inventory.json").read_bytes()
+    )
+    build = yaml.safe_load((ROOT / "Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c/profile.yaml")
+                           .read_text(encoding="utf-8"))
+    change(build)
+    (images / "profile.yaml").write_text(yaml.safe_dump(build, sort_keys=False), encoding="utf-8")
+    admitted = load_runtime_profile("qwen35-sft-v1", profiles)
+    with pytest.raises(ValueError, match=match):
+        resolve_modal_sft_build(admitted, profiles, "Qwen/Qwen3.5-4B",
+                                "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")
 
 
 @pytest.mark.parametrize("mutation", [

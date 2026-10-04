@@ -258,7 +258,7 @@ def test_training_completion_inventory_near_misses_never_echo_content(mutation):
     elif mutation == "total":
         from tuner.execution.providers.modal.contracts import provider_entry_identity
         for item in document["members"]:
-            item["size"] = 60 * 1024 * 1024
+            item["size"] = diagnostic._MAX_ARTIFACT_TOTAL_BYTES // len(document["members"]) + 1
             item["provider_entry_id"] = provider_entry_identity(binding.provider_facts.artifact_volume_id,
                                                                item["path"], item["size"])
     result = diagnostic.training_completion_metadata(canonical_bytes(document), b"tag", binding, _CALL)

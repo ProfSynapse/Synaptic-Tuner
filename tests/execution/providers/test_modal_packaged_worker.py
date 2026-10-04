@@ -17,6 +17,7 @@ from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.providers.modal.packaged_dispatch import (
     ModalPackagedVolumeMarker, build_modal_packaged_dispatch,
 )
+from tuner.execution.providers.modal.coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
 from tuner.execution.providers.modal.packaged_worker import (
     ModalPackagedWorker,
     ModalPackagedWorkerRoots,
@@ -400,8 +401,8 @@ def test_worker_rejects_noncanonical_artifact_roles_before_signing_or_commit(tmp
     assert signer.calls == events == []
 
 
-def test_worker_rejects_member_above_192_mib_before_signing_or_commit(tmp_path) -> None:
-    executor = Executor(declared_sizes=(192 * 1024 * 1024 + 1, 1, 1, 1, 1))
+def test_worker_rejects_member_above_policy_bound_before_signing_or_commit(tmp_path) -> None:
+    executor = Executor(declared_sizes=(MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes + 1, 1, 1, 1, 1))
     _, dispatch, worker, _, signer, _ = _worker(tmp_path, executor=executor)
     events = []
     result = worker(
@@ -413,8 +414,8 @@ def test_worker_rejects_member_above_192_mib_before_signing_or_commit(tmp_path) 
     assert signer.calls == events == []
 
 
-def test_worker_rejects_aggregate_above_256_mib_before_signing_or_commit(tmp_path) -> None:
-    executor = Executor(declared_sizes=(60 * 1024 * 1024,) * 5)
+def test_worker_rejects_aggregate_above_policy_bound_before_signing_or_commit(tmp_path) -> None:
+    executor = Executor(declared_sizes=(MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_total_bytes // 5 + 1,) * 5)
     _, dispatch, worker, _, signer, _ = _worker(tmp_path, executor=executor)
     events = []
     result = worker(

@@ -36,6 +36,7 @@ from tuner.execution.providers.modal.coordinator_launch import ModalLaunchEnvelo
 from tuner.execution.providers.modal.coordinator_retention import (
     ModalRetainedPreparation,
 )
+from tuner.execution.providers.modal.coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
 from tuner.execution.providers.modal.coordinator_staging import ModalStageMaterial
 
 from .artifacts import ModalChatArtifactVerifier
@@ -177,7 +178,7 @@ def compose_modal_chat_host(
     cursor_key: bytes,
     approved_cost_minor_units: int,
     approved_currency: str = "USD",
-    maximum_artifact_bytes: int = 256 * 1024 * 1024,
+    maximum_total_artifact_bytes: int = MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_total_bytes,
     maximum_grant_seconds: int = 900,
 ) -> ModalChatHost:
     if (
@@ -224,7 +225,7 @@ def compose_modal_chat_host(
         key_ref="modal-chat-artifact-key",
         key=artifact_key,
         clock=clock,
-        maximum_total_bytes=maximum_artifact_bytes,
+        maximum_total_bytes=maximum_total_artifact_bytes,
     )
     bindings = CanonicalCatalog(
         ModalCommandBinding,

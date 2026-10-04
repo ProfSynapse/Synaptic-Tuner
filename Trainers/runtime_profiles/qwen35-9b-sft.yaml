@@ -1,17 +1,18 @@
 schema_version: syntunia-runtime-profile/v1
-name: qwen35-sft-v1
+name: qwen35-9b-sft
 
+# Candidate admission for exact-revision qualification; this is not GPU evidence.
 compatibility:
   models:
-    - name: Qwen/Qwen3.5-4B
+    - name: Qwen/Qwen3.5-9B
       revisions:
-        - 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+        - c202236235762e1c871ad0ccb60c8ee5ba337b9a
   methods:
     - sft
 
 runtime:
   image: unsloth/unsloth@sha256:1644d635bc7c5b57ed64cabbab1ae00647dfb583c2135fdfb6a461aeeba52739
-  packaged_build_profile: qwen35_4b_packaged_sft_3360351c
+  packaged_build_profile: qwen35_9b_packaged_sft
   inventory:
     path: qwen35-sft-v1.inventory.json
     sha256: sha256:ecf4d0a27e5455b946237bf97790cba308765c2e5cf538e560e0de4c372f88e3

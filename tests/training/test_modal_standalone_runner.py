@@ -49,7 +49,8 @@ from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
 from tuner.training.modal_host_qualification import (
     ModalHostCPUQualificationV1, ModalHostQualificationUnavailable,
 )
-from tuner.training.modal_recipe import ModalSFTRecipePlanV1, load_modal_sft_recipe
+from tuner.training.modal_recipe import ModalSFTRecipePlanV1, load_modal_sft_recipe, resolve_modal_sft_build
+from tuner.runtime_profiles import load_runtime_profile
 from tuner.training.packaged_compilation import (
     PACKAGED_SFT_WORKLOAD_SCHEMA, compile_packaged_sft_workload,
     packaged_configuration_digest,
@@ -138,9 +139,20 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
         "syntunia-sft-row/v2",
     )
     config = recipe.packaged_config(identity)
+    profile_root = tmp_path / "Trainers/runtime_profiles"
+    image_root = tmp_path / "Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c"
+    profile_root.mkdir(parents=True)
+    image_root.mkdir(parents=True)
+    for name in ("qwen35-sft-v1.yaml", "qwen35-sft-v1.inventory.json"):
+        (profile_root / name).write_bytes((ROOT / "Trainers/runtime_profiles" / name).read_bytes())
+    (image_root / "profile.yaml").write_bytes((ROOT / "Trainers/image_profiles"
+        / "qwen35_4b_packaged_sft_3360351c/profile.yaml").read_bytes())
+    profile = load_runtime_profile(recipe.runtime_profile, profile_root)
+    _build_path, intent = resolve_modal_sft_build(profile, profile_root,
+                                                   recipe.model.ref, recipe.model.revision)
     plan = ModalSFTRecipePlanV1(
-        recipe, identity, "sha256:" + "a" * 64, "fixture/base@sha256:" + "b" * 64,
-        "c" * 64, compile_packaged_sft_workload(resolved_config=config).fingerprint,
+        recipe, identity, profile.profile_sha256, profile.image,
+        intent["intent_digest"], compile_packaged_sft_workload(resolved_config=config).fingerprint,
         packaged_configuration_digest(config),
     )
     release = _release(recipe)
@@ -320,6 +332,23 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
             return ModalFunctionCallState.RETURNED, completion_digest
     monkeypatch.setattr(ModalPackagedCoordinatorReaderV1, "_poll_packaged_call", poll)
     return plan, ProjectContext.standalone(engine_root=tmp_path), events
+
+
+@pytest.mark.parametrize("field", [
+    "profile_sha256", "profile_base_image", "runtime_material_intent_digest",
+])
+def test_runner_rejects_changed_profile_or_build_before_provider_effects(
+        tmp_path, monkeypatch, field):
+    plan, context, events = _setup(tmp_path, monkeypatch)
+    stale = replace(plan, **{field: "changed"})
+    with pytest.raises(runner.ModalStandaloneRunUnavailable,
+                       match="modal_runtime_profile_changed"):
+        runner._qualified_runtime(
+            modal=object(), plan=stale, context=context, resources=object(),
+            storage=object(), effect_id="unused", modal_profile="unused",
+            modal_environment="unused", builder_cache_root=tmp_path,
+        )
+    assert events == []
 
 
 def test_cli_v2_fake_transcript_prepares_submits_verifies_and_downloads(tmp_path, monkeypatch, capsys):

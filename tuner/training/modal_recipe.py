@@ -14,7 +14,7 @@ from synaptic_tuner.api.v1.training_input import (
     TrainingMethodV1, TrainingModelInputV1,
 )
 from tuner.discovery.recipes import load_recipe
-from tuner.runtime_profiles import load_runtime_profile
+from tuner.runtime_profiles import RuntimeProfile, load_runtime_profile
 from tuner.training.contracts import ArtifactPolicy, CanonicalDocument
 from tuner.training.packaged_compilation import PACKAGED_SFT_CONFIG_SCHEMA
 from tuner.training.packaged_compilation import (
@@ -23,7 +23,6 @@ from tuner.training.packaged_compilation import (
 from tuner.training.post_training import validate_post_training_config
 
 
-_PROFILE = "qwen35-sft-v1"
 _ROLES = ("final_model", "tokenizer", "training_lineage", "training_metrics", "workload_record")
 MODAL_SFT_ACCELERATOR_RATE_KEYS = MappingProxyType({
     "A100-80GB": "gpu_hour_cost_a100_80gb",
@@ -158,18 +157,37 @@ def plan_modal_sft_recipe(recipe_path: Path, *, project_root: Path,
     config = recipe.packaged_config(identity)
     workload = compile_packaged_sft_workload(resolved_config=config)
     profile = load_runtime_profile(recipe.runtime_profile, profiles_root)
-    from tuner.execution.providers.modal.runtime_build import plan_modal_build_material
-
-    build_profile = (profiles_root.parent / "image_profiles"
-                     / "qwen35_4b_packaged_sft_3360351c" / "profile.yaml")
-    build_intent = plan_modal_build_material(build_profile)
-    if build_intent["base_image"].removeprefix("docker.io/") != profile.image.removeprefix("docker.io/"):
-        raise ValueError("Modal build intent differs from the admitted runtime profile")
+    _build_profile, build_intent = resolve_modal_sft_build(profile, profiles_root,
+                                                         recipe.model.ref, recipe.model.revision)
     return ModalSFTRecipePlanV1(
         recipe, identity, profile.profile_sha256, profile.image,
         build_intent["intent_digest"],
         workload.fingerprint, packaged_configuration_digest(config),
     )
+
+
+def resolve_modal_sft_build(profile: RuntimeProfile, profiles_root: Path,
+                            model: str, revision: str) -> tuple[Path, dict[str, object]]:
+    """Bind a named runtime profile to one compatible packaged build intent."""
+    from tuner.cloud.derived_training_image import load_profile
+    from tuner.execution.providers.modal.runtime_build import plan_modal_build_material
+    from tuner.training.packaged_compilation import PACKAGED_SFT_WORKLOAD_SCHEMA
+
+    build_path = profile.modal_build_profile_path(profiles_root.parent / "image_profiles")
+    intent = plan_modal_build_material(build_path)
+    build = load_profile(build_path)
+    if (intent["profile_digest"] != build.canonical_sha256
+            or intent["base_image"].removeprefix("docker.io/") != profile.image.removeprefix("docker.io/")
+            or build.packaged_runtime is None):
+        raise ValueError("Modal build intent differs from the admitted runtime profile")
+    compatibility = build.packaged_runtime["capabilities"]["compatibility"]
+    contracts = build.packaged_runtime["capabilities"]["contracts"]
+    if ("sft" not in compatibility["methods"]
+            or {"ref": model, "revision": revision} not in compatibility["models"]
+            or "syntunia-sft-row/v2" not in compatibility["dataset_formats"]
+            or contracts["workload_schema"] != PACKAGED_SFT_WORKLOAD_SCHEMA):
+        raise ValueError("Modal build capability differs from the admitted runtime profile")
+    return build_path, intent
 
 
 def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV1:
@@ -184,8 +202,9 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
         "runtime_profile", "accelerator", "accelerator_count", "timeout_seconds",
         "maximum_cost_minor_units",
     }, "job")
-    if job.get("runtime_profile") != _PROFILE:
-        raise ValueError("runtime profile is not admitted for Modal SFT")
+    profile_name = job.get("runtime_profile")
+    if type(profile_name) is not str:
+        raise ValueError("Modal SFT requires a named runtime profile")
     if (type(job.get("accelerator")) is not str
             or job["accelerator"] not in MODAL_SFT_ACCELERATOR_RATE_KEYS
             or type(job.get("accelerator_count")) is not int
@@ -202,7 +221,7 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
     model = _section(cfg.get("model"), {"name", "revision", "max_seq_length", "load_in_4bit"}, "model")
     if model.get("load_in_4bit") is not False:
         raise ValueError("this profile requires non-quantized model loading")
-    profile = load_runtime_profile(_PROFILE, profiles_root).resolve(
+    profile = load_runtime_profile(profile_name, profiles_root).resolve(
         model=model.get("name"), model_revision=model.get("revision"), method="sft",
     )
     if profile is None:
@@ -259,7 +278,7 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
     )
     return ModalSFTRecipeV1(
         cfg.get("name", path.stem), locator, dataset["expected_digest"],
-        counts["train"], counts["validation"], _PROFILE, model_input,
+        counts["train"], counts["validation"], profile_name, model_input,
         hyperparameters, artifacts, job["accelerator"],
         job["accelerator_count"], job["timeout_seconds"], maximum_cost,
         validate_post_training_config(cfg.get("post_training")),

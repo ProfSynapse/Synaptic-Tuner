@@ -19,6 +19,7 @@ PROFILE_SCHEMA = "syntunia-runtime-profile/v1"
 INVENTORY_SCHEMA = "syntunia-python-distribution-inventory/v1"
 
 _PROFILE_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+_BUILD_PROFILE_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9_-]{0,126}[a-z0-9])?$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IMMUTABLE_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 
@@ -39,6 +40,7 @@ class RuntimeProfile:
     inventory_sha256: str
     runtime_facts: Mapping[str, Any]
     distribution_count: int
+    packaged_build_profile: str | None = None
 
     def resolve(
         self, *, model: str, model_revision: str, method: str
@@ -71,6 +73,24 @@ class RuntimeProfile:
             "distribution_count": self.distribution_count,
             "runtime_facts": dict(self.runtime_facts),
         }
+
+    def modal_build_profile_path(self, image_profiles_dir: Path) -> Path:
+        """Resolve only a declared, repository-scoped packaged image profile."""
+        name = self.packaged_build_profile
+        if name is None:
+            raise RuntimeProfileError(
+                f"Runtime profile {self.name!r} has no packaged Modal build profile"
+            )
+        root = image_profiles_dir.resolve(strict=True)
+        directory = root / name
+        if directory.resolve(strict=True).parent != root:
+            raise RuntimeProfileError("Packaged build profile escapes the image profile directory")
+        candidate = directory / "profile.yaml"
+        if candidate.resolve(strict=True).parent != directory:
+            raise RuntimeProfileError("Packaged build profile escapes its directory")
+        if not candidate.is_file() or candidate.is_symlink():
+            raise RuntimeProfileError("Packaged build profile must be a regular file")
+        return candidate
 
 
 def _exact_mapping(value: Any, keys: set[str], label: str) -> dict[str, Any]:
@@ -228,9 +248,12 @@ def load_runtime_profile(name: str, profiles_dir: Path) -> RuntimeProfile:
     profile_candidate = root / f"{name}.yaml"
     if profile_candidate.parent != root:
         raise RuntimeProfileError("Runtime profile escapes the profile directory")
-    profile_bytes = _read_stable_regular_file(
-        profile_candidate, maximum=1024 * 1024, label="Runtime profile"
-    )
+    try:
+        profile_bytes = _read_stable_regular_file(
+            profile_candidate, maximum=1024 * 1024, label="Runtime profile"
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeProfileError("Named runtime profile does not exist") from exc
     profile_path = profile_candidate.resolve(strict=True)
     if profile_path.parent != root:
         raise RuntimeProfileError("Runtime profile escapes the profile directory")
@@ -271,9 +294,18 @@ def load_runtime_profile(name: str, profiles_dir: Path) -> RuntimeProfile:
     )
     if methods != ("sft",):
         raise RuntimeProfileError("Runtime profile schema v1 supports only method sft")
-    runtime = _exact_mapping(
-        profile["runtime"], {"image", "inventory"}, "runtime profile runtime"
-    )
+    runtime = profile["runtime"]
+    if not isinstance(runtime, dict) or set(runtime) not in (
+        {"image", "inventory"}, {"image", "inventory", "packaged_build_profile"}
+    ):
+        raise RuntimeProfileError(
+            "runtime profile runtime must contain image, inventory, and optional packaged_build_profile"
+        )
+    build_name = runtime.get("packaged_build_profile")
+    if build_name is not None and (
+        not isinstance(build_name, str) or _BUILD_PROFILE_NAME.fullmatch(build_name) is None
+    ):
+        raise RuntimeProfileError("Packaged build profile name is invalid")
     image = runtime["image"]
     if not isinstance(image, str) or not _IMMUTABLE_IMAGE.fullmatch(image):
         raise RuntimeProfileError(
@@ -309,4 +341,5 @@ def load_runtime_profile(name: str, profiles_dir: Path) -> RuntimeProfile:
         inventory_sha256=inventory_sha256,
         runtime_facts=inventory["runtime"],
         distribution_count=distribution_count,
+        packaged_build_profile=build_name,
     )
