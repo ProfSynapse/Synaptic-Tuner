@@ -341,3 +341,28 @@ def test_local_run_dpo_omits_aux_head_flags(tmp_path):
         aux_head={"enabled": True, "layer": 35},
     )
     assert not any(arg.startswith("--aux-head-") for arg in command)
+
+
+def _copy_commands(tmp_path, monkeypatch, *, has_unsloth_user):
+    import subprocess
+
+    handler = LocalRunHandler(args=Namespace())
+    (tmp_path / "Trainers" / "x").mkdir(parents=True, exist_ok=True)
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        failed = args[-3:] == ["id", "-u", "unsloth"] and not has_unsloth_user
+        return subprocess.CompletedProcess(args, 1 if failed else 0)
+
+    monkeypatch.setattr(handler, "_run", fake_run)
+    monkeypatch.setattr(handler, "_rel_path", lambda p: tmp_path / p)
+    from pathlib import Path
+
+    handler._copy_into_container("c1", [Path("Trainers/x")])
+    return [c for c in calls if "chown" in c]
+
+
+def test_copy_mode_chowns_only_when_image_has_unsloth_user(tmp_path, monkeypatch):
+    assert _copy_commands(tmp_path, monkeypatch, has_unsloth_user=True)
+    assert not _copy_commands(tmp_path, monkeypatch, has_unsloth_user=False)

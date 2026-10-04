@@ -832,8 +832,13 @@ class LocalRunHandler(BaseHandler):
         if run_cfg.get("command"):
             command = _as_list(self._render_value(run_cfg["command"], variables))
             workdir = str(run_cfg.get("workdir", "/workspace/repo"))
+            # host_path accepts the same {name}/{timestamp} templates as run.command,
+            # so an explicit-command trainer can write a fresh per-run directory.
             host_artifact_path = self._rel_path(
-                artifacts_cfg.get("host_path", f"toolset-training-artifacts/runs/local_docker/custom/{name}")
+                self._render_value(
+                    artifacts_cfg.get("host_path", "toolset-training-artifacts/runs/local_docker/custom/{name}"),
+                    variables,
+                )
             )
         elif method in ("sft", "dpo", "kto"):
             command, workdir, host_artifact_path = self._build_trainer_command(cfg, variables, method)
@@ -963,7 +968,15 @@ class LocalRunHandler(BaseHandler):
             parent = str(Path(dest).parent).replace("\\", "/")
             self._check(["docker", "exec", "-u", "root", container, "mkdir", "-p", parent])
             self._check(["docker", "cp", str(src), f"{container}:{dest}"])
-        self._check(["docker", "exec", "-u", "root", container, "chown", "-R", "unsloth:unsloth", "/workspace/repo"])
+        # Older Unsloth images run as an `unsloth` user that must own the copied
+        # tree; newer ones (2026-10) run as root and have no such user.
+        has_unsloth_user = self._run(
+            ["docker", "exec", container, "id", "-u", "unsloth"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0
+        if has_unsloth_user:
+            self._check(["docker", "exec", "-u", "root", container, "chown", "-R", "unsloth:unsloth", "/workspace/repo"])
 
     def _copy_artifacts_from_container(
         self,
