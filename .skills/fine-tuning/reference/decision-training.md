@@ -104,6 +104,30 @@ YAML. Unknown YAML keys are rejected.
 - The run registry's primary metric is held-out `eval_accuracy` when the
   evaluate stage ran.
 
+## Confidence analysis
+
+The question: is the confidence calibrated, and does an internal probe know
+more than the readout says? The model always chooses (no abstention). This
+pass is read-only over a trained `final_model`:
+
+```bash
+python tuner.py local-run --job-config Trainers/recipes/decision_confidence_analysis_pointer.yaml --yes
+```
+
+It writes `confidence_report.json`:
+
+- **Arms:** R0 raw, R1 CAL-refit temperature, P-dial correctness probe
+  (MechInterp layer sweep), P-gate real-vs-ablated probe, and S stacked.
+- **Hypotheses:** `h2_*` paired AUROC diffs. H2 asks whether the probe beats
+  the readout.
+- **Ablated twins:** `humility_ablated` (max-p vs chance on evidence-removed twins).
+- **Sets:** `conformal` (LAC sets per kind: coverage and size, real vs ablated).
+
+Thresholds, splits, layers and alphas live in
+`configs/experiments/confidence_analysis_*.yaml`. Rows that carry a
+prior-knowledge label in `meta.knowledge` (`known` / `unknown` / `ambiguous`,
+from an external labeling protocol) also get a `knowledge` block in the report.
+
 ## Gotchas
 
 - Qwen3.5 needs transformers 5.x. The recipes overlay `transformers==5.17.0` and

@@ -21,6 +21,8 @@ RECIPES = [
     "Trainers/recipes/decision_strands_corpus_build.yaml",
     "Trainers/recipes/decision_qwen35_2b_pointer_smoke.yaml",
     "Trainers/recipes/decision_qwen35_2b_letter_logits_smoke.yaml",
+    "Trainers/recipes/decision_confidence_analysis_pointer.yaml",
+    "Trainers/recipes/decision_confidence_analysis_letter_logits.yaml",
 ]
 
 

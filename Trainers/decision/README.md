@@ -110,6 +110,39 @@ A run writes `<output_root>/<timestamp>/` containing:
 - `run_config.json`
 - `training_lineage.json`
 
+## Confidence analysis
+
+`analyze_confidence.py` is a read-only pass over a trained `final_model`. It asks
+whether the model's confidence is calibrated, and whether an internal probe knows more
+than the readout says. It runs on held-out rows plus **state-ablated twins**
+(the evidence removed, so the question becomes unknowable).
+
+- **Confidence arms:**
+  - raw (R0)
+  - calibrated (R1, temperatures refitted on its own CAL split)
+  - a correctness probe at `<answer>` (P-dial; `MechInterp.probe.fit` layer sweep)
+  - a real-vs-ablated gate probe (P-gate)
+  - a stack of R1 and P-dial (S)
+- **Metrics:**
+  - ECE / NLL / Brier, AUROC with a bootstrap floor, AURC
+  - confident-wrong and underconfident-right rates
+  - the confidence-over-chance gap on ablated twins
+  - split-conformal LAC sets per kind and ordinal intervals
+
+The model never abstains. If rows carry a prior-knowledge label in
+`meta.knowledge` (`known` / `unknown` / `ambiguous`), supplied by an external
+labeling protocol, the report adds a `knowledge` block: per-group accuracy and
+confidence, and whether the readout, the P-dial probe and a known-vs-unknown
+probe separate the groups.
+
+```bash
+python tuner.py local-run --job-config Trainers/recipes/decision_confidence_analysis_pointer.yaml --yes
+python tuner.py local-run --job-config Trainers/recipes/decision_confidence_analysis_letter_logits.yaml --yes
+```
+
+Config: `configs/experiments/confidence_analysis_*.yaml`. The checkpoint can be
+`latest:<run root>`.
+
 ## Status and gaps
 
 - The recipe pins (`transformers==5.17.0`, `peft==0.21.0`) follow the

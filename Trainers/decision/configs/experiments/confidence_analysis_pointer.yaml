@@ -1,0 +1,46 @@
+# Confidence analysis (read-only) -- pointer readout.
+# Run:    python tuner.py local-run --job-config Trainers/recipes/decision_confidence_analysis_pointer.yaml --yes
+
+# A final_model dir, or latest:<run root> for the newest <timestamp>/final_model under it.
+checkpoint: latest:toolset-training-artifacts/runs/local_docker/decision/decision-qwen35-2b-pointer
+
+data:
+  # Held-out tasks with label sets never trained on.
+  files: [Datasets/decision/strands_v5/holdout_v5_norule.jsonl]
+  max_rows: 4000          # seeded, task-stratified sample (x2 with ablated twins)
+  fit_fraction: 0.4       # probes fit here
+  cal_fraction: 0.2       # temperatures, conformal q-hat, stacker fit here
+  seed: 0                 # TEST = the remaining 40%; every reported number is TEST
+
+ablation:
+  enabled: true
+  # Replaces the state; question and options are unchanged -> an unknowable twin.
+  state_text: (no information about this case is available)
+
+capture:
+  layers: all             # hidden-state indices (0 = embeddings) or "all"
+  batch_size: 8
+  max_length: null        # null -> the checkpoint's max_length
+
+probe:                    # MechInterp.probe.fit (PCA -> logistic, out-of-fold AUROC)
+  n_components: 128
+  n_splits: 5
+  C: 1.0
+  max_iter: 2000
+  permuted_control: true  # label-permuted probe at the best layer (should be ~0.5)
+
+conformal:
+  alphas: [0.1, 0.2]      # LAC sets targeting 90% / 80% coverage; argmax always included
+  min_rows_per_kind: 50
+
+thresholds:
+  confident: 0.8          # confident-wrong = wrong with confidence >= this
+  underconfident: 0.5     # underconfident-right = right with confidence < this
+  ece_bins: 15
+
+bootstrap:
+  n_boot: 1000
+  seed: 0
+
+output:
+  output_root: decision_output/confidence

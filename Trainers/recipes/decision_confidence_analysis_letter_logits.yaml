@@ -1,0 +1,47 @@
+# Confidence analysis (read-only) over the full letter_logits decision run.
+#
+# Captures <answer> hidden states (all layers) + option logits for held-out rows
+# and their state-ablated twins, then reports R0/R1/P-dial/P-gate/S confidence
+# arms, conformal sets, the confident-wrong / underconfident-right pair and the
+# confidence-over-chance gap on ablated twins. Every knob is in the --config
+# file; the checkpoint resolves to the newest final_model under the full-run
+# root (latest:...).
+name: decision-confidence-analysis-letter-logits
+description: Read-only confidence analysis of the letter_logits decision model.
+target: local
+method: decision
+provider: local_docker
+
+job:
+  # Same digest-pinned image as the decision training recipes.
+  image: unsloth/unsloth@sha256:0b8efd89caf77bc4150f6464416d7bc6a5e00e27a4446615ecf99ef20f553397
+  pull_policy: missing
+  transfer: auto
+  keep_container: false
+
+setup:
+  pip:
+    - peft==0.21.2
+    - flash-linear-attention
+  copy:
+    - Trainers/decision
+    - shared
+    - MechInterp
+    - Datasets/decision/strands_v5
+    - toolset-training-artifacts/runs/local_docker/decision/decision-qwen35-2b-letter-logits
+
+run:
+  method: decision
+  trainer: Trainers/decision/analyze_confidence.py
+  command:
+    - python
+    - Trainers/decision/analyze_confidence.py
+    - --config
+    - Trainers/decision/configs/experiments/confidence_analysis_letter_logits.yaml
+    - --output-root
+    - toolset-training-artifacts/runs/local_docker/decision_confidence/{name}
+    - --run-timestamp
+    - "{timestamp}"
+
+artifacts:
+  host_path: toolset-training-artifacts/runs/local_docker/decision_confidence/{name}/{timestamp}
