@@ -219,6 +219,7 @@ Synthetic Conversations/
 │   ├── rtx3090_kto/           # KTO training (refinement)
 │   ├── local/                 # Local Docker SFT/KTO jobs (uid-agnostic, persistent-container mode)
 │   ├── embedding/             # Embedding & reranker trainer (dual loader fast/fallback; full/LoRA/frozen_head modes)
+│   ├── decision/              # Decision models (Jev-style typed yes-no/choice/score; pointer or letter-logit readout + calibration)
 │   └── shared/                # Shared code (upload, model loading, utilities)
 │
 ├── SynthChat/                 # Synthetic chat generation & dataset improvement

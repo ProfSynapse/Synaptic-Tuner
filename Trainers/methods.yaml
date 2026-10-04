@@ -21,3 +21,4 @@ method_labels:
   dpo: "DPO - Direct Preference Optimization"
   embedding: "Embedding - Bi-Encoder Training"
   ace_step: "ACE-STEP - Music Generation (LoRA/LoKr)"
+  decision: "Decision - Typed Choice/Yes-No/Score Model (Jev-style)"
