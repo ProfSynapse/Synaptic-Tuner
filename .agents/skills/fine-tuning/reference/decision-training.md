@@ -133,7 +133,13 @@ Optional outputs (see `Trainers/decision/README.md` for the full field list):
 - **`export.per_row`** (default `true`): `test_rows.jsonl` records gain
   `row_index`, `probs_r0` / `probs_r1` (canonical option order), `dial_score`,
   `stack_score`, `ku_probe_score` (`null` if that probe was not fit) and
-  `direction_scores`.
+  `direction_scores`. Every record carries `split` (`test`, `cal` or `fit`).
+- **`export.cal_rows`** (default `false`): also writes `cal_rows.jsonl`, the
+  same records for CAL rows (`row_index` within CAL). R1 uses the same CAL-fit
+  temperatures, and probe, stacker and direction scores are computed as for
+  TEST. Fit abstention thresholds on CAL and apply them to TEST.
+- **`export.fit_rows`** (default `false`): also writes `fit_rows.jsonl` for FIT
+  rows; probe scores there are in-sample.
 - **`export.states`** (default `false`): writes `test_states.npz` with the TEST
   `<answer>` states, keyed `L{i}` (float16) plus `row_index`. `export.layers`
   picks a subset of the captured layers to keep the file small.

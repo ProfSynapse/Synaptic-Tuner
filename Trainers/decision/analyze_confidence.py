@@ -9,8 +9,10 @@ Recipe:   Trainers/recipes/decision_confidence_analysis_*.yaml
 
 Read-only over a trained final_model. Writes to <output_root>/<timestamp>/:
     confidence_report.json   every arm + metric (see decision_core/confidence_analysis.py)
-    test_rows.jsonl          per-row TEST records (confidence per arm, ablated twin; with
+    test_rows.jsonl          per-row TEST records (split, confidence per arm, ablated twin; with
                              export.per_row also option probabilities, raw scores, direction scores)
+    cal_rows.jsonl           export.cal_rows only: the same records for CAL rows
+    fit_rows.jsonl           export.fit_rows only: the same records for FIT rows (in-sample probe scores)
     test_states.npz          export.states only: <answer> states of TEST rows (L{i} + row_index)
     analysis_config.json     the resolved config
 
@@ -109,9 +111,10 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     (out / "confidence_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out / "analysis_config.json").write_text(json.dumps(cfg.to_dict(), indent=2), encoding="utf-8")
-    with open(out / "test_rows.jsonl", "w", encoding="utf-8") as fh:
-        for rec in records:
-            fh.write(json.dumps(rec) + "\n")
+    for split, recs in records.items():
+        with open(out / f"{split}_rows.jsonl", "w", encoding="utf-8") as fh:
+            for rec in recs:
+                fh.write(json.dumps(rec) + "\n")
     if arrays:
         import numpy as np
 

@@ -26,8 +26,10 @@ Optional extras (config-driven):
   directions  external frozen directions (``mechinterp-direction/v1`` JSON from
               MechInterp.probe.fit.freeze_direction) scored on every TEST row's
               <answer> state; AUROC vs correctness / prior knowledge per direction
-  export      per-row option probabilities and raw scores in test_rows.jsonl, and
-              (opt-in) the TEST <answer> states as test_states.npz
+  export      per-row option probabilities and raw scores in test_rows.jsonl,
+              (opt-in) the same records for CAL / FIT rows (cal_rows.jsonl /
+              fit_rows.jsonl, e.g. to fit abstention thresholds on CAL and apply
+              them on TEST), and (opt-in) the TEST <answer> states as test_states.npz
 
 Layer convention: a "layer" here is an index into the decoder's
 ``output_hidden_states`` tuple -- 0 is the embedding output, i >= 1 is the output
@@ -125,7 +127,9 @@ class OutputSection:
 class ExportSection:
     states: bool = False   # write test_states.npz: <answer> states of TEST rows (float16)
     layers: Any = None     # null -> every captured layer; else a subset of the captured indices
-    per_row: bool = True   # add option probabilities and raw scores to test_rows.jsonl
+    per_row: bool = True   # add option probabilities and raw scores to the *_rows.jsonl records
+    cal_rows: bool = False  # also write cal_rows.jsonl: the same per-row records for CAL rows
+    fit_rows: bool = False  # also write fit_rows.jsonl (probe scores are in-sample there)
 
 
 @dataclass
@@ -216,8 +220,10 @@ def load_analysis_config(path: str | Path) -> ConfidenceAnalysisConfig:
     if cfg.data.fit_fraction + cfg.data.cal_fraction >= 1.0:
         raise ValueError("data.fit_fraction + data.cal_fraction must leave rows for TEST")
     ex = cfg.export
-    if not isinstance(ex.states, bool) or not isinstance(ex.per_row, bool):
-        raise ValueError(f"{path}: export.states and export.per_row must be true/false")
+    flags = {"states": ex.states, "per_row": ex.per_row, "cal_rows": ex.cal_rows, "fit_rows": ex.fit_rows}
+    bad_flags = sorted(k for k, v in flags.items() if not isinstance(v, bool))
+    if bad_flags:
+        raise ValueError(f"{path}: export.{', export.'.join(bad_flags)} must be true/false")
     if ex.layers is not None:
         if (not isinstance(ex.layers, list) or not ex.layers
                 or any(isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in ex.layers)):
@@ -560,12 +566,16 @@ def ordinal_interval_block(probs: list[np.ndarray], labels: list[int], kinds: li
 
 
 def analyze(model: Any, cfg: ConfidenceAnalysisConfig, repo_root: Path
-            ) -> tuple[dict, list[dict], dict[str, np.ndarray]]:
+            ) -> tuple[dict, dict[str, list[dict]], dict[str, np.ndarray]]:
     """Run every confidence arm.
 
-    Returns (report, per-row TEST records, test_states.npz arrays -- empty
-    unless ``export.states``). Record ``row_index`` i is TEST row i and the
-    npz ``row_index`` entry that holds its states.
+    Returns (report, per-row records by split, test_states.npz arrays -- empty
+    unless ``export.states``). Records always include ``"test"``; ``"cal"`` /
+    ``"fit"`` are added by ``export.cal_rows`` / ``export.fit_rows``. Every
+    record carries ``split``; ``row_index`` i is row i of that split (for TEST
+    also the npz ``row_index`` entry that holds its states). All splits use the
+    same CAL-fit temperatures, probes and stacker; on FIT the probe scores are
+    in-sample (the probes were fit there).
     """
     def resolve(p: str) -> Path:
         q = Path(p)
@@ -612,7 +622,7 @@ def analyze(model: Any, cfg: ConfidenceAnalysisConfig, repo_root: Path
     # P-dial: probe of own correctness on FIT real rows.
     dial = run_probes(splits["fit"].states, F["fit"]["correct"], cfg.probe, cfg.data.seed)
     best = dial["best_layer"]
-    dial_score = {n: _score(dial["probe"], splits[n].states[best]) for n in ("cal", "test")}
+    dial_score = {n: _score(dial["probe"], splits[n].states[best]) for n in ("fit", "cal", "test")}
     p_dial_test = _sigmoid(dial_score["test"])
 
     # S: stack logit(R1) + dial score, fitted on CAL.
@@ -623,7 +633,6 @@ def analyze(model: Any, cfg: ConfidenceAnalysisConfig, repo_root: Path
         np.column_stack([_logit(r1_cal), dial_score["cal"]]), F["cal"]["correct"])
     stack_X_test = np.column_stack([_logit(r1), dial_score["test"]])
     p_stack = stack.predict_proba(stack_X_test)[:, 1]
-    stack_score = stack.decision_function(stack_X_test)
 
     report: dict[str, Any] = {
         "schema": "decision-confidence-analysis/v1",
@@ -679,7 +688,7 @@ def analyze(model: Any, cfg: ConfidenceAnalysisConfig, repo_root: Path
         report["readout_as_gate_auroc"] = auroc(
             np.concatenate([np.ones(len(test_rows)), np.zeros(len(test_rows))]), np.concatenate([r1, maxp]))
 
-    knowledge, ku_probe_score = knowledge_block(fit_rows, test_rows, splits, r1, dial_score["test"], ok_t, cfg)
+    knowledge, ku_probe = knowledge_block(fit_rows, test_rows, splits, r1, dial_score["test"], ok_t, cfg)
     if knowledge:
         report["knowledge"] = knowledge
 
@@ -693,34 +702,51 @@ def analyze(model: Any, cfg: ConfidenceAnalysisConfig, repo_root: Path
 
     arrays = export_arrays(test_states, cfg.export.layers, len(test_rows)) if cfg.export.states else {}
 
-    records = []
-    for i, r in enumerate(test_rows):
-        rec = {"row_index": i, "task": r.task, "kind": r.kind, "n_options": r.n_options, "gold": r.label,
-               "pred": test["pred"][i], "correct": int(ok_t[i]), "conf_r0": float(r0[i]),
-               "conf_r1": float(r1[i]), "p_dial": float(p_dial_test[i]), "p_stack": float(p_stack[i])}
-        if cfg.ablation.enabled:
-            rec["ablated_max_prob"] = float(probs["test_ablated"][i].max())
-            rec["ablated_pred"] = int(np.argmax(probs["test_ablated"][i]))
-        if cfg.export.per_row:
-            rec["probs_r0"] = [float(x) for x in raw["test"][i]]      # canonical option order
-            rec["probs_r1"] = [float(x) for x in probs["test"][i]]
-            rec["dial_score"] = float(dial_score["test"][i])          # probe decision value (logit)
-            rec["stack_score"] = float(stack_score[i])                # stacker decision value (logit)
-            rec["ku_probe_score"] = None if ku_probe_score is None else float(ku_probe_score[i])
-            rec["direction_scores"] = {n: float(s[i]) for n, s in direction_scores.items()}
-        if r.meta:
-            rec["meta"] = r.meta
-        records.append(rec)
+    split_rows = {"fit": fit_rows, "cal": cal_rows, "test": test_rows}
+
+    def split_records(name: str) -> list[dict]:
+        """Per-row records for one split, scored exactly as TEST (CAL temperatures, FIT probes, CAL stacker)."""
+        c_r0 = np.array([p.max() for p in raw[name]])
+        c_r1 = np.array([p.max() for p in probs[name]])
+        X = np.column_stack([_logit(c_r1), dial_score[name]])
+        p_st, s_st = stack.predict_proba(X)[:, 1], stack.decision_function(X)
+        p_di = _sigmoid(dial_score[name])
+        ok = F[name]["correct"]
+        dirs = direction_scores if name == "test" else score_directions(directions, splits[name].states)
+        ku = (None if ku_probe is None
+              else _score(ku_probe["probe"], splits[name].states[ku_probe["best_layer"]]))
+        out = []
+        for i, r in enumerate(split_rows[name]):
+            rec = {"split": name, "row_index": i, "task": r.task, "kind": r.kind, "n_options": r.n_options,
+                   "gold": r.label, "pred": F[name]["pred"][i], "correct": int(ok[i]), "conf_r0": float(c_r0[i]),
+                   "conf_r1": float(c_r1[i]), "p_dial": float(p_di[i]), "p_stack": float(p_st[i])}
+            if cfg.ablation.enabled:
+                rec["ablated_max_prob"] = float(probs[f"{name}_ablated"][i].max())
+                rec["ablated_pred"] = int(np.argmax(probs[f"{name}_ablated"][i]))
+            if cfg.export.per_row:
+                rec["probs_r0"] = [float(x) for x in raw[name][i]]      # canonical option order
+                rec["probs_r1"] = [float(x) for x in probs[name][i]]
+                rec["dial_score"] = float(dial_score[name][i])          # probe decision value (logit)
+                rec["stack_score"] = float(s_st[i])                     # stacker decision value (logit)
+                rec["ku_probe_score"] = None if ku is None else float(ku[i])
+                rec["direction_scores"] = {n: float(v[i]) for n, v in dirs.items()}
+            if r.meta:
+                rec["meta"] = r.meta
+            out.append(rec)
+        return out
+
+    exported = ["test"] + [n for n, on in (("cal", cfg.export.cal_rows), ("fit", cfg.export.fit_rows)) if on]
+    records = {name: split_records(name) for name in exported}
     return report, records, arrays
 
 
 def knowledge_block(fit_rows: list[DecisionExample], test_rows: list[DecisionExample],
                     splits: dict[str, Capture], r1: np.ndarray, dial_test: np.ndarray,
-                    ok_t: np.ndarray, cfg: ConfidenceAnalysisConfig) -> tuple[dict, np.ndarray | None]:
+                    ok_t: np.ndarray, cfg: ConfidenceAnalysisConfig) -> tuple[dict, dict | None]:
     """Confidence vs a *prior* knowledge label on each row.
 
-    Returns (block, known-vs-unknown probe score for every TEST row, or None
-    when that probe was not fit).
+    Returns (block, the known-vs-unknown probe -- ``run_probes`` output with
+    ``probe`` and ``best_layer`` -- or None when that probe was not fit).
 
     Present only when rows carry ``meta.knowledge`` (``known`` / ``unknown`` /
     ``ambiguous``), supplied by an external labeling protocol that records
@@ -752,7 +778,7 @@ def knowledge_block(fit_rows: list[DecisionExample], test_rows: list[DecisionExa
                                                      th.ece_bins),
         }
     out: dict[str, Any] = {"groups": groups}
-    ku_score_all: np.ndarray | None = None
+    ku_fitted: dict | None = None
 
     ku = np.array([i for i, lab in enumerate(labels) if lab in ("known", "unknown")], dtype=int)
     y_ku = np.array([1 if labels[i] == "known" else 0 for i in ku])
@@ -766,8 +792,8 @@ def knowledge_block(fit_rows: list[DecisionExample], test_rows: list[DecisionExa
         if fit_idx.size >= 20 and fit_y.min() != fit_y.max():
             fit_states = {k: v[fit_idx] for k, v in splits["fit"].states.items()}
             ku_probe = run_probes(fit_states, fit_y, cfg.probe, cfg.data.seed)
-            ku_score_all = _score(ku_probe["probe"], splits["test"].states[ku_probe["best_layer"]])
-            ku_score = ku_score_all[ku]
+            ku_fitted = ku_probe
+            ku_score = _score(ku_probe["probe"], splits["test"].states[ku_probe["best_layer"]])[ku]
             out["ku_probe"] = {k: v for k, v in ku_probe.items() if k != "probe"}
             out["ku_probe"]["test_auroc_known_vs_unknown"] = auroc(y_ku, ku_score)
             out["ku_probe_minus_readout"] = paired_auroc_diff(y_ku, ku_score, r1[ku], cfg.bootstrap.n_boot,
@@ -786,7 +812,7 @@ def knowledge_block(fit_rows: list[DecisionExample], test_rows: list[DecisionExa
                           "known_share": float(np.mean([labels[i] == "known" for i in np.flatnonzero(bins == b)]))}
             for b in range(4) if (bins == b).any()
         }
-    return out, ku_score_all
+    return out, ku_fitted
 
 
 def _hidden_size(model: Any) -> int | None:

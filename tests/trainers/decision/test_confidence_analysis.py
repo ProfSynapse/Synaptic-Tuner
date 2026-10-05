@@ -67,6 +67,7 @@ def _write_cfg(tmp_path, **extra) -> Path:
 def test_export_and_directions_default_off(tmp_path):
     cfg = load_analysis_config(_write_cfg(tmp_path))
     assert cfg.export.states is False and cfg.export.per_row is True and cfg.export.layers is None
+    assert cfg.export.cal_rows is False and cfg.export.fit_rows is False
     assert cfg.directions == []
     cfg = load_analysis_config(_write_cfg(
         tmp_path, capture={"layers": [0, 3, 5]}, export={"states": True, "layers": [3]},
@@ -74,11 +75,17 @@ def test_export_and_directions_default_off(tmp_path):
     assert cfg.export.states and cfg.export.layers == [3]
     assert cfg.directions == [DirectionSpec("d1", "a.json", None), DirectionSpec("d2", "/abs/b.json", 5)]
     assert cfg.to_dict()["directions"][1] == {"name": "d2", "path": "/abs/b.json", "layer": 5}
+    cfg = load_analysis_config(_write_cfg(tmp_path, export={"cal_rows": True, "fit_rows": True}))
+    assert cfg.export.cal_rows is True and cfg.export.fit_rows is True
+    assert cfg.to_dict()["export"]["cal_rows"] is True
 
 
 @pytest.mark.parametrize("extra, match", [
     ({"export": {"nope": 1}}, "nope"),
     ({"export": {"states": "yes"}}, "true/false"),
+    ({"export": {"cal_rows": "yes"}}, r"export\.cal_rows must be true/false"),
+    ({"export": {"fit_rows": 1}}, r"export\.fit_rows must be true/false"),
+    ({"export": {"test_rows": True}}, "test_rows"),
     ({"export": {"layers": [-1]}}, "export.layers"),
     ({"export": {"layers": []}}, "export.layers"),
     ({"capture": {"layers": [0, 1]}, "export": {"layers": [2]}}, r"\[2\] are not in capture.layers"),
@@ -204,7 +211,7 @@ def test_analyze_end_to_end_on_tiny_model(tmp_path, monkeypatch):
         "conformal": {"alphas": [0.2], "min_rows_per_kind": 10},
         "bootstrap": {"n_boot": 50},
         "output": {"output_root": str(tmp_path / "out")},
-        "export": {"states": True, "layers": [0, 2], "per_row": True},
+        "export": {"states": True, "layers": [0, 2], "per_row": True, "cal_rows": True},
         "directions": [{"name": "random", "path": str(direction_path)},
                        {"name": "random_last", "path": str(direction_path), "layer": 2}],
     }
@@ -234,6 +241,7 @@ def test_analyze_end_to_end_on_tiny_model(tmp_path, monkeypatch):
     # export.per_row fields
     recs = [json.loads(line) for line in rows_out]
     assert [r["row_index"] for r in recs] == list(range(n_test))
+    assert {r["split"] for r in recs} == {"test"}
     for r in recs:
         assert len(r["probs_r0"]) == len(r["probs_r1"]) == r["n_options"]
         assert sum(r["probs_r1"]) == pytest.approx(1.0, abs=1e-6)
@@ -242,6 +250,29 @@ def test_analyze_end_to_end_on_tiny_model(tmp_path, monkeypatch):
         assert r["p_stack"] == pytest.approx(1 / (1 + np.exp(-r["stack_score"])), abs=1e-6)
         assert isinstance(r["ku_probe_score"], float)   # the known-vs-unknown probe was fit
         assert set(r["direction_scores"]) == {"random", "random_last"}
+
+    # export.cal_rows -> cal_rows.jsonl: same schema, CAL-relative row_index; fit_rows stays off
+    run_dir = tmp_path / "out" / "unit"
+    assert not (run_dir / "fit_rows.jsonl").exists()
+    cal = [json.loads(line) for line in (run_dir / "cal_rows.jsonl").read_text(encoding="utf-8").splitlines()]
+    n_cal = report["n_rows"]["cal"]
+    assert n_cal > 0 and len(cal) == n_cal
+    assert [r["row_index"] for r in cal] == list(range(n_cal)) and {r["split"] for r in cal} == {"cal"}
+    assert set(cal[0]) == set(recs[0])
+    for r in cal:
+        assert len(r["probs_r0"]) == len(r["probs_r1"]) == r["n_options"]
+        assert sum(r["probs_r1"]) == pytest.approx(1.0, abs=1e-6)
+        assert max(r["probs_r1"]) == pytest.approx(r["conf_r1"])
+        assert r["p_dial"] == pytest.approx(1 / (1 + np.exp(-r["dial_score"])), abs=1e-6)
+        assert r["p_stack"] == pytest.approx(1 / (1 + np.exp(-r["stack_score"])), abs=1e-6)
+        assert isinstance(r["ku_probe_score"], float)
+        assert set(r["direction_scores"]) == {"random", "random_last"}
+    # CAL R1 uses the CAL-fit per-kind temperatures reported for TEST
+    t = report["temperatures_cal"]
+    for r in cal:
+        lg = np.log(np.asarray(r["probs_r0"]))
+        expect = np.exp(lg / t.get(r["kind"], 1.0))
+        np.testing.assert_allclose(r["probs_r1"], expect / expect.sum(), rtol=1e-5, atol=1e-6)
 
     # export.states -> test_states.npz
     npz = np.load(tmp_path / "out" / "unit" / "test_states.npz")

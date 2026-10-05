@@ -147,8 +147,9 @@ Outputs, under `<output_root>/<timestamp>/`:
 
 - `confidence_report.json`: every arm and metric.
 - `analysis_config.json`: the resolved config.
-- `test_rows.jsonl`: one record per TEST row, keyed by `row_index`. With
-  `export.per_row: true` (the default) each record also carries:
+- `test_rows.jsonl`: one record per TEST row, keyed by `row_index` and tagged
+  `split: "test"`. With `export.per_row: true` (the default) each record also
+  carries:
   - `probs_r0` / `probs_r1`: raw and calibrated option probabilities, in
     canonical option order
   - `dial_score`, `stack_score`: the P-dial probe's and the stacker's decision
@@ -156,6 +157,14 @@ Outputs, under `<output_root>/<timestamp>/`:
   - `ku_probe_score`: the known-vs-unknown probe's decision value, or `null`
     when that probe was not fit
   - `direction_scores`: `{name: score}` for each external direction
+- `cal_rows.jsonl` (only with `export.cal_rows: true`): the same records for
+  CAL rows, with `split: "cal"` and `row_index` counting within CAL. They are
+  scored exactly as TEST: R1 uses the same CAL-fit temperatures, and the
+  probes, stacker and directions are the same ones. Use them to fit an
+  abstention threshold on CAL and apply it to `test_rows.jsonl`. Because the
+  temperatures and stacker were fit on CAL, CAL-side calibration is optimistic.
+- `fit_rows.jsonl` (only with `export.fit_rows: true`): the same for FIT rows
+  (`split: "fit"`). The probes were fit on FIT, so their scores are in-sample.
 - `test_states.npz` (only with `export.states: true`): the `<answer>` hidden
   states of TEST rows, one float16 `(n_test, hidden_size)` array `L{i}` per
   hidden-state index, plus `row_index`. `export.layers` limits it to a subset of
