@@ -1,0 +1,88 @@
+# SMOKE variant of config.yaml: identical model/prompt/loss/augmentation, sized to
+# prove the end-to-end path (load -> train -> calibrate -> evaluate -> lineage)
+# in a few minutes. Not a quality run. Recipe:
+#   Trainers/recipes/decision_qwen35_2b_pointer_smoke.yaml
+
+model:
+  registry_name: qwen35-2b-base   # key into configs/model_registry.yaml (hf_id, revision, loader, LoRA targets)
+  registry_path: null             # null -> Trainers/decision/configs/model_registry.yaml
+  readout: pointer                # pointer | letter_logits
+  pointer_dim: 256
+  head_dropout: 0.05
+  # Per-run overrides of the registry entry (null keeps the registry value).
+  revision: null
+  max_length: null                # rows longer than this are dropped, never truncated
+  torch_dtype: null
+  attn_implementation: null
+
+prompt:
+  marker_style: numbers           # "1." "2." ...; the frozen-KL term reads markers 1-9
+  # One line per question kind, above the question text. Saved with the
+  # checkpoint, so serving renders exactly what training saw.
+  headers:
+    noul: Decide whether the statement is true of the state.
+    choice: Select exactly one option.
+    score: Rate the state against the ordered levels below (lowest first).
+
+lora:
+  enabled: true
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: null            # null -> the registry entry's lora_target_modules
+
+data:
+  train_files: [Datasets/decision/strands_v5/train_v5.jsonl]
+  val_fraction: 0.03
+  # Held-out tasks with unseen label sets. Half (stratified by task) calibrates,
+  # the other half is the reported evaluation.
+  eval_files: [Datasets/decision/strands_v5/holdout_v5_norule.jsonl]
+  calibration_files: []
+  max_train_examples: 2000     # seeded sample across all tasks
+  max_eval_examples: 400
+  seed: 0
+
+augmentation:
+  shuffle_options: true     # the point of the method -- do not turn off
+  reverse_score_prob: 0.5
+  ordinal_smoothing: 0.1
+  vary_instructions: true
+
+loss:
+  brier_weight: 0.0
+  kl_frozen_weight: 0.3     # KL(frozen torso's marker readout || student)
+
+training:
+  num_epochs: 1
+  max_steps: 30
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 8
+  gradient_accumulation_steps: 4   # effective batch 32
+  learning_rate: 1.0e-4            # LoRA
+  head_learning_rate: 1.0e-3       # randomly initialised pointer head
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  max_grad_norm: 1.0
+  lr_scheduler_type: linear
+  gradient_checkpointing: true
+  group_by_length: true
+  logging_steps: 5
+  eval_steps: 15
+  save_steps: 30
+  save_total_limit: 2
+  bf16: true
+  seed: 0
+
+calibration:
+  enabled: true
+  holdout_fraction: 0.5
+  min_rows_per_kind: 20
+
+evaluation:
+  enabled: true
+  shuffle_trials: 1
+  ece_bins: 15
+  batch_size: 8
+
+output:
+  output_root: decision_output/smoke

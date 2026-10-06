@@ -195,6 +195,26 @@ python -m Evaluator.cli \
 | `--env-template` | E2B template ID when using `--env-backend e2b` |
 | `--env-tool-schema` | Path to custom tool schema YAML |
 | `--env-exec-config` | Path to custom execution-rules YAML |
+| `--no-load-in-4bit` | `unsloth` only: load at full/half precision instead of 4-bit |
+| `--quantization` | Quant label of the evaluated artifact (default: detected from the model path) |
+| `--artifact-manifest` | `gguf_manifest.json` whose matching entry and calibration are recorded |
+
+### Comparing Results
+
+`python -m Evaluator.compare` compares a reference results file with one or
+more candidates (e.g. the full-precision model against each GGUF quant):
+pass-rate and per-tag deltas, per-case flips, an exact McNemar p-value, and an
+optional gate (`--max-pass-rate-drop`, `--max-tag-drop`, `--max-regressions`).
+Exit code `1` means a gate breached, `2` an input error.
+
+```bash
+python -m Evaluator.compare \
+  --reference Evaluator/results/f16.json \
+  --candidate Evaluator/results/q4_k_m.json \
+  --max-pass-rate-drop 3 --markdown Evaluator/results/quant_compare.md
+```
+
+See `.skills/evaluation/reference/results-metrics.md` for the full recipe.
 
 ## Output Format
 

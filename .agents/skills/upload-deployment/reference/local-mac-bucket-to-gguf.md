@@ -218,35 +218,17 @@ On this repo, the reliable converter lives in:
 And a local `llama.cpp` build may already exist at:
 - `Trainers/llama.cpp`
 
-If the model is already merged, do not call the top-level `ReliableGGUFConverter.convert()` path. That flow assumes it starts from a LoRA adapter and will try to merge again.
-
-For already merged models, use the lower-level methods directly:
+If the model is already merged, do not call the top-level `ReliableGGUFConverter.convert()` path; it merges a LoRA adapter first. Use the merged-model path instead, which writes the GGUFs plus `gguf_manifest.json`:
 
 ```bash
 source /tmp/model-merge-venv/bin/activate
-python - <<'PY'
-from pathlib import Path
-from shared.upload.converters.gguf_reliable import ReliableGGUFConverter
-
-merged_model = Path("/tmp/model-merge-staging/<slug>/merged/<model-name>")
-out_dir = Path("/tmp/model-merge-staging/<slug>/converted/<model-name>/gguf")
-out_dir.mkdir(parents=True, exist_ok=True)
-
-base_gguf = out_dir / "<model-name>.gguf"
-q4_gguf = out_dir / "<model-name>-Q4_K_M.gguf"
-
-converter = ReliableGGUFConverter(
-    llama_cpp_dir=Path("/Users/jrosenbaum/Documents/Code/Synthetic Conversations/Trainers/llama.cpp")
-)
-
-if not converter.convert_to_gguf_base(merged_model, base_gguf, dtype="bf16"):
-    raise SystemExit(1)
-if not converter.quantize_gguf(base_gguf, q4_gguf, "Q4_K_M"):
-    raise SystemExit(2)
-
-print(base_gguf)
-print(q4_gguf)
-PY
+python -m shared.upload.converters.gguf_reliable \
+  "/tmp/model-merge-staging/<slug>/merged/<model-name>" \
+  "/tmp/model-merge-staging/<slug>/converted/<model-name>" \
+  --merged --name <model-name> --quants Q4_K_M \
+  --llama-cpp-dir "/Users/jrosenbaum/Documents/Code/Synthetic Conversations/Trainers/llama.cpp"
+# Add --calibration <train.jsonl> for an imatrix-calibrated Q4_K_M (builds llama-imatrix if missing).
+# Add --no-cleanup to keep the bf16 base GGUF in <out>/work/ (it is also copied to <out>/gguf/).
 ```
 
 If conversion fails with:

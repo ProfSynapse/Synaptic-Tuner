@@ -1,0 +1,45 @@
+# Build the strands-decider v5 short-task corpus for the `decision` method.
+#
+# Runs Trainers/decision/build_corpus.py inside the training image (the pinned
+# strands-decider builder imports torch). Downloads ~28 public Hugging Face
+# classification datasets and writes Datasets/decision/strands_v5/:
+#   train_v5.jsonl, train_v5.holdout.jsonl, holdout_v5_norule.jsonl,
+#   corpus_manifest.json (row counts, sha256 vs the published hashes, argv).
+# Corpus definition: Trainers/decision/configs/corpus_strands_v5.yaml.
+#
+# Artifacts copy back to Datasets/decision/strands_v5; the run refuses to
+# overwrite a non-empty directory, so move an old build aside to rebuild.
+name: decision-strands-corpus-build
+description: Build the strands v5 decision corpus (21 train + 7 held-out public tasks).
+target: local
+method: decision
+provider: local_docker
+
+job:
+  # Pinned by digest: the :latest pulled 2026-10-04 (torch 2.11+cu128,
+  # transformers 5.17.0, peft 0.21.2). :latest is rebuilt upstream.
+  image: unsloth/unsloth@sha256:0b8efd89caf77bc4150f6464416d7bc6a5e00e27a4446615ecf99ef20f553397
+  pull_policy: missing
+  transfer: auto
+  keep_container: false
+
+setup:
+  # TBD-PENDING-SMOKE: versions match the strands-decider README's tested stack;
+  # record any corrective pin the first build needs here.
+  pip:
+    - strands-decider[train]==0.1.0
+    - transformers==5.17.0
+  copy:
+    - Trainers/decision
+
+run:
+  method: decision
+  trainer: Trainers/decision/build_corpus.py
+  command:
+    - python
+    - Trainers/decision/build_corpus.py
+    - --config
+    - Trainers/decision/configs/corpus_strands_v5.yaml
+
+artifacts:
+  host_path: Datasets/decision/strands_v5

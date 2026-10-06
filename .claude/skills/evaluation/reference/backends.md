@@ -96,6 +96,10 @@ Requirements:
 - GPU runtime with Unsloth installed.
 - Model path points at a compatible saved model/adaptor directory.
 
+The base model loads in 4-bit by default. Add `--no-load-in-4bit` for a
+full-precision run, e.g. the reference in a quantization regression check. The
+load precision is recorded in `metadata.model_artifact.load_settings`.
+
 ---
 
 ## llama.cpp
@@ -106,8 +110,13 @@ For evaluating quantized GGUF models.
 python -m Evaluator.cli \
   --backend llamacpp \
   --model ./path/to/model-Q4_K_M.gguf \
-  --scenario tool_prompts.yaml
+  --scenario tool_prompts.yaml \
+  --artifact-manifest ./path/to/gguf_manifest.json
 ```
+
+The quant label (`Q4_K_M`) is detected from the file name and recorded in
+`metadata.model_artifact`; `--quantization` overrides it and
+`--artifact-manifest` records the file's manifest entry and calibration.
 
 ---
 
@@ -165,7 +174,13 @@ python -m Evaluator.cli --backend vllm --model finetuned \
   --output Evaluator/results/finetuned_tools.json
 ```
 
-Compare `summary.correctness_pass_rate`.
+Then compare them:
+
+```bash
+python -m Evaluator.compare \
+  --reference Evaluator/results/base_tools.json \
+  --candidate finetuned=Evaluator/results/finetuned_tools.json
+```
 
 ---
 

@@ -1,0 +1,59 @@
+# Local Docker FULL run for the `decision` method: letter-logit readout, Qwen3.5-2B-Base.
+#
+# Proves the end-to-end path (model load -> LoRA + marker-logit readout -> option-
+# shuffled training -> per-kind temperature calibration -> held-out evaluation
+# -> lineage) over the whole strands v5 corpus (~100k rows, one epoch; hours on
+# one 24 GB card). Run the matching *_smoke recipe first.
+#
+# Needs the corpus first:
+#   python tuner.py local-run --job-config Trainers/recipes/decision_strands_corpus_build.yaml --yes
+# Every model/prompt/data/loss/training knob lives in Trainers/decision/configs/letter_logits.yaml;
+# the torso comes from model.registry_name in configs/model_registry.yaml.
+name: decision-qwen35-2b-letter-logits
+description: Full decision-model training (letter-logit readout) on Qwen3.5-2B-Base, strands v5 corpus.
+target: local
+method: decision
+provider: local_docker
+
+job:
+  # Pinned by digest: the :latest pulled 2026-10-04 (torch 2.11+cu128,
+  # transformers 5.17.0, peft 0.21.2). :latest is rebuilt upstream.
+  image: unsloth/unsloth@sha256:0b8efd89caf77bc4150f6464416d7bc6a5e00e27a4446615ecf99ef20f553397
+  pull_policy: missing
+  # copy on Windows (GPU bind mounts can fail), bind elsewhere.
+  transfer: auto
+  keep_container: false
+
+setup:
+  # Qwen3.5 needs transformers 5.x; flash-linear-attention gives the Gated
+  # DeltaNet layers their Triton kernels (Linux only; without it transformers
+  # falls back to a ~2.3x slower PyTorch path).
+  # TBD-PENDING-SMOKE: these follow the strands-decider README's tested stack.
+  # This recipe is not a qualified runtime profile; capture the working
+  # inventory from the first passing smoke before treating it as one.
+  pip:
+    - transformers==5.17.0
+    - peft==0.21.2
+    - flash-linear-attention
+  copy:
+    - Trainers/decision
+    - Trainers/shared
+    - shared
+    - tuner
+    - Datasets/decision/strands_v5
+
+run:
+  method: decision
+  trainer: Trainers/decision/train_decision.py
+  command:
+    - python
+    - Trainers/decision/train_decision.py
+    - --config
+    - Trainers/decision/configs/letter_logits.yaml
+    - --output-root
+    - toolset-training-artifacts/runs/local_docker/decision/{name}
+    - --run-timestamp
+    - "{timestamp}"
+
+artifacts:
+  host_path: toolset-training-artifacts/runs/local_docker/decision/{name}/{timestamp}

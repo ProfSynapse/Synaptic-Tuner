@@ -1505,12 +1505,16 @@ class LocalRunHandler(BaseHandler):
                     CONTAINER_ROOTS["engine"] if self.context.mode == "host" else "/workspace/repo",
                 )
             )
+            # host_path accepts the same {name}/{timestamp} templates as run.command,
+            # so an explicit-command trainer can write a fresh per-run directory.
+            configured_host_path = artifacts_cfg.get("host_path")
             host_artifact_path = self._rel_path(
-                artifacts_cfg.get(
-                    "host_path",
+                self._render_value(configured_host_path, variables)
+                if configured_host_path is not None
+                else (
                     f"runs/local_docker/custom/{name}"
                     if self.context.mode == "host"
-                    else f"toolset-training-artifacts/runs/local_docker/custom/{name}",
+                    else f"toolset-training-artifacts/runs/local_docker/custom/{name}"
                 ),
                 declaring_file=config_path,
                 access="write" if self.context.mode == "host" else "read",

@@ -128,8 +128,13 @@ vendor/
 # at their own corpus, or drops audio here when data_dir is left empty.
 Datasets/ace_step_corpus/
 
+# Decision-model corpora built from public Hugging Face datasets by
+# Trainers/decision/build_corpus.py (downloaded, never redistributed).
+Datasets/decision/
+
 # Local training outputs
 webllm_output/
+decision_output/
 sft_output_mac/
 grpo_output_rtx3090/.worktrees/
 

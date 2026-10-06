@@ -55,6 +55,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Warm Space scaffold | `python3 Trainers/cloud/scripts/manage_space.py render --template vllm_warm --output-dir /tmp/my-space --base-image ghcr.io/<org>/<image>:<tag>` |
 | Warm Space deploy | `python3 Trainers/cloud/scripts/manage_space.py deploy --space-id <user>/<space> --template vllm_warm --base-image ghcr.io/<org>/<image>:<tag> --hardware a10g-small --sleep-time 3600 --var BASE_MODEL=<model>` |
 | ML training | `python tuner.py ml train --config Trainers/ml/configs/templates/regression.yaml` |
+| Decision model (Jev-style) smoke | `python tuner.py local-run --job-config Trainers/recipes/decision_qwen35_2b_pointer_smoke.yaml --yes` |
 
 ## Training Methods at a Glance
 
@@ -64,6 +65,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | **KTO** | Refine with preferences | 1e-6 | 1 | Interleaved True/False | Second stage |
 | **GRPO** | Optimize against rewards | 5e-6 | 1 | Prompts + ground truth | Final online stage |
 | **Embedding** | Train a retrieval bi-encoder | 2e-5 | 1 | Triplets / pairs | Retrieval / RAG embedders |
+| **Decision** | Calibrated typed decisions (yes/no, choice, score) | 1e-4 (+1e-3 head) | 1 | State + typed question + gold | Routing / triage / policy checks (Jev-style) |
 
 **Recommended pipeline:** SFT → KTO → GRPO
 
@@ -73,6 +75,11 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 > the same `local-run`/recipe path as SFT. For the full surface use the
 > dedicated **`embedding-training`** skill; the triplet/retrieval data shapes are
 > in `reference/dataset-formats.md` below.
+>
+> **Decision training** (Jev / Strands Decider-style "System One" models) answers
+> typed questions with calibrated option probabilities instead of text, via a
+> `pointer` head or the LM's own `letter_logits`. It has its own trainer, corpus
+> builder, temperature calibration and evaluation; see `reference/decision-training.md`.
 
 ## Complexity Tiers
 
@@ -92,6 +99,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - `Trainers/kto/` — KTO trainer
 - `Trainers/grpo/` — GRPO and env-GRPO trainer
 - `Trainers/embedding/` — embedding (SentenceTransformer bi-encoder) trainer, registry, and dual loader; see the `embedding-training` skill
+- `Trainers/decision/` — decision-model (Jev-style typed choice/yes-no/score) trainer, corpus builder, calibration; see `reference/decision-training.md`
 - `Trainers/archive/legacy_rtx3090/` — archived legacy RTX3090 trainer snapshots and outputs; do not use for new runs
 - `Datasets/` — JSONL training datasets
 - `SynthChat/scenarios/` — synthetic data and environment-backed scenarios
@@ -190,6 +198,7 @@ Load the specific reference you need:
 | **LoRA Techniques** | LoRA variants, init methods, config recipes | `reference/lora-techniques.md` |
 | **Evolutionary Config** | Experimental gradient-selection config schema and defaults | `reference/training-config.md` |
 | **LoRA Surgery** | Eval-guided post-training weight optimization | `reference/lora-surgery.md` |
+| **Decision Training** | Jev-style typed decision models: readouts, corpus, calibration, eval | `reference/decision-training.md` |
 | **Troubleshooting** | OOM errors, instability, platform issues | `reference/troubleshooting.md` |
 | **Tokenizer Profiling** | Offline token-length distributions and sequence-budget sizing | `reference/tokenizer-profiling.md` |
 | **Derived Training Images** | Immutable package-overlay planning, capture, diagnostic reporting, and live launch verification | `reference/derived-training-images.md` |
