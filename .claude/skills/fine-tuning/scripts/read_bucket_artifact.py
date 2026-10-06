@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from shared.utilities.bucket_artifacts import (
+from shared.utilities.bucket_artifacts import (  # noqa: F401  helpers re-exported for tests/scripts/test_read_bucket_artifact.py
     latest_jsonl_record as _latest_jsonl_record,
     read_artifact,
     tail_lines as _tail_lines,

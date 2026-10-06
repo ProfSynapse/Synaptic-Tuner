@@ -78,7 +78,9 @@ def test_windows_cmd_shim_resolves_to_node_without_shell(tmp_path, monkeypatch):
     cli.write_text("// intentionally not executed", encoding="utf-8")
     node.write_text("", encoding="utf-8")
 
-    monkeypatch.setattr(module.os, "name", "nt")
+    # Fake Windows for the module under test only; patching the global os.name
+    # would also make pathlib construct WindowsPath objects on POSIX hosts.
+    monkeypatch.setattr(module, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(module.shutil, "which", lambda name: str(shim if name == "nexus" else node if name == "node" else ""))
     logical = module.nexus_argv({"vault": "Vault", "workspace": "research", "session": "snapshot"}, "Notes/one.md")
     assert module.resolve_nexus_command(logical) == [str(node), str(cli), *logical[1:]]
@@ -103,6 +105,7 @@ def test_invalid_envelopes_and_numbered_sequences_fail_closed_without_prose(tmp_
     malformed = json.dumps({"content": [{"type": "text", "text": json.dumps({"success": True, "path": "Notes/first.md", "content": "1: private prose\n3: skipped"})}]})
 
     monkeypatch.setattr(module, "load_config", lambda _: config)
+    monkeypatch.setattr(module, "resolve_nexus_command", lambda argv: argv)
     monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=malformed))
     assert module.main(["--config", "ignored.yaml"]) == 2
     captured = capsys.readouterr()
@@ -123,6 +126,7 @@ def test_batch_failure_leaves_no_artifact_and_existing_output_is_idempotent_or_c
         _envelope("Notes/first.md", "1: alpha"),
         _envelope("Notes/second.md", "1: malformed\n3: gap"),
     ])
+    monkeypatch.setattr(module, "resolve_nexus_command", lambda argv: argv)
     monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=next(replies)))
     with __import__("pytest").raises(module.SnapshotError, match="NUMBERED_CONTENT_INVALID"):
         module.build_rows(config)

@@ -5,13 +5,12 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, Callable
-from contextlib import contextmanager
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch import nn
 
-from shared.validation.fitness import FitnessEvaluator, FitnessResult
+from shared.validation.fitness import FitnessEvaluator
 from .config import EvolutionaryConfig
 from .candidate_generator import CandidateGenerator
 from .strategies import GradientCandidate

@@ -23,7 +23,8 @@ schemas, mappings, and quality policy in caller configuration.
      architecture: `references/generation-workflow.md`.
    - Regenerate selected rows with checked-in commands:
      `references/targeted-regeneration.md`.
-   - Project environment rollouts into SFT, KTO, or GRPO data:
+   - Project environment rollouts into SFT, KTO, or GRPO data, or pick the
+     `validation_group_key` for training on them:
      `references/rollout-projection.md`.
    - Plan run-size and cost projections: `references/rollout-projection.md`.
    - Export admitted structured results to Markdown:

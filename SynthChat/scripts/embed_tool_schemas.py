@@ -9,7 +9,7 @@ that StructureValidator can use for tool call validation.
 import json
 import yaml
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 
 def load_tool_schemas(schema_file: Path) -> Dict:
@@ -150,7 +150,7 @@ def main():
         # Optionally write to file or print instructions
         if rubric_file.exists():
             print(f"  [INFO] Rubric exists: {rubric_file}")
-            print(f"  [TODO] Add the above 'validations' section to this file")
+            print("  [TODO] Add the above 'validations' section to this file")
         else:
             print(f"  [WARN] Rubric not found: {rubric_file}")
         print()

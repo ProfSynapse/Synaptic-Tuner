@@ -315,7 +315,7 @@ def test_reconciliation_uses_only_retained_call_id_without_spawn(monkeypatch) ->
 
 def test_operational_binding_substitution_stops_before_function_lookup(monkeypatch) -> None:
     binding, transport, _, _, _, _, _ = _transport(monkeypatch)
-    other = _case()[0]
+    _case()
     # The separately parsed commands are semantically identical, so use a
     # stage command to prove effect-type substitution is rejected pre-provider.
     stage = __import__(

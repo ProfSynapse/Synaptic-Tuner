@@ -17,7 +17,6 @@ Supports --json flag for AI-parseable output. In JSON mode:
 - All output is JSON formatted for programmatic parsing
 """
 
-import os
 from argparse import Namespace
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -37,9 +36,6 @@ from shared.ui import (
     prompt,
     spinner,
     BOX,
-    COLORS,
-    console,
-    RICH_AVAILABLE,
 )
 
 
@@ -184,7 +180,6 @@ class SynthChatHandler(BaseHandler):
     def _show_generate_defaults(self, config: Dict[str, Any]) -> None:
         """Display generate defaults in a config panel."""
         gen = config.get("generate", {})
-        shared = config.get("shared", {})
 
         display = {
             "Backend": gen.get("backend", "lmstudio"),
@@ -618,7 +613,7 @@ class SynthChatHandler(BaseHandler):
             max_iterations = int(iters_str) if iters_str.strip() else default_iters
 
             # 5. Line range
-            start_str = prompt(f"Start line (default: 1)")
+            start_str = prompt("Start line (default: 1)")
             start_line = int(start_str) if start_str.strip() else 1
 
             end_str = prompt(f"End line (default: {total_lines})")

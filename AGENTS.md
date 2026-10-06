@@ -165,7 +165,10 @@ This repository has a few cloud-training constraints that are easy to relearn th
   for an intentional reviewed hash refresh, then rerun the default check. The
   tool must never be used to change the locked inventory or runtime/image pins;
   `CURRENT` confirms only agreement with the current policy-valid lock's source
-  hashes, not independent approval of its non-hash pins.
+  hashes, not independent approval of its non-hash pins. The same tool keeps
+  `.skills/fine-tuning/configs/qwen35_4b_token_profile.yaml`'s
+  `expected_lock_sha256` in step (reported when stale, rewritten by `--write`);
+  after `--write` run `python3 .skills/scripts/sync_skill_trees.py`.
 - When extracting code from a locked runtime member, explicitly review and
   update the lock inventory, JSON schema, runtime policy and maintenance script
   together before refreshing hashes. Moving code must not remove it from the

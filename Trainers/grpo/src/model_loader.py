@@ -4,7 +4,6 @@ Model loading helpers for GRPO / GSPO training using Unsloth.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional, Tuple
 
 import torch
@@ -153,7 +152,7 @@ def apply_lora_adapters(
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
     trainable_pct = 100 * trainable_params / total_params if total_params else 0.0
-    print(f"\n✓ LoRA adapters applied")
+    print("\n✓ LoRA adapters applied")
     print(f"Trainable parameters: {trainable_params:,} ({trainable_pct:.2f}%)")
     print(f"Total parameters: {total_params:,}")
     print("=" * 60)
@@ -218,7 +217,7 @@ def load_from_sft_checkpoint(
         )
         tokenizer_or_processor = tokenizer
 
-    print(f"\n✓ Merged model loaded")
+    print("\n✓ Merged model loaded")
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
         print(f"✓ GPU: {gpu_name}")

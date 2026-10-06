@@ -17,11 +17,16 @@ import yaml
 from shared.utilities.paths import get_canonical_trainer_dir_name
 from shared.utilities.unique_ids import unique_utc_timestamp
 from tuner.cloud import HF_BUCKET_SYNC_OVERLAY_PACKAGES
-from tuner.core.config import CloudTrainingConfig
+from tuner.core.config import CloudTrainingConfig, validation_split_flags
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.stages._util import hf_verified_source_steps
 
 from .base_cloud import load_project_deps
+
+# Methods whose trainer accepts the HF Jobs run/artifact flags built below
+# (grpo runs train_env_grpo.py). tests/contract/test_trainer_argv_contract.py
+# parses every built command with the real trainer argparse.
+HF_TRAINER_METHODS = ("sft", "kto", "dpo", "grpo")
 
 
 class HFCommandBuilderMixin:
@@ -81,6 +86,11 @@ class HFCommandBuilderMixin:
         Returns:
             Shell command string to pass as ["bash", "-c", command]
         """
+        if config.method not in HF_TRAINER_METHODS:
+            raise CloudProviderError(
+                f"HF Jobs training supports {', '.join(HF_TRAINER_METHODS)}; the "
+                f"{config.method} trainer does not accept the HF Jobs run/artifact flags."
+            )
         preparation = getattr(self, "source_preparation", None)
         if preparation is None:
             raise CloudProviderError("HF Jobs secure source preparation is required before command compilation.")
@@ -145,7 +155,23 @@ class HFCommandBuilderMixin:
         if config.max_steps is not None:
             training_args.extend(["--max-steps", str(config.max_steps)])
         if config.max_seq_length is not None:
+            if config.method == "grpo":
+                # train_env_grpo has no sequence-length setting (the model is
+                # loaded by name; prompt/completion lengths live in the YAML).
+                raise CloudProviderError(
+                    "max_seq_length is not supported for HF env-GRPO; set "
+                    "training.max_completion_length in "
+                    "Trainers/grpo/configs/env_config.yaml instead."
+                )
             training_args.extend(["--max-seq-length", str(config.max_seq_length)])
+        training_args.extend(
+            validation_split_flags(
+                method=config.method,
+                split_dataset=config.split_dataset,
+                test_size=config.test_size,
+                validation_group_key=config.validation_group_key,
+            )
+        )
         # chat_template_kwargs is a nested mapping; serialize to the same JSON-string
         # --chat-template-kwargs flag the local lane uses (one wire format, both
         # lanes). sft-only: dpo/kto template internally via TRL and expose no flag.

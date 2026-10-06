@@ -40,6 +40,8 @@ from tuner.cloud.derived_training_image import (
     validate_verification_report,
     verify_effectful_launch,
 )
+from tuner.core.config import validation_split_flags
+from tuner.core.exceptions import ConfigurationError
 from tuner.discovery.recipes import load_recipe
 from tuner.handlers.base import BaseHandler
 from tuner.project import PathRef, ProjectContext
@@ -1174,11 +1176,15 @@ class LocalRunHandler(BaseHandler):
 
         command = ["python", trainer_file]
         _append_flag(command, "model_name", model_cfg.get("name") or model_cfg.get("model_name"))
-        _append_flag(
-            command,
-            "model_revision",
-            model_cfg.get("revision") or model_cfg.get("model_revision"),
-        )
+        model_revision = model_cfg.get("revision") or model_cfg.get("model_revision")
+        if model_revision is not None and not sft_only:
+            # Only train_sft.py pins and verifies a Hub revision; the dpo/kto
+            # trainers would reject --model-revision, so refuse the setting here.
+            raise LocalRunError(
+                f"model.revision is supported only for run.method=sft; the {method} "
+                "trainer has no revision pin. Remove model.revision."
+            )
+        _append_flag(command, "model_revision", model_revision)
         if runtime_profile is not None:
             _append_flag(command, "runtime_profile_name", runtime_profile["name"])
             _append_flag(
@@ -1312,8 +1318,19 @@ class LocalRunHandler(BaseHandler):
             )
         if sft_only and training_cfg.get("require_memory_efficient_loss") is True:
             command.append("--require-memory-efficient-loss")
-        if bool(dataset_cfg.get("split_dataset", False)):
-            command.append("--split-dataset")
+        # Validation split settings use the same flag builder and validation as
+        # the cloud lanes (a group key without split_dataset is refused).
+        try:
+            command.extend(
+                validation_split_flags(
+                    method=method,
+                    split_dataset=bool(dataset_cfg.get("split_dataset", False)),
+                    test_size=dataset_cfg.get("test_size"),
+                    validation_group_key=dataset_cfg.get("validation_group_key"),
+                )
+            )
+        except ConfigurationError as exc:
+            raise LocalRunError(str(exc)) from exc
 
         for key in (
             "batch_size",
@@ -1488,12 +1505,16 @@ class LocalRunHandler(BaseHandler):
                     CONTAINER_ROOTS["engine"] if self.context.mode == "host" else "/workspace/repo",
                 )
             )
+            # host_path accepts the same {name}/{timestamp} templates as run.command,
+            # so an explicit-command trainer can write a fresh per-run directory.
+            configured_host_path = artifacts_cfg.get("host_path")
             host_artifact_path = self._rel_path(
-                artifacts_cfg.get(
-                    "host_path",
+                self._render_value(configured_host_path, variables)
+                if configured_host_path is not None
+                else (
                     f"runs/local_docker/custom/{name}"
                     if self.context.mode == "host"
-                    else f"toolset-training-artifacts/runs/local_docker/custom/{name}",
+                    else f"toolset-training-artifacts/runs/local_docker/custom/{name}"
                 ),
                 declaring_file=config_path,
                 access="write" if self.context.mode == "host" else "read",

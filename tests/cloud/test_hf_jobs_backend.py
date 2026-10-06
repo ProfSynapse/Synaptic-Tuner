@@ -10,7 +10,7 @@ Covers:
 - _parse_timeout: hours, minutes, bare numbers, invalid
 """
 
-import os
+import shlex
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -18,9 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tuner.backends.training.cloud.hf_jobs_backend import (
-    DEFAULT_FLAVOR,
     DEFAULT_IMAGE,
-    DEFAULT_TIMEOUT,
     HFJobsBackend,
     _parse_timeout,
 )
@@ -109,6 +107,22 @@ def canonical_repo_source():
         commit=canonical_source.commit,
         canonical_source=canonical_source,
     )
+
+
+def _env_grpo_parse_args():
+    """train_env_grpo.parse_args without importing the trainer's ML stack."""
+    import argparse
+    import ast
+
+    source_path = Path(__file__).resolve().parents[2] / "Trainers" / "grpo" / "train_env_grpo.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    function = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "parse_args"
+    )
+    namespace = {"argparse": argparse}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(source_path), "exec"), namespace)
+    return namespace["parse_args"]
 
 
 def _cloud_config(**overrides):
@@ -258,6 +272,8 @@ class TestHFJobsLoadConfig:
         assert config.config_path.name == "env_config.yaml"
         assert config.dataset_name == "professorsynapse/nexus-synthetic-data"
         assert config.dataset_file == "professorsynapse/nexus-synthetic-data/environment_rollouts/canonical/vault_shared_seed_dynamic_roles_aggregate_20260316.jsonl"
+        # env-GRPO has no sequence-length flag; max_prompt_length stays in YAML.
+        assert config.max_seq_length is None
 
     def test_raises_on_unknown_method(self, repo_root):
         backend = HFJobsBackend(repo_root)
@@ -806,6 +822,35 @@ class TestBuildTrainingCommand:
         assert "--output-dir /workspace/artifacts/grpo/20260322_170000" in cmd
         assert "python -m shared.hf_bucket_sync_helper /workspace/artifacts/grpo/20260322_170000" in cmd
 
+    def test_grpo_command_flags_are_all_accepted_by_env_trainer(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method="grpo",
+            config_path=repo_root / "Trainers" / "grpo" / "configs" / "env_config.yaml",
+            trainer_dir=repo_root / "Trainers" / "grpo",
+            save_steps=25,
+            save_total_limit=2,
+            gradient_accumulation_steps=2,
+            max_steps=10,
+        )
+        cmd = backend._build_training_command(config, timestamp="20260322_170000")
+        trainer_line = next(part for part in cmd.split(" && ") if "train_env_grpo.py" in part)
+        argv = shlex.split(trainer_line.split("train_env_grpo.py", 1)[1])
+        assert "--save-steps" in argv and "--save-total-limit" in argv
+        args = _env_grpo_parse_args()(argv)
+        assert (args.save_steps, args.save_total_limit, args.max_steps) == (25, 2, 10)
+
+    def test_grpo_command_refuses_max_seq_length(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method="grpo",
+            config_path=repo_root / "Trainers" / "grpo" / "configs" / "env_config.yaml",
+            trainer_dir=repo_root / "Trainers" / "grpo",
+            max_seq_length=4096,
+        )
+        with pytest.raises(CloudProviderError, match="max_seq_length is not supported"):
+            backend._build_training_command(config, timestamp="20260322_170000")
+
     def test_build_artifact_prefix(self, repo_root):
         backend = HFJobsBackend(repo_root)
         config = _cloud_config()
@@ -939,3 +984,49 @@ class TestParseTimeout:
     def test_case_insensitive(self):
         assert _parse_timeout("4H") == 4.0
         assert _parse_timeout("90M") == 1.5
+
+
+class TestHFJobsValidationSplitForwarding:
+    """split_dataset / test_size / validation_group_key reach the HF trainer argv."""
+
+    @pytest.mark.parametrize("method", ["sft", "kto", "dpo"])
+    def test_command_forwards_grouped_split(self, repo_root, method):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method=method, split_dataset=True, test_size=0.2, validation_group_key="metadata.scenario"
+        )
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+        assert f"python train_{method}.py" in cmd
+        assert " --split-dataset --test-size 0.2 --validation-group-key metadata.scenario" in cmd
+
+    def test_command_omits_split_flags_when_unset(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        cmd = backend._build_training_command(_cloud_config(test_size=0.1), timestamp="20260314_181946")
+        assert "--split-dataset" not in cmd
+        assert "--test-size" not in cmd
+        assert "--validation-group-key" not in cmd
+
+    def test_command_refuses_group_key_without_split(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(validation_group_key="metadata.scenario")
+        with pytest.raises(ConfigurationError, match="requires dataset.split_dataset"):
+            backend._build_training_command(config, timestamp="20260314_181946")
+
+    def test_load_config_reads_trainer_dataset_split_settings(self, repo_root, canonical_repo_source):
+        import yaml
+
+        config_path = repo_root / "Trainers" / "sft" / "configs" / "config.yaml"
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        raw["dataset"].update(
+            {"split_dataset": True, "test_size": 0.25, "validation_group_key": "metadata.seed_id"}
+        )
+        config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        backend = HFJobsBackend(repo_root)
+        with patch(
+            "tuner.backends.training.cloud.hf_jobs_backend.resolve_repo_source",
+            return_value=canonical_repo_source,
+        ):
+            config = backend.load_config("sft")
+        assert (config.split_dataset, config.test_size, config.validation_group_key) == (
+            True, 0.25, "metadata.seed_id",
+        )

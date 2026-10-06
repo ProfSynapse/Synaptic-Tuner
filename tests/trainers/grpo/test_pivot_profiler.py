@@ -4,25 +4,22 @@ import json
 import logging
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
+from tests.trainers._trainer_import import load_trainer_module
+
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "Trainers" / "grpo" / "src"))
 
-# pivot_profiler imports torch at module level; stub it when unavailable.
-if "torch" not in sys.modules:
-    sys.modules["torch"] = MagicMock()
-
-from pivot_profiler import (
-    PivotCandidate,
-    PivotResult,
-    extract_candidates,
-    filter_pivots,
-    pivots_to_dataset,
-)
+# pivot_profiler imports torch at module level. When torch is not installed a
+# stub stands in only while the module loads; it never stays in sys.modules.
+pivot_profiler = load_trainer_module("grpo", "pivot_profiler", stub_if_missing=("torch",))
+PivotCandidate = pivot_profiler.PivotCandidate
+PivotResult = pivot_profiler.PivotResult
+extract_candidates = pivot_profiler.extract_candidates
+filter_pivots = pivot_profiler.filter_pivots
+pivots_to_dataset = pivot_profiler.pivots_to_dataset
 
 
 # ---------------------------------------------------------------------------

@@ -12,13 +12,9 @@ from tuner.execution.foundation_v2.executors import (
     ExecutionResolutionRequestV2,
     ReconciliationResolutionRequestV2,
 )
-from tuner.execution.foundation_v2.identities import EffectKind
 from tuner.execution.foundation_v2.observations import ObservationDisposition
 from tuner.execution.foundation_v2.reconciliation import ReconciliationTargetV1
 from tuner.execution.providers.modal.coordinator_effects import ModalEffectOutcome
-from tuner.execution.providers.modal.inference_commands import (
-    ModalInferenceCommandBinding,
-)
 from tuner.execution.providers.modal.inference_effects import (
     ModalChatEffectExecutor,
     ModalChatExecutorResolver,

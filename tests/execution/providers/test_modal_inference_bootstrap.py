@@ -10,7 +10,6 @@ import pytest
 from tests.execution.providers.modal_inference_worker_fixtures import (
     mounted_launch_case,
 )
-from tuner.execution.foundation_v2.canonical import parse_canonical_object
 from tuner.execution.providers.modal import inference_bootstrap as bootstrap
 from tuner.execution.providers.modal.inference_bootstrap import (
     ModalInferenceBootstrapError,

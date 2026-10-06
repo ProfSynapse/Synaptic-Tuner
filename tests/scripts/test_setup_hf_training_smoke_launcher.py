@@ -85,7 +85,7 @@ def test_checked_in_lock_and_allowlist_are_exact_reviewed_contract() -> None:
 )
 def test_hashed_lock_rejects_extra_ranged_marked_url_vcs_local_and_ml(tmp_path: Path, bad_line: str) -> None:
     lock = tmp_path / "lock.txt"
-    versions = _write_lock(lock)
+    _write_lock(lock)
     lock.write_text(lock.read_text() + bad_line + "\n", encoding="utf-8")
     with pytest.raises(setup.LauncherContractError):
         setup.validate_hashed_lock(lock)

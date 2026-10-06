@@ -150,7 +150,7 @@ class ParsedResponse:
             )
             if wrapper_spec is not None:
                 for key in wrapper_spec.get("field_names", []):
-                    if key == "tool":
+                    if key == wrapper_spec.get("command_field"):
                         continue
                     val = self.first_tool_call.arguments.get(key)
                     if val is not None:

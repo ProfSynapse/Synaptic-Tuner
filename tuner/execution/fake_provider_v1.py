@@ -8,7 +8,7 @@ import hmac
 from threading import Lock
 
 from synaptic_tuner.api.v1.providers import ProviderDescriptor, ProviderRef
-from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
+from synaptic_tuner.api.v1.results import VerifiedArtifact
 from synaptic_tuner.api.v1.runs_facade import RunLogEntry
 
 from .foundation_v2.canonical import canonical_bytes, digest_text, domain_digest, safe_ref
@@ -29,7 +29,6 @@ from .foundation_v2.references import (
     ScopedProviderRunRefV1,
 )
 from .foundation_v2.registry import (
-    ProviderReaderFactoryRequestV1,
     ResolvedProviderReaderV1,
 )
 from .coordinator_v1.model import (
@@ -45,7 +44,6 @@ from .coordinator_v1.model import (
     ProviderRunPhaseV1,
     ProviderRunReadRequestV1,
     VerificationVerdictV1,
-    WorkflowRecordV1,
 )
 
 

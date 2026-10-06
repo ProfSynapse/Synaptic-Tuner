@@ -24,9 +24,6 @@ from tests.execution.providers.test_modal_inference_workload import (
 )
 from tuner.execution.foundation_v2.authority import GrantAuthorityV2
 from tuner.execution.foundation_v2.canonical import parse_canonical_object
-from tuner.execution.providers.modal.inference_commands import (
-    ModalInferenceCommandBinding,
-)
 from tuner.execution.providers.modal.coordinator_preflight import (
     TrustedEvidenceIdentity,
 )

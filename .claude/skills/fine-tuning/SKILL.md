@@ -35,6 +35,8 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
 | Analyze/prune dataset from loss | `python3 scripts/prune_dataset_from_loss.py --dataset-path ... --experiment-id ... --analyze-only` |
+| Train/eval contamination check | `python tuner.py check-contamination --train-data Datasets/<train>.jsonl` |
+| Grouped validation split | recipe `dataset: {split_dataset: true, validation_group_key: metadata.scenario}` |
 | Standalone prompt optimization | `python tuner.py prompt-optimize --prompt-opt-config configs/prompt_optimization/NAME.yaml` |
 | Prompt-optimize SynthChat generation | `python -m SynthChat.run generate --prompt-opt-config configs/prompt_optimization/NAME.yaml [options]` |
 | Analyze bucket-backed run | `python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/` |
@@ -48,10 +50,12 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Local deterministic vLLM generation | `VLLM_BATCH_INVARIANT=1 python tuner.py batch-generate --engine vllm ...` |
 | HF gym against trained model | `python tuner.py cloud-gym --run latest --method sft` |
 | Prepare verified raw-text SFT data | `python tuner.py prepare-dataset --config <config.json> --json` |
+| Check SFT loss masking (tokenizer only) | `python tuner.py doctor sft-mask --dataset-path <jsonl> --model <tokenizer>` |
 | Plan a derived training image | `python scripts/qualify_derived_training_image.py plan --config Trainers/image_profiles/<profile>.yaml` |
 | Warm Space scaffold | `python3 Trainers/cloud/scripts/manage_space.py render --template vllm_warm --output-dir /tmp/my-space --base-image ghcr.io/<org>/<image>:<tag>` |
 | Warm Space deploy | `python3 Trainers/cloud/scripts/manage_space.py deploy --space-id <user>/<space> --template vllm_warm --base-image ghcr.io/<org>/<image>:<tag> --hardware a10g-small --sleep-time 3600 --var BASE_MODEL=<model>` |
 | ML training | `python tuner.py ml train --config Trainers/ml/configs/templates/regression.yaml` |
+| Decision model (Jev-style) smoke | `python tuner.py local-run --job-config Trainers/recipes/decision_qwen35_2b_pointer_smoke.yaml --yes` |
 
 ## Training Methods at a Glance
 
@@ -61,6 +65,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | **KTO** | Refine with preferences | 1e-6 | 1 | Interleaved True/False | Second stage |
 | **GRPO** | Optimize against rewards | 5e-6 | 1 | Prompts + ground truth | Final online stage |
 | **Embedding** | Train a retrieval bi-encoder | 2e-5 | 1 | Triplets / pairs | Retrieval / RAG embedders |
+| **Decision** | Calibrated typed decisions (yes/no, choice, score) | 1e-4 (+1e-3 head) | 1 | State + typed question + gold | Routing / triage / policy checks (Jev-style) |
 
 **Recommended pipeline:** SFT → KTO → GRPO
 
@@ -70,6 +75,11 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 > the same `local-run`/recipe path as SFT. For the full surface use the
 > dedicated **`embedding-training`** skill; the triplet/retrieval data shapes are
 > in `reference/dataset-formats.md` below.
+>
+> **Decision training** (Jev / Strands Decider-style "System One" models) answers
+> typed questions with calibrated option probabilities instead of text, via a
+> `pointer` head or the LM's own `letter_logits`. It has its own trainer, corpus
+> builder, temperature calibration and evaluation; see `reference/decision-training.md`.
 
 ## Complexity Tiers
 
@@ -89,6 +99,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - `Trainers/kto/` — KTO trainer
 - `Trainers/grpo/` — GRPO and env-GRPO trainer
 - `Trainers/embedding/` — embedding (SentenceTransformer bi-encoder) trainer, registry, and dual loader; see the `embedding-training` skill
+- `Trainers/decision/` — decision-model (Jev-style typed choice/yes-no/score) trainer, corpus builder, calibration; see `reference/decision-training.md`
 - `Trainers/archive/legacy_rtx3090/` — archived legacy RTX3090 trainer snapshots and outputs; do not use for new runs
 - `Datasets/` — JSONL training datasets
 - `SynthChat/scenarios/` — synthetic data and environment-backed scenarios
@@ -121,6 +132,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - Treat `loss_summary.json` as a supporting artifact, not the canonical final loss metadata file.
 - The ledger should accumulate real model-size / hardware / timing / cost data so future hardware planning can optimize against observed evidence instead of memory.
 - For local trainer iteration, use the checked-in `train_sft.py`, `train_kto.py`, and `train_grpo.py` entrypoints.
+- Before any SFT run on a new dataset, tokenizer, `max_seq_length`, `chat_template_kwargs` or `prompt_render`, run `python tuner.py doctor sft-mask` (the run's trainer config via `--sft-config`, plus `--dataset-path`/`--model` overrides). It uses the trainer's real dataset contract and preprocessing with only the tokenizer loaded and exits 1 on hard masking failures (more dropped rows than `training.max_dropped_row_fraction`, wrong or missing end-of-turn token, doubled BOS, contract violations). Since preprocessing contract version 2 the trainer itself drops rows with no supervised tokens or a prompt-prefix mismatch, masks tokens after the final end-of-turn token, and makes `prompt_completion` close completions with the template's end-of-turn token (not `eos_token_id`, unless the template renders none) and honour `completion_only_loss`; SFT losses from earlier runs are not directly comparable. Do not launch on a failing report; details are in `reference/dataset-formats.md` → Validation.
 - For repeatable local GPU training, prefer `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes` over ad hoc `docker run` commands. Put the model, dataset, Docker image, package overrides, LoRA settings, training knobs, and artifact paths in YAML.
 - For Windows Docker Desktop with GPU, prefer `job.transfer: auto` or `copy` in local-run configs. The runner chooses copy mode on Windows because GPU bind mounts can fail with access denied.
 - Keep newly released model support in local-run config, not shell history. For a reviewed overlay that must be immutable at launch, use the checked-in derived-image plan/build/capture/verify workflow rather than `setup.pip`.
@@ -192,6 +204,7 @@ Load the specific reference you need:
 | **LoRA Techniques** | LoRA variants, init methods, config recipes | `reference/lora-techniques.md` |
 | **Evolutionary Config** | Experimental gradient-selection config schema and defaults | `reference/training-config.md` |
 | **LoRA Surgery** | Eval-guided post-training weight optimization | `reference/lora-surgery.md` |
+| **Decision Training** | Jev-style typed decision models: readouts, corpus, calibration, eval | `reference/decision-training.md` |
 | **Troubleshooting** | OOM errors, instability, platform issues | `reference/troubleshooting.md` |
 | **Tokenizer Profiling** | Offline token-length distributions and sequence-budget sizing | `reference/tokenizer-profiling.md` |
 | **Derived Training Images** | Immutable package-overlay planning, capture, diagnostic reporting, and live launch verification | `reference/derived-training-images.md` |

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validator for synthetic Claudesidian tool-calling datasets in ChatML format.
+Validator for synthetic tool-calling datasets in ChatML format.
 
 Validates JSONL files with the following structure:
 {
@@ -12,8 +12,21 @@ Validates JSONL files with the following structure:
   "label": true  // optional (true = desirable, false = undesirable)
 }
 
+Checks are config-first:
+- A tool call whose name (or argument set) matches a wrapper in the tool-call
+  format registry (SynthChat/config/tool_call_formats.yaml by default) must
+  carry that format's required argument fields, each satisfying its configured
+  property schema. Fields the format lists under ``prompt_bound_fields`` must
+  hold a value the system prompt states. Calls that match no configured wrapper
+  are direct (wrapper-less) tool calls.
+- Every call is checked against its entry in the tool schema catalog
+  (Tools/tool_schemas.json in the engine by default): required parameters and
+  undeclared parameters.
+
 Usage:
-    python3 .skills/synthetic-data-generation/scripts/validate_syngen.py Synthetic\\ Conversations/syngen_toolset_v1.0.0.jsonl
+    python3 -m shared.validation.dataset_validator Datasets/your_dataset.jsonl
+    python3 -m shared.validation.dataset_validator data.jsonl \\
+        --tool-call-formats host/tool_call_formats.yaml --tool-schemas host/tool_schemas.json
 """
 from __future__ import annotations
 
@@ -23,39 +36,52 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Tuple, Dict, Any, Optional
+from functools import lru_cache
+from typing import Iterable, List, Tuple, Dict, Any, Mapping, Optional, Sequence
 
-SESSION_ID_RE = re.compile(r"^session_\d{13}_[a-z0-9]+$")
-WORKSPACE_ID_RE = re.compile(r"^ws_\d{13}_[a-z0-9]+$")
+from jsonschema import Draft202012Validator
+
+from SynthChat.config.format_resolver import load_tool_call_formats
+from shared.utilities.paths import get_engine_root
+from shared.validation.parsing.configured_formats import (
+    build_wrapper_specs,
+    get_configured_wrapper_specs,
+    match_configured_wrapper,
+)
+
 # Labels are now boolean: true = desirable, false = undesirable
 ALLOWED_ROLES = {"system", "user", "assistant"}
-MIN_TOOL_CALLS = 2
 
-# System prompt context extraction patterns
-SESSION_CONTEXT_RE = re.compile(r'<session_context>(.*?)</session_context>', re.DOTALL)
-AVAILABLE_WORKSPACES_RE = re.compile(r'<available_workspaces>(.*?)</available_workspaces>', re.DOTALL)
-AVAILABLE_AGENTS_RE = re.compile(r'<available_agents>(.*?)</available_agents>', re.DOTALL)
-SESSION_ID_EXTRACT_RE = re.compile(r'sessionId:\s*["\']([^"\']+)["\']')
-WORKSPACE_ID_EXTRACT_RE = re.compile(r'workspaceId:\s*["\']([^"\']+)["\']')
-WORKSPACE_LIST_RE = re.compile(r'\(id:\s*["\']([^"\']+)["\']\)')
-AGENT_LIST_RE = re.compile(r'\(id:\s*["\']([^"\']+)["\']\)')
+# Engine tool schema catalog, resolved from the engine root (not the CWD).
+SCHEMAS_FILE = get_engine_root() / "Tools" / "tool_schemas.json"
 
-# Load tool schemas
-TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {}
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCHEMAS_FILE = REPO_ROOT / "tools" / "tool_schemas.json"
 
-def load_tool_schemas() -> Dict[str, Dict[str, Any]]:
-    """Load tool schemas from JSON file."""
-    if SCHEMAS_FILE.exists():
+def load_tool_schemas(path: Path = SCHEMAS_FILE) -> Dict[str, Dict[str, Any]]:
+    """Load a tool schema catalog (tool name -> schema) from JSON."""
+    if path.exists():
         try:
-            with open(SCHEMAS_FILE) as f:
+            with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             print(f"Warning: Could not load tool schemas: {e}", file=sys.stderr)
     return {}
 
-TOOL_SCHEMAS = load_tool_schemas()
+
+@dataclass(frozen=True)
+class ValidatorConfig:
+    """The configuration a dataset is validated against."""
+
+    wrapper_specs: Sequence[Dict[str, Any]]
+    tool_schemas: Mapping[str, Dict[str, Any]]
+
+
+@lru_cache(maxsize=1)
+def default_validator_config() -> ValidatorConfig:
+    """The engine's configured tool-call formats and tool schema catalog."""
+    return ValidatorConfig(
+        wrapper_specs=get_configured_wrapper_specs(),
+        tool_schemas=load_tool_schemas(),
+    )
 
 
 @dataclass
@@ -71,7 +97,11 @@ class ExampleReport:
     label: Optional[bool] = None
 
     def add(self, level: str, message: str) -> None:
-        self.issues.append(ValidationIssue(level, message))
+        issue = ValidationIssue(level, message)
+        # The wrapper format and the tool schema can both require a field;
+        # report each finding once.
+        if issue not in self.issues:
+            self.issues.append(issue)
 
     @property
     def is_valid(self) -> bool:
@@ -84,9 +114,7 @@ class ExampleReport:
                 if issue.level == "ERROR" and not any(x in issue.message for x in [
                     "Missing required parameter",
                     "Unexpected parameter",
-                    "Invalid parameter value",
-                    "Missing required 'context'",  # Allow missing context in undesirable
-                    "Context object must be the first field",  # Allow context ordering issues
+                    "Invalid wrapper field",
                     "does not match system prompt"  # Allow ID mismatches in undesirable
                 ])
             ]
@@ -95,122 +123,53 @@ class ExampleReport:
         return all(issue.level != "ERROR" for issue in self.issues)
 
 
-@dataclass
-class SystemPromptContext:
-    """Extracted context from system prompt for validation."""
-    session_id: Optional[str] = None
-    workspace_id: Optional[str] = None
-    available_workspace_ids: List[str] = field(default_factory=list)
-    available_agent_ids: List[str] = field(default_factory=list)
-    has_system_prompt: bool = False
-
-
-def extract_system_prompt_context(conversations: list) -> SystemPromptContext:
-    """Extract IDs from system prompt for cross-validation with tool calls."""
-    ctx = SystemPromptContext()
-
-    # Find system message
-    system_msg = None
+def extract_system_prompt(conversations: list) -> Optional[str]:
+    """Return the first system message's content, if any."""
     for msg in conversations:
         if isinstance(msg, dict) and msg.get("role") == "system":
-            system_msg = msg.get("content", "")
-            ctx.has_system_prompt = True
-            break
-
-    if not system_msg:
-        return ctx
-
-    # Extract session context
-    session_match = SESSION_CONTEXT_RE.search(system_msg)
-    if session_match:
-        session_content = session_match.group(1)
-
-        # Extract sessionId
-        sid_match = SESSION_ID_EXTRACT_RE.search(session_content)
-        if sid_match:
-            ctx.session_id = sid_match.group(1)
-
-        # Extract workspaceId
-        wid_match = WORKSPACE_ID_EXTRACT_RE.search(session_content)
-        if wid_match:
-            ctx.workspace_id = wid_match.group(1)
-
-    # Extract available workspaces
-    workspaces_match = AVAILABLE_WORKSPACES_RE.search(system_msg)
-    if workspaces_match:
-        workspaces_content = workspaces_match.group(1)
-        ctx.available_workspace_ids = WORKSPACE_LIST_RE.findall(workspaces_content)
-
-    # Extract available agents
-    agents_match = AVAILABLE_AGENTS_RE.search(system_msg)
-    if agents_match:
-        agents_content = agents_match.group(1)
-        ctx.available_agent_ids = AGENT_LIST_RE.findall(agents_content)
-
-    return ctx
+            content = msg.get("content")
+            return content if isinstance(content, str) else None
+    return None
 
 
-def validate_ids_match_system_prompt(
-    tool_name: str,
-    args: dict,
-    system_ctx: SystemPromptContext,
+def _prompt_values(system_prompt: str, sources: Sequence[Mapping[str, Any]]) -> List[str]:
+    """Values the system prompt states for one prompt-bound field."""
+    values: List[str] = []
+    for source in sources:
+        text = system_prompt
+        tag = source.get("in_tag")
+        if tag:
+            match = re.search(rf"<{re.escape(tag)}(?:\s[^>]*)?>(.*?)</{re.escape(tag)}>", system_prompt, re.DOTALL)
+            if not match:
+                continue
+            text = match.group(1)
+        for value in re.findall(source["pattern"], text):
+            if value not in values:
+                values.append(value)
+    return values
+
+
+def validate_prompt_bound_fields(
+    spec: Mapping[str, Any],
+    args: Mapping[str, Any],
+    system_prompt: Optional[str],
     report: ExampleReport,
-    tool_call_num: int
+    tool_call_num: int,
 ) -> None:
-    """Validate that tool call IDs match those provided in the system prompt."""
-    if not system_ctx.has_system_prompt:
-        return  # No system prompt to validate against
-
-    context = {
-        "sessionId": args.get("sessionId"),
-        "workspaceId": args.get("workspaceId"),
-    }
-
-    # Validate sessionId matches
-    tool_session_id = context.get("sessionId")
-    if tool_session_id and system_ctx.session_id:
-        if tool_session_id != system_ctx.session_id:
-            report.add("ERROR",
-                f"Tool call #{tool_call_num} ({tool_name}): sessionId '{tool_session_id}' "
-                f"does not match system prompt sessionId '{system_ctx.session_id}'")
-
-    # Validate workspaceId matches
-    tool_workspace_id = context.get("workspaceId")
-    if tool_workspace_id and system_ctx.workspace_id:
-        # workspaceId in tool should match either:
-        # 1. The workspaceId in session_context, OR
-        # 2. One of the available_workspace_ids (for workspace operations)
-        valid_workspace_ids = [system_ctx.workspace_id] + system_ctx.available_workspace_ids
-
-        if tool_workspace_id not in valid_workspace_ids:
-            report.add("ERROR",
-                f"Tool call #{tool_call_num} ({tool_name}): workspaceId '{tool_workspace_id}' "
-                f"does not match system prompt (expected one of: {valid_workspace_ids})")
-
-    # For workspace operations, validate the target workspace ID
-    if "id" in args and tool_name.startswith("memoryManager_"):
-        target_id = args.get("id")
-        if target_id and system_ctx.available_workspace_ids:
-            # For loadWorkspace, createWorkspace, etc. the target should be in available list
-            # or be a new workspace being created
-            if target_id.startswith("ws_") and target_id not in system_ctx.available_workspace_ids:
-                # Only warn for loadWorkspace (should exist), not createWorkspace (new)
-                if "load" in tool_name.lower():
-                    report.add("WARN",
-                        f"Tool call #{tool_call_num} ({tool_name}): target workspace '{target_id}' "
-                        f"not in available_workspaces list")
-
-    # For agent operations, validate agent IDs
-    if tool_name.startswith("agentManager_"):
-        # Check 'id' parameter for updateAgent, deleteAgent, getAgent, toggleAgent
-        agent_id = args.get("id")
-        if agent_id and system_ctx.available_agent_ids:
-            if agent_id.startswith("agent_") and agent_id not in system_ctx.available_agent_ids:
-                # Only warn - agent might be newly created
-                if any(op in tool_name.lower() for op in ["update", "delete", "get", "toggle"]):
-                    report.add("WARN",
-                        f"Tool call #{tool_call_num} ({tool_name}): agent '{agent_id}' "
-                        f"not in available_agents list")
+    """Check the wrapper's prompt-bound fields against the values the system prompt states."""
+    if not system_prompt:
+        return
+    for field_name, sources in spec.get("prompt_bound_fields", {}).items():
+        value = args.get(field_name)
+        if not isinstance(value, str) or not value:
+            continue
+        allowed = _prompt_values(system_prompt, sources or [])
+        if allowed and value not in allowed:
+            report.add(
+                "ERROR",
+                f"Tool call #{tool_call_num} ({spec['wrapper_name']}): {field_name} '{value}' "
+                f"does not match system prompt (expected one of: {allowed})",
+            )
 
 
 def load_jsonl(path: Path) -> Iterable[Tuple[int, dict]]:
@@ -372,155 +331,36 @@ def extract_tool_calls_mistral(content: str) -> List[Tuple[str, dict]]:
     return entries
 
 
-def validate_tool_call_structure(content: str, report: ExampleReport) -> None:
-    """Validate the structure and formatting of tool calls in assistant content."""
-    tool_call_positions = []
-    pos = 0
+def validate_tool_against_schema(
+    tool_name: str,
+    args: dict,
+    report: ExampleReport,
+    tool_call_num: int,
+    tool_schemas: Mapping[str, Dict[str, Any]],
+) -> None:
+    """Validate tool call arguments against the tool's catalog schema.
 
-    # Find all tool_call markers
-    while True:
-        idx = content.find("tool_call:", pos)
-        if idx == -1:
-            break
-        tool_call_positions.append(idx)
-        pos = idx + 1
-
-    if not tool_call_positions:
-        return  # No tool calls to validate
-
-    for call_idx, call_pos in enumerate(tool_call_positions):
-        tool_call_num = call_idx + 1
-
-        # Extract the section for this tool call
-        next_pos = tool_call_positions[call_idx + 1] if call_idx + 1 < len(tool_call_positions) else len(content)
-        section = content[call_pos:next_pos]
-
-        # 1. Validate tool_call line format
-        first_line_end = section.find("\n")
-        if first_line_end == -1:
-            report.add("ERROR", f"Tool call #{tool_call_num}: Missing newline after tool_call:")
-            continue
-
-        first_line = section[:first_line_end]
-        if not first_line.startswith("tool_call: "):
-            report.add("ERROR", f"Tool call #{tool_call_num}: Must have space after 'tool_call:'")
-
-        tool_name = first_line.replace("tool_call:", "").strip()
-        if not tool_name:
-            report.add("ERROR", f"Tool call #{tool_call_num}: Missing tool name after 'tool_call:'")
-        elif "_" not in tool_name:
-            report.add("WARN", f"Tool call #{tool_call_num}: Tool name '{tool_name}' doesn't follow manager_mode convention")
-
-        # 2. Validate arguments presence and format
-        if "arguments:" not in section:
-            report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Missing 'arguments:' line")
-            continue
-
-        args_idx = section.find("arguments:")
-        args_line_start = section.rfind("\n", 0, args_idx)
-        args_line = section[args_line_start:args_idx + len("arguments:")].strip()
-
-        if not args_line.startswith("arguments:"):
-            report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): 'arguments:' must be at start of line")
-
-        # 3. Validate arguments JSON structure
-        try:
-            json_start = section.index("{", args_idx)
-            json_blob, _ = extract_json_block(section, json_start)
-            args = json.loads(json_blob, strict=False)
-
-            # Validate it's a dict
-            if not isinstance(args, dict):
-                report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Arguments must be a JSON object, not {type(args).__name__}")
-        except ValueError as e:
-            report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Invalid JSON in arguments - {e}")
-        except json.JSONDecodeError as e:
-            report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Failed to parse arguments JSON - {e}")
-
-        # 4. Validate Result format if present
-        if "Result:" not in section:
-            # Results are optional - tool calls can exist without results
-            continue
-
-        result_idx = section.find("Result:")
-
-        # Check that Result comes after arguments
-        if result_idx < args_idx:
-            report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): 'Result:' appears before 'arguments:'")
-
-        # 5. Validate Result JSON structure
-        try:
-            result_json_start = section.index("{", result_idx)
-            result_json_blob, _ = extract_json_block(section, result_json_start)
-            result = json.loads(result_json_blob, strict=False)
-
-            # Validate it's a dict
-            if not isinstance(result, dict):
-                report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Result must be a JSON object, not {type(result).__name__}")
-        except ValueError as e:
-            report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Invalid JSON in Result - {e}")
-        except json.JSONDecodeError as e:
-            report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Failed to parse Result JSON - {e}")
-
-
-def validate_tool_against_schema(tool_name: str, args: dict, report: ExampleReport, tool_call_num: int) -> None:
-    """Validate tool call arguments against the tool's schema."""
-    if not TOOL_SCHEMAS:
+    The schema's ``required_params`` must be present and every argument must be
+    declared in its ``parameters``.
+    """
+    if not tool_schemas:
         report.add("WARN", "Tool schemas not loaded - skipping schema validation")
         return
 
-    if tool_name not in TOOL_SCHEMAS:
+    if tool_name not in tool_schemas:
         report.add("WARN", f"Tool call #{tool_call_num} ({tool_name}): No schema found for this tool")
         return
 
-    schema = TOOL_SCHEMAS[tool_name]
-    required_params = schema.get('required_params', [])
-    all_params = {p['name']: p for p in schema.get('parameters', [])}
+    schema = tool_schemas[tool_name]
+    declared_params = {p["name"] for p in schema.get("parameters", [])}
 
-    # Special handling for get_tools meta-tool
-    if tool_name == 'get_tools':
-        # Validate 'managers' parameter is present and is an array
-        if 'managers' not in args:
-            report.add("ERROR", f"Tool call #{tool_call_num} (get_tools): Missing required parameter 'managers'")
-        elif not isinstance(args.get('managers'), list):
-            report.add("ERROR", f"Tool call #{tool_call_num} (get_tools): Parameter 'managers' must be an array")
-        elif len(args.get('managers', [])) == 0:
-            report.add("WARN", f"Tool call #{tool_call_num} (get_tools): Parameter 'managers' is an empty array")
-
-        # Validate context is present (required for all tools)
-        # if 'context' not in args:
-        #     report.add("ERROR", f"Tool call #{tool_call_num} (get_tools): Missing required parameter 'context'")
-
-        # Skip further validation for get_tools (it's a meta-tool with special handling)
-        return
-
-    # Check required parameters are present
-    for req_param in required_params:
-        # Skip 'context' check here - it is handled by validate_context() which supports both old (object) and new (flat) formats
-        if req_param == 'context':
-            continue
-
+    for req_param in schema.get("required_params", []):
         if req_param not in args:
             report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Missing required parameter '{req_param}'")
 
-    # Check for unexpected parameters (skip 'sessionId' and 'workspaceId' as they are standard across all tools via CommonParams)
     for arg_name in args.keys():
-        if arg_name not in all_params and arg_name not in ['sessionId', 'workspaceId', 'context', 'workspaceContext']:
+        if arg_name not in declared_params:
             report.add("WARN", f"Tool call #{tool_call_num} ({tool_name}): Unexpected parameter '{arg_name}' not in schema")
-
-    # Validate a stray nested context object if one appears, so archived data can still
-    # be diagnosed clearly during validation.
-    if 'context' in args and 'context_schema' in schema:
-        context = args['context']
-        if not isinstance(context, dict):
-            report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): 'context' must be an object")
-        else:
-            context_schema = schema['context_schema']
-            if context_schema and 'fields' in context_schema:
-                required_context_fields = [f['name'] for f in context_schema['fields'] if not f.get('optional', False)]
-                for field in required_context_fields:
-                    if field not in context:
-                        report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Missing required context field '{field}'")
 
 
 def extract_json_block(text: str, start_index: int) -> Tuple[str, int]:
@@ -548,38 +388,61 @@ def extract_json_block(text: str, start_index: int) -> Tuple[str, int]:
     raise ValueError("Unterminated JSON block")
 
 
-def validate_context(args: dict, report: ExampleReport) -> None:
-    if not isinstance(args, dict) or not args:
-        report.add("ERROR", "Arguments must be a JSON object")
+def validate_wrapper_arguments(
+    tool_name: str,
+    args: Any,
+    report: ExampleReport,
+    tool_call_num: int,
+    wrapper_specs: Sequence[Dict[str, Any]],
+    system_prompt: Optional[str] = None,
+) -> None:
+    """Check a tool call's arguments against the configured wrapper it uses.
+
+    The wrapper is resolved with the shared ``match_configured_wrapper`` helper
+    (by function name, then by argument set) over ``wrapper_specs``. A call that
+    matches no wrapper is a direct tool call and has no wrapper fields to check.
+    """
+    if not isinstance(args, dict):
+        report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Arguments must be a JSON object")
         return
 
-    required_fields = ["sessionId", "workspaceId", "memory", "goal", "tool"]
-    for field in required_fields:
-        if field not in args:
-            report.add("ERROR", f"Missing required '{field}' field in arguments")
+    spec = match_configured_wrapper(args, function_name=tool_name, specs=wrapper_specs)
+    if spec is None:
+        return
 
-    if "sessionId" not in args:
-        report.add("ERROR", "Missing required 'sessionId' field in arguments")
-    else:
-        sess_id = args.get("sessionId")
-        if isinstance(sess_id, str) and not SESSION_ID_RE.match(sess_id):
-            report.add("ERROR", f"sessionId '{sess_id}' does not match generator format")
+    wrapper_name = spec["wrapper_name"]
+    for field_name in spec["required_fields"]:
+        if field_name not in args:
+            report.add(
+                "ERROR",
+                f"Tool call #{tool_call_num} ({wrapper_name}): Missing required parameter '{field_name}'",
+            )
 
-    if "workspaceId" not in args:
-        report.add("ERROR", "Missing required 'workspaceId' field in arguments")
-    else:
-        ws_id = args.get("workspaceId")
-        if isinstance(ws_id, str) and ws_id != "default" and not WORKSPACE_ID_RE.match(ws_id):
-            report.add("ERROR", f"workspaceId '{ws_id}' does not match generator format")
+    properties = {name: prop for name, prop in spec["properties"].items() if isinstance(prop, dict)}
+    property_validator = Draft202012Validator({"type": "object", "properties": properties})
+    for error in sorted(property_validator.iter_errors(args), key=lambda e: [str(part) for part in e.path]):
+        field_path = ".".join(str(part) for part in error.path)
+        report.add(
+            "ERROR",
+            f"Tool call #{tool_call_num} ({wrapper_name}): Invalid wrapper field '{field_path}' - {error.message}",
+        )
+
+    validate_prompt_bound_fields(spec, args, system_prompt, report, tool_call_num)
 
 
-def validate_assistant_content(content: str, report: ExampleReport, system_ctx: Optional[SystemPromptContext] = None) -> None:
+def validate_assistant_content(
+    content: str,
+    report: ExampleReport,
+    system_prompt: Optional[str] = None,
+    config: Optional[ValidatorConfig] = None,
+) -> None:
     """Validate assistant message content, including tool calls if present.
 
     Supports multiple formats:
     - ChatML format: tool_call: toolName\\narguments: {...}
     - Mistral format: [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
     """
+    config = config or default_validator_config()
     if not content.strip():
         report.add("ERROR", "Assistant content may not be empty")
         return
@@ -614,16 +477,19 @@ def validate_assistant_content(content: str, report: ExampleReport, system_ctx: 
     for idx, (tool_name, args) in enumerate(tool_calls, 1):
         if not tool_name:
             report.add("ERROR", f"Tool call #{idx} missing name")
-        validate_context(args, report)
-        # Validate against actual tool schema
-        validate_tool_against_schema(tool_name, args, report, idx)
-        # Validate IDs match system prompt context
-        if system_ctx:
-            validate_ids_match_system_prompt(tool_name, args, system_ctx, report, idx)
+        validate_wrapper_arguments(tool_name, args, report, idx, config.wrapper_specs, system_prompt)
+        if isinstance(args, dict):
+            validate_tool_against_schema(tool_name, args, report, idx, config.tool_schemas)
 
 
-def validate_assistant_message_openai(msg: dict, report: ExampleReport, system_ctx: Optional[SystemPromptContext] = None) -> None:
+def validate_assistant_message_openai(
+    msg: dict,
+    report: ExampleReport,
+    system_prompt: Optional[str] = None,
+    config: Optional[ValidatorConfig] = None,
+) -> None:
     """Validate OpenAI format assistant message with tool_calls array."""
+    config = config or default_validator_config()
     tool_calls_array = msg.get("tool_calls")
     if not isinstance(tool_calls_array, list):
         report.add("ERROR", "tool_calls must be an array")
@@ -647,15 +513,16 @@ def validate_assistant_message_openai(msg: dict, report: ExampleReport, system_c
     for idx, (tool_name, args) in enumerate(tool_calls, 1):
         if not tool_name:
             report.add("ERROR", f"Tool call #{idx} missing name")
-        validate_context(args, report)
-        # Validate against actual tool schema
-        validate_tool_against_schema(tool_name, args, report, idx)
-        # Validate IDs match system prompt context
-        if system_ctx:
-            validate_ids_match_system_prompt(tool_name, args, system_ctx, report, idx)
+        validate_wrapper_arguments(tool_name, args, report, idx, config.wrapper_specs, system_prompt)
+        if isinstance(args, dict):
+            validate_tool_against_schema(tool_name, args, report, idx, config.tool_schemas)
 
 
-def validate_example(idx: int, example: dict) -> ExampleReport:
+def validate_example(
+    idx: int,
+    example: dict,
+    config: Optional[ValidatorConfig] = None,
+) -> ExampleReport:
     label = example.get("label")
     report = ExampleReport(index=idx, label=label)
     conversations = example.get("conversations")
@@ -671,8 +538,8 @@ def validate_example(idx: int, example: dict) -> ExampleReport:
     # Validate conversations array structure
     validate_conversations_array(conversations, report)
 
-    # Extract system prompt context for ID validation
-    system_ctx = extract_system_prompt_context(conversations)
+    # The system prompt states the values of prompt-bound wrapper fields
+    system_prompt = extract_system_prompt(conversations)
 
     # Validate assistant messages specifically
     for msg in conversations:
@@ -680,11 +547,11 @@ def validate_example(idx: int, example: dict) -> ExampleReport:
             # Check format: OpenAI (tool_calls array) or ChatML (content string)
             if "tool_calls" in msg:
                 # OpenAI format
-                validate_assistant_message_openai(msg, report, system_ctx)
+                validate_assistant_message_openai(msg, report, system_prompt, config)
             else:
                 # ChatML format
                 content = msg.get("content", "")
-                validate_assistant_content(content, report, system_ctx)
+                validate_assistant_content(content, report, system_prompt, config)
 
     # Label is optional in ChatML format
     # Labels should now be boolean: true = desirable, false = undesirable
@@ -695,18 +562,43 @@ def validate_example(idx: int, example: dict) -> ExampleReport:
     return report
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate Claudesidian synthetic data JSONL files")
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    parser = argparse.ArgumentParser(description="Validate synthetic tool-calling JSONL files")
     parser.add_argument("path", type=Path, help="Path to JSONL file")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--tool-call-formats",
+        type=Path,
+        default=None,
+        help="Tool-call format registry YAML (default: SynthChat/config/tool_call_formats.yaml)",
+    )
+    parser.add_argument(
+        "--tool-schemas",
+        type=Path,
+        default=None,
+        help="Tool schema catalog JSON (default: the engine's Tools/tool_schemas.json)",
+    )
+    args = parser.parse_args(argv)
 
     if not args.path.exists():
         sys.exit(f"File not found: {args.path}")
 
+    default = default_validator_config()
+    wrapper_specs = default.wrapper_specs
+    if args.tool_call_formats is not None:
+        if not args.tool_call_formats.is_file():
+            sys.exit(f"Tool-call format registry not found: {args.tool_call_formats}")
+        wrapper_specs = build_wrapper_specs(load_tool_call_formats(str(args.tool_call_formats)))
+    tool_schemas = default.tool_schemas
+    if args.tool_schemas is not None:
+        if not args.tool_schemas.is_file():
+            sys.exit(f"Tool schema catalog not found: {args.tool_schemas}")
+        tool_schemas = load_tool_schemas(args.tool_schemas)
+    config = ValidatorConfig(wrapper_specs=wrapper_specs, tool_schemas=tool_schemas)
+
     reports: List[ExampleReport] = []
     try:
         for idx, payload in load_jsonl(args.path):
-            reports.append(validate_example(idx, payload))
+            reports.append(validate_example(idx, payload, config))
     except ValueError as exc:
         sys.exit(str(exc))
 
@@ -722,10 +614,10 @@ def main() -> None:
             print()
 
     # Print schema validation status
-    if TOOL_SCHEMAS:
-        print(f"✓ Schema validation enabled ({len(TOOL_SCHEMAS)} tool schemas loaded)\n", file=sys.stderr)
+    if config.tool_schemas:
+        print(f"✓ Schema validation enabled ({len(config.tool_schemas)} tool schemas loaded)\n", file=sys.stderr)
     else:
-        print(f"⚠ Schema validation disabled (tool_schemas.json not found)\n", file=sys.stderr)
+        print("⚠ Schema validation disabled (no tool schemas loaded)\n", file=sys.stderr)
 
     # Count label=false examples separately for informational purposes
     label_false_count = len([r for r in reports if r.label is False])

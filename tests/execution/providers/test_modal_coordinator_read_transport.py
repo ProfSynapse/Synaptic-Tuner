@@ -207,7 +207,6 @@ def test_adversarial_evidence_and_artifact_streams_fail_closed(monkeypatch, faul
         return
     inventory = transport.artifact_inventory(binding, provider_job_ref="job-a")
     member = inventory.manifest.members[0]
-    original = ExplicitModal154ReadFacade.iter_complete
     if fault == "truncated":
         monkeypatch.setattr(ExplicitModal154ReadFacade, "iter_complete",
                             lambda self, volume, path, *, max_bytes: iter((stored[path][:-1],)))

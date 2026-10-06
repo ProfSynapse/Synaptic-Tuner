@@ -1,7 +1,6 @@
 """Tests for flywheel_cycle_to_run_record adapter in shared.experiment_tracking.adapters."""
 from __future__ import annotations
 
-import pytest
 
 from shared.experiment_tracking.adapters import flywheel_cycle_to_run_record
 from shared.experiment_tracking.registry import RunRecord

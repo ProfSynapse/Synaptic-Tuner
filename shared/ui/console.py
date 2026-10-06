@@ -7,11 +7,9 @@ Follows Single Responsibility Principle - only handles display logic.
 
 import os
 import sys
-import threading
-import time
 from typing import Optional, Dict, List, Tuple
 
-from .theme import COLORS, LOGO, LOGO_SMALL, TAGLINE, BOX, STYLES, get_animated_logo_frame, get_static_logo
+from .theme import COLORS, LOGO, LOGO_SMALL, TAGLINE, BOX, STYLES
 
 # =============================================================================
 # ARROW-KEY MENU SUPPORT (simple-term-menu)
@@ -197,7 +195,7 @@ def print_menu(options: List[Tuple[str, str]], title: str = "Select an option") 
         print()
         for i, (key, desc) in enumerate(options, 1):
             print(f"  [{i}] {desc}")
-        print(f"  [0] Back / Exit")
+        print("  [0] Back / Exit")
         print()
 
         while True:

@@ -2,6 +2,10 @@
 
 The default is read-only. ``--write`` atomically replaces the lock after every
 declared source has been safely read and the lock has been rechecked for races.
+The checked-in token-profile example commits to the SHA-256 of the lock file;
+the same check and ``--write`` also cover that one ``expected_lock_sha256``
+line, so a lock refresh cannot leave the example stale. Both modes name every
+file they find stale or change. Real profiling configs are never touched.
 Inventory changes remain forbidden except for the explicit, one-way
 ``modal_prepared_input`` additive migration declared in this script.
 This tool performs no provider, SDK, network, package, or image operation.
@@ -14,6 +18,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import stat
 import sys
 import tempfile
@@ -126,6 +131,11 @@ LOCKED_FILES = {
 ADDITIVE_LOCK_MIGRATION = {
     "modal_prepared_input": "tuner/execution/providers/modal/prepared_input.py",
 }
+# The one checked-in profiler example that pins the lock file's own digest.
+# Only its ``expected_lock_sha256`` value is rewritten; nothing else in it.
+EXAMPLE_PIN_RELATIVE = ".skills/fine-tuning/configs/qwen35_4b_token_profile.yaml"
+_EXAMPLE_PIN_LINE = re.compile(rb"^(  expected_lock_sha256: )([0-9a-f]{64})(\r?)$", re.MULTILINE)
+MAX_EXAMPLE_BYTES = 64 * 1024
 MAX_LOCK_BYTES = 256 * 1024
 MAX_SOURCE_BYTES = 16 * 1024 * 1024
 
@@ -283,44 +293,42 @@ def _updated(root: Path, current: bytes) -> bytes:
     return _canonical(refreshed)
 
 
-def regenerate(root: Path, *, write: bool = False) -> int:
-    supplied_root = root.absolute()
-    root_identity = _reject_reparse(supplied_root)
-    if stat.S_ISLNK(root_identity.st_mode) or not stat.S_ISDIR(root_identity.st_mode):
-        raise LockRegenerationError("ROOT_IDENTITY_INVALID")
-    root = root.resolve(strict=True)
-    lock_path = root / LOCK_RELATIVE
-    current, identity = _safe_regular_bytes(root, LOCK_RELATIVE, maximum=MAX_LOCK_BYTES)
-    refreshed = _updated(root, current)
-    if refreshed == current:
-        print(json.dumps({"status": "CURRENT", "locked_file_count": len(LOCKED_FILES)}, sort_keys=True))
-        return 0
-    if not write:
-        print("Modal runtime lock is STALE; re-run with --write.", file=sys.stderr)
-        return 3
+def _updated_example(current: bytes, lock: bytes) -> bytes:
+    """Return the example with its lock pin set to the digest of ``lock``."""
+    matches = _EXAMPLE_PIN_LINE.findall(current)
+    if len(matches) != 1 or current.count(b"expected_lock_sha256") != 1:
+        raise LockRegenerationError("EXAMPLE_PIN_INVALID")
+    digest = hashlib.sha256(lock).hexdigest().encode("ascii")
+    return _EXAMPLE_PIN_LINE.sub(lambda match: match.group(1) + digest + match.group(3), current)
 
-    # All sources were validated above. These pathname/identity checks narrow
-    # ordinary local maintenance races; they are not a hostile-volume CAS or
-    # retained-dirfd guarantee.
-    observed, observed_identity = _safe_regular_bytes(root, LOCK_RELATIVE, maximum=MAX_LOCK_BYTES)
+
+def _replace_atomically(
+    root: Path, relative: str, current: bytes, identity: os.stat_result,
+    refreshed: bytes, *, maximum: int, prefix: str,
+) -> None:
+    # All sources were validated by the caller. These pathname/identity checks
+    # narrow ordinary local maintenance races; they are not a hostile-volume
+    # CAS or retained-dirfd guarantee.
+    target = root.joinpath(*PurePosixPath(relative).parts)
+    observed, observed_identity = _safe_regular_bytes(root, relative, maximum=maximum)
     if (observed != current or (observed_identity.st_dev, observed_identity.st_ino,
             observed_identity.st_mtime_ns) != (identity.st_dev, identity.st_ino, identity.st_mtime_ns)):
         raise LockRegenerationError("LOCK_CHANGED_BEFORE_WRITE")
     temporary_name = None
     try:
-        descriptor, temporary_name = tempfile.mkstemp(prefix=".modal-runtime-lock.", dir=lock_path.parent)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=prefix, dir=target.parent)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(refreshed)
             stream.flush()
             os.fsync(stream.fileno())
         os.chmod(temporary_name, stat.S_IMODE(identity.st_mode))
-        latest, latest_identity = _safe_regular_bytes(root, LOCK_RELATIVE, maximum=MAX_LOCK_BYTES)
+        latest, latest_identity = _safe_regular_bytes(root, relative, maximum=maximum)
         if latest != current or (latest_identity.st_dev, latest_identity.st_ino,
                 latest_identity.st_mtime_ns) != (identity.st_dev, identity.st_ino, identity.st_mtime_ns):
             raise LockRegenerationError("LOCK_CHANGED_BEFORE_REPLACE")
-        os.replace(temporary_name, lock_path)
+        os.replace(temporary_name, target)
         temporary_name = None
-        if _safe_regular_bytes(root, LOCK_RELATIVE, maximum=MAX_LOCK_BYTES)[0] != refreshed:
+        if _safe_regular_bytes(root, relative, maximum=maximum)[0] != refreshed:
             raise LockRegenerationError("LOCK_VERIFY_FAILED")
     finally:
         if temporary_name is not None:
@@ -328,7 +336,49 @@ def regenerate(root: Path, *, write: bool = False) -> int:
                 os.unlink(temporary_name)
             except FileNotFoundError:
                 pass
-    print(json.dumps({"status": "REFRESHED", "locked_file_count": len(LOCKED_FILES)}, sort_keys=True))
+
+
+def regenerate(root: Path, *, write: bool = False) -> int:
+    supplied_root = root.absolute()
+    root_identity = _reject_reparse(supplied_root)
+    if stat.S_ISLNK(root_identity.st_mode) or not stat.S_ISDIR(root_identity.st_mode):
+        raise LockRegenerationError("ROOT_IDENTITY_INVALID")
+    root = root.resolve(strict=True)
+    current, identity = _safe_regular_bytes(root, LOCK_RELATIVE, maximum=MAX_LOCK_BYTES)
+    refreshed = _updated(root, current)
+    # The example must commit to the lock as it will be after this run, and is
+    # read before anything is written so a bad example blocks the whole refresh.
+    example, example_identity = _safe_regular_bytes(
+        root, EXAMPLE_PIN_RELATIVE, maximum=MAX_EXAMPLE_BYTES,
+    )
+    example_refreshed = _updated_example(example, refreshed)
+    stale = []
+    if refreshed != current:
+        stale.append(LOCK_RELATIVE)
+    if example_refreshed != example:
+        stale.append(EXAMPLE_PIN_RELATIVE)
+    if not stale:
+        print(json.dumps({"status": "CURRENT", "locked_file_count": len(LOCKED_FILES)}, sort_keys=True))
+        return 0
+    if not write:
+        print("Modal runtime lock check is STALE; re-run with --write. Stale: "
+              + ", ".join(stale), file=sys.stderr)
+        return 3
+
+    # The lock is replaced first: if interrupted before the example, a rerun
+    # finds the lock current and the example stale and finishes the refresh.
+    if refreshed != current:
+        _replace_atomically(root, LOCK_RELATIVE, current, identity, refreshed,
+                            maximum=MAX_LOCK_BYTES, prefix=".modal-runtime-lock.")
+    if example_refreshed != example:
+        _replace_atomically(root, EXAMPLE_PIN_RELATIVE, example, example_identity,
+                            example_refreshed, maximum=MAX_EXAMPLE_BYTES,
+                            prefix=".token-profile-example.")
+    print(json.dumps({"changed": stale, "locked_file_count": len(LOCKED_FILES),
+                      "status": "REFRESHED"}, sort_keys=True))
+    if EXAMPLE_PIN_RELATIVE in stale:
+        print("Example pin changed; run python3 .skills/scripts/sync_skill_trees.py "
+              "to refresh the generated skill mirrors.", file=sys.stderr)
     return 0
 
 

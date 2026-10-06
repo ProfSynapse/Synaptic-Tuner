@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from argparse import Namespace
-from typing import Optional
 
 from tuner.handlers.base import BaseHandler
 from tuner.handlers.cloud_eval_handler import CloudEvalHandler

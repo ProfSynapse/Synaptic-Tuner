@@ -94,7 +94,7 @@ The inner wrapper payload is:
 
 Use the canonical validator from the synthetic-data-generation skill:
 ```bash
-python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/my_dataset.jsonl
+python3 -m shared.validation.dataset_validator Datasets/my_dataset.jsonl
 ```
 
 Use the environment-backed SynthChat path for runtime checks:

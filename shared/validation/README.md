@@ -117,13 +117,15 @@ validations:
     type: xml
     error: "Missing vault_structure tag"
 
-  # Tool manifest validation
+  # Tool manifest validation (tool name -> argument schema)
   - tools:
-      useTools:
-        _required: ["context", "calls"]
-        context:
-          sessionId: string
-          workspaceId: string
+      YOUR_TOOL_NAME:
+        _required: ["owner", "steps"]
+        owner: string
+        steps:
+          _item_schema:          # array; each item must match this schema or type
+            action: string
+    error: "YOUR_TOOL_NAME failed: {details}"   # applied to every failure; {tool_name}, {details}
 
   # Cross-scope validation
   - cross_scope:

@@ -237,6 +237,7 @@ from transformers import Trainer
 from trl import SFTConfig
 
 from configs.config_loader import (
+    PROTECTED_RECIPE_ENVELOPE_KEYS,
     get_3b_config,
     get_7b_config,
     get_13b_config,
@@ -254,7 +255,6 @@ from src.training_callbacks import (
     MetricsTableCallback,
     CheckpointMonitorCallback,
     LiveDashboardCallback,
-    suppress_training_logs,
     DASHBOARD_AVAILABLE,
 )
 from shared.cloud_artifacts import (
@@ -266,9 +266,9 @@ from shared.cloud_artifacts import (
     sync_directory_to_hf_bucket,
     write_manifest,
 )
-from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
 from shared.training_utils import (
     setup_wandb,
+    apply_wandb_destination,
     extract_previous_log_entries,
     save_training_lineage,
     build_base_lineage,
@@ -530,6 +530,7 @@ def build_training_lineage(
             "train_examples": len(train_dataset),
             "eval_examples": len(eval_dataset) if eval_dataset else 0,
             "filter_desirable": config.dataset.filter_desirable,
+            "validation_group_key": config.dataset.validation_group_key,
         },
         run_dir=run_dir,
         trainer=trainer,
@@ -786,6 +787,10 @@ def parse_args(argv=None):
         dest="require_memory_efficient_loss",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument("--test-size", type=float, default=None,
+                       help="Validation fraction for --split-dataset (rows, or groups with --validation-group-key)")
+    parser.add_argument("--validation-group-key", type=str, default=None,
+                       help="Dot-path into each raw row (e.g. metadata.scenario); with --split-dataset, rows sharing a group stay on one side of the validation split")
 
     # W&B tracking
     parser.add_argument("--wandb", action="store_true",
@@ -892,7 +897,9 @@ def run(args: argparse.Namespace):
     if args.protected_smoke_config:
         if not args.protected_smoke_evidence or args.config or args.model_size:
             raise ValueError("Protected smoke config is exclusive to protected evidence mode")
-        config = load_config(args.protected_smoke_config)
+        config = load_config(
+            args.protected_smoke_config, envelope_keys=PROTECTED_RECIPE_ENVELOPE_KEYS
+        )
         print("Loading protected YAML configuration")
     elif args.config:
         # Custom config file
@@ -1114,6 +1121,10 @@ def run(args: argparse.Namespace):
         config.dataset.use_preassigned_splits = args.use_preassigned_splits
     if args.require_memory_efficient_loss is not None:
         config.training.require_memory_efficient_loss = args.require_memory_efficient_loss
+    if args.test_size is not None:
+        config.dataset.test_size = args.test_size
+    if args.validation_group_key:
+        config.dataset.validation_group_key = args.validation_group_key
 
     # W&B setup
     if args.wandb:
@@ -1122,6 +1133,8 @@ def run(args: argparse.Namespace):
             config.wandb_project = args.wandb_project
         if config.use_wandb and args.wandb_run_name:
             config.wandb_run_name = args.wandb_run_name
+    if config.use_wandb:
+        apply_wandb_destination(config.wandb.project, config.wandb.entity)
 
     # Protected anonymous loads never consult ambient credentials. Ordinary
     # training retains the historical token fallback.
@@ -1162,7 +1175,6 @@ def run(args: argparse.Namespace):
         checkpoints_dir = run_paths.checkpoints_dir
         logs_dir = run_paths.logs_dir
         final_model_path = run_paths.final_model_dir
-        lineage_path = run_paths.lineage_path
         manifest_path = run_paths.manifest_path
         for path in (run_dir, checkpoints_dir, logs_dir):
             path.mkdir(parents=True, exist_ok=True)
@@ -1185,7 +1197,6 @@ def run(args: argparse.Namespace):
         checkpoints_dir = run_dir / "checkpoints"
         logs_dir = run_dir / "logs"
         final_model_path = run_dir / "final_model"
-        lineage_path = run_dir / "training_lineage.json"
         checkpoints_dir.mkdir(parents=True, exist_ok=True)
         logs_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = None
@@ -1257,7 +1268,11 @@ def run(args: argparse.Namespace):
 
     loss_mask_mode = "assistant_only" if config.training.completion_only_loss else "full_sequence"
     preprocessing_metadata = {
-        "contract_version": 1,
+        # 2: assistant-only labels stop at the final end-of-turn token,
+        # prompt_completion closes with the template's end-of-turn token and
+        # honours completion_only_loss, and untrainable rows are dropped.
+        # Losses are not directly comparable with version 1 runs.
+        "contract_version": 2,
         "dataset_representation": "tokenized",
         "loss_mask_mode": loss_mask_mode,
         "tool_call_mode": "render_text",
@@ -1310,6 +1325,8 @@ def run(args: argparse.Namespace):
         aux_token_position=aux_head_cfg.token_position if aux_head_enabled else None,
         use_preassigned_splits=getattr(config.dataset, "use_preassigned_splits", False),
         preparation_metadata=dataset_preparation_metadata,
+        validation_group_key=config.dataset.validation_group_key,
+        max_dropped_row_fraction=config.training.max_dropped_row_fraction,
     )
     prepared_dataset_format = dataset_preparation_metadata.get("dataset_format")
     if prepared_dataset_format in {"raw_text", "messages"}:
@@ -1415,6 +1432,7 @@ def run(args: argparse.Namespace):
         "save_total_limit": config.training.save_total_limit,
         "dataloader_num_workers": config.training.dataloader_num_workers,
         "dataloader_pin_memory": config.training.dataloader_pin_memory,
+        "group_by_length": config.training.group_by_length,
         "eval_strategy": config.training.eval_strategy if eval_dataset else "no",
         "eval_steps": config.training.eval_steps if eval_dataset else None,
         "report_to": "wandb" if config.use_wandb else "none",
@@ -1438,29 +1456,29 @@ def run(args: argparse.Namespace):
     print(f"Dataset: {len(train_dataset)} examples")
     if eval_dataset:
         print(f"Validation: {len(eval_dataset)} examples")
-    print(f"\nBatch configuration:")
+    print("\nBatch configuration:")
     print(f"  Batch size: {config.training.per_device_train_batch_size}")
     print(f"  Gradient accumulation: {config.training.gradient_accumulation_steps}")
     effective_batch = config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps
     print(f"  Effective batch size: {effective_batch}")
-    print(f"\nHyperparameters:")
+    print("\nHyperparameters:")
     print(f"  Learning rate: {config.training.learning_rate}")
     print(f"  Warmup ratio: {config.training.warmup_ratio}")
     print(f"  Max sequence length: {config.training.max_seq_length}")
     print(f"  Number of epochs: {config.training.num_train_epochs}")
-    print(f"\nLoRA configuration:")
+    print("\nLoRA configuration:")
     print(f"  Rank: {config.lora.r}")
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
-    print(f"\nSFT-specific:")
+    print("\nSFT-specific:")
     print("  Packing: False (explicit pre-encoded dataset path)")
     print(f"  Completion-only loss: {config.training.completion_only_loss}")
-    print(f"\nOptimizations:")
+    print("\nOptimizations:")
     print(f"  Optimizer: {config.training.optim}")
     print(f"  FP16: {training_args.fp16}")
     print(f"  BF16: {training_args.bf16}")
     print(f"  Gradient checkpointing: {config.training.gradient_checkpointing}")
-    print(f"\nCheckpointing & Logging:")
+    print("\nCheckpointing & Logging:")
     print(f"  Log metrics every: {config.training.logging_steps} steps")
     print(f"  Save checkpoint every: {config.training.save_steps} steps")
     print(f"  Keep last: {config.training.save_total_limit} checkpoints")
@@ -1590,7 +1608,7 @@ def run(args: argparse.Namespace):
                 tokenizer=tokenizer,
                 events_path=logs_dir / "evolutionary_events.jsonl",
             )
-            print(f"[OK] Evolutionary training enabled:")
+            print("[OK] Evolutionary training enabled:")
             print(f"     Strategy: {config.evolutionary.strategy.type}")
             print(f"     Candidates: {config.evolutionary.candidates}")
             print(f"     Selection: {config.evolutionary.selection.method}")
@@ -1614,7 +1632,6 @@ def run(args: argparse.Namespace):
     training_start_time = time.time()
 
     # Use evolutionary wrapper if enabled, otherwise standard training
-    training_failed = False
     failure_message = None
     try:
         if evo_wrapper:
@@ -1624,7 +1641,6 @@ def run(args: argparse.Namespace):
             _mark_packaged_runtime_phase("TRAIN_CALL")
             trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     except Exception as exc:
-        training_failed = True
         failure_message = str(exc)
         if manifest_path:
             write_manifest(
@@ -1724,7 +1740,7 @@ def run(args: argparse.Namespace):
         )
         print(f"[aux_head] saved sidecar (aux_head.safetensors + aux_head_config.json) to: {final_model_path}")
 
-    print(f"\n[OK] Training complete!")
+    print("\n[OK] Training complete!")
     print(f"  Model saved to: {final_model_path}")
     print(f"  Logs saved to: {logs_dir}/")
 
@@ -1765,7 +1781,6 @@ def run(args: argparse.Namespace):
             from shared.experiment_tracking.lineage_enrichment import build_loss_lineage, write_json as write_lineage_json
             
             # Switch to eval mode
-            import torch
             model.eval()
             
             # Unsloth for_inference to optimize inference speed
@@ -1774,7 +1789,7 @@ def run(args: argparse.Namespace):
             
             dataset_path = config.data.train_dataset
             if not Path(dataset_path).exists():
-                dataset_path = Path(_REPO_ROOT) / dataset_path
+                dataset_path = Path(__file__).parent.parent.parent / dataset_path
                 
             losses = compute_per_example_losses(
                 model=model,

@@ -179,3 +179,24 @@ Heuristics for planning generation runs, drawn from OpenThoughts-Agent (arXiv 26
 - **Keep multi-step trajectories.** Longer agentic trajectories (e.g. `total_turns >= 5`) are higher-quality SFT signal even at a matched token budget. Enforce it with the `total_turns` filter from section 1.
   - **Caveat for THIS repo:** today's scenarios are mostly single-step (turn counts cluster at 1-3), so the real lever is **authoring genuinely multi-step tasks first** — the filter only helps once such data actually exists.
 - **Augmentation caution.** LLM task-hardening/constraining rewriting was within noise. What scales past the upsampling plateau is **expanding surface forms (paraphrases) of GOOD sources**, not making tasks artificially harder.
+
+## 4. Validation Split Group Keys
+
+Projected rows are near-duplicates of each other whenever they come from one
+scenario template, one shared environment seed, or several turns of one
+episode. A random row-level validation split then leaks. When a trainer runs
+with `split_dataset: true`, set `dataset.validation_group_key` to a dot-path
+that the rows actually carry (the loaders fail loudly on a missing value):
+
+| Rows | Key | Keeps together |
+|------|-----|----------------|
+| Canonical rollouts from `generate` | `metadata.scenario` | One scenario template |
+| Canonical rollouts | `metadata.environment_seed.seed_id` | One shared seed fixture (several scenarios) |
+| KTO / SFT / GRPO projections | `scenario_id` | One scenario template |
+| Per-turn projections | `metadata.seed_id` | All turn rows of an episode and its seed |
+
+`source_example_id` is unique per projected row (it includes the turn index), so
+it is not a group key. Before evaluating, run `python tuner.py check-contamination`
+against the generated data to confirm no eval prompt was reproduced (see the
+`evaluation` skill).
+

@@ -18,7 +18,7 @@ import time
 from dataclasses import asdict
 from typing import List
 
-from shared.eval_backend import EvalBackend, EvalResult
+from shared.eval_backend import EvalBackend
 
 from .config import OperationResult, SurgeryConfig, SurgeryResult
 from .registry import get_operation

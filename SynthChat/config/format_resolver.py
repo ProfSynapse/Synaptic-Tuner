@@ -6,7 +6,6 @@ Purpose: Resolve which tool-call format, workspace format, and label mappings
 Usage: Called by generator.py at generation time to resolve per-scenario configs.
 """
 
-import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -195,6 +194,15 @@ def resolve_workspace_format(
         return deepcopy(default_format) if default_format else None
 
     return None
+
+
+def required_argument_fields(format_config: Dict[str, Any]) -> List[str]:
+    """The argument fields a tool-call format requires.
+
+    ``argument_required`` wins; ``argument_fields.required`` is the fallback.
+    """
+    argument_fields = format_config.get("argument_fields") or {}
+    return [str(name) for name in (format_config.get("argument_required") or argument_fields.get("required") or [])]
 
 
 def get_default_tool_call_format() -> Dict[str, Any]:

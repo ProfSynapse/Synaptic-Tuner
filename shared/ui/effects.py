@@ -10,7 +10,7 @@ import random
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from asciimatics.screen import Screen
+    pass
 
 # =============================================================================
 # BRAND COLORS for 256-color terminals

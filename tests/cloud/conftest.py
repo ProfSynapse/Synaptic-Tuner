@@ -9,10 +9,7 @@ Provides:
 - GPU pricing cache reset between tests
 """
 
-import os
 import subprocess
-import textwrap
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -59,7 +56,6 @@ def repo_root(tmp_path):
     grpo_config = {
         "model": {
             "model_name": "professorsynapse/Nexus-Quark-L2.5.28",
-            "max_seq_length": 8192,
         },
         "dataset": {
             "dataset_name": "professorsynapse/nexus-synthetic-data",

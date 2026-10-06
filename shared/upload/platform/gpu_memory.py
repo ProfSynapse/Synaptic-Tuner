@@ -135,7 +135,7 @@ def ensure_gpu_memory(
 
     # Still not enough
     shortfall = required_gb - free_gb
-    print(f"\n✗ Still insufficient GPU memory")
+    print("\n✗ Still insufficient GPU memory")
     print(f"  Need {shortfall:.1f} GB more")
     print("\nSuggestions:")
     print("  1. Close other applications using GPU (check: nvidia-smi)")

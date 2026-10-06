@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 

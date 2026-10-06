@@ -23,6 +23,12 @@ def _canonical_repo_source() -> RepoSource:
         dirty=False,
         pushed=True,
     )
+    return RepoSource(
+        url=source.location.canonical_url,
+        branch=source.branch,
+        commit=source.commit,
+        canonical_source=source,
+    )
 
 
 def _source_preparation(repo_root) -> HFSourcePreparation:
@@ -57,12 +63,6 @@ def _source_preparation(repo_root) -> HFSourcePreparation:
         lambda hub: HFVerifiedVolume(volume_spec, "verified-volume", "d" * 64, "e" * 64),
     )
     return preparation
-    return RepoSource(
-        url=source.location.canonical_url,
-        branch=source.branch,
-        commit=source.commit,
-        canonical_source=source,
-    )
 
 
 def test_build_eval_command_uses_cloud_job_helper(repo_root):

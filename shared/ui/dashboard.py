@@ -8,8 +8,8 @@ import time
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Callable
-from threading import Thread, Event
+from typing import Optional, List, Dict
+from threading import Event
 
 from .theme import COLORS, BOX
 from .console import console, RICH_AVAILABLE, clear_screen

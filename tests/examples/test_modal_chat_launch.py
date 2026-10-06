@@ -3,7 +3,6 @@
 from types import SimpleNamespace
 from collections import namedtuple
 import json
-from pathlib import Path
 
 import pytest
 

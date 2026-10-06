@@ -105,7 +105,7 @@ def test_exact_repository_and_pull_scope_only() -> None:
     registry.fetch_registry_documents(transport.reference, transport=transport)
     challenge_request = transport.calls[0]
     assert challenge_request.url.startswith(f"https://{registry.REGISTRY_HOST}/v2/unsloth/unsloth/manifests/")
-    assert f"scope=repository:unsloth%2Funsloth:pull" in registry.TOKEN_URL
+    assert "scope=repository:unsloth%2Funsloth:pull" in registry.TOKEN_URL
 
 
 def test_bounded_closed_distribution_json_challenge_is_accepted() -> None:

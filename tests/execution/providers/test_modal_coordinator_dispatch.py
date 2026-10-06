@@ -6,7 +6,6 @@ import json
 import pytest
 
 from tests.execution.providers.test_modal_coordinator_wire import wire_case
-from tuner.execution.foundation_v2.canonical import canonical_bytes
 from tuner.execution.providers.modal.coordinator_dispatch import (
     build_modal_worker_dispatch, parse_modal_worker_dispatch,
 )

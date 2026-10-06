@@ -520,7 +520,7 @@ Capability descriptor:
 
 Wave 5 fixes discovery to two import-light operations: `capabilities list` and `capabilities describe [capability_id]`. The parser accepts `--json` in the global or subcommand position, and the router reaches the capability handler before importing the legacy heavyweight handler graph. `tuner`, `tuner.handlers`, and `tuner.cloud` preserve compatibility exports through lazy package resolution.
 
-The accepted built-in registry contains exactly seven descriptors:
+The accepted built-in registry contains exactly eight descriptors:
 
 1. `training.local-run`
 2. `experiment.run`
@@ -529,6 +529,7 @@ The accepted built-in registry contains exactly seven descriptors:
 5. `generation.batch`
 6. `cloud.launch`
 7. `cloud.inspect`
+8. `dataset.contamination-check` (local, read-only inputs; writes a report; `json_result: false` because its `--json` payload is not the `synaptic-result/v1` envelope)
 
 Discovery is descriptive, not authorization. `cloud.launch` remains registered with `supports.available: false` throughout this revision. Any future enablement would require the complete JT/JTR/JIR/J1/JX/JX2/JX3/JCT hermetic barrier, accepted final P6R reconciliation, recorded SA6 plus impacted-SA6 PASS, and a fresh RA6 PASS, separately approved and acknowledged JP evidence for the exact immutable descriptor, and a separately designed and accepted protected submission capability. The other descriptors report their implemented support flags rather than promising JSON, event, or dry-run modes that their handlers do not yet provide.
 

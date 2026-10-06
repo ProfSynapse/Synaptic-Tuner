@@ -3,7 +3,7 @@ Inference utilities for KTO-trained models.
 """
 
 import torch
-from typing import List, Dict, Optional
+from typing import List, Dict
 from transformers import TextStreamer
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
@@ -48,7 +48,7 @@ class KTOInference:
         # Set to inference mode
         FastLanguageModel.for_inference(self.model)
 
-        print(f"✓ Model loaded and ready for inference")
+        print("✓ Model loaded and ready for inference")
 
     def generate(
         self,

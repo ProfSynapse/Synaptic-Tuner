@@ -833,7 +833,7 @@ This ensures [benefit]. Should I proceed?
 
 ### Validation Command:
 ```bash
-python tools/validate_syngen.py Datasets/behavior_datasets/CATEGORY/pairs_v1.3.jsonl
+python -m shared.validation.dataset_validator Datasets/behavior_datasets/CATEGORY/pairs_v1.3.jsonl
 ```
 
 ---

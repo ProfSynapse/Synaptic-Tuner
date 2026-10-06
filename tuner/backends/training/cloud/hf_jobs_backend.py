@@ -26,7 +26,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.paths import TRAINING_METHODS, get_trainer_root
 from tuner.cloud import (
     CloudJobSpec,
@@ -34,10 +33,8 @@ from tuner.cloud import (
     build_bash_command,
     build_hf_job_secrets,
     load_huggingface_hub,
-    resolve_hf_bucket_id,
 )
 from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
-from tuner.ui import print_config
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
@@ -323,7 +320,12 @@ class HFJobsBackend(
             chat_template_kwargs=training_config.get("chat_template_kwargs"),
             save_steps=training_config.get("save_steps"),
             save_total_limit=training_config.get("save_total_limit"),
-            max_seq_length=training_config.get("max_seq_length") or training_config.get("max_prompt_length") or model_config.get("max_seq_length"),
+            # env-GRPO has no sequence-length flag; its lengths stay in its YAML.
+            max_seq_length=None if method == "grpo" else (
+                training_config.get("max_seq_length")
+                or training_config.get("max_prompt_length")
+                or model_config.get("max_seq_length")
+            ),
             load_in_4bit=model_config.get("load_in_4bit"),
             lora_r=config.get("lora", {}).get("r"),
             lora_alpha=config.get("lora", {}).get("lora_alpha"),
@@ -349,6 +351,9 @@ class HFJobsBackend(
             evolutionary_cache_baseline=evolutionary_config.get("cache_baseline"),
             evolutionary_log_candidates=evolutionary_logging.get("candidates"),
             evolutionary_log_selected=evolutionary_logging.get("selected"),
+            split_dataset=dataset_config.get("split_dataset"),
+            test_size=dataset_config.get("test_size"),
+            validation_group_key=dataset_config.get("validation_group_key"),
             provider="hf_jobs",
             gpu_type=flavor,
             timeout_hours=timeout_hours,
@@ -501,7 +506,7 @@ class HFJobsBackend(
                 else:
                     return None  # Still running
 
-            except Exception as e:
+            except Exception:
                 # Let poll_until_done handle persistent vs transient classification
                 raise
 

@@ -30,8 +30,7 @@ from synaptic_tuner.api.v1.pipelines_facade import (
     PipelinesAPI, StageState, stage_attempt_key,
 )
 from synaptic_tuner.api.v1.planning import (
-    ProviderPlanContextV1, ProviderPlanRef, ResolvedTrainingRequest, TrainingPlan,
-    TrainingPlanBasisV1,
+    ProviderPlanContextV1, ResolvedTrainingRequest, TrainingPlanBasisV1,
 )
 from synaptic_tuner.api.v1.ports import StoragePartition
 from synaptic_tuner.api.v1.providers import ProviderCapabilities, ProviderDescriptor, ProviderRef

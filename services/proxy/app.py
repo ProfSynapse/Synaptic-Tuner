@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     flywheel_config = None
     try:
         from shared.flywheel.catalog import create_catalog
-        from shared.flywheel.config import FlywheelConfig, load_flywheel_config
+        from shared.flywheel.config import load_flywheel_config
         from shared.flywheel.inference_logger import InferenceLogger
 
         flywheel_config = load_flywheel_config()

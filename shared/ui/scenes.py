@@ -8,11 +8,10 @@ Contains scene creation functions for:
 """
 
 import random
-from typing import Optional
 
 from .effects import (
     BRAND_AQUA, BRAND_PURPLE, BRAND_CELLO, BRAND_ORANGE,
-    BrandBubbles, SparkBurst, ProgressLoader,
+    BrandBubbles, ProgressLoader,
 )
 from .menu import SYNAPTIC_LOGO, SYNAPTIC_WIDTH, TUNER_LOGO, TUNER_WIDTH
 
@@ -57,7 +56,7 @@ try:
     from asciimatics.screen import Screen
     from asciimatics.scene import Scene
     from asciimatics.effects import Print, Stars
-    from asciimatics.renderers import FigletText, Fire, StaticRenderer, Rainbow
+    from asciimatics.renderers import StaticRenderer
     from asciimatics.particles import (
         StarFirework, RingFirework, PalmFirework, SerpentFirework,
     )

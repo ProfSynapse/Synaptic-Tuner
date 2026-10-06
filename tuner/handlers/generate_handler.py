@@ -19,7 +19,7 @@ import sys
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from tuner.handlers.base import BaseHandler
 from tuner.project import resolve_path
@@ -34,11 +34,7 @@ from shared.ui import (
     print_success,
     confirm,
     prompt,
-    console,
-    RICH_AVAILABLE,
-    COLORS,
     spinner,
-    BOX,
     LiveSynthChatDashboard,
 )
 
@@ -110,7 +106,7 @@ class GenerateHandler(BaseHandler):
                 print("  1. LM Studio is running")
                 print("  2. A model is loaded")
                 print("  3. Server is started (click 'Start Server')")
-                print(f"  4. Server is accessible at localhost:1234")
+                print("  4. Server is accessible at localhost:1234")
                 return None
 
         except ImportError as e:
@@ -182,7 +178,7 @@ class GenerateHandler(BaseHandler):
             for i, key in enumerate(available, 1):
                 print(f"  {i}. {key}")
 
-            scenario_input = prompt(f"\nSelect scenarios (comma-separated numbers or 'all')").strip()
+            scenario_input = prompt("\nSelect scenarios (comma-separated numbers or 'all')").strip()
 
             if scenario_input.lower() == "all":
                 selected = available
@@ -191,7 +187,7 @@ class GenerateHandler(BaseHandler):
                 selected = [available[i] for i in indices if 0 <= i < len(available)]
 
             if selected:
-                count_str = prompt(f"Examples per scenario (default: 10)")
+                count_str = prompt("Examples per scenario (default: 10)")
                 count = int(count_str) if count_str.strip() else 10
 
                 for key in selected:
@@ -302,7 +298,6 @@ class GenerateHandler(BaseHandler):
         try:
             from SynthChat.generator import SynthChatGenerator
             from SynthChat.engine import ImprovementEngine
-            from shared.llm import create_client
 
             # Setup paths
             config_dir = self._config_dir()

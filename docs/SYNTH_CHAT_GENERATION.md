@@ -30,7 +30,7 @@ This creates a **self-improvement loop** where your model generates data to trai
 │     - Collect responses                                       │
 │                                                               │
 │  3. Response Validator                                        │
-│     - Use existing validate_syngen.py                         │
+│     - Use shared/validation/dataset_validator.py              │
 │     - Check tool call syntax                                  │
 │     - Verify context objects                                  │
 │     - Validate against tool schemas                           │
@@ -113,7 +113,7 @@ python Tools/selfplay_generator.py \
 1. Loads 47 prompts from `tool_prompts.json`
 2. For each prompt, generates 3 variations with temperature 0.7
 3. Sends each to your model via LM Studio
-4. Validates each response using `validate_syngen.py`
+4. Validates each response using `shared/validation/dataset_validator.py`
 5. Labels as `true` (valid) or `false` (invalid)
 6. Interleaves in True/False/True/False pattern
 7. Writes 1000 examples to output file
@@ -186,7 +186,7 @@ Once you have a self-play dataset:
 ### 1. Validate it
 
 ```bash
-python tools/validate_syngen.py Datasets/syngen_selfplay_20251204.jsonl
+python -m shared.validation.dataset_validator Datasets/syngen_selfplay_20251204.jsonl
 ```
 
 ### 2. Train with KTO
@@ -383,7 +383,7 @@ ip route | grep default
 
 ```bash
 # Run validator directly to debug
-python tools/validate_syngen.py Datasets/syngen_selfplay_test.jsonl
+python -m shared.validation.dataset_validator Datasets/syngen_selfplay_test.jsonl
 ```
 
 ### Low valid example rate
@@ -423,7 +423,7 @@ python Tools/selfplay_generator.py \
 Then inspect:
 ```bash
 # Check validation stats
-python tools/validate_syngen.py Datasets/test_selfplay.jsonl
+python -m shared.validation.dataset_validator Datasets/test_selfplay.jsonl
 
 # Look at examples
 head -5 Datasets/test_selfplay.jsonl | jq
@@ -486,6 +486,6 @@ python Tools/shuffle_and_interleave.py \
 ## References
 
 - [KTO Training Reference](../KTO_TRAINING_REFERENCE.md)
-- [Dataset Validation](../tools/validate_syngen.py)
+- [Dataset Validation](../shared/validation/dataset_validator.py)
 - [Evaluation Guide](../Evaluator/README.md)
 - [CLAUDE.md](../CLAUDE.md)

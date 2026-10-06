@@ -147,7 +147,7 @@ def split_dataset(
                 "ground_truth_args_json": json.dumps(args, ensure_ascii=False) if args else "{}",
             })
 
-    print(f"\nSplit results:")
+    print("\nSplit results:")
     print(f"  SFT: {len(sft_examples)} examples")
     print(f"  GSPO: {len(gspo_examples)} examples")
 

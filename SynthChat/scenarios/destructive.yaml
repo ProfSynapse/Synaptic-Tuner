@@ -9,8 +9,7 @@ scenarios:
     system: true
 
     tools:
-      storageManager_archive: 0.5
-      storageManager_archive: 0.5
+      storageManager_archive: 1.0
 
     prompts:
       system: |
@@ -32,7 +31,7 @@ scenarios:
         Execute deletion with high confidence.
         Generate response with:
         1. <thinking> showing: high risk + high confidence (permission given)
-        2. Tool call to archive or archive
+        2. Tool call to archive
         The thinking should note explicit permission was given.
 
   destructive_ambiguous_target:
@@ -42,8 +41,7 @@ scenarios:
     system: true
 
     tools:
-      storageManager_archive: 0.6
-      storageManager_archive: 0.4
+      storageManager_archive: 1.0
 
     prompts:
       system: |
@@ -75,8 +73,7 @@ scenarios:
     system: true
 
     tools:
-      storageManager_archive: 0.7
-      storageManager_archive: 0.3
+      storageManager_archive: 1.0
 
     prompts:
       system: |
@@ -137,8 +134,7 @@ scenarios:
     system: true
 
     tools:
-      storageManager_archive: 0.5
-      storageManager_archive: 0.5
+      storageManager_archive: 1.0
 
     prompts:
       system: |

@@ -13,10 +13,8 @@ Verifies:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -158,6 +156,11 @@ def _mock_backend(exit_code: int = 0):
     mock_config.gpu_type = "a10g-small"
     mock_config.cloud_image = "unsloth/unsloth:latest"
     mock_config.artifact_mount_path = "/workspace/outputs"
+    # CloudTrainingConfig defaults: no validation split configured. A bare
+    # MagicMock attribute would read as a set (truthy, non-None) group key.
+    mock_config.split_dataset = None
+    mock_config.test_size = None
+    mock_config.validation_group_key = None
     backend.load_config.return_value = mock_config
     backend.execute.return_value = exit_code
     backend.last_artifact_prefix = "runs/hf_jobs/sft/20260401_000000-abc12345"

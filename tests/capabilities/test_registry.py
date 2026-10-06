@@ -22,6 +22,7 @@ EXPECTED_IDS = {
     "generation.batch",
     "cloud.launch",
     "cloud.inspect",
+    "dataset.contamination-check",
 }
 
 EXPECTED_DESCRIPTOR_MATRIX = {
@@ -71,6 +72,21 @@ EXPECTED_DESCRIPTOR_MATRIX = {
         "confirmation": {"required": True, "reason": "paid_compute"},
         "resumable": False,
         "available": False,
+        "dry_run": False,
+    },
+    "dataset.contamination-check": {
+        "inputs": {
+            "contamination_config": False,
+            "train_data": False,
+            "eval_source": False,
+            "eval_text": False,
+            "report_dir": False,
+            "write_decontaminated": False,
+        },
+        "effects": (True, False, "none", False, False),
+        "confirmation": {"required": False},
+        "resumable": False,
+        "available": True,
         "dry_run": False,
     },
     "cloud.inspect": {
@@ -252,3 +268,17 @@ def test_describe_events_jsonl_preserves_descriptor_access_from_unrelated_cwd(
     descriptor = event["result"]["data"]["capability"]
     assert descriptor["id"] == "training.local-run"
     assert descriptor["inputs"][0]["access"] == "read"
+
+
+def test_contamination_check_descriptor_matches_the_routed_command() -> None:
+    from tuner.cli.parser import create_parser
+
+    descriptor = builtin_registry().describe("dataset.contamination-check")
+    assert descriptor.command == ("check-contamination",)
+    args = create_parser().parse_args(list(descriptor.command))
+    assert args.command == "check-contamination"
+    for item in descriptor.inputs:
+        assert hasattr(args, item["name"]), item["name"]
+    # --json emits the handler's {success, data} payload, not the synaptic-result/v1
+    # envelope, so the descriptor must not promise json_result.
+    assert descriptor.supports["json_result"] is False

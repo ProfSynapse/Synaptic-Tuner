@@ -182,5 +182,5 @@ python -c "from unsloth import FastLanguageModel; print('OK')"
 python -c "import trl; print(trl.__version__)"
 
 # Validate dataset
-python .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/my_data.jsonl
+python -m shared.validation.dataset_validator Datasets/my_data.jsonl
 ```

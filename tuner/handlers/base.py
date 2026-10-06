@@ -17,7 +17,7 @@ from abc import ABC
 from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 from tuner.core.interfaces import IHandler
 from tuner.project import ProjectContext

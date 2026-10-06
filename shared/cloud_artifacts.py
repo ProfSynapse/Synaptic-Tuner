@@ -17,6 +17,11 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from transformers import TrainerCallback
 from shared.experiment_tracking.experiment import _atomic_write_text
 
+# Hub release whose Buckets surface the repository qualifies. Mirrors
+# tuner.cloud.hf_provider_adapter.PINNED_HF_HUB_VERSION, which this module cannot
+# import: it is outside the offline SFT worker closure this file belongs to.
+_QUALIFIED_HF_BUCKETS_HUB_VERSION = "1.27.0"
+
 if TYPE_CHECKING:
     from tuner.project import ProjectContext
 
@@ -349,20 +354,29 @@ def sync_file_to_hf_bucket(local_path: Path, bucket_id: str, remote_path: str, t
     token = _normalize_token_value(token)
     bucket_id = ensure_hf_bucket(bucket_id, token=token)
 
+    # Buckets are not repositories: upload_file/create_commit reject any
+    # repo_type outside model/dataset/space. Files are added with the Buckets
+    # batch API, called as tuner.cloud.hf_provider_adapter calls it.
     try:
-        from huggingface_hub import HfApi  # type: ignore
+        import huggingface_hub  # type: ignore
     except ImportError as exc:
         raise RuntimeError(
-            "huggingface_hub HfApi is unavailable; install huggingface_hub>=1.5.0."
+            "huggingface_hub is not installed; HF Bucket uploads need the Buckets API "
+            f"(batch_bucket_files), qualified with huggingface_hub=={_QUALIFIED_HF_BUCKETS_HUB_VERSION}."
         ) from exc
+    batch_bucket_files = getattr(huggingface_hub, "batch_bucket_files", None)
+    if not callable(batch_bucket_files):
+        installed = getattr(huggingface_hub, "__version__", "unknown")
+        raise RuntimeError(
+            f"huggingface_hub {installed} has no Buckets API (batch_bucket_files); "
+            f"HF Bucket uploads are qualified with huggingface_hub=={_QUALIFIED_HF_BUCKETS_HUB_VERSION}."
+        )
 
-    api = HfApi(token=token)
     try:
-        api.upload_file(
-            path_or_fileobj=str(local_path),
-            path_in_repo=remote_path_stripped,
-            repo_id=bucket_id,
-            repo_type="bucket",
+        batch_bucket_files(
+            bucket_id,
+            add=[(str(local_path), remote_path_stripped)],
+            token=token,
         )
     except Exception as exc:
         raise RuntimeError(

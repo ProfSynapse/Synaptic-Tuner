@@ -1435,6 +1435,12 @@ python3 scripts/regenerate_modal_runtime_lock.py --write
 python3 scripts/regenerate_modal_runtime_lock.py
 ```
 
+The same check and `--write` also keep the checked-in token-profile example
+(`.skills/fine-tuning/configs/qwen35_4b_token_profile.yaml`) pinned to the lock's
+SHA-256: stale files are named on stderr, `--write` prints the changed paths, and
+only that example's `expected_lock_sha256` line is rewritten. Run
+`python3 .skills/scripts/sync_skill_trees.py` afterwards to refresh the skill mirrors.
+
 This is an offline local maintenance command. It does not contact Modal, load
 the provider SDK, resolve packages, inspect an image, or authenticate source or
 quote evidence. It preserves the exact reviewed inventory and preserves all

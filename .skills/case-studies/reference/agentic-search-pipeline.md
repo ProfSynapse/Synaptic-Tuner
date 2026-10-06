@@ -161,7 +161,7 @@ All three stages visible: targeted search terms, selective reading (skipped the 
 ### Structural Validation
 
 ```bash
-python3 .skills/synethetic-data-generation/scripts/validate_syngen.py \
+python3 -m shared.validation.dataset_validator \
   Datasets/synthchat/agentic_search_raw.jsonl
 ```
 

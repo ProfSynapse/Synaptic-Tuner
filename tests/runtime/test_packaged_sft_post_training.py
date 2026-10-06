@@ -10,13 +10,13 @@ from tuner.training.contracts import CanonicalDocument
 from tuner.training.packaged_compilation import (
     compile_packaged_sft_workload, packaged_configuration_digest,
 )
-from tests.runtime.test_packaged_sft_execution import FakeRunner, material, prepare, seal
+from tests.runtime.test_packaged_sft_execution import FakeRunner, material, prepare, seal  # noqa: F401  pytest fixtures registered by import
 from tests.training.test_modal_post_training_compilation import (
     _evaluation, _three_complete_synthetic_contexts,
 )
 
 
-def _opt_in(material, evaluation=None):
+def _opt_in(material, evaluation=None):  # noqa: F811  pytest fixture shadows imported fixture
     config = seam._document(material["workload_bytes"])["configuration"]["document"]
     config["post_training"] = _evaluation() if evaluation is None else evaluation
     compiled = compile_packaged_sft_workload(
@@ -43,7 +43,7 @@ def _opt_in(material, evaluation=None):
     return material
 
 
-def test_three_large_unicode_contexts_admit_through_packaged_worker(material, seal):
+def test_three_large_unicode_contexts_admit_through_packaged_worker(material, seal):  # noqa: F811  pytest fixtures
     expected = _three_complete_synthetic_contexts()
     _opt_in(material, expected)
     assert len(material["workload_bytes"]) > 256 * 1024
@@ -56,7 +56,7 @@ def test_three_large_unicode_contexts_admit_through_packaged_worker(material, se
     ]
 
 
-def test_post_training_uses_one_preparation_and_context_expires(material, seal):
+def test_post_training_uses_one_preparation_and_context_expires(material, seal):  # noqa: F811  pytest fixtures
     _opt_in(material)
     calls = []
     captured = []
@@ -94,7 +94,7 @@ def test_post_training_uses_one_preparation_and_context_expires(material, seal):
     assert len(calls) == 1
 
 
-def test_evaluation_failure_retains_completed_training_artifacts(material, seal):
+def test_evaluation_failure_retains_completed_training_artifacts(material, seal):  # noqa: F811  pytest fixtures
     _opt_in(material)
     admitted = seam.admit_packaged_sft(**material)
 
@@ -119,7 +119,7 @@ def test_evaluation_failure_retains_completed_training_artifacts(material, seal)
         )
 
 
-def test_changed_adapter_is_rejected_while_context_is_live(material, seal):
+def test_changed_adapter_is_rejected_while_context_is_live(material, seal):  # noqa: F811  pytest fixtures
     _opt_in(material)
     admitted = seam.admit_packaged_sft(**material)
 

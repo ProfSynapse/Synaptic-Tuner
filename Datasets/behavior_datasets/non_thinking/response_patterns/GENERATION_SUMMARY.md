@@ -88,7 +88,7 @@ All critical requirements met:
 ## Validation Results
 
 ```bash
-python tools/validate_syngen.py tool_text_pairs_v1.0.jsonl
+python -m shared.validation.dataset_validator tool_text_pairs_v1.0.jsonl
 ```
 
 **Output:**

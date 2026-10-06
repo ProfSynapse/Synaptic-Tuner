@@ -20,12 +20,12 @@ The extraction and probe-fit configs are lighter; each drives one verb.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 import yaml
 
 from tuner.project import ProjectContext, resolve_path
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 # --------------------------------------------------------------------------

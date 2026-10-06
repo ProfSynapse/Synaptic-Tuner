@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from ..config.privacy import load_privacy_profiles, resolve_privacy_settings
 from ..result_writer import metadata_path, write_metadata

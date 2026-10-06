@@ -47,7 +47,7 @@ import math
 import re
 from typing import Protocol
 
-from ._contract import digest_text, exact_fields, exact_integer, required_text
+from ._contract import digest_text, exact_fields, required_text
 from .observations import (
     ObservationFamily,
     ObservationPage,

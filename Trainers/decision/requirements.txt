@@ -1,0 +1,16 @@
+# Trainers/decision/requirements.txt
+#
+# Method-local dependencies for the decision trainer, layered on the training
+# image by the recipes' setup.pip. Versions follow the strands-decider README's
+# tested stack for the Qwen3.5 torso; they are not yet captured from a passing
+# smoke here, so treat them as candidates, not a qualified runtime profile.
+transformers==5.17.0     # Qwen3.5 (Gated DeltaNet hybrid) needs transformers 5.x
+peft==0.21.2
+accelerate>=0.34
+safetensors>=0.4
+pyyaml>=6.0
+numpy>=1.24
+flash-linear-attention   # Linux only: Triton kernels for Qwen3.5's linear-attention layers
+
+# Corpus build only (Trainers/decision/build_corpus.py):
+# strands-decider[train]==0.1.0

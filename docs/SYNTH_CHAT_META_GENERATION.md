@@ -271,7 +271,10 @@ response = model.generate(messages, temp=0.5, top_p=0.95)
 
 **Step 5: Validate**
 ```python
-is_valid = validate_syngen({"user": user_prompt, "assistant": response})
+from shared.validation import dataset_validator
+
+example = {"conversations": [{"role": "user", "content": user_prompt}, response]}
+is_valid = dataset_validator.validate_example(1, example).is_valid
 label = True if is_valid else False
 ```
 

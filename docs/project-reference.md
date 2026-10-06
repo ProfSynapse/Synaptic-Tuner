@@ -33,6 +33,14 @@ Scripts, configuration files, environment variables, data patterns, and platform
 - SFT: `Datasets/syngen_tools_sft_11.18.25.jsonl` (2,676 positive examples)
 - KTO: `Datasets/syngen_tools_11.18.25.jsonl` (4,649 interleaved examples)
 
+**Dataset split keys** (`dataset:` in `Trainers/{sft,kto,dpo}/configs/config.yaml` and local-run recipes):
+- `split_dataset` / `test_size` - random train/validation split (seed 42)
+- `validation_group_key` - dot-path into each raw row (e.g. `metadata.scenario`); keeps groups on one side of the split, `test_size` applied over groups. See `docs/common-tasks.md` section 1c for recommended keys.
+- `use_preassigned_splits` - SFT only: consume `split` from prepared datasets instead of splitting
+
+**Contamination check:**
+- `configs/contamination/default.yaml` - defaults for `python tuner.py check-contamination` (n-gram size, threshold, train roles, eval sources, report dir)
+
 **SynthChat (Dataset Improvement):**
 - `SynthChat/config/config.yaml` - Main config
 - `SynthChat/rubrics/*.yaml` - Quality rubrics
@@ -129,11 +137,14 @@ tail -f sft_output/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 | Environment setup | X | | `./setup_env.sh` |
 | Dependency install | X | | `./run.sh doctor --fix` |
 | List resources | X | | `./run.sh list *` |
-| Dataset validation | X | | `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py` |
+| Dataset validation | X | | `python3 -m shared.validation.dataset_validator` |
+| Train/eval contamination check | X | | `python tuner.py check-contamination --train-data <jsonl>`; exit 2 when an eval item is flagged |
 | System diagnostics | X | | `./run.sh doctor` |
+| SFT loss-mask check | X | | `python tuner.py doctor sft-mask --dataset-path ... --model ...` (or `--sft-config`); tokenizer only, thresholds in `Trainers/sft/configs/mask_doctor.yaml` |
 | Training (SFT/KTO) | | X | Needs dataset choice, model size |
 | Local Docker training | | X | `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml`; UID-agnostic, persistent-container mode |
 | Evaluation | | X | Needs model path, scenario set |
+| Eval comparison / quant regression gate | X | | `python -m Evaluator.compare --reference REF.json --candidate CAND.json` |
 | Upload to HuggingFace | | X | Needs repo name, HF_TOKEN |
 | Dataset improvement | | X | Needs rubrics, line range |
 | Synthetic data gen | | X | Needs config, teacher model |
@@ -157,6 +168,6 @@ tail -f sft_output/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 
 - Check script help: `python script.py --help`
 - Run dry runs: `python train_sft.py --dry-run`
-- Validate first: `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py dataset.jsonl`
+- Validate first: `python3 -m shared.validation.dataset_validator dataset.jsonl`
 
 **Key Principle:** Use the bash scripts (`./run.sh`, `setup.sh`, etc.) rather than direct Python when possible - they handle environment setup, dependency checks, and provide better UX.

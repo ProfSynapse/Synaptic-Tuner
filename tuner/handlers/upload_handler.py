@@ -31,11 +31,7 @@ from tuner.ui import (
     confirm,
     prompt,
     BOX,
-    RICH_AVAILABLE,
-    console,
-    COLORS,
 )
-from shared.ui import spinner
 from tuner.utils.validation import validate_repo_id, load_env_file
 
 
@@ -420,7 +416,7 @@ class UploadHandler(BaseHandler):
             "--gguf-quantizations", *quantizations,
         ]
 
-        print_info(f"Running GGUF conversion...")
+        print_info("Running GGUF conversion...")
         print()
 
         exit_code = subprocess.run(cmd, cwd=str(trainers_dir)).returncode

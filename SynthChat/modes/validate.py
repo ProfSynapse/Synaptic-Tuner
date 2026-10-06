@@ -10,7 +10,6 @@ Usage: Called by SynthChat.run.main() when command is 'validate'.
 import json
 import sys
 from pathlib import Path
-from typing import Dict
 
 from ..engine import ImprovementEngine
 from ..services.privacy_preprocess import (
@@ -147,7 +146,7 @@ def validate_mode(args, *, load_settings, create_llm_client):
     total = len(examples)
     pass_rate = (total_passed / total * 100) if total > 0 else 0
 
-    print(f"\n=== Validation Summary ===")
+    print("\n=== Validation Summary ===")
     print(f"Total examples: {total}")
     print(f"Passed: {total_passed} ({pass_rate:.1f}%)")
     print(f"Failed: {total_failed} ({100 - pass_rate:.1f}%)")
@@ -159,7 +158,7 @@ def validate_mode(args, *, load_settings, create_llm_client):
         if len(failing_lines) > 20:
             print(f"  ... and {len(failing_lines) - 20} more")
 
-    print(f"\n=== Failures by Rubric ===")
+    print("\n=== Failures by Rubric ===")
     for rubric, failed_lines in failures_by_rubric.items():
         if failed_lines:
             print(f"{rubric}: {len(failed_lines)} failures")
@@ -168,5 +167,5 @@ def validate_mode(args, *, load_settings, create_llm_client):
                 print(f"  ... and {len(failed_lines) - 10} more")
 
     if total_failed > 0:
-        print(f"\nRun with 'improve' mode to fix failing examples:")
+        print("\nRun with 'improve' mode to fix failing examples:")
         print(f"  python -m SynthChat.run improve --input {input_path} --rubrics {','.join(rubrics)}")

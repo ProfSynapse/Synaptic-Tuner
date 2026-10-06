@@ -17,7 +17,7 @@ Commands:
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from shared.llm import create_client
 from shared.environments import EnvironmentValidator

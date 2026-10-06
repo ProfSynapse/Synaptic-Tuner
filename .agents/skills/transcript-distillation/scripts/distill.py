@@ -201,6 +201,9 @@ def emit_rows(events, *, source_kind, project, rel_id, lab, ctx_budget, render_m
             "metadata": {
                 "source_kind": source_kind,
                 "project": project,
+                # Every turn row of one transcript shares this; use it as the
+                # trainers' dataset.validation_group_key to keep sessions whole.
+                "session_id": f"{source_kind}:{rel_id}",
                 "turn_index": i,
                 "tool_names": [c.get("name") for c in ev.get("tool_calls", [])],
                 "had_tool_error": tool_error,

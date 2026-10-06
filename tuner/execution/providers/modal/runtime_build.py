@@ -15,7 +15,6 @@ import queue
 from pathlib import Path
 import re
 import subprocess
-import sys
 import tarfile
 import tempfile
 import threading
@@ -662,13 +661,13 @@ class ModalBuildCandidateV1:
             "platform_machine": ("platform", "machine"),
             "cuda_version": ("platform", "cuda_version"),
         }
-        for field, path in checks.items():
+        for attribute, path in checks.items():
             value: object = measured
             for part in path:
                 if type(value) is not dict:
                     raise ValueError("Modal candidate measurement is invalid")
                 value = value[part]
-            if getattr(release, field) != value:
+            if getattr(release, attribute) != value:
                 raise ValueError("Modal candidate measurement differs from release")
         if (release.to_dict()["platform"]["runtime_facts"] != measured["platform"]["runtime_facts"]
                 or measured["contracts"] != release.to_dict()["contracts"]

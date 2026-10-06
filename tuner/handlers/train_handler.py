@@ -10,7 +10,6 @@ Supports --json flag for AI-parseable output. In JSON mode:
 - All output is JSON formatted for programmatic parsing
 """
 
-import subprocess
 from argparse import Namespace
 from pathlib import Path
 from typing import Optional

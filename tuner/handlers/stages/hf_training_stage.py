@@ -25,6 +25,7 @@ from tuner.cloud import (
     resolve_hf_bucket_id,
 )
 from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
+from tuner.core.config import validation_split_flags
 from tuner.core.exceptions import CloudProviderError
 
 from ._util import _optional_backend_value, load_tracked_hf_source_preparation
@@ -146,6 +147,19 @@ class HFTrainingStageRunner:
         config.model_name = spec.training.model_name
         config.dataset_name = spec.dataset.source
         config.dataset_file = spec.dataset.file
+        if spec.dataset.split_dataset is not None:
+            config.split_dataset = spec.dataset.split_dataset
+        if spec.dataset.test_size is not None:
+            config.test_size = spec.dataset.test_size
+        if spec.dataset.validation_group_key is not None:
+            config.validation_group_key = spec.dataset.validation_group_key
+        # Refuse invalid split settings before any job is submitted.
+        validation_split_flags(
+            method=config.method,
+            split_dataset=config.split_dataset,
+            test_size=config.test_size,
+            validation_group_key=config.validation_group_key,
+        )
         if spec.training.batch_size is not None:
             config.batch_size = spec.training.batch_size
         if spec.training.gradient_accumulation is not None:

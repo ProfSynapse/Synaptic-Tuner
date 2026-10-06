@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,7 +18,6 @@ import yaml
 # Rich console for colored output (optional)
 try:
     from rich.console import Console
-    from rich.text import Text
     _console = Console()
     _RICH_AVAILABLE = True
 except ImportError:
@@ -29,7 +27,7 @@ except ImportError:
 # Import live dashboard and UI components
 try:
     from shared.ui import LiveEvaluationDashboard, RICH_AVAILABLE as _SHARED_RICH
-    from .ui import rich_summary, rich_failure_details, print_evaluation_header
+    from .ui import rich_summary, rich_failure_details
     _DASHBOARD_AVAILABLE = True
 except ImportError:
     _DASHBOARD_AVAILABLE = False
@@ -50,6 +48,7 @@ from .config import (
     parse_tags,
 )
 from .config_loader import ConfigLoader, load_yaml_scenarios
+from .model_artifact import build_model_artifact
 from .reporting import (
     build_run_payload,
     console_summary,
@@ -397,6 +396,24 @@ Backend Configuration:
     parser.add_argument("--seed", type=int, help="Optional generation seed")
     parser.add_argument("--host", help="Override backend host (OLLAMA_HOST or LMSTUDIO_HOST)")
     parser.add_argument("--port", type=int, help="Override backend port (OLLAMA_PORT or LMSTUDIO_PORT)")
+    parser.add_argument(
+        "--no-load-in-4bit",
+        action="store_true",
+        help="unsloth backend only: load the model at full/half precision instead of the default 4-bit "
+        "(use for a full-precision reference run)",
+    )
+    parser.add_argument(
+        "--quantization",
+        metavar="LABEL",
+        help="Quantization label of the evaluated artifact (e.g. Q4_K_M, Q8_0, F16), recorded in results "
+        "metadata and lineage. Default: detected from the model path/name when it carries a llama.cpp quant name",
+    )
+    parser.add_argument(
+        "--artifact-manifest",
+        metavar="PATH",
+        help="gguf_manifest.json describing the evaluated GGUF; the entry matching the model file name "
+        "and the calibration block are recorded in results metadata and lineage",
+    )
     parser.add_argument("--mlc-port", type=int, default=8000, help="Port for MLC/WebLLM HTTP server (default: 8000)")
     parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser for MLC evaluation")
     parser.add_argument("--retries", type=int, default=2, help="HTTP retry attempts")
@@ -692,7 +709,6 @@ def main(
     # Load display configuration
     display_config = load_display_config(config_dir)
     labels = display_config.get("labels", {})
-    colors = display_config.get("colors", {})
 
     # Get settings kwargs for host/port overrides
     settings_kwargs = build_settings_kwargs(args)
@@ -708,6 +724,31 @@ def main(
         reasoning_effort=args.reasoning_effort,
         **settings_kwargs,
     )
+    if args.no_load_in_4bit:
+        if args.backend != "unsloth":
+            print("Error: --no-load-in-4bit applies only to --backend unsloth.", file=sys.stderr)
+            return 1
+        settings.load_in_4bit = False
+
+    load_settings = (
+        {"load_in_4bit": settings.load_in_4bit, "max_seq_length": settings.max_seq_length}
+        if args.backend == "unsloth"
+        else None
+    )
+    model_artifact = build_model_artifact(
+        model=args.model,
+        backend=args.backend,
+        quantization=args.quantization,
+        manifest_path=(
+            expand_path(args.artifact_manifest)
+            if args.artifact_manifest
+            else None
+        ),
+        load_settings=load_settings,
+    )
+    for warning in model_artifact.get("warnings", []):
+        print(f"Warning: {warning}", file=sys.stderr)
+
     client = create_client(
         backend=args.backend,
         settings=settings,
@@ -884,6 +925,9 @@ def main(
 
     def build_current_metadata() -> Dict[str, Any]:
         metadata = build_metadata(config, settings, total_cases, len(selected_cases), args.backend)
+        metadata["scenarios"] = list(args.scenarios or [])
+        metadata["preset"] = args.preset
+        metadata["model_artifact"] = model_artifact
         if args.env_backend != "none":
             metadata["environment"] = {
                 "backend": args.env_backend,
@@ -1069,6 +1113,7 @@ def main(
             test_suites=[str(prompt_path)],
             eval_config=eval_config,
             hardware_info={"platform": sys.platform},
+            model_artifact=model_artifact,
         )
         model_card_section = generate_evaluation_model_card_section(lineage)
 
@@ -1134,7 +1179,7 @@ def main(
                 repo_id=repo_id,
                 token=hf_token,
             )
-            print(f"  ✓ evaluation_lineage.json uploaded")
+            print("  ✓ evaluation_lineage.json uploaded")
 
             # Update model card if requested
             if args.update_model_card:
@@ -1161,7 +1206,7 @@ def main(
                         repo_id=repo_id,
                         token=hf_token,
                     )
-                    print(f"  ✓ README.md updated with evaluation results")
+                    print("  ✓ README.md updated with evaluation results")
 
                 except Exception as e:
                     print(f"  ⚠️  Could not update README: {e}")

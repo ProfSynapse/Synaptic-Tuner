@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import Mapping
 from urllib.parse import parse_qsl, urlsplit
 
-from tuner.execution.contracts import EffectIdentity, safe_ref
+from tuner.execution.contracts import EffectIdentity
 from tuner.execution.operation import OperationBindingV1
 from tuner.execution.providers.contracts import StageBundle
 from tuner.project.execution_source import ExecutionSourceV1

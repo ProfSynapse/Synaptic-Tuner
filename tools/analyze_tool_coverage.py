@@ -11,34 +11,39 @@ from __future__ import annotations
 
 import json
 import re
-import shlex
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from shared.validation.parsing.cli_commands import (  # noqa: E402
+    CliCommandSpec,
+    load_cli_command_catalog,
+    parse_cli_commands,
+)
 
 
-def load_tool_schema(path: Path) -> Tuple[set[str], Dict[str, List[str]], Dict[str, Tuple[str, List[Dict[str, Any]]]]]:
+def load_tool_schema(path: Path) -> Tuple[set[str], Dict[str, List[str]], Dict[str, CliCommandSpec]]:
+    command_lookup = load_cli_command_catalog(path)
     payload = json.loads(path.read_text(encoding="utf-8"))
     valid_tools: set[str] = set()
     tools_by_agent: Dict[str, List[str]] = defaultdict(list)
-    command_lookup: Dict[str, Tuple[str, List[Dict[str, Any]]]] = {}
 
     for item in payload.get("tools", []):
         if not isinstance(item, dict):
             continue
         agent = str(item.get("agent", "")).strip()
         tool = str(item.get("tool", "")).strip()
-        command = str(item.get("command", "")).strip()
         if not agent or not tool:
             continue
 
         full_name = f"{agent}_{tool}"
         valid_tools.add(full_name)
         tools_by_agent[agent].append(full_name)
-
-        if command:
-            command_lookup[command] = (full_name, item.get("arguments", []) or [])
 
     return valid_tools, {k: sorted(v) for k, v in tools_by_agent.items()}, command_lookup
 
@@ -56,76 +61,19 @@ def parse_arguments(arguments: Any) -> Dict[str, Any]:
     return {}
 
 
-def split_cli_commands(tool_value: str) -> List[str]:
-    commands: List[str] = []
-    current: List[str] = []
-    quote: Optional[str] = None
-    escape = False
-    brace_depth = 0
-    bracket_depth = 0
-
-    for char in tool_value:
-        current.append(char)
-        if escape:
-            escape = False
-            continue
-        if char == "\\":
-            escape = True
-            continue
-        if quote:
-            if char == quote:
-                quote = None
-            continue
-        if char in {"'", '"'}:
-            quote = char
-            continue
-        if char == "{":
-            brace_depth += 1
-            continue
-        if char == "}":
-            brace_depth = max(0, brace_depth - 1)
-            continue
-        if char == "[":
-            bracket_depth += 1
-            continue
-        if char == "]":
-            bracket_depth = max(0, bracket_depth - 1)
-            continue
-        if char == "," and brace_depth == 0 and bracket_depth == 0:
-            current.pop()
-            segment = "".join(current).strip()
-            if segment:
-                commands.append(segment)
-            current = []
-
-    tail = "".join(current).strip()
-    if tail:
-        commands.append(tail)
-    return commands
-
-
-def extract_from_cli(tool_value: str, command_lookup: Dict[str, Tuple[str, List[Dict[str, Any]]]]) -> List[str]:
-    matched: List[str] = []
-    sorted_commands = sorted(command_lookup.keys(), key=lambda value: len(value.split()), reverse=True)
-
-    for command_str in split_cli_commands(tool_value):
-        try:
-            tokens = shlex.split(command_str)
-        except ValueError:
-            continue
-        if not tokens:
-            continue
-        for command in sorted_commands:
-            command_tokens = command.split()
-            if tokens[: len(command_tokens)] == command_tokens:
-                matched.append(command_lookup[command][0])
-                break
-    return matched
+def extract_from_cli(tool_value: str, command_lookup: Dict[str, CliCommandSpec]) -> List[str]:
+    """Return the tool names of the catalog commands in a CLI command string."""
+    try:
+        # Only command names are read here, so argument escapes do not matter.
+        commands = parse_cli_commands(tool_value, command_lookup, {})
+    except ValueError:
+        return []
+    return [command.spec.tool_name for command in commands if command.spec is not None]
 
 
 def extract_tools_from_assistant_message(
     message: Dict[str, Any],
-    command_lookup: Dict[str, Tuple[str, List[Dict[str, Any]]]],
+    command_lookup: Dict[str, CliCommandSpec],
 ) -> List[str]:
     tools: List[str] = []
 
@@ -148,7 +96,7 @@ def extract_tools_from_assistant_message(
     return tools
 
 
-def analyze_coverage(jsonl_file: Path, valid_tools: set[str], tools_by_agent: Dict[str, List[str]], command_lookup: Dict[str, Tuple[str, List[Dict[str, Any]]]]) -> Dict[str, Any]:
+def analyze_coverage(jsonl_file: Path, valid_tools: set[str], tools_by_agent: Dict[str, List[str]], command_lookup: Dict[str, CliCommandSpec]) -> Dict[str, Any]:
     tool_counter = Counter()
     label_tool_counter = defaultdict(Counter)
     invalid_tool_counter = Counter()
@@ -250,8 +198,7 @@ def main(argv: Iterable[str]) -> int:
         return 1
 
     dataset_path = Path(args[1]).resolve()
-    repo_root = Path(__file__).resolve().parents[1]
-    schema_path = repo_root / "cli-first-tool-schemas.json"
+    schema_path = _REPO_ROOT / "cli-first-tool-schemas.json"
 
     valid_tools, tools_by_agent, command_lookup = load_tool_schema(schema_path)
     results = analyze_coverage(dataset_path, valid_tools, tools_by_agent, command_lookup)

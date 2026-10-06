@@ -271,7 +271,7 @@ Commands:
   modelops    Model operations (run, merge, convert, upload)
   ml          Traditional ML training (LightGBM, XGBoost, sklearn)
   status      System status overview (use --json for structured output)
-  doctor      System diagnostics (use --fix to auto-fix issues)
+  doctor      System diagnostics (use --fix to auto-fix issues); 'doctor sft-mask' checks SFT loss masking
   flywheel    Data flywheel (self-improving training pipeline)
   experiment-loop  Autonomous hyperparameter search (LLM + surrogate)
   prompt-optimize Deterministic config-first prompt optimization
@@ -286,6 +286,7 @@ Commands:
   prepare-dataset  Convert one verified bundle into a private training dataset
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
+  check-contamination  N-gram containment of eval prompts inside training data
 
 Flywheel Subcommands:
   flywheel status       Show flywheel system status
@@ -296,6 +297,12 @@ Flywheel Subcommands:
   flywheel logs         Show inference log statistics
   flywheel versions     List staged dataset versions
   flywheel export-fixtures --export-config <yaml> --output <yaml>
+
+Doctor Subcommands:
+  doctor              System diagnostics (environment, GPU, dependencies, backends)
+  doctor sft-mask     Run a dataset sample through the real SFT preprocessing path with
+                      only the tokenizer loaded and report loss-mask problems
+                      (exit 1 on hard failures, 2 on setup errors; --json for structured output)
 
 List Subcommands:
   list datasets   List available JSONL datasets
@@ -331,18 +338,22 @@ Examples:
   python tuner.py prepare-dataset --config <config.json> --json
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
+  python tuner.py doctor sft-mask --dataset-path Datasets/my_sft.jsonl --model <tokenizer-id-or-path>
+  python tuner.py doctor sft-mask --sft-config Trainers/sft/configs/config.yaml --json
   python tuner.py list datasets    # List datasets
   python tuner.py ml                   # Interactive ML training
   python tuner.py ml train --config path/to/config.yaml
   python tuner.py ml list-configs      # Show available configs
   python tuner.py list models --json   # List models as JSON
+  python tuner.py check-contamination --train-data Datasets/my_sft.jsonl
+  python tuner.py check-contamination --train-data Datasets/my_sft.jsonl --eval-source Evaluator/config/scenarios/tool_prompts.yaml --threshold 0.5 --json
 """
     )
 
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "modal-runtime-release", "ingest", "prepare-dataset", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "modal-runtime-release", "ingest", "prepare-dataset", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compare-runs", "create-experiment", "check-contamination"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -442,6 +453,43 @@ Examples:
         action="store_true",
         dest="doctor_fix",
         help="Auto-fix simple issues (only used with 'doctor' command)"
+    )
+    # doctor sft-mask flags. Settings resolve like the SFT trainer: trainer config
+    # (--sft-config, default Trainers/sft/configs/config.yaml) < explicit flags
+    # (--model, --dataset-path, --max-seq-length, --chat-template-kwargs,
+    # --prompt-render, --no-completion-only).
+    parser.add_argument(
+        "--sft-config",
+        dest="sft_config",
+        help="SFT trainer config (YAML, or .py with Config()) whose preprocessing settings to reuse (doctor sft-mask).",
+    )
+    parser.add_argument(
+        "--chat-template-kwargs",
+        dest="chat_template_kwargs",
+        help='JSON object forwarded to apply_chat_template as the SFT trainer does, e.g. \'{"enable_thinking": false}\' (doctor sft-mask).',
+    )
+    parser.add_argument(
+        "--prompt-render",
+        dest="prompt_render",
+        choices=["full_conversation", "prompt_completion"],
+        help="SFT render/masking strategy to check (doctor sft-mask; default from the trainer config).",
+    )
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        dest="sample_size",
+        help="Rows to sample, 0 = all (doctor sft-mask; default from Trainers/sft/configs/mask_doctor.yaml).",
+    )
+    parser.add_argument(
+        "--preview-rows",
+        dest="preview_rows",
+        help="Comma-separated dataset row indices to show token-by-token (doctor sft-mask).",
+    )
+    parser.add_argument(
+        "--preview-count",
+        type=int,
+        dest="preview_count",
+        help="Rows to preview when --preview-rows is not given; failing rows first (doctor sft-mask).",
     )
 
     # ML-specific flags
@@ -625,6 +673,11 @@ Examples:
     parser.add_argument("--train-num-epochs", type=int, help="Override epochs for cloud/cloud-pipeline training.")
     parser.add_argument("--train-max-steps", type=int, help="Override max training steps for cloud/cloud-pipeline training.")
     parser.add_argument("--train-max-seq-length", type=int, help="Override max sequence length for cloud/cloud-pipeline training.")
+    parser.add_argument("--train-split-dataset", action="store_true", dest="train_split_dataset", help="Create a train/validation split in cloud/cloud-pipeline SFT/KTO/DPO training.")
+    parser.add_argument("--train-no-split-dataset", action="store_false", dest="train_split_dataset", help="Disable the train/validation split for cloud/cloud-pipeline training.")
+    parser.set_defaults(train_split_dataset=None)
+    parser.add_argument("--train-test-size", type=float, help="Validation fraction (of rows, or of groups with a group key) for cloud/cloud-pipeline training.")
+    parser.add_argument("--train-validation-group-key", help="Dot-path into each row; keeps groups on one side of the cloud/cloud-pipeline validation split (requires --train-split-dataset or split_dataset in the trainer config).")
     parser.add_argument("--train-lora-r", type=int, help="Override LoRA rank for cloud/cloud-pipeline SFT training.")
     parser.add_argument("--train-lora-alpha", type=int, help="Override LoRA alpha for cloud/cloud-pipeline SFT training.")
     parser.add_argument("--train-lora-dropout", type=float, help="Override LoRA dropout for cloud/cloud-pipeline SFT training.")
@@ -794,6 +847,60 @@ Examples:
         help="Override output directory for prompt optimization artifacts.",
     )
 
+    # check-contamination flags (train/eval leakage check). Defaults live in
+    # configs/contamination/default.yaml; these override it.
+    parser.add_argument(
+        "--contamination-config",
+        dest="contamination_config",
+        help="Contamination check config YAML (default: configs/contamination/default.yaml).",
+    )
+    parser.add_argument(
+        "--train-data",
+        dest="train_data",
+        action="append",
+        help="Training JSONL to check (repeatable; replaces the config's train_datasets).",
+    )
+    parser.add_argument(
+        "--eval-source",
+        dest="eval_source",
+        action="append",
+        help="Evaluator scenario YAML or prompt set .json/.jsonl (repeatable; replaces the config's eval sources).",
+    )
+    parser.add_argument(
+        "--eval-text",
+        dest="eval_text",
+        action="append",
+        help="Plain JSONL of eval text, one object per line (repeatable; replaces the config's eval sources).",
+    )
+    parser.add_argument(
+        "--eval-text-field",
+        dest="eval_text_field",
+        help="Field (dot-path) holding the text in --eval-text files (default: text).",
+    )
+    parser.add_argument("--ngram", type=int, help="Word n-gram size for check-contamination (default from config: 8).")
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        help="Containment at/above which an eval item is flagged; any flag exits 2 (default from config: 0.5).",
+    )
+    parser.add_argument(
+        "--min-item-tokens",
+        dest="min_item_tokens",
+        type=int,
+        help="Shortest eval item (words) still scored by containment (default from config: 4).",
+    )
+    parser.add_argument("--top-k", dest="top_k", type=int, help="Top (eval item, training row) pairs to report.")
+    parser.add_argument(
+        "--report-dir",
+        dest="report_dir",
+        help="Directory for the timestamped contamination report (default from config: scratch/contamination).",
+    )
+    parser.add_argument(
+        "--write-decontaminated",
+        dest="write_decontaminated",
+        help="Write training data minus flagged rows: a .jsonl file (one --train-data) or a directory, plus a .removed.json sidecar.",
+    )
+
     # list-runs filters (unified tracking registry)
     parser.add_argument("--run-type", help="Filter by run type: sft, kto, grpo, ml, evaluation, cloud_sft, cloud_kto, cloud_grpo (list-runs only)")
     parser.add_argument("--since", help="Filter runs after this ISO 8601 date (list-runs only)")
@@ -835,12 +942,12 @@ Examples:
         help="Skip a stage in run-experiment. May be repeated.",
     )
     parser.add_argument("--base-dir", default=".tracking", help="Tracking base directory")
-    parser.add_argument("--model", help="Model path for inference")
+    parser.add_argument("--model", help="Model path for inference (doctor sft-mask: tokenizer id or local path)")
     parser.add_argument("--model-revision", dest="model_revision", help="Model commit SHA/revision for reproducible inference loads")
     parser.add_argument("--tokenizer-revision", dest="tokenizer_revision", help="Tokenizer commit SHA/revision for reproducible inference loads")
-    parser.add_argument("--dataset-path", help="Path to jsonl dataset")
-    parser.add_argument("--max-seq-length", type=int, default=2048, help="Max sequence length")
-    parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking")
+    parser.add_argument("--dataset-path", help="Path to jsonl dataset (doctor sft-mask: local dataset to check)")
+    parser.add_argument("--max-seq-length", type=int, default=None, help="Max sequence length (doctor sft-mask: overrides the trainer config)")
+    parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking (doctor sft-mask: check full-sequence loss)")
     parser.add_argument("--base-model-name", help="Base model name for experiment")
     parser.add_argument("--dataset-hash", help="Dataset hash for experiment")
 

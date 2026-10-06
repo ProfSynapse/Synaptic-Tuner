@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
-import os
+import re
 from pathlib import Path
 
 import pytest
@@ -23,7 +23,7 @@ def _fixture(tmp_path: Path) -> Path:
     lock_target = root / tool.LOCK_RELATIVE
     lock_target.parent.mkdir(parents=True)
     lock_target.write_bytes(lock_source.read_bytes())
-    for relative in tool.LOCKED_FILES.values():
+    for relative in [*tool.LOCKED_FILES.values(), tool.EXAMPLE_PIN_RELATIVE]:
         source = ROOT / relative
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -35,8 +35,94 @@ def _document(root: Path) -> dict:
     return json.loads((root / tool.LOCK_RELATIVE).read_text(encoding="utf-8"))
 
 
+def _pin(root: Path) -> str:
+    text = (root / tool.EXAMPLE_PIN_RELATIVE).read_text(encoding="utf-8")
+    return re.search(r"^  expected_lock_sha256: ([0-9a-f]{64})$", text, re.MULTILINE).group(1)
+
+
+def _lock_sha(root: Path) -> str:
+    return hashlib.sha256((root / tool.LOCK_RELATIVE).read_bytes()).hexdigest()
+
+
 def test_checked_in_modal_runtime_lock_is_current():
     assert tool.regenerate(ROOT) == 0
+
+
+def test_checked_in_token_profile_example_pins_the_checked_in_lock():
+    assert _pin(ROOT) == _lock_sha(ROOT)
+
+
+def test_lock_refresh_updates_only_the_example_pin_and_reports_both(tmp_path, capsys):
+    root = _fixture(tmp_path)
+    example = root / tool.EXAMPLE_PIN_RELATIVE
+    before_example = example.read_text(encoding="utf-8")
+    old_pin = _pin(root)
+    changed = root / tool.LOCKED_FILES["modal_worker_source"]
+    changed.write_bytes(changed.read_bytes() + b"\n")
+
+    assert tool.regenerate(root) == 3
+    check_report = capsys.readouterr().err
+    assert tool.LOCK_RELATIVE in check_report and tool.EXAMPLE_PIN_RELATIVE in check_report
+    assert example.read_text(encoding="utf-8") == before_example
+
+    assert tool.regenerate(root, write=True) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "REFRESHED"
+    assert report["changed"] == [tool.LOCK_RELATIVE, tool.EXAMPLE_PIN_RELATIVE]
+    new_pin = _lock_sha(root)
+    assert new_pin != old_pin and _pin(root) == new_pin
+    assert example.read_text(encoding="utf-8") == before_example.replace(old_pin, new_pin)
+    assert tool.regenerate(root) == 0
+    assert tool.regenerate(root, write=True) == 0
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["status"] == "CURRENT"
+
+
+def test_stale_example_alone_is_reported_and_repaired_without_touching_the_lock(tmp_path, capsys):
+    root = _fixture(tmp_path)
+    lock = root / tool.LOCK_RELATIVE
+    original_lock = lock.read_bytes()
+    example = root / tool.EXAMPLE_PIN_RELATIVE
+    example.write_text(
+        example.read_text(encoding="utf-8").replace(_pin(root), "0" * 64), encoding="utf-8",
+    )
+
+    assert tool.regenerate(root) == 3
+    assert tool.EXAMPLE_PIN_RELATIVE in capsys.readouterr().err
+    assert tool.regenerate(root, write=True) == 0
+    assert json.loads(capsys.readouterr().out)["changed"] == [tool.EXAMPLE_PIN_RELATIVE]
+    assert lock.read_bytes() == original_lock
+    assert _pin(root) == _lock_sha(root)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda text, pin: text.replace(pin, pin.upper()),
+        lambda text, pin: text.replace("expected_lock_sha256", "expected_lock"),
+        lambda text, pin: text + "# expected_lock_sha256: " + pin + "\n",
+        lambda text, pin: text.replace("  expected_lock_sha256", "    expected_lock_sha256"),
+    ],
+)
+def test_unrecognized_example_pin_fails_without_writing_anything(tmp_path, mutation):
+    root = _fixture(tmp_path)
+    changed = root / tool.LOCKED_FILES["modal_worker_source"]
+    changed.write_bytes(changed.read_bytes() + b"\n")
+    lock = root / tool.LOCK_RELATIVE
+    original_lock = lock.read_bytes()
+    example = root / tool.EXAMPLE_PIN_RELATIVE
+    example.write_text(mutation(example.read_text(encoding="utf-8"), _pin(root)), encoding="utf-8")
+    original_example = example.read_bytes()
+
+    with pytest.raises(tool.LockRegenerationError, match="EXAMPLE_PIN_INVALID"):
+        tool.regenerate(root, write=True)
+    assert lock.read_bytes() == original_lock and example.read_bytes() == original_example
+
+
+def test_missing_example_fails_closed(tmp_path):
+    root = _fixture(tmp_path)
+    (root / tool.EXAMPLE_PIN_RELATIVE).unlink()
+    with pytest.raises(tool.LockRegenerationError, match="FILE_MISSING"):
+        tool.regenerate(root)
 
 
 @pytest.mark.parametrize("member", ["deployment_wrapper", "modal_worker_ports", "modal_worker_source"])

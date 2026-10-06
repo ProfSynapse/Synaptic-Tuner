@@ -35,10 +35,6 @@ from MechInterp.config import (
     SteerCellConfig,
     ExtractConfig,
     ProbeFitConfig,
-    load_dose_calibration_config,
-    load_steer_config,
-    load_extract_config,
-    load_probe_fit_config,
 )
 
 
@@ -173,7 +169,7 @@ def run_probe_fit(config: ProbeFitConfig) -> int:
         **clf_kwargs,
     )
     best_layer = sweep["best_layer"]
-    record = freeze_direction(
+    freeze_direction(
         matrices[best_layer],
         y,
         layer=best_layer,
@@ -329,7 +325,6 @@ def _run_one_pass(
     generation_mode: str,
     render_fn: Callable,
 ) -> dict:
-    import torch
 
     prompt = render_fn(row)
     enc = tokenizer(prompt, return_tensors="pt").to(next(model.parameters()).device)
@@ -470,7 +465,6 @@ def run_steer(
     guard = _require_gpu_ack(gpu_ack)
     if guard is not None:
         return guard
-    import torch
 
     from MechInterp.intervention import InterventionHook, GenerationInterventionController, get_decoder_layer
     from MechInterp.probe import load_frozen_direction
@@ -656,7 +650,6 @@ def run_dose_calibration(
     guard = _require_gpu_ack(gpu_ack)
     if guard is not None:
         return guard
-    import torch
 
     from MechInterp.intervention import (
         GenerationInterventionController,

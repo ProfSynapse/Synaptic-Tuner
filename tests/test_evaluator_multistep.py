@@ -6,6 +6,7 @@ from Evaluator.prompt_sets import PromptCase
 from Evaluator.protocols import BackendResponse
 from Evaluator.runner import evaluate_cases
 from shared.environments import EnvironmentValidator
+from SynthChat.config.format_resolver import load_tool_call_formats
 
 
 class _SequenceClient:
@@ -29,74 +30,75 @@ class _SequenceClient:
         )
 
 
-def _tool_response(calls):
+# Tool calls follow the configured default tool-call format: the wrapper name and
+# its required argument fields come from SynthChat/config/tool_call_formats.yaml,
+# and each command string is one the CLI catalog maps to a concrete tool.
+_TOOL_CALL_FORMAT = load_tool_call_formats()["default"]
+
+
+def _tool_response(*commands):
+    arguments = {
+        "sessionId": "session_1732300800000_loopcase",
+        "workspaceId": "ws_1732300800000_loopcase",
+        "memory": "Loop test",
+        "goal": "Complete the task",
+        "tool": ", ".join(commands),
+    }
+    missing = set(_TOOL_CALL_FORMAT["argument_required"]) - set(arguments)
+    assert not missing, f"configured tool-call format requires {sorted(missing)}"
     return {
         "tool_calls": [
             {
                 "type": "function",
                 "function": {
-                    "name": "useTools",
-                    "arguments": json.dumps(
-                        {
-                            "context": {
-                                "sessionId": "session_1732300800000_loopcase",
-                                "workspaceId": "ws_1732300800000_loopcase",
-                                "memory": "Loop test",
-                                "goal": "Complete the task",
-                            },
-                            "calls": calls,
-                        }
-                    ),
+                    "name": _TOOL_CALL_FORMAT["wrapper_name"],
+                    "arguments": json.dumps(arguments),
                 },
             }
         ]
     }
 
 
+# Evaluation is assertion driven: a case passes only when its configured
+# `correct` assertions hold for the final response (and the environment passes).
+def _final_text_correct(text):
+    return {"assertions": [{"type": "text_contains", "path": "$.content", "value": text}]}
+
+
+def _final_command_correct(pattern):
+    return {
+        "assertions": [
+            {
+                "type": "jsonpath_regex",
+                "path": "$.tool_calls[0].function.arguments.tool",
+                "pattern": pattern,
+            }
+        ]
+    }
+
+
+def _cli_quote(value):
+    """Double-quote a CLI argument, escaping ``\\`` and ``"``; newlines stay literal."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def test_multistep_environment_loop_feeds_tool_results_back_to_model():
+    daily_note = (
+        "---\n"
+        "title: 2026-03-15\n"
+        "type: daily\n"
+        "tags:\n"
+        "  - journal\n"
+        "mood: focused\n"
+        "---\n"
+        "# Daily Note\n\n"
+        "## Linked Notes\n"
+        "- [[Projects/Alpha/meeting-notes]]\n"
+    )
     responses = [
-        _tool_response(
-            [
-                {
-                    "agent": "searchManager",
-                    "tool": "searchDirectory",
-                    "params": {"query": "daily-note", "paths": ["Templates/"]},
-                }
-            ]
-        ),
-        _tool_response(
-            [
-                {
-                    "agent": "contentManager",
-                    "tool": "read",
-                    "params": {"path": "Templates/daily-note.md", "startLine": 1},
-                }
-            ]
-        ),
-        _tool_response(
-            [
-                {
-                    "agent": "contentManager",
-                    "tool": "write",
-                    "params": {
-                        "path": "Journal/Daily/2026-03-15.md",
-                        "content": (
-                            "---\n"
-                            "title: 2026-03-15\n"
-                            "type: daily\n"
-                            "tags:\n"
-                            "  - journal\n"
-                            "mood: focused\n"
-                            "---\n"
-                            "# Daily Note\n\n"
-                            "## Linked Notes\n"
-                            "- [[Projects/Alpha/meeting-notes]]\n"
-                        ),
-                        "overwrite": True,
-                    },
-                }
-            ]
-        ),
+        _tool_response('search directory "daily-note" --paths \'["Templates/"]\''),
+        _tool_response('content read "Templates/daily-note.md" 1'),
+        _tool_response(f'content write "Journal/Daily/2026-03-15.md" {_cli_quote(daily_note)} --overwrite'),
         {"content": "Done. The daily note is created."},
     ]
     client = _SequenceClient(
@@ -111,16 +113,12 @@ def test_multistep_environment_loop_feeds_tool_results_back_to_model():
     case = PromptCase(
         case_id="loop_daily_note",
         question="Create today's daily note from the vault template.",
-        expected_tools=[
-            "searchManager_searchDirectory",
-            "contentManager_read",
-            "contentManager_write",
-        ],
         metadata={
             "system": "Loop system prompt",
+            "correct": _final_text_correct("daily note is created"),
             "environment": {
                 "allowed_tools": [
-                    "searchManager_searchDirectory",
+                    "searchManager_directory",
                     "contentManager_read",
                     "contentManager_write",
                 ],
@@ -168,13 +166,15 @@ def test_multistep_environment_loop_feeds_tool_results_back_to_model():
 
     assert record.passed is True
     assert record.validator is not None
-    assert [tool.name for tool in record.validator.tool_calls] == [
-        "searchManager_searchDirectory",
+    assert [tool.name for tool in record.validator.tool_calls] == [_TOOL_CALL_FORMAT["wrapper_name"]] * 3
+    assert record.environment is not None
+    assert record.environment.passed is True
+    assert [tool.name for tool in record.environment.executed_tools] == [
+        "searchManager_directory",
         "contentManager_read",
         "contentManager_write",
     ]
-    assert record.environment is not None
-    assert record.environment.passed is True
+    assert record.environment.executed_tools[-1].arguments["content"] == daily_note
     assert record.environment.episode_trace is not None
     assert record.environment.episode_trace.total_turns == 4
     assert record.environment.episode_trace.stop_reason == "text_response"
@@ -187,19 +187,7 @@ def test_multistep_environment_loop_feeds_tool_results_back_to_model():
 def test_multistep_environment_loop_can_stop_when_environment_passes():
     client = _SequenceClient(
         [
-            _tool_response(
-                [
-                    {
-                        "agent": "contentManager",
-                        "tool": "write",
-                        "params": {
-                            "path": "Inbox/final.md",
-                            "content": "complete",
-                            "overwrite": True,
-                        },
-                    }
-                ]
-            )
+            _tool_response('content write "Inbox/final.md" "complete" --overwrite')
         ],
         expected_substrings=[[]],
     )
@@ -208,6 +196,7 @@ def test_multistep_environment_loop_can_stop_when_environment_passes():
         question="Write the final file.",
         metadata={
             "system": "Loop system prompt",
+            "correct": _final_command_correct(r'^content write "Inbox/final\.md"'),
             "environment": {
                 "allowed_tools": ["contentManager_write"],
                 "max_steps": 2,
@@ -238,19 +227,7 @@ def test_multistep_environment_loop_can_stop_when_environment_passes():
 def test_multistep_environment_loop_can_require_final_text_after_pass():
     client = _SequenceClient(
         [
-            _tool_response(
-                [
-                    {
-                        "agent": "contentManager",
-                        "tool": "write",
-                        "params": {
-                            "path": "Inbox/final.md",
-                            "content": "complete",
-                            "overwrite": True,
-                        },
-                    }
-                ]
-            ),
+            _tool_response('content write "Inbox/final.md" "complete" --overwrite'),
             {"content": "Done. I wrote the file.", "tool_calls": None},
         ],
         expected_substrings=[
@@ -263,6 +240,7 @@ def test_multistep_environment_loop_can_require_final_text_after_pass():
         question="Write the final file.",
         metadata={
             "system": "Loop system prompt",
+            "correct": _final_text_correct("I wrote the file"),
             "environment": {
                 "allowed_tools": ["contentManager_write"],
                 "max_steps": 2,
@@ -298,22 +276,8 @@ def test_multistep_environment_loop_prefers_success_over_tool_budget_on_same_tur
     client = _SequenceClient(
         [
             _tool_response(
-                [
-                    {
-                        "agent": "contentManager",
-                        "tool": "write",
-                        "params": {
-                            "path": "Inbox/final.md",
-                            "content": "complete",
-                            "overwrite": True,
-                        },
-                    },
-                    {
-                        "agent": "contentManager",
-                        "tool": "read",
-                        "params": {"path": "Inbox/final.md", "startLine": 1},
-                    },
-                ]
+                'content write "Inbox/final.md" "complete" --overwrite',
+                'content read "Inbox/final.md" 1',
             ),
             {"content": "Done. I wrote the file.", "tool_calls": None},
         ],
@@ -327,6 +291,7 @@ def test_multistep_environment_loop_prefers_success_over_tool_budget_on_same_tur
         question="Write the final file.",
         metadata={
             "system": "Loop system prompt",
+            "correct": _final_text_correct("I wrote the file"),
             "environment": {
                 "allowed_tools": ["contentManager_write", "contentManager_read"],
                 "max_steps": 3,
@@ -368,6 +333,7 @@ def test_multistep_environment_loop_rejects_text_before_completion_when_final_te
         question="Write the final file.",
         metadata={
             "system": "Loop system prompt",
+            "correct": _final_text_correct("I handled it"),
             "environment": {
                 "allowed_tools": ["contentManager_write"],
                 "max_steps": 2,
@@ -398,45 +364,11 @@ def test_multistep_environment_loop_rejects_text_before_completion_when_final_te
 def test_agentic_loop_can_recover_after_a_bad_first_step():
     client = _SequenceClient(
         [
+            _tool_response('content read "Journal/Daily/2026-03-15.md" 1'),
+            _tool_response('search directory "daily-note" --paths \'["Templates/"]\''),
             _tool_response(
-                [
-                    {
-                        "agent": "contentManager",
-                        "tool": "read",
-                        "params": {"path": "Journal/Daily/2026-03-15.md", "startLine": 1},
-                    }
-                ]
-            ),
-            _tool_response(
-                [
-                    {
-                        "agent": "searchManager",
-                        "tool": "searchDirectory",
-                        "params": {"query": "daily-note", "paths": ["Templates/"]},
-                    }
-                ]
-            ),
-            _tool_response(
-                [
-                    {
-                        "agent": "contentManager",
-                        "tool": "write",
-                        "params": {
-                            "path": "Journal/Daily/2026-03-15.md",
-                            "content": (
-                                "---\n"
-                                "title: 2026-03-15\n"
-                                "type: daily\n"
-                                "tags:\n"
-                                "  - journal\n"
-                                "mood: focused\n"
-                                "---\n"
-                                "# Daily Note\n"
-                            ),
-                            "overwrite": True,
-                        },
-                    }
-                ]
+                'content write "Journal/Daily/2026-03-15.md" '
+                + _cli_quote("---\ntitle: 2026-03-15\ntype: daily\nmood: focused\n---\n# Daily Note\n")
             ),
         ],
         expected_substrings=[
@@ -450,10 +382,11 @@ def test_agentic_loop_can_recover_after_a_bad_first_step():
         question="Create today's daily note.",
         metadata={
             "system": "Loop system prompt",
+            "correct": _final_command_correct(r'^content write "Journal/Daily/2026-03-15\.md" "---\n'),
             "environment": {
                 "allowed_tools": [
                     "contentManager_read",
-                    "searchManager_searchDirectory",
+                    "searchManager_directory",
                     "contentManager_write",
                 ],
                 "max_steps": 4,
@@ -496,15 +429,7 @@ def test_agentic_loop_can_recover_after_a_bad_first_step():
 
 
 def test_agentic_loop_stops_repeated_failed_steps_as_stuck():
-    repeated_failure = _tool_response(
-        [
-            {
-                "agent": "contentManager",
-                "tool": "read",
-                "params": {"path": "Inbox/missing.md", "startLine": 1},
-            }
-        ]
-    )
+    repeated_failure = _tool_response('content read "Inbox/missing.md" 1')
     client = _SequenceClient(
         [repeated_failure, repeated_failure, repeated_failure],
         expected_substrings=[
@@ -518,6 +443,7 @@ def test_agentic_loop_stops_repeated_failed_steps_as_stuck():
         question="Read the missing file.",
         metadata={
             "system": "Loop system prompt",
+            "correct": _final_command_correct(r'^content read "Inbox/missing\.md"'),
             "environment": {
                 "allowed_tools": ["contentManager_read"],
                 "max_steps": 8,

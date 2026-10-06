@@ -8,14 +8,9 @@ Purpose: Verify all surgery operations, config loading, and edge cases
 from __future__ import annotations
 
 import json
-import math
 import os
 import shutil
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -27,7 +22,6 @@ from shared.evolutionary.lora_surgery import (
     LoRASurgeon,
     OperationResult,
     SurgeryConfig,
-    SurgeryResult,
     copy_adapter,
     find_lora_pairs,
     get_layer_indices,
@@ -542,26 +536,36 @@ class TestCheckpointInterpolation:
 
 class TestDAREDropRescale:
     def test_expected_value_preserved(self, tmp_adapter, tmp_path):
-        """DARE should preserve expected value: E[x_dropped] approx E[x_original]."""
+        """DARE should preserve expected value: E[x_dropped] approx E[x_original].
+
+        One trial of an element x is x * Bernoulli(1 - p) / (1 - p): mean x,
+        standard deviation |x| * sqrt(p / (1 - p)). The mean over the trials is
+        checked against that standard error at six sigma per element, so an
+        unbiased implementation passes whatever the RNG state (false-failure
+        probability ~1e-6 for the whole tensor), while the bound stays below
+        0.5 for every |x| < 4.
+        """
         weights = load_all_weights(tmp_adapter)
         # Pick a representative key
         sample_key = list(weights.keys())[0]
-        original = weights[sample_key]
+        original = weights[sample_key].float()
 
         drop_rate = 0.3
         # Run many trials to test expected value
-        num_trials = 100
-        accumulated = torch.zeros_like(original.float())
+        num_trials = 1000
+        accumulated = torch.zeros_like(original)
         for _ in range(num_trials):
-            mask = (torch.rand_like(original.float()) > drop_rate).to(original.dtype)
+            mask = (torch.rand_like(original) > drop_rate).to(original.dtype)
             dropped = original * mask / (1.0 - drop_rate)
-            accumulated += dropped.float()
+            accumulated += dropped
 
         mean_result = accumulated / num_trials
         # Expected value should be close to original
-        assert torch.allclose(
-            mean_result, original.float(), atol=0.5
-        ), "DARE expected value not preserved"
+        standard_error = original.abs() * (drop_rate / (1.0 - drop_rate) / num_trials) ** 0.5
+        deviation = (mean_result - original).abs()
+        assert torch.all(
+            deviation <= 6.0 * standard_error + 1e-5
+        ), f"DARE expected value not preserved (max deviation {deviation.max().item():.4f})"
 
     @pytest.mark.asyncio
     async def test_operation_runs(self, tmp_adapter, tmp_path):

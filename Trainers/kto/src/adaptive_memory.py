@@ -96,7 +96,7 @@ class AdaptiveMemoryManager:
         target_effective_batch = 32
         gradient_accumulation = max(1, target_effective_batch // optimal_batch_size)
 
-        logger.info(f"Adaptive Memory Manager:")
+        logger.info("Adaptive Memory Manager:")
         logger.info(f"  Total VRAM: {total_vram:.1f}GB")
         logger.info(f"  Target utilization: {self.target_utilization*100:.0f}%")
         logger.info(f"  Recommended batch size: {optimal_batch_size}")
@@ -214,7 +214,7 @@ if __name__ == "__main__":
 
     # Check current memory
     mem_stats = manager.check_memory_usage()
-    print(f"\nCurrent GPU Memory:")
+    print("\nCurrent GPU Memory:")
     print(f"  Total: {mem_stats['total_gb']:.1f} GB")
     print(f"  Reserved: {mem_stats['reserved_gb']:.1f} GB")
     print(f"  Free: {mem_stats['free_gb']:.1f} GB")

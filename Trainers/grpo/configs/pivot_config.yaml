@@ -90,10 +90,6 @@ dataset:
   num_proc: 1
   prompt_column: "prompt"
 
-# Schema Configuration
-schema:
-  tool_schema_path: "../../Evaluator/config/tool_schema.yaml"
-
 # ============================================================================
 # Pivot Profiling Configuration
 #
@@ -164,36 +160,28 @@ rewards:
     # Primary reward: Full args comparison (context + tool + params)
     - name: "args_match"
       weight: 1.0
-      params: {}
 
     # Secondary: Ensure valid JSON structure
     - name: "json_structure"
       weight: 0.3
-      params:
-        reward_value: 0.3
 
     # Secondary: Ensure tool call format is correct
     - name: "format"
       weight: 0.2
-      params:
-        reward_value: 0.2
 
     # Structural fitness via FitnessEvaluator
     - name: "structural_fitness"
       weight: 0.3
-      params: {}
 
     # PivotRL: Functional equivalence check.
     # Rewards tool calls that produce the same effect as the ground truth,
     # even when exact argument values differ (e.g. different valid IDs).
     - name: "functional_equivalence"
       weight: 0.5
-      params: {}
 
   # Custom reward: functional verifier (loaded from file)
   custom:
     enabled: true
-    module: null
     file: "./src/functional_verifier.py"
     functions: []
 

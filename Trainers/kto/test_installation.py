@@ -101,7 +101,7 @@ def test_unsloth():
     print("\n[5/8] Testing Unsloth...")
 
     try:
-        from unsloth import FastLanguageModel, is_bfloat16_supported
+        from unsloth import FastLanguageModel, is_bfloat16_supported  # noqa: F401  availability probe
         print("Unsloth installed: ✓")
         print(f"BFloat16 supported: {is_bfloat16_supported()}")
         print("✓ PASS")
@@ -117,7 +117,7 @@ def test_trl():
     print("\n[6/8] Testing TRL (Transformer Reinforcement Learning)...")
 
     try:
-        from trl import KTOConfig, KTOTrainer
+        from trl import KTOConfig, KTOTrainer  # noqa: F401  availability probe
         import trl
         print(f"TRL version: {trl.__version__}")
         print("KTOTrainer available: ✓")
@@ -134,7 +134,7 @@ def test_datasets():
     print("\n[7/8] Testing Datasets...")
 
     try:
-        from datasets import load_dataset
+        from datasets import load_dataset  # noqa: F401  availability probe
         import datasets
         print(f"Datasets version: {datasets.__version__}")
         print("✓ PASS")

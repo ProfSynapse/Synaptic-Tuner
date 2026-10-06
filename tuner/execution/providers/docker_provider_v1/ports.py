@@ -25,7 +25,6 @@ from .model import (
     DockerCancellationRequestV1,
     DockerCancellationLookupRequestV1,
     DockerCancellationLookupResultV1,
-    DockerCommandBindingV1,
     DockerCreateResultV1,
     DockerImageV1,
     DockerLabelsV1,

@@ -197,7 +197,7 @@ class LMStudioClient(BaseLLMClient):
             response.raise_for_status()
             return response.json()
 
-        except requests.exceptions.ConnectionError as e:
+        except requests.exceptions.ConnectionError:
             error_msg = f"Cannot connect to LM Studio at {self.base_url}\n{WSL_HELP}"
             raise LLMConnectionError(error_msg)
         except requests.exceptions.Timeout as e:

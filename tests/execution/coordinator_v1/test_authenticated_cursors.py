@@ -12,7 +12,6 @@ from synaptic_tuner.api.v1.runs_facade import (
     RunOperationError,
 )
 from tuner.execution.coordinator_v1.cursors import (
-    AuthenticatedCursorV1,
     CursorContentV1,
     CursorKindV1,
     HMACCursorAuthorityV1,

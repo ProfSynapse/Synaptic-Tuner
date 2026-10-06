@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 # Add repo root to path so shared modules are importable
 ROOT = Path(__file__).resolve().parents[3]
@@ -20,7 +19,6 @@ from rewards import (
     fitness_reward,
     build_fitness_reward,
     build_combined_reward_function,
-    _coerce_to_text,
 )
 
 

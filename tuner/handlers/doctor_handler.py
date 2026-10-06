@@ -451,7 +451,7 @@ class DoctorHandler(BaseHandler):
                         gpu_mem = props.total_memory / (1024**3)  # Convert to GB
                         self._gpu_info = {"name": gpu_name, "memory_gb": gpu_mem}
                         section.add(CheckResult(
-                            name=f"GPU detected",
+                            name="GPU detected",
                             status=STATUS_OK,
                             message=f"{gpu_name} ({gpu_mem:.0f}GB)"
                         ))
@@ -493,6 +493,18 @@ class DoctorHandler(BaseHandler):
                 message="torch not installed",
                 fix_command="pip install torch",
                 fix_description="Install PyTorch for GPU training"
+            ))
+            self._cuda_available = False
+        except Exception as exc:
+            # Installed but broken (missing shared libraries, ABI mismatch, ...).
+            # Doctor exists to diagnose this, so report it instead of crashing.
+            section.add(CheckResult(
+                name="PyTorch",
+                status=STATUS_FAIL,
+                message=f"torch import failed: {type(exc).__name__}: {exc}",
+                details="PyTorch is installed but cannot be imported",
+                fix_command="pip install --force-reinstall torch",
+                fix_description="Reinstall PyTorch for this Python and CUDA version"
             ))
             self._cuda_available = False
 
@@ -961,7 +973,6 @@ except Exception as e:
         """Print the doctor command header."""
         try:
             from rich.console import Console
-            from rich.text import Text
             console = Console()
             console.print()
             console.print("  [bold cyan]Running diagnostics...[/bold cyan]")
@@ -973,9 +984,6 @@ except Exception as e:
         """Print the diagnostic report."""
         try:
             from rich.console import Console
-            from rich.panel import Panel
-            from rich.table import Table
-            from rich import box
 
             console = Console()
 

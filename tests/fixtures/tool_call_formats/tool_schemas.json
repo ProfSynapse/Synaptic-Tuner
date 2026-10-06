@@ -1,0 +1,19 @@
+{
+  "dispatchAction": {
+    "tool_name": "dispatchAction",
+    "parameters": [
+      {"name": "ticketRef", "optional": false, "type": "string"},
+      {"name": "command", "optional": false, "type": "string"},
+      {"name": "priority", "optional": true, "type": "string"}
+    ],
+    "required_params": ["ticketRef", "command"]
+  },
+  "notes_read": {
+    "tool_name": "notes_read",
+    "parameters": [
+      {"name": "path", "optional": false, "type": "string"},
+      {"name": "limit", "optional": true, "type": "number"}
+    ],
+    "required_params": ["path"]
+  }
+}

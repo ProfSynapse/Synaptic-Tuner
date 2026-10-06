@@ -41,7 +41,6 @@ from tuner.execution.providers.modal.runtime_build import build_modal_runtime_re
 from tuner.execution.providers.modal.runtime_release_qualification import ModalRuntimeReleaseQualificationReceiptV1
 from tuner.project.context import ProjectContext
 from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV2
-from tuner.training.contracts import ResourceSpec
 from tuner.training.modal_host_reader import ModalPackagedCoordinatorReaderV1, ModalPackagedReadUnavailable
 from tuner.training.modal_host_requests import ModalPackagedResolutionUnavailable
 from tuner.training.modal_host_runtime import ModalHostRuntimeV1

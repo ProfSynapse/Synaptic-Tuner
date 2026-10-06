@@ -178,3 +178,23 @@ def test_claude_adapter_links_tool_use_id_to_tool_result(tmp_path):
     assert events[0]["tool_calls"][0]["id"] == "toolu_1"
     assert events[1]["tool_call_id"] == "toolu_1"
     assert events[1]["command"] == "pytest"
+
+
+def test_rows_carry_session_id_shared_by_every_turn_of_a_transcript():
+    events = [
+        {"role": "human", "text": "First request"},
+        {"role": "assistant", "text": "First answer", "tool_calls": []},
+        {"role": "human", "text": "Second request"},
+        {"role": "assistant", "text": "Second answer", "tool_calls": []},
+    ]
+    rows = emit_rows(
+        events,
+        source_kind="unit",
+        project="proj",
+        rel_id="session.jsonl",
+        lab=LAB,
+        ctx_budget={"max_context_tokens": 8192, "chars_per_token": 4.0, "max_context_messages": 10},
+    )
+    assert len(rows) == 2
+    assert {row["metadata"]["session_id"] for row in rows} == {"unit:session.jsonl"}
+    assert len({row["source_example_id"] for row in rows}) == 2

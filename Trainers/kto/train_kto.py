@@ -38,7 +38,6 @@ from trl import KTOConfig, KTOTrainer
 from src.kto_s_trainer import KTOSTrainer
 
 from configs.config_loader import (
-    Config,
     load_config
 )
 from src.data_loader import load_and_prepare_dataset, validate_kto_dataset, print_dataset_samples
@@ -49,7 +48,7 @@ from src.model_loader import (
     check_gpu_memory
 )
 from src.training_callbacks import LiveDashboardCallback, MetricsTableCallback, CheckpointMonitorCallback, TwoStageLRCallback, DASHBOARD_AVAILABLE, RICH_AVAILABLE
-from src.adaptive_memory import AdaptiveMemoryManager, get_adaptive_settings
+from src.adaptive_memory import get_adaptive_settings
 from src.debug_logger import TrainingDebugger
 from shared.cloud_artifacts import (
     HFBucketSyncCallback,
@@ -60,9 +59,9 @@ from shared.cloud_artifacts import (
     sync_directory_to_hf_bucket,
     write_manifest,
 )
-from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
 from shared.training_utils import (
     setup_wandb,
+    apply_wandb_destination,
     extract_previous_log_entries,
     save_training_lineage,
     build_base_lineage,
@@ -158,6 +157,7 @@ def build_training_lineage(
             "source": dataset_source,
             "train_examples": len(train_dataset),
             "eval_examples": len(eval_dataset) if eval_dataset else 0,
+            "validation_group_key": config.dataset.validation_group_key,
         },
         run_dir=run_dir,
         trainer=trainer,
@@ -181,7 +181,8 @@ def build_training_lineage(
     return enrich_training_lineage(lineage, args=args)
 
 
-def main():
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Build the KTO CLI parser (pure argparse; no ML imports)."""
     parser = argparse.ArgumentParser(description="KTO Training on RTX 3090")
 
     # Model configuration
@@ -251,6 +252,18 @@ def main():
         "--split-dataset",
         action="store_true",
         help="Create train/validation split"
+    )
+    parser.add_argument(
+        "--test-size",
+        type=float,
+        default=None,
+        help="Validation fraction for --split-dataset (rows, or groups with --validation-group-key)"
+    )
+    parser.add_argument(
+        "--validation-group-key",
+        type=str,
+        default=None,
+        help="Dot-path into each raw row (e.g. metadata.scenario); with --split-dataset, rows sharing a group stay on one side of the validation split"
     )
 
     # Training configuration
@@ -332,6 +345,8 @@ def main():
         type=int,
         help="Override the training random seed (config.seed)"
     )
+    parser.add_argument("--save-steps", type=int, help="Override training.save_steps")
+    parser.add_argument("--save-total-limit", type=int, help="Override training.save_total_limit")
     parser.add_argument(
         "--beta",
         type=float,
@@ -429,6 +444,11 @@ def main():
         help="Enable detailed debug logging to diagnose freezes/hangs"
     )
 
+    return parser
+
+
+def main():
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     # Process friendly model selection flags
@@ -586,6 +606,10 @@ def main():
         config.dataset.dataset_name = args.dataset_name
     if args.dataset_file:
         config.dataset.dataset_file = args.dataset_file
+    if args.test_size is not None:
+        config.dataset.test_size = args.test_size
+    if args.validation_group_key:
+        config.dataset.validation_group_key = args.validation_group_key
 
     # Apply adaptive memory management if requested
     if args.adaptive_memory:
@@ -600,7 +624,7 @@ def main():
         config.training.gradient_accumulation_steps = adaptive_settings["gradient_accumulation"]
         if adaptive_settings.get("gradient_checkpointing"):
             config.training.gradient_checkpointing = True
-        print(f"✓ Automatically adjusted settings:")
+        print("✓ Automatically adjusted settings:")
         print(f"  Batch size: {adaptive_settings['batch_size']}")
         print(f"  Gradient accumulation: {adaptive_settings['gradient_accumulation']}")
         print(f"  Effective batch size: {adaptive_settings['batch_size'] * adaptive_settings['gradient_accumulation']}")
@@ -618,6 +642,10 @@ def main():
     # config default — the handler forwards explicit zeros (provenance: no silent override).
     if args.seed is not None:
         config.seed = args.seed
+    if args.save_steps is not None:
+        config.training.save_steps = args.save_steps
+    if args.save_total_limit is not None:
+        config.training.save_total_limit = args.save_total_limit
     if args.beta is not None:
         config.training.beta = args.beta
     if args.num_epochs is not None:
@@ -638,7 +666,8 @@ def main():
         if args.wandb_project:
             config.wandb_project = args.wandb_project
         elif not hasattr(config, 'wandb_project') or not config.wandb_project:
-            config.wandb_project = "kto-training"  # Default project name
+            # Default project name; an exported WANDB_PROJECT still wins.
+            config.wandb_project = os.environ.get("WANDB_PROJECT") or "kto-training"
 
         if args.wandb_run_name:
             config.wandb_run_name = args.wandb_run_name
@@ -647,6 +676,8 @@ def main():
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
             config.wandb_run_name = f"{args.model_size}-{timestamp}"
+    if config.use_wandb:
+        apply_wandb_destination(config.wandb.project, config.wandb.entity)
 
     if not args.hf_token:
         args.hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
@@ -660,7 +691,8 @@ def main():
         local_file=local_file_path,
         num_proc=config.dataset.num_proc,
         test_size=config.dataset.test_size,
-        split_dataset=args.split_dataset
+        split_dataset=args.split_dataset,
+        validation_group_key=config.dataset.validation_group_key,
     )
 
     # Interleave dataset to guarantee mixed True/False batches
@@ -766,31 +798,31 @@ def main():
     print(f"Dataset: {len(train_dataset)} examples")
     if eval_dataset:
         print(f"Validation: {len(eval_dataset)} examples")
-    print(f"\nBatch configuration:")
+    print("\nBatch configuration:")
     print(f"  Batch size: {config.training.per_device_train_batch_size}")
     print(f"  Gradient accumulation: {config.training.gradient_accumulation_steps}")
     effective_batch = config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps
     print(f"  Effective batch size: {effective_batch}")
-    print(f"\nHyperparameters:")
+    print("\nHyperparameters:")
     print(f"  Learning rate: {config.training.learning_rate}")
     if config.training.use_two_stage_lr:
         reduced_lr = config.training.learning_rate * config.training.lr_reduction_factor
-        print(f"  Two-stage LR: ENABLED")
+        print("  Two-stage LR: ENABLED")
         print(f"    - Steps 1-{config.training.lr_reduction_step}: {config.training.learning_rate:.2e}")
         print(f"    - Steps {config.training.lr_reduction_step+1}+: {reduced_lr:.2e} ({config.training.lr_reduction_factor:.1%} reduction)")
     print(f"  Beta: {config.training.beta}")
     print(f"  Warmup ratio: {config.training.warmup_ratio}")
     print(f"  Max length: {config.training.max_length}")
-    print(f"\nLoRA configuration:")
+    print("\nLoRA configuration:")
     print(f"  Rank: {config.lora.r}")
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
-    print(f"\nOptimizations:")
+    print("\nOptimizations:")
     print(f"  Optimizer: {config.training.optim}")
     print(f"  FP16: {training_args.fp16}")
     print(f"  BF16: {training_args.bf16}")
     print(f"  Gradient checkpointing: {config.training.gradient_checkpointing}")
-    print(f"\nCheckpointing & Logging:")
+    print("\nCheckpointing & Logging:")
     print(f"  Log metrics every: {config.training.logging_steps} steps")
     print(f"  Save checkpoint every: {config.training.save_steps} steps")
     print(f"  Keep last: {config.training.save_total_limit} checkpoints")
@@ -900,8 +932,6 @@ def main():
 
     # Monkey-patch the forward method to use index_select instead of list indexing
     # This fixes CUDA errors with large vocab models like Qwen3-VL (151K vocab)
-    original_forward = trainer.forward
-
     def patched_forward(model, batch):
         """Patched forward that uses index_select for large vocab compatibility."""
         # Run the KL computation first

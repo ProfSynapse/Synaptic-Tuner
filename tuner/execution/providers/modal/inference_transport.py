@@ -638,7 +638,7 @@ class ModalInferenceSdkTransport:
                     late_cleanup=lambda _handle: create_ownership.close(),
                     ownership=create_ownership,
                 )
-            except (KeyboardInterrupt, SystemExit) as error:
+            except (KeyboardInterrupt, SystemExit):
                 raise
             except TimeoutError as error:
                 pending = getattr(error, "pending_operation", None)

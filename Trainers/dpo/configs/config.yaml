@@ -54,7 +54,7 @@ dataset:
   local_file: null
   num_proc: 1
   test_size: 0.1
-  chat_template: chatml
+  validation_group_key: null  # dot-path into raw rows; keeps groups on one side of the split
 wandb:
   enabled: false
   project: dpo-finetuning

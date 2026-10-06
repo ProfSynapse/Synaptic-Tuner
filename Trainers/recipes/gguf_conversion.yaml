@@ -1,5 +1,5 @@
 name: gguf-conversion
-description: Convert a HuggingFace model to GGUF format and upload the result. Pure Python, no GPU required.
+description: Convert a merged HuggingFace model to one or more GGUF types (optionally imatrix-calibrated) and upload them with gguf_manifest.json. CPU only.
 target: cloud
 method: gguf
 provider: hf_jobs
@@ -24,6 +24,14 @@ run:
   env:
     PYTHONPATH: "{repo_dir}"
     GGUF_MODEL_REPO: "professorsynapse/gemma-4-e4b-sft"
+    # Space- or comma-separated. f32/f16/bf16/q8_0/tq1_0/tq2_0 convert directly
+    # (no compile); anything else (q4_k_m, q5_k_m, IQ types) builds llama-quantize.
     GGUF_QUANT_TYPE: "q8_0"
+    # Optional importance-matrix calibration: HF dataset repo + JSONL path inside it
+    # (e.g. the SFT training data). Leave both empty to skip. Required for IQ types.
+    GGUF_CALIBRATION_REPO: ""
+    GGUF_CALIBRATION_FILE: ""
   steps:
-    - "cd {repo_dir} && python scripts/cloud_gguf_convert.py --model-repo $GGUF_MODEL_REPO --quant $GGUF_QUANT_TYPE"
+    # {{ }} escapes the template renderer; the shell sees ${VAR:+...} and omits
+    # the calibration flags when GGUF_CALIBRATION_REPO is empty.
+    - "cd {repo_dir} && python scripts/cloud_gguf_convert.py --model-repo \"$GGUF_MODEL_REPO\" --quant $GGUF_QUANT_TYPE ${{GGUF_CALIBRATION_REPO:+--calibration-repo \"$GGUF_CALIBRATION_REPO\" --calibration-file \"$GGUF_CALIBRATION_FILE\"}}"

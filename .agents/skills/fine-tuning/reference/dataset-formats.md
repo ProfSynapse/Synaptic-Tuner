@@ -395,8 +395,51 @@ Current canonical versions:
 ## Validation
 
 ```bash
-python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/my_dataset.jsonl
+python3 -m shared.validation.dataset_validator Datasets/my_dataset.jsonl
 ```
+
+Before SFT, check the loss mask the trainer will actually build for this
+dataset and tokenizer. `doctor sft-mask` runs the trainer's dataset contract
+check and a row sample through its own preprocessing (`materialize_sft_row`)
+with only the tokenizer loaded, so it needs no GPU or model weights. It works on
+legacy conversation rows and on `prepare-dataset` outputs (raw text and
+authoritative messages):
+
+```bash
+# Reuse the trainer config's model, dataset, max_seq_length, chat_template_kwargs and prompt_render
+python tuner.py doctor sft-mask --sft-config Trainers/sft/configs/config.yaml
+
+# Explicit flags override the trainer config, as train_sft.py flags do
+python tuner.py doctor sft-mask --dataset-path Datasets/my_dataset.jsonl \
+  --model <tokenizer-id-or-path> --max-seq-length 4096 \
+  --chat-template-kwargs '{"enable_thinking": false}' --preview-rows 0,12 --json
+```
+
+Hard failures (exit 1): a dataset the trainer's contract would reject,
+preprocessing errors (including authoritative rows that do not fit), more rows
+the trainer would drop than `training.max_dropped_row_fraction` allows (rows
+with zero trained tokens, and masks that stop before the end of the prompt
+render), assistant-only rows that fall back to full-sequence loss, trained spans
+that do not end with the template's end-of-turn token (`eos_token` for raw
+text), and doubled BOS. Warnings: individual dropped rows, truncation rate above
+the configured threshold (p50/p95/max lengths are reported) and end-of-turn
+tokens lost to truncation. Info: multi-turn rows whose earlier assistant turns
+are untrained. Doctor defaults live in `Trainers/sft/configs/mask_doctor.yaml`;
+the end-of-turn derivation and drop policy are shared with the trainer. Fix the
+data, `max_seq_length`, `chat_template_kwargs` or `prompt_render` until it
+passes; do not launch SFT on a failing report. Training runs log the same
+dropped-row counts after dataset preparation.
+
+**SFT label change (preprocessing contract version 2).** Assistant-only labels
+now stop at the final turn's end-of-turn token (the template's trailing newline
+after it is masked); `prompt_render: prompt_completion` closes completions with
+the template's end-of-turn token instead of `eos_token_id` (identical when they
+coincide) and honours `completion_only_loss: false`; and rows with no supervised tokens left after
+truncation, or whose assistant-only mask stopped before the end of the prompt
+render, are dropped with a logged count. The run fails when dropped rows exceed
+`training.max_dropped_row_fraction` (default `0.01`). Losses and checkpoints
+from runs before this change are not directly comparable with later runs;
+`training_lineage.json` records `dataset.preprocessing.contract_version: 2`.
 
 Use the migration pipeline for corpus refreshes instead of ad hoc rewriting:
 

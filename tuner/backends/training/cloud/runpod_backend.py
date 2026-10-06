@@ -25,16 +25,16 @@ Dependencies:
 
 import logging
 import os
+import shlex
 import time
 import yaml
-from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
 from shared.utilities.paths import get_canonical_trainer_dir_name, get_trainer_root
 from shared.utilities.unique_ids import unique_utc_timestamp
 from tuner.backends.training.base import ITrainingBackend
-from tuner.core.config import CloudTrainingConfig, TrainingConfig
+from tuner.core.config import CloudTrainingConfig, TrainingConfig, validation_split_flags
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 from tuner.backends.training.cloud.base_cloud import (
     load_cloud_config,
@@ -174,6 +174,9 @@ class RunPodBackend(ITrainingBackend):
             epochs=training_config.get("num_train_epochs", 1),
             batch_size=training_config.get("per_device_train_batch_size", 4),
             learning_rate=training_config.get("learning_rate", 0.0),
+            split_dataset=dataset_config.get("split_dataset"),
+            test_size=dataset_config.get("test_size"),
+            validation_group_key=dataset_config.get("validation_group_key"),
             provider="runpod",
             gpu_type=runpod_config.get("gpu_type_id", "NVIDIA A100 SXM"),
             timeout_hours=runpod_config.get("default_timeout", 7200) / 3600,
@@ -323,7 +326,7 @@ class RunPodBackend(ITrainingBackend):
             cost_per_hr = pod.get("costPerHr", "unknown")
             print(f"\nPod created: {pod_id}")
             print(f"  Cost: ${cost_per_hr}/hr")
-            print(f"  Status: Starting...\n")
+            print("  Status: Starting...\n")
 
             # Wait for pod to reach RUNNING status
             self._wait_for_pod_running(runpod, pod_id)
@@ -461,6 +464,14 @@ class RunPodBackend(ITrainingBackend):
             f"{'--publish-final-model' if config.publish_final_model else ''} "
             f"{f'--publish-target-repo {config.publish_target_repo}' if config.publish_target_repo else ''}"
         )
+        split_flags = validation_split_flags(
+            method=config.method,
+            split_dataset=getattr(config, "split_dataset", None),
+            test_size=getattr(config, "test_size", None),
+            validation_group_key=getattr(config, "validation_group_key", None),
+        )
+        if split_flags:
+            training_cmd = f"{training_cmd} {' '.join(shlex.quote(flag) for flag in split_flags)}"
         parts.append(training_cmd)
 
         return " && ".join(parts)

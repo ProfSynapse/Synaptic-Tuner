@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from shared.flywheel.catalog import InferenceLogRecord, LogFilter
+from shared.flywheel.catalog import InferenceLogRecord
 from shared.flywheel.config import FlywheelConfig
 from shared.flywheel.judge import FlywheelJudgeOutcome
-from shared.flywheel.tagger import AutoTagger, TaggedExample, TaggingResult
+from shared.flywheel.tagger import AutoTagger, TaggedExample
 from shared.llm.usage import LLMStructuredV1
 
 

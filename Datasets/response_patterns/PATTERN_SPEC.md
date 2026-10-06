@@ -85,5 +85,5 @@ Generate 50 examples per pattern = 150 total examples
 
 Run standard validator:
 ```bash
-python tools/validate_syngen.py Datasets/response_patterns/patterns_v1.0.jsonl
+python -m shared.validation.dataset_validator Datasets/response_patterns/patterns_v1.0.jsonl
 ```

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 import os
-from pathlib import Path
 import pytest
 from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
 from tests.execution.providers.modal_inference_worker_fixtures import (

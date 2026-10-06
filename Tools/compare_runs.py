@@ -9,7 +9,6 @@ into a stable feature matrix (features.csv).
 import argparse
 import sys
 from pathlib import Path
-import json
 import logging
 
 import pandas as pd
@@ -38,7 +37,7 @@ def main(args=None):
     experiment = tracking_service.load_experiment(args.experiment_id)
     
     if not experiment.base_losses_path:
-        raise ValueError("Experiment base_losses_path is empty. Run compute-losses on base model first.")
+        raise ValueError("Experiment base_losses_path is empty. Compute per-example losses for the base model first (shared.experiment_tracking.compute_per_example_losses, or train with compute_losses enabled) and record them as the experiment base_losses.")
         
     logger.info(f"Loading base losses from {experiment.base_losses_path}")
     base_losses_path = Path(args.base_dir).parent / experiment.base_losses_path

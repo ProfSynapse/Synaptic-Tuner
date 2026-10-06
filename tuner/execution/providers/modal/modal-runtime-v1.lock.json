@@ -318,7 +318,7 @@
     },
     "bootstrap__tuner__runtime__manifests__offline-sft-worker-v1_json": {
       "path": "tuner/runtime/manifests/offline-sft-worker-v1.json",
-      "sha256": "dc5f15ce9040ed5536a0cc53a110d783f8bdc3abccbaaa88f2792d30ca42cdb5"
+      "sha256": "b3ee9b2d2342de45cc97447be289e838b2a055147f844a94c2e791266d7ccc4e"
     },
     "bootstrap__tuner__runtime__offline_sft_worker_py": {
       "path": "tuner/runtime/offline_sft_worker.py",
@@ -390,7 +390,7 @@
     },
     "sft_runtime": {
       "path": "Trainers/sft/runtime_v1.py",
-      "sha256": "5aaa78841ef90d982679ebe6712daa7af3edccf1d7dd0a2828418076b0642bfc"
+      "sha256": "dcef6818a12211846eaf782cb44e4f502c7154619e962cdb86bcbf0df972b12d"
     }
   },
   "ml_stack": {

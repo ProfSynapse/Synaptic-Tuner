@@ -15,7 +15,6 @@ Guides user through:
 import asyncio
 import os
 from argparse import Namespace
-from pathlib import Path
 from typing import Optional
 
 from tuner.handlers.base import BaseHandler

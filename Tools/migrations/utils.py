@@ -236,7 +236,7 @@ class MigrationReport:
             for file_path, error in self.errors:
                 print(f"  {file_path}: {error}")
 
-        print(f"\nSummary:")
+        print("\nSummary:")
         print(f"  Files processed: {self.files_processed}")
         print(f"  Files changed: {self.files_changed}")
         print(f"  Items processed: {self.items_processed}")

@@ -8,7 +8,7 @@ import json
 import re
 from typing import Protocol
 
-from tuner.execution.foundation_v2.canonical import canonical_bytes, parse_canonical_object, safe_ref
+from tuner.execution.foundation_v2.canonical import canonical_bytes, safe_ref
 from tuner.execution.foundation_v2.commands import SubmitCommandV2, parse_exact_command
 from tuner.runtime.releases import (
     PackagedExecutionBindingV1,

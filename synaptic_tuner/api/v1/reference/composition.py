@@ -51,7 +51,6 @@ from .authority import (
     ReferenceAuthorityV1,
     UnavailableQuiescenceEvidenceV1,
     UnavailableRecoveryVerifierV1,
-    compose_reference_authority,
 )
 from .provider_family import (
     CoordinatorRequestPortsV1,

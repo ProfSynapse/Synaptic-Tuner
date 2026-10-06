@@ -32,6 +32,7 @@ from tuner.cloud import (
     standalone_credential_from_environment,
 )
 from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
+from tuner.core.config import CloudTrainingConfig, validation_split_flags
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import TrainingBackendRegistry
@@ -401,6 +402,20 @@ class CloudTrainHandler(BaseHandler):
         if train_max_seq_length is not None:
             config.max_seq_length = train_max_seq_length
 
+        # Validation split overrides; validated with the trainer-config values
+        # when the HF/RunPod command is built (validation_split_flags).
+        train_split_dataset = getattr(args, "train_split_dataset", None)
+        if train_split_dataset is not None:
+            config.split_dataset = train_split_dataset
+
+        train_test_size = getattr(args, "train_test_size", None)
+        if train_test_size is not None:
+            config.test_size = train_test_size
+
+        train_validation_group_key = getattr(args, "train_validation_group_key", None)
+        if train_validation_group_key:
+            config.validation_group_key = train_validation_group_key
+
         if getattr(args, "train_load_in_4bit", None) is not None:
             config.load_in_4bit = args.train_load_in_4bit
 
@@ -533,6 +548,14 @@ class CloudTrainHandler(BaseHandler):
         if config.dataset_name and config.dataset_file and "/" not in config.dataset_file:
             config.dataset_file = f"{config.dataset_name}/{config.dataset_file}"
 
+        # Fail before any submission when the effective split settings are invalid.
+        if isinstance(config, CloudTrainingConfig):
+            validation_split_flags(
+                method=config.method,
+                split_dataset=config.split_dataset,
+                test_size=config.test_size,
+                validation_group_key=config.validation_group_key,
+            )
         return config
 
     def _load_method_labels(self) -> Dict[str, str]:

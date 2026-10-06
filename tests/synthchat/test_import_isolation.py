@@ -201,8 +201,8 @@ def test_import_modes_package():
     mod = _import("SynthChat.modes")
     assert mod is not None
     from SynthChat.modes.generate import generate_mode
-    from SynthChat.modes.improve import improve_mode
-    from SynthChat.modes.validate import validate_mode
+    from SynthChat.modes.improve import improve_mode  # noqa: F401  importability is the assertion
+    from SynthChat.modes.validate import validate_mode  # noqa: F401  importability is the assertion
     assert generate_mode is not None
 
 

@@ -107,6 +107,28 @@ def dpo_lineage_to_run_record(
     )
 
 
+def decision_lineage_to_run_record(
+    lineage: dict[str, Any],
+    run_dir: str,
+    *,
+    run_id: str | None = None,
+    cloud: bool = False,
+) -> RunRecord:
+    """Convert a decision-model training_lineage.json dict to a RunRecord.
+
+    The primary metric is the calibrated held-out accuracy when the evaluate
+    stage ran, otherwise the final training loss.
+    """
+    record = _training_lineage_to_run_record(
+        lineage, run_dir, "decision", run_id=run_id, cloud=cloud,
+    )
+    eval_accuracy = lineage.get("results", {}).get("eval_accuracy")
+    if eval_accuracy is not None:
+        record.primary_metric = eval_accuracy
+        record.primary_metric_name = "eval_accuracy"
+    return record
+
+
 def retrieval_eval_to_run_record(
     lineage: dict[str, Any],
     run_dir: str,
@@ -335,7 +357,6 @@ def eval_to_run_record(
         A RunRecord populated from the evaluation lineage.
     """
     results = lineage.get("results_summary", {})
-    perf = lineage.get("performance", {})
 
     pass_rate = results.get("overall_pass_rate")
 

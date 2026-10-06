@@ -365,10 +365,10 @@ def main():
     print(f"  Tools in JSON schema: {len(json_tools)}")
     print(f"  Schema differences: {len(differences)}")
     print(f"  Test case issues: {len(test_issues)}")
-    print(f"\nNext steps:")
+    print("\nNext steps:")
     print(f"  1. Review {output_yaml_path}")
-    print(f"  2. Replace tool_schema.yaml with corrected version")
-    print(f"  3. Fix test case questions that reference invalid params")
+    print("  2. Replace tool_schema.yaml with corrected version")
+    print("  3. Fix test case questions that reference invalid params")
 
 
 if __name__ == "__main__":
