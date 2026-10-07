@@ -1,6 +1,6 @@
 # Training progress chart feed
 
-Status: staged implementation; no live Modal chart feed is qualified. The existing training attempt must remain untouched. Modal advertises observe and artifact streaming, but not logs. Pending status and a trainer-start phase do not establish optimizer progress.
+Status: numeric contract and bounded log projection implemented; no live Modal chart feed is qualified. The existing training attempt must remain untouched. Modal advertises observe and artifact streaming, but not logs. Pending status and a trainer-start phase do not establish optimizer progress.
 
 This updates the plan retained at `fd2a4b14` against merged main `73a3ba2c`. The historical local-state callback no longer exists. Do not restore its assumptions or create a second telemetry schema.
 
@@ -21,6 +21,21 @@ Current SFT metrics originate in `BaseMetricsCallback.on_log` (`Trainers/shared/
 
 ## Numeric contract acceptance
 
+The numeric contract was checkpointed at `9b235855`. The internal
+`tuner/execution/observation_logs.py` projection now encodes the full canonical
+metric observation into the existing log message, with a 4,096-byte UTF-8 bound.
+It requires the expected training run's exact project/run identity and UTC Z
+timestamp, preserves the original sequence, and verifies outer timestamp,
+sequence, event, level and byte count on readback. Duplicate keys, nonfinite
+numbers, alternate JSON encodings, wrong identities and malformed inputs fail
+with a fixed diagnostic. No arbitrary phase text is admitted. Matching a run
+name is not source authentication; this codec must be composed behind the
+authenticated producer/read boundary.
+
+Tests carry fractional metrics through the real Modal log-chunk parser and
+the coordinator's authenticated public paging/cursor fixture. These are
+provider-free format/read-path checks, not a live append qualification.
+
 Test exact required field sets, null unknowns, finite numeric values, rejection of booleans and overflow, bounded integer steps and memory bytes, step/total consistency, utilization range, schema parity, public exports, and observation family/page binding. Existing observation kinds and wire shapes must remain unchanged. Loss may be negative for objectives that allow it; memory and rates cannot be negative. Memory occupancy must never be presented as measured GPU utilization.
 
 Runtime validation is authoritative for exact Python integer types, finite-number conversion and cross-field step/total comparisons that standard JSON Schema cannot fully express. The no-text property is local to the new payload: existing stream identifiers and phase text still require source binding and privacy review before public transport. Existing observation pages have a count bound, not a serialized-byte bound; the later projection must apply its explicit byte budget.
@@ -28,6 +43,29 @@ Runtime validation is authoritative for exact Python integer types, finite-numbe
 Adding a kind to the closed v1 vocabulary is additive for current code, but an older consumer can reject a newly emitted kind. No emitter is enabled by the contract slice. Coordinate consumer support before the later emission rollout rather than assuming older clients ignore unknown kinds.
 
 The later capture/transport acceptance must additionally cover runs without checkpoint retention, configured sampling cadence, interrupted-stream recovery, complete UTF-8 bounded projection, authenticated multi-page reads and unchanged terminal artifact verification. Completion and writing quality remain separate from progress observations.
+
+## Live bridge constraints found in source review
+
+The current Modal producer finalizes one terminal log record at sequence zero
+and binds an immutable terminal chain digest. Its validator requires contiguous
+zero-based record sequences and caps the complete chain at 256 records. Existing
+observation contracts permit gaps; the projection must not hide them by
+renumbering. A long-lived feed needs an explicit committed-progress design,
+not a capability-flag flip or polling of the terminal chain.
+
+Provider evidence is also bounded at 65,536 bytes even though public log queries
+allow 262,144 message bytes. Future paging must account for evidence/chunk
+serialization overhead as well as message bytes. Test both bounds before
+enabling live reads.
+
+The isolated child has a bound run reference, but no full project identity or
+authenticated whole-job start timestamp. Bind these from retained execution
+context at the host/transport boundary; do not invent identifiers or timing.
+Callback capture must send numeric fields only, never generic trainer JSONL.
+A local injectable callback can be tested independently, but including its
+typed payload requires deliberate admission of `observations.py` and
+`_timestamps.py` to the offline trainer inventory. That expansion and its
+source-hash refresh are separate from the pure projection.
 
 ## Deliberately separate work
 
