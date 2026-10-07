@@ -10,19 +10,16 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 from .config import (
-    BaseBackendSettings,
     EvaluatorConfig,
     LMStudioSettings,
     OllamaSettings,
     VLLMSettings,
     expand_path,
 )
-from .enums import BackendType
 from .protocols import BackendError, ModelListingClient
-from .prompt_sets import PromptCase
 from .runner import EvaluationRecord
 
 

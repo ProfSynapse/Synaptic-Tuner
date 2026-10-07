@@ -13,8 +13,7 @@ def test_canonical_skill_docs_do_not_reference_old_script_locations() -> None:
     text_suffixes = {".md", ".py", ".sh", ".ps1", ".yaml", ".yml", ".txt"}
     banned_tokens = (
         "Trainers/scripts/",
-        "tools/validate_syngen.py",
-        "Tools/validate_syngen.py",
+        "validate_syngen",
         "tools/split_for_gspo.py",
         "src/upload_to_hf.py",
     )
@@ -42,9 +41,14 @@ def test_generalizable_skill_scripts_exist_in_canonical_tree() -> None:
         REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "prune_dataset_from_loss.py",
         REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "read_bucket_artifact.py",
         REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "split_for_gspo.py",
-        REPO_ROOT / ".skills" / "synethetic-data-generation" / "scripts" / "validate_syngen.py",
         REPO_ROOT / ".skills" / "upload-deployment" / "scripts" / "upload_model.py",
     ]
 
     for path in expected:
         assert path.exists(), f"Missing canonical skill script: {path}"
+
+
+def test_dataset_validator_has_no_skill_script_shim() -> None:
+    # The validator runs as `python3 -m shared.validation.dataset_validator`.
+    assert not (REPO_ROOT / ".skills" / "synthetic-data-generation" / "scripts" / "validate_syngen.py").exists()
+    assert (REPO_ROOT / "shared" / "validation" / "dataset_validator.py").is_file()

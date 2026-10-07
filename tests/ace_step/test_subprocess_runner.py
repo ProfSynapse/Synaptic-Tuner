@@ -34,7 +34,6 @@ if str(_SRC) not in sys.path:
     # runner's own `from config_translation import ...` resolves from this same dir.
     sys.path.insert(0, str(_SRC))
 
-import subprocess_runner  # noqa: E402
 from subprocess_runner import AceStepSubprocessError, run_ace_step_subprocess  # noqa: E402
 
 

@@ -15,10 +15,8 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
-import re
 import sys
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import logging
@@ -547,7 +545,6 @@ def build_combined_reward_function(
             continue
 
         weight = float(item.get("weight", 1.0))
-        params = item.get("params", {}) or {}
 
         # Try to load from rubric YAML first
         if engine:
@@ -575,10 +572,9 @@ def build_combined_reward_function(
         # Rubric not found
         print(f"Warning: Reward rubric '{name}' not found in {rewards_dir}")
 
-    # Handle custom rewards (from module/file)
+    # Handle custom rewards loaded from a Python file
     custom = rewards_config.get("custom", {}) or {}
     if bool(custom.get("enabled")):
-        module_name = custom.get("module")
         file_path = custom.get("file")
 
         if file_path:

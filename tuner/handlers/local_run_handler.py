@@ -3,7 +3,10 @@
 Bind-mount runs use root inside the container with a chown-on-exit trap so
 artifacts written to the host tree land with host-user ownership. Copy-mode
 extracts the artifact archive and then rewrites ownership on the host on
-Linux/macOS. The ``job.user`` YAML knob overrides this behavior:
+Linux/macOS. Its container-side writable paths are permissioned for whichever
+numeric or image-default user Docker actually runs, without assuming that the
+image defines a particular named account. The ``job.user`` YAML knob overrides
+this behavior:
 
   auto  (default) — bind: root + chown-back; copy: image-user + host chown-back
   root           — run as 0:0 inside container, do not chown back
@@ -18,8 +21,10 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 from argparse import Namespace
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,12 +33,46 @@ from typing import Any, Iterable, Literal
 
 import yaml
 
+from tuner.cloud.derived_training_image import (
+    DockerLaunchAuthority,
+    DerivedTrainingImageError,
+    load_profile as load_derived_image_profile,
+    validate_verification_report,
+    verify_effectful_launch,
+)
+from tuner.core.config import validation_split_flags
+from tuner.core.exceptions import ConfigurationError
 from tuner.discovery.recipes import load_recipe
 from tuner.handlers.base import BaseHandler
+from tuner.project import PathRef, ProjectContext
+from tuner.runtime_profiles import RuntimeProfileError, load_runtime_profile
 from tuner.ui import BOX, confirm, print_menu
 
 
 DEFAULT_STOP_TIMEOUT = 60
+RUNTIME_LAYOUT_SCHEMA = "synaptic-runtime-layout/v1"
+
+CONTAINER_ROOTS = {
+    "engine": "/workspace/engine",
+    "project": "/workspace/project",
+    "artifacts": "/workspace/artifacts",
+    "state": "/workspace/state",
+    "tracking": "/workspace/tracking",
+    "cache": "/workspace/cache",
+    "tmp": "/workspace/tmp",
+}
+
+# This is the repo-owned import closure shared by the standard trainer
+# entrypoints.  Keep it explicit: copy mode should stage the selected trainer
+# plus the packages it imports, not an accidental snapshot of the whole repo.
+# ``tuner`` imports the distribution version from ``synaptic_tuner`` at package
+# initialization, so both packages are part of the same runtime unit.
+_DEFAULT_COPY_RUNTIME_SUPPORT = (
+    Path("Trainers/shared"),
+    Path("shared"),
+    Path("tuner"),
+    Path("synaptic_tuner"),
+)
 
 # Generic gitignored landing dir for a music-training audio corpus when a recipe
 # leaves dataset.data_dir empty (build contract §5.1). Repo-relative, NOT
@@ -42,6 +81,16 @@ DEFAULT_STOP_TIMEOUT = 60
 DEFAULT_ACE_STEP_CORPUS_DIR = "Datasets/ace_step_corpus"
 
 _USER_FIELD_PATTERN = re.compile(r"^\d+:\d+$")
+_RUNTIME_PROFILE_RESERVED_ARGS = frozenset(
+    {
+        "--model-name",
+        "--model-revision",
+        "--runtime-profile-name",
+        "--runtime-profile-digest",
+        "--runtime-inventory-digest",
+        "--runtime-image",
+    }
+)
 
 
 class LocalRunError(RuntimeError):
@@ -61,6 +110,22 @@ class UserSpec:
     chown_host_uid: int | None
     chown_host_gid: int | None
     skip_chown: bool
+
+
+@dataclass(frozen=True)
+class CopyEntry:
+    """Canonical copy-mode input resolved at compile time."""
+
+    source: Path
+    destination: str
+    source_root: Literal["engine", "project"]
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "source": str(self.source),
+            "destination": self.destination,
+            "source_root": self.source_root,
+        }
 
 
 def _as_list(value: Any) -> list[str]:
@@ -117,6 +182,13 @@ def _validate_user_field(raw: Any) -> str:
     raise LocalRunError(
         f"Invalid job.user: {raw!r}. Expected one of: auto, root, image, or '<uid>:<gid>'."
     )
+
+
+def _resolve_transfer_mode(raw: Any, *, platform_name: str | None = None) -> str:
+    mode = str(raw or "auto").lower()
+    if mode == "auto":
+        return "copy" if (platform_name or os.name) == "nt" else "bind"
+    return mode
 
 
 def _current_host_ids() -> tuple[int, int]:
@@ -176,8 +248,13 @@ def _collect_chown_paths(plan: dict[str, Any]) -> list[str]:
     if workdir:
         raw.append(str(workdir))
 
-    # Common artifact roots the trainer may write under.
-    raw.append("/workspace/repo/toolset-training-artifacts")
+    # Common artifact roots the trainer may write under. Host-project mode has
+    # a split read-only source / writable-runtime layout; legacy mode retains
+    # the historical single-repository location.
+    if plan.get("runtime_layout") == RUNTIME_LAYOUT_SCHEMA:
+        raw.extend(CONTAINER_ROOTS[name] for name in ("artifacts", "state", "tracking", "cache", "tmp"))
+    else:
+        raw.append("/workspace/repo/toolset-training-artifacts")
 
     return list(dict.fromkeys(raw))
 
@@ -346,10 +423,35 @@ def _cache_mount_args(plan: dict[str, Any], home_dir: Path) -> list[str]:
     ``home_dir`` is injected so tests don't read the env.
     """
     args: list[str] = []
+    cache_root = plan.get("host_cache_root")
+    host_base = Path(cache_root) if cache_root else home_dir / ".cache"
+    # ``Path.__str__`` uses backslashes on Windows even for injected POSIX test
+    # paths. Docker accepts forward slashes consistently on all supported hosts.
+    host_base_text = host_base.as_posix()
     if plan.get("mount_hf_cache"):
-        args.extend(["-v", f"{home_dir}/.cache/huggingface:/root/.cache/huggingface"])
+        args.extend(["-v", f"{host_base_text}/huggingface:/root/.cache/huggingface"])
     if plan.get("mount_pip_cache"):
-        args.extend(["-v", f"{home_dir}/.cache/pip:/root/.cache/pip"])
+        args.extend(["-v", f"{host_base_text}/pip:/root/.cache/pip"])
+    return args
+
+
+def _runtime_mount_args(plan: dict[str, Any], repo_root: Path) -> list[str]:
+    """Return portable source and writable-root bind arguments.
+
+    Host mode supplies an explicit mount table. Standalone mode intentionally
+    keeps the legacy writable repo mount for backwards compatibility.
+    """
+
+    mounts = plan.get("runtime_mounts")
+    if not mounts:
+        return ["-v", f"{repo_root.as_posix()}:/workspace/repo"]
+    args: list[str] = []
+    for mount in mounts:
+        host = Path(mount["host"]).as_posix()
+        container = str(mount["container"])
+        mode = str(mount.get("mode", "rw"))
+        suffix = ":ro" if mode == "ro" else ""
+        args.extend(["-v", f"{host}:{container}{suffix}"])
     return args
 
 
@@ -408,13 +510,14 @@ def _ensure_host_cache_dirs(plan: dict[str, Any], home_dir: Path) -> None:
     """
     if sys.platform == "win32":
         return
+    base = Path(plan["host_cache_root"]) if plan.get("host_cache_root") else home_dir / ".cache"
     for field, subpath in (
         ("mount_hf_cache", "huggingface"),
         ("mount_pip_cache", "pip"),
     ):
         if not plan.get(field):
             continue
-        target = home_dir / ".cache" / subpath
+        target = base / subpath
         try:
             target.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -450,9 +553,8 @@ def _build_persistent_docker_run_args(
         "all",
         "-u",
         docker_user,
-        "-v",
-        f"{repo_root}:/workspace/repo",
     ]
+    args.extend(_runtime_mount_args(plan, repo_root))
     args.extend(_cache_mount_args(plan, home_dir))
     args.extend(_data_dir_mount_args(plan))
     args.extend(
@@ -470,9 +572,15 @@ def _build_persistent_docker_run_args(
 class LocalRunHandler(BaseHandler):
     """Run config-driven local Docker jobs, starting with SFT training."""
 
-    def __init__(self, args: Namespace | None = None):
-        super().__init__(args=args)
+    def __init__(
+        self,
+        args: Namespace | None = None,
+        context: ProjectContext | None = None,
+    ):
+        super().__init__(args=args, context=context)
         self._container_name: str | None = None
+        self._qualified_docker: DockerLaunchAuthority | None = None
+        self._qualified_docker_temp: Any | None = None
 
     @property
     def name(self) -> str:
@@ -481,23 +589,41 @@ class LocalRunHandler(BaseHandler):
     def can_handle_direct_mode(self) -> bool:
         return True
 
+    def _job_dirs(self) -> list[Path]:
+        if self.context.mode == "standalone":
+            return [self.engine_root / "Trainers" / "recipes"]
+        candidates = [
+            self.context.config_root,
+            self.project_root / "Trainers" / "recipes",
+            self.engine_root / "Trainers" / "recipes",
+        ]
+        return list(dict.fromkeys(path.resolve(strict=False) for path in candidates))
+
     def _jobs_dir(self) -> Path:
-        return self.repo_root / "Trainers" / "recipes"
+        return self._job_dirs()[0]
 
     def _list_job_configs(self) -> list[Path]:
-        jobs_dir = self._jobs_dir()
-        if not jobs_dir.exists():
-            return []
-        return sorted(path for path in jobs_dir.glob("*.yaml") if path.is_file())
+        results: list[Path] = []
+        seen_names: set[str] = set()
+        for jobs_dir in self._job_dirs():
+            if not jobs_dir.exists():
+                continue
+            for path in sorted(jobs_dir.glob("*.yaml")):
+                if path.is_file() and path.name not in seen_names:
+                    results.append(path)
+                    seen_names.add(path.name)
+        return results
 
     def _resolve_job_config_path(self, requested: str | None) -> Path:
         if requested:
             candidate = Path(requested)
             if not candidate.is_absolute():
-                candidate = self.repo_root / requested
-                if not candidate.exists():
-                    candidate = self._jobs_dir() / requested
-            if candidate.exists():
+                roots = [self.context.invocation_cwd, self.project_root, *self._job_dirs()]
+                for root in roots:
+                    candidate = root / requested
+                    if candidate.exists():
+                        return candidate.resolve()
+            elif candidate.exists():
                 return candidate.resolve()
             raise LocalRunError(f"Local job config not found: {requested}")
 
@@ -524,14 +650,323 @@ class LocalRunHandler(BaseHandler):
             raise LocalRunError(f"Local job config must be a YAML object: {path}")
         return data
 
-    def _rel_path(self, path_value: str | Path) -> Path:
+    def _rel_path(
+        self,
+        path_value: str | Path,
+        *,
+        declaring_file: Path | None = None,
+        access: Literal["read", "write"] = "read",
+        output_default: bool = False,
+    ) -> Path:
+        if self.context.path_mode == "project_v1":
+            raw = str(path_value)
+            if output_default and "://" not in raw and not Path(raw).is_absolute():
+                raw = "artifact://" + raw.replace("\\", "/")
+            return PathRef.parse(raw).resolve(
+                self.context,
+                declaring_file=declaring_file,
+                from_cli=declaring_file is None,
+                access=access,
+            )
         path = Path(path_value)
         if not path.is_absolute():
             path = self.repo_root / path
         return path.resolve()
 
+    def _container_path(self, host_path: Path) -> str:
+        """Map a resolved host path into the logical runtime layout."""
+
+        resolved = host_path.resolve(strict=False)
+        if self.context.mode == "standalone":
+            try:
+                relative = resolved.relative_to(self.engine_root)
+            except ValueError as exc:
+                raise LocalRunError(f"Standalone runtime path is outside the engine: {resolved}") from exc
+            return str(PurePosixPath("/workspace/repo") / relative.as_posix())
+        roots = (
+            (self.engine_root, CONTAINER_ROOTS["engine"]),
+            (self.artifact_root, CONTAINER_ROOTS["artifacts"]),
+            (self.state_root, CONTAINER_ROOTS["state"]),
+            (self.tracking_root, CONTAINER_ROOTS["tracking"]),
+            (self.cache_root, CONTAINER_ROOTS["cache"]),
+            (self.context.tmp_root, CONTAINER_ROOTS["tmp"]),
+            (self.project_root, CONTAINER_ROOTS["project"]),
+        )
+        for root, container_root in roots:
+            try:
+                relative = resolved.relative_to(root.resolve(strict=False))
+            except ValueError:
+                continue
+            return str(PurePosixPath(container_root) / relative.as_posix())
+        raise LocalRunError(f"Path is outside the declared runtime roots: {resolved}")
+
+    def _external_input_destination(self, source: Path) -> str:
+        digest = hashlib.sha256(str(source).encode("utf-8")).hexdigest()[:12]
+        root = CONTAINER_ROOTS["project"] if self.context.mode == "host" else "/workspace/repo"
+        return str(PurePosixPath(root) / ".inputs" / digest / source.name)
+
+    def _copy_entry_for_source(
+        self,
+        source: Path,
+        *,
+        destination: str | None = None,
+        source_root: Literal["engine", "project"] | None = None,
+    ) -> CopyEntry:
+        resolved = source.resolve(strict=False)
+        if destination is None:
+            try:
+                destination = self._container_path(resolved)
+            except LocalRunError:
+                destination = self._external_input_destination(resolved)
+        if source_root is None:
+            source_root = (
+                "engine"
+                if resolved.is_relative_to(self.engine_root.resolve(strict=False))
+                else "project"
+            )
+        return CopyEntry(resolved, destination, source_root)
+
+    def _resolve_dataset_copy_entry(
+        self, raw_value: str | Path, *, config_path: Path
+    ) -> CopyEntry:
+        raw = Path(str(raw_value))
+        if self.context.mode == "host":
+            source = self._rel_path(
+                str(raw_value), declaring_file=config_path, access="read"
+            )
+        elif raw.is_absolute():
+            source = raw.resolve(strict=False)
+        else:
+            source = (self.engine_root / raw).resolve(strict=False)
+        return self._copy_entry_for_source(source)
+
+    def _runtime_identity(
+        self,
+        *,
+        image: str,
+        pip_hash: str,
+        config_path: Path,
+        runtime_profile_sha256: str = "",
+        runtime_inventory_sha256: str = "",
+    ) -> str:
+        manifest_hash = "standalone"
+        if self.context.manifest_path and self.context.manifest_path.is_file():
+            manifest_hash = hashlib.sha256(self.context.manifest_path.read_bytes()).hexdigest()
+        engine_identity = str(self.engine_root)
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(self.engine_root), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                engine_identity = result.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+        payload = {
+            "schema": RUNTIME_LAYOUT_SCHEMA if self.context.mode == "host" else "legacy",
+            "engine": engine_identity,
+            "manifest": manifest_hash,
+            "image": image,
+            "dependencies": pip_hash,
+            "runtime_profile": runtime_profile_sha256,
+            "runtime_inventory": runtime_inventory_sha256,
+            "config": str(config_path.resolve(strict=False)),
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+    def _compile_runtime_profile(
+        self,
+        job_cfg: dict[str, Any],
+        setup_cfg: dict[str, Any],
+        *,
+        model: str,
+        model_revision: str,
+        method: str,
+    ) -> dict[str, Any] | None:
+        raw_name = job_cfg.get("runtime_profile")
+        if raw_name is None:
+            return None
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise LocalRunError("job.runtime_profile must be a non-empty profile name")
+        if "image" in job_cfg:
+            raise LocalRunError(
+                "job.runtime_profile cannot be combined with a raw job.image override"
+            )
+        if job_cfg.get("image_qualification") is not None:
+            raise LocalRunError(
+                "job.runtime_profile cannot be combined with job.image_qualification"
+            )
+        if _as_list(setup_cfg.get("pip")):
+            raise LocalRunError(
+                "Named runtime profiles forbid setup.pip because it mutates the pinned dependency inventory"
+            )
+        if method != "sft":
+            raise LocalRunError(
+                "Runtime profile schema v1 supports only run.method=sft"
+            )
+        try:
+            profile = load_runtime_profile(
+                raw_name.strip(), self.engine_root / "Trainers" / "runtime_profiles"
+            ).resolve(
+                model=model, model_revision=model_revision, method=method
+            )
+        except (OSError, RuntimeProfileError) as exc:
+            raise LocalRunError(f"Runtime profile is invalid: {exc}") from exc
+        resolved = profile.to_plan_dict()
+        resolved["model"] = model
+        resolved["model_revision"] = model_revision
+        return resolved
+
+    @staticmethod
+    def _validate_runtime_profile_run_config(
+        run_cfg: dict[str, Any], runtime_profile: dict[str, Any]
+    ) -> None:
+        if "command" in run_cfg:
+            raise LocalRunError(
+                "Runtime profile schema v1 does not support run.command"
+            )
+        for argument in _as_list(run_cfg.get("extra_args")):
+            option = argument.split("=", 1)[0]
+            if any(
+                option.startswith("--") and reserved.startswith(option)
+                for reserved in _RUNTIME_PROFILE_RESERVED_ARGS
+            ):
+                raise LocalRunError(
+                    f"run.extra_args cannot override reserved runtime identity flag {argument!r}"
+                )
+
+    def _runtime_mounts(self) -> list[dict[str, str]]:
+        if self.context.mode == "standalone":
+            return []
+        mounts = [
+            {"host": str(self.engine_root), "container": CONTAINER_ROOTS["engine"], "mode": "ro"},
+            {"host": str(self.project_root), "container": CONTAINER_ROOTS["project"], "mode": "ro"},
+        ]
+        for name, root in (
+            ("artifacts", self.artifact_root),
+            ("state", self.state_root),
+            ("tracking", self.tracking_root),
+            ("cache", self.cache_root),
+            ("tmp", self.context.tmp_root),
+        ):
+            mounts.append({"host": str(root), "container": CONTAINER_ROOTS[name], "mode": "rw"})
+        return mounts
+
+    def _compile_image_qualification(
+        self, job_cfg: dict[str, Any], *, config_path: Path
+    ) -> dict[str, str] | None:
+        raw = job_cfg.get("image_qualification")
+        if raw is None:
+            return None
+        if not isinstance(raw, dict) or set(raw) != {
+            "required", "profile", "verification_report"
+        }:
+            raise LocalRunError(
+                "job.image_qualification must contain exactly required, profile, and verification_report"
+            )
+        required = _validate_bool_field(
+            raw.get("required"), "image_qualification.required", default=False
+        )
+        if not required:
+            return None
+        profile_value = raw.get("profile")
+        verification_report_value = raw.get("verification_report")
+        if not isinstance(profile_value, str) or not profile_value.strip():
+            raise LocalRunError("job.image_qualification.profile must be a non-empty path")
+        if (
+            not isinstance(verification_report_value, str)
+            or not verification_report_value.strip()
+        ):
+            raise LocalRunError(
+                "job.image_qualification.verification_report must be a non-empty path"
+            )
+        profile_path = self._rel_path(
+            profile_value, declaring_file=config_path, access="read"
+        )
+        verification_report_path = self._rel_path(
+            verification_report_value, declaring_file=config_path, access="read"
+        )
+        try:
+            profile = load_derived_image_profile(profile_path)
+        except DerivedTrainingImageError as exc:
+            raise LocalRunError(
+                f"Derived image qualification profile is invalid: {exc.code}"
+            ) from exc
+        return {
+            "profile": str(profile_path),
+            "profile_sha256": profile.canonical_sha256,
+            "verification_report": str(verification_report_path),
+        }
+
+    @staticmethod
+    def _validate_image_qualification_report(plan: dict[str, Any]) -> None:
+        qualification = plan.get("image_qualification")
+        if qualification is None:
+            return
+        image = plan.get("image")
+        if not isinstance(image, str) or not image:
+            raise LocalRunError(
+                "This recipe requires job.image to be an exact verified OCI reference or local image-config sha256"
+            )
+        try:
+            validate_verification_report(
+                profile_path=Path(qualification["profile"]),
+                verification_report_path=Path(
+                    qualification["verification_report"]
+                ),
+                image=image,
+            )
+        except DerivedTrainingImageError as exc:
+            raise LocalRunError(
+                f"Derived image qualification failed: {exc.code}"
+            ) from exc
+
+    def _verify_live_image_qualification(self, plan: dict[str, Any]) -> None:
+        qualification = plan.get("image_qualification")
+        if qualification is None:
+            return
+        docker_value = shutil.which("docker")
+        if not docker_value:
+            raise LocalRunError("Derived image qualification failed: DOCKER_INVALID")
+        temporary: Any | None = None
+        try:
+            docker = Path(docker_value).resolve(strict=True)
+            temporary = tempfile.TemporaryDirectory(
+                prefix="syntunia-docker-authority-"
+            )
+            docker_config = Path(temporary.name) / "config"
+            docker_config.mkdir()
+            authority = verify_effectful_launch(
+                profile_path=Path(qualification["profile"]),
+                verification_report_path=Path(
+                    qualification["verification_report"]
+                ),
+                image=str(plan["image"]),
+                docker=docker,
+                docker_config=docker_config,
+            )
+            self._qualified_docker = authority
+            self._qualified_docker_temp = temporary
+        except (DerivedTrainingImageError, OSError) as exc:
+            if temporary is not None:
+                temporary.cleanup()
+            code = exc.code if isinstance(exc, DerivedTrainingImageError) else "DOCKER_INVALID"
+            raise LocalRunError(
+                f"Derived image live qualification failed: {code}"
+            ) from exc
+
+    def _release_live_image_qualification(self) -> None:
+        self._qualified_docker = None
+        temporary = self._qualified_docker_temp
+        self._qualified_docker_temp = None
+        if temporary is not None:
+            temporary.cleanup()
+
     def _resolve_data_dir_paths(
-        self, cfg: dict[str, Any]
+        self, cfg: dict[str, Any], *, config_path: Path | None = None
     ) -> tuple[str | None, str | None]:
         """Resolve dataset.data_dir / dataset.cache_dir to absolute host paths.
 
@@ -577,17 +1012,33 @@ class LocalRunHandler(BaseHandler):
         if not raw_data_dir and not raw_cache_dir and method != "ace_step":
             return None, None
 
-        data_dir_host = self._rel_path(raw_data_dir or DEFAULT_ACE_STEP_CORPUS_DIR)
-        cache_dir_host = (
-            self._rel_path(raw_cache_dir)
-            if raw_cache_dir
-            else (data_dir_host / ".cache")
-        )
+        if self.context.mode == "host":
+            data_dir_host = self._rel_path(
+                raw_data_dir or f"project://{DEFAULT_ACE_STEP_CORPUS_DIR}",
+                declaring_file=config_path,
+                access="read",
+            )
+            cache_ref = raw_cache_dir
+            if cache_ref and "://" not in cache_ref and not Path(cache_ref).is_absolute():
+                cache_ref = "cache://" + cache_ref.replace("\\", "/")
+            cache_dir_host = self._rel_path(
+                cache_ref or "cache://.",
+                declaring_file=config_path,
+                access="write",
+            )
+        else:
+            data_dir_host = self._rel_path(raw_data_dir or DEFAULT_ACE_STEP_CORPUS_DIR)
+            cache_dir_host = (
+                self._rel_path(raw_cache_dir)
+                if raw_cache_dir
+                else (data_dir_host / ".cache")
+            )
 
         # Containment heads-up BEFORE we create dirs / mount (M-b). Warn-only.
         self._warn_mount_containment(data_dir_host, cache_dir_host)
 
-        for target in (data_dir_host, cache_dir_host):
+        targets = (data_dir_host, cache_dir_host) if self.context.mode == "standalone" else (cache_dir_host,)
+        for target in targets:
             try:
                 target.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
@@ -625,15 +1076,19 @@ class LocalRunHandler(BaseHandler):
         root. ``self.repo_root`` is already absolute; we re-resolve defensively so
         the comparison is symlink-consistent with the resolved mount paths.
         """
-        repo_root = self.repo_root.resolve()
-        default_corpus = (repo_root / DEFAULT_ACE_STEP_CORPUS_DIR).resolve()
+        repo_root = self.engine_root.resolve()
+        default_corpus = (
+            (self.project_root if self.context.mode == "host" else repo_root)
+            / DEFAULT_ACE_STEP_CORPUS_DIR
+        ).resolve()
 
         # cache_dir: RW + potentially root-owned -> prominent security warning.
         # The escape test runs on the RESOLVED paths (post-_rel_path/.resolve()),
         # so a symlinked cache_dir collapses to its real target and is caught here.
-        if not _path_within(cache_dir_host, repo_root) and not _path_within(
-            cache_dir_host, data_dir_host
-        ):
+        cache_is_approved = self.context.mode == "host" and _path_within(
+            cache_dir_host, self.cache_root.resolve()
+        )
+        if not cache_is_approved and not _path_within(cache_dir_host, repo_root) and not _path_within(cache_dir_host, data_dir_host):
             print(
                 f"Warning (security): resolved dataset.cache_dir {cache_dir_host} "
                 "resolves outside both the repo tree and the corpus root. It is "
@@ -646,7 +1101,10 @@ class LocalRunHandler(BaseHandler):
 
         # data_dir: :ro and out-of-repo is the normal large-corpus case -> quieter
         # informational note only, to flag a possible symlink escape.
-        if not _path_within(data_dir_host, repo_root) and data_dir_host != default_corpus:
+        data_is_project = self.context.mode == "host" and _path_within(
+            data_dir_host, self.project_root.resolve()
+        )
+        if not data_is_project and not _path_within(data_dir_host, repo_root) and data_dir_host != default_corpus:
             print(
                 f"Note: resolved dataset.data_dir {data_dir_host} is outside the "
                 "repo tree. It is bind-mounted READ-ONLY at /workspace/data; this is "
@@ -663,8 +1121,35 @@ class LocalRunHandler(BaseHandler):
             return {str(k): self._render_value(v, variables) for k, v in value.items()}
         return value
 
+    def _validated_trainer_path(
+        self, run_cfg: dict[str, Any], method: str
+    ) -> Path:
+        raw = run_cfg.get("trainer", f"Trainers/{method}/train_{method}.py")
+        if (
+            not isinstance(raw, str)
+            or not raw
+            or raw != raw.strip()
+            or "\\" in raw
+            or ":" in raw
+        ):
+            raise LocalRunError("run.trainer must be a normalized repo-relative path")
+        posix = PurePosixPath(raw)
+        if posix.is_absolute() or any(part in {"", ".", ".."} for part in posix.parts):
+            raise LocalRunError("run.trainer must be a normalized repo-relative path")
+        relative = Path(*posix.parts)
+        resolved = (self.engine_root / relative).resolve(strict=False)
+        if not resolved.is_relative_to(self.engine_root.resolve(strict=True)):
+            raise LocalRunError("run.trainer must remain inside the engine root")
+        return relative
+
     def _build_trainer_command(
-        self, cfg: dict[str, Any], variables: dict[str, str], method: str
+        self,
+        cfg: dict[str, Any],
+        variables: dict[str, str],
+        method: str,
+        *,
+        config_path: Path | None = None,
+        runtime_profile: dict[str, Any] | None = None,
     ) -> tuple[list[str], str, Path]:
         # Builds the trainer invocation for any registered method. The trainer
         # script is selected by run.trainer; the per-method flag dialect differs,
@@ -678,11 +1163,11 @@ class LocalRunHandler(BaseHandler):
         run_cfg = cfg.get("run", {}) if isinstance(cfg.get("run"), dict) else {}
         artifacts_cfg = cfg.get("artifacts", {}) if isinstance(cfg.get("artifacts"), dict) else {}
 
-        default_trainer = f"Trainers/{method}/train_{method}.py"
-        trainer_path = Path(str(run_cfg.get("trainer", default_trainer)))
+        trainer_path = self._validated_trainer_path(run_cfg, method)
         trainer_dir = trainer_path.parent
         trainer_file = trainer_path.name
-        workdir = "/workspace/repo/" + trainer_dir.as_posix()
+        source_root = CONTAINER_ROOTS["engine"] if self.context.mode == "host" else "/workspace/repo"
+        workdir = str(PurePosixPath(source_root) / trainer_dir.as_posix())
 
         # Flags the dpo/kto trainers do not expose as CLI args (they read these
         # from their YAML config instead). Emitting them would make argparse
@@ -691,6 +1176,26 @@ class LocalRunHandler(BaseHandler):
 
         command = ["python", trainer_file]
         _append_flag(command, "model_name", model_cfg.get("name") or model_cfg.get("model_name"))
+        model_revision = model_cfg.get("revision") or model_cfg.get("model_revision")
+        if model_revision is not None and not sft_only:
+            # Only train_sft.py pins and verifies a Hub revision; the dpo/kto
+            # trainers would reject --model-revision, so refuse the setting here.
+            raise LocalRunError(
+                f"model.revision is supported only for run.method=sft; the {method} "
+                "trainer has no revision pin. Remove model.revision."
+            )
+        _append_flag(command, "model_revision", model_revision)
+        if runtime_profile is not None:
+            _append_flag(command, "runtime_profile_name", runtime_profile["name"])
+            _append_flag(
+                command, "runtime_profile_digest", runtime_profile["profile_sha256"]
+            )
+            _append_flag(
+                command,
+                "runtime_inventory_digest",
+                runtime_profile["inventory_sha256"],
+            )
+            _append_flag(command, "runtime_image", runtime_profile["image"])
         _append_flag(command, "model_size", model_cfg.get("size"))
         if sft_only and "load_in_4bit" in model_cfg:
             command.append("--load-in-4bit" if bool(model_cfg["load_in_4bit"]) else "--no-load-in-4bit")
@@ -700,12 +1205,132 @@ class LocalRunHandler(BaseHandler):
         _append_flag(command, "dataset_file", dataset_cfg.get("file") or dataset_cfg.get("dataset_file"))
         local_file = dataset_cfg.get("local_file")
         if local_file:
-            container_dataset_path = PurePosixPath("/workspace/repo") / Path(str(local_file)).as_posix()
-            container_workdir = PurePosixPath(workdir)
-            local_file = os.path.relpath(str(container_dataset_path), str(container_workdir)).replace("\\", "/")
+            if config_path is None:
+                raise LocalRunError("Dataset path resolution requires a declaring config")
+            dataset_entry = self._resolve_dataset_copy_entry(
+                str(local_file), config_path=config_path
+            )
+            if self.context.mode == "host":
+                local_file = dataset_entry.destination
+            else:
+                container_dataset_path = PurePosixPath(dataset_entry.destination)
+                container_workdir = PurePosixPath(workdir)
+                local_file = os.path.relpath(str(container_dataset_path), str(container_workdir)).replace("\\", "/")
         _append_flag(command, "local_file", local_file)
-        if bool(dataset_cfg.get("split_dataset", False)):
-            command.append("--split-dataset")
+        raw_schema = dataset_cfg.get("schema_version")
+        raw_format = dataset_cfg.get("format")
+        claims_raw_text = (
+            raw_schema == "syntunia-sft-row/v1" or raw_format == "raw_text"
+        )
+        claims_authoritative_messages = (
+            raw_schema == "syntunia-sft-row/v2" or raw_format == "messages"
+        )
+        if sft_only and claims_raw_text:
+            if raw_schema != "syntunia-sft-row/v1" or raw_format != "raw_text":
+                raise LocalRunError(
+                    "Raw-text SFT requires dataset.schema_version="
+                    "'syntunia-sft-row/v1' and dataset.format='raw_text'."
+                )
+            if dataset_cfg.get("use_preassigned_splits") is not True:
+                raise LocalRunError(
+                    "Raw-text SFT requires dataset.use_preassigned_splits=true."
+                )
+            if dataset_cfg.get("split_dataset", False) is not False:
+                raise LocalRunError(
+                    "Raw-text SFT cannot use random dataset.split_dataset."
+                )
+            if training_cfg.get("completion_only_loss") is not False:
+                raise LocalRunError(
+                    "Raw-text SFT requires training.completion_only_loss=false."
+                )
+            if training_cfg.get("assistant_only_loss") is not False:
+                raise LocalRunError(
+                    "Raw-text SFT requires training.assistant_only_loss=false."
+                )
+            if training_cfg.get("prompt_render", "full_conversation") != "full_conversation":
+                raise LocalRunError(
+                    "Raw-text SFT requires training.prompt_render='full_conversation'."
+                )
+            aux_head_cfg = cfg.get("aux_head")
+            if isinstance(aux_head_cfg, dict) and aux_head_cfg.get("token_position") == "end_of_prompt":
+                raise LocalRunError(
+                    "Raw-text SFT cannot use aux_head.token_position='end_of_prompt'."
+                )
+            command.extend(
+                [
+                    "--no-completion-only-loss",
+                    "--no-assistant-only-loss",
+                    "--use-preassigned-splits",
+                ]
+            )
+        if sft_only and claims_authoritative_messages:
+            if raw_schema != "syntunia-sft-row/v2" or raw_format != "messages":
+                raise LocalRunError(
+                    "Authoritative message SFT requires dataset.schema_version="
+                    "'syntunia-sft-row/v2' and dataset.format='messages'."
+                )
+            if dataset_cfg.get("use_preassigned_splits") is not True:
+                raise LocalRunError(
+                    "Authoritative message SFT requires "
+                    "dataset.use_preassigned_splits=true."
+                )
+            if dataset_cfg.get("split_dataset", False) is not False:
+                raise LocalRunError(
+                    "Authoritative message SFT cannot use random dataset.split_dataset."
+                )
+            if training_cfg.get("packing") is not False:
+                raise LocalRunError(
+                    "Authoritative message SFT requires training.packing=false."
+                )
+            if training_cfg.get("completion_only_loss") is not True:
+                raise LocalRunError(
+                    "Authoritative message SFT requires "
+                    "training.completion_only_loss=true."
+                )
+            if training_cfg.get("assistant_only_loss", False) is not False:
+                raise LocalRunError(
+                    "Authoritative message SFT requires "
+                    "training.assistant_only_loss=false."
+                )
+            if training_cfg.get("prompt_render") != "prompt_completion":
+                raise LocalRunError(
+                    "Authoritative message SFT requires "
+                    "training.prompt_render='prompt_completion'."
+                )
+            max_seq_length = model_cfg.get("max_seq_length") or training_cfg.get(
+                "max_seq_length"
+            )
+            if (
+                isinstance(max_seq_length, int)
+                and max_seq_length >= 32768
+                and training_cfg.get("require_memory_efficient_loss") is not True
+            ):
+                raise LocalRunError(
+                    "SFT_LONG_CONTEXT_LOSS_GUARD_REQUIRED: 32K authoritative "
+                    "message SFT requires training.require_memory_efficient_loss=true."
+                )
+            command.extend(
+                [
+                    "--completion-only-loss",
+                    "--no-assistant-only-loss",
+                    "--use-preassigned-splits",
+                ]
+            )
+        if sft_only and training_cfg.get("require_memory_efficient_loss") is True:
+            command.append("--require-memory-efficient-loss")
+        # Validation split settings use the same flag builder and validation as
+        # the cloud lanes (a group key without split_dataset is refused).
+        try:
+            command.extend(
+                validation_split_flags(
+                    method=method,
+                    split_dataset=bool(dataset_cfg.get("split_dataset", False)),
+                    test_size=dataset_cfg.get("test_size"),
+                    validation_group_key=dataset_cfg.get("validation_group_key"),
+                )
+            )
+        except ConfigurationError as exc:
+            raise LocalRunError(str(exc)) from exc
 
         for key in (
             "batch_size",
@@ -781,9 +1406,12 @@ class LocalRunHandler(BaseHandler):
         if bool(lora_cfg.get("use_rslora", False)):
             command.append("--use-rslora")
 
-        output_root = artifacts_cfg.get(
-            "output_root", "toolset-training-artifacts/runs/local_docker/" + method + "/{name}"
+        default_output_root = (
+            "runs/local_docker/" + method + "/{name}"
+            if self.context.mode == "host"
+            else "toolset-training-artifacts/runs/local_docker/" + method + "/{name}"
         )
+        output_root = artifacts_cfg.get("output_root", default_output_root)
         output_root = str(self._render_value(output_root, variables))
         run_timestamp = str(
             self._render_value(
@@ -791,7 +1419,21 @@ class LocalRunHandler(BaseHandler):
                 variables,
             )
         )
-        command.extend(["--output-root", "../../" + output_root if not output_root.startswith("/") else output_root])
+        host_output_root = self._rel_path(
+            output_root,
+            declaring_file=config_path,
+            access="write" if self.context.mode == "host" else "read",
+            output_default=self.context.mode == "host",
+        )
+        container_output_root = self._container_path(host_output_root)
+        command.extend(
+            [
+                "--output-root",
+                container_output_root
+                if self.context.mode == "host"
+                else ("../../" + output_root if not output_root.startswith("/") else output_root),
+            ]
+        )
         command.extend(["--run-timestamp", run_timestamp])
 
         for key in ("tier", "resume_from_checkpoint"):
@@ -806,7 +1448,7 @@ class LocalRunHandler(BaseHandler):
                 command.append("--quiet")
         command.extend(_as_list(run_cfg.get("extra_args")))
 
-        host_artifact_path = self._rel_path(Path(output_root) / run_timestamp)
+        host_artifact_path = (host_output_root / run_timestamp).resolve(strict=False)
         return command, workdir, host_artifact_path
 
     def _compile(self, config_path: Path, cfg: dict[str, Any]) -> dict[str, Any]:
@@ -819,6 +1461,9 @@ class LocalRunHandler(BaseHandler):
             "name": name,
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
             "repo_root": str(self.repo_root),
+            "engine_root": str(self.engine_root),
+            "project_root": str(self.project_root),
+            "artifact_root": str(self.artifact_root),
         }
         variables.update({str(k): str(v) for k, v in (cfg.get("template_vars") or {}).items()})
 
@@ -827,24 +1472,68 @@ class LocalRunHandler(BaseHandler):
         setup_cfg = cfg.get("setup", {}) if isinstance(cfg.get("setup"), dict) else {}
         artifacts_cfg = cfg.get("artifacts", {}) if isinstance(cfg.get("artifacts"), dict) else {}
 
-        image = str(job_cfg.get("image", "unsloth/unsloth:latest"))
         method = str(run_cfg.get("method", "sft")).lower()
+        model_cfg = cfg.get("model", {}) if isinstance(cfg.get("model"), dict) else {}
+        model_name = model_cfg.get("name")
+        model_revision = model_cfg.get("revision") or model_cfg.get("model_revision")
+        runtime_profile = self._compile_runtime_profile(
+            job_cfg,
+            setup_cfg,
+            model=str(model_name) if model_name is not None else "",
+            model_revision=str(model_revision) if model_revision is not None else "",
+            method=method,
+        )
+        if runtime_profile is not None:
+            self._validate_runtime_profile_run_config(run_cfg, runtime_profile)
+        image_qualification = self._compile_image_qualification(
+            job_cfg, config_path=config_path
+        )
+        if runtime_profile is not None:
+            image = str(runtime_profile["image"])
+        elif "image" in job_cfg:
+            raw_image = job_cfg.get("image")
+            image = raw_image.strip() if isinstance(raw_image, str) else ""
+        elif image_qualification is not None:
+            image = ""
+        else:
+            image = "unsloth/unsloth:latest"
         if run_cfg.get("command"):
             command = _as_list(self._render_value(run_cfg["command"], variables))
-            workdir = str(run_cfg.get("workdir", "/workspace/repo"))
+            workdir = str(
+                run_cfg.get(
+                    "workdir",
+                    CONTAINER_ROOTS["engine"] if self.context.mode == "host" else "/workspace/repo",
+                )
+            )
+            # host_path accepts the same {name}/{timestamp} templates as run.command,
+            # so an explicit-command trainer can write a fresh per-run directory.
+            configured_host_path = artifacts_cfg.get("host_path")
             host_artifact_path = self._rel_path(
-                artifacts_cfg.get("host_path", f"toolset-training-artifacts/runs/local_docker/custom/{name}")
+                self._render_value(configured_host_path, variables)
+                if configured_host_path is not None
+                else (
+                    f"runs/local_docker/custom/{name}"
+                    if self.context.mode == "host"
+                    else f"toolset-training-artifacts/runs/local_docker/custom/{name}"
+                ),
+                declaring_file=config_path,
+                access="write" if self.context.mode == "host" else "read",
+                output_default=self.context.mode == "host",
             )
         elif method in ("sft", "dpo", "kto"):
-            command, workdir, host_artifact_path = self._build_trainer_command(cfg, variables, method)
+            command, workdir, host_artifact_path = self._build_trainer_command(
+                cfg,
+                variables,
+                method,
+                config_path=config_path,
+                runtime_profile=runtime_profile,
+            )
         else:
             raise LocalRunError(
                 "local-run supports run.method: sft, dpo, kto, or an explicit run.command list."
             )
 
-        transfer_mode = str(job_cfg.get("transfer", "auto")).lower()
-        if transfer_mode == "auto":
-            transfer_mode = "copy" if os.name == "nt" else "bind"
+        transfer_mode = _resolve_transfer_mode(job_cfg.get("transfer", "auto"))
 
         job_user = _validate_user_field(job_cfg.get("user"))
         host_uid, host_gid = _current_host_ids()
@@ -853,12 +1542,74 @@ class LocalRunHandler(BaseHandler):
         copy_paths = [Path(path) for path in _as_list(setup_cfg.get("copy"))]
         if transfer_mode == "copy" and not copy_paths:
             # Copy the trainer directory the dispatched method actually runs from
-            # (run.trainer selects it per method) rather than always Trainers/sft.
-            trainer_dir = Path(str(run_cfg.get("trainer", f"Trainers/{method}/train_{method}.py"))).parent
-            copy_paths = [trainer_dir, Path("shared"), Path("tuner")]
+            # (run.trainer selects it per method), plus its shared runtime
+            # packages, rather than always staging a full repository.
+            trainer_dir = self._validated_trainer_path(run_cfg, method).parent
+            copy_paths = [trainer_dir, *_DEFAULT_COPY_RUNTIME_SUPPORT]
             dataset_cfg = cfg.get("dataset", {}) if isinstance(cfg.get("dataset"), dict) else {}
             if dataset_cfg.get("local_file"):
                 copy_paths.append(Path(str(dataset_cfg["local_file"])))
+
+        copy_entries: list[CopyEntry] = []
+        if transfer_mode == "copy":
+            explicit_copy = _as_list(setup_cfg.get("copy"))
+            if explicit_copy:
+                for raw_copy in explicit_copy:
+                    if self.context.mode == "host":
+                        source = self._rel_path(
+                            raw_copy, declaring_file=config_path, access="read"
+                        )
+                    else:
+                        raw_path = Path(raw_copy)
+                        source = (
+                            raw_path.resolve(strict=False)
+                            if raw_path.is_absolute()
+                            else (self.engine_root / raw_path).resolve(strict=False)
+                        )
+                    copy_entries.append(self._copy_entry_for_source(source))
+            else:
+                trainer_dir = self._validated_trainer_path(run_cfg, method).parent
+                for engine_relative in (trainer_dir, *_DEFAULT_COPY_RUNTIME_SUPPORT):
+                    source = (self.engine_root / engine_relative).resolve(strict=False)
+                    destination = str(
+                        PurePosixPath(
+                            CONTAINER_ROOTS["engine"]
+                            if self.context.mode == "host"
+                            else "/workspace/repo"
+                        )
+                        / engine_relative.as_posix()
+                    )
+                    copy_entries.append(
+                        self._copy_entry_for_source(
+                            source, destination=destination, source_root="engine"
+                        )
+                    )
+            dataset_cfg = cfg.get("dataset", {}) if isinstance(cfg.get("dataset"), dict) else {}
+            if dataset_cfg.get("local_file"):
+                copy_entries.append(
+                    self._resolve_dataset_copy_entry(
+                        str(dataset_cfg["local_file"]), config_path=config_path
+                    )
+                )
+            copy_entries = list(
+                {
+                    (entry.source, entry.destination): entry
+                    for entry in copy_entries
+                }.values()
+            )
+        elif self.context.mode == "host":
+            dataset_cfg = cfg.get("dataset", {}) if isinstance(cfg.get("dataset"), dict) else {}
+            if dataset_cfg.get("local_file"):
+                entry = self._resolve_dataset_copy_entry(
+                    str(dataset_cfg["local_file"]), config_path=config_path
+                )
+                if not (
+                    entry.source.is_relative_to(self.engine_root)
+                    or entry.source.is_relative_to(self.project_root)
+                ):
+                    raise LocalRunError(
+                        "Host bind mode requires dataset.local_file below the engine or project root"
+                    )
 
         stop_timeout = int(job_cfg.get("stop_timeout", DEFAULT_STOP_TIMEOUT))
         tty_mode = _validate_tty_field(job_cfg.get("tty"))
@@ -881,7 +1632,9 @@ class LocalRunHandler(BaseHandler):
         # dataset.data_dir / dataset.cache_dir gets the host paths resolved here
         # and mounted by _data_dir_mount_args. Today only ace_step uses it; absent
         # keys -> None -> no mounts, so every existing recipe is unaffected.
-        data_dir_host, cache_dir_host = self._resolve_data_dir_paths(cfg)
+        data_dir_host, cache_dir_host = self._resolve_data_dir_paths(
+            cfg, config_path=config_path
+        )
         if data_dir_host and transfer_mode != "bind":
             raise LocalRunError(
                 "dataset.data_dir requires job.transfer: bind (an out-of-repo "
@@ -901,12 +1654,64 @@ class LocalRunHandler(BaseHandler):
             )
 
         pip_items = _as_list(setup_cfg.get("pip"))
+        if image_qualification is not None and pip_items:
+            raise LocalRunError(
+                "Qualified derived images forbid setup.pip because launch-time "
+                "package mutation would invalidate the live image verification"
+            )
         pip_marker_hash = _pip_marker_hash(pip_items)
+        runtime_identity = self._runtime_identity(
+            image=image,
+            pip_hash=pip_marker_hash,
+            config_path=config_path,
+            runtime_profile_sha256=(runtime_profile or {}).get("profile_sha256", ""),
+            runtime_inventory_sha256=(runtime_profile or {}).get("inventory_sha256", ""),
+        )
+        if self.context.mode == "host":
+            persistent_container_name = _derive_container_name(
+                f"{persistent_container_name}-{runtime_identity[:12]}"
+            )
+
+        container_artifact_path = self._container_path(host_artifact_path)
+        explicit_container_artifact = artifacts_cfg.get("container_path")
+        if explicit_container_artifact:
+            explicit_text = str(explicit_container_artifact)
+            if self.context.mode == "host" and not any(
+                explicit_text == root or explicit_text.startswith(root + "/")
+                for root in (
+                    CONTAINER_ROOTS["artifacts"],
+                    CONTAINER_ROOTS["state"],
+                    CONTAINER_ROOTS["tracking"],
+                    CONTAINER_ROOTS["cache"],
+                    CONTAINER_ROOTS["tmp"],
+                )
+            ):
+                raise LocalRunError(
+                    "artifacts.container_path must be below a writable /workspace root"
+                )
+            container_artifact_path = explicit_text
 
         return {
             "name": name,
             "config_path": str(config_path),
             "image": image,
+            "runtime_profile": runtime_profile,
+            "lineage_inputs": {
+                "runtime_profile": {
+                    key: runtime_profile[key]
+                    for key in (
+                        "name",
+                        "profile_sha256",
+                        "image",
+                        "inventory_sha256",
+                        "model",
+                        "model_revision",
+                    )
+                }
+            }
+            if runtime_profile is not None
+            else {},
+            "image_qualification": image_qualification,
             "pull_policy": str(job_cfg.get("pull_policy", "missing")).lower(),
             "transfer": transfer_mode,
             "keep_container": bool(job_cfg.get("keep_container", False)),
@@ -915,15 +1720,11 @@ class LocalRunHandler(BaseHandler):
             "pip": pip_items,
             "pip_marker_hash": pip_marker_hash,
             "copy_paths": copy_paths,
+            "copy_entries": copy_entries,
             "command": command,
             "workdir": workdir,
             "host_artifact_path": host_artifact_path,
-            "container_artifact_path": str(
-                artifacts_cfg.get(
-                    "container_path",
-                    "/workspace/repo/" + str(host_artifact_path.relative_to(self.repo_root)).replace("\\", "/"),
-                )
-            ),
+            "container_artifact_path": container_artifact_path,
             "job_user": job_user,
             "user_spec": user_spec,
             "stop_timeout": stop_timeout,
@@ -933,10 +1734,24 @@ class LocalRunHandler(BaseHandler):
             "cache_dir": cache_dir_host,
             "mount_hf_cache": mount_hf_cache,
             "mount_pip_cache": mount_pip_cache,
+            "runtime_layout": RUNTIME_LAYOUT_SCHEMA if self.context.mode == "host" else "legacy",
+            "runtime_identity": runtime_identity,
+            "runtime_mounts": self._runtime_mounts(),
+            "host_cache_root": str(self.cache_root) if self.context.mode == "host" else None,
         }
 
     def _run(self, args: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-        return subprocess.run(args, cwd=self.repo_root, text=True, **kwargs)
+        authority = self._qualified_docker
+        if authority is None or not args or args[0] != "docker":
+            return subprocess.run(args, cwd=self.engine_root, text=True, **kwargs)
+        qualified_args = authority.command(args[1:])
+        kwargs["env"] = authority.environment
+        try:
+            return subprocess.run(
+                qualified_args, cwd=self.engine_root, text=True, **kwargs
+            )
+        finally:
+            authority.assert_current()
 
     def _check(self, args: list[str]) -> None:
         result = self._run(args)
@@ -954,16 +1769,75 @@ class LocalRunHandler(BaseHandler):
             raise LocalRunError("job.pull_policy must be one of: missing, always, never")
         self._check(["docker", "pull", image])
 
-    def _copy_into_container(self, container: str, paths: Iterable[Path]) -> None:
-        for relative in paths:
-            src = self._rel_path(relative)
+    def _copy_into_container(
+        self,
+        container: str,
+        paths: Iterable[Path],
+        *,
+        copy_entries: Iterable[CopyEntry] | None = None,
+    ) -> None:
+        entries = list(copy_entries or [])
+        if self.context.mode == "host" and not entries:
+            raise LocalRunError("Host copy mode requires canonical copy entries")
+        if not entries:
+            for relative in paths:
+                raw = Path(relative)
+                src = (
+                    raw.resolve(strict=False)
+                    if raw.is_absolute()
+                    else (self.engine_root / raw).resolve(strict=False)
+                )
+                destination = (
+                    self._external_input_destination(src)
+                    if raw.is_absolute() and not src.is_relative_to(self.engine_root)
+                    else "/workspace/repo/" + raw.as_posix()
+                )
+                entries.append(
+                    self._copy_entry_for_source(
+                        src, destination=destination, source_root="engine"
+                    )
+                )
+        for entry in entries:
+            src = entry.source
             if not src.exists():
-                raise LocalRunError(f"Configured copy path does not exist: {relative}")
-            dest = "/workspace/repo/" + Path(relative).as_posix()
+                raise LocalRunError(f"Configured copy path does not exist: {src}")
+            dest = entry.destination
             parent = str(Path(dest).parent).replace("\\", "/")
             self._check(["docker", "exec", "-u", "root", container, "mkdir", "-p", parent])
             self._check(["docker", "cp", str(src), f"{container}:{dest}"])
-        self._check(["docker", "exec", "-u", "root", container, "chown", "-R", "unsloth:unsloth", "/workspace/repo"])
+        if self.context.mode == "host":
+            self._check(
+                [
+                    "docker", "exec", "-u", "root", container, "mkdir", "-p",
+                    *[CONTAINER_ROOTS[name] for name in ("artifacts", "state", "tracking", "cache", "tmp")],
+                ]
+            )
+            self._check(
+                [
+                    "docker", "exec", "-u", "root", container, "chmod", "-R", "a-w",
+                    CONTAINER_ROOTS["engine"], CONTAINER_ROOTS["project"],
+                ]
+            )
+            # ``docker cp`` and the setup commands above run as root.  The
+            # training command may instead use an image-default or configured
+            # numeric user, and not every image has a shared named account.
+            # These are private, writable runtime roots, so grant the actual
+            # runtime user access by mode rather than chowning to a guessed
+            # passwd entry.  Engine/project inputs remain read-only above.
+            self._check(
+                [
+                    "docker", "exec", "-u", "root", container, "chmod", "-R", "a+rwX",
+                    *[CONTAINER_ROOTS[name] for name in ("artifacts", "state", "tracking", "cache", "tmp")],
+                ]
+            )
+        else:
+            # Legacy copy mode executes against the copied repository itself.
+            # Do not require an image-specific named user here: ``job.user``
+            # may select a numeric uid, or ``auto`` / ``image`` may retain an
+            # arbitrary image-default user.
+            self._check(
+                ["docker", "exec", "-u", "root", container, "chmod", "-R", "a+rwX", "/workspace/repo"]
+            )
 
     def _copy_artifacts_from_container(
         self,
@@ -980,7 +1854,7 @@ class LocalRunHandler(BaseHandler):
         container_parent = str(Path(container_path).parent).replace("\\", "/")
         container_base = Path(container_path).name
         self._check(["docker", "exec", container, "tar", "-chf", archive_name, "-C", container_parent, container_base])
-        host_archive = self.repo_root / "tmp" / f"{host_path.name}.tar"
+        host_archive = self.context.tmp_root / f"{host_path.name}.tar"
         host_archive.parent.mkdir(parents=True, exist_ok=True)
         try:
             self._check(["docker", "cp", f"{container}:{archive_name}", str(host_archive)])
@@ -1018,8 +1892,17 @@ class LocalRunHandler(BaseHandler):
         )
         self._check(["docker", "start", container])
         try:
-            self._check(["docker", "exec", "-u", "root", container, "mkdir", "-p", "/workspace/repo"])
-            self._copy_into_container(container, plan["copy_paths"])
+            source_dirs = (
+                [CONTAINER_ROOTS["engine"], CONTAINER_ROOTS["project"]]
+                if self.context.mode == "host"
+                else ["/workspace/repo"]
+            )
+            self._check(["docker", "exec", "-u", "root", container, "mkdir", "-p", *source_dirs])
+            self._copy_into_container(
+                container,
+                plan["copy_paths"],
+                copy_entries=plan.get("copy_entries"),
+            )
             if plan["pip"]:
                 self._check(["docker", "exec", "-u", "root", container, "pip", "install", "--upgrade", *plan["pip"]])
             command_text = " ".join(shlex.quote(part) for part in plan["command"])
@@ -1056,14 +1939,8 @@ class LocalRunHandler(BaseHandler):
         ]
         if user_spec.docker_user_flag is not None:
             docker_cmd.extend(["-u", user_spec.docker_user_flag])
-        docker_cmd.extend(
-            [
-                "--entrypoint",
-                "bash",
-                "-v",
-                f"{self.repo_root}:/workspace/repo",
-            ]
-        )
+        docker_cmd.extend(["--entrypoint", "bash"])
+        docker_cmd.extend(_runtime_mount_args(plan, self.repo_root))
         docker_cmd.extend(_cache_mount_args(plan, home_dir))
         docker_cmd.extend(_data_dir_mount_args(plan))
         docker_cmd.extend(
@@ -1233,6 +2110,9 @@ class LocalRunHandler(BaseHandler):
         ):
             serializable = dict(plan)
             serializable["copy_paths"] = [str(path) for path in plan["copy_paths"]]
+            serializable["copy_entries"] = [
+                entry.to_dict() for entry in plan.get("copy_entries", [])
+            ]
             serializable["host_artifact_path"] = str(plan["host_artifact_path"])
             user_spec: UserSpec = plan["user_spec"]
             serializable["user_spec"] = {
@@ -1243,6 +2123,12 @@ class LocalRunHandler(BaseHandler):
             }
             self.output(serializable)
             return 0
+
+        try:
+            self._validate_image_qualification_report(plan)
+        except LocalRunError as exc:
+            print(f"Error: {exc}")
+            return 1
 
         user_spec = plan["user_spec"]
         chown_back_desc = (
@@ -1260,6 +2146,10 @@ class LocalRunHandler(BaseHandler):
         print("Local Docker Run Configuration")
         print(f"  Config: {plan['config_path']}")
         print(f"  Name: {plan['name']}")
+        if plan.get("runtime_profile") is not None:
+            runtime_profile = plan["runtime_profile"]
+            print(f"  Runtime profile: {runtime_profile['name']}")
+            print(f"  Runtime inventory: {runtime_profile['inventory_sha256']}")
         print(f"  Image: {plan['image']}")
         print(f"  Pull policy: {plan['pull_policy']}")
         print(f"  Transfer: {plan['transfer']}")
@@ -1271,13 +2161,19 @@ class LocalRunHandler(BaseHandler):
         print(f"  TTY: {plan['tty_mode']} ({tty_attached_desc})")
         if plan["persist"]:
             persistent_name = plan["persistent_container_name"]
-            reuse_state = self._container_exists(persistent_name)
-            reuse_desc = {
-                "running": "reusing running container",
-                "exited": "reusing stopped container (will start)",
-                "absent": "will be created",
-            }[reuse_state]
-            print(f"  Container: {persistent_name} ({reuse_desc})")
+            if plan.get("image_qualification") is not None:
+                print(
+                    f"  Container: {persistent_name} "
+                    "(state checked after image qualification)"
+                )
+            else:
+                reuse_state = self._container_exists(persistent_name)
+                reuse_desc = {
+                    "running": "reusing running container",
+                    "exited": "reusing stopped container (will start)",
+                    "absent": "will be created",
+                }[reuse_state]
+                print(f"  Container: {persistent_name} ({reuse_desc})")
         if plan["transfer"] == "bind":
             print(f"  HF cache mount: {'yes' if plan['mount_hf_cache'] else 'no'}")
             print(f"  pip cache mount: {'yes' if plan['mount_pip_cache'] else 'no'}")
@@ -1300,15 +2196,27 @@ class LocalRunHandler(BaseHandler):
             print("Local run cancelled.")
             return 0
 
-        # Ensure the host artifact parent exists before executing — prevents
-        # docker from creating it as root on bind mounts.
-        plan["host_artifact_path"].parent.mkdir(parents=True, exist_ok=True)
-        # Pre-create ~/.cache/huggingface and ~/.cache/pip so docker doesn't
-        # bind an empty root-owned dir. Cache mounts apply to bind modes only.
-        if plan["transfer"] == "bind":
-            _ensure_host_cache_dirs(plan, Path(os.path.expanduser("~")))
+        # The offline report is diagnostic only.  After explicit confirmation,
+        # freshly bind it to the exact local Docker image before preparing any
+        # project/artifact/cache paths or performing the normal pull/run flow.
+        try:
+            self._verify_live_image_qualification(plan)
+        except LocalRunError as exc:
+            print(f"Error: {exc}")
+            return 1
 
         try:
+            # Ensure declared writable roots exist before Docker sees them.
+            # Source roots are intentionally never created or mutated here.
+            if self.context.mode == "host":
+                for root in self.context.writable_roots:
+                    root.mkdir(parents=True, exist_ok=True)
+            else:
+                plan["host_artifact_path"].parent.mkdir(parents=True, exist_ok=True)
+            # Pre-create caches so Docker does not create root-owned dirs.
+            if plan["transfer"] == "bind":
+                _ensure_host_cache_dirs(plan, Path(os.path.expanduser("~")))
+
             self._pull_image(plan["image"], plan["pull_policy"])
             if plan["transfer"] == "copy":
                 self._execute_copy_mode(plan)
@@ -1324,6 +2232,8 @@ class LocalRunHandler(BaseHandler):
             if self._container_name:
                 print(f"Temporary container retained for inspection: {self._container_name}")
             return 1
+        finally:
+            self._release_live_image_qualification()
 
         print(f"Local run completed. Artifacts: {plan['host_artifact_path']}")
         return 0

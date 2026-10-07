@@ -33,7 +33,6 @@ faiss = pytest.importorskip("faiss", reason="faiss-cpu not installed (CI-gated r
 
 import numpy as np  # noqa: E402
 
-from shared.verifiers.builtins import retrieval_verifier as rv  # noqa: E402
 from shared.verifiers.builtins.retrieval_verifier import (  # noqa: E402
     RetrievalConfig,
     RetrievalThresholds,

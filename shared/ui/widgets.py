@@ -4,7 +4,6 @@ Advanced UI Widgets for Synaptic Tuner
 Provides spinners, file pickers, fuzzy search, sparklines, and more.
 """
 
-import os
 import sys
 import logging
 from pathlib import Path
@@ -42,7 +41,6 @@ def spinner(message: str, spinner_type: str = "dots"):
             upload_model(repo_id)
     """
     if RICH_AVAILABLE:
-        from rich.status import Status
         with console.status(
             f"[bold {COLORS['purple']}]{message}[/]",
             spinner=spinner_type,
@@ -666,12 +664,4 @@ def quiet_training():
                 dashboard.update(step=step, loss=loss)
     """
     with suppress_logs():
-        # Also suppress tqdm if it's being used
-        try:
-            import tqdm
-            old_disable = tqdm.tqdm.__init__.__defaults__
-            # This is a bit hacky but works
-        except ImportError:
-            pass
-
         yield

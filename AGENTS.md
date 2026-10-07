@@ -4,6 +4,8 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Fine-Tuning Workflow Discipline
 
+- Runtime profiles MUST be configuration-driven. Recipes select named profiles; profile data declares exact model/revision/method compatibility, immutable image/inventory and associated build configuration. Planning and execution must resolve the same bound selection. Never add model-specific profile constants, switches or fallback mappings to a launcher. A candidate profile permits qualification, not a claim of successful model/hardware qualification; retain independent smoke evidence before promotion.
+
 - For any task in this repo, begin by loading the most relevant canonical skill from `.skills/`. For fine-tuning, cloud training, evaluation, experiment-loop, checkpoint-eval, model-selection, or dataset-publishing work, that starting point is usually the `fine-tuning` skill.
 - `.skills/` is the canonical skill source for this repo. `.agents/skills` and `.claude/skills` are synced copies and must match it exactly.
 - After changing canonical skills, run `python3 .skills/scripts/sync_skill_trees.py` and verify with `python3 .skills/scripts/sync_skill_trees.py --check`.
@@ -11,8 +13,17 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - Do not create throwaway scripts just to get a task done if an existing script, CLI, or skill can be used or extended.
 - If the capability does not exist, the next step is not an ad hoc workaround. Update the relevant skill and add the proper checked-in script/CLI workflow so the new capability is reusable.
 - Prefer repo CLIs and checked-in scripts over manual bucket/API probing whenever those surfaces exist.
+- Diagnose failures from the exact attempt's retained records, logs, pinned SDK source, and provider documentation. Use relevant issue/forum reports to form hypotheses, then run a targeted experiment before calling a hypothesis the cause. A closed failure phase locates a boundary; it does not establish the cause.
+- Keep the training workflow proportional to the supported use case. Remove redundant operations when documented behavior and experiments show they add no useful guarantee;
+  retain source/model pins, credential isolation, artifact verification, and protection against replaying an uncertain submission. Test doubles must model the provider's documented behavior, not merely repeat our implementation.
+- For prompt/completion training, explicitly review the generation scaffold at the target boundary and keep model-specific chat-template arguments in recipe configuration, consistent with serving. Preserve legacy canonical documents when optional arguments are absent. An explicit null output budget means no request-level token ceiling, not unlimited context, time, or transport size. A completed-text smoke must check natural completion and must not be reported as a writing-quality evaluation.
 
-## Config-First Generation Discipline
+## Config-First Generation and Split Discipline
+
+- Before context-to-completion dataset preparation, record the approved input contract: required source kinds and relationships, target selection, exclusions, document-order policy, provenance, and expected coverage. Check the actual assembled rows against that contract; a valid schema or a label such as "context package" is not coverage evidence. Missing required context must be reported, never silently replaced by a narrower recipe. Review representative complete examples after changing source selection or the generation scaffold, before authorizing training. Randomizing documents within a prompt is distinct from shuffling training rows; retain the configured per-example order for reproducibility.
+- Review training/validation coverage across the configured groups before launch. For chronological context-to-completion data, use the existing preparation CLI's opt-in sequence-tail policy when both splits need each group represented. Authenticate ordering from declared lineage, keep equal-sequence cohorts together, and reject training contexts containing held-out targets or their revisions/derivatives. Validation may use earlier training context. Rebuild to a fresh immutable publication; never relabel an existing dataset or silently repair conflicting lineage.
+- Distinguish explicitly approved target-derived guidance from the literal target completion. An own-target outline may be intentional conditioning under the declared opt-in policy; preserve its true derivation, review its content, and describe evaluation as conditioned writing rather than blind prediction. Input metadata and assistant-target formatting are independently configured; never assume they must use the same projection.
+- The strict chronology/held-out-derivative rules above have one explicitly reviewed exception: `declared_retrospective_support/v1` may admit newer or held-out summary ancestry only for its exact selected same-group support item IDs. Preserve truthful ancestry and causal sequence; never relabel retrospective material as independent early context. No selected target item or target revision family may be selected as support, and selection does not authorize descendants or unrelated context. Literal target prose and alternate target revisions remain prohibited; inspect copied prose separately because structural verification cannot establish semantic source truth. Record unresolved historical sources without inventing IDs, and describe evaluation using this opt-in as conditioned drafting, not blind prediction.
 
 - This repo is format-agnostic. Do not treat the current tool wrapper, CLI shape, or toy dataset format as a runtime truth.
 - For generation and evaluation tasks, do not change runtime code to support one user's current tool schema, wrapper, commands, examples, or dataset shape. Use config, scenario YAML, rubric YAML, schema files, or checked-in declarative config instead.
@@ -27,7 +38,12 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## HF Jobs
 
+- For the protected paid A10G training smoke, use only `python tuner.py hf-training-smoke {preflight,approve,execute,recover,observe,verify}`: require the exact pushed-source, security/release, isolated CPython 3.12.7 launcher, live quote, and approval gates; allow one submission and one cancel attempt; keep credentials out of the remote job; and verify only the exact 15-file artifact inventory without bulk bucket sync.
 - Remote jobs clone and run the exact pushed commit. If the job log shows an older `HEAD`, stop and relaunch from the right SHA instead of debugging stale code.
+- HF Jobs may preserve submitted argv in JobInfo while shell-processing it at runtime. Protected launcher payload chunks must use a shell-safe alphabet such as standard Base64; do not use Base85 or any encoding whose alphabet contains shell metacharacters.
+- Protected remote smoke diagnostics must use only the closed non-secret stage codes: credential (120), runtime (121), artifact (122), trainer (123), input (124), with failures outside classified phases remaining generic (125). Never expose remote exception text, tracebacks, provider response data, or credential-derived details.
+- HF Jobs does not materialize a writable bucket mount for a brand-new empty subprefix. For the protected smoke, `execute` must durably claim authority, prove the exact derived slot empty, upload a CSPRNG-named one-use mount anchor, and re-list it as the slot's only member before mounting that exact slot. The durable submission claim and exact authenticated provider command must bind the generated anchor nonce and canonical payload digest. The credential-free remote job must require that exact anchor, retain its verified file identity through consumption, create `exclusive-sentinel.json` with atomic `O_EXCL`, recheck and remove only its own anchor, and reject every collision; never upload the fixed sentinel through the overwriting Buckets batch API, widen the mount to the artifact parent, or pass credentials into the job. For compatibility with HF mount releases before v0.9.2, consumption must atomically rename the verified open anchor with no-replace, verify the same file identity through that claim, close it, recheck it, and unlink only the claimed name; do not depend on unlink-while-open.
+- For an exact engine-repository worktree in standalone mode, omit `--project-root` and `--manifest` from `hf-source` and `hf-training-smoke`; supplying `--project-root` selects host-project mode and requires `<project-root>/synaptic.yaml`.
 - Do not upgrade `huggingface_hub` in the main Unsloth training environment just to get Buckets support. `transformers` in the training stack requires `huggingface-hub<1.0`.
 - If Buckets support needs a newer Hub client, isolate it in a helper path or subprocess and keep the trainer runtime untouched.
 - Pass `HF_TOKEN` into `huggingface_hub.run_job(...)` explicitly with job secrets. Do not assume the cloud job inherits the local shell environment.
@@ -41,7 +57,148 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - If a preset resolves but scenario loading fails, inspect `Evaluator/config/eval_run.yaml` for stale filenames before debugging `config_loader.py`.
 - HF cloud eval results are saved under the source run's `evaluations/vllm/{timestamp}/` prefix. Inspect `evaluation_results.json` first, then `evaluation_results.md`, then `evaluation_lineage.json`; use `logs/eval_progress.jsonl` only for live/debug state.
 
-## Cloud Artifact UX
+## Modal v1
+
+- Packaged trainer `TORCH_OOM` diagnostics recognize Torch's shared OOM
+  exception identity; the CUDA alias alone does not establish device, allocation
+  size or batch capacity. Preserve trusted finite execution milestones for
+  unknown library failures. Historical `EXEC_OTHER` cannot retrospectively
+  establish OOM or justify a recipe change or attempt replay.
+
+- The approved packaged-runtime policy separates hosted-parent inventory from the
+  isolated trainer: parent admission/revalidation checks the complete inventory
+  under authenticated, stable Python library roots against the exact release,
+  while the isolated child and default inspector retain full ambient inventory
+  checks. Preserve parent Python, wheel/bootstrap bytes, provenance, members,
+  closure and trainer assets; unproven roots or mismatched inventories reject.
+  This explicitly accepts extra outside-root dependencies in the privileged
+  parent and does not attest loaded-module origins. Do not extend that allowance
+  to the isolated trainer or use a failed check as a scope-switching fallback.
+
+- The standalone host uses a thread-affine SQLite attempt journal and call catalogs.
+  Do not pass catalog resolve/publish through `_bounded`'s worker thread. Keep
+  journal operations on their owning thread and bound only the provider
+  hydrate/spawn/call-ID closure. A timed-out worker may still spawn later;
+  preserve the consumed claim and never auto-replay or infer no call from a
+  missing catalog row.
+
+- The minimal consumer's provisioning step is create-only
+  (`allow_existing=False`). A genuinely fresh manual attempt must use unused
+  control Volume, artifact Volume, model-cache Volume, and runtime Secret names;
+  changing only the attempt or deployment reference is insufficient. Preserve
+  failed state and existing resources, diagnose exact collisions read-only, and
+  never reinterpret an already-exists failure as retry, adoption, or cleanup
+  authority.
+
+- Training and model chat are independent processes. Use the model-first
+  `scripts/chat_model.py` / `tuner.inference.model_chat.open_model_chat` boundary
+  when testing serving. Do not submit training to obtain in-memory chat authority.
+  The existing verified-run workflow is optional integration, not a prerequisite
+  for model serving. Provider adapters still own explicit bounded GPU cleanup.
+
+- Use the consumer launcher's fixed phase/class/location diagnostics for host-side
+  failures, including suppressed exception context; never print exception messages,
+  locals or full traceback text. Retain later workflow snapshots by their digest,
+  without rewriting immutable submit ownership or authorizing a retry.
+
+- Native training qualification H supports only public observe and artifact
+  streaming. Keep logs/cancel/reconcile/cost-quote disabled; separately qualify
+  the updated inference image and bounded chat. See the exact evidence and
+  limits in `docs/review/modal-native-training-qualification.md`.
+
+- Configure required executable search paths explicitly in the authenticated
+  runtime environment. Offline trainer children replace inherited environments;
+  a missing PATH can let GCC start but prevent its linker from being found.
+  The same environment configures the image: preserve the locked Python's
+  directory as well as system tool directories for Modal Python/pip discovery.
+- Provider reads must reuse and authenticate the exact assessment retained in
+  the submit binding while revalidating the current Foundation record. Issuing
+  a newly timestamped assessment breaks that binding after time passes; do not
+  weaken evidence equality or renew submission authority to compensate.
+
+- Bind model-cache paths to the authenticated execution source's exact run ID;
+  do not require a consumer naming prefix. Initialize lazy SDK call handles
+  with the explicit client before checking identity or polling. Existing-image
+  admission must check the provider-returned ID before Sandbox creation.
+- Hold private chat model-root directory descriptors across preparation and
+  inventory capture. Reopening paths alone permits inode reuse to conceal a
+  replaced directory; validate the retained identities before returning.
+
+- Parse compiled workload bytes with the shared workload-specific finite-number
+  parser throughout worker admission, revalidation and inference preparation.
+  Fractional learning rates and dropout are valid; Foundation command/evidence
+  JSON remains integer-only. Test numeric configuration, not only string rates.
+
+- Do not assume a floating Modal Function lookup returns an immutable definition
+  ID. The minimal consumer must verify current scoped app generation and exact
+  private layout, including the deployment's single-generation increment;
+  an omitted definition ID is not identity evidence. Current-state verification
+  is not version-pinned invocation and cannot eliminate an external-admin race.
+
+- The minimal consumer's effectful launcher must use the packaged training
+  lock's CPython version (currently 3.11.14) and the hash-pinned launcher closure.
+  Its serialized deployment cannot cross Python minor versions. Check host
+  compatibility before credentials, attempt claims or provisioning; do not
+  change the remote image pins to accommodate an arbitrary operator Python.
+
+- Initialize inference commitments only with `scripts/initialize_modal_inference_lock.py`
+  from explicitly reviewed candidate and additive-lock hashes; never overwrite
+  existing resources or silently normalize their bytes. Qualify the fresh wheel
+  using the existing CPU capture's `--check-private-directories` and
+  `--verify-runtime-lock-digest` before GPU/chat use. A CPU package result is not
+  serving authority or live model qualification; see the canonical Modal reference.
+
+- Keep the minimal train/chat consumer under `examples/modal_chat`, not in
+  engine runtime modules. Its private attempt journal prevents automatic replay;
+  it is not durable recovery of all coordinator/Foundation state. Live training
+  still requires an actual pushed host superproject with the exact engine
+  gitlink. Do not use EHR or fabricate source/run evidence for this example.
+
+- For existing inference locks, use `python3 scripts/regenerate_modal_inference_lock.py`
+  (read-only check), then `--write` only after reviewing source changes. It
+  preserves the fixed inventory and pins and never initializes missing locks.
+  An interrupted two-file replacement requires recovery of the reviewed
+  consistent pair; do not bypass validation or assume a rerun repairs it.
+
+- After changing any file already listed in `modal-runtime-v1.lock.json`, run
+  `python3 scripts/regenerate_modal_runtime_lock.py` first; use `--write` only
+  for an intentional reviewed hash refresh, then rerun the default check. The
+  tool must never be used to change the locked inventory or runtime/image pins;
+  `CURRENT` confirms only agreement with the current policy-valid lock's source
+  hashes, not independent approval of its non-hash pins. The same tool keeps
+  `.skills/fine-tuning/configs/qwen35_4b_token_profile.yaml`'s
+  `expected_lock_sha256` in step (reported when stale, rewritten by `--write`);
+  after `--write` run `python3 .skills/scripts/sync_skill_trees.py`.
+- When extracting code from a locked runtime member, explicitly review and
+  update the lock inventory, JSON schema, runtime policy and maintenance script
+  together before refreshing hashes. Moving code must not remove it from the
+  locked source boundary. Bootstrap provider modules and the offline trainer
+  closure are separate inventories; change only the inventory actually affected.
+- Prepare pinned models automatically on the execution machine using the Hub SDK in private scratch; never expose hostile shared cache paths to SDK writes. Create the private repository and each validated member-parent directory explicitly at 0700 before SDK writes; do not depend on ambient umask, use `mkdir(parents=True)` for permission guarantees, or relax the publication guard. Test nested members through the real binding under umask 022 and 002. Reuse only independently verified repository files, commit the persistent cache before training, and keep the offline trainer subprocess credential-free. No operator weight upload step is required.
+- Modal training is available only behind the provider-neutral public `TrainingAPI`; do not recreate a `modal run` launcher, provider-specific public verb, or engine-owned database.
+- The consuming host owns configuration, credentials, grants, coordinator/Foundation persistence, retained preparation catalogs, data, and product state. Compose the existing generic store and authority ports; do not recreate the removed Modal-specific lifecycle repository.
+- Enforce the packaged `modal-runtime-v1.lock.json` at composition and again in the remote source materializer. The CPython 3.11/Linux launcher dependency file must contain the complete transitive closure with exact hashes; install it with `--require-hashes` and never resolve additional packages at runtime.
+- Secrets may enter only through explicitly named Modal Secrets. Reject token/secret/password/API-key environment entries and never embed credential values in `Image.env()`.
+- Treat mounted Volume paths as hostile shared storage: on the locked Linux runtime, traverse and open through retained parent directory descriptors (`dir_fd`/openat semantics) so ancestor substitution cannot redirect I/O; bounded reads must reject symlink/reparse leaves and compare file identity across the read, while writes remain exclusive and collision-failing.
+- A self-consistent provider observation cannot override the packaged image, SDK, Python, dependency, wrapper, worker, SFT runtime, or ML-stack lock. No live preflight or paid smoke may run until the provider-free barrier and independent review are green.
+
+## Cloud Artifact and Evaluation UX
+
+- Keep evaluation response retention aligned with its admitted HTTP byte budget,
+  and serialize the signed evaluation envelope with its evaluation-specific
+  aggregate bound, not the smaller workload-document bound. Test complete UTF-8
+  responses through execution, publication and authenticated readback, including
+  byte-boundary rejection and legacy canonical-byte compatibility. A null output
+  token budget does not remove finite context, deadline or transport bounds.
+  Do not replay training to recover an evaluation-only or local readback failure.
+
+- Modal artifact downloads must pass the shared per-artifact bound, not the
+  aggregate artifact-set bound. Pinned SDK file blocks may exceed the public
+  stream's 1 MiB chunk limit; split them at the provider facade while preserving
+  byte order, aggregate limits, and end-to-end hash verification. Regression
+  tests must carry multi-MiB SDK-shaped blocks through the real public stream.
+  A zero-byte partial is not a cause diagnosis, and a consumed training attempt
+  must never be replayed to recover a failed local download.
 
 - HF Jobs local dashboard parity comes from syncing JSONL training logs to the bucket and replaying them locally.
 - HF Jobs cloud evaluation now uses the same adapter idea: remote JSONL progress, local replay into the existing evaluation dashboard.

@@ -105,7 +105,7 @@ Use the tool's parameters to guide questions:
 ## Validation
 After creating examples, validate with:
 ```bash
-python tools/validate_syngen.py Datasets/tools_datasets/{manager}/tools_v1.2.jsonl
+python -m shared.validation.dataset_validator Datasets/tools_datasets/{manager}/tools_v1.2.jsonl
 ```
 
 ## Output

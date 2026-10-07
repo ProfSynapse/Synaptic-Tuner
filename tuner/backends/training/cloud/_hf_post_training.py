@@ -32,6 +32,10 @@ class HFPostTrainingMixin:
         summary = {
             "Remote artifacts": self._build_remote_run_uri(config, artifact_prefix),
             "Suggested local path": str(self._local_download_run_dir(config, artifact_prefix)),
+            "Source lock": getattr(self, "last_source_lock_uri", None) or "unavailable",
+            "Source lock SHA-256": getattr(self, "last_source_lock_sha256", None) or "unavailable",
+            "Source transport": getattr(getattr(self, "source_preparation", None), "descriptor_uri", None) or "unavailable",
+            "Provisioning evidence": getattr(getattr(self, "source_preparation", None), "provisioning_evidence_uri", None) or "unavailable",
         }
         if local_run_dir:
             summary["Local run"] = str(local_run_dir)

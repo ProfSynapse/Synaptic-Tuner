@@ -16,8 +16,15 @@ ChatML->prompt/completion/label transform is replaced here by a
 prompt/chosen/rejected pass-through with structural validation.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 from datasets import load_dataset, Dataset
+
+from shared.training_utils import (
+    DEFAULT_SPLIT_SEED,
+    extract_dataset_group_values,
+    require_split_for_group_key,
+    split_train_validation,
+)
 
 
 # Columns TRL's DPOTrainer expects in conversational mode.
@@ -42,7 +49,8 @@ def load_and_prepare_dataset(
     local_file: Optional[str] = None,
     num_proc: int = 1,
     test_size: float = 0.1,
-    split_dataset: bool = False
+    split_dataset: bool = False,
+    validation_group_key: Optional[str] = None,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare a preference-pair dataset for DPO training.
@@ -54,6 +62,10 @@ def load_and_prepare_dataset(
         num_proc: Number of processes for dataset loading (1 for Windows)
         test_size: Fraction of data for validation
         split_dataset: Whether to create a train/val split
+        validation_group_key: Optional dot-path into the raw row (e.g.
+            ``metadata.pair_key``). When set and splitting, all rows sharing a
+            group value land on the same side and ``test_size`` applies over
+            groups. Missing values fail loudly with the row index.
 
     Returns:
         Tuple of (train_dataset, eval_dataset or None) with columns
@@ -84,6 +96,15 @@ def load_and_prepare_dataset(
 
     print(f"\nRaw dataset size: {len(raw_datasets)} examples")
 
+    # Read group values before the non-DPO columns (provenance) are dropped.
+    require_split_for_group_key(
+        split_dataset=split_dataset, test_size=test_size, validation_group_key=validation_group_key
+    )
+    group_values = None
+    if split_dataset and test_size > 0 and validation_group_key:
+        print(f"Grouping validation split by: {validation_group_key}")
+        group_values = extract_dataset_group_values(raw_datasets, validation_group_key)
+
     # Keep only the DPO columns; drop any extras the builder may have emitted
     # (e.g. provenance fields) so the Dataset matches what DPOTrainer expects.
     extra_cols = [c for c in raw_datasets.column_names if c not in REQUIRED_DPO_COLUMNS]
@@ -97,9 +118,12 @@ def load_and_prepare_dataset(
     eval_dataset = None
     if split_dataset and test_size > 0:
         print(f"\nCreating train/validation split ({1-test_size:.0%}/{test_size:.0%})")
-        split = train_dataset.train_test_split(test_size=test_size, seed=42)
-        train_dataset = split["train"]
-        eval_dataset = split["test"]
+        train_dataset, eval_dataset = split_train_validation(
+            train_dataset,
+            test_size=test_size,
+            seed=DEFAULT_SPLIT_SEED,
+            group_values=group_values,
+        )
 
         print(f"  Training set: {len(train_dataset)} examples")
         print(f"  Validation set: {len(eval_dataset)} examples")

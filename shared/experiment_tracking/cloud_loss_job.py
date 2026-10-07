@@ -109,6 +109,7 @@ def main() -> int:
     if not hf_token:
         raise RuntimeError("HF_TOKEN or HF_API_KEY is required inside the cloud evaluation job.")
 
+    project_root = Path(os.environ.get("SYNAPTIC_PROJECT_ROOT", str(_REPO_ROOT))).resolve()
     output_root = Path(args.output_root)
     model_dir = output_root / "model"
     results_dir = output_root / "results"
@@ -121,6 +122,7 @@ def main() -> int:
         job_ref=detect_cloud_job_ref(),
         run_prefix=args.run_prefix.strip("/"),
         bucket_id=args.bucket_id,
+        source_lock_id=os.environ.get("SYNAPTIC_SOURCE_LOCK_ID") or None,
     )
     apply_stage_logging_env(
         stage="loss",
@@ -140,7 +142,7 @@ def main() -> int:
     )
 
     if args.dataset_path:
-        dataset_path = Path(_REPO_ROOT) / args.dataset_path
+        dataset_path = project_root / args.dataset_path
         if not dataset_path.exists():
             dataset_path = Path(args.dataset_path)
             if not dataset_path.exists():

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from tuner.project import ProjectContext
+
 
 @dataclass
 class DatasetInfo:
@@ -25,6 +27,7 @@ class DatasetInfo:
     size_bytes: int
     size_human: str
     relative_path: str
+    declaring_root: Optional[Path] = None
 
 
 class DatasetDiscovery:
@@ -44,17 +47,34 @@ class DatasetDiscovery:
             print(f"{ds.name}: {ds.dataset_type} ({ds.example_count} examples, {ds.size_human})")
     """
 
-    def __init__(self, repo_root: Path = None):
+    def __init__(
+        self,
+        repo_root: Path = None,
+        *,
+        context: ProjectContext | None = None,
+    ):
         """
         Initialize the dataset discovery service.
 
         Args:
             repo_root: Repository root path. If None, uses module location to find repo root.
         """
-        if repo_root is None:
-            self.repo_root = Path(__file__).parent.parent.parent
-        else:
-            self.repo_root = repo_root
+        self.context = context
+        self.repo_root = (
+            context.engine_root
+            if context is not None
+            else (repo_root or Path(__file__).parent.parent.parent)
+        )
+
+    def _dataset_roots(self) -> list[Path]:
+        if self.context is None or self.context.mode == "standalone":
+            return [self.repo_root / "Datasets"]
+        roots = [
+            self.context.project_root / "Datasets",
+            self.context.project_root / "data",
+            self.context.engine_root / "Datasets",
+        ]
+        return list(dict.fromkeys(root.resolve(strict=False) for root in roots))
 
     def discover_all(self) -> List[DatasetInfo]:
         """
@@ -66,27 +86,26 @@ class DatasetDiscovery:
         Returns:
             List of DatasetInfo objects sorted by modification time (newest first).
         """
-        datasets_dir = self.repo_root / "Datasets"
-
-        if not datasets_dir.exists():
-            return []
-
         results: List[DatasetInfo] = []
-
-        # Find all JSONL files
-        jsonl_files = list(datasets_dir.rglob("*.jsonl"))
-
-        # Sort by modification time (newest first)
-        jsonl_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-
-        for filepath in jsonl_files:
-            try:
-                info = self._analyze_dataset(filepath, datasets_dir)
-                if info:
-                    results.append(info)
-            except Exception:
-                # Skip files that can't be analyzed
+        seen_relative: set[str] = set()
+        for datasets_dir in self._dataset_roots():
+            if not datasets_dir.exists():
                 continue
+            jsonl_files = sorted(
+                datasets_dir.rglob("*.jsonl"),
+                key=lambda p: (-p.stat().st_mtime, p.as_posix()),
+            )
+            for filepath in jsonl_files:
+                key = filepath.relative_to(datasets_dir).as_posix()
+                if key in seen_relative:
+                    continue
+                try:
+                    info = self._analyze_dataset(filepath, datasets_dir)
+                    if info:
+                        results.append(info)
+                        seen_relative.add(key)
+                except Exception:
+                    continue
 
         return results
 
@@ -154,6 +173,7 @@ class DatasetDiscovery:
             size_bytes=size_bytes,
             size_human=size_human,
             relative_path=relative_path,
+            declaring_root=datasets_dir,
         )
 
     @staticmethod

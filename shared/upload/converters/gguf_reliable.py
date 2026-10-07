@@ -48,7 +48,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Dict, Any
+from typing import Iterable, List, Optional, Dict, Any
 from contextlib import contextmanager
 
 from .calibration import CalibrationRenderResult, CalibrationSpec, render_calibration_text
@@ -60,7 +60,6 @@ PURPLE = "#93278F"
 # Try to import Rich for nice spinners
 try:
     from rich.console import Console
-    from rich.spinner import Spinner
     from rich.live import Live
     from rich.text import Text
     RICH_AVAILABLE = True
@@ -367,7 +366,7 @@ class ReliableGGUFConverter:
             print(f"  ✗ Build finished but binaries not found under {build_dir / 'bin'}")
             return False
 
-        print(f"  ✓ llama.cpp built successfully")
+        print("  ✓ llama.cpp built successfully")
         return True
 
     def llama_cpp_commit(self) -> Optional[str]:
@@ -521,12 +520,12 @@ class ReliableGGUFConverter:
                 tokenizer,
                 save_method="merged_16bit",
             )
-            print(f"  ✓ Merged model saved")
+            print("  ✓ Merged model saved")
 
         except ImportError:
             # Fallback to PEFT merge
             print("  Using PEFT for merge (Unsloth not available)...")
-            from peft import PeftModel, AutoPeftModelForCausalLM
+            from peft import AutoPeftModelForCausalLM
             from transformers import AutoTokenizer
 
             model = AutoPeftModelForCausalLM.from_pretrained(
@@ -540,7 +539,7 @@ class ReliableGGUFConverter:
 
             model.save_pretrained(str(merged_dir))
             tokenizer.save_pretrained(str(merged_dir))
-            print(f"  ✓ Merged model saved")
+            print("  ✓ Merged model saved")
 
         return merged_dir
 
@@ -588,7 +587,7 @@ class ReliableGGUFConverter:
                 )
 
             if result.returncode != 0:
-                print(f"  ✗ Conversion failed:")
+                print("  ✗ Conversion failed:")
                 print(f"    {_stderr_tail(result.stderr)}")
                 return False
 
@@ -601,7 +600,7 @@ class ReliableGGUFConverter:
             return True
 
         except subprocess.TimeoutExpired:
-            print(f"  ✗ Conversion timed out")
+            print("  ✗ Conversion timed out")
             return False
         except Exception as e:
             print(f"  ✗ Conversion error: {e}")
@@ -658,7 +657,7 @@ class ReliableGGUFConverter:
                 )
 
             if result.returncode != 0:
-                print(f"  ✗ imatrix computation failed:")
+                print("  ✗ imatrix computation failed:")
                 print(f"    {_stderr_tail(result.stderr)}")
                 return False
 
@@ -671,7 +670,7 @@ class ReliableGGUFConverter:
             return True
 
         except subprocess.TimeoutExpired:
-            print(f"  ✗ imatrix computation timed out")
+            print("  ✗ imatrix computation timed out")
             return False
         except Exception as e:
             print(f"  ✗ imatrix error: {e}")
@@ -724,7 +723,7 @@ class ReliableGGUFConverter:
                 )
 
             if result.returncode != 0:
-                print(f"  ✗ Quantization failed:")
+                print("  ✗ Quantization failed:")
                 print(f"    {_stderr_tail(result.stderr)}")
                 return False
 
@@ -737,7 +736,7 @@ class ReliableGGUFConverter:
             return True
 
         except subprocess.TimeoutExpired:
-            print(f"  ✗ Quantization timed out")
+            print("  ✗ Quantization timed out")
             return False
         except Exception as e:
             print(f"  ✗ Quantization error: {e}")
@@ -932,7 +931,7 @@ class ReliableGGUFConverter:
             }
 
         # Quantizations
-        print(f"\n[Quantize] Creating quantizations...")
+        print("\n[Quantize] Creating quantizations...")
         for quant in quants:
             quant_file = gguf_dir / f"{model_name}-{quant}.gguf"
             quant_imatrix = imatrix_file if imatrix_file is not None and uses_imatrix(quant) else None
@@ -953,7 +952,7 @@ class ReliableGGUFConverter:
             calibration=calibration_record,
         )
 
-        print(f"\n[Summary]")
+        print("\n[Summary]")
         print("=" * 60)
         print(f"✓ Created {len(created_files)} GGUF files:")
         for f in created_files:
@@ -1057,7 +1056,7 @@ class ReliableGGUFConverter:
         finally:
             # Cleanup temp files
             if cleanup_temp and temp_dir.exists():
-                print(f"\nCleaning up temp files...")
+                print("\nCleaning up temp files...")
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 print(f"✓ Cleaned up {temp_dir}")
 

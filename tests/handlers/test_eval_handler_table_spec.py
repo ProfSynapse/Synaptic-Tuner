@@ -11,14 +11,10 @@ Verifies:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from tuner.handlers.eval_handler import EvalHandler
 

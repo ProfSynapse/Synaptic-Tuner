@@ -19,7 +19,11 @@ from shared.experiment_tracking import (
 )
 from shared.experiment_tracking.schema import RunRecord
 from tuner.core.exceptions import CloudProviderError
+from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
 from tuner.handlers.cloud_eval_handler import CloudEvalHandler
+from tuner.backends.training.cloud.base_cloud import load_cloud_config
+from tuner.project import ProjectContext
+from ._util import load_tracked_hf_source_preparation
 
 
 class HFEvalStageRunner:
@@ -35,26 +39,23 @@ class HFEvalStageRunner:
         mode = getattr(post_training, "mode", "parallel")
         return mode == "same_job" and bool(spec.loss.enabled)
 
-    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: StageResult | None = None) -> StageResult:
-        if previous is None or previous.run_record is None:
-            raise CloudProviderError("Evaluation stage requires a completed training run.")
-        artifact_prefix = previous.run_record.tags.get("artifact_prefix", "")
-        bucket_id = previous.run_record.tags.get("bucket_id", "")
-        if not artifact_prefix or not bucket_id:
-            raise CloudProviderError("Training stage did not capture the HF artifact prefix and bucket.")
-        self.tracking_service.update_stage_details(
-            experiment,
-            "evaluation",
-            status="running",
-            source_commit=previous.run_record.source_commit,
-            tags={
-                "provider": spec.provider,
-                "bucket_id": bucket_id,
-                "artifact_prefix": artifact_prefix,
-            },
-        )
+    def build_evaluation_plan_args(
+        self,
+        *,
+        spec: ExperimentSpec,
+        artifact_prefix: str,
+        bucket_id: str,
+        source_preparation,
+    ) -> Namespace:
+        """Compile the side-effect-free evaluation plan before authorization.
 
-        args = Namespace(
+        This seam exposes configuration forwarding for dry-run and contract
+        tests.  It does not load an SDK, inspect credentials, touch a bucket,
+        or authorize submission.
+        """
+
+        same_job_loss = self._use_same_job_loss(spec)
+        return Namespace(
             json=False,
             run=artifact_prefix,
             method=spec.method,
@@ -74,15 +75,59 @@ class HFEvalStageRunner:
             update_model_card=False,
             gpu=spec.evaluation.gpu,
             timeout_hours=spec.evaluation.timeout_hours,
-            with_loss=self._use_same_job_loss(spec),
-            loss_dataset_name=spec.dataset.source if self._use_same_job_loss(spec) else None,
-            loss_dataset_file=spec.dataset.file if self._use_same_job_loss(spec) else None,
-            loss_max_seq_length=(spec.loss.max_seq_length or spec.training.max_seq_length) if self._use_same_job_loss(spec) else None,
-            loss_no_completion_only=(not spec.loss.completion_only) if self._use_same_job_loss(spec) else False,
+            with_loss=same_job_loss,
+            loss_dataset_name=spec.dataset.source if same_job_loss else None,
+            loss_dataset_file=spec.dataset.file if same_job_loss else None,
+            loss_max_seq_length=(
+                spec.loss.max_seq_length or spec.training.max_seq_length
+            ) if same_job_loss else None,
+            loss_no_completion_only=(not spec.loss.completion_only) if same_job_loss else False,
             auto_confirm=True,
+            _source_preparation=source_preparation,
         )
-        handler = CloudEvalHandler(args=args)
-        handler._repo_root = self.repo_root
+
+    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: StageResult | None = None) -> StageResult:
+        if previous is None or previous.run_record is None:
+            raise CloudProviderError("Evaluation stage requires a completed training run.")
+        artifact_prefix = previous.run_record.tags.get("artifact_prefix", "")
+        bucket_id = previous.run_record.tags.get("bucket_id", "")
+        if not artifact_prefix or not bucket_id:
+            raise CloudProviderError("Training stage did not capture the HF artifact prefix and bucket.")
+        if not experiment.source_lock_uri or not experiment.source_lock_sha256:
+            raise CloudProviderError("Evaluation stage requires the training stage SourceLock identity.")
+        context = self.tracking_service.project_context or ProjectContext.standalone(engine_root=self.repo_root)
+        hf_settings = load_cloud_config(
+            self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        ).get("hf_jobs", {})
+        volume_settings = hf_settings.get("bootstrap_volume", {})
+        if not isinstance(volume_settings, dict):
+            raise CloudProviderError("hf_jobs.bootstrap_volume must be a mapping.")
+        source_preparation = load_tracked_hf_source_preparation(
+            context,
+            tracking_service=self.tracking_service,
+            experiment=experiment,
+            volume_settings=volume_settings,
+        )
+        require_current_hf_source_submission_authorization(route="stage.evaluation")
+        args = self.build_evaluation_plan_args(
+            spec=spec,
+            artifact_prefix=artifact_prefix,
+            bucket_id=bucket_id,
+            source_preparation=source_preparation,
+        )
+        self.tracking_service.update_stage_details(
+            experiment,
+            "evaluation",
+            status="running",
+            source_commit=previous.run_record.source_commit,
+            tags={
+                "provider": spec.provider,
+                "bucket_id": bucket_id,
+                "artifact_prefix": artifact_prefix,
+            },
+        )
+
+        handler = CloudEvalHandler(args=args, context=context)
         exit_code = handler.handle()
         status = "completed" if exit_code == 0 else "failed"
         self.tracking_service.update_stage_details(

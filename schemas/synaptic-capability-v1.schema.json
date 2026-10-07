@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-capability-v1.schema.json",
+  "title": "Synaptic Capability Descriptor v1",
+  "type": "object",
+  "required": ["schema_version", "id", "summary", "command", "inputs", "outputs", "effects", "confirmation", "resumable", "supports"],
+  "properties": {
+    "schema_version": {"const": "synaptic-capability/v1"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
+    "summary": {"type": "string", "minLength": 1},
+    "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "config_schema": {"type": "string", "minLength": 1},
+    "inputs": {"type": "array", "items": {"$ref": "#/$defs/input"}},
+    "outputs": {"type": "array", "items": {"$ref": "#/$defs/output"}},
+    "effects": {
+      "type": "object",
+      "required": ["filesystem_write", "network", "gpu", "paid_compute", "external_publish"],
+      "properties": {
+        "filesystem_write": {"type": "boolean"},
+        "network": {"type": "boolean"},
+        "gpu": {"enum": ["none", "optional", "required"]},
+        "paid_compute": {"enum": [false, "possible", "required"]},
+        "external_publish": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "confirmation": {
+      "type": "object",
+      "required": ["required"],
+      "properties": {"required": {"type": "boolean"}, "reason": {"type": "string", "minLength": 1}},
+      "additionalProperties": false
+    },
+    "resumable": {"type": "boolean"},
+    "supports": {
+      "type": "object",
+      "required": ["available", "dry_run", "json_result", "jsonl_events"],
+      "properties": {
+        "available": {"type": "boolean"},
+        "dry_run": {"type": "boolean"},
+        "json_result": {"type": "boolean"},
+        "jsonl_events": {"type": "boolean"}
+      },
+      "additionalProperties": {"type": "boolean"}
+    }
+  },
+  "$defs": {
+    "input": {
+      "type": "object",
+      "required": ["name", "type", "required"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "type": {"type": "string", "minLength": 1},
+        "required": {"type": "boolean"},
+        "access": {"enum": ["read", "write"]},
+        "description": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "output": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"type": "string", "minLength": 1},
+        "root": {"enum": ["artifact", "state", "tracking", "cache", "stdout", "external"]},
+        "description": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

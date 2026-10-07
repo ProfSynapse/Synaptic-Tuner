@@ -4,12 +4,10 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from shared.flywheel.catalog import InferenceLogRecord
 from shared.flywheel.config import FlywheelConfig
 from shared.flywheel.inference_logger import (
     InferenceLogger,

@@ -353,7 +353,7 @@ Main Menu:
 | `Evaluator/` | Hybrid evaluation | ML for structural checks, LLM for subjective |
 | `shared/validation/` | Feature source | Validation results become ML features |
 | `shared/judge/` | Label source | Judge scores become ML training labels |
-| `Tools/validate_syngen.py` | Enhanced validation | ML-powered quality predictions |
+| `shared/validation/dataset_validator.py` | Enhanced validation | ML-powered quality predictions |
 
 ---
 

@@ -6,7 +6,7 @@ Purpose: Orchestrate cloud training workflow (provider selection, config, job su
 Used by: Router when 'cloud' command is invoked, MainMenuHandler for cloud training option
 
 Manages the user workflow for submitting training jobs to cloud GPU providers:
-1. Select cloud provider (HF Jobs, Modal, RunPod)
+1. Select a legacy training backend (HF Jobs or RunPod)
 2. Validate provider credentials/environment
 3. Select training method (SFT, KTO)
 4. Load and display configuration with cost estimate
@@ -17,11 +17,23 @@ Supports --json flag for AI-parseable output.
 """
 
 import logging
+import os
 from argparse import Namespace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from tuner.backends.training.cloud.base_cloud import resolve_cloud_image
+from tuner.cloud import (
+    build_runtime_layout,
+    build_source_lock,
+    checkout_policy_from_context,
+    ssh_checkout_policy_from_environment,
+    standalone_credential_from_environment,
+)
+from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
+from tuner.core.config import CloudTrainingConfig, validation_split_flags
+from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.ui import (
@@ -44,12 +56,6 @@ PROVIDER_INFO = {
         "description": "Managed GPU training via HF infrastructure",
         "install_hint": "pip install --upgrade huggingface_hub>=0.27.0",
         "env_var": "HF_TOKEN",
-    },
-    "modal": {
-        "name": "Modal",
-        "description": "Serverless GPU compute with auto-scaling",
-        "install_hint": "pip install modal && modal setup",
-        "env_var": None,  # Uses OAuth or MODAL_TOKEN_ID
     },
     "runpod": {
         "name": "RunPod",
@@ -94,9 +100,13 @@ class CloudTrainHandler(BaseHandler):
         """Can be invoked as 'python tuner.py cloud'."""
         return True
 
-    def _get_provider_status(self) -> List[Dict]:
+    def _get_provider_status(self, *, validate_environment: bool = True) -> List[Dict]:
         """
         Check availability and status of each cloud provider.
+
+        ``validate_environment=False`` is the inspection-only path used by
+        JSON status output. It reports registry metadata without constructing
+        a backend or resolving provider credentials.
 
         Returns:
             List of dicts with provider id, name, status, and details
@@ -112,7 +122,7 @@ class CloudTrainHandler(BaseHandler):
                 "detail": "",
             }
 
-            if status["registered"]:
+            if status["registered"] and validate_environment:
                 try:
                     backend = TrainingBackendRegistry.get(provider_id, repo_root=self.repo_root)
                     is_valid, error = backend.validate_environment()
@@ -120,6 +130,8 @@ class CloudTrainHandler(BaseHandler):
                     status["detail"] = "" if is_valid else error
                 except Exception as e:
                     status["detail"] = str(e)
+            elif status["registered"]:
+                status["detail"] = "Registered; credentials not checked in inspection mode"
             else:
                 status["detail"] = f"Not installed (run: {info['install_hint']})"
 
@@ -133,12 +145,41 @@ class CloudTrainHandler(BaseHandler):
 
         Returns dict with available providers, their status, and methods.
         """
-        providers = self._get_provider_status()
+        providers = self._get_provider_status(validate_environment=False)
         return {
             "command": "cloud",
-            "status": "ready" if any(p["env_ready"] for p in providers) else "no_providers",
+            "status": "inspection_only",
+            "submission_enabled": False,
+            "credentials_checked": False,
             "providers": providers,
         }
+
+    def _prepare_source_contract(self):
+        """Build and validate source/layout provenance before provider choice."""
+
+        run_id = getattr(self.args, "run_id", None) or (
+            "cloud-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        )
+        standalone_credential = standalone_credential_from_environment(os.environ)
+        ssh_policy = ssh_checkout_policy_from_environment(os.environ)
+        source_lock = build_source_lock(
+            self.context,
+            run_id=run_id,
+            mode=getattr(self.args, "source_mode", None),
+            environment=os.environ,
+            provider_secret=getattr(self, "_source_provider_secret", None),
+            credential_helper=getattr(self, "_source_credential_helper", None),
+            standalone_credential=standalone_credential,
+            ssh_policy=ssh_policy,
+        )
+        policy = checkout_policy_from_context(
+            self.context,
+            ssh_policy=ssh_policy,
+            source_lock=source_lock,
+        )
+        policy.validate(source_lock.project_source.location)
+        policy.validate(source_lock.engine_source.location)
+        return source_lock, build_runtime_layout(self.context), policy
 
     def _build_provider_menu(self, providers: List[Dict]) -> List[Tuple[str, str]]:
         """
@@ -189,6 +230,25 @@ class CloudTrainHandler(BaseHandler):
             return 0
 
         print_header("CLOUD TRAINING", "Train models on cloud GPU providers")
+
+        # Source identity, cleanliness, pushed state, policy, and filesystem
+        # layout are established before provider selection or paid execution.
+        try:
+            source_lock, runtime_layout, checkout_policy = self._prepare_source_contract()
+        except Exception as exc:
+            print_error(f"Cloud source preflight failed: {exc}")
+            return 1
+
+        # Source preflight establishes what would run, but does not authorize
+        # provider interaction. Fail closed before capability probes, menus,
+        # SDK/backend construction, credential resolution, or compilation.
+        try:
+            require_current_hf_source_submission_authorization(
+                route="cloud-train.handle"
+            )
+        except CloudProviderError as exc:
+            print_error(f"Cloud launch authorization failed: {exc}")
+            return 1
 
         # Step 1: Check provider availability
         providers = self._get_provider_status()
@@ -248,6 +308,11 @@ class CloudTrainHandler(BaseHandler):
         try:
             config = backend.load_config(method)
             config = self._apply_training_overrides(config)
+            # Provider integrations consume these canonical objects as they
+            # migrate; attaching rather than re-modeling keeps one source SSOT.
+            config.source_lock = source_lock
+            config.runtime_layout = runtime_layout
+            config.checkout_policy = checkout_policy
         except Exception as e:
             print_error(f"Failed to load configuration: {e}")
             return 1
@@ -336,6 +401,20 @@ class CloudTrainHandler(BaseHandler):
         train_max_seq_length = getattr(args, "train_max_seq_length", None)
         if train_max_seq_length is not None:
             config.max_seq_length = train_max_seq_length
+
+        # Validation split overrides; validated with the trainer-config values
+        # when the HF/RunPod command is built (validation_split_flags).
+        train_split_dataset = getattr(args, "train_split_dataset", None)
+        if train_split_dataset is not None:
+            config.split_dataset = train_split_dataset
+
+        train_test_size = getattr(args, "train_test_size", None)
+        if train_test_size is not None:
+            config.test_size = train_test_size
+
+        train_validation_group_key = getattr(args, "train_validation_group_key", None)
+        if train_validation_group_key:
+            config.validation_group_key = train_validation_group_key
 
         if getattr(args, "train_load_in_4bit", None) is not None:
             config.load_in_4bit = args.train_load_in_4bit
@@ -469,6 +548,14 @@ class CloudTrainHandler(BaseHandler):
         if config.dataset_name and config.dataset_file and "/" not in config.dataset_file:
             config.dataset_file = f"{config.dataset_name}/{config.dataset_file}"
 
+        # Fail before any submission when the effective split settings are invalid.
+        if isinstance(config, CloudTrainingConfig):
+            validation_split_flags(
+                method=config.method,
+                split_dataset=config.split_dataset,
+                test_size=config.test_size,
+                validation_group_key=config.validation_group_key,
+            )
         return config
 
     def _load_method_labels(self) -> Dict[str, str]:

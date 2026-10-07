@@ -1,4 +1,459 @@
-from tuner.cli.parser import create_parser
+import json
+import importlib
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+import pytest
+
+import synaptic_tuner
+import tuner
+from shared.utilities.env import load_env_file, redact_env_value
+from tuner.cli.main import build_project_context, main as cli_main
+from tuner.cli.parser import _PROTECTED_ACTION_OPTIONS, create_parser
+from tuner.cli.router import route_command
+from tuner.project import ProjectContext
+
+
+def test_capabilities_parser_supports_list_describe_and_json_placement():
+    parser = create_parser()
+
+    listed = parser.parse_args(["capabilities", "list", "--json"])
+    described = parser.parse_args(
+        ["--json", "capabilities", "describe", "mechinterp.steer"]
+    )
+
+    assert (listed.command, listed.subcommand, listed.capability_id, listed.json) == (
+        "capabilities",
+        "list",
+        None,
+        True,
+    )
+    assert (
+        described.command,
+        described.subcommand,
+        described.capability_id,
+        described.json,
+    ) == ("capabilities", "describe", "mechinterp.steer", True)
+
+
+def test_hf_source_and_smoke_parser_are_narrow_and_have_no_yes_bypass():
+    parser = create_parser()
+    source = parser.parse_args([
+        "hf-source", "provision", "--experiment-id", "exp-1", "--actor", "operator-1",
+        "--env-file", ".env", "--base-dir", "C:/external/tracking",
+    ])
+    prepared = parser.parse_args([
+        "hf-source", "prepare", "--source-config", "Trainers/cloud/cloud_config.yaml",
+        "--base-dir", "C:/external/tracking",
+    ])
+    smoke = parser.parse_args([
+        "hf-smoke", "execute", "--experiment-id", "exp-1", "--env-file", ".env",
+        "--base-dir", "C:/external/tracking",
+    ])
+    training_smoke = parser.parse_args([
+        "hf-training-smoke", "execute", "--experiment-id", "exp-1",
+        "--env-file", ".env", "--base-dir", "C:/external/tracking",
+    ])
+    assert (source.command, source.subcommand) == ("hf-source", "provision")
+    assert (prepared.command, prepared.subcommand) == ("hf-source", "prepare")
+    assert (smoke.command, smoke.subcommand) == ("hf-smoke", "execute")
+    assert (training_smoke.command, training_smoke.subcommand) == (
+        "hf-training-smoke", "execute"
+    )
+    assert not hasattr(smoke, "hf_smoke_command")
+    with pytest.raises(SystemExit):
+        parser.parse_args(["hf-smoke", "execute", "--experiment-id", "exp-1", "--yes"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["hf-training-smoke", "execute", "--yes"])
+    for argv in (
+        ["hf-smoke"], ["hf-smoke", "retry"], ["hf-source"],
+        ["hf-source", "execute"], ["hf-training-smoke"],
+        ["hf-training-smoke", "retry"],
+    ):
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)
+
+
+def test_protected_action_option_allowlists_are_frozen():
+    assert _PROTECTED_ACTION_OPTIONS == {
+        ("hf-source", "prepare"): frozenset({
+            "--base-dir", "--experiment-id", "--json", "--manifest",
+            "--project-root", "--source-config", "--source-mode",
+        }),
+        ("hf-source", "provision"): frozenset({
+            "--actor", "--authority", "--base-dir", "--env-file",
+            "--experiment-id", "--json", "--manifest", "--project-root",
+        }),
+        ("hf-smoke", "approve"): frozenset({
+            "--authorization-reference", "--base-dir", "--experiment-id",
+            "--expires-at", "--hourly-price-usd", "--issued-at", "--json",
+            "--manifest", "--project-root", "--projected-cost-usd", "--quoted-at",
+        }),
+        ("hf-smoke", "execute"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+        ("hf-smoke", "observe"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+        ("hf-training-smoke", "preflight"): frozenset({
+            "--artifact-bucket-id", "--artifact-prefix", "--base-dir",
+            "--env-file", "--expected-namespace", "--experiment-id", "--json",
+            "--manifest", "--project-root", "--source-bucket-id",
+            "--source-prefix",
+        }),
+        ("hf-training-smoke", "approve"): frozenset({
+            "--authorization-reference", "--base-dir", "--experiment-id",
+            "--expires-at", "--issued-at", "--json", "--manifest",
+            "--project-root",
+        }),
+        ("hf-training-smoke", "execute"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+        ("hf-training-smoke", "recover"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+        ("hf-training-smoke", "observe"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+        ("hf-training-smoke", "verify"): frozenset({
+            "--base-dir", "--env-file", "--experiment-id", "--json",
+            "--manifest", "--project-root",
+        }),
+        ("modal-runtime-release", "preflight"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest",
+            "--project-root", "--release-plan",
+        }),
+        ("modal-runtime-release", "approve"): frozenset({
+            "--authorization-reference", "--base-dir", "--expires-at",
+            "--issued-at", "--json", "--manifest", "--project-root",
+            "--release-ref",
+        }),
+        ("modal-runtime-release", "execute"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest",
+            "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "recover"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest",
+            "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "observe"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest",
+            "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "verify"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest",
+            "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-preflight"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-approve"): frozenset({
+            "--authorization-reference", "--base-dir", "--expires-at", "--issued-at",
+            "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-execute"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-recover"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-observe"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+        ("modal-runtime-release", "qualify-verify"): frozenset({
+            "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+        }),
+    }
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["hf-source", "prepare", "--source-config=config.yaml", "--base-dir=C:/external", "--source-mode=standalone", "--json"], ("hf-source", "prepare")),
+        (["hf-source", "provision", "--experiment-id=exp-1", "--actor=operator", "--authority=operator", "--env-file=.env", "--base-dir=C:/external"], ("hf-source", "provision")),
+        (["hf-smoke", "approve", "--experiment-id=exp-1", "--authorization-reference=chat", "--issued-at=2026-08-20T00:00:00Z", "--expires-at=2026-08-20T01:00:00Z", "--quoted-at=2026-08-20T00:00:00Z", "--hourly-price-usd=0.01", "--projected-cost-usd=0.01", "--base-dir=C:/external"], ("hf-smoke", "approve")),
+        (["hf-smoke", "execute", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-smoke", "execute")),
+        (["hf-smoke", "observe", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-smoke", "observe")),
+        (["hf-training-smoke", "preflight", "--experiment-id=exp-1", "--expected-namespace=owner", "--source-bucket-id=owner/source", "--source-prefix=source/exact", "--artifact-bucket-id=owner/artifacts", "--artifact-prefix=training/smoke", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "preflight")),
+        (["hf-training-smoke", "approve", "--experiment-id=exp-1", "--authorization-reference=chat", "--issued-at=2026-08-21T00:00:00Z", "--expires-at=2026-08-21T00:15:00Z", "--base-dir=C:/external"], ("hf-training-smoke", "approve")),
+        (["hf-training-smoke", "execute", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "execute")),
+        (["hf-training-smoke", "recover", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "recover")),
+        (["hf-training-smoke", "observe", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "observe")),
+        (["hf-training-smoke", "verify", "--experiment-id=exp-1", "--env-file=.env", "--base-dir=C:/external"], ("hf-training-smoke", "verify")),
+        (["modal-runtime-release", "preflight", "--release-plan=release.json", "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "preflight")),
+        (["modal-runtime-release", "approve", "--release-ref=" + "a" * 64, "--authorization-reference=chat", "--issued-at=2026-09-22T00:00:00Z", "--expires-at=2026-09-22T00:15:00Z", "--base-dir=C:/external"], ("modal-runtime-release", "approve")),
+        (["modal-runtime-release", "execute", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "execute")),
+        (["modal-runtime-release", "recover", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "recover")),
+        (["modal-runtime-release", "observe", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "observe")),
+        (["modal-runtime-release", "verify", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "verify")),
+        (["modal-runtime-release", "qualify-preflight", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-preflight")),
+        (["modal-runtime-release", "qualify-approve", "--release-ref=" + "a" * 64, "--authorization-reference=chat", "--issued-at=2026-09-22T00:00:00Z", "--expires-at=2026-09-22T00:15:00Z", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-approve")),
+        (["modal-runtime-release", "qualify-execute", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-execute")),
+        (["modal-runtime-release", "qualify-recover", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-recover")),
+        (["modal-runtime-release", "qualify-observe", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-observe")),
+        (["modal-runtime-release", "qualify-verify", "--release-ref=" + "a" * 64, "--env-file=.env", "--base-dir=C:/external"], ("modal-runtime-release", "qualify-verify")),
+    ],
+)
+def test_protected_action_allowlists_accept_equals_syntax(argv, expected):
+    parsed = create_parser().parse_args(argv)
+    assert (parsed.command, parsed.subcommand) == expected
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["hf-source", "prepare", "--env-file=.env"],
+        ["hf-source", "prepare", "--profile=unsafe"],
+        ["hf-source", "provision", "--source-config=config.yaml"],
+        ["hf-source", "provision", "--source-mode=standalone"],
+        ["hf-smoke", "approve", "--env-file=.env"],
+        ["hf-smoke", "approve", "--source-mode=standalone"],
+        ["hf-smoke", "execute", "--quoted-at=2026-08-20T00:00:00Z"],
+        ["hf-smoke", "observe", "--authorization-reference=chat"],
+        ["hf-smoke", "execute", "--yes"],
+        ["--profile=unsafe", "hf-smoke", "observe"],
+        ["hf-training-smoke", "preflight", "--hardware=a10g-large"],
+        ["hf-training-smoke", "preflight", "--train-gpu=a100-large"],
+        ["hf-training-smoke", "preflight", "--hourly-price-usd=0.01"],
+        ["hf-training-smoke", "approve", "--env-file=.env"],
+        ["hf-training-smoke", "approve", "--artifact-prefix=chosen"],
+        ["hf-training-smoke", "approve", "--max-hourly-price=0.01"],
+        ["hf-training-smoke", "execute", "--expected-namespace=owner"],
+        ["hf-training-smoke", "execute", "--timeout=60"],
+        ["hf-training-smoke", "execute", "--timeout-hours=1"],
+        ["hf-training-smoke", "execute", "--train-cloud-image=mutable:latest"],
+        ["hf-training-smoke", "execute", "--provider=modal"],
+        ["hf-training-smoke", "execute", "--auto-confirm"],
+        ["hf-training-smoke", "recover", "--yes"],
+        ["hf-training-smoke", "observe", "--authorization-reference=chat"],
+        ["hf-training-smoke", "verify", "--source-prefix=other"],
+        ["--profile=unsafe", "hf-training-smoke", "observe"],
+    ],
+)
+def test_protected_action_allowlists_reject_disallowed_explicit_options(argv):
+    with pytest.raises(SystemExit):
+        create_parser().parse_args(argv)
+
+
+def test_hf_training_smoke_router_uses_protected_handler(tmp_path, monkeypatch):
+    from tuner.handlers.hf_training_smoke_handler import HFTrainingSmokeHandler
+
+    args = create_parser().parse_args([
+        "hf-training-smoke", "verify", "--experiment-id", "exp-1",
+        "--env-file", ".env", "--base-dir", "C:/external",
+    ])
+    context = ProjectContext.standalone(engine_root=tmp_path)
+    seen = []
+
+    def handle(handler):
+        seen.append((handler.args, handler.context))
+        return 17
+
+    monkeypatch.setattr(HFTrainingSmokeHandler, "handle", handle)
+
+    assert route_command(args, context=context) == 17
+    assert seen == [(args, context)]
+
+
+def test_tuner_legacy_exports_resolve_lazily_and_preserve_normal_errors(tmp_path):
+    engine_root = Path(__file__).parents[2].resolve()
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(engine_root), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    probe = """
+import json
+import sys
+import tuner
+
+before = sorted(name for name in sys.modules if name.startswith("tuner.core."))
+training_config = tuner.TrainingConfig
+after_config = sorted(name for name in sys.modules if name.startswith("tuner.core."))
+backend_error = tuner.BackendError
+after_error = sorted(name for name in sys.modules if name.startswith("tuner.core."))
+try:
+    tuner.not_a_public_export
+except AttributeError as exc:
+    error = str(exc)
+else:
+    raise AssertionError("unknown package attributes must raise AttributeError")
+print(json.dumps({
+    "before": before,
+    "after_config": after_config,
+    "after_error": after_error,
+    "training_config_module": training_config.__module__,
+    "backend_error_module": backend_error.__module__,
+    "all_contains_exports": all(
+        name in tuner.__all__ for name in ("TrainingConfig", "BackendError")
+    ),
+    "dir_contains_exports": all(
+        name in dir(tuner) for name in ("TrainingConfig", "BackendError")
+    ),
+    "normal_error": "not_a_public_export" in error,
+}))
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["before"] == []
+    expected_core_modules = {
+        "tuner.core.config",
+        "tuner.core.exceptions",
+        "tuner.core.interfaces",
+    }
+    assert set(payload["after_config"]) == expected_core_modules
+    assert set(payload["after_error"]) == expected_core_modules
+    assert payload["training_config_module"] == "tuner.core.config"
+    assert payload["backend_error_module"] == "tuner.core.exceptions"
+    assert payload["all_contains_exports"] is True
+    assert payload["dir_contains_exports"] is True
+    assert payload["normal_error"] is True
+
+
+def test_handler_package_exports_are_lazy_and_isolated(tmp_path):
+    engine_root = Path(__file__).parents[2].resolve()
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(engine_root), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    probe = """
+import json
+import sys
+import tuner.handlers as handlers
+
+before = sorted(name for name in sys.modules if name.startswith("tuner.handlers."))
+status_handler = handlers.StatusHandler
+after = sorted(name for name in sys.modules if name.startswith("tuner.handlers."))
+try:
+    handlers.not_a_handler
+except AttributeError as exc:
+    error = str(exc)
+else:
+    raise AssertionError("unknown handler attributes must raise AttributeError")
+print(json.dumps({
+    "before": before,
+    "after": after,
+    "module": status_handler.__module__,
+    "all_contains_export": "StatusHandler" in handlers.__all__,
+    "dir_contains_export": "StatusHandler" in dir(handlers),
+    "normal_error": "not_a_handler" in error,
+}))
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["before"] == []
+    assert "tuner.handlers.status_handler" in payload["after"]
+    assert not any(
+        name in payload["after"]
+        for name in (
+            "tuner.handlers.train_handler",
+            "tuner.handlers.eval_handler",
+            "tuner.handlers.ml_handler",
+            "tuner.handlers.cloud_train_handler",
+        )
+    )
+    assert payload["module"] == "tuner.handlers.status_handler"
+    assert payload["all_contains_export"] is True
+    assert payload["dir_contains_export"] is True
+    assert payload["normal_error"] is True
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["capabilities"],
+        ["capabilities", "unknown"],
+        ["capabilities", "list", "mechinterp.steer"],
+        ["capabilities", "describe"],
+        ["list", "datasets", "unexpected"],
+    ],
+)
+def test_capabilities_parser_rejects_invalid_positional_combinations(argv):
+    with pytest.raises(SystemExit) as exc_info:
+        create_parser().parse_args(argv)
+
+    assert exc_info.value.code == 2
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_capability"),
+    [
+        (["capabilities", "list", "--json"], "capabilities.list"),
+        (
+            ["capabilities", "describe", "mechinterp.steer", "--json"],
+            "capabilities.describe",
+        ),
+    ],
+)
+def test_synaptic_capability_discovery_is_import_light_from_unrelated_cwd(
+    tmp_path, arguments, expected_capability
+):
+    engine_root = Path(__file__).parents[2].resolve()
+    module_log = tmp_path / "modules.json"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(engine_root), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    env["SYNAPTIC_TEST_MODULE_LOG"] = str(module_log)
+    probe = (
+        "import json, os, sys; from pathlib import Path; "
+        "from tuner.cli.main import main; code = 0\n"
+        "try: main()\n"
+        "except SystemExit as exc: code = exc.code\n"
+        "Path(os.environ['SYNAPTIC_TEST_MODULE_LOG']).write_text("
+        "json.dumps(sorted(sys.modules)), encoding='utf-8')\n"
+        "raise SystemExit(code)"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe, *arguments],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["schema_version"] == "synaptic-result/v1"
+    assert payload["success"] is True
+    assert payload["capability"] == expected_capability
+    imported = set(json.loads(module_log.read_text(encoding="utf-8")))
+    forbidden = {
+        "torch",
+        "transformers",
+        "huggingface_hub",
+        "modal",
+        "runpod",
+    }
+    assert not (forbidden & imported)
 
 
 def test_parser_supports_yes_alias_for_auto_confirm():
@@ -307,3 +762,445 @@ def test_flywheel_export_fixtures_command_parses():
     assert args.output == "Evaluator/config/scenarios/flywheel_frozen.yaml"
     assert args.dry_run is True
     assert args.auto_confirm is True
+
+
+def test_project_command_and_context_flags_parse():
+    parser = create_parser()
+
+    args = parser.parse_args(
+        [
+            "project",
+            "validate",
+            "--project-root",
+            "host",
+            "--manifest",
+            "host/synaptic.yaml",
+            "--env-file",
+            "host/.env",
+            "--profile",
+            "smoke",
+            "--source-mode",
+            "superproject",
+            "--events",
+            "jsonl",
+            "--json",
+        ]
+    )
+
+    assert args.command == "project"
+    assert args.subcommand == "validate"
+    assert args.project_root == "host"
+    assert args.manifest == "host/synaptic.yaml"
+    assert args.env_file == "host/.env"
+    assert args.profile == "smoke"
+    assert args.source_mode == "superproject"
+    assert args.events == "jsonl"
+    assert args.json is True
+
+
+def test_legacy_command_defaults_remain_unchanged():
+    parser = create_parser()
+
+    args = parser.parse_args(["local-run", "--job-config", "recipe.yaml", "--yes"])
+
+    assert args.command == "local-run"
+    assert args.project_root is None
+    assert args.manifest is None
+    assert args.env_file is None
+    assert args.profile is None
+    assert args.events is None
+    assert args.source_mode is None
+
+
+def test_build_project_context_resolves_manifest_paths(tmp_path, monkeypatch):
+    project_root = tmp_path / "host"
+    project_root.mkdir()
+    (project_root / "synaptic.yaml").write_text(
+        """schema_version: synaptic-project/v1
+project:
+  id: parser-host
+  name: Parser Host
+engine:
+  requires: \">=1.0,<2.0\"
+  api: v1
+paths:
+  configs: project://experiments
+  artifacts: project://.synaptic/artifacts
+  state: project://.synaptic/state
+  tracking: project://.synaptic/tracking
+  cache: project://.synaptic/cache
+  tmp: project://.synaptic/tmp
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    args = create_parser().parse_args(
+        ["project", "inspect", "--project-root", str(project_root), "--json"]
+    )
+
+    context = build_project_context(args, engine_root=Path(__file__).parents[2])
+
+    assert context.mode == "host"
+    assert context.project_root == project_root.resolve()
+    assert context.artifact_root == (project_root / ".synaptic" / "artifacts").resolve()
+
+
+def test_context_env_loading_preserves_process_precedence(tmp_path, monkeypatch):
+    project_root = tmp_path / "host"
+    project_root.mkdir()
+    (project_root / ".env").write_text(
+        "NODE_D_EXISTING=from-file\nNODE_D_NEW=from-file\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("NODE_D_EXISTING", "from-process")
+    monkeypatch.delenv("NODE_D_NEW", raising=False)
+    context = ProjectContext.host(engine_root=tmp_path / "engine", project_root=project_root)
+
+    assert load_env_file(context=context) is True
+    assert __import__("os").environ["NODE_D_EXISTING"] == "from-process"
+    assert __import__("os").environ["NODE_D_NEW"] == "from-file"
+
+
+def test_environment_redaction_never_reveals_secret_prefixes():
+    assert redact_env_value("HF_TOKEN", "hf_example-secret") == "<redacted>"
+    assert redact_env_value("OPENROUTER_API_KEY", "sk-or-example") == "<redacted>"
+    assert redact_env_value("LMSTUDIO_HOST", "localhost") == "localhost"
+
+
+def test_explicit_env_file_has_selection_priority(tmp_path, monkeypatch):
+    project_root = tmp_path / "host"
+    project_root.mkdir()
+    (project_root / ".env").write_text("NODE_D_ENV_SOURCE=host\n", encoding="utf-8")
+    explicit = tmp_path / "selected.env"
+    explicit.write_text("NODE_D_ENV_SOURCE=explicit\n", encoding="utf-8")
+    monkeypatch.delenv("NODE_D_ENV_SOURCE", raising=False)
+    context = ProjectContext.host(engine_root=tmp_path / "engine", project_root=project_root)
+
+    assert load_env_file(context=context, explicit_path=explicit) is True
+    assert os.environ["NODE_D_ENV_SOURCE"] == "explicit"
+
+
+def test_process_environment_beats_explicit_env_file(tmp_path, monkeypatch):
+    explicit = tmp_path / "selected.env"
+    explicit.write_text("NODE_D_ENV_PROCESS=file\n", encoding="utf-8")
+    monkeypatch.setenv("NODE_D_ENV_PROCESS", "process")
+
+    assert load_env_file(explicit_path=explicit) is True
+    assert os.environ["NODE_D_ENV_PROCESS"] == "process"
+
+
+def test_explicit_python_engine_root_beats_process_override(tmp_path, monkeypatch):
+    explicit = tmp_path / "explicit-engine"
+    process = tmp_path / "process-engine"
+    monkeypatch.setenv("SYNAPTIC_ENGINE_ROOT", str(process))
+    monkeypatch.chdir(tmp_path)
+    args = create_parser().parse_args(["project", "inspect"])
+
+    context = build_project_context(args, engine_root=explicit)
+
+    assert context.engine_root == explicit.resolve()
+
+
+def test_process_engine_root_beats_module_fallback(tmp_path, monkeypatch):
+    process = tmp_path / "process-engine"
+    monkeypatch.setenv("SYNAPTIC_ENGINE_ROOT", str(process))
+    monkeypatch.chdir(tmp_path)
+    args = create_parser().parse_args(["project", "inspect"])
+
+    context = build_project_context(args)
+
+    assert context.engine_root == process.resolve()
+
+
+def test_dotenv_engine_root_cannot_retroactively_change_context(tmp_path, monkeypatch):
+    dotenv_engine = tmp_path / "dotenv-engine"
+    env_file = tmp_path / "selected.env"
+    env_file.write_text(
+        f"SYNAPTIC_ENGINE_ROOT={dotenv_engine}\n", encoding="utf-8"
+    )
+    monkeypatch.delenv("SYNAPTIC_ENGINE_ROOT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    args = create_parser().parse_args(["project", "inspect"])
+
+    context = build_project_context(args, engine_root=tmp_path / "explicit-engine")
+    try:
+        assert load_env_file(context=context, explicit_path=env_file) is True
+        assert context.engine_root == (tmp_path / "explicit-engine").resolve()
+        assert os.environ["SYNAPTIC_ENGINE_ROOT"] == str(dotenv_engine)
+    finally:
+        os.environ.pop("SYNAPTIC_ENGINE_ROOT", None)
+
+
+def test_missing_explicit_env_file_fails_before_routing(
+    tmp_path, monkeypatch, capsys
+):
+    routed = False
+
+    def fail_if_routed(*args, **kwargs):
+        nonlocal routed
+        routed = True
+        raise AssertionError("router must not run when explicit env file is missing")
+
+    cli_main_module = importlib.import_module("tuner.cli.main")
+    monkeypatch.setattr(cli_main_module, "route_command", fail_if_routed)
+    missing = tmp_path / "missing.env"
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["project", "inspect", "--env-file", str(missing), "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exc_info.value.code == 1
+    assert routed is False
+    assert payload["error"]["code"] == "ENV_FILE_NOT_FOUND"
+    assert payload["error"]["details"]["path"] == str(missing.resolve())
+
+
+def test_explicit_env_file_without_dotenv_support_fails_before_routing(
+    tmp_path, monkeypatch, capsys
+):
+    routed = False
+
+    def fail_if_routed(*args, **kwargs):
+        nonlocal routed
+        routed = True
+        raise AssertionError("router must not run without explicit dotenv support")
+
+    env_file = tmp_path / "selected.env"
+    env_file.write_text("NODE_D_SUPPORT_TEST=loaded\n", encoding="utf-8")
+    cli_main_module = importlib.import_module("tuner.cli.main")
+    monkeypatch.setattr(cli_main_module, "route_command", fail_if_routed)
+    monkeypatch.setitem(sys.modules, "dotenv", None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["project", "inspect", "--env-file", str(env_file), "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exc_info.value.code == 1
+    assert routed is False
+    assert payload["error"] == {
+        "code": "ENV_FILE_SUPPORT_UNAVAILABLE",
+        "message": "Explicit env file requires python-dotenv support",
+        "details": {
+            "path": str(env_file.resolve()),
+            "dependency": "python-dotenv",
+        },
+    }
+
+
+def test_implicit_env_loading_preserves_no_dotenv_compatibility(
+    tmp_path, monkeypatch
+):
+    (tmp_path / ".env").write_text("NODE_D_IMPLICIT_TEST=loaded\n", encoding="utf-8")
+    context = ProjectContext.standalone(engine_root=tmp_path)
+    monkeypatch.setitem(sys.modules, "dotenv", None)
+
+    assert load_env_file(context=context) is False
+
+
+def test_explicit_env_file_with_installed_support_loads_and_routes(
+    tmp_path, monkeypatch
+):
+    env_file = tmp_path / "selected.env"
+    env_file.write_text(
+        "NODE_D_INSTALLED_EXISTING=file\nNODE_D_INSTALLED_NEW=loaded\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NODE_D_INSTALLED_EXISTING", "process")
+    monkeypatch.delenv("NODE_D_INSTALLED_NEW", raising=False)
+    routed = []
+
+    def record_route(args, *, context):
+        routed.append(context.engine_root)
+        return 0
+
+    cli_main_module = importlib.import_module("tuner.cli.main")
+    monkeypatch.setattr(cli_main_module, "route_command", record_route)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["project", "inspect", "--env-file", str(env_file), "--json"])
+
+    assert exc_info.value.code == 0
+    assert routed == [Path(__file__).parents[2].resolve()]
+    assert os.environ["NODE_D_INSTALLED_EXISTING"] == "process"
+    assert os.environ["NODE_D_INSTALLED_NEW"] == "loaded"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["hf-source", "provision", "--experiment-id", "exp-1", "--actor", "operator-1"],
+        ["hf-smoke", "execute", "--experiment-id", "exp-1"],
+        ["hf-smoke", "observe", "--experiment-id", "exp-1"],
+        ["hf-training-smoke", "preflight", "--experiment-id", "exp-1"],
+        ["hf-training-smoke", "execute", "--experiment-id", "exp-1"],
+        ["hf-training-smoke", "recover", "--experiment-id", "exp-1"],
+        ["hf-training-smoke", "observe", "--experiment-id", "exp-1"],
+        ["hf-training-smoke", "verify", "--experiment-id", "exp-1"],
+    ],
+)
+def test_protected_hf_cli_defers_dotenv_until_handler_boundary(
+    tmp_path, monkeypatch, argv
+):
+    env_file = tmp_path / "protected.env"
+    env_file.write_text("HF_TOKEN=hf_must_not_load_before_route\n", encoding="utf-8")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    routed = []
+
+    def record_route(args, *, context):
+        assert "HF_TOKEN" not in os.environ
+        assert args._env_loaded is False
+        assert args._env_loading_deferred is True
+        assert args._explicit_env_path == env_file.resolve()
+        routed.append((args.command, args.subcommand))
+        return 0
+
+    cli_main_module = importlib.import_module("tuner.cli.main")
+    monkeypatch.setattr(cli_main_module, "route_command", record_route)
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main([*argv, "--env-file", str(env_file), "--json"])
+
+    assert exc_info.value.code == 0
+    assert routed == [(argv[0], argv[1])]
+    assert "HF_TOKEN" not in os.environ
+
+
+def test_real_main_and_smoke_handler_reject_ambient_token_before_submit(
+    tmp_path, monkeypatch, capsys
+):
+    from types import SimpleNamespace
+    from tuner.handlers.hf_smoke_handler import HFSmokeHandler
+
+    project = tmp_path / "protected-host"
+    project.mkdir()
+    (project / "experiments").mkdir()
+    engine_root = tmp_path / "engine-checkout"
+    engine_root.mkdir()
+    monkeypatch.setenv("SYNAPTIC_ENGINE_ROOT", str(engine_root))
+    _write_requirement_manifest(project, ">=1.1,<2")
+    env_file = project / "smoke.env"
+    env_file.write_text("HF_TOKEN=hf_file_authority\n", encoding="utf-8")
+    monkeypatch.setenv("HF_TOKEN", "hf_ambient_rejected")
+    monkeypatch.delenv("HF_API_KEY", raising=False)
+    tracking = SimpleNamespace(resolve_uri=lambda uri: env_file)
+    experiment = SimpleNamespace(
+        hf_submission_state="APPROVED",
+        hf_run_approval_uri="tracking://approval.json",
+    )
+    monkeypatch.setattr(
+        HFSmokeHandler, "_state", lambda self: (tracking, experiment, object())
+    )
+    smoke_module = importlib.import_module("tuner.handlers.hf_smoke_handler")
+    monkeypatch.setattr(smoke_module, "load_canonical_json", lambda *args, **kwargs: {})
+    monkeypatch.setattr(smoke_module, "validate_hf_run_approval", lambda value: object())
+    submissions = []
+    monkeypatch.setattr(
+        smoke_module,
+        "submit_approved_bootstrap_smoke",
+        lambda **kwargs: submissions.append(kwargs),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main([
+            "hf-smoke", "execute", "--experiment-id", "exp-1",
+            "--project-root", str(project), "--env-file", str(env_file), "--json",
+        ])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert "ambient" in payload["error"]["message"]
+    assert "hf_ambient_rejected" not in json.dumps(payload)
+    assert submissions == []
+
+
+def _write_requirement_manifest(project_root: Path, requirement: str) -> None:
+    (project_root / "synaptic.yaml").write_text(
+        f"""schema_version: synaptic-project/v1
+project:
+  id: requirement-host
+  name: Requirement Host
+engine:
+  requires: \"{requirement}\"
+  api: v1
+paths:
+  configs: project://experiments
+  artifacts: project://.synaptic/artifacts
+  state: project://.synaptic/state
+  tracking: project://.synaptic/tracking
+  cache: project://.synaptic/cache
+  tmp: project://.synaptic/tmp
+""",
+        encoding="utf-8",
+    )
+
+
+def test_compatible_engine_requirement_routes_handler(tmp_path, monkeypatch):
+    project_root = tmp_path / "compatible-host"
+    project_root.mkdir()
+    _write_requirement_manifest(project_root, ">=1.1,<2")
+    routed = []
+
+    def record_route(args, *, context):
+        routed.append((args.command, context.project_root))
+        return 0
+
+    cli_main_module = importlib.import_module("tuner.cli.main")
+    monkeypatch.setattr(cli_main_module, "route_command", record_route)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["project", "inspect", "--project-root", str(project_root), "--json"])
+
+    assert exc_info.value.code == 0
+    assert routed == [("project", project_root.resolve())]
+
+
+def test_incompatible_engine_requirement_fails_before_routing(
+    tmp_path, monkeypatch, capsys
+):
+    project_root = tmp_path / "incompatible-host"
+    project_root.mkdir()
+    _write_requirement_manifest(project_root, "<1.1")
+    routed = False
+
+    def fail_if_routed(*args, **kwargs):
+        nonlocal routed
+        routed = True
+        raise AssertionError("router must not run for an incompatible engine")
+
+    cli_main_module = importlib.import_module("tuner.cli.main")
+    monkeypatch.setattr(cli_main_module, "route_command", fail_if_routed)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["project", "inspect", "--project-root", str(project_root), "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exc_info.value.code == 1
+    assert routed is False
+    assert payload["error"]["code"] == "PROJECT_MANIFEST_INVALID"
+    assert payload["error"]["details"] == {
+        "reason": "engine_version_incompatible",
+        "requires": "<1.1",
+        "engine_version": "1.1.0",
+    }
+
+
+def test_legacy_and_public_runtime_versions_share_canonical_1_1_0():
+    assert synaptic_tuner.__version__ == "1.1.0"
+    assert tuner.__version__ == synaptic_tuner.__version__
+
+
+def test_project_migrate_dry_run_is_json_and_side_effect_free(tmp_path, capsys):
+    project_root = tmp_path / "legacy-host"
+    project_root.mkdir()
+    args = create_parser().parse_args(
+        ["project", "migrate-dry-run", "--project-root", str(project_root), "--json"]
+    )
+    context = ProjectContext.host(
+        engine_root=Path(__file__).parents[2], project_root=project_root
+    )
+
+    assert route_command(args, context=context) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is True
+    assert payload["data"]["dry_run"] is True
+    assert payload["data"]["writes_performed"] is False
+    assert not (project_root / "synaptic.yaml").exists()
+    assert not (project_root / ".synaptic").exists()

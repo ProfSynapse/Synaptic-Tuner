@@ -1,0 +1,5 @@
+# Consumer-only host closure; do not install into the remote training image.
+-r ../../requirements/modal-launcher-v1.lock
+charset-normalizer==3.4.5 --hash=sha256:9db5e3fcdcee89a78c04dffb3fe33c79f77bd741a624946db2591c81b2fc85b0
+requests==2.32.5 --hash=sha256:2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6
+urllib3==2.6.3 --hash=sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4

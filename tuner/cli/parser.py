@@ -17,8 +17,192 @@ The parser defines the top-level command structure:
 """
 
 import argparse
+import sys
 
 from shared.utilities.paths import TRAINING_METHODS
+
+
+_PROTECTED_ACTION_OPTIONS = {
+    ("hf-source", "prepare"): frozenset({
+        "--base-dir", "--experiment-id", "--json", "--manifest",
+        "--project-root", "--source-config", "--source-mode",
+    }),
+    ("hf-source", "provision"): frozenset({
+        "--actor", "--authority", "--base-dir", "--env-file",
+        "--experiment-id", "--json", "--manifest", "--project-root",
+    }),
+    ("hf-smoke", "approve"): frozenset({
+        "--authorization-reference", "--base-dir", "--experiment-id",
+        "--expires-at", "--hourly-price-usd", "--issued-at", "--json",
+        "--manifest", "--project-root", "--projected-cost-usd", "--quoted-at",
+    }),
+    ("hf-smoke", "execute"): frozenset({
+        "--base-dir", "--env-file", "--experiment-id", "--json",
+        "--manifest", "--project-root",
+    }),
+    ("hf-smoke", "observe"): frozenset({
+        "--base-dir", "--env-file", "--experiment-id", "--json",
+        "--manifest", "--project-root",
+    }),
+    ("hf-training-smoke", "preflight"): frozenset({
+        "--artifact-bucket-id", "--artifact-prefix", "--base-dir", "--env-file",
+        "--expected-namespace", "--experiment-id", "--json", "--manifest",
+        "--project-root", "--source-bucket-id", "--source-prefix",
+    }),
+    ("hf-training-smoke", "approve"): frozenset({
+        "--authorization-reference", "--base-dir", "--experiment-id", "--expires-at",
+        "--issued-at", "--json", "--manifest", "--project-root",
+    }),
+    ("hf-training-smoke", "execute"): frozenset({
+        "--base-dir", "--env-file", "--experiment-id", "--json", "--manifest", "--project-root",
+    }),
+    ("hf-training-smoke", "recover"): frozenset({
+        "--base-dir", "--env-file", "--experiment-id", "--json", "--manifest", "--project-root",
+    }),
+    ("hf-training-smoke", "observe"): frozenset({
+        "--base-dir", "--env-file", "--experiment-id", "--json", "--manifest", "--project-root",
+    }),
+    ("hf-training-smoke", "verify"): frozenset({
+        "--base-dir", "--env-file", "--experiment-id", "--json", "--manifest", "--project-root",
+    }),
+    ("modal-runtime-release", "preflight"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-plan",
+    }),
+    ("modal-runtime-release", "approve"): frozenset({
+        "--authorization-reference", "--base-dir", "--expires-at",
+        "--issued-at", "--json", "--manifest", "--project-root",
+        "--release-ref",
+    }),
+    ("modal-runtime-release", "execute"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "recover"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "observe"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "verify"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest",
+        "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-preflight"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-approve"): frozenset({
+        "--authorization-reference", "--base-dir", "--expires-at", "--issued-at",
+        "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-execute"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-recover"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-observe"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+    ("modal-runtime-release", "qualify-verify"): frozenset({
+        "--base-dir", "--env-file", "--json", "--manifest", "--project-root", "--release-ref",
+    }),
+}
+
+
+def _explicit_long_options(arguments: list[str]) -> set[str]:
+    """Return canonical long-option names, including ``--flag=value`` forms."""
+
+    return {
+        token.partition("=")[0]
+        for token in arguments
+        if token.startswith("--")
+    }
+
+
+def _enforce_protected_action_allowlist(
+    parser: argparse.ArgumentParser,
+    arguments: list[str],
+    *,
+    command: str,
+    action: str,
+) -> None:
+    allowed = _PROTECTED_ACTION_OPTIONS[(command, action)]
+    disallowed = sorted(_explicit_long_options(arguments) - allowed)
+    if disallowed:
+        parser.error(
+            f"{command} {action} does not accept explicit option(s): "
+            + ", ".join(disallowed)
+        )
+
+
+class _SynapticArgumentParser(argparse.ArgumentParser):
+    """Validate command-specific positionals used by the flat CLI grammar."""
+
+    def parse_args(self, args=None, namespace=None):
+        arguments = list(sys.argv[1:] if args is None else args)
+        parsed = super().parse_args(args=arguments, namespace=namespace)
+        command = getattr(parsed, "command", None)
+        capability_id = getattr(parsed, "capability_id", None)
+
+        if command == "hf-training-smoke":
+            action = getattr(parsed, "subcommand", None)
+            allowed_actions = {"preflight", "approve", "execute", "recover", "observe", "verify"}
+            if action not in allowed_actions:
+                self.error("hf-training-smoke requires an action: preflight, approve, execute, recover, observe, or verify")
+            if capability_id is not None:
+                self.error(f"unrecognized arguments: {capability_id}")
+            _enforce_protected_action_allowlist(self, arguments, command=command, action=action)
+            return parsed
+        if command == "modal-runtime-release":
+            action = getattr(parsed, "subcommand", None)
+            allowed_actions = {"preflight", "approve", "execute", "recover", "observe", "verify",
+                               "qualify-preflight", "qualify-approve", "qualify-execute",
+                               "qualify-recover", "qualify-observe", "qualify-verify"}
+            if action not in allowed_actions:
+                self.error("modal-runtime-release requires an action: preflight, approve, execute, recover, observe, or verify")
+            if capability_id is not None:
+                self.error(f"unrecognized arguments: {capability_id}")
+            _enforce_protected_action_allowlist(
+                self, arguments, command=command, action=action,
+            )
+            return parsed
+        if command == "hf-smoke":
+            action = getattr(parsed, "subcommand", None)
+            if action not in {"approve", "execute", "observe"}:
+                self.error("hf-smoke requires an action: approve, execute, or observe")
+            if capability_id is not None:
+                self.error(f"unrecognized arguments: {capability_id}")
+            _enforce_protected_action_allowlist(
+                self, arguments, command=command, action=action
+            )
+            return parsed
+        if command == "hf-source":
+            action = getattr(parsed, "subcommand", None)
+            if action not in {"prepare", "provision"}:
+                self.error("hf-source requires an action: prepare or provision")
+            if capability_id is not None:
+                self.error(f"unrecognized arguments: {capability_id}")
+            _enforce_protected_action_allowlist(
+                self, arguments, command=command, action=action
+            )
+            return parsed
+
+        if command != "capabilities":
+            if capability_id is not None:
+                self.error(f"unrecognized arguments: {capability_id}")
+            return parsed
+
+        action = getattr(parsed, "subcommand", None)
+        if action not in {"list", "describe"}:
+            self.error("capabilities requires an action: list or describe")
+        if action == "list" and capability_id is not None:
+            self.error("capabilities list does not accept a capability id")
+        if action == "describe" and capability_id is None:
+            self.error("capabilities describe requires a capability id")
+        return parsed
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -62,14 +246,14 @@ def create_parser() -> argparse.ArgumentParser:
         >>> args.list_subcommand
         'datasets'
     """
-    parser = argparse.ArgumentParser(
+    parser = _SynapticArgumentParser(
         description="Synaptic Tuner - Fine-tuning CLI for Nexus MCP",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
   (none)      Interactive menu
   train       Training workflow (SFT, KTO, GRPO)
-  cloud       Cloud training (HF Jobs, Modal, RunPod)
+  cloud       Legacy cloud training (HF Jobs, RunPod)
   cloud-run   Config-driven HF cloud job
   cloud-jobs  Inspect or manage live HF Jobs
   plan-hardware Blind hardware planning for experiment specs
@@ -87,13 +271,22 @@ Commands:
   modelops    Model operations (run, merge, convert, upload)
   ml          Traditional ML training (LightGBM, XGBoost, sklearn)
   status      System status overview (use --json for structured output)
-  doctor      System diagnostics (use --fix to auto-fix issues)
+  doctor      System diagnostics (use --fix to auto-fix issues); 'doctor sft-mask' checks SFT loss masking
   flywheel    Data flywheel (self-improving training pipeline)
   experiment-loop  Autonomous hyperparameter search (LLM + surrogate)
   prompt-optimize Deterministic config-first prompt optimization
   surgery     LoRA weight surgery (eval-guided post-training optimization)
+  project     Inspect or validate the selected host project
+  capabilities Discover agent-readable capabilities and their effects
+  hf-source   Prepare or provision one exact immutable HF Profile-C source transport
+  hf-smoke    Approve, execute, or observe one fixed bootstrap-only HF smoke
+  hf-training-smoke  Preflight, approve, execute, recover, observe, or verify the protected A10G smoke
+  modal-runtime-release  Release one exact packaged Modal runtime deployment
+  ingest      Ingest one explicit local Markdown selection to a private bundle
+  prepare-dataset  Convert one verified bundle into a private training dataset
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
+  check-contamination  N-gram containment of eval prompts inside training data
 
 Flywheel Subcommands:
   flywheel status       Show flywheel system status
@@ -104,6 +297,12 @@ Flywheel Subcommands:
   flywheel logs         Show inference log statistics
   flywheel versions     List staged dataset versions
   flywheel export-fixtures --export-config <yaml> --output <yaml>
+
+Doctor Subcommands:
+  doctor              System diagnostics (environment, GPU, dependencies, backends)
+  doctor sft-mask     Run a dataset sample through the real SFT preprocessing path with
+                      only the tokenizer loaded and report loss-mask problems
+                      (exit 1 on hard failures, 2 on setup errors; --json for structured output)
 
 List Subcommands:
   list datasets   List available JSONL datasets
@@ -133,20 +332,28 @@ Examples:
   python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200
   python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/smollm2_full_cycle_smoke.yaml --yes
   python tuner.py analyze-experiment --experiment-id latest
+  synaptic capabilities list --json
+  synaptic capabilities describe mechinterp.steer --json
+  python tuner.py ingest --config <config.json> --select notes=./notes --json
+  python tuner.py prepare-dataset --config <config.json> --json
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
+  python tuner.py doctor sft-mask --dataset-path Datasets/my_sft.jsonl --model <tokenizer-id-or-path>
+  python tuner.py doctor sft-mask --sft-config Trainers/sft/configs/config.yaml --json
   python tuner.py list datasets    # List datasets
   python tuner.py ml                   # Interactive ML training
   python tuner.py ml train --config path/to/config.yaml
   python tuner.py ml list-configs      # Show available configs
   python tuner.py list models --json   # List models as JSON
+  python tuner.py check-contamination --train-data Datasets/my_sft.jsonl
+  python tuner.py check-contamination --train-data Datasets/my_sft.jsonl --eval-source Evaluator/config/scenarios/tool_prompts.yaml --threshold 0.5 --json
 """
     )
 
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "modal-runtime-release", "ingest", "prepare-dataset", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compare-runs", "create-experiment", "check-contamination"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -160,12 +367,77 @@ Examples:
         default=None,
         help="Sub-command (e.g., 'datasets' for list, 'train' for ml)"
     )
+    parser.add_argument(
+        "capability_id",
+        nargs="?",
+        default=None,
+        help="Capability id (only used with 'capabilities describe')",
+    )
 
     # Global flags
     parser.add_argument(
         "--json",
         action="store_true",
         help="Output in JSON format for AI-parseable output (disables interactive menus)"
+    )
+    parser.add_argument(
+        "--project-root",
+        help="Explicit host-project root. Selects strict project mode.",
+    )
+    parser.add_argument(
+        "--manifest",
+        help="Explicit synaptic project manifest path (normally synaptic.yaml).",
+    )
+    parser.add_argument(
+        "--env-file",
+        help="Explicit dotenv file; selected instead of the host or engine .env.",
+    )
+    parser.add_argument(
+        "--source-config",
+        help="Committed source configuration used only by hf-source prepare.",
+    )
+    parser.add_argument("--actor", help="Non-secret operator identity for hf-source provisioning.")
+    parser.add_argument(
+        "--authority",
+        choices=["operator", "protected_workflow"],
+        default=None,
+        help="Bounded hf-source provisioning authority.",
+    )
+    parser.add_argument(
+        "--authorization-reference",
+        help="Exact user-authorization reference for hf-smoke approve.",
+    )
+    parser.add_argument("--issued-at", help="Canonical UTC issuance time for hf-smoke approval.")
+    parser.add_argument("--expires-at", help="Canonical UTC expiry time for hf-smoke approval.")
+    parser.add_argument("--quoted-at", help="Canonical UTC HF price-quote time.")
+    parser.add_argument("--hourly-price-usd", help="Exact decimal CPU Basic hourly price.")
+    parser.add_argument("--projected-cost-usd", help="Exact decimal projected smoke cost.")
+    parser.add_argument("--expected-namespace", help="Exact HF namespace for protected training.")
+    parser.add_argument("--source-bucket-id", help="Authenticated source Bucket identifier.")
+    parser.add_argument("--source-prefix", help="Authenticated source Bucket prefix.")
+    parser.add_argument("--artifact-bucket-id", help="Exclusive artifact Bucket identifier.")
+    parser.add_argument("--artifact-prefix", help="Approval-bound artifact base prefix.")
+    parser.add_argument(
+        "--release-plan",
+        help="Canonical packaged Modal runtime release deployment plan JSON.",
+    )
+    parser.add_argument(
+        "--release-ref",
+        help="Exact deployment-spec digest for a retained Modal runtime release.",
+    )
+    parser.add_argument(
+        "--profile",
+        help="Named project configuration profile.",
+    )
+    parser.add_argument(
+        "--events",
+        choices=["jsonl"],
+        help="Emit machine-readable lifecycle events when supported.",
+    )
+    parser.add_argument(
+        "--source-mode",
+        choices=["standalone", "superproject", "dual_clone"],
+        help="Expected source reconstruction mode for commands that create a source lock.",
     )
     parser.add_argument(
         "--yes",
@@ -182,12 +454,60 @@ Examples:
         dest="doctor_fix",
         help="Auto-fix simple issues (only used with 'doctor' command)"
     )
+    # doctor sft-mask flags. Settings resolve like the SFT trainer: trainer config
+    # (--sft-config, default Trainers/sft/configs/config.yaml) < explicit flags
+    # (--model, --dataset-path, --max-seq-length, --chat-template-kwargs,
+    # --prompt-render, --no-completion-only).
+    parser.add_argument(
+        "--sft-config",
+        dest="sft_config",
+        help="SFT trainer config (YAML, or .py with Config()) whose preprocessing settings to reuse (doctor sft-mask).",
+    )
+    parser.add_argument(
+        "--chat-template-kwargs",
+        dest="chat_template_kwargs",
+        help='JSON object forwarded to apply_chat_template as the SFT trainer does, e.g. \'{"enable_thinking": false}\' (doctor sft-mask).',
+    )
+    parser.add_argument(
+        "--prompt-render",
+        dest="prompt_render",
+        choices=["full_conversation", "prompt_completion"],
+        help="SFT render/masking strategy to check (doctor sft-mask; default from the trainer config).",
+    )
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        dest="sample_size",
+        help="Rows to sample, 0 = all (doctor sft-mask; default from Trainers/sft/configs/mask_doctor.yaml).",
+    )
+    parser.add_argument(
+        "--preview-rows",
+        dest="preview_rows",
+        help="Comma-separated dataset row indices to show token-by-token (doctor sft-mask).",
+    )
+    parser.add_argument(
+        "--preview-count",
+        type=int,
+        dest="preview_count",
+        help="Rows to preview when --preview-rows is not given; failing rows first (doctor sft-mask).",
+    )
 
     # ML-specific flags
     parser.add_argument(
         "--config",
         dest="ml_config",
-        help="Path to config YAML (ml train or mechinterp run)."
+        help=(
+            "Command config file: YAML for ml/mechinterp, or strict JSON "
+            "for ingest/prepare-dataset."
+        ),
+    )
+    parser.add_argument(
+        "--select",
+        action="append",
+        default=None,
+        dest="ingestion_selections",
+        metavar="ALIAS=PATH",
+        help="One local ingestion selection; repeat for additional roots.",
     )
 
     # Flywheel-specific flags
@@ -353,6 +673,11 @@ Examples:
     parser.add_argument("--train-num-epochs", type=int, help="Override epochs for cloud/cloud-pipeline training.")
     parser.add_argument("--train-max-steps", type=int, help="Override max training steps for cloud/cloud-pipeline training.")
     parser.add_argument("--train-max-seq-length", type=int, help="Override max sequence length for cloud/cloud-pipeline training.")
+    parser.add_argument("--train-split-dataset", action="store_true", dest="train_split_dataset", help="Create a train/validation split in cloud/cloud-pipeline SFT/KTO/DPO training.")
+    parser.add_argument("--train-no-split-dataset", action="store_false", dest="train_split_dataset", help="Disable the train/validation split for cloud/cloud-pipeline training.")
+    parser.set_defaults(train_split_dataset=None)
+    parser.add_argument("--train-test-size", type=float, help="Validation fraction (of rows, or of groups with a group key) for cloud/cloud-pipeline training.")
+    parser.add_argument("--train-validation-group-key", help="Dot-path into each row; keeps groups on one side of the cloud/cloud-pipeline validation split (requires --train-split-dataset or split_dataset in the trainer config).")
     parser.add_argument("--train-lora-r", type=int, help="Override LoRA rank for cloud/cloud-pipeline SFT training.")
     parser.add_argument("--train-lora-alpha", type=int, help="Override LoRA alpha for cloud/cloud-pipeline SFT training.")
     parser.add_argument("--train-lora-dropout", type=float, help="Override LoRA dropout for cloud/cloud-pipeline SFT training.")
@@ -392,7 +717,13 @@ Examples:
     parser.add_argument("--env-template", help="E2B template ID for cloud-eval/cloud-gym when --env-backend e2b.")
     parser.add_argument("--env-tool-schema", help="Custom tool schema YAML for cloud-eval/cloud-gym.")
     parser.add_argument("--env-exec-config", help="Custom environment execution YAML for cloud-eval/cloud-gym.")
-    parser.add_argument("--job-config", help="Config-driven job YAML (cloud-run or local-run workflow).")
+    parser.add_argument("--job-config", help="Config-driven job YAML (train, cloud-run or local-run workflow).")
+    parser.add_argument("--plan", action="store_true", help="Resolve a train --job-config plan without provider effects.")
+    parser.add_argument("--quote", action="store_true", help="Read scoped Modal GPU rates for a train --job-config without starting a job.")
+    parser.add_argument("--qualify", action="store_true", help="Build and run the packaged Modal CPU self-check without starting training.")
+    parser.add_argument("--fresh-attempt", action="store_true", help="Explicitly start a separate one-shot Modal attempt with a new private journal.")
+    parser.add_argument("--modal-profile", help="Named local Modal credential profile for train --quote or execution.")
+    parser.add_argument("--modal-environment", help="Existing Modal environment for train --quote or execution.")
     parser.add_argument(
         "--provider",
         choices=["local", "modal"],
@@ -516,6 +847,60 @@ Examples:
         help="Override output directory for prompt optimization artifacts.",
     )
 
+    # check-contamination flags (train/eval leakage check). Defaults live in
+    # configs/contamination/default.yaml; these override it.
+    parser.add_argument(
+        "--contamination-config",
+        dest="contamination_config",
+        help="Contamination check config YAML (default: configs/contamination/default.yaml).",
+    )
+    parser.add_argument(
+        "--train-data",
+        dest="train_data",
+        action="append",
+        help="Training JSONL to check (repeatable; replaces the config's train_datasets).",
+    )
+    parser.add_argument(
+        "--eval-source",
+        dest="eval_source",
+        action="append",
+        help="Evaluator scenario YAML or prompt set .json/.jsonl (repeatable; replaces the config's eval sources).",
+    )
+    parser.add_argument(
+        "--eval-text",
+        dest="eval_text",
+        action="append",
+        help="Plain JSONL of eval text, one object per line (repeatable; replaces the config's eval sources).",
+    )
+    parser.add_argument(
+        "--eval-text-field",
+        dest="eval_text_field",
+        help="Field (dot-path) holding the text in --eval-text files (default: text).",
+    )
+    parser.add_argument("--ngram", type=int, help="Word n-gram size for check-contamination (default from config: 8).")
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        help="Containment at/above which an eval item is flagged; any flag exits 2 (default from config: 0.5).",
+    )
+    parser.add_argument(
+        "--min-item-tokens",
+        dest="min_item_tokens",
+        type=int,
+        help="Shortest eval item (words) still scored by containment (default from config: 4).",
+    )
+    parser.add_argument("--top-k", dest="top_k", type=int, help="Top (eval item, training row) pairs to report.")
+    parser.add_argument(
+        "--report-dir",
+        dest="report_dir",
+        help="Directory for the timestamped contamination report (default from config: scratch/contamination).",
+    )
+    parser.add_argument(
+        "--write-decontaminated",
+        dest="write_decontaminated",
+        help="Write training data minus flagged rows: a .jsonl file (one --train-data) or a directory, plus a .removed.json sidecar.",
+    )
+
     # list-runs filters (unified tracking registry)
     parser.add_argument("--run-type", help="Filter by run type: sft, kto, grpo, ml, evaluation, cloud_sft, cloud_kto, cloud_grpo (list-runs only)")
     parser.add_argument("--since", help="Filter runs after this ISO 8601 date (list-runs only)")
@@ -557,12 +942,12 @@ Examples:
         help="Skip a stage in run-experiment. May be repeated.",
     )
     parser.add_argument("--base-dir", default=".tracking", help="Tracking base directory")
-    parser.add_argument("--model", help="Model path for inference")
+    parser.add_argument("--model", help="Model path for inference (doctor sft-mask: tokenizer id or local path)")
     parser.add_argument("--model-revision", dest="model_revision", help="Model commit SHA/revision for reproducible inference loads")
     parser.add_argument("--tokenizer-revision", dest="tokenizer_revision", help="Tokenizer commit SHA/revision for reproducible inference loads")
-    parser.add_argument("--dataset-path", help="Path to jsonl dataset")
-    parser.add_argument("--max-seq-length", type=int, default=2048, help="Max sequence length")
-    parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking")
+    parser.add_argument("--dataset-path", help="Path to jsonl dataset (doctor sft-mask: local dataset to check)")
+    parser.add_argument("--max-seq-length", type=int, default=None, help="Max sequence length (doctor sft-mask: overrides the trainer config)")
+    parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking (doctor sft-mask: check full-sequence loss)")
     parser.add_argument("--base-model-name", help="Base model name for experiment")
     parser.add_argument("--dataset-hash", help="Dataset hash for experiment")
 

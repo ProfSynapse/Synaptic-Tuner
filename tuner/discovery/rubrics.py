@@ -15,6 +15,8 @@ from typing import List, Optional
 
 import yaml
 
+from tuner.project import ProjectContext
+
 
 @dataclass
 class RubricInfo:
@@ -24,6 +26,7 @@ class RubricInfo:
     description: str
     scope: Optional[str]
     source: str  # Which directory (SynthChat, improvement_engine, shared)
+    declaring_root: Optional[Path] = None
 
 
 class RubricDiscovery:
@@ -52,17 +55,41 @@ class RubricDiscovery:
         ("shared/validation/rubrics", "shared"),
     ]
 
-    def __init__(self, repo_root: Path = None):
+    def __init__(
+        self,
+        repo_root: Path = None,
+        *,
+        context: ProjectContext | None = None,
+    ):
         """
         Initialize the rubric discovery service.
 
         Args:
             repo_root: Repository root path. If None, uses module location to find repo root.
         """
-        if repo_root is None:
-            self.repo_root = Path(__file__).parent.parent.parent
-        else:
-            self.repo_root = repo_root
+        self.context = context
+        self.repo_root = context.engine_root if context else (repo_root or Path(__file__).parent.parent.parent)
+
+    def _rubric_dirs(self) -> list[tuple[Path, str]]:
+        roots: list[tuple[Path, str]] = []
+        if self.context is not None and self.context.mode == "host":
+            roots.extend(
+                [
+                    (self.context.project_root / "rubrics", "project"),
+                    (self.context.project_root / "SynthChat" / "rubrics", "project:SynthChat"),
+                    (self.context.config_root / "rubrics", "project:config"),
+                ]
+            )
+        roots.extend((self.repo_root / path, source) for path, source in self.RUBRIC_DIRS)
+        seen: set[Path] = set()
+        unique: list[tuple[Path, str]] = []
+        for path, source in roots:
+            resolved = path.resolve(strict=False)
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            unique.append((path, source))
+        return unique
 
     def discover_all(self) -> List[RubricInfo]:
         """
@@ -74,8 +101,7 @@ class RubricDiscovery:
         results: List[RubricInfo] = []
         seen_names = set()
 
-        for dir_path, source in self.RUBRIC_DIRS:
-            rubrics_dir = self.repo_root / dir_path
+        for rubrics_dir, source in self._rubric_dirs():
 
             if not rubrics_dir.exists():
                 continue
@@ -88,7 +114,7 @@ class RubricDiscovery:
                     continue
 
                 try:
-                    info = self._analyze_rubric(filepath, source)
+                    info = self._analyze_rubric(filepath, source, rubrics_dir)
                     if info:
                         results.append(info)
                         seen_names.add(name)
@@ -100,7 +126,9 @@ class RubricDiscovery:
         results.sort(key=lambda r: r.name)
         return results
 
-    def _analyze_rubric(self, filepath: Path, source: str) -> Optional[RubricInfo]:
+    def _analyze_rubric(
+        self, filepath: Path, source: str, declaring_root: Path
+    ) -> Optional[RubricInfo]:
         """
         Analyze a single rubric file and extract metadata.
 
@@ -127,4 +155,5 @@ class RubricDiscovery:
             description=description if description else name,
             scope=scope,
             source=source,
+            declaring_root=declaring_root,
         )

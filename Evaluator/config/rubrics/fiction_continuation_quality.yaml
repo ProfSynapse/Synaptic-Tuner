@@ -1,0 +1,48 @@
+name: Fiction Continuation Quality
+description: Evaluates whether a continuation stays grounded in supplied fiction context while remaining coherent, stylistically continuous without imitation, and narratively complete.
+scope: response
+pass_threshold: 0.75
+
+judge_prompt: |
+  You are judging a proposed continuation of the fiction excerpt in the user prompt.
+
+  Source context and continuation request:
+  ```text
+  {user_prompt}
+  ```
+
+  Proposed continuation:
+  ```text
+  {response}
+  ```
+
+  Score the proposed continuation from 0.0 to 1.0. Weight these dimensions:
+
+  1. Context fidelity (35%): Preserve the supplied situation, characters, stakes,
+     setting facts, and immediate point of view. Do not contradict the excerpt or
+     introduce unsupported facts as though they were established.
+  2. Coherence (30%): Continue causally from the final moment with clear prose,
+     readable scene logic, and internally consistent actions and dialogue.
+  3. Style and tone continuity (20%): Carry forward the excerpt's broad voice,
+     emotional register, tense, and level of detail without copying distinctive
+     sentences, relying on imitation, or referring to the source as a dataset.
+  4. Completion behavior (15%): Produce an actual next scene or meaningful next
+     beat, rather than a summary, outline, critique, disclaimer, or request for
+     more material. It may leave an appropriate narrative hook.
+
+  A score of 0.75 or above requires a coherent, context-grounded continuation
+  with no material contradiction. Return only JSON matching the schema.
+
+output_schema:
+  type: object
+  properties:
+    fiction_continuation_quality_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+    overall_feedback:
+      type: string
+  required:
+    - fiction_continuation_quality_score
+    - overall_feedback
+  additionalProperties: false

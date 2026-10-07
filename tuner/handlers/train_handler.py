@@ -10,13 +10,13 @@ Supports --json flag for AI-parseable output. In JSON mode:
 - All output is JSON formatted for programmatic parsing
 """
 
-import subprocess
 from argparse import Namespace
 from pathlib import Path
 from typing import Optional
 
 from shared.utilities.paths import TRAINING_METHODS
 from tuner.handlers.base import BaseHandler
+from tuner.project import ProjectContext
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.ui import (
     print_menu,
@@ -100,9 +100,11 @@ class TrainHandler(BaseHandler):
         exit_code = handler.handle()  # Returns JSON status
     """
 
-    def __init__(self, args: Optional[Namespace] = None):
+    def __init__(
+        self, args: Optional[Namespace] = None, context: ProjectContext | None = None
+    ):
         """Initialize handler with optional args."""
-        super().__init__(args=args)
+        super().__init__(args=args, context=context)
 
     @property
     def name(self) -> str:
@@ -169,6 +171,13 @@ class TrainHandler(BaseHandler):
         Returns:
             int: Exit code (0 = success, non-zero = failure)
         """
+        job_config = getattr(self.args, "job_config", None)
+        if job_config:
+            return self._handle_job_config(job_config)
+        if getattr(self.args, "plan", False):
+            self.output_error("--plan requires --job-config", code="TRAIN_RECIPE_REQUIRED")
+            return 2
+
         # JSON mode: return status information
         if self.json_mode:
             status = self._get_training_status()
@@ -194,7 +203,9 @@ class TrainHandler(BaseHandler):
 
         # Step 2: Get backend
         try:
-            backend = TrainingBackendRegistry.get(platform_choice, repo_root=self.repo_root)
+            # Backend code/config defaults are engine assets. Context-aware
+            # local execution is provided by the local-run command.
+            backend = TrainingBackendRegistry.get(platform_choice, repo_root=self.engine_root)
         except ValueError as e:
             print_error(str(e))
             return 1
@@ -268,3 +279,13 @@ class TrainHandler(BaseHandler):
             print_error(f"Training failed with exit code: {exit_code}")
 
         return exit_code
+
+    def _handle_job_config(self, requested: str) -> int:
+        from tuner.handlers.modal_job_config_handler import ModalJobConfigHandler
+
+        return ModalJobConfigHandler(self.args, self.context).handle()
+
+    def _quote_job_config(self, plan: object) -> int:
+        from tuner.handlers.modal_job_config_handler import ModalJobConfigHandler
+
+        return ModalJobConfigHandler(self.args, self.context)._quote(plan)

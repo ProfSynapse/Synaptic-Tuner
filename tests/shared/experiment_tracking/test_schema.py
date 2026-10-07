@@ -195,6 +195,19 @@ class TestRunRecord:
         loaded = RunRecord.from_dict(data)
         assert loaded.experiment_id is None
         assert loaded.per_example_losses_path is None
+        assert loaded.hf_provisioning_event_uri is None
+        assert loaded.hf_provisioning_event_sha256 is None
+        assert loaded.hf_provisioning_state is None
+
+    def test_provisioning_projection_requires_closed_consistent_state(self):
+        with pytest.raises(ValueError, match="requires an event"):
+            _make_record(hf_provisioning_state="CLAIMED")
+        with pytest.raises(ValueError, match="Unknown HF provisioning state"):
+            _make_record(
+                hf_provisioning_event_uri="tracking://event.json",
+                hf_provisioning_event_sha256="1" * 64,
+                hf_provisioning_state="RETRYABLE",
+            )
 
 # ===========================================================================
 # RunFilter
@@ -280,4 +293,43 @@ class TestRunFilter:
         # Fails on run_type
         assert not filt.matches(
             _make_record(run_type="kto", status="completed", model_name="Qwen2.5-7B")
+        )
+
+
+def test_training_projection_round_trips_separately_from_bootstrap_projection():
+    record = _make_record(
+        hf_training_root_id="a" * 64,
+        hf_training_run_id="training-smoke-1",
+        hf_training_preflight_uri="tracking://preflight.json",
+        hf_training_preflight_sha256="b" * 64,
+        hf_training_preflight_state="PASS",
+        hf_training_approval_uri="tracking://approval.json",
+        hf_training_approval_sha256="c" * 64,
+        hf_training_authorization_id="d" * 64,
+        hf_training_submission_state="APPROVED",
+    )
+    loaded = RunRecord.from_json_line(record.to_json_line())
+    assert loaded.hf_training_submission_state == "APPROVED"
+    assert loaded.hf_submission_state is None
+
+
+def test_training_projection_rejects_partial_or_unknown_state():
+    with pytest.raises(ValueError, match="tracking-root"):
+        _make_record(
+            hf_training_run_id="training-smoke-1",
+            hf_training_preflight_uri="tracking://preflight.json",
+            hf_training_preflight_sha256="b" * 64,
+            hf_training_preflight_state="PASS",
+        )
+    with pytest.raises(ValueError, match="Unknown HF training submission"):
+        _make_record(
+            hf_training_root_id="a" * 64,
+            hf_training_run_id="training-smoke-1",
+            hf_training_preflight_uri="tracking://preflight.json",
+            hf_training_preflight_sha256="b" * 64,
+            hf_training_preflight_state="PASS",
+            hf_training_approval_uri="tracking://approval.json",
+            hf_training_approval_sha256="c" * 64,
+            hf_training_authorization_id="d" * 64,
+            hf_training_submission_state="RETRYABLE",
         )

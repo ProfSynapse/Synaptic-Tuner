@@ -1,0 +1,5 @@
+# Runtime-owned outputs stay private to the host project.
+.synaptic/
+
+# Promote selected summaries into source control only through an explicit
+# export capability; normal runs never write into host source directories.

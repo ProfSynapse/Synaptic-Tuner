@@ -128,6 +128,7 @@ def build_training_lineage(
             "source": dataset_source,
             "train_examples": len(train_dataset),
             "eval_examples": len(eval_dataset) if eval_dataset else 0,
+            "validation_group_key": config.dataset.validation_group_key,
         },
         run_dir=run_dir,
         trainer=trainer,
@@ -199,6 +200,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-file", type=str, help="Dataset file within HuggingFace dataset")
     parser.add_argument("--local-file", type=str, help="Path to local JSONL file (prompt/chosen/rejected)")
     parser.add_argument("--split-dataset", action="store_true", help="Create train/validation split")
+    parser.add_argument("--test-size", type=float, default=None, help="Validation fraction for --split-dataset (rows, or groups with --validation-group-key)")
+    parser.add_argument("--validation-group-key", type=str, default=None, help="Dot-path into each raw row (e.g. metadata.scenario); with --split-dataset, rows sharing a group stay on one side of the validation split")
 
     # Training configuration
     parser.add_argument("--output-dir", type=str, help="Override output directory")
@@ -221,6 +224,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gradient-accumulation", type=int, help="Override gradient_accumulation_steps")
     parser.add_argument("--learning-rate", type=float, help="Override learning rate")
     parser.add_argument("--seed", type=int, help="Override the training random seed (config.seed)")
+    parser.add_argument("--save-steps", type=int, help="Override training.save_steps")
+    parser.add_argument("--save-total-limit", type=int, help="Override training.save_total_limit")
     parser.add_argument("--beta", type=float, help="Override DPO beta parameter (controls KL regularization strength)")
     parser.add_argument("--loss-type", type=str, help="Override DPO loss variant (default: sigmoid = vanilla DPO)")
     parser.add_argument("--num-epochs", type=int, help="Override number of training epochs")
@@ -319,6 +324,10 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
         config.dataset.dataset_name = args.dataset_name
     if args.dataset_file:
         config.dataset.dataset_file = args.dataset_file
+    if args.test_size is not None:
+        config.dataset.test_size = args.test_size
+    if args.validation_group_key:
+        config.dataset.validation_group_key = args.validation_group_key
 
     if args.batch_size is not None:
         config.training.per_device_train_batch_size = args.batch_size
@@ -330,6 +339,10 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
     # config default — the handler forwards explicit zeros (provenance: no silent override).
     if args.seed is not None:
         config.seed = args.seed
+    if args.save_steps is not None:
+        config.training.save_steps = args.save_steps
+    if args.save_total_limit is not None:
+        config.training.save_total_limit = args.save_total_limit
     if args.beta is not None:
         config.training.beta = args.beta
     if args.loss_type:
@@ -384,13 +397,18 @@ def main():
         if args.wandb_project:
             config.wandb_project = args.wandb_project
         elif not getattr(config, "wandb_project", None):
-            config.wandb_project = "dpo-training"
+            # Default project name; an exported WANDB_PROJECT still wins.
+            config.wandb_project = os.environ.get("WANDB_PROJECT") or "dpo-training"
         if args.wandb_run_name:
             config.wandb_run_name = args.wandb_run_name
         elif not getattr(config, "wandb_run_name", None):
             from datetime import datetime
             ts = datetime.now().strftime("%Y%m%d_%H%M")
             config.wandb_run_name = f"{args.model_size or 'dpo'}-{ts}"
+    if config.use_wandb:
+        from shared.training_utils import apply_wandb_destination
+
+        apply_wandb_destination(config.wandb.project, config.wandb.entity)
 
     if not args.hf_token:
         args.hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
@@ -466,6 +484,7 @@ def main():
         num_proc=config.dataset.num_proc,
         test_size=config.dataset.test_size,
         split_dataset=args.split_dataset,
+        validation_group_key=config.dataset.validation_group_key,
     )
 
     # Validate dataset (prompt/chosen/rejected structure). DPO is paired and
@@ -486,17 +505,17 @@ def main():
     if eval_dataset:
         print(f"Validation: {len(eval_dataset)} examples")
     effective_batch = config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps
-    print(f"\nBatch configuration:")
+    print("\nBatch configuration:")
     print(f"  Batch size: {config.training.per_device_train_batch_size}")
     print(f"  Gradient accumulation: {config.training.gradient_accumulation_steps}")
     print(f"  Effective batch size: {effective_batch}")
-    print(f"\nHyperparameters:")
+    print("\nHyperparameters:")
     print(f"  Learning rate: {config.training.learning_rate}")
     print(f"  Beta: {config.training.beta}")
     print(f"  Loss type: {config.training.loss_type}")
     print(f"  Warmup ratio: {config.training.warmup_ratio}")
     print(f"  Max length: {config.training.max_length}")
-    print(f"\nLoRA configuration:")
+    print("\nLoRA configuration:")
     print(f"  Rank: {config.lora.r}")
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
@@ -509,7 +528,6 @@ def main():
         return
 
     # ---- Heavy path: only reached for a real run (model load + training) ----
-    import torch
     from unsloth import is_bfloat16_supported
     from trl import DPOConfig, DPOTrainer
 

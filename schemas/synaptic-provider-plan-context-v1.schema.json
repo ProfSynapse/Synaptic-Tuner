@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-provider-plan-context-v1.schema.json",
+  "title": "Synaptic Provider Plan Context v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "provider", "basis_digest", "descriptor_digest", "profile_digest"],
+  "properties": {
+    "schema_version": {"const": "synaptic-provider-plan-context/v1"},
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_id", "profile_ref"],
+      "properties": {
+        "provider_id": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+        "profile_ref": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"}
+      }
+    },
+    "basis_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "descriptor_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "profile_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

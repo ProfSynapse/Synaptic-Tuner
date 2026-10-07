@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-resolved-config-v1.schema.json",
+  "title": "Synaptic Resolved Configuration v1",
+  "type": "object",
+  "required": ["schema_version", "config", "sources", "overrides", "source_map", "resolved_sha256"],
+  "properties": {
+    "schema_version": {"const": "synaptic-resolved-config/v1"},
+    "config": {"type": "object"},
+    "sources": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/source"}
+    },
+    "overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "source", "value"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "source": {"type": "string", "minLength": 1},
+          "value": true
+        },
+        "additionalProperties": false
+      }
+    },
+    "source_map": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["uri", "precedence"],
+        "properties": {
+          "uri": {"type": "string", "minLength": 1},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "precedence": {"type": "integer"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "resolved_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source": {
+      "type": "object",
+      "required": ["uri", "sha256", "precedence"],
+      "properties": {
+        "uri": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "precedence": {"type": "integer"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

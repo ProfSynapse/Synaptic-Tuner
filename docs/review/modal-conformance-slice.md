@@ -1,0 +1,210 @@
+# Provider-free coordinator conformance slice
+
+Status: checked-in qualification candidate; CI execution not yet observed.
+
+## Claim and non-claims
+
+The `Provider-free coordinator conformance` workflow is a bounded regression
+lane for the provider-neutral coordinator and Foundation contracts, the generic
+fake-provider family, and the Modal adapter and runtime. It runs the existing
+pytest surface, including the bounded Modal effect, reader and staging adapters, without
+installing the Modal SDK and with common provider credential variables
+explicitly empty.
+
+Passing this lane means those synthetic and local contracts conform in the
+tested source revision. Fake-provider success is **not** evidence of a live
+Modal API call, authenticated provider observation, cloud execution, training,
+artifact retrieval, model quality, release publication, or spending approval.
+It supplies no live account credentials or consumer authority and performs only
+fake-provider mutations. It also does not enable or qualify the descriptor's six
+advertised read, lifecycle, artifact-streaming, and cost-quote flags. Those flags
+are not a master switch for an otherwise authenticated start.
+
+## Exact test surface
+
+The workflow executes:
+
+- `tests/contract/test_provider_neutral_foundation_v1.py`
+- `tests/contract/test_modal_optional_dependency.py`
+- `tests/contract/test_modal_runtime_lock.py`
+- `tests/contract/test_modal_runtime_lock_regeneration.py`
+- `tests/contract/test_modal_bootstrap_closure.py`
+- `tests/contract/test_offline_sft_worker_closure.py`
+- `tests/contract/test_public_runs_api_v1.py`
+- `tests/contract/test_public_training_api_v1.py`
+- `tests/contract/test_public_publication_v1.py`
+- `tests/execution/coordinator_v1/`
+- `tests/execution/foundation_v2/`
+- `tests/execution/test_fake_provider_v1_conformance.py`
+- `tests/execution/test_mutation_broker.py`
+- `tests/execution/providers/test_modal_*.py`
+- `tests/training/`
+- `tests/runtime/`
+- `tests/trainers/sft/test_runtime_v1.py`
+- `tests/execution/providers/docker_provider_v1/`
+
+The Modal adapter test drives the real generic coordinator against its
+synthetic Foundation executor, verifies refusal by production preflight, and
+imports the adapter in a fresh process without loading `modal`, consumer code,
+SQLite, or the old Modal training lifecycle. The optional-dependency contract
+also checks the SDK-free public import boundary and statically rejects
+module-scope SDK imports from the provider package.
+
+Correction (2026-09-09): integration expands the lane to the complete
+`test_modal_*.py` provider-free set, including the existing runtime regressions
+and the new staging boundary. Public API and mutation-broker contracts and
+the hash-only runtime-lock maintenance tests are also included. This does not
+add ML execution, GPU, cloud, or live-provider tests.
+
+## Environment and dependencies
+
+CI uses Ubuntu 24.04 and CPython 3.12. The install is deliberately limited to:
+
+- a wheel built from the local project, installed with its four declared
+  runtime dependencies;
+- the declared supported test range, `pytest>=8,<9`;
+- `numpy>=1.24,<3` and `pandas>=2,<3`, because the repository-wide
+  `tests/conftest.py` imports both during collection even though this slice does
+  not use its DataFrame fixtures;
+- the declared build requirements, `setuptools>=68` and `wheel`, to build the
+  candidate without build isolation.
+
+The Modal extra is not installed. Pytest plug-in autoload is disabled, the
+cache provider is disabled, and no provider credentials are supplied. Tests in
+this surface use in-memory fakes and local subprocesses; the workflow neither
+invokes a provider CLI nor performs an authenticated cloud operation.
+
+Before pytest, CI changes to the runner's temporary directory and imports the
+installed wheel's preparation, common binding, effect, reader, staging and launch modules. It
+also reads and parses the packaged `modal-runtime-v1.lock.json` and
+`offline-sft-worker-v1.json` through `importlib.resources`. This checks that the
+provider-free imports and required package data do not succeed merely because
+the repository root is the current directory.
+
+## Repeatability and qualification
+
+The checked-in command is:
+
+```text
+python -B -m pytest -q -p no:cacheprovider \
+  tests/contract/test_provider_neutral_foundation_v1.py \
+  tests/contract/test_modal_optional_dependency.py \
+  tests/contract/test_modal_runtime_lock.py \
+  tests/contract/test_modal_runtime_lock_regeneration.py \
+  tests/contract/test_modal_bootstrap_closure.py \
+  tests/contract/test_offline_sft_worker_closure.py \
+  tests/contract/test_public_runs_api_v1.py \
+  tests/contract/test_public_training_api_v1.py \
+  tests/contract/test_public_publication_v1.py \
+  tests/execution/coordinator_v1 \
+  tests/execution/foundation_v2 \
+  tests/execution/test_fake_provider_v1_conformance.py \
+  tests/execution/test_mutation_broker.py \
+  tests/training \
+  tests/runtime \
+  tests/trainers/sft/test_runtime_v1.py \
+  tests/execution/providers/docker_provider_v1 \
+  tests/execution/providers/test_modal_*.py
+```
+
+An earlier 896-test comparison used pytest 9.0.2 while the project declares
+pytest below 9. It remains useful regression evidence, but it is not a release
+qualification under the declared dependency contract. This workflow enforces
+the supported major-version range before collecting tests.
+
+Local authoring verification collected and passed 644 tests in the subset that
+predated the effect and reader additions, in 155.84 seconds, using CPython
+3.12.9 and pytest 9.0.2 with an empty inherited environment, plug-in autoload
+disabled, and explicit candidate
+imports from a separate clean checkout. That is same-environment regression
+evidence only: because pytest 9 is outside `pytest>=8,<9`, it is not the
+supported-dependency CI qualification that this workflow is designed to
+provide. The effect and reader additions and the wheel-installed neutral-CWD
+smoke have not been executed in this worktree. No workflow was dispatched while
+authoring this slice.
+
+Correction (2026-09-09): the integrated lead candidate subsequently passed
+1,070 tests in 166.20 seconds in a clean temporary CPython 3.12.9 environment
+with pytest 8.4.2, no system-site packages, and no Modal SDK. This included the
+final reader, effects and staging changes, plus all existing Modal tests, but
+preceded launch and lock-regenerator integration. The lock-regenerator module
+then independently passed 13 tests in 0.29 seconds. These are distinct runs,
+not a claim of one combined 1,083-test run. The installed non-editable wheel
+also passed the neutral-working-directory import and both package-resource
+checks. The source lock reports `CURRENT` for all eight members, and skill
+mirrors pass their synchronization check. No GitHub workflow has run yet.
+
+Later combined checkpoint (2026-09-09): **1,091 passed in 164.73 seconds**
+after launch and lock-regenerator integration. A subsequent test-only fixture
+change binds its deterministic authentication tag to the complete launch
+payload; all eight launch tests passed again in 5.57 seconds. The rebuilt
+launch-integrated wheel passed SDK-free imports and both resource checks.
+Wheel SHA-256:
+`deab14b0c31e7841737dcf4276dc6d72d7d707e49f083052c385f4584a0e1fee`.
+Bundle, resolved-material and remote-wire additions remain outside this
+checkpoint. The workflow test wildcard will include their provider tests as
+they are integrated; the new generic material test requires an explicit entry.
+
+Correction (2026-09-09): the lane now explicitly includes `tests/training`,
+including resolved material, and wheel imports cover material, bundle, wire
+and dispatch. The lead's expanded selection passed 1,177 tests in 167.59
+seconds before dispatch integration; a later 19-test dispatch/wire selection
+passed in 11.78 seconds. The rebuilt wheel imported those modules from its
+installed location in a neutral directory with the Modal SDK absent. Its
+SHA-256 is `5404e0972a607433499fe38d2937fb966b82d9a9d0419e473a04b568fec52760`.
+This wheel predates host submit-preparation and worker integration. No combined
+final count or new runtime-lock qualification is implied by these checkpoints.
+
+Subsequent combined lead run: **1,192 passed in 175.25 seconds**, including
+dispatch and host submit preparation, in clean CPython 3.12.9 / pytest 8.4.2.
+This precedes worker extraction and its lock refresh. Review also added the
+shared fixture's exact path to CI triggers and host submit preparation to the
+installed-wheel import checks; the preceding wheel measurement is not evidence
+that this new import has already run from a rebuilt wheel.
+
+Extraction checkpoint (2026-09-09): 166 focused tests passed in 1.62 seconds,
+including the expanded runtime-lock tests, the six directly affected runtime
+test files, deployment/configuration and optional-dependency contracts. The
+ten-member lock is current; only three existing source hashes and two new
+helper entries changed, with all runtime pins preserved. Fresh-process runtime
+imports exclude the legacy worker, bundle and broker; public API imports remain
+SDK-free. This is not a combined worker/producer/transport qualification.
+
+Next combined checkpoint: **1,210 passed in 181.88 seconds**, including the
+Foundation worker and extraction. Later mounted-I/O changes separately passed
+43 helper/legacy-producer tests in 0.80 seconds. The new Foundation producer
+then independently passed 15 tests, including actual temporary-filesystem
+publication, and the host transport passed its review plus 12 focused tests.
+None of these counts is a claim that the later timestamped-log/read/preflight
+work is complete. Linux retained-directory-descriptor tests do not establish
+equivalent hostile-volume race protection for the best-effort Windows fallback.
+
+Later combined checkpoint: **1,264 passed in 199.55 seconds** in the same clean
+SDK-free environment. The corresponding installed worker wheel passed all 16
+module imports and both packaged resources from a neutral directory, with
+SHA-256 `34d74b732b66b4f55fefce38f891085465e68d68bc0ecbda39d5f3a7b609b18f`.
+This predates timestamped logs, read transport and preflight. After integrating
+the timestamped codec and producer revision, 97 focused tests passed in 26.74
+seconds. Those are separate measurements, not a new combined-suite count.
+
+The subsequent timestamped-log integrated run passed **1,279 tests in 201.16
+seconds**. The runtime lock remains current at ten members and skill mirrors
+pass their synchronization check. Authenticated read transport and operational
+preflight are still outside this checkpoint. No live provider check is implied.
+
+The next combined checkpoint includes authenticated reads, operational preflight
+and registry factories advertising six false capability flags: **1,326 passed
+in 223.91 seconds**. Its installed
+wheel passed 20 module imports and both resources from a neutral directory
+without Modal. SHA-256:
+`af7724f83af1a8c3c95c5893e75f177b32ef267550c2f257121e1cdba18c05b4`.
+Retention/delegation, generic training-service composition, candidate deployment
+and the new bootstrap inventory are not covered by this checkpoint.
+
+The workflow pins external actions to immutable commits. On 2026-09-09 the lead
+verified the official upstream release refs with read-only `git ls-remote`:
+`actions/checkout` tag `v4.3.0` resolves to
+`08eba0b27e820071cde6df949e0beb9ba4906955`, and `actions/setup-python` tag
+`v5.6.0` resolves to `a26af69be951a213d495a4c3e4e4022e16d87065`.
+The mutable `checkout@v4` ref differed and is not used. Until a run is observed,
+this document claims only local test evidence, not a green CI or release gate.

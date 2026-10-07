@@ -1,4 +1,11 @@
+import argparse
+import ast
+import json
 from pathlib import Path
+from typing import Any
+
+import pytest
+import Trainers.sft.runtime_v1 as runtime_v1
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -64,6 +71,79 @@ def test_train_sft_honors_config_level_max_steps() -> None:
     assert "config.training.max_steps = args.max_steps" in source
     assert 'effective_max_steps = getattr(config.training, "max_steps", None) or -1' in source
     assert '"max_steps": effective_max_steps' in source
+
+
+def test_train_sft_threads_protected_revision_and_evidence_without_ambient_token_fallback() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+
+    assert '"--model-revision"' in source
+    assert '"--anonymous-model"' in source
+    assert '"--protected-smoke-config"' in source
+    assert '"--protected-smoke-evidence"' in source
+    assert 'model_revision=getattr(config.model, "model_revision", None)' in source
+    assert 'require_resolved_revision=bool(args.protected_smoke_evidence)' in source
+    assert '"--model-snapshot"' in source
+    assert "model_snapshot=args.model_snapshot" in source
+    assert "require_local_snapshot=args.model_snapshot is not None" in source
+    assert "Runtime v1 requires one environment-bound offline model snapshot" in source
+    assert "Protected smoke rejects ambient Hugging Face credentials" in source
+    assert "capture_trainable_snapshot(model)" in source
+    assert "finalize_protected_evidence(" in source
+
+
+def test_train_sft_persists_runtime_profile_in_metadata_and_lineage() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(
+        encoding="utf-8"
+    )
+
+    for flag in (
+        '"--runtime-profile-name"',
+        '"--runtime-profile-digest"',
+        '"--runtime-inventory-digest"',
+        '"--runtime-image"',
+    ):
+        assert flag in source
+    assert '"runtime_profile": resolved_runtime_profile' in source
+    assert '"revision": config.model.model_revision' in source
+    assert 'lineage["runtime_profile"] = profile_metadata' in source
+    dry_run_start = source.index("if args.dry_run:")
+    dry_run_end = source.index("# Extract previous log entries", dry_run_start)
+    dry_run_block = source[dry_run_start:dry_run_end]
+    assert 'lineage["dry_run"] = True' in dry_run_block
+    assert "save_training_lineage(lineage, run_dir)" in dry_run_block
+    assert 'run_metadata["lineage_path"]' in dry_run_block
+
+
+def test_train_sft_disables_argparse_long_option_abbreviation() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'description="SFT Training for RTX 3090", allow_abbrev=False' in source
+
+    parsed = ast.parse(source)
+    functions = {
+        node.name: node
+        for node in parsed.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_parse_init_lora_weights", "parse_args"}
+    }
+    namespace = {"argparse": argparse}
+    exec(
+        compile(
+            ast.Module(body=list(functions.values()), type_ignores=[]),
+            "train_sft_argparse_subset",
+            "exec",
+        ),
+        namespace,
+    )
+    for argv in (
+        ["--model-rev", "other"],
+        ["--model-rev=other"],
+        ["--runtime-im", "example/image"],
+    ):
+        with pytest.raises(SystemExit):
+            namespace["parse_args"](argv)
 
 
 def test_train_sft_exposes_aux_head_cli_flags() -> None:
@@ -135,6 +215,43 @@ def test_train_sft_threads_prompt_render_and_warns_on_off_anchor_combo() -> None
     assert "WARNING: aux_head token_position='end_of_prompt'" in source
 
 
+def test_train_sft_threads_explicit_preassigned_splits_and_records_raw_lineage() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    config_source = (
+        REPO_ROOT / "Trainers" / "sft" / "configs" / "config_loader.py"
+    ).read_text(encoding="utf-8")
+
+    assert "use_preassigned_splits: bool = False" in config_source
+    assert 'preprocessing_metadata["dataset_format"] = prepared_dataset_format' in source
+    assert '"loss_mask_mode": loss_mask_mode' in source
+    assert "use_preassigned_splits=getattr(" in source
+    assert "assistant_only_loss_requested=config.training.assistant_only_loss" in source
+    assert "aux_token_position=aux_head_cfg.token_position if aux_head_enabled else None" in source
+    for flag in (
+        '"--completion-only-loss"',
+        '"--no-completion-only-loss"',
+        '"--assistant-only-loss"',
+        '"--no-assistant-only-loss"',
+        '"--use-preassigned-splits"',
+        '"--no-use-preassigned-splits"',
+    ):
+        assert flag in source
+    assert 'dataset_preparation_metadata: dict[str, str] = {}' in source
+    assert 'prepared_dataset_format in {"raw_text", "messages"}' in source
+
+
+def test_train_sft_has_fail_closed_memory_efficient_loss_gate() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    config_source = (
+        REPO_ROOT / "Trainers" / "sft" / "configs" / "config_loader.py"
+    ).read_text(encoding="utf-8")
+
+    assert "require_memory_efficient_loss: bool = False" in config_source
+    assert '"--require-memory-efficient-loss"' in source
+    assert "require_unsloth_memory_efficient_loss(model)" in source
+    assert "SFT_LONG_CONTEXT_LOSS_GUARD_REQUIRED" in source
+
+
 def test_train_sft_revalidates_aux_head_coherence_after_cli_overrides() -> None:
     # Finding A remediation: the --aux-head-* overrides mutate config.aux_head
     # AFTER load_aux_head_config has run, so the YAML-load coherence guards would
@@ -170,3 +287,215 @@ def test_train_sft_revalidates_aux_head_coherence_after_cli_overrides() -> None:
     # The B-M1 ERROR guard is DISTINCT from the prompt_render WARN guard — both
     # must coexist; the remediation must not merge or remove the WARN.
     assert "WARNING: aux_head token_position='end_of_prompt'" in source
+
+
+def test_runtime_v1_projection_is_opt_in_atomic_and_post_save() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    for flag in (
+        "--runtime-v1-workload-fingerprint",
+        "--runtime-v1-configuration-revision",
+        "--runtime-v1-tokenizer-revision",
+        "--runtime-v1-dataset-revision",
+        "--runtime-v1-dataset-digest",
+    ):
+        assert flag in source
+    assert "if any(present) and not all(present):" in source
+    save_block = source[source.index("trainer.save_model(") : source.index("# Runtime v1 only:", source.index("trainer.save_model("))]
+    assert "if runtime_v1_requested:" in save_block
+    assert "_save_runtime_v1_text_tokenizer(tokenizer, final_model_path)" in save_block
+    assert "elif args.protected_smoke_evidence:" in save_block
+    assert "tokenizer.save_pretrained(str(final_model_path))" in save_block
+    assert "os.replace(temporary, destination)" in source
+    assert source.index("trainer.save_model(") < source.index("write_runtime_v1_projection_atomic(", source.index("def run("))
+    assert 'lineage["synaptic_runtime_projection"] = runtime_projection' in source
+
+
+def _runtime_v1_text_saver():
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    function = next(node for node in ast.parse(source).body
+                    if isinstance(node, ast.FunctionDef) and node.name == "_save_runtime_v1_text_tokenizer")
+    namespace = {"Any": Any, "Path": Path}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), "text_tokenizer_saver", "exec"), namespace)
+    return namespace["_save_runtime_v1_text_tokenizer"]
+
+
+class _TextTokenizer:
+    def __init__(self, template: str | None = None, *, fail: bool = False) -> None:
+        if template is not None:
+            self.chat_template = template
+        self.fail = fail
+        self.saved_template = None
+
+    def save_pretrained(self, directory: str) -> None:
+        if self.fail:
+            raise RuntimeError("PRIVATE_SENTINEL")
+        root = Path(directory)
+        self.saved_template = getattr(self, "chat_template", None)
+        (root / "tokenizer_config.json").write_text(
+            json.dumps({"tokenizer_class": "Fixture", "chat_template": self.saved_template}), encoding="utf-8")
+        (root / "tokenizer.json").write_text(
+            '{"version":"1.0","model":{"type":"BPE","vocab":{"x":0}}}', encoding="utf-8")
+        if self.saved_template:
+            (root / "chat_template.jinja").write_text(self.saved_template, encoding="utf-8")
+
+
+class _Processor:
+    def __init__(self, text_tokenizer: _TextTokenizer, template: str) -> None:
+        self.tokenizer = text_tokenizer
+        self.chat_template = template
+        self.save_called = False
+
+    def save_pretrained(self, directory: str) -> None:
+        self.save_called = True
+        raise AssertionError("processor save must not create modality sidecars")
+
+
+@pytest.mark.parametrize("inner_template", ["inner template", None])
+def test_runtime_v1_saves_effective_wrapper_template_as_text_only(tmp_path: Path, inner_template: str | None) -> None:
+    text = _TextTokenizer(inner_template)
+    wrapper = _Processor(text, "effective wrapper template")
+    _runtime_v1_text_saver()(wrapper, tmp_path)
+    assert not wrapper.save_called
+    assert text.saved_template == wrapper.chat_template
+    assert (tmp_path / "chat_template.jinja").read_text(encoding="utf-8") == wrapper.chat_template
+    assert (tmp_path / "tokenizer_config.json").is_file()
+    assert (tmp_path / "tokenizer.json").is_file()
+    assert not (tmp_path / "preprocessor_config.json").exists()
+    assert not (tmp_path / "video_preprocessor_config.json").exists()
+    if inner_template is None:
+        assert not hasattr(text, "chat_template")
+    else:
+        assert text.chat_template == inner_template
+
+    (tmp_path / "adapter_config.json").write_text(
+        '{"peft_type":"LORA","base_model_name_or_path":"example/model"}', encoding="utf-8")
+    header = b'{"weight":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}'
+    header += b" " * ((8 - len(header) % 8) % 8)
+    (tmp_path / "adapter_model.safetensors").write_bytes(len(header).to_bytes(8, "little") + header + b"\x01\x00\x00\x00")
+    assert runtime_v1._select_artifact_members(tmp_path, "model", locked_model_ref="example/model")
+    assert runtime_v1._select_artifact_members(tmp_path, "tokenizer")
+    (tmp_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "video_preprocessor_config.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(runtime_v1.RuntimeV1Error, match="unsupported file"):
+        runtime_v1._select_artifact_members(tmp_path, "model", locked_model_ref="example/model")
+
+
+@pytest.mark.parametrize("inner_template", ["inner template", None])
+def test_runtime_v1_restores_text_template_when_save_fails(tmp_path: Path, inner_template: str | None) -> None:
+    text = _TextTokenizer(inner_template, fail=True)
+    wrapper = _Processor(text, "effective wrapper template")
+    with pytest.raises(RuntimeError, match="PRIVATE_SENTINEL"):
+        _runtime_v1_text_saver()(wrapper, tmp_path)
+    if inner_template is None:
+        assert not hasattr(text, "chat_template")
+    else:
+        assert text.chat_template == inner_template
+    assert not wrapper.save_called
+
+
+def test_runtime_v1_direct_tokenizer_save_is_unchanged(tmp_path: Path) -> None:
+    text = _TextTokenizer("direct template")
+    _runtime_v1_text_saver()(text, tmp_path)
+    assert text.saved_template == "direct template"
+    assert text.chat_template == "direct template"
+
+
+def _stamp_block(source: str) -> str:
+    """Return the adapter_config stamp block, sliced back from its write.
+
+    The assertions below must hold for the STAMP specifically, not anywhere in
+    the 1500-line module, so every check is scoped to this slice.
+    """
+    marker = 'document["base_model_name_or_path"] = locked_ref'
+    assert source.count(marker) == 1, (
+        "expected exactly one adapter_config base_model_name_or_path assignment, "
+        f"found {source.count(marker)}"
+    )
+    end = source.index(marker) + len(marker)
+    start = source.rindex("if runtime_v1_requested:", 0, end)
+    return source[start:end]
+
+
+def test_train_sft_stamps_locked_model_ref_into_adapter_config() -> None:
+    # B-2. peft writes base_model_name_or_path as the offline SNAPSHOT PATH
+    # (src/model_loader.py asserts _name_or_path is the snapshot dir), but the
+    # host verifies that field for equality against the locked repo id. The
+    # trainer re-reads and rewrites the file after the final save.
+    #
+    # train_sft imports unsloth at module load, so this is pinned at the source
+    # level. A bare grep for "base_model_name_or_path" would pass against a
+    # version that stamps the snapshot path — which IS the bug — so all three
+    # properties are asserted, scoped to the stamp block.
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    block = _stamp_block(source)
+
+    # 1. The stamped value is the locked model ref, never the snapshot path.
+    assert "locked_ref = config.model.model_name" in block
+    assert "args.model_snapshot" not in block, (
+        "the stamp must not read the snapshot path; that value is the defect"
+    )
+
+    # 2. The write is gated on runtime_v1_requested, so every other lane
+    #    (notably local --compute-losses, which feeds this string back to
+    #    transformers_loss_loader as a path to load from) stays byte-identical.
+    assert block.startswith("if runtime_v1_requested:")
+
+    # 3. A non-string or empty ref raises; there is no fallback branch.
+    assert "if not isinstance(locked_ref, str) or not locked_ref:" in block
+    assert "raise RuntimeError(" in block
+    assert (
+        "runtime-v1 run has no usable model ref to stamp into adapter_config.json"
+        in block
+    )
+    assert "runtime-v1 run produced no adapter_config.json to stamp" in block
+    assert "adapter_config.json is not a JSON object" in block
+    for fallback in ("except", "try:", "pass"):
+        assert fallback not in block, (
+            f"the stamp must fail closed; found a {fallback!r} in the stamp block"
+        )
+
+
+def test_train_sft_guards_locked_model_ref_before_training_starts() -> None:
+    # The same fail-closed guard is repeated immediately after the LoRA attach
+    # so an unusable ref fails in seconds rather than after a full training run.
+    # It is repeated rather than hoisted because the two sites are ~280 lines
+    # apart and each must be independently fail-closed.
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+
+    attach_end = source.index("init_lora_weights=config.lora.init_lora_weights,")
+    guard_region = source[attach_end : source.index("protected_before = None")]
+
+    assert "if runtime_v1_requested:" in guard_region
+    assert "locked_ref = config.model.model_name" in guard_region
+    assert "if not isinstance(locked_ref, str) or not locked_ref:" in guard_region
+    assert "raise RuntimeError(" in guard_region
+
+    # The early guard must precede training, and the stamp must follow the save.
+    assert attach_end < source.index("trainer.save_model(")
+    assert source.index("trainer.save_model(") < source.index(
+        'document["base_model_name_or_path"] = locked_ref'
+    )
+
+
+def test_train_sft_loss_hook_resolves_relative_dataset_against_repo_root() -> None:
+    # The post-training loss hook once referenced an undefined _REPO_ROOT; the
+    # NameError was swallowed and per-example losses were silently skipped. It
+    # must resolve relative datasets with the same repo-root expression the
+    # module uses for its sys.path bootstrap.
+    path = REPO_ROOT / "Trainers" / "sft" / "train_sft.py"
+    source = path.read_text(encoding="utf-8")
+    repo_root_expr = "Path(__file__).parent.parent.parent"
+    assert f"sys.path.insert(0, str({repo_root_expr}))" in source
+
+    fallbacks = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Assign)
+        and [ast.unparse(target) for target in node.targets] == ["dataset_path"]
+        and isinstance(node.value, ast.BinOp)
+        and isinstance(node.value.op, ast.Div)
+        and ast.unparse(node.value.right) == "dataset_path"
+    ]
+    assert [ast.unparse(node.value.left) for node in fallbacks] == [repo_root_expr]
+    assert path.parent.parent.parent == REPO_ROOT
+    assert "_REPO_ROOT" not in source

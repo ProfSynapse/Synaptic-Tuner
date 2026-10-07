@@ -99,7 +99,7 @@ def _print_rich_checkpoint_table(checkpoints: List[CheckpointInfo], training_typ
     console.print(table)
 
     if training_type == "kto":
-        console.print(f"\n  [dim]Score = Margin/KL (higher is better: high margin, low KL)[/dim]")
+        console.print("\n  [dim]Score = Margin/KL (higher is better: high margin, low KL)[/dim]")
     console.print()
 
 

@@ -14,13 +14,16 @@ from pathlib import Path
 from typing import Optional
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import PathRef, ProjectContext
 
 
 class BatchGenerateHandler(BaseHandler):
     """Batched prompts-in / completions-out generation."""
 
-    def __init__(self, args: Optional[Namespace] = None):
-        super().__init__(args=args)
+    def __init__(
+        self, args: Optional[Namespace] = None, context: ProjectContext | None = None
+    ):
+        super().__init__(args=args, context=context)
 
     @property
     def name(self) -> str:
@@ -43,12 +46,29 @@ class BatchGenerateHandler(BaseHandler):
             )
             return 1
 
+        try:
+            prompts = PathRef.parse(str(prompts)).resolve(
+                self.context, from_cli=True, access="read"
+            )
+            raw_out = str(out_dir)
+            if self.context.mode == "host" and "://" not in raw_out and not Path(raw_out).is_absolute():
+                raw_out = "artifact://" + raw_out.replace("\\", "/")
+            out_dir = PathRef.parse(raw_out).resolve(
+                self.context, from_cli=True, access="write" if self.context.mode == "host" else "read"
+            )
+        except Exception as exc:
+            self.output_error(str(exc), code="INVALID_BATCH_PATH")
+            return 1
+
         stop = list(getattr(args, "stop_strings", None) or []) or None
         json_schema = None
         json_schema_path = getattr(args, "json_schema", None)
         if json_schema_path:
             try:
-                json_schema = json.loads(Path(json_schema_path).read_text(encoding="utf-8"))
+                resolved_schema = PathRef.parse(str(json_schema_path)).resolve(
+                    self.context, from_cli=True, access="read"
+                )
+                json_schema = json.loads(resolved_schema.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
                 self.output_error(
                     f"Cannot read --json-schema {json_schema_path!r}: {exc}",
@@ -119,6 +139,7 @@ class BatchGenerateHandler(BaseHandler):
                 dtype=getattr(args, "compute_dtype", None),
                 trust_remote_code=getattr(args, "trust_remote_code", False),
                 log=(lambda m: None) if self.json_mode else print,
+                context=self.context,
             )
         except Exception as exc:  # noqa: BLE001 - surface as a clean CLI error
             self.output_error(str(exc), code="BATCH_GENERATE_FAILED")

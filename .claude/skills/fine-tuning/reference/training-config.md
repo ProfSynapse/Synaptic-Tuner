@@ -2,6 +2,13 @@
 
 Full YAML configuration reference for all training methods.
 
+Trainer configs are strict: the SFT/KTO/DPO loaders, both GRPO entrypoints and
+tier presets refuse any key the trainer does not read (every dotted path is
+listed with a "did you mean" hint), and a YAML setting the installed TRL config
+class does not accept raises instead of being dropped. `wandb.project` and
+`wandb.entity` are applied via `WANDB_PROJECT` / `WANDB_ENTITY` when W&B is on.
+See `docs/troubleshooting.md` for both errors.
+
 ---
 
 ## Local Docker Job Config (`Trainers/recipes/*.yaml` with `target: local`)
@@ -53,6 +60,31 @@ python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes
 ```
 
 Use repo-relative paths for `dataset.local_file`; the runner translates them into the trainer's container working directory. On Windows, `job.transfer: auto` uses copy mode because GPU bind mounts can fail with access denied.
+
+For recipes that require an immutable reviewed package overlay, add the optional
+config-driven safety contract below and use the derived-image workflow in
+`derived-training-images.md`:
+
+```yaml
+job:
+  image: sha256:<real-local-image-config-digest>
+  pull_policy: never
+  image_qualification:
+    required: true
+    profile: Trainers/image_profiles/my-profile.yaml
+    verification_report: private/image-qualifications/my-verification.json
+```
+
+The block is opt-in and does not change existing recipes. `local-run --json`
+can still compile a template with no image or report. An effectful run with the
+block fails before project/artifact preparation unless a fresh, network-disabled
+Docker probe of the exact immutable `job.image` agrees with the profile and
+diagnostic report. The report alone is never launch authority. Omit `job.image`
+from checked-in templates until a real captured digest exists; never use a fake
+runnable-looking placeholder.
+Qualified recipes also reject non-empty `setup.pip`, because mutating packages
+after the live check would invalidate it. This is an honest-local consistency
+gate, not cryptographic build provenance or release/Modal promotion authority.
 
 ### `job.user` — container user + artifact ownership
 
@@ -147,6 +179,9 @@ training:
   max_seq_length: 2048
   packing: true                     # 2.5-5x faster!
   completion_only_loss: true        # Train only on assistant responses
+  assistant_only_loss: false        # Explicit for authoritative v2 rows
+  prompt_render: full_conversation  # Use prompt_completion for exact boundaries
+  require_memory_efficient_loss: false  # Fail closed on stock/fallback LM loss
 
   # Memory optimizations
   gradient_checkpointing: true
@@ -178,8 +213,17 @@ dataset:
   num_proc: 1                       # Must be 1 on Windows/WSL
   test_size: 0.1                    # Validation split ratio
   split_dataset: false
+  validation_group_key: null        # Dot-path (e.g. metadata.scenario); keeps groups on one side
   filter_desirable: false           # SFT doesn't need filtering
 ```
+
+`validation_group_key` (SFT, KTO, DPO; forwarded by `local-run` as
+`--validation-group-key`) replaces the random row split with a grouped one:
+`test_size` is applied over distinct group values, every row of a group lands
+on the same side, and the assignment is deterministic for the split seed (42).
+A missing/null/empty value fails with the row index; it requires
+`split_dataset: true` and cannot be combined with `use_preassigned_splits`.
+Recommended keys per data source are in `docs/common-tasks.md` section 1c.
 
 ### Evolutionary Section (Experimental)
 ```yaml
@@ -273,6 +317,7 @@ dataset:
   local_file: ../../Datasets/behavior_merged_kto_v1.5_balanced.jsonl
   num_proc: 1
   test_size: 0.1
+  validation_group_key: null        # Same grouped split as SFT (with --split-dataset)
 ```
 
 ---

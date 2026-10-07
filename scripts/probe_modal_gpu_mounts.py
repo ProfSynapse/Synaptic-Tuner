@@ -1,0 +1,892 @@
+"""One-shot private Modal GPU mount-topology diagnostic.
+
+This maintenance probe is deliberately outside TrainingAPI. It creates three
+fresh v1 Volumes and one private L40S Function using an existing exact Image.
+Its result is diagnostic only and cannot authorize training or a mount guard
+change. The claim and provider resources are retained on every outcome.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import hashlib
+import hmac
+import itertools
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import signal
+import stat
+import sys
+import tempfile
+import time
+
+
+_NAME = re.compile(r"[a-z][a-z0-9-]{0,62}[a-z0-9]\Z")
+_PREFIX = re.compile(r"[a-z][a-z0-9-]{0,17}[a-z0-9]\Z")
+_IMAGE = re.compile(r"im-[A-Za-z0-9]{1,64}\Z")
+_VOLUME = re.compile(r"vo-[A-Za-z0-9]{1,64}\Z")
+_CALL = re.compile(r"fc-[A-Za-z0-9]{1,77}\Z")
+_MARKER = re.compile(r"probe-[0-9a-f]{32}\.bin\Z")
+_ROLES = ("control", "artifacts", "model_cache")
+_MOUNT_PARENTS = ("/mnt", "/workspace")
+_MOUNT_LEAVES = ("control", "artifacts", "model-cache")
+_CATEGORIES = ("DIRECTORY", "LINK", "ABSENT", "OTHER", "UNAVAILABLE")
+_LINK_SUFFIXES = (
+    "TRAVERSAL", "MISSING", "ANCESTOR_LINK", "ANCESTOR_OTHER",
+    "TARGET_LINK", "TARGET_OTHER", "ANCESTOR_UNTRUSTED",
+    "TARGET_WRITABLE", "TARGET_OWNER_SELF", "TARGET_OWNER_ROOT",
+    "TARGET_OWNER_OTHER", "UNSTABLE", "UNAVAILABLE",
+)
+_LINK_CATEGORIES = ("NOT_LINK", "ABSENT", "UNAVAILABLE") + tuple(
+    prefix + "_" + suffix for prefix in ("ABS", "REL") for suffix in _LINK_SUFFIXES
+)
+_MAPPING_CATEGORIES = (
+    "MATCH", "MATCH_MODAL_ID", "MATCH_MODAL_ID_DESCENDANT",
+    "MISMATCH", "MARKER_MISSING", "MARKER_UNSAFE",
+    "ROOT_UNSAFE", "UNSTABLE", "UNAVAILABLE",
+)
+_SCHEMA = "synaptic-modal-gpu-mount-probe/v1"
+_TIMEOUT = 120
+_STAGE_FAILURES = frozenset({
+    "APP_CONSTRUCT_UNAVAILABLE",
+    "VOLUME_CREATE_UNAVAILABLE", "VOLUME_HYDRATE_UNAVAILABLE",
+    "IMAGE_HANDLE_UNAVAILABLE", "FUNCTION_CONSTRUCT_UNAVAILABLE",
+    "APP_DEPLOY_UNAVAILABLE", "FUNCTION_SPAWN_UNAVAILABLE",
+    "CALL_RETENTION_UNAVAILABLE", "POLL_UNAVAILABLE",
+    "MARKER_UPLOAD_UNAVAILABLE",
+    "MAPPING_RECEIPT_UNAVAILABLE",
+})
+_SDK_ORIGIN_MODULES = {
+    "modal.app": "app.py",
+    "modal.runner": "runner.py",
+    "modal._functions": "_functions.py",
+    "modal.image": "image.py",
+    "modal._resolver": "_resolver.py",
+    "modal._object": "_object.py",
+    "modal.mount": "mount.py",
+    "modal.client": "client.py",
+}
+_FUNCTION_CREATE_TOPICS = (
+    ("VOLUME", frozenset({"volume", "volumes"})),
+    ("MOUNT", frozenset({"mount", "mounts"})),
+    ("IMAGE", frozenset({"image", "images"})),
+    ("GPU", frozenset({"gpu", "gpus"})),
+    ("SECRET", frozenset({"secret", "secrets"})),
+    ("NETWORK", frozenset({"network", "networks"})),
+    ("MEMORY", frozenset({"memory"})),
+    ("CPU", frozenset({"cpu", "cpus"})),
+    ("TIMEOUT", frozenset({"timeout"})),
+    ("FUNCTION", frozenset({"function", "functions"})),
+)
+_FUNCTION_CREATE_ACTIONS = (
+    ("UNSUPPORTED", frozenset({"unsupported"})),
+    ("INVALID", frozenset({"invalid"})),
+    ("MISSING", frozenset({"missing", "required"})),
+    ("DUPLICATE", frozenset({"duplicate"})),
+    ("LIMIT", frozenset({"limit", "exceeded"})),
+    ("PERMISSION", frozenset({"permission", "forbidden"})),
+    ("CONFLICT", frozenset({"conflict"})),
+)
+
+
+class ProbeUnavailable(RuntimeError):
+    """Closed diagnostic failure whose underlying details must stay private."""
+
+    def __init__(self, code: str, *, failure_class: str | None = None,
+                 failure_origin: str | None = None,
+                 failure_topics: tuple[str, ...] = (),
+                 failure_action: str | None = None):
+        super().__init__(code)
+        self.failure_class = failure_class
+        self.failure_origin = failure_origin
+        self.failure_topics = failure_topics
+        self.failure_action = failure_action
+
+
+def _failure_class(error: BaseException) -> str:
+    kind = type(error)
+    admitted = {
+        TypeError, ValueError, RuntimeError, TimeoutError, PermissionError,
+        AttributeError, ImportError, ModuleNotFoundError, OSError,
+    }
+    if kind in admitted:
+        return kind.__name__
+    module = getattr(kind, "__module__", "")
+    name = getattr(kind, "__name__", "")
+    if module.startswith("modal.") and name in {
+        "InvalidError", "ExecutionError", "SerializationError", "NotFoundError",
+    }:
+        return name
+    if module.startswith("grpclib.") and name == "GRPCError":
+        return name
+    return "OTHER"
+
+
+def _failure_origin(error: BaseException) -> str | None:
+    """Expose one admitted SDK source site, never a traceback path or message."""
+    trace = error.__traceback__
+    origin = None
+    for _ in range(64):
+        if trace is None:
+            break
+        frame = trace.tb_frame
+        module = frame.f_globals.get("__name__")
+        filename = _SDK_ORIGIN_MODULES.get(module) if type(module) is str else None
+        path = frame.f_code.co_filename.replace("\\", "/")
+        line = trace.tb_lineno
+        if (filename is not None and path.endswith("/modal/" + filename)
+                and type(line) is int and 0 < line <= 10000):
+            origin = f"{filename}:{line}"
+        trace = trace.tb_next
+    return origin
+
+
+def _function_create_topics(error: BaseException) -> tuple[tuple[str, ...], str | None]:
+    """Return advisory keyword hints, not causes; never emit provider text."""
+    try:
+        words = set(re.findall(r"[a-z_]{2,32}", str(error)[:2048].lower()))
+    except Exception:
+        return (), None
+    topics = tuple(label for label, names in _FUNCTION_CREATE_TOPICS if words & names)[:4]
+    action = next((label for label, names in _FUNCTION_CREATE_ACTIONS if words & names), None)
+    return topics, action
+
+
+@contextlib.contextmanager
+def _provider_stage(code: str):
+    assert code in _STAGE_FAILURES
+    try:
+        yield
+    except ProbeUnavailable as error:
+        failure_class = ("TimeoutError" if str(error) == "PROVIDER_INDETERMINATE"
+                         else "OTHER")
+        raise ProbeUnavailable(code, failure_class=failure_class) from None
+    except Exception as error:
+        failure_class = _failure_class(error)
+        failure_origin = _failure_origin(error)
+        topics, action = ((), None)
+        if (code == "APP_DEPLOY_UNAVAILABLE" and failure_class == "InvalidError"
+                and type(error).__module__ == "modal.exception"
+                and failure_origin == "_functions.py:1148"):
+            topics, action = _function_create_topics(error)
+        raise ProbeUnavailable(
+            code, failure_class=failure_class, failure_origin=failure_origin,
+            failure_topics=topics, failure_action=action,
+        ) from None
+
+
+def _mount_paths(parent: str) -> tuple[str, ...]:
+    if type(parent) is not str or parent not in _MOUNT_PARENTS:
+        raise ProbeUnavailable("INPUT_INVALID")
+    return tuple(parent + "/" + leaf for leaf in _MOUNT_LEAVES)
+
+
+def _prepare_marker(volume: object, name: str, raw: bytes) -> bool:
+    """Submit one create-only marker; the remote challenge verifies its bytes."""
+    if (_MARKER.fullmatch(name) is None or type(raw) is not bytes or len(raw) != 32):
+        return False
+    with tempfile.SpooledTemporaryFile(max_size=64, mode="w+b") as spool:
+        spool.write(raw)
+        spool.seek(0)
+        with _provider_stage("MARKER_UPLOAD_UNAVAILABLE"):
+            with _deadline(60):
+                with volume.batch_upload(force=False) as batch:
+                    batch.put_file(spool, name, mode=0o600)
+    return True
+
+
+def _same_file(first: object, second: object) -> bool:
+    return all(getattr(first, name) == getattr(second, name) for name in (
+        "st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_ctime_ns",
+    ))
+
+
+def _link_target_status(parent: int, target: str) -> str:
+    """Walk only target directory metadata, stopping at any linked component."""
+    absolute = target.startswith("/")
+    parts = target[1:].split("/") if absolute else target.split("/")
+    if (len(target) > 1024 or not parts or len(parts) > 16
+            or any(part in ("", ".", "..") for part in parts)):
+        return "TRAVERSAL"
+    descriptor = None
+    ancestor_untrusted = False
+    try:
+        descriptor = (os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                      if absolute else os.dup(parent))
+        final_info = None
+        for index, part in enumerate(parts):
+            final = index == len(parts) - 1
+            try:
+                info = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                return "MISSING"
+            if stat.S_ISLNK(info.st_mode):
+                return "TARGET_LINK" if final else "ANCESTOR_LINK"
+            if not stat.S_ISDIR(info.st_mode):
+                return "TARGET_OTHER" if final else "ANCESTOR_OTHER"
+            opened = os.open(
+                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=descriptor,
+            )
+            try:
+                if not _same_file(info, os.fstat(opened)):
+                    os.close(opened)
+                    return "UNSTABLE"
+            except BaseException:
+                os.close(opened)
+                raise
+            os.close(descriptor)
+            descriptor = opened
+            if final:
+                final_info = info
+            elif info.st_uid not in (0, os.geteuid()) or stat.S_IMODE(info.st_mode) & 0o022:
+                ancestor_untrusted = True
+        if not _same_file(final_info, os.fstat(descriptor)):
+            return "UNSTABLE"
+        if ancestor_untrusted:
+            return "ANCESTOR_UNTRUSTED"
+        if stat.S_IMODE(final_info.st_mode) & 0o022:
+            return "TARGET_WRITABLE"
+        if final_info.st_uid == os.geteuid():
+            return "TARGET_OWNER_SELF"
+        return "TARGET_OWNER_ROOT" if final_info.st_uid == 0 else "TARGET_OWNER_OTHER"
+    except BaseException:
+        return "UNAVAILABLE"
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _inspect_root_link(parent: int, leaf: str) -> str:
+    try:
+        before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+    except FileNotFoundError:
+        return "ABSENT"
+    except BaseException:
+        return "UNAVAILABLE"
+    if not stat.S_ISLNK(before.st_mode):
+        return "NOT_LINK"
+    try:
+        target = os.readlink(leaf, dir_fd=parent)
+        if type(target) is not str:
+            return "UNAVAILABLE"
+        prefix = "ABS" if target.startswith("/") else "REL"
+        status = _link_target_status(parent, target)
+        after = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if not _same_file(before, after):
+            status = "UNSTABLE"
+        return prefix + "_" + status
+    except BaseException:
+        return "UNAVAILABLE"
+
+
+def _open_mapping_root(parent: int, leaf: str) -> tuple[int | None, object | None, object | None]:
+    """Resolve a root link through retained nofollow directory descriptors."""
+    descriptor = None
+    try:
+        link = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISLNK(link.st_mode):
+            return None, None, None
+        target = os.readlink(leaf, dir_fd=parent)
+        if type(target) is not str or len(target) > 1024:
+            return None, None, None
+        absolute = target.startswith("/")
+        parts = target[1:].split("/") if absolute else target.split("/")
+        if (not parts or len(parts) > 16
+                or any(part in ("", ".", "..") for part in parts)):
+            return None, None, None
+        descriptor = (os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                      if absolute else os.dup(parent))
+        for part in parts:
+            before = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                return None, None, None
+            opened = os.open(
+                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=descriptor,
+            )
+            if not _same_file(before, os.fstat(opened)):
+                os.close(opened)
+                return None, None, None
+            os.close(descriptor)
+            descriptor = opened
+        if not _same_file(link, os.stat(leaf, dir_fd=parent, follow_symlinks=False)):
+            return None, None, None
+        root_info = os.fstat(descriptor)
+        result = descriptor
+        descriptor = None
+        return result, root_info, link
+    except BaseException:
+        return None, None, None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _mapping_target_category(target: str, volume_id: str) -> str:
+    """Classify an opaque provider target without emitting its path."""
+    if (type(target) is not str or type(volume_id) is not str
+            or _VOLUME.fullmatch(volume_id) is None):
+        return "UNAVAILABLE"
+    expected = "/__modal/volumes/" + volume_id
+    if target == expected:
+        return "MATCH_MODAL_ID"
+    if target.startswith(expected + "/"):
+        return "MATCH_MODAL_ID_DESCENDANT"
+    return "MATCH"
+
+
+def _verify_mapping_root(parent: int, leaf: str, name: str, digest: str,
+                         volume_id: str = "") -> str:
+    root = None
+    marker = None
+    try:
+        if (type(name) is not str or _MARKER.fullmatch(name) is None
+                or type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+            return "UNAVAILABLE"
+        root, root_info, link_info = _open_mapping_root(parent, leaf)
+        if root is None:
+            return "ROOT_UNSAFE"
+        try:
+            before = os.stat(name, dir_fd=root, follow_symlinks=False)
+        except FileNotFoundError:
+            return "MARKER_MISSING"
+        if not stat.S_ISREG(before.st_mode) or before.st_size != 32:
+            return "MARKER_UNSAFE"
+        marker = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=root)
+        opened = os.fstat(marker)
+        if not stat.S_ISREG(opened.st_mode) or not _same_file(before, opened):
+            return "UNSTABLE"
+        data = bytearray()
+        while len(data) <= 32:
+            chunk = os.read(marker, 33 - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+        if (not _same_file(before, os.fstat(marker))
+                or not _same_file(before, os.stat(name, dir_fd=root, follow_symlinks=False))
+                or not _same_file(root_info, os.fstat(root))
+                or not _same_file(link_info, os.stat(
+                    leaf, dir_fd=parent, follow_symlinks=False,
+                ))):
+            return "UNSTABLE"
+        if len(data) != 32 or not hmac.compare_digest(hashlib.sha256(data).hexdigest(), digest):
+            return "MISMATCH"
+        if volume_id:
+            target = os.readlink(leaf, dir_fd=parent)
+            if not _same_file(link_info, os.stat(
+                leaf, dir_fd=parent, follow_symlinks=False,
+            )):
+                return "UNSTABLE"
+            return _mapping_target_category(target, volume_id)
+        return "MATCH"
+    except BaseException:
+        return "UNAVAILABLE"
+    finally:
+        if marker is not None:
+            os.close(marker)
+        if root is not None:
+            os.close(root)
+
+
+def _canonical_link_category(value: str) -> str:
+    """Reuse the admitted string object so exact pickle matching is stable."""
+    return next((item for item in _LINK_CATEGORIES if item == value), "UNAVAILABLE")
+
+
+def _remote_probe(mount_parent: str = "/mnt", inspect_links: bool = False,
+                  verify_mapping: bool = False, marker_names: tuple[str, ...] = (),
+                  marker_digests: tuple[str, ...] = (),
+                  volume_ids: tuple[str, ...] = ()) -> dict[str, object]:
+    """Inspect only selected mount roots through one retained parent descriptor."""
+    import os
+    import stat
+
+    categories = []
+    parent = None
+    try:
+        if type(mount_parent) is not str or mount_parent not in _MOUNT_PARENTS:
+            raise ValueError
+        parent = os.open(mount_parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        if (type(inspect_links) is not bool or type(verify_mapping) is not bool
+                or (inspect_links and verify_mapping)):
+            raise ValueError
+        if verify_mapping and (type(marker_names) is not tuple or len(marker_names) != 3
+                               or type(marker_digests) is not tuple or len(marker_digests) != 3
+                               or type(volume_ids) is not tuple or len(volume_ids) not in (0, 3)):
+            raise ValueError
+        parent_info = os.fstat(parent) if (inspect_links or verify_mapping) else None
+        for index, leaf in enumerate(_MOUNT_LEAVES):
+            if verify_mapping:
+                value = _verify_mapping_root(
+                    parent, leaf, marker_names[index], marker_digests[index],
+                    volume_ids[index] if volume_ids else "",
+                )
+                categories.append(next((item for item in _MAPPING_CATEGORIES
+                                        if item == value), "UNAVAILABLE"))
+                continue
+            if inspect_links:
+                categories.append(_canonical_link_category(_inspect_root_link(parent, leaf)))
+                continue
+            try:
+                info = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                categories.append("ABSENT")
+                continue
+            except BaseException:
+                categories.append("UNAVAILABLE")
+                continue
+            if stat.S_ISLNK(info.st_mode):
+                categories.append("LINK")
+            elif stat.S_ISDIR(info.st_mode):
+                descriptor = None
+                try:
+                    descriptor = os.open(
+                        leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=parent,
+                    )
+                    opened = os.fstat(descriptor)
+                    categories.append(
+                        "DIRECTORY" if (opened.st_dev, opened.st_ino)
+                        == (info.st_dev, info.st_ino) else "UNAVAILABLE"
+                    )
+                except BaseException:
+                    categories.append("UNAVAILABLE")
+                finally:
+                    if descriptor is not None:
+                        os.close(descriptor)
+            else:
+                categories.append("OTHER")
+        if (inspect_links or verify_mapping) and not _same_file(
+            parent_info, os.stat(mount_parent, follow_symlinks=False),
+        ):
+            categories = ["UNAVAILABLE"] * 3
+    except BaseException:
+        categories = ["UNAVAILABLE"] * 3
+    finally:
+        if parent is not None:
+            os.close(parent)
+    key = "mapping" if verify_mapping else ("links" if inspect_links else "roots")
+    return {"schema_version": _SCHEMA, key: tuple(categories)}
+
+
+def _exact(value: str, pattern: re.Pattern[str]) -> str:
+    if type(value) is not str or pattern.fullmatch(value) is None:
+        raise ProbeUnavailable("INPUT_INVALID")
+    return value
+
+
+def _require_host() -> None:
+    if (os.name != "posix" or sys.implementation.name != "cpython"
+            or sys.version_info[:3] != (3, 11, 14)
+            or sys.version_info.releaselevel != "final"):
+        raise ProbeUnavailable("HOST_INCOMPATIBLE")
+
+
+def _private_directory(path: Path) -> int:
+    if not path.is_absolute():
+        raise ProbeUnavailable("CLAIM_PATH_INVALID")
+    descriptor = None
+    try:
+        descriptor = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        parts = path.parts[1:]
+        if not parts:
+            raise ValueError
+        for index, part in enumerate(parts):
+            before = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
+            opened = os.open(
+                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=descriptor,
+            )
+            after = os.fstat(opened)
+            if (not stat.S_ISDIR(before.st_mode)
+                    or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+                    or before.st_uid not in (0, os.geteuid())
+                    or stat.S_IMODE(before.st_mode) & 0o022
+                    or (index == len(parts) - 1 and (
+                        before.st_uid != os.geteuid()
+                        or stat.S_IMODE(before.st_mode) & 0o077
+                    ))):
+                os.close(opened)
+                raise ValueError
+            os.close(descriptor)
+            descriptor = opened
+        return descriptor
+    except Exception:
+        if descriptor is not None:
+            os.close(descriptor)
+        raise ProbeUnavailable("CLAIM_PATH_INVALID")
+
+
+def _exclusive_record(root: int, leaf: str, value: dict[str, object]) -> None:
+    raw = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if len(raw) > 4096:
+        raise ProbeUnavailable("CLAIM_INVALID")
+    descriptor = None
+    try:
+        descriptor = os.open(
+            leaf, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600, dir_fd=root,
+        )
+        remaining = memoryview(raw)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError("short claim write")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+        os.fsync(root)
+    except FileExistsError:
+        raise ProbeUnavailable("CLAIM_ALREADY_CONSUMED") from None
+    except Exception:
+        raise ProbeUnavailable("CLAIM_INDETERMINATE") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _bounded_alarm(_signum, _frame):
+    raise ProbeUnavailable("PROVIDER_INDETERMINATE")
+
+
+@contextlib.contextmanager
+def _deadline(seconds: int):
+    former = signal.signal(signal.SIGALRM, _bounded_alarm)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, former)
+
+
+def _classify_raw(output: object, api_pb2: object, serialize: object,
+                  inspect_links: bool = False,
+                  verify_mapping: bool = False) -> str | dict[str, str]:
+    """Compare only pinned small inline pickle bytes; never deserialize them."""
+    try:
+        if output.result.status != api_pb2.GenericResult.GENERIC_STATUS_SUCCESS:
+            return "PROVIDER_FAILURE"
+        if (output.data_format != api_pb2.DATA_FORMAT_PICKLE
+                or output.result.data_blob_id or type(output.result.data) is not bytes
+                or len(output.result.data) > 512):
+            return "OUTPUT_UNCLASSIFIED"
+        raw = output.result.data
+        if (type(inspect_links) is not bool or type(verify_mapping) is not bool
+                or (inspect_links and verify_mapping)):
+            return "OUTPUT_UNCLASSIFIED"
+        categories = (_MAPPING_CATEGORIES if verify_mapping else
+                      (_LINK_CATEGORIES if inspect_links else _CATEGORIES))
+        key = "mapping" if verify_mapping else ("links" if inspect_links else "roots")
+        for values in itertools.product(categories, repeat=3):
+            expected = serialize({"schema_version": _SCHEMA, key: values})
+            if type(expected) is bytes and hmac.compare_digest(raw, expected):
+                return dict(zip(_ROLES, values))
+    except Exception:
+        pass
+    return "OUTPUT_UNCLASSIFIED"
+
+
+async def _poll_raw(client: object, call_id: str, api_pb2: object,
+                    serialize: object, inspect_links: bool = False,
+                    verify_mapping: bool = False) -> str | dict[str, str]:
+    import asyncio
+
+    request = api_pb2.FunctionGetOutputsRequest(
+        function_call_id=call_id, timeout=0, last_entry_id="0-0",
+        clear_on_success=False, requested_at=time.time(),
+        start_idx=0, end_idx=0, max_values=1,
+    )
+    try:
+        response = await asyncio.wait_for(
+            client.stub.FunctionGetOutputs(request, retry=None, timeout=15), timeout=16,
+        )
+        if len(response.outputs) == 0:
+            return "PENDING" if response.num_unfinished_inputs > 0 else "OUTPUT_EXPIRED"
+        if len(response.outputs) != 1 or response.outputs[0].idx != 0:
+            return "OUTPUT_UNCLASSIFIED"
+        return _classify_raw(response.outputs[0], api_pb2, serialize,
+                             inspect_links, verify_mapping)
+    except Exception:
+        return "POLL_UNAVAILABLE"
+
+
+def _client(sdk: object, profile: str):
+    from modal.config import config
+
+    if sdk.__version__ != "1.5.4":
+        raise ProbeUnavailable("SDK_INCOMPATIBLE")
+    token_id = config.get("token_id", profile=profile, use_env=False)
+    token_secret = config.get("token_secret", profile=profile, use_env=False)
+    if any(type(value) is not str or not value.strip()
+           for value in (token_id, token_secret)):
+        raise ProbeUnavailable("CREDENTIAL_UNAVAILABLE")
+    return sdk.Client.from_credentials(token_id, token_secret)
+
+
+async def _read_app_absence(client: object, app_name: str,
+                            environment: str, api_pb2: object) -> bool:
+    import asyncio
+    from modal.exception import NotFoundError
+
+    request = api_pb2.AppGetByDeploymentNameRequest(
+        name=app_name, environment_name=environment,
+    )
+    try:
+        response = await asyncio.wait_for(
+            client.stub.AppGetByDeploymentName(request, retry=None, timeout=15), timeout=16,
+        )
+    except NotFoundError:
+        return True
+    return (
+        type(response) is api_pb2.AppGetByDeploymentNameResponse
+        and response.app_id == ""
+        and response.previous_app_id == ""
+        and response.lifecycle == api_pb2.AppLifecycle()
+        and response.environment_name in ("", environment)
+    )
+
+
+async def _read_image_identity(client: object, image_id: str,
+                               api_pb2: object) -> bool:
+    """Read the selected existing Image ID before an app ID exists."""
+    import asyncio
+
+    request = api_pb2.ImageFromIdRequest(image_id=image_id)
+    response = await asyncio.wait_for(
+        client.stub.ImageFromId(request, retry=None, timeout=15), timeout=16,
+    )
+    return (type(response) is api_pb2.ImageFromIdResponse
+            and response.image_id == image_id)
+
+
+def execute(args: argparse.Namespace, sdk: object, client: object) -> str | dict[str, str]:
+    """One app deployment and one Function spawn after an exclusive claim."""
+    from modal._utils.async_utils import synchronizer
+    from modal_proto import api_pb2
+
+    try:
+        absent = synchronizer.create_blocking(_read_app_absence)(
+            client, args.app, args.environment, api_pb2,
+        )
+    except Exception:
+        raise ProbeUnavailable("APP_ABSENCE_UNAVAILABLE") from None
+    if not absent:
+        raise ProbeUnavailable("APP_NOT_FRESH")
+    try:
+        image_matches = synchronizer.create_blocking(_read_image_identity)(
+            client, args.image_id, api_pb2,
+        )
+    except Exception:
+        raise ProbeUnavailable("IMAGE_READ_UNAVAILABLE") from None
+    if not image_matches:
+        raise ProbeUnavailable("IMAGE_IDENTITY_INVALID")
+    with _provider_stage("APP_CONSTRUCT_UNAVAILABLE"):
+        app = sdk.App(args.app, include_source=False)
+    volumes = {}
+    for role, name in zip(_ROLES, args.volume_names):
+        with _provider_stage("VOLUME_CREATE_UNAVAILABLE"):
+            with _deadline(60):
+                sdk.Volume.objects.create(
+                    name, version=1, allow_existing=False,
+                    environment_name=args.environment, client=client,
+                )
+        with _provider_stage("VOLUME_HYDRATE_UNAVAILABLE"):
+            with _deadline(60):
+                volume = sdk.Volume.from_name(
+                    name, environment_name=args.environment,
+                    create_if_missing=False, version=1, client=client,
+                )
+                volume.hydrate(client)
+        identity = getattr(volume, "object_id", None)
+        if (getattr(volume, "is_hydrated", False) is not True
+                or type(identity) is not str or _VOLUME.fullmatch(identity) is None
+                or identity in [item.object_id for item in volumes.values()]):
+            raise ProbeUnavailable("VOLUME_IDENTITY_INVALID")
+        volumes[role] = volume
+    volume_ids = tuple(volumes[role].object_id for role in _ROLES)
+    if args.verify_mapping:
+        for index, role in enumerate(_ROLES):
+            if not _prepare_marker(
+                volumes[role], args.marker_names[index], args.marker_bytes[index],
+            ):
+                raise ProbeUnavailable("MARKER_VERIFY_INVALID")
+        with _provider_stage("MAPPING_RECEIPT_UNAVAILABLE"):
+            _exclusive_record(args.claim_fd, "marker-receipt.json", {
+                "schema_version": _SCHEMA,
+                "selection_sha256": args.selection_sha256,
+                "marker_names": args.marker_names,
+                "marker_sha256": args.marker_digests,
+                "volume_ids": volume_ids,
+                "marker_upload": "accepted_create_only_no_host_readback",
+            })
+    with _provider_stage("IMAGE_HANDLE_UNAVAILABLE"):
+        image = sdk.Image.from_id(args.image_id, client=client)
+    if getattr(image, "object_id", None) != args.image_id:
+        raise ProbeUnavailable("IMAGE_IDENTITY_INVALID")
+    with _provider_stage("FUNCTION_CONSTRUCT_UNAVAILABLE"):
+        function = app.function(
+            name="mount_probe", image=image, cpu=1, memory=4096, gpu="L40S",
+            timeout=_TIMEOUT, retries=0,
+            volumes=dict(zip(_mount_paths(args.mount_parent),
+                             (volumes[role] for role in _ROLES))),
+            secrets=[], block_network=True, restrict_modal_access=True,
+            single_use_containers=True, serialized=False, include_source=True,
+        )(_remote_probe)
+    with tempfile.TemporaryDirectory(prefix="synaptic-modal-mount-probe-") as directory:
+        original = os.getcwd()
+        try:
+            os.chdir(directory)
+            with _provider_stage("APP_DEPLOY_UNAVAILABLE"):
+                with _deadline(300):
+                    app.deploy(environment_name=args.environment, client=client)
+        finally:
+            os.chdir(original)
+    if (getattr(image, "is_hydrated", False) is not True
+            or getattr(image, "object_id", None) != args.image_id):
+        raise ProbeUnavailable("POSTDEPLOY_IMAGE_INVALID")
+    if tuple(getattr(volumes[role], "object_id", None) for role in _ROLES) != volume_ids:
+        raise ProbeUnavailable("VOLUME_IDENTITY_INVALID")
+    with _provider_stage("FUNCTION_SPAWN_UNAVAILABLE"):
+        with _deadline(60):
+            call = function.spawn(
+                args.mount_parent, args.inspect_links, args.verify_mapping,
+                args.marker_names, args.marker_digests,
+                volume_ids if args.verify_mapping else (),
+            )
+    call_id = getattr(call, "object_id", None)
+    if type(call_id) is not str or _CALL.fullmatch(call_id) is None:
+        raise ProbeUnavailable("CALL_ID_INDETERMINATE")
+    with _provider_stage("CALL_RETENTION_UNAVAILABLE"):
+        _exclusive_record(args.claim_fd, "call.json", {
+            "schema_version": _SCHEMA, "call_id": call_id,
+        })
+    from modal._serialization import serialize
+
+    until = time.monotonic() + 180
+    while time.monotonic() < until:
+        with _provider_stage("POLL_UNAVAILABLE"):
+            result = synchronizer.create_blocking(_poll_raw)(
+                client, call_id, api_pb2, serialize,
+                args.inspect_links, args.verify_mapping,
+            )
+        if result != "PENDING":
+            return result
+        time.sleep(min(2, max(0, until - time.monotonic())))
+    return "PENDING"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--claim-dir", type=Path, required=True)
+    parser.add_argument("--name-prefix", required=True)
+    parser.add_argument("--environment", required=True)
+    parser.add_argument("--modal-profile", required=True)
+    parser.add_argument("--image-id", required=True)
+    parser.add_argument("--mount-parent", default="/mnt")
+    parser.add_argument("--inspect-links", action="store_true")
+    parser.add_argument("--verify-mapping", action="store_true")
+    args = parser.parse_args(argv)
+    result: str | dict[str, str] = "LOCAL_UNAVAILABLE"
+    failure_class = None
+    failure_origin = None
+    failure_topics = ()
+    failure_action = None
+    claim_fd = None
+    try:
+        _require_host()
+        claim_fd = _private_directory(args.claim_dir)
+        args.claim_fd = claim_fd
+        prefix = _exact(args.name_prefix, _PREFIX)
+        args.environment = _exact(args.environment, _NAME)
+        args.modal_profile = _exact(args.modal_profile, _NAME)
+        args.image_id = _exact(args.image_id, _IMAGE)
+        if args.inspect_links and args.verify_mapping:
+            raise ProbeUnavailable("INPUT_INVALID")
+        mount_paths = _mount_paths(args.mount_parent)
+        args.marker_names = ()
+        args.marker_digests = ()
+        args.marker_bytes = ()
+        if args.verify_mapping:
+            names = tuple("probe-" + secrets.token_hex(16) + ".bin" for _ in _ROLES)
+            values = tuple(secrets.token_bytes(32) for _ in _ROLES)
+            if (len(set(names)) != 3 or len(set(values)) != 3
+                    or any(_MARKER.fullmatch(name) is None for name in names)
+                    or any(type(value) is not bytes or len(value) != 32 for value in values)):
+                raise ProbeUnavailable("INPUT_INVALID")
+            args.marker_names = names
+            args.marker_digests = tuple(hashlib.sha256(value).hexdigest()
+                                        for value in values)
+            args.marker_bytes = values
+        nonce = secrets.token_hex(16)
+        args.app = prefix + "-probe-" + nonce
+        args.volume_names = tuple(prefix + "-" + role.replace("_", "-")
+                                  + "-" + nonce for role in _ROLES)
+        if any(_NAME.fullmatch(name) is None
+               for name in (args.app, *args.volume_names)):
+            raise ProbeUnavailable("INPUT_INVALID")
+        claim = {
+            "schema_version": _SCHEMA,
+            "app": args.app,
+            "environment": args.environment,
+            "image_id": args.image_id,
+            "mount_parent": args.mount_parent,
+            "mount_paths": mount_paths,
+            "inspect_links": args.inspect_links,
+            "verify_mapping": args.verify_mapping,
+            "marker_names": args.marker_names,
+            "marker_sha256": args.marker_digests,
+            "volume_names": args.volume_names,
+        }
+        claim["selection_sha256"] = hashlib.sha256(
+            json.dumps(claim, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        args.selection_sha256 = claim["selection_sha256"]
+        _exclusive_record(claim_fd, "claim.json", claim)
+        with open(os.devnull, "w") as sink:
+            with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+                import modal
+                client = _client(modal, args.modal_profile)
+                result = execute(args, modal, client)
+    except ProbeUnavailable as error:
+        failure_class = error.failure_class
+        failure_origin = error.failure_origin
+        failure_topics = error.failure_topics
+        failure_action = error.failure_action
+        result = str(error) if str(error) in {
+            "HOST_INCOMPATIBLE", "CLAIM_PATH_INVALID", "CLAIM_INVALID",
+            "CLAIM_ALREADY_CONSUMED", "CLAIM_INDETERMINATE", "INPUT_INVALID",
+            "SDK_INCOMPATIBLE", "CREDENTIAL_UNAVAILABLE",
+            "APP_ABSENCE_UNAVAILABLE", "APP_NOT_FRESH",
+            "VOLUME_IDENTITY_INVALID", "IMAGE_READ_UNAVAILABLE", "IMAGE_IDENTITY_INVALID",
+            "CALL_ID_INDETERMINATE", "PROVIDER_INDETERMINATE",
+            "POSTDEPLOY_IMAGE_INVALID", *_STAGE_FAILURES,
+            "MARKER_VERIFY_INVALID",
+        } else "LOCAL_UNAVAILABLE"
+    except Exception:
+        result = "PROVIDER_INDETERMINATE"
+    finally:
+        if claim_fd is not None:
+            os.close(claim_fd)
+    output = {
+        "schema_version": _SCHEMA, "authority": "DIAGNOSTIC_ONLY",
+        "result": result,
+    }
+    if failure_class is not None and result in _STAGE_FAILURES:
+        output["failure_class"] = failure_class
+    if failure_origin is not None and result in _STAGE_FAILURES:
+        output["failure_origin"] = failure_origin
+    if failure_topics and result == "APP_DEPLOY_UNAVAILABLE":
+        output["message_topic_hints"] = failure_topics
+    if failure_action is not None and result == "APP_DEPLOY_UNAVAILABLE":
+        output["message_action_hint"] = failure_action
+    print(json.dumps(output, sort_keys=True, separators=(",", ":")))
+    return 0 if isinstance(result, dict) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

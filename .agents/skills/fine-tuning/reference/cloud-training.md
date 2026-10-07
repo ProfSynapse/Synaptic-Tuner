@@ -2,6 +2,25 @@
 
 Cloud training uses the existing SFT and KTO trainers plus the env-backed GRPO path, but persistence and code sync behave differently from local runs.
 
+## Canonical product path
+
+The new product path is the submodule-first public training API documented in
+`docs/architecture/submodule-first-training-v1.md`. Modal SFT and host-selected
+local publication are live-proven. Hugging Face publication is implemented and
+fake-tested only. Local Docker, HF Jobs, and RunPod are not yet execution
+providers through that API.
+
+The protected HF source/bootstrap lane and the older `cloud-run`,
+`cloud-pipeline`, and experiment commands documented below are legacy or
+migration surfaces. They are not fallback implementations of the public v1 API
+and must not be wrapped as new provider adapters. Provider-free checks are not
+live provider proof, and authenticated provider reads are not paid execution
+proof.
+
+For the frozen Modal run and exact fixture completeness boundary, see
+`reference/modal-jobs.md` and
+`tests/fixtures/training_product/modal_live_v1/evidence-index.json`.
+
 ---
 
 ## Exact Source Requirements
@@ -12,6 +31,473 @@ Cloud jobs run from the exact git revision you launch:
 - `HEAD` must already be pushed to `origin/<branch>`
 
 If any of those checks fail, the cloud backend stops before submitting a job.
+
+---
+
+## Protected HF Source Provisioning and Fixed Bootstrap Smoke
+
+This is a narrow source/bootstrap provider-proof lane, not the normal
+`cloud-run`, `cloud-pipeline`, or `run-experiment` training path. The local
+`hf-source` and `hf-smoke` commands exist. The original JP-S audit returned
+REVISE for process-local cancellation, insufficient `JobInfo` identity
+agreement, and an incomplete launcher/runtime contract. Bounded remediations are
+implemented. JP-S2 passed the frozen 29-file manifest
+`55e2c876dd8cc282a43248a3eeaf3f445f6e452ce76ab2d7a0b814b460ef0f41`
+with 283 passed/6 skipped, 16 hostile checks, 87 import/generic checks, and no
+findings. Final JP-R also PASSed that earlier frozen release/inventory tree. The
+later JP-PREP implementation materially changed the protected tree. Its first
+independent security re-audit returned **REVISE** on four findings, and its first
+release re-audit also returned **REVISE**. JP-PRT-R and JP-PRH-R are implemented,
+and fresh independent security and release re-audits now both **PASS** the exact
+JP-PRT-R/JP-PRH-R/JP-PRC-R tree. Security evidence is **400 passed, 5 skipped**.
+Release evidence is focused **283 passed, 3 skipped**; tracking **263 passed, 1
+skipped**; CLI/contract **284 passed, 1 skipped**; broad runnable **624 passed,
+16 skipped** with five historical failures; and stale lifecycle fixtures **60
+passed, 8 classified**. Checkpoint 16R is eligible. None of this is live
+installation or provider proof. Live use still requires 16R commit/exact push,
+a fresh named-branch worktree at that commit, the five-pin clean-venv launcher
+gate, and credential preflight. `cloud.launch` and generic training remain
+unavailable.
+
+### Fixed authorization envelope
+
+- At most one paid submission; no retry or replacement without new user approval.
+- `cpu-basic`, `python:3.12`, bootstrap verification only.
+- No training, publication, ports, SSH, or provider retry.
+- Provider timeout 600 seconds; one cancellation attempt after 720 seconds if
+  still nonterminal; stop observing after 900 seconds.
+- Projected compute no more than USD $0.01; hard total cap USD $2.
+- Canonical workload SHA-256:
+  `0d1d3454d079ea994a1e3a24b59b772bd4adb40cb441e00cc5801faf5d220841`.
+
+Any wider workload, second submission, higher cost, longer duration, or retry
+needs new approval. `SUBMITTING` consumes the authorization even if the provider
+response is ambiguous.
+
+### Isolated launcher only
+
+Use a dedicated Python 3.12 environment with exactly these direct pins:
+`huggingface_hub==1.27.0`, `jsonschema==4.23.0`, `packaging==24.1`,
+`python-dotenv==1.0.1`, and `PyYAML==6.0.2`. Never install this JP dependency set
+into the Unsloth/trainer runtime.
+
+```powershell
+python scripts/setup_hf_jp_launcher.py `
+  --python C:\path\to\python3.12.exe `
+  --venv C:\path\to\new\hf-jp-launcher `
+  --repo-root <exact-repository-worktree>
+```
+
+The setup script refuses a non-3.12 interpreter, missing/extra/duplicate/ranged
+or reordered requirements, or an existing target directory. After install it
+checks all five distribution versions in isolated Python, imports both protected
+handlers without Torch/Transformers/Unsloth, and runs `hf-source --help` and
+`hf-smoke --help` from the exact repository worktree with user-site and bytecode
+writes disabled. This is a credential-free/provider-free clean-venv gate, not
+live provider proof. `python:3.12` is a mutable provider image tag; even a
+successful smoke is not digest-pinned image provenance.
+
+### Operator sequence
+
+Only after clean exact-pushed proof and the five-pin clean-venv gate may the
+preparation step run. Explicit credential preflight is additionally required
+before provisioning or execution:
+
+```powershell
+python tuner.py hf-source prepare `
+  --project-root <host-project-root> `
+  --source-config <committed-cloud-config> `
+  --source-mode <standalone-or-discovered-host-mode> `
+  --base-dir <absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-source provision `
+  --project-root <host-project-root> `
+  --experiment-id <experiment-id> `
+  --actor <non-secret-operator-id> `
+  --authority operator `
+  --env-file <explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+```
+
+For an exact engine-repository worktree operating in `standalone` mode, omit both
+`--project-root` and `--manifest` from `hf-source` and `hf-training-smoke`
+commands and invoke them from that worktree. Supplying `--project-root` selects host
+project mode, which requires `<project-root>/synaptic.yaml`; use that selector only
+for a real host project. The standalone SourceLock records the committed
+`--source-config` as its logical project configuration.
+
+`hf-source prepare` is provider-, credential-, ML-, and UI-free. It creates or
+recovers a neutral bootstrap experiment, performs exact-pushed Git preflight,
+parses the volume policy from the exact committed config blob, rechecks the
+working config against that commit, durably creates or adopts the canonical
+enriched SourceLock before transport preparation, and then persists the
+capsule/bundle, descriptor, and PREPARED state below the explicit absolute
+external base directory. Output is limited to the experiment ID, portable
+tracking URIs/digests, and closed read-only volume metadata.
+
+If creation is interrupted, use the reported experiment ID with the same
+inputs. Recovery accepts only neutral, exact SourceLock-only, or exact PREPARED
+state and converges idempotently. A crash-created SourceLock artifact, including
+the exact copy left inside an interrupted transport, is adopted only after
+bounded canonical regular/link-free/run-bound authentication and only when its
+bytes are identical. The durable SourceLock projection precedes transport
+installation, so interruption on either side of that boundary can converge
+without overwriting different bytes. Provider evidence, approval/submission
+state, or incomplete/mismatched references fail closed.
+
+`hf-source provision` requires exact PREPARED tracking state and the same
+`--base-dir`. It verifies durable provenance and independently reauthenticates
+the descriptor/SourceLock/policy/capsule/bundle before secret-file content or
+provider imports. It provisions or verifies only the descriptor-bound private
+Profile-C prefix, persists bounded evidence, and then validates CONSUMABLE. It
+never submits a job. The explicit env file must be
+a regular link-free file inside the project/config boundary and contain exactly
+a nonblank `HF_TOKEN`. Metadata preflight stores only root/path selection and
+reads no bytes; the one complete content read occurs after the durable claim.
+File/ambient `HF_API_KEY` and ambient `HF_TOKEN` are rejected. The protected
+handler parses the file without mutating the environment or emitting the value.
+On POSIX, held ancestor descriptors plus `O_NOFOLLOW` bind the read to the opened
+regular file; rename after final open cannot alter bytes read through that
+descriptor, but pathname identity after the read is not promised. On Windows,
+native `CreateFileW` handles allow only read sharing, deny write/delete sharing
+for the read, reject reparse points, and verify final-handle containment and
+identity.
+
+Provisioning atomically records a closed
+`synaptic-hf-provisioning-claim/v1` `CLAIMED` event before credential content or
+provider construction. Its closed events include exact sequence, canonical
+time, predecessor, evidence, `reason_code`, and `provider_effect_possible`.
+`CREDENTIAL_REJECTED` and `LOCAL_POSTCLAIM_FAILURE` map to no possible provider
+effect; `PROVIDER_OUTCOME_AMBIGUOUS`, `INTERRUPTED_AFTER_CLAIM`, and
+`RECOVERY_EVIDENCE_INVALID` map to possible provider effect. Verified success
+records `SUCCEEDED` plus exact evidence; post-claim uncertainty records terminal
+`AMBIGUOUS`, retains PREPARED, and is not retryable. A resumed `CLAIMED` head
+never gets provider authority: it adopts and verifies an exact orphan terminal
+or persisted evidence and converges to `SUCCEEDED`, otherwise it terminalizes as
+`AMBIGUOUS` with `INTERRUPTED_AFTER_CLAIM` for absent evidence or
+`RECOVERY_EVIDENCE_INVALID` for invalid/conflicting recovery artifacts. Durable
+`SUCCEEDED` may finish local consumption without a provider call; terminal
+`AMBIGUOUS` never authorizes another attempt.
+
+Create the provider-free exact approval:
+
+```powershell
+python tuner.py hf-smoke approve `
+  --project-root <host-project-root> `
+  --experiment-id <experiment-id> `
+  --authorization-reference <recorded-reference> `
+  --issued-at <UTC-RFC3339> `
+  --expires-at <UTC-RFC3339> `
+  --quoted-at <UTC-RFC3339> `
+  --hourly-price-usd <official-cpu-basic-hourly-price> `
+  --projected-cost-usd <no-more-than-0.01> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+```
+
+Then, for the one authorized submission only:
+
+```powershell
+python tuner.py hf-smoke execute `
+  --project-root <host-project-root> `
+  --experiment-id <experiment-id> `
+  --env-file <explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-smoke observe `
+  --project-root <host-project-root> `
+  --experiment-id <experiment-id> `
+  --env-file <explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+```
+
+The parser uses a frozen per-action explicit-option allowlist and treats
+`--flag=value` exactly like `--flag value`. Globally recognized options are
+rejected when absent from the selected protected action's allowlist. No action
+accepts `--yes`, retry, hardware, image, command, publication, port, or generic
+training overrides.
+
+`execute` revalidates every approval/source/provisioning/workload binding and
+atomically writes `SUBMITTING` before credential or provider work. Success records
+the normalized provider job identity as `SUBMITTED`; an exception after the call
+boundary records terminal `AMBIGUOUS`. Never rerun `execute` after either outcome.
+`observe` accepts status/results only when every returned `JobInfo` normalizes to
+the exact recorded namespace/job ID. At the cancellation boundary it durably
+claims one `synaptic-hf-cancellation-attempt/v1` event. Only the first locked
+claimant may call `cancel_job`; resumed/concurrent observers cannot issue another
+provider attempt, and an ambiguous cancellation remains consumed.
+
+### Official Hub 1.27 compatibility contract
+
+The isolated adapter probes the complete v1.27.0 method parameter names, order,
+kinds, and defaults for `create_bucket`, `bucket_info`, `list_bucket_tree`,
+`batch_bucket_files`, and `download_bucket_files` before its first provider read
+or mutation. It uses `Volume(type="bucket", source=..., mount_path=...,
+path=..., read_only=True)` and the explicit `run_job(..., volumes=...)` surface
+for the fixed smoke. These are official-source expectations and hermetic
+compatibility checks, not live account/bucket/job proof.
+
+`batch_bucket_files` is officially non-transactional. A failure may leave only
+some files uploaded. The operator therefore authenticates immutable byte values
+before the one upload attempt, rejects unknown/duplicate/colliding remote entries,
+downloads and hashes every exact member, and returns non-retryable
+`mutation_ambiguous` for any create/upload/readback uncertainty. Do not retry;
+inspect the exact prefix read-only and obtain new user authority for any later
+action.
+
+### Remaining gates
+
+- Original JP-S verdict: REVISE for cancellation durability, JobInfo agreement,
+  and launcher/runtime completeness.
+- JP-S2 security re-audit: PASS on the frozen manifest above; local security
+  evidence only, with no live install/provider proof.
+- Final JP-R release/inventory re-audit: **PASS**. Evidence: affected **200 passed, 3 skipped**; full JP/HF/import/order **393 passed, 15 skipped**; tracking **249 passed, 1 skipped**; CLI/capability/project/plugin/contract **268 passed, 1 skipped**; broad cloud **673 passed, 15 skipped** with the same five accepted failures and two documented exclusions; **26 Python files compiled**; imports clean; diff check warnings only; public API and `cloud.launch` unchanged; skill sync clean.
+- Those PASSes predate JP-PREP and do not approve its changed tree.
+- First post-JP-PREP security re-audit: **REVISE** on four findings. Evidence:
+  former-HIGH closure **25 passed, 2 Windows link skips**; parser **63**;
+  claim/operator/assets **27**; thread/spawn/ambiguity **3**; protected handlers
+  **39 passed, 2 skipped**.
+- First post-JP-PREP release re-audit: **REVISE**. Evidence: focused **270/3**;
+  tracking **257/1**; broad cloud **679 passed, 16 skipped, 13 classified
+  failures** (five accepted prior plus eight stale lifecycle fixtures);
+  CLI/project/capability/plugin/contract **279/1** plus five MAX_PATH artifacts;
+  affected short-path rerun **16/16 passed**.
+- JP-PRT-R evidence: focused **138/1**, full tracking **261/1**, contract **12**.
+- JP-PRH-R evidence: focused **67/2**, utilities **148/2**, broad **348/3**,
+  plus one classified missing-Transformers environment failure.
+- Fresh post-remediation security re-audit: **PASS**, **400 passed, 5 skipped**.
+- Fresh post-remediation release re-audit: **PASS**. Evidence: focused **283/3**;
+  tracking **263/1**; CLI/contract **284/1**; broad runnable **624/16** plus five
+  historical failures; stale lifecycle fixtures **60 passed, 8 classified**.
+- Checkpoint 16R is eligible. JP-LIVE is next only after 16R commit/exact push,
+  a fresh named-branch worktree at that commit, the exact five-pin launcher gate,
+  and explicit-file credential preflight.
+- Explicit usable `HF_TOKEN` preflight: pending; no value may enter logs/docs.
+- Live provider proof: pending.
+- RunPod remains later and requires fresh dated official API/SDK research before
+  implementation because its API may have changed.
+
+---
+
+## Protected HF A10G Training Smoke
+
+This is the checked-in, approval-bound operator for the narrow paid training
+smoke. It is separate from both the CPU bootstrap smoke above and the normal
+`cloud-run`, `cloud-pipeline`, and `run-experiment` paths. Do not replace it
+with an ad hoc `run_job` call or a manual bucket download.
+
+The command family is:
+
+```powershell
+python tuner.py hf-training-smoke preflight `
+  --project-root <exact-clean-worktree> `
+  --manifest <committed-protected-manifest> `
+  --experiment-id <experiment-id> `
+  --expected-namespace <hf-namespace> `
+  --source-bucket-id <namespace/source-bucket> `
+  --source-prefix <authenticated-source-prefix> `
+  --artifact-bucket-id <namespace/artifact-bucket> `
+  --artifact-prefix <private-artifact-base-prefix> `
+  --env-file <explicit-project-env-file> `
+  --base-dir <absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-training-smoke approve `
+  --project-root <same-exact-clean-worktree> `
+  --manifest <same-committed-protected-manifest> `
+  --experiment-id <same-experiment-id> `
+  --authorization-reference <recorded-reference> `
+  --issued-at <UTC-RFC3339> `
+  --expires-at <UTC-RFC3339> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-training-smoke execute `
+  --project-root <same-exact-clean-worktree> `
+  --manifest <same-committed-protected-manifest> `
+  --experiment-id <same-experiment-id> `
+  --env-file <same-explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-training-smoke recover `
+  --project-root <same-exact-clean-worktree> `
+  --manifest <same-committed-protected-manifest> `
+  --experiment-id <same-experiment-id> `
+  --env-file <same-explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-training-smoke observe `
+  --project-root <same-exact-clean-worktree> `
+  --manifest <same-committed-protected-manifest> `
+  --experiment-id <same-experiment-id> `
+  --env-file <same-explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+
+python tuner.py hf-training-smoke verify `
+  --project-root <same-exact-clean-worktree> `
+  --manifest <same-committed-protected-manifest> `
+  --experiment-id <same-experiment-id> `
+  --env-file <same-explicit-project-env-file> `
+  --base-dir <same-absolute-external-tracking-root> `
+  --json
+```
+
+Each action has a closed option allowlist. There are no operator overrides for
+image, command, hardware, timeout, retry count, price, artifact slot, provider,
+publication, ports, or SSH.
+
+### Gates before any paid execution
+
+Do not run `execute` merely because the command exists. All of these gates must
+pass first:
+
+1. The current protected code tree has independent security and release PASS
+   verdicts for the exact files that will be committed.
+2. Those exact files are committed and pushed from a named branch, and the
+   operator runs from a fresh clean worktree at that pushed commit.
+3. The host launcher passes its isolated CPython 3.12.7 contract. Create it only
+   from the checked-in hashed lock, installed allowlist, and an external
+   wheelhouse:
+
+   ```powershell
+   python scripts/setup_hf_training_smoke_launcher.py `
+     --python C:\path\to\python-3.12.7.exe `
+     --venv C:\path\to\fresh\hf-training-smoke-launcher `
+     --wheelhouse C:\path\to\authenticated\wheelhouse `
+     --repo-root <same-exact-clean-worktree>
+   ```
+
+   This host launcher is distinct from the digest-pinned remote training image,
+   whose authenticated runtime is recorded in its canonical runtime lock.
+4. `preflight` authenticates the exact source, manifest, runtime lock, buckets,
+   namespace, and derived destination binding; performs the live provider
+   identity and hardware reads; and durably records the accepted bindings.
+5. The preflight quote resolves exactly one `a10g-small` price from the provider
+   in integer micro-USD. The quote binds unit price per minute, derived hourly
+   cost, the fixed 30-minute timeout cost, and provider fetch time. The live
+   provider represents its displayed USD $1/hour price as 16,667 micro-USD per
+   minute, so the exact derived bounds are 1,000,020 micro-USD/hour and 500,010
+   micro-USD/30 minutes. It must be no more than 15 minutes old when approval is
+   issued and still fresh at submission.
+6. `approve` binds that exact preflight digest, quote, source, workload, runtime,
+   artifact destination, and authorization window. Only then may `execute` be
+   invoked once.
+
+Until code, security, release, exact-commit push, clean-worktree, launcher,
+preflight, and approval gates all pass, this lane is **not live-eligible**.
+
+### Frozen safety contract
+
+- **Exact pushed source:** the no-shell launcher authenticates and reconstructs
+  the exact pushed SourceLock commits before importing or executing repository
+  code. The provider command and remote argv are independently hashed and bound
+  into the protected workload. The fixed standard-library launcher and every authenticated launcher
+  argument are carried together in one deterministic zlib/Base64 envelope using only shell-safe payload characters
+  behind a tiny no-shell decoder. Its canonical serialized argv is capped at
+  4608 bytes, and every provider command item is capped at 512 UTF-8 bytes.
+- **Closed remote failure stages:** the silenced remote entrypoint may expose only
+  `REMOTE_CREDENTIAL_REJECTED` (120), `REMOTE_RUNTIME_REJECTED` (121),
+  `REMOTE_ARTIFACT_REJECTED` (122), `REMOTE_TRAINER_REJECTED` (123), or
+  `REMOTE_INPUT_REJECTED` (124).
+  Failures outside a classified phase remain `REMOTE_TRAINING_SMOKE_REJECTED`
+  (125). Never emit
+  exception text, tracebacks, provider response data, or credential-derived details.
+- **Isolated provider client:** the host uses the pinned Hub client and fixed
+  HTTPS endpoint with ambient proxy, endpoint, CA, and credential overrides
+  rejected. Credential contents are read only after the required durable claim.
+- **No remote credential:** the local token authorizes provider API calls and
+  volume access only. The remote job receives `secrets={}` and no `HF_TOKEN`,
+  `HF_API_KEY`, or other credential in its command or environment.
+- **Domain-separated artifact slot:** the operator derives the 64-hex slot from
+  canonical JSON under the `synaptic-hf-training-artifact-slot/v1` domain. The
+  input binds the experiment, run, tracking root, source lock, workload, runtime
+  lock, artifact bucket, and artifact base prefix. The full destination is the
+  approved base prefix plus that derived slot; the CLI cannot choose it.
+  `execute` first consumes its durable claim, then requires that exact slot to
+  be empty immediately before the first provider mutation. Because HF Jobs does
+  not materialize a writable mount for a brand-new empty subprefix, the trusted
+  local provider client then uploads a CSPRNG-named, one-use mount anchor as the
+  first mutation and re-lists the slot, requiring that anchor to be its only
+  member. The durable submission claim records the nonce, canonical anchor
+  digest, and resulting provider-command digest; the exact inspected provider
+  command carries the same closed fields. Only then may it submit with the exact
+  derived slot mounted writable. The credential-free remote entrypoint must
+  require that exact anchor, retain its verified file identity through
+  consumption and create `exclusive-sentinel.json` atomically with `O_EXCL`.
+  HF mount releases before v0.9.2 reject unlink-while-open, so the remote must
+  atomically rename the verified open anchor with no-replace, verify the same
+  identity through that claim, close and recheck it, and unlink only the claimed
+  name before writing anything else. A concurrent
+  protected execution selects a different anchor path; extra entries or a fixed-
+  sentinel collision fail closed without overwrite or submission. Never upload
+  the fixed sentinel through the overwriting Buckets batch API or mount the
+  broader artifact parent. Any uncertainty after the anchor upload boundary is
+  `AMBIGUOUS` and nonretryable.
+- **One submission, no retry:** `execute` durably consumes authority before the
+  provider call. A definite local pre-call failure records `NOT_SUBMITTED`; an
+  uncertain post-call outcome records `AMBIGUOUS`. Never rerun `execute` after
+  an ambiguous outcome and never submit a replacement under the same approval.
+  Post-boundary HTTP failures remain terminally ambiguous and nonretryable, but
+  their durable reason may retain only a bounded status class (request, auth,
+  payment, rate limit, service, or transport error). Never persist provider exception text,
+  response bodies, request identifiers, headers, or credential-derived data.
+- **Read-only recovery:** `recover` never submits or cancels. It can confirm
+  `SUBMITTED` only from exactly one matching provider job whose full identity
+  and spec reauthenticate. Zero matches leaves the outcome `AMBIGUOUS`; it does
+  not restore submission authority. Multiple, malformed, or mismatched matches
+  also fail closed as ambiguous.
+- **One cancel attempt:** observation reauthenticates the complete job spec on
+  every poll. At the 25-minute cancellation boundary it claims the attempt,
+  reinspects for a terminal race, and may call cancel exactly once. Provider
+  timeout is 30 minutes and observation stops after 35 minutes. An uncertain
+  cancellation remains consumed and is never retried.
+- **Exact bounded readback:** verification first lists the destination and
+  accepts exactly these 15 files:
+  `source-lock.json`, `exclusive-sentinel.json`,
+  `checkpoint-1/adapter_model.safetensors`,
+  `checkpoint-1/adapter_config.json`,
+  `checkpoint-1/trainer_state.json`, `checkpoint-1/optimizer.pt`,
+  `checkpoint-1/scheduler.pt`, `final_model/adapter_model.safetensors`,
+  `final_model/adapter_config.json`, `final_model/tokenizer_config.json`,
+  `training_lineage.json`, `step-evidence.json`, `result.json`, `manifest.json`,
+  and `inventory.json`. An owned, deadline-bounded child downloads only that
+  prelisted set. Pre- and post-download inventories must be identical before
+  strict local artifact verification may return `VERIFIED`.
+- **No bulk sync:** the protected lane never calls `sync_bucket`; broad pull or
+  sync commands are not an acceptable substitute for `verify`.
+
+`preflight`, `recover`, `observe`, and `verify` may perform authenticated
+provider reads. Only `execute` may submit, and its durable one-shot authority is
+not widened by any later action.
+
+---
+
+## Modal v1 execution lane
+
+Modal v1 is the clean submodule-first lane described in
+`reference/modal-jobs.md`. It uses exact SDK 1.5.4, an explicit host-created
+client, the fixed deployed `synaptic-training-v1/run_sft_v1` Function, one A10,
+two existing Volume v1 objects, exact dual-clone source verification, and one
+brokered `.spawn()` with retries disabled. The old `ModalBackend`,
+`Trainers/cloud/train_modal.py`, provider menu, pricing table, and manual
+`modal run` training path are removed and must not be restored.
+
+The consuming project owns configuration, database transactions, lifecycle,
+grants, secrets, and evidence authentication. The engine contains no concrete
+database and no SQLite runtime. Modal artifacts are authoritative in the
+artifact Volume; optional Hub publication is a later action.
+
+Proof is staged: provider-free checks first, authenticated provider reads
+second, and one paid smoke only after the exact tree, host durability, and
+authorization barriers pass. Provider-free success is not evidence that an
+account, deployment, Volume, secret, GPU, or paid invocation works live.
 
 ---
 
@@ -59,16 +545,28 @@ When enabled:
 
 ## Smoke-Test Workflow
 
-1. Confirm the branch is clean and pushed.
-2. Point the trainer config at a remote dataset when possible.
-3. Run `python tuner.py cloud`.
-4. Choose provider and method.
-5. Start with a short smoke test (`max_steps`, small dataset slice, or one epoch).
-6. Verify artifacts in provider-native storage before enabling final-model publish.
+Cloud training is config-first through the public training API. There is no
+generic provider menu and the removed legacy Modal launcher is not a fallback.
+
+1. Confirm the host project and engine submodule are clean, exact, and pushed.
+2. Resolve the model, dataset, provider profile, runtime lock, and short SFT
+   smoke configuration through `TrainingAPI.load`, `resolve`, and `plan`. The
+   host resolver must emit a canonical `synaptic-modal-plan-context/v1`; do not
+   keep deployment, Volume, quote, expiry, or operation identity only in memory.
+3. Pass the provider-free barrier, then run the provider's authenticated
+   read-only preflight.
+4. Persist the exact preflight and obtain a host-owned opaque execution grant.
+   The main-project database must implement `ModalTrainingRepository`; its
+   preparation commit and lifecycle revision are one atomic transaction.
+5. Call `TrainingAPI.start` once. An ambiguous provider outcome is
+   reconciliation-only and never authorizes another submission.
+6. Use `TrainingAPI.outcome` and provider-native evidence to verify artifacts
+   before any separately authorized final-model publication.
 
 Recommended first-pass checks:
 - `hf_jobs`: inspect the configured bucket prefix under `runs/hf_jobs/...`
-- `modal`: inspect the configured Modal Volume path
+- `modal`: inspect only the effect-scoped `operations/{effect_id}/` paths in the
+  configured control and artifact Volumes
 - `runpod`: inspect the mounted RunPod Network Volume path
 
 For HF Jobs specifically, bucket-backed artifacts are the primary source of truth once they start appearing:
@@ -94,8 +592,8 @@ python tuner.py bucket analyze \
 ```
 
 Keep the checked-in benchmark ledger updated from finished runs:
-- [model_hardware_benchmark_ledger.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/docs/benchmarks/model_hardware_benchmark_ledger.md)
-- [model_hardware_benchmark_ledger.csv](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/docs/benchmarks/model_hardware_benchmark_ledger.csv)
+- `docs/benchmarks/model_hardware_benchmark_ledger.md`
+- `docs/benchmarks/model_hardware_benchmark_ledger.csv`
 
 For `run-experiment`, the analysis bundle now appends or updates the ledger automatically using:
 - training lineage
@@ -181,6 +679,11 @@ For `hf_jobs`, a few patterns matter enough to treat as hard rules:
 - Normalize blank auth values to `None`. An empty `HF_TOKEN` or `HF_API_KEY` can produce `Authorization: Bearer ` and fail before the request is sent.
 - Resolve and, if needed, create the bucket once before training starts. During steady-state log sync, use the resolved bucket ID directly.
 - Keep HF job labels conservative. Do not put slash-heavy values like raw `bucket_id` or `artifact_prefix` into labels; HF Jobs can reject submission. Recover those values from command args or other metadata instead.
+- For the protected A10G smoke, keep discovery labels inside the checked-in
+  conservative provider profile: lowercase alphanumeric/hyphen keys and values,
+  no more than 63 characters each. Use the approval authorization prefix for
+  discovery; authenticate the full approval through the inspected image,
+  command, environment, and volumes instead of placing 64-character digests in provider labels.
 - Polling and identity checks should be conservative. Frequent bucket creation attempts or repeated `whoami-v2` calls can hit Hugging Face rate limits.
 - On Windows launch hosts, set `PYTHONIOENCODING=utf-8` for non-JSON cloud
   launches. Rich UI output can contain glyphs such as `★`, and the default
@@ -190,6 +693,11 @@ For `hf_jobs`, a few patterns matter enough to treat as hard rules:
   launcher-only venv with `huggingface_hub>=1.5.0`, `transformers` 5.x, and CPU
   `torch` can satisfy local CLI imports and Buckets APIs without upgrading the
   Unsloth/KTO training env, which may still require `huggingface_hub<1.0`.
+- Do not apply that broad legacy launcher recipe to the protected JP lane. JP
+  uses the five exact direct pins listed above under Python 3.12; missing, extra,
+  duplicate, reordered, or ranged requirements change the audited runtime
+  contract. Transformers, Torch, and Unsloth must remain absent from protected
+  launcher imports.
 - Do not upgrade generic project dependencies in the active training image
   during HF Jobs bootstrap. Install missing project deps only; curated Unsloth
   images can carry tightly coupled NumPy/SciPy/Transformers/Unsloth stacks, and

@@ -16,6 +16,8 @@ from typing import Any, Literal, Optional
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
+from tuner.project import ProjectContext, resolve_path
+
 
 StageKind = Literal[
     "command",
@@ -122,12 +124,52 @@ class PipelineConfig(BaseModel):
         return self
 
 
-def load_pipeline_config(path: str | Path) -> PipelineConfig:
-    with open(path, encoding="utf-8") as fh:
+def load_pipeline_config(
+    path: str | Path, *, context: ProjectContext | None = None
+) -> PipelineConfig:
+    declaring_file = Path(path).resolve()
+    with open(declaring_file, encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"MechInterp pipeline config must be a YAML object: {path}")
-    return PipelineConfig(**data)
+    cfg = PipelineConfig(**data)
+    if context is None:
+        return cfg
+
+    def resolved(value: str, *, access: str = "read") -> str:
+        return str(
+            resolve_path(
+                value,
+                context,
+                declaring_file=declaring_file,
+                access=access,
+            )
+        )
+
+    runtime = cfg.runtime.model_copy(
+        update={
+            "workdir": resolved(cfg.runtime.workdir),
+            "pythonpath": [resolved(item) for item in cfg.runtime.pythonpath],
+        }
+    )
+    stages = []
+    for stage in cfg.stages:
+        updates: dict[str, object] = {}
+        for field_name in ("config", "gates_config", "rows_path", "workdir"):
+            value = getattr(stage, field_name)
+            if value:
+                updates[field_name] = resolved(value)
+        stages.append(stage.model_copy(update=updates))
+    artifacts = cfg.artifacts.model_copy(
+        update={
+            "checkpoint_paths": [
+                resolved(item, access="write") for item in cfg.artifacts.checkpoint_paths
+            ]
+        }
+    )
+    return cfg.model_copy(
+        update={"runtime": runtime, "stages": stages, "artifacts": artifacts}
+    )
 
 
 def select_stages(
@@ -173,7 +215,11 @@ def _repo_path(repo_root: Path, path: str) -> Path:
     return p if p.is_absolute() else repo_root / p
 
 
-def _execution_render_fn(stage: StageConfig, repo_root: Path) -> str | None:
+def _execution_render_fn(
+    stage: StageConfig,
+    repo_root: Path,
+    context: ProjectContext | None = None,
+) -> str | None:
     if stage.render_fn:
         return stage.render_fn
     if not stage.config:
@@ -186,10 +232,14 @@ def _execution_render_fn(stage: StageConfig, repo_root: Path) -> str | None:
 
         if stage.kind == "mechinterp.dose-calibrate":
             return load_dose_calibration_config(
-                _repo_path(repo_root, stage.config)
+                _repo_path(repo_root, stage.config), context=context
             ).execution.render_fn
-        return load_steer_config(_repo_path(repo_root, stage.config)).execution.render_fn
+        return load_steer_config(
+            _repo_path(repo_root, stage.config), context=context
+        ).execution.render_fn
     except Exception:
+        if context is not None:
+            raise
         return None
 
 
@@ -198,11 +248,13 @@ def compile_stage_command(
     stage: StageConfig,
     *,
     repo_root: Path,
+    context: ProjectContext | None = None,
     gpu_ack: bool = False,
     force: bool = False,
 ) -> list[str] | str:
     python = cfg.runtime.python or sys.executable
-    tuner = str(repo_root / "tuner.py")
+    engine_root = context.engine_root if context is not None else repo_root
+    tuner = str(engine_root / "tuner.py")
     if stage.kind == "command":
         if isinstance(stage.command, list):
             return [str(item) for item in stage.command]
@@ -230,7 +282,7 @@ def compile_stage_command(
         return cmd
 
     if stage.kind == "mechinterp.probe-fit":
-        return [
+        cmd = [
             python,
             tuner,
             "mechinterp",
@@ -238,6 +290,7 @@ def compile_stage_command(
             "--mi-config",
             str(stage.config),
         ]
+        return cmd
 
     if stage.kind == "mechinterp.steer":
         cmd = [
@@ -254,7 +307,7 @@ def compile_stage_command(
         if revision:
             cmd.extend(["--model-revision", revision])
         adapter = _stage_adapter(cfg, stage)
-        render_fn = _execution_render_fn(stage, repo_root)
+        render_fn = _execution_render_fn(stage, repo_root, context)
         if adapter:
             cmd.extend(["--adapter", adapter])
         if render_fn:
@@ -277,7 +330,7 @@ def compile_stage_command(
             _stage_model(cfg, stage),
         ]
         adapter = _stage_adapter(cfg, stage)
-        render_fn = _execution_render_fn(stage, repo_root)
+        render_fn = _execution_render_fn(stage, repo_root, context)
         if adapter:
             cmd.extend(["--adapter", adapter])
         if render_fn:
@@ -287,7 +340,7 @@ def compile_stage_command(
         return cmd
 
     if stage.kind == "mechinterp.score-gates":
-        return [
+        cmd = [
             python,
             tuner,
             "mechinterp",
@@ -299,6 +352,7 @@ def compile_stage_command(
             "--arm-field",
             stage.arm_field,
         ]
+        return cmd
 
     raise ValueError(f"unsupported stage kind: {stage.kind}")
 
@@ -307,6 +361,7 @@ def build_pipeline_plan(
     cfg: PipelineConfig,
     *,
     repo_root: Path,
+    context: ProjectContext | None = None,
     provider: str,
     only_step: str | None = None,
     from_step: str | None = None,
@@ -336,6 +391,7 @@ def build_pipeline_plan(
                     cfg,
                     stage,
                     repo_root=repo_root,
+                    context=context,
                     gpu_ack=gpu_ack,
                     force=force,
                 ),
@@ -346,11 +402,20 @@ def build_pipeline_plan(
     }
 
 
-def _env_for_stage(cfg: PipelineConfig, stage: StageConfig, repo_root: Path) -> dict[str, str]:
+def _env_for_stage(
+    cfg: PipelineConfig,
+    stage: StageConfig,
+    repo_root: Path,
+    context: ProjectContext | None = None,
+) -> dict[str, str]:
     env = {**os.environ, **cfg.runtime.env, **stage.env}
     paths = [str(repo_root / p) if not Path(p).is_absolute() else p for p in cfg.runtime.pythonpath]
     if paths:
         env["PYTHONPATH"] = os.pathsep.join(paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+    if context is not None:
+        env["SYNAPTIC_ENGINE_ROOT"] = str(context.engine_root)
+        if context.mode == "host":
+            env["SYNAPTIC_PROJECT_ROOT"] = str(context.project_root)
     return env
 
 
@@ -358,6 +423,7 @@ def run_local_pipeline(
     cfg: PipelineConfig,
     *,
     repo_root: Path,
+    context: ProjectContext | None = None,
     only_step: str | None = None,
     from_step: str | None = None,
     skip_steps: list[str] | None = None,
@@ -368,10 +434,17 @@ def run_local_pipeline(
         cfg, only_step=only_step, from_step=from_step, skip_steps=skip_steps
     ):
         cmd = compile_stage_command(
-            cfg, stage, repo_root=repo_root, gpu_ack=gpu_ack, force=force
+            cfg,
+            stage,
+            repo_root=repo_root,
+            context=context,
+            gpu_ack=gpu_ack,
+            force=force,
         )
-        cwd = repo_root / (stage.workdir or cfg.runtime.workdir)
-        env = _env_for_stage(cfg, stage, repo_root)
+        workdir = Path(stage.workdir or cfg.runtime.workdir)
+        project_root = context.project_root if context is not None else repo_root
+        cwd = workdir if workdir.is_absolute() else project_root / workdir
+        env = _env_for_stage(cfg, stage, repo_root, context)
         print(f"[mechinterp-run] stage={stage.name} kind={stage.kind}")
         if isinstance(cmd, list):
             result = subprocess.run(cmd, cwd=cwd, env=env)

@@ -99,7 +99,6 @@ class MacBackend(ITrainingBackend):
         model_config = config.get('model', {})
         data_config = config.get('data', {})
         training_config = config.get('training', {})
-        lora_config = config.get('lora', {})
 
         return TrainingConfig(
             method=method,

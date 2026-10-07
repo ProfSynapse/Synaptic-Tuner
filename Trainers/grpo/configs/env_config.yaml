@@ -7,8 +7,6 @@
 model:
   # Use a merged/published SFT model on Hugging Face for env-GRPO.
   model_name: "professorsynapse/Nexus-Quark-L2.5.28"
-  max_seq_length: 8192
-  chat_template: null
 
 dataset:
   dataset_name: "professorsynapse/nexus-synthetic-data"
@@ -21,7 +19,8 @@ training:
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 1
   num_generations: 4
-  max_prompt_length: 4096
+  # max_prompt_length is omitted: GRPOConfig dropped it in trl 0.28 (this
+  # runtime pins trl>=0.28). Older TRL gets the trainer's 4096 default.
   max_completion_length: 220
   temperature: 0.6
   learning_rate: 5e-6
@@ -61,7 +60,6 @@ lora:
     - down_proj
 
 env_training:
-  backend: "trl_rollout_func"
   require_environment_passed: true
   require_environment_config: true
   required_stage_reviews:
@@ -90,9 +88,9 @@ env_training:
   context_token_policy: mask
 
   runtime:
-    # Keep using the shared Unsloth image for cloud jobs, but isolate modern
-    # env-GRPO deps in a venv so we don't destabilize existing trainers.
-    cloud_base_image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+    # Cloud jobs keep the shared Unsloth image (pinned by the job recipe,
+    # e.g. Trainers/recipes/nexus_quark_l25_28_env_grpo.yaml) but isolate
+    # modern env-GRPO deps in a venv so we don't destabilize other trainers.
     repo_root_in_container: "/workspace/repo"
     isolated_venv_dir: "/workspace/.venvs/grpo-openenv"
     local_venv_dir: ".venvs/grpo-openenv"

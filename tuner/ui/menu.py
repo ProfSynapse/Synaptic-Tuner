@@ -8,7 +8,6 @@ Location: /mnt/f/Code/Toolset-Training/tuner/ui/menu.py
 Used by: All handlers for interactive menu navigation
 """
 
-from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
 # Try importing from shared UI first

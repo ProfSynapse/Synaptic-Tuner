@@ -4,15 +4,38 @@ Environment variable utilities.
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tuner.project.context import ProjectContext
+
+_SECRET_NAME_PARTS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL")
 
 
-def load_env_file(paths: list = None) -> bool:
+def redact_env_value(name: str, value: str) -> str:
+    """Return a display-safe environment value without exposing credentials."""
+
+    upper_name = name.upper()
+    if any(part in upper_name for part in _SECRET_NAME_PARTS):
+        return "<redacted>" if value else ""
+    return value
+
+
+def load_env_file(
+    paths: Iterable[Path | str] | Path | str | None = None,
+    *,
+    context: "ProjectContext | None" = None,
+    explicit_path: Path | str | None = None,
+) -> bool:
     """
     Load environment variables from .env file.
 
     Args:
-        paths: List of paths to check for .env file
+        paths: Paths to check for an env file. A single path is accepted.
+        context: Project context selecting exactly one host or engine ``.env``.
+            Process environment variables always take precedence.
+        explicit_path: Explicit env file. When provided, it is the only file
+            considered and therefore has selection priority over context roots.
 
     Returns:
         True if .env file was loaded, False otherwise
@@ -22,20 +45,31 @@ def load_env_file(paths: list = None) -> bool:
     except ImportError:
         return False
 
-    if paths is None:
+    if explicit_path is not None:
+        candidates = [Path(explicit_path)]
+    elif context is not None:
+        selected_root = (
+            context.project_root if context.mode == "host" else context.engine_root
+        )
+        candidates = [selected_root / ".env"]
+    elif paths is None:
         # env.py is at shared/utilities/env.py
         # So .parent.parent.parent gets us to repo root
         repo_root = Path(__file__).parent.parent.parent
-        paths = [
+        candidates = [
             Path.cwd() / ".env",
             Path.cwd().parent / ".env",
             Path.cwd().parent.parent / ".env",
             repo_root / ".env",
         ]
+    elif isinstance(paths, (str, Path)):
+        candidates = [Path(paths)]
+    else:
+        candidates = [Path(path) for path in paths]
 
-    for path in paths:
+    for path in candidates:
         if path.exists():
-            load_dotenv(path)
+            load_dotenv(path, override=False)
             return True
 
     return False

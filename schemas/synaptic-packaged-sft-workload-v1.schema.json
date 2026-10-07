@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-packaged-sft-workload-v1.schema.json",
+  "title": "Provider-neutral packaged SFT workload v1",
+  "description": "Acyclic workload compiled before execution binding. Canonical compilation additionally validates finite numeric bounds, logical references, prepared controls and cross-field/digest equality. No Git source, launch command or provider-native object is admitted.",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "method", "entrypoint", "configuration", "identities", "runtime_requirements", "artifacts"],
+  "properties": {
+    "schema_version": {"const": "synaptic-packaged-sft-workload/v1"},
+    "method": {"const": "sft"},
+    "entrypoint": {"const": "tuner.runtime.packaged_training_worker:main"},
+    "configuration": {
+      "type": "object", "additionalProperties": false, "required": ["digest", "document"],
+      "properties": {"digest": {"$ref": "#/$defs/digest"}, "document": {"$ref": "#/$defs/config"}}
+    },
+    "identities": {
+      "type": "object", "additionalProperties": false, "required": ["model", "dataset"],
+      "properties": {"model": {"$ref": "#/$defs/model"}, "dataset": {"$ref": "#/$defs/prepared"}}
+    },
+    "runtime_requirements": {
+      "const": {"schema_version": "synaptic-packaged-sft-runtime-requirements/v1", "offline_trainer": true, "credential_free_trainer": true}
+    },
+    "artifacts": {
+      "const": {
+        "schema_version": "synaptic-sft-artifacts/v1",
+        "requirements": [
+          {"role": "workload_record", "minimum": 1, "maximum": 1},
+          {"role": "training_lineage", "minimum": 1, "maximum": 1},
+          {"role": "training_metrics", "minimum": 1, "maximum": 1},
+          {"role": "final_model", "minimum": 1, "maximum": 1},
+          {"role": "tokenizer", "minimum": 1, "maximum": 1}
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "revision": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ref", "revision", "tokenizer_revision", "load_in_4bit"],
+      "properties": {
+        "ref": {"type": "string", "minLength": 1, "maxLength": 512},
+        "revision": {"$ref": "#/$defs/revision"}, "tokenizer_revision": {"$ref": "#/$defs/revision"},
+        "load_in_4bit": {"type": "boolean"}
+      }
+    },
+    "prepared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ref", "revision", "content_digest", "size_bytes", "format"],
+      "properties": {
+        "ref": {"type": "string", "pattern": "^prepared://sha256/[0-9a-f]{64}$"},
+        "revision": {"$ref": "#/$defs/digest"}, "content_digest": {"$ref": "#/$defs/digest"},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864},
+        "format": {"enum": ["syntunia-sft-row/v1", "syntunia-sft-row/v2"]}
+      }
+    },
+    "config": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "method", "execution", "model", "dataset", "sft"],
+      "properties": {
+        "schema_version": {"const": "synaptic-packaged-sft-config/v1"}, "method": {"const": "sft"},
+        "execution": {"const": {"mode": "packaged_runtime"}},
+        "model": {"$ref": "#/$defs/model"}, "dataset": {"$ref": "#/$defs/prepared"},
+        "sft": {"$ref": "#/$defs/hyperparameters"},
+        "post_training": {"$ref": "#/$defs/post_training"}
+      }
+    },
+    "post_training": {
+      "type": "object", "additionalProperties": false, "required": ["mode", "evaluation"],
+      "properties": {"mode": {"const": "same_job"}, "evaluation": {"$ref": "#/$defs/evaluation"}}
+    },
+    "evaluation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scenarios", "min_pass_rate", "max_cases", "startup_timeout_seconds", "timeout_seconds", "served_model_name", "generation", "vllm"],
+      "properties": {
+        "scenarios": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/scenario"}},
+        "min_pass_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_cases": {"type": "integer", "minimum": 1, "maximum": 32},
+        "startup_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 1800},
+        "timeout_seconds": {"type": "number", "minimum": 1, "maximum": 3600},
+        "served_model_name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$", "not": {"const": "synaptic-base"}},
+        "generation": {"$ref": "#/$defs/generation"}, "vllm": {"$ref": "#/$defs/vllm"}
+      }
+    },
+    "scenario": {
+      "type": "object", "additionalProperties": false, "required": ["id", "question", "correct"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"},
+        "question": {"type": "string", "pattern": "\\S"}, "system": {"type": "string"},
+        "messages": {"type": "array", "minItems": 1, "maxItems": 16, "items": {
+          "type": "object", "additionalProperties": false, "required": ["role", "content"],
+          "properties": {"role": {"enum": ["system", "user", "assistant"]}, "content": {"type": "string"}}
+        }},
+        "correct": {"type": "object", "anyOf": [
+          {"required": ["any"], "properties": {"any": {"type": "array", "minItems": 1}}},
+          {"required": ["all"], "properties": {"all": {"type": "array", "minItems": 1}}},
+          {"required": ["assertions"], "properties": {"assertions": {"type": "array", "minItems": 1}}}
+        ]},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "scoring": {}, "response_schema": {}, "response_schema_name": {}
+      }
+    },
+    "generation": {
+      "type": "object", "additionalProperties": false, "required": ["max_tokens", "temperature", "top_p"],
+      "properties": {
+        "max_tokens": {"type": ["integer", "null"], "minimum": 1, "maximum": 262144},
+        "temperature": {"type": "number", "minimum": 0, "maximum": 2},
+        "top_p": {"type": "number", "minimum": 0.000001, "maximum": 1},
+        "presence_penalty": {"type": "number", "minimum": -2, "maximum": 2},
+        "top_k": {"type": "integer", "minimum": -1},
+        "min_p": {"type": "number", "minimum": 0, "maximum": 1},
+        "repetition_penalty": {"type": "number", "exclusiveMinimum": 0},
+        "chat_template_kwargs": {"$ref": "#/$defs/chat_template_kwargs"}
+      }
+    },
+    "chat_template_kwargs": {
+      "type": "object", "minProperties": 1,
+      "propertyNames": {"minLength": 1, "maxLength": 128,
+        "not": {"enum": ["messages", "tokenize", "add_generation_prompt", "return_dict", "return_tensors", "continue_final_message", "chat_template"]}},
+      "description": "The shared renderer additionally checks UTF-8 byte, finite JSON, depth and aggregate node bounds."
+    },
+    "vllm": {
+      "type": "object", "additionalProperties": false,
+      "required": ["expected_version", "dtype", "max_model_len", "tensor_parallel_size", "max_num_seqs", "max_num_batched_tokens", "language_model_only", "max_lora_rank"],
+      "properties": {
+        "expected_version": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+){1,3}([A-Za-z0-9.+-]*)$"},
+        "dtype": {"enum": ["auto", "float16", "bfloat16", "float32"]},
+        "max_model_len": {"type": "integer", "minimum": 128, "maximum": 262144},
+        "tensor_parallel_size": {"type": "integer", "minimum": 1, "maximum": 256},
+        "max_num_seqs": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "max_num_batched_tokens": {"type": "integer", "minimum": 128, "maximum": 262144},
+        "language_model_only": {"type": "boolean"},
+        "max_lora_rank": {"type": "integer", "minimum": 1, "maximum": 1024}
+      }
+    },
+    "hyperparameters": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "batch_size", "gradient_accumulation_steps", "learning_rate", "duration", "max_seq_length", "seed", "save_steps", "save_total_limit", "lora_rank", "lora_alpha", "lora_dropout", "lora_target_modules", "use_dora", "use_rslora", "init_lora_weights", "split_dataset", "dataset_format", "completion_only_loss", "assistant_only_loss", "use_preassigned_splits", "prompt_render", "packing", "require_memory_efficient_loss"],
+      "properties": {
+        "schema_version": {"const": "synaptic-sft-hyperparameters/v1"},
+        "batch_size": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "gradient_accumulation_steps": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "learning_rate": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "duration": {
+          "type": "object", "additionalProperties": false, "required": ["max_steps", "num_epochs"],
+          "oneOf": [
+            {"properties": {"max_steps": {"type": "integer", "minimum": 1, "maximum": 10000000}, "num_epochs": {"type": "null"}}},
+            {"properties": {"max_steps": {"type": "null"}, "num_epochs": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000}}}
+          ],
+          "properties": {"max_steps": {}, "num_epochs": {}}
+        },
+        "max_seq_length": {"type": "integer", "minimum": 1, "maximum": 1048576},
+        "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+        "save_steps": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "save_total_limit": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "lora_rank": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "lora_alpha": {"type": "integer", "minimum": 1, "maximum": 65536},
+        "lora_dropout": {"type": "number", "minimum": 0, "exclusiveMaximum": 1},
+        "lora_target_modules": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+        "use_dora": {"type": "boolean"}, "use_rslora": {"type": "boolean"},
+        "init_lora_weights": {"type": "boolean"}, "split_dataset": {"const": false},
+        "dataset_format": {"enum": ["raw_text", "messages"]},
+        "completion_only_loss": {"type": "boolean"}, "assistant_only_loss": {"type": "boolean"},
+        "use_preassigned_splits": {"const": true},
+        "prompt_render": {"enum": ["full_conversation", "prompt_completion"]},
+        "packing": {"type": "boolean"}, "require_memory_efficient_loss": {"type": "boolean"},
+        "chat_template_kwargs": {"$ref": "#/$defs/chat_template_kwargs"}
+      }
+    }
+  }
+}

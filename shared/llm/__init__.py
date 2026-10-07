@@ -18,10 +18,11 @@ Usage:
     # Or specify explicitly
     client = create_client(provider="lmstudio", model="local-model")
 
-    # Chat completion
-    response = client.chat([
+    # Chat completion: LLMCompletionV1 with .text and .usage
+    completion = client.chat([
         {"role": "user", "content": "Hello!"}
     ])
+    print(completion.text)
 
     # Structured output with JSON schema
     schema = {
@@ -32,7 +33,8 @@ Usage:
         },
         "required": ["answer", "confidence"]
     }
-    result = client.structured_output(messages, schema)
+    result = client.structured_output(messages, schema)   # LLMStructuredV1
+    print(result.value["answer"], result.usage)
 
 Environment variables:
     IMPROVEMENT_BACKEND=openrouter  # or openai_responses, lmstudio, ollama
@@ -47,6 +49,7 @@ Environment variables:
 
 from .base import BaseLLMClient
 from .config import LLMConfig
+from .usage import LLMCompletionV1, LLMStructuredV1
 from .factory import create_client, list_providers
 from .exceptions import (
     LLMError,
@@ -63,6 +66,10 @@ __all__ = [
     # Base classes
     "BaseLLMClient",
     "LLMConfig",
+
+    # Return types
+    "LLMCompletionV1",
+    "LLMStructuredV1",
 
     # Exceptions
     "LLMError",

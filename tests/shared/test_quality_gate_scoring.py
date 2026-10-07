@@ -24,6 +24,7 @@ import pytest
 
 from shared.judge.judge_service import JudgeService
 from shared.judge.models import JudgeConfig, RubricDef
+from shared.llm.usage import LLMStructuredV1
 
 
 class _NoopClient:
@@ -237,7 +238,7 @@ def test_fail_closed_surfaces_as_failed_judge_result_not_a_crash(monkeypatch):
     monkeypatch.setattr(
         service.llm_client,
         "structured_output",
-        lambda **kwargs: _raw({k: v for k, v in _FLOORS_PASS.items() if k != "openness_neutrality"}),
+        lambda **kwargs: LLMStructuredV1(_raw({k: v for k, v in _FLOORS_PASS.items() if k != "openness_neutrality"})),
         raising=False,
     )
     result = service.judge(prompt="x", rubrics=[rubric])

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-hf-provisioning-claim-v1.schema.json",
+  "title": "Synaptic Hugging Face provisioning claim v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "experiment_id", "run_id", "state", "sequence", "descriptor", "source_lock", "volume", "bundle_sha256", "capsule_manifest_sha256", "checkout_policy_sha256", "authority", "actor", "occurred_at", "previous_event", "evidence", "reason_code", "provider_effect_possible"],
+  "properties": {
+    "schema_version": {"const": "synaptic-hf-provisioning-claim/v1"},
+    "event_id": {"$ref": "#/$defs/sha256"},
+    "experiment_id": {"$ref": "#/$defs/segment"},
+    "run_id": {"$ref": "#/$defs/segment"},
+    "state": {"enum": ["CLAIMED", "SUCCEEDED", "AMBIGUOUS"]},
+    "sequence": {"enum": [1, 2]},
+    "descriptor": {"$ref": "#/$defs/artifactRef"},
+    "source_lock": {"$ref": "#/$defs/artifactRef"},
+    "volume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "path", "type", "read_only"],
+      "properties": {
+        "source": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 255},
+        "path": {"$ref": "#/$defs/relativePath"},
+        "type": {"const": "bucket"},
+        "read_only": {"const": true}
+      }
+    },
+    "bundle_sha256": {"$ref": "#/$defs/sha256"},
+    "capsule_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "checkout_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "authority": {"enum": ["operator", "protected_workflow"]},
+    "actor": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$"},
+    "occurred_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$", "maxLength": 64},
+    "previous_event": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifactRef"}]},
+    "evidence": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifactRef"}]}
+    ,"reason_code": {"oneOf": [{"type": "null"}, {"enum": ["CREDENTIAL_REJECTED", "LOCAL_POSTCLAIM_FAILURE", "PROVIDER_OUTCOME_AMBIGUOUS", "INTERRUPTED_AFTER_CLAIM", "RECOVERY_EVIDENCE_INVALID"]}]}
+    ,"provider_effect_possible": {"type": "boolean"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"state": {"const": "CLAIMED"}}},
+      "then": {"properties": {"sequence": {"const": 1}, "previous_event": {"type": "null"}, "evidence": {"type": "null"}, "reason_code": {"type": "null"}, "provider_effect_possible": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"state": {"const": "SUCCEEDED"}}},
+      "then": {"properties": {"sequence": {"const": 2}, "previous_event": {"$ref": "#/$defs/artifactRef"}, "evidence": {"$ref": "#/$defs/artifactRef"}, "reason_code": {"type": "null"}, "provider_effect_possible": {"const": true}}}
+    },
+    {
+      "if": {"properties": {"state": {"const": "AMBIGUOUS"}}},
+      "then": {"properties": {"sequence": {"const": 2}, "previous_event": {"$ref": "#/$defs/artifactRef"}, "evidence": {"type": "null"}, "reason_code": {"enum": ["CREDENTIAL_REJECTED", "LOCAL_POSTCLAIM_FAILURE", "PROVIDER_OUTCOME_AMBIGUOUS", "INTERRUPTED_AFTER_CLAIM", "RECOVERY_EVIDENCE_INVALID"]}}}
+    },
+    {
+      "if": {"properties": {"reason_code": {"enum": ["CREDENTIAL_REJECTED", "LOCAL_POSTCLAIM_FAILURE"]}}, "required": ["reason_code"]},
+      "then": {"properties": {"provider_effect_possible": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"reason_code": {"enum": ["PROVIDER_OUTCOME_AMBIGUOUS", "INTERRUPTED_AFTER_CLAIM", "RECOVERY_EVIDENCE_INVALID"]}}, "required": ["reason_code"]},
+      "then": {"properties": {"provider_effect_possible": {"const": true}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "segment": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "relativePath": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "maxLength": 1024},
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256"],
+      "properties": {
+        "uri": {"type": "string", "pattern": "^tracking://[A-Za-z0-9][A-Za-z0-9._/-]*$", "maxLength": 2048},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

@@ -1,0 +1,384 @@
+name: Provider-free coordinator conformance
+
+on:
+  pull_request:
+    paths:
+      - "synaptic_tuner/api/v1/**"
+      - "tuner/execution/coordinator_v1/**"
+      - "tuner/execution/foundation_v2/**"
+      - "tuner/execution/fake_provider_v1.py"
+      - "tuner/execution/providers/modal/**"
+      - "tuner/training/**"
+      - "tuner/project/**"
+      - "tuner/runtime/**"
+      - "tuner/inference/**"
+      - "tests/inference/**"
+      - "Evaluator/vllm_setup.py"
+      - "Evaluator/interactive_cli.py"
+      - "Evaluator/cloud_hf_job_vllm.py"
+      - "Evaluator/cli.py"
+      - "Evaluator/base_client.py"
+      - "Evaluator/openai_compat_client.py"
+      - "Evaluator/verified_vllm_chat.py"
+      - "Evaluator/local_run_chat.py"
+      - "tests/evaluator/test_same_job_post_training_eval.py"
+      - "tests/evaluator/test_owned_process.py"
+      - "tests/evaluator/test_vllm_*.py"
+      - "tests/evaluator/test_chat_session.py"
+      - "tests/evaluator/test_verified_vllm_chat.py"
+      - "tests/evaluator/test_local_run_chat.py"
+      - "tests/evaluator/test_run_chat_local_integration.py"
+      - "tests/evaluator/test_http_transport_policy.py"
+      - "tests/evaluator/test_http_request_bounds.py"
+      - "tests/test_evaluator_clients.py"
+      - "tests/cloud/test_vllm_setup.py"
+      - "tests/cloud/test_cloud_hf_job_vllm.py"
+      - "tests/contract/test_modal_optional_dependency.py"
+      - "tests/contract/test_modal_runtime_lock*.py"
+      - "tests/contract/test_modal_bootstrap_closure.py"
+      - "tests/contract/test_offline_sft_worker_closure.py"
+      - "tests/contract/fixtures/api_v1_formal_exports_coordinator.json"
+      - "tests/contract/test_public_runs_api_v1.py"
+      - "tests/contract/test_public_training_api_v1.py"
+      - "tests/contract/test_public_publication_v1.py"
+      - "tests/contract/test_provider_neutral_foundation_v1.py"
+      - "tests/conftest.py"
+      - "tests/training/**"
+      - "tests/runtime/**"
+      - "tests/trainers/sft/test_runtime_v1.py"
+      - "tests/execution/providers/docker_provider_v1/**"
+      - "tuner/execution/providers/docker_provider_v1/**"
+      - "tests/execution/coordinator_v1/**"
+      - "tests/execution/foundation_v2/**"
+      - "tests/execution/providers/test_modal_*.py"
+      - "tests/execution/providers/modal_coordinator_fixtures.py"
+      - "tests/execution/test_mutation_broker.py"
+      - "tuner/execution/broker.py"
+      - "tests/execution/test_fake_provider_v1_conformance.py"
+      - "examples/host-project/providers/modal-a10-v1.yaml"
+      - "requirements/modal-launcher-v1.lock"
+      - "tuner/runtime/manifests/offline-sft-worker-v1.json"
+      - "Trainers/sft/**"
+      - "Trainers/shared/**"
+      - "shared/**"
+      - "tuner/cloud/**"
+      - "tuner/execution/*.py"
+      - "tuner/__init__.py"
+      - "synaptic_tuner/__init__.py"
+      - "synaptic_tuner/_version.py"
+      - "synaptic_tuner/api/__init__.py"
+      - "schemas/**"
+      - "scripts/regenerate_modal_runtime_lock.py"
+      - "scripts/regenerate_offline_sft_worker_closure.py"
+      - "scripts/capture_modal_inference_runtime.py"
+      - "scripts/inspect_modal_inference_runtime.py"
+      - ".gitattributes"
+      - "pyproject.toml"
+      - ".github/workflows/provider-free-conformance.yml"
+  push:
+    branches: [main, feat/submodule-cloud-api-v1, feat/submodule-cloud-api-v1-windows]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-free-conformance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    name: CPython 3.12 / pytest 8 (${{ matrix.suite }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core, modal-inference]
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      MODAL_IS_REMOTE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - name: Check out source without persisted credentials
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Set up supported Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the minimal conformance environment
+        run: |
+          python -m pip install \
+            'pytest>=8,<9' \
+            'numpy>=1.24,<3' \
+            'pandas>=2,<3' \
+            'setuptools>=68' \
+            'requests>=2.32,<3' \
+            wheel
+          python -m pip wheel --no-deps --no-build-isolation \
+            --wheel-dir "$RUNNER_TEMP/wheelhouse" .
+          python -m pip install "$RUNNER_TEMP"/wheelhouse/synaptic_tuner-*.whl
+
+      - name: Verify declared pytest range and excluded provider SDK
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import pytest
+          from packaging.version import Version
+
+          version = Version(pytest.__version__)
+          assert Version("8") <= version < Version("9"), version
+          assert importlib.util.find_spec("modal") is None
+          PY
+
+      - name: Verify wheel resources from a neutral working directory
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-import-venv"
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -m pip install "$RUNNER_TEMP"/wheelhouse/synaptic_tuner-*.whl
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PY'
+          import importlib.resources
+          import importlib.util
+          import json
+
+          assert importlib.util.find_spec("modal") is None
+          assert importlib.util.find_spec("torch") is None
+          resource = importlib.resources.files(
+              "tuner.execution.providers.modal"
+          ).joinpath("modal-runtime-v1.lock.json")
+          document = json.loads(resource.read_text(encoding="utf-8"))
+          assert document["schema_version"] == "synaptic-modal-runtime-lock/v1"
+          worker = importlib.resources.files("tuner.runtime").joinpath(
+              "manifests/offline-sft-worker-v1.json"
+          )
+          worker_document = json.loads(worker.read_text(encoding="utf-8"))
+          assert worker_document["schema_version"] == "synaptic-offline-sft-worker-closure/v1"
+          import tuner.execution.providers.modal.coordinator_adapter
+          import tuner.execution.providers.modal.coordinator_binding
+          import tuner.execution.providers.modal.coordinator_effects
+          import tuner.execution.providers.modal.coordinator_reader
+          import tuner.execution.providers.modal.coordinator_staging
+          import tuner.execution.providers.modal.coordinator_launch
+          import tuner.execution.providers.modal.coordinator_wire
+          import tuner.execution.providers.modal.coordinator_bundle
+          import tuner.execution.providers.modal.coordinator_dispatch
+          import tuner.execution.providers.modal.coordinator_submit_preparation
+          import tuner.execution.providers.modal.coordinator_worker
+          import tuner.execution.providers.modal.coordinator_producer
+          import tuner.execution.providers.modal.coordinator_logs
+          import tuner.execution.providers.modal.coordinator_preflight
+          import tuner.execution.providers.modal.coordinator_factories
+          import tuner.execution.providers.modal.coordinator_read_transport
+          import tuner.execution.providers.modal.coordinator_transport
+          import tuner.execution.providers.modal.coordinator_deployment
+          import tuner.execution.providers.modal.coordinator_retention
+          import tuner.execution.providers.modal.coordinator_composition
+          import tuner.execution.providers.modal.worker_ports
+          import tuner.execution.providers.modal.worker_source
+          import tuner.training.coordinator_material
+          import tuner.training.coordinator_service
+          import tuner.training.contracts
+          import tuner.inference.owned_process
+          import tuner.inference.vllm_runtime
+          import tuner.inference.chat_session
+          import Evaluator.verified_vllm_chat
+          import Evaluator.local_run_chat
+          import Evaluator.schema_validator
+          import shared.validation.dataset_validator
+          import tuner.inference.retrieved_model
+          import tuner.inference.serving_target
+          import tuner.inference.run_chat
+          import tuner.execution.providers.modal.inference_model
+          import tuner.execution.providers.modal.inference_binding
+          import tuner.execution.providers.modal.inference_workload
+          import tuner.execution.providers.modal.inference_artifacts
+          import tuner.execution.providers.modal.inference_preparation
+          import tuner.execution.providers.modal.inference_commands
+          import tuner.execution.providers.modal.inference_retention
+          import tuner.execution.providers.modal.inference_effects
+          import tuner.execution.providers.modal.inference_launch
+          import tuner.execution.providers.modal.inference_wire
+          import tuner.execution.providers.modal.inference_worker
+          import tuner.execution.providers.modal.inference_runtime
+          import tuner.execution.providers.modal.inference_bootstrap
+          import tuner.execution.providers.modal.inference_channel
+          import tuner.execution.providers.modal.inference_channel_client
+          import tuner.execution.providers.modal.inference_entrypoint
+          import tuner.execution.providers.modal.inference_transport
+          import tuner.execution.providers.modal.inference_run_chat
+          PY
+
+      - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
+        run: |
+          python -B scripts/regenerate_offline_sft_worker_closure.py
+          python -B scripts/regenerate_modal_runtime_lock.py
+
+      - name: Run provider-free conformance contracts
+        env:
+          CONFORMANCE_SUITE: ${{ matrix.suite }}
+          HF_TOKEN: ""
+          HF_API_KEY: ""
+          MODAL_TOKEN_ID: ""
+          MODAL_TOKEN_SECRET: ""
+          WANDB_API_KEY: ""
+        run: |
+          inference_tests=(tests/execution/providers/test_modal_inference_*.py)
+          other_modal_tests=()
+          for test_file in tests/execution/providers/test_modal_*.py; do
+            if [[ "$test_file" != tests/execution/providers/test_modal_inference_*.py ]]; then
+              other_modal_tests+=("$test_file")
+            fi
+          done
+          if [[ ! -f "${inference_tests[0]}" || ${#other_modal_tests[@]} -eq 0 ]]; then
+            echo "Modal provider test selection is empty" >&2
+            exit 1
+          fi
+          if [[ "$CONFORMANCE_SUITE" == "modal-inference" ]]; then
+            python -B -m pytest -q -p no:cacheprovider "${inference_tests[@]}"
+            exit
+          fi
+          if [[ "$CONFORMANCE_SUITE" != "core" ]]; then
+            echo "Unknown conformance suite" >&2
+            exit 1
+          fi
+          python -B -m pytest -q -p no:cacheprovider \
+            tests/contract/test_provider_neutral_foundation_v1.py \
+            tests/contract/test_modal_optional_dependency.py \
+            tests/contract/test_modal_runtime_lock.py \
+            tests/contract/test_modal_runtime_lock_regeneration.py \
+            tests/contract/test_modal_bootstrap_closure.py \
+            tests/contract/test_offline_sft_worker_closure.py \
+            tests/contract/test_public_runs_api_v1.py \
+            tests/contract/test_public_training_api_v1.py \
+            tests/contract/test_public_publication_v1.py \
+            tests/execution/coordinator_v1 \
+            tests/execution/foundation_v2 \
+            tests/execution/test_fake_provider_v1_conformance.py \
+            tests/execution/test_mutation_broker.py \
+            tests/training \
+            tests/runtime \
+            tests/evaluator/test_owned_process.py \
+            tests/evaluator/test_vllm_runtime.py \
+            tests/evaluator/test_vllm_interpreter.py \
+            tests/evaluator/test_vllm_startup_cleanup.py \
+            tests/evaluator/test_chat_session.py \
+            tests/evaluator/test_verified_vllm_chat.py \
+            tests/evaluator/test_local_run_chat.py \
+            tests/evaluator/test_run_chat_local_integration.py \
+            tests/evaluator/test_http_transport_policy.py \
+            tests/evaluator/test_http_request_bounds.py \
+            tests/test_evaluator_clients.py \
+            tests/cloud/test_vllm_setup.py \
+            tests/inference \
+            tests/trainers/sft/test_runtime_v1.py \
+            tests/execution/providers/docker_provider_v1 \
+            "${other_modal_tests[@]}"
+
+  modal-diagnostics:
+    name: Modal 1.5.4 diagnostic contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      MODAL_IS_REMOTE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      HF_TOKEN: ""
+      HF_API_KEY: ""
+      MODAL_TOKEN_ID: ""
+      MODAL_TOKEN_SECRET: ""
+    steps:
+      - name: Check out source without persisted credentials
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Set up supported Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned Modal diagnostic environment
+        run: |
+          python -m pip install \
+            'pytest>=8,<9' \
+            'numpy>=1.24,<3' \
+            'pandas>=2,<3' \
+            'setuptools>=68' \
+            'requests>=2.32,<3' \
+            'modal==1.5.4' \
+            'protobuf==6.33.6' \
+            wheel
+          python -m pip wheel --no-deps --no-build-isolation \
+            --wheel-dir "$RUNNER_TEMP/wheelhouse" .
+          python -m pip install "$RUNNER_TEMP"/wheelhouse/synaptic_tuner-*.whl
+
+      - name: Require the pinned Modal protobuf SDK
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          import modal_proto.api_pb2
+
+          assert version("modal") == "1.5.4"
+          assert version("protobuf") == "6.33.6"
+          PY
+
+      - name: Run mock-only packaged-call diagnostics with the pinned SDK
+        run: python -B -m pytest -q -p no:cacheprovider tests/training/test_inspect_modal_packaged_call.py
+
+  conformance-gate:
+    name: CPython 3.12 / pytest 8
+    needs: [conformance, modal-diagnostics]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Require conformance and Modal diagnostic jobs
+        env:
+          CONFORMANCE_RESULT: ${{ needs.conformance.result }}
+          MODAL_DIAGNOSTICS_RESULT: ${{ needs['modal-diagnostics'].result }}
+        run: |
+          test "$CONFORMANCE_RESULT" = success
+          test "$MODAL_DIAGNOSTICS_RESULT" = success
+
+  evaluator-callers:
+    name: CPU-only evaluator caller regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      MODAL_IS_REMOTE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      CUDA_VISIBLE_DEVICES: ""
+      HF_TOKEN: ""
+      HF_API_KEY: ""
+      MODAL_TOKEN_ID: ""
+      MODAL_TOKEN_SECRET: ""
+    steps:
+      - name: Check out source without persisted credentials
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Set up supported Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Install CPU evaluator test dependencies
+        run: |
+          python -m pip install 'torch>=2,<3' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'pytest>=8,<9' 'requests>=2.32,<3' 'numpy>=1.24,<3' 'pandas>=2,<3' tqdm .
+      - name: Run real caller bodies with fake external effects
+        run: |
+          python -B -m pytest -q -p no:cacheprovider \
+            tests/evaluator/test_same_job_post_training_eval.py \
+            tests/evaluator/test_vllm_callers.py \
+            tests/cloud/test_cloud_hf_job_vllm.py \
+            tests/cloud/test_schema_validator.py \
+            tests/cloud/test_vllm_setup.py \
+            tests/evaluator/test_vllm_runtime.py \
+            tests/evaluator/test_vllm_startup_cleanup.py \
+            tests/evaluator/test_owned_process.py

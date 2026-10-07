@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from argparse import Namespace
-from typing import Optional
 
 from tuner.handlers.base import BaseHandler
 from tuner.handlers.cloud_eval_handler import CloudEvalHandler
@@ -42,5 +41,5 @@ class CloudGymHandler(BaseHandler):
 
     def handle(self) -> int:
         handler = CloudEvalHandler(args=self._build_eval_args())
-        handler._repo_root = self.repo_root
+        handler.bind_context(self.context)
         return handler.handle()

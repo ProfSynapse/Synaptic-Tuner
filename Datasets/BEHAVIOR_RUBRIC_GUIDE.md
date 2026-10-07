@@ -730,7 +730,7 @@ After generating pairs, validate with:
 
 ```bash
 # Basic schema validation
-python tools/validate_syngen.py Datasets/behavior_datasets/intellectual_humility_pairs.jsonl
+python -m shared.validation.dataset_validator Datasets/behavior_datasets/intellectual_humility_pairs.jsonl
 
 # Behavior-specific validation
 python tools/validate_behavior_pairs.py \

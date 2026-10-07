@@ -48,6 +48,9 @@ Explicit CLI flags (e.g., `--learning-rate`) override tier defaults.
 | `--dataset-file STR` | Specific file in HF dataset | config value |
 | `--local-file PATH` | Local JSONL file (overrides HF) | — |
 | `--split-dataset` | Create train/validation split | false |
+| `--test-size FLOAT` | Validation fraction (rows, or groups with a group key) | config value (0.1) |
+| `--validation-group-key PATH` | Dot-path into each row; keeps groups on one side of the split | config value (null) |
+| `--use-preassigned-splits` | Consume declared raw-text train/validation splits | false |
 
 ### Experiment Tracking
 | Flag | Description | Default |
@@ -83,10 +86,113 @@ When `packing: true` in config:
 3. Dataset auto-preprocessed with chat template
 
 ### Completion-Only Loss
-When `completion_only_loss: true` (default):
+For conversational or prompt/completion rows, when
+`completion_only_loss: true` (default):
 - Loss computed only on assistant response tokens
 - User prompt tokens ignored during training
 - Prevents model from learning to generate user messages
+
+### Authoritative raw-text rows
+
+Rows are admitted to the direct-text path only when they declare both
+`schema_version: syntunia-sft-row/v1` and `format: raw_text`. An arbitrary
+`text` field does not opt a dataset into this behavior.
+
+Raw-text SFT deliberately bypasses chat rendering. The trainer tokenizes the
+row's `text`, appends the tokenizer-derived EOS token, and labels the complete
+sequence. Its recipe must therefore bind the following settings together:
+
+```yaml
+model:
+  max_seq_length: 16384  # choose from exact tokenizer-profile evidence
+dataset:
+  local_file: private/prepared-dataset/dataset.jsonl
+  schema_version: syntunia-sft-row/v1
+  format: raw_text
+  use_preassigned_splits: true
+  split_dataset: false
+  test_size: 0.0
+training:
+  completion_only_loss: false
+  assistant_only_loss: false
+  prompt_render: full_conversation
+aux_head:
+  enabled: false
+```
+
+The declared splits must contain a non-empty `train` set and a non-empty
+`validation` set, with no other split names. Do not enable random splitting,
+assistant/completion-only masks, `prompt_render: prompt_completion`, or
+`aux_head.token_position: end_of_prompt` for raw text. Profile the exact pinned
+tokenizer first; the sequence length above is illustrative, not a default.
+
+### Authoritative prompt/completion rows and 32K
+
+`syntunia-sft-row/v2` / `messages` rows are a distinct, fail-closed path for an
+exact two-turn user prompt and assistant target. The recipe must bind all of the
+following together:
+
+```yaml
+model:
+  max_seq_length: 32768
+dataset:
+  schema_version: syntunia-sft-row/v2
+  format: messages
+  use_preassigned_splits: true
+  split_dataset: false
+training:
+  packing: false
+  completion_only_loss: true
+  assistant_only_loss: false
+  prompt_render: prompt_completion
+  require_memory_efficient_loss: true
+```
+
+Authoritative rows must fit completely; preprocessing rejects over-budget rows
+instead of truncating context or target tokens. At 32K, the local runner rejects
+the recipe unless the memory-efficient-loss guard is enabled. The trainer then
+checks the loaded model's actual loss-function identity against the active
+Unsloth causal-LM mapping, preventing a silent stock Transformers fallback that
+could materialize full fp32 logits.
+
+The checked-in `Trainers/recipes/qwen35_4b_32k_prompt_completion.yaml` selects
+the `qwen35-sft-v1` runtime profile. It supplies the immutable image, complete
+installed-distribution inventory, and exact admitted `Qwen/Qwen3.5-4B` revision
+`851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` for SFT. The recipe remains
+`dry_run: true`; its batch size and accumulation are conservative sizing
+candidates only. A green provider-free compile/test pass does not qualify GPU
+memory, throughput, or a live provider launch.
+
+Consumers using the provider-neutral `TrainingAPI` carry these seven prepared-row
+controls as one atomic optional group on `SFTTrainingHyperparametersV1`:
+`dataset_format`, `completion_only_loss`, `assistant_only_loss`,
+`use_preassigned_splits`, `prompt_render`, `packing`, and
+`require_memory_efficient_loss`. Omitting the whole group preserves the original
+v1 input document exactly. A prepared v2 artifact requires the group and
+`dataset_format: messages`; the consumer resolver transports it unchanged into
+the resolved SFT configuration.
+
+Optional `training.chat_template_kwargs` in a Modal recipe flows through the
+provider-neutral SFT hyperparameters into the existing `--chat-template-kwargs`
+trainer flag. It is bounded finite JSON, not an executable template override;
+renderer-control keys are rejected. Omit it to preserve the legacy canonical
+document. For prompt/completion rows, inspect the pinned tokenizer's generation
+scaffold and use matching template arguments at serving time. Keep model-specific
+arguments in the recipe, never in generic engine behavior.
+An offline boundary regression can use an already-verified saved tokenizer
+archive, without weights or Hub access:
+
+```bash
+SYNAPTIC_TEST_QWEN35_TOKENIZER_ARTIFACT=/private/verified/tokenizer.artifact \
+  python -B -m pytest -q tests/training/test_chat_template_training_transport.py
+```
+
+The artifact-backed case checks the exact pinned template hash, generation
+scaffold, prompt mask, and prose-plus-terminal target (the terminal is the
+template's end-of-turn token, which is `eos_token_id` for that tokenizer when
+the two coincide). Without that explicit local
+artifact it skips; the generic contract/transport cases still run. This checks
+token placement, not live GPU execution or writing quality.
 
 ### Auxiliary Readout Head (`aux_head`, optional)
 An optional auxiliary scalar readout head that learns to predict a per-row
@@ -153,9 +259,17 @@ the head reads an off-anchor representation.
 
 Set `training.prompt_render: prompt_completion` for a faithful boundary: the row's
 `input_ids` are built from the `add_generation_prompt=True` prompt render followed
-by the raw completion plus the tokenizer's derived terminal (`eos_token_id`), with
-the prompt segment masked to `-100`. The prompt then ends exactly at the
-generation anchor, so the existing `end_of_prompt` read is faithful.
+by the raw completion plus the chat template's end-of-turn token, with the
+prompt segment masked to `-100` when `completion_only_loss: true` (with
+`completion_only_loss: false` every token is trained). The terminal is derived
+from the template (the special token it renders after assistant content, the
+same derivation `doctor sft-mask` uses); only when the template renders none does
+it fall back to `eos_token_id`, logged once. Where `eos_token_id` already is the
+end-of-turn token the rows are byte-identical to the earlier eos-terminated
+construction; where they differ (for example eos `<|endoftext|>` vs turn end
+`<|im_end|>`), the completion now ends with the turn terminator. The prompt then
+ends exactly at the generation anchor, so the existing `end_of_prompt` read is
+faithful.
 
 ```yaml
 training:
@@ -201,7 +315,15 @@ The `aux_head` block flows through **both** launch paths:
 ## Training Workflow
 
 1. **Choose runtime**: prefer `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes` for repeatable local Docker runs; use direct `cd Trainers/sft && python train_sft.py ...` for tight trainer iteration.
-2. **Prepare dataset**: JSONL with `conversations` field, positive examples only
+2. **Prepare dataset**: use conversational JSONL for chat semantics, or run
+   `prepare-dataset` for a verified `syntunia-sft-row/v1` raw-text artifact.
+   Then check loss masking with the target tokenizer:
+   `python tuner.py doctor sft-mask --sft-config <trainer-config> --model <tokenizer> --dataset-path <jsonl>`
+   (tokenizer only, no GPU; exit 1 on hard failures such as too many dropped
+   rows or a wrong end-of-turn token). See `dataset-formats.md` → Validation.
+   Preprocessing contract version 2 changed SFT labels (end-of-turn stop,
+   dropped untrainable rows, `training.max_dropped_row_fraction`); losses from
+   earlier runs are not directly comparable.
 3. **Test setup**: set `run.dry_run: true` in local-run YAML or use `python train_sft.py --model-size 7b --tier quick --dry-run`
 4. **Quick iteration**: cap `training.max_steps` in local-run YAML or use `--tier quick`
 5. **Production run**: remove the step cap and use the intended `training`, `model`, `dataset`, and `lora` settings in YAML

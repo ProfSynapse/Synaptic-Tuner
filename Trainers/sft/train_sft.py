@@ -10,34 +10,234 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
+import re
 import sys
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
+
+
+RUNTIME_V1_PROJECTION_SCHEMA = "synaptic-sft-trainer-projection/v1"
+_SHA256_VALUE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_IMMUTABLE_IMAGE_VALUE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+
+
+def _mark_packaged_runtime_phase(phase: str) -> None:
+    marker = globals().get("__packaged_runtime_phase__")
+    if marker is not None:
+        marker(phase)
+
+
+def _save_runtime_v1_text_tokenizer(tokenizer: Any, directory: Path) -> None:
+    """Save only the text tokenizer admitted by the runtime-v1 artifact contract."""
+    absent = object()
+    text_tokenizer = getattr(tokenizer, "tokenizer", absent)
+    if text_tokenizer is absent:
+        tokenizer.save_pretrained(str(directory))
+        return
+    if text_tokenizer is None:
+        raise RuntimeError("runtime-v1 processor has no text tokenizer")
+    template = getattr(tokenizer, "chat_template", absent)
+    if template is absent or template is None:
+        text_tokenizer.save_pretrained(str(directory))
+        return
+    original = getattr(text_tokenizer, "chat_template", absent)
+    text_tokenizer.chat_template = template
+    try:
+        text_tokenizer.save_pretrained(str(directory))
+    finally:
+        if original is absent:
+            del text_tokenizer.chat_template
+        else:
+            text_tokenizer.chat_template = original
+
+
+def runtime_profile_metadata(args: argparse.Namespace) -> dict[str, str] | None:
+    """Validate the all-or-none runtime profile inputs forwarded by local-run."""
+
+    fields = {
+        "name": getattr(args, "runtime_profile_name", None),
+        "profile_sha256": getattr(args, "runtime_profile_digest", None),
+        "inventory_sha256": getattr(args, "runtime_inventory_digest", None),
+        "image": getattr(args, "runtime_image", None),
+    }
+    present = [value is not None for value in fields.values()]
+    if any(present) and not all(present):
+        raise ValueError("Runtime profile flags must be supplied together")
+    if not all(present):
+        return None
+    if not isinstance(fields["name"], str) or not fields["name"]:
+        raise ValueError("Runtime profile name is invalid")
+    if not _SHA256_VALUE.fullmatch(str(fields["profile_sha256"])):
+        raise ValueError("Runtime profile digest is invalid")
+    if not _SHA256_VALUE.fullmatch(str(fields["inventory_sha256"])):
+        raise ValueError("Runtime inventory digest is invalid")
+    if not _IMMUTABLE_IMAGE_VALUE.fullmatch(str(fields["image"])):
+        raise ValueError("Runtime profile image is not immutable")
+    return {key: str(value) for key, value in fields.items()}
+
+
+def _runtime_v1_projection_requested(args: argparse.Namespace) -> bool:
+    names = (
+        "runtime_v1_workload_fingerprint", "runtime_v1_configuration_revision",
+        "runtime_v1_tokenizer_revision", "runtime_v1_dataset_revision",
+        "runtime_v1_dataset_digest",
+    )
+    present = [getattr(args, name, None) is not None for name in names]
+    if any(present) and not all(present):
+        raise ValueError("Runtime v1 projection flags must be supplied together")
+    raw_names = ("runtime_v1_dataset_schema", "runtime_v1_dataset_format")
+    raw_present = [getattr(args, name, None) is not None for name in raw_names]
+    if any(raw_present) and not all(raw_present):
+        raise ValueError("Runtime v1 raw dataset projection flags must be supplied together")
+    if any(raw_present) and not all(present):
+        raise ValueError("Runtime v1 raw dataset projection requires the base projection flags")
+    return all(present)
+
+
+def _sha256_regular_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_runtime_v1_projection(
+    *, args: argparse.Namespace, config: Any, run_dir: Path, final_model_path: Path
+) -> dict[str, object] | None:
+    """Build the closed runtime-v1 projection from values actually executed."""
+
+    if not _runtime_v1_projection_requested(args):
+        return None
+    supplied_dataset_path = str(config.dataset.local_file)
+    if re.fullmatch(r"/proc/self/fd/[1-9][0-9]*", supplied_dataset_path):
+        dataset_path = Path(supplied_dataset_path)
+        if not dataset_path.is_file():
+            raise ValueError("Runtime v1 retained dataset descriptor is unavailable")
+    else:
+        dataset_path = Path(supplied_dataset_path).resolve(strict=True)
+    dataset_digest = _sha256_regular_file(dataset_path)
+    if dataset_digest != args.runtime_v1_dataset_digest:
+        raise ValueError("Runtime v1 dataset digest does not match the executed input")
+    effective_max_steps = getattr(config.training, "max_steps", None) or -1
+    projection = {
+        "schema_version": RUNTIME_V1_PROJECTION_SCHEMA,
+        "workload_fingerprint": args.runtime_v1_workload_fingerprint,
+        "configuration_revision": args.runtime_v1_configuration_revision,
+        "model": {
+            "ref": config.model.model_name,
+            "revision": config.model.model_revision,
+            "tokenizer_revision": args.runtime_v1_tokenizer_revision,
+            "load_in_4bit": config.model.load_in_4bit,
+        },
+        "dataset": {
+            "resolved_path": str(dataset_path),
+            "revision": args.runtime_v1_dataset_revision,
+            "content_digest": dataset_digest,
+        },
+        "training": {
+            "batch_size": config.training.per_device_train_batch_size,
+            "gradient_accumulation_steps": config.training.gradient_accumulation_steps,
+            "learning_rate": config.training.learning_rate,
+            "max_steps": effective_max_steps,
+            "num_epochs": config.training.num_train_epochs,
+            "max_seq_length": config.training.max_seq_length,
+            "seed": config.seed,
+            "save_steps": config.training.save_steps,
+            "save_total_limit": config.training.save_total_limit,
+            "split_dataset": bool(args.split_dataset or config.dataset.split_dataset),
+        },
+        "lora": {
+            "rank": config.lora.r,
+            "alpha": config.lora.lora_alpha,
+            "dropout": config.lora.lora_dropout,
+            "target_modules": config.lora.target_modules,
+            "use_dora": config.lora.use_dora,
+            "use_rslora": config.lora.use_rslora,
+            "init_lora_weights": config.lora.init_lora_weights,
+        },
+        "outputs": {
+            "run_dir": str(run_dir.resolve()),
+            "final_model_dir": str(final_model_path.resolve()),
+        },
+        "status": "completed",
+    }
+    dataset_format = getattr(args, "runtime_v1_dataset_format", None)
+    if dataset_format is not None:
+        projection["dataset"]["schema_version"] = args.runtime_v1_dataset_schema
+        projection["dataset"]["format"] = dataset_format
+        projection["training"].update(
+            {
+                "completion_only_loss": config.training.completion_only_loss,
+                "assistant_only_loss": config.training.assistant_only_loss,
+                "use_preassigned_splits": config.dataset.use_preassigned_splits,
+            }
+        )
+        if dataset_format == "messages":
+            projection["training"].update(
+                {
+                    "prompt_render": config.training.prompt_render,
+                    "packing": False,
+                    "require_memory_efficient_loss": config.training.require_memory_efficient_loss,
+                }
+            )
+    return projection
+
+
+def write_runtime_v1_projection_atomic(
+    projection: dict[str, object], run_dir: Path
+) -> Path:
+    destination = run_dir / "runtime_v1_projection.json"
+    if destination.exists():
+        raise FileExistsError(f"Runtime projection already exists: {destination}")
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".runtime-v1-projection-", suffix=".tmp", dir=run_dir
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(projection, stream, sort_keys=True, separators=(",", ":"), allow_nan=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+    return destination
 
 # Add repo root and src to path before imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Environment bootstrap — must run before importing torch/unsloth/transformers
+_mark_packaged_runtime_phase("BOOTSTRAP_ENV")
 from shared.env_bootstrap import init_trainer_env, suppress_transformers_logging
 
 init_trainer_env()
 
+_mark_packaged_runtime_phase("TORCH_IMPORT")
 import torch  # noqa: E402
 
+_mark_packaged_runtime_phase("UNSLOTH_IMPORT")
 from unsloth import is_bfloat16_supported  # noqa: E402
 
 # Suppress transformers library-level logging after import
 suppress_transformers_logging()
 
+_mark_packaged_runtime_phase("TRAINER_IMPORT")
 from transformers import Trainer
 from trl import SFTConfig
 
 from configs.config_loader import (
+    PROTECTED_RECIPE_ENVELOPE_KEYS,
     get_3b_config,
     get_7b_config,
     get_13b_config,
@@ -55,7 +255,6 @@ from src.training_callbacks import (
     MetricsTableCallback,
     CheckpointMonitorCallback,
     LiveDashboardCallback,
-    suppress_training_logs,
     DASHBOARD_AVAILABLE,
 )
 from shared.cloud_artifacts import (
@@ -67,9 +266,9 @@ from shared.cloud_artifacts import (
     sync_directory_to_hf_bucket,
     write_manifest,
 )
-from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
 from shared.training_utils import (
     setup_wandb,
+    apply_wandb_destination,
     extract_previous_log_entries,
     save_training_lineage,
     build_base_lineage,
@@ -293,6 +492,7 @@ def build_training_lineage(
         training_type="SFT",
         model_info={
             "base_model": config.model.model_name,
+            "revision": config.model.model_revision,
             "max_seq_length": config.model.max_seq_length,
             "load_in_4bit": config.model.load_in_4bit,
             "dtype": str(config.model.dtype),
@@ -330,6 +530,7 @@ def build_training_lineage(
             "train_examples": len(train_dataset),
             "eval_examples": len(eval_dataset) if eval_dataset else 0,
             "filter_desirable": config.dataset.filter_desirable,
+            "validation_group_key": config.dataset.validation_group_key,
         },
         run_dir=run_dir,
         trainer=trainer,
@@ -361,12 +562,40 @@ def build_training_lineage(
                 }
             )
 
+    if getattr(args, "protected_smoke_evidence", None):
+        from tuner.cloud.hf_training_smoke_workload import DATASET_SHA256
+
+        lineage.update(
+            {
+                "model_revision": config.model.model_revision,
+                "dataset_sha256": DATASET_SHA256,
+                "max_steps": 1,
+                "gradient_accumulation_steps": 1,
+                "protected_smoke": True,
+            }
+        )
+
+    profile_metadata = runtime_profile_metadata(args)
+    if profile_metadata is not None:
+        lineage["runtime_profile"] = profile_metadata
+
     return enrich_training_lineage(lineage, args=args)
+
+
+def _parse_init_lora_weights(value: str) -> bool | str:
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    return normalized
 
 
 def parse_args(argv=None):
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="SFT Training for RTX 3090")
+    parser = argparse.ArgumentParser(
+        description="SFT Training for RTX 3090", allow_abbrev=False
+    )
 
     # Model configuration
     parser.add_argument("--model-size", type=str, choices=["3b", "7b", "13b", "20b"],
@@ -375,6 +604,14 @@ def parse_args(argv=None):
                        help="Path to custom config file")
     parser.add_argument("--model-name", type=str,
                        help="Override Hugging Face model name/path")
+    parser.add_argument("--model-revision", type=str,
+                       help="Exact Hugging Face model/tokenizer revision")
+    parser.add_argument("--anonymous-model", action="store_true",
+                       help="Disable token use for public model/tokenizer loading")
+    parser.add_argument("--model-cache-dir", type=str,
+                       help="Controlled model/tokenizer cache directory")
+    parser.add_argument("--model-snapshot", type=str,
+                       help="Exact pre-materialized local model/tokenizer snapshot")
 
     # Training parameters
     parser.add_argument("--batch-size", type=int,
@@ -414,7 +651,7 @@ def parse_args(argv=None):
                         help="Enable DoRA (Weight-Decomposed LoRA). Passes through to PEFT via Unsloth kwargs.")
     parser.add_argument("--use-rslora", action="store_true",
                         help="Enable rsLoRA (rank-stabilized scaling). Recommended at r>=128.")
-    parser.add_argument("--init-lora-weights", type=str,
+    parser.add_argument("--init-lora-weights", type=_parse_init_lora_weights,
                         help="Set init_lora_weights (for example: gaussian, loftq, corda, eva, pissa, olora).")
     parser.add_argument("--evolutionary-enabled", action="store_true",
                         help="Enable experimental evolutionary gradient selection.")
@@ -484,7 +721,14 @@ def parse_args(argv=None):
     # mean False. --aux-head-prompt-render is grouped here for user intent but
     # sets config.training.prompt_render — the render mode lives on
     # SFTTrainingConfig, not AuxHeadConfig (it replaces the masking region).
-    parser.set_defaults(aux_head_enabled=None, aux_head_freeze_base=None)
+    parser.set_defaults(
+        aux_head_enabled=None,
+        aux_head_freeze_base=None,
+        completion_only_loss=None,
+        assistant_only_loss=None,
+        use_preassigned_splits=None,
+        require_memory_efficient_loss=None,
+    )
     parser.add_argument("--aux-head-enabled", action="store_true", dest="aux_head_enabled",
                         help="Enable the auxiliary scalar readout head (AuxHeadConfig.enabled=true).")
     parser.add_argument("--no-aux-head-enabled", action="store_false", dest="aux_head_enabled",
@@ -525,6 +769,28 @@ def parse_args(argv=None):
                        help="Path to local dataset file (overrides HF dataset)")
     parser.add_argument("--split-dataset", action="store_true",
                        help="Create train/validation split")
+    parser.add_argument("--completion-only-loss", action="store_true", dest="completion_only_loss")
+    parser.add_argument("--no-completion-only-loss", action="store_false", dest="completion_only_loss")
+    parser.add_argument("--assistant-only-loss", action="store_true", dest="assistant_only_loss")
+    parser.add_argument("--no-assistant-only-loss", action="store_false", dest="assistant_only_loss")
+    parser.add_argument("--use-preassigned-splits", action="store_true", dest="use_preassigned_splits")
+    parser.add_argument("--no-use-preassigned-splits", action="store_false", dest="use_preassigned_splits")
+    parser.add_argument(
+        "--require-memory-efficient-loss",
+        action="store_true",
+        dest="require_memory_efficient_loss",
+        help="Fail closed unless Unsloth's memory-efficient causal-LM loss is active.",
+    )
+    parser.add_argument(
+        "--no-require-memory-efficient-loss",
+        action="store_false",
+        dest="require_memory_efficient_loss",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("--test-size", type=float, default=None,
+                       help="Validation fraction for --split-dataset (rows, or groups with --validation-group-key)")
+    parser.add_argument("--validation-group-key", type=str, default=None,
+                       help="Dot-path into each raw row (e.g. metadata.scenario); with --split-dataset, rows sharing a group stay on one side of the validation split")
 
     # W&B tracking
     parser.add_argument("--wandb", action="store_true",
@@ -564,6 +830,32 @@ def parse_args(argv=None):
                        help="Target Hugging Face model repo when publishing final_model")
     parser.add_argument("--run-timestamp", type=str,
                        help="Explicit run timestamp for canonical cloud run layout")
+    parser.add_argument("--protected-smoke-evidence", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--protected-smoke-config", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-workload-fingerprint", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-configuration-revision", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-tokenizer-revision", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-dataset-revision", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-dataset-digest", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-dataset-schema", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-dataset-format", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-profile-name", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-profile-digest", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-inventory-digest", type=str,
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-image", type=str,
+                       help=argparse.SUPPRESS)
 
     # UI options
     parser.add_argument("--no-dashboard", action="store_true",
@@ -576,6 +868,19 @@ def parse_args(argv=None):
 
 def run(args: argparse.Namespace):
     """Execute training with the provided CLI arguments."""
+    _mark_packaged_runtime_phase("CONFIG")
+    runtime_v1_requested = _runtime_v1_projection_requested(args)
+    resolved_runtime_profile = runtime_profile_metadata(args)
+    if runtime_v1_requested and (
+        args.model_snapshot is None
+        or args.model_cache_dir is None
+        or os.environ.get("SYNAPTIC_MODEL_SNAPSHOT") != args.model_snapshot
+        or os.environ.get("HF_HUB_OFFLINE") != "1"
+        or os.environ.get("TRANSFORMERS_OFFLINE") != "1"
+    ):
+        raise ValueError(
+            "Runtime v1 requires one environment-bound offline model snapshot"
+        )
     run_metadata = {
         "train_size": None,
         "eval_size": None,
@@ -584,10 +889,19 @@ def run(args: argparse.Namespace):
         "logs_dir": None,
         "manifest_path": None,
         "config_path": args.config,
+        "lineage_path": None,
+        "runtime_profile": resolved_runtime_profile,
     }
 
     # Load configuration
-    if args.config:
+    if args.protected_smoke_config:
+        if not args.protected_smoke_evidence or args.config or args.model_size:
+            raise ValueError("Protected smoke config is exclusive to protected evidence mode")
+        config = load_config(
+            args.protected_smoke_config, envelope_keys=PROTECTED_RECIPE_ENVELOPE_KEYS
+        )
+        print("Loading protected YAML configuration")
+    elif args.config:
         # Custom config file
         print(f"Loading custom config from: {args.config}")
         import importlib.util
@@ -727,6 +1041,14 @@ def run(args: argparse.Namespace):
         config.lora.lora_dropout = args.lora_dropout
     if args.model_name:
         config.model.model_name = args.model_name
+    if args.model_revision is not None:
+        config.model.model_revision = args.model_revision
+    if args.anonymous_model:
+        config.model.anonymous = True
+        config.model.trust_remote_code = False
+        config.model.use_safetensors = True
+    if args.model_cache_dir is not None:
+        config.model.cache_dir = args.model_cache_dir
     if args.load_in_4bit is not None:
         config.model.load_in_4bit = args.load_in_4bit
     if args.lora_target_modules:
@@ -791,6 +1113,18 @@ def run(args: argparse.Namespace):
         config.dataset.dataset_file = args.dataset_file
     if args.local_file:
         config.dataset.local_file = args.local_file
+    if args.completion_only_loss is not None:
+        config.training.completion_only_loss = args.completion_only_loss
+    if args.assistant_only_loss is not None:
+        config.training.assistant_only_loss = args.assistant_only_loss
+    if args.use_preassigned_splits is not None:
+        config.dataset.use_preassigned_splits = args.use_preassigned_splits
+    if args.require_memory_efficient_loss is not None:
+        config.training.require_memory_efficient_loss = args.require_memory_efficient_loss
+    if args.test_size is not None:
+        config.dataset.test_size = args.test_size
+    if args.validation_group_key:
+        config.dataset.validation_group_key = args.validation_group_key
 
     # W&B setup
     if args.wandb:
@@ -799,9 +1133,22 @@ def run(args: argparse.Namespace):
             config.wandb_project = args.wandb_project
         if config.use_wandb and args.wandb_run_name:
             config.wandb_run_name = args.wandb_run_name
+    if config.use_wandb:
+        apply_wandb_destination(config.wandb.project, config.wandb.entity)
 
-    # HuggingFace token
-    if not args.hf_token:
+    # Protected anonymous loads never consult ambient credentials. Ordinary
+    # training retains the historical token fallback.
+    if args.protected_smoke_evidence:
+        if not config.model.anonymous or args.hf_token:
+            raise ValueError("Protected smoke requires explicit anonymous model loading")
+        if os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY"):
+            raise ValueError("Protected smoke rejects ambient Hugging Face credentials")
+        if not config.model.model_revision:
+            raise ValueError("Protected smoke requires an exact model revision")
+        if config.model.trust_remote_code is not False or config.model.use_safetensors is not True:
+            raise ValueError("Protected smoke requires trust_remote_code=false and safetensors=true")
+        args.hf_token = False
+    elif not args.hf_token:
         args.hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
 
     # Validate model compatibility BEFORE loading model
@@ -828,7 +1175,6 @@ def run(args: argparse.Namespace):
         checkpoints_dir = run_paths.checkpoints_dir
         logs_dir = run_paths.logs_dir
         final_model_path = run_paths.final_model_dir
-        lineage_path = run_paths.lineage_path
         manifest_path = run_paths.manifest_path
         for path in (run_dir, checkpoints_dir, logs_dir):
             path.mkdir(parents=True, exist_ok=True)
@@ -851,7 +1197,6 @@ def run(args: argparse.Namespace):
         checkpoints_dir = run_dir / "checkpoints"
         logs_dir = run_dir / "logs"
         final_model_path = run_dir / "final_model"
-        lineage_path = run_dir / "training_lineage.json"
         checkpoints_dir.mkdir(parents=True, exist_ok=True)
         logs_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = None
@@ -871,16 +1216,31 @@ def run(args: argparse.Namespace):
     )
 
     # Load model and tokenizer FIRST (needed for packing preprocessing)
+    _mark_packaged_runtime_phase("MODEL_SNAPSHOT")
     model, tokenizer = load_model_and_tokenizer(
         model_name=config.model.model_name,
         max_seq_length=config.model.max_seq_length,
         dtype=config.model.dtype,
         load_in_4bit=config.model.load_in_4bit,
-        hf_token=args.hf_token
+        hf_token=args.hf_token,
+        model_revision=getattr(config.model, "model_revision", None),
+        trust_remote_code=getattr(config.model, "trust_remote_code", None),
+        use_safetensors=getattr(config.model, "use_safetensors", None),
+        cache_dir=getattr(config.model, "cache_dir", None),
+        require_resolved_revision=bool(args.protected_smoke_evidence),
+        model_snapshot=args.model_snapshot,
+        require_local_snapshot=args.model_snapshot is not None,
+        _diagnostic_mark=_mark_packaged_runtime_phase,
     )
+    if config.training.require_memory_efficient_loss:
+        _mark_packaged_runtime_phase("LOSS_GUARD")
+        from src.model_loader import require_unsloth_memory_efficient_loss
+
+        require_unsloth_memory_efficient_loss(model)
 
     # Prefer the pretrained chat template when available; otherwise, apply a
     # family-specific fallback via Unsloth.
+    _mark_packaged_runtime_phase("DATA_PREP")
     from unsloth.chat_templates import get_chat_template
 
     model_name_lower = config.model.model_name.lower()
@@ -908,14 +1268,17 @@ def run(args: argparse.Namespace):
 
     loss_mask_mode = "assistant_only" if config.training.completion_only_loss else "full_sequence"
     preprocessing_metadata = {
-        "contract_version": 1,
+        # 2: assistant-only labels stop at the final end-of-turn token,
+        # prompt_completion closes with the template's end-of-turn token and
+        # honours completion_only_loss, and untrainable rows are dropped.
+        # Losses are not directly comparable with version 1 runs.
+        "contract_version": 2,
         "dataset_representation": "tokenized",
         "loss_mask_mode": loss_mask_mode,
         "tool_call_mode": "render_text",
         "chat_template_source": chat_template_name,
         "packing": False,
     }
-
     # aux_head: carry the configured per-row target column through preprocessing
     # only when the feature is enabled; None ⇒ dataset prep is byte-identical.
     aux_head_cfg = getattr(config, "aux_head", None)
@@ -943,6 +1306,7 @@ def run(args: argparse.Namespace):
 
     # Materialize trainer-ready tokenized rows in-repo so cloud runs do not
     # depend on implicit TRL/Unsloth dataset preparation behavior.
+    dataset_preparation_metadata: dict[str, str] = {}
     train_dataset, eval_dataset = load_and_prepare_tokenized_dataset(
         dataset_name=config.dataset.dataset_name if not config.dataset.local_file else None,
         data_files=config.dataset.dataset_file if not config.dataset.local_file else None,
@@ -957,7 +1321,36 @@ def run(args: argparse.Namespace):
         chat_template_kwargs=config.training.chat_template_kwargs,
         aux_target_field=aux_target_field,
         prompt_render=config.training.prompt_render,
+        assistant_only_loss_requested=config.training.assistant_only_loss,
+        aux_token_position=aux_head_cfg.token_position if aux_head_enabled else None,
+        use_preassigned_splits=getattr(config.dataset, "use_preassigned_splits", False),
+        preparation_metadata=dataset_preparation_metadata,
+        validation_group_key=config.dataset.validation_group_key,
+        max_dropped_row_fraction=config.training.max_dropped_row_fraction,
     )
+    prepared_dataset_format = dataset_preparation_metadata.get("dataset_format")
+    if prepared_dataset_format in {"raw_text", "messages"}:
+        preprocessing_metadata["dataset_format"] = prepared_dataset_format
+    if prepared_dataset_format == "messages":
+        if (
+            config.training.packing is not False
+            or config.training.completion_only_loss is not True
+            or config.training.assistant_only_loss is not False
+            or config.training.prompt_render != "prompt_completion"
+        ):
+            raise ValueError(
+                "SFT_AUTHORITATIVE_MESSAGES_CONFIG_INVALID: authoritative message "
+                "rows require packing=false, completion_only_loss=true, "
+                "assistant_only_loss=false, and prompt_render='prompt_completion'."
+            )
+        if (
+            config.training.max_seq_length >= 32768
+            and config.training.require_memory_efficient_loss is not True
+        ):
+            raise ValueError(
+                "SFT_LONG_CONTEXT_LOSS_GUARD_REQUIRED: 32K authoritative message "
+                "SFT requires require_memory_efficient_loss=true."
+            )
     run_metadata["train_size"] = len(train_dataset)
     run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None
 
@@ -965,6 +1358,7 @@ def run(args: argparse.Namespace):
     print_dataset_samples(train_dataset, num_samples=2)
 
     # Apply LoRA adapters
+    _mark_packaged_runtime_phase("LORA_ATTACH")
     model = apply_lora_adapters(
         model,
         r=config.lora.r,
@@ -978,6 +1372,32 @@ def run(args: argparse.Namespace):
         use_dora=config.lora.use_dora,
         init_lora_weights=config.lora.init_lora_weights,
     )
+
+    # Runtime v1 stamps the locked model ref into the saved adapter_config.json
+    # (see the stamp after the final save below). peft derives
+    # base_model_name_or_path from the loaded model's _name_or_path, which
+    # src/model_loader.py deliberately asserts is the offline snapshot
+    # directory, so the saved value is a path and the host's equality check
+    # against the locked ref rejects it. Fail closed here, seconds after the
+    # attach, rather than after a full training run.
+    if runtime_v1_requested:
+        locked_ref = config.model.model_name
+        if not isinstance(locked_ref, str) or not locked_ref:
+            raise RuntimeError(
+                "runtime-v1 run has no usable model ref to stamp into adapter_config.json"
+            )
+
+    _mark_packaged_runtime_phase("TRAINER_SETUP")
+    protected_before = None
+    protected_callback = None
+    if args.protected_smoke_evidence:
+        from src.protected_smoke_evidence import (
+            ProtectedOptimizerBoundaryCallback,
+            capture_trainable_snapshot,
+        )
+
+        protected_before = capture_trainable_snapshot(model)
+        protected_callback = ProtectedOptimizerBoundaryCallback()
 
     # Check initial GPU memory
     check_gpu_memory()
@@ -1012,6 +1432,7 @@ def run(args: argparse.Namespace):
         "save_total_limit": config.training.save_total_limit,
         "dataloader_num_workers": config.training.dataloader_num_workers,
         "dataloader_pin_memory": config.training.dataloader_pin_memory,
+        "group_by_length": config.training.group_by_length,
         "eval_strategy": config.training.eval_strategy if eval_dataset else "no",
         "eval_steps": config.training.eval_steps if eval_dataset else None,
         "report_to": "wandb" if config.use_wandb else "none",
@@ -1035,35 +1456,48 @@ def run(args: argparse.Namespace):
     print(f"Dataset: {len(train_dataset)} examples")
     if eval_dataset:
         print(f"Validation: {len(eval_dataset)} examples")
-    print(f"\nBatch configuration:")
+    print("\nBatch configuration:")
     print(f"  Batch size: {config.training.per_device_train_batch_size}")
     print(f"  Gradient accumulation: {config.training.gradient_accumulation_steps}")
     effective_batch = config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps
     print(f"  Effective batch size: {effective_batch}")
-    print(f"\nHyperparameters:")
+    print("\nHyperparameters:")
     print(f"  Learning rate: {config.training.learning_rate}")
     print(f"  Warmup ratio: {config.training.warmup_ratio}")
     print(f"  Max sequence length: {config.training.max_seq_length}")
     print(f"  Number of epochs: {config.training.num_train_epochs}")
-    print(f"\nLoRA configuration:")
+    print("\nLoRA configuration:")
     print(f"  Rank: {config.lora.r}")
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
-    print(f"\nSFT-specific:")
+    print("\nSFT-specific:")
     print("  Packing: False (explicit pre-encoded dataset path)")
     print(f"  Completion-only loss: {config.training.completion_only_loss}")
-    print(f"\nOptimizations:")
+    print("\nOptimizations:")
     print(f"  Optimizer: {config.training.optim}")
     print(f"  FP16: {training_args.fp16}")
     print(f"  BF16: {training_args.bf16}")
     print(f"  Gradient checkpointing: {config.training.gradient_checkpointing}")
-    print(f"\nCheckpointing & Logging:")
+    print("\nCheckpointing & Logging:")
     print(f"  Log metrics every: {config.training.logging_steps} steps")
     print(f"  Save checkpoint every: {config.training.save_steps} steps")
     print(f"  Keep last: {config.training.save_total_limit} checkpoints")
     print("=" * 60 + "\n")
 
     if args.dry_run:
+        if resolved_runtime_profile is not None:
+            lineage = build_training_lineage(
+                config=config,
+                train_dataset=train_dataset,
+                eval_dataset=eval_dataset,
+                trainer=None,
+                run_dir=run_dir,
+                args=args,
+                preprocessing_metadata=preprocessing_metadata,
+            )
+            lineage["dry_run"] = True
+            actual_lineage_path = save_training_lineage(lineage, run_dir)
+            run_metadata["lineage_path"] = str(actual_lineage_path)
         print("[OK] Dry run completed. Exiting without training.")
         return run_metadata
 
@@ -1092,6 +1526,8 @@ def run(args: argparse.Namespace):
             ),
             CheckpointMonitorCallback()
         ]
+    if protected_callback is not None:
+        callbacks.append(protected_callback)
     if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
         callbacks.append(
             HFBucketSyncCallback(
@@ -1172,7 +1608,7 @@ def run(args: argparse.Namespace):
                 tokenizer=tokenizer,
                 events_path=logs_dir / "evolutionary_events.jsonl",
             )
-            print(f"[OK] Evolutionary training enabled:")
+            print("[OK] Evolutionary training enabled:")
             print(f"     Strategy: {config.evolutionary.strategy.type}")
             print(f"     Candidates: {config.evolutionary.candidates}")
             print(f"     Selection: {config.evolutionary.selection.method}")
@@ -1196,15 +1632,15 @@ def run(args: argparse.Namespace):
     training_start_time = time.time()
 
     # Use evolutionary wrapper if enabled, otherwise standard training
-    training_failed = False
     failure_message = None
     try:
         if evo_wrapper:
+            _mark_packaged_runtime_phase("TRAIN_CALL")
             evo_wrapper.train(resume_from_checkpoint=args.resume_from_checkpoint)
         else:
+            _mark_packaged_runtime_phase("TRAIN_CALL")
             trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     except Exception as exc:
-        training_failed = True
         failure_message = str(exc)
         if manifest_path:
             write_manifest(
@@ -1241,9 +1677,53 @@ def run(args: argparse.Namespace):
     print("TRAINING COMPLETED")
     print("=" * 60)
 
+    _mark_packaged_runtime_phase("SAVE")
     # Save final model
     print(f"\nSaving final model to: {final_model_path}")
     trainer.save_model(str(final_model_path))
+    if runtime_v1_requested:
+        _save_runtime_v1_text_tokenizer(tokenizer, final_model_path)
+    elif args.protected_smoke_evidence:
+        tokenizer.save_pretrained(str(final_model_path))
+
+    # Runtime v1 only: peft wrote base_model_name_or_path as the offline
+    # snapshot directory, but the artifact contract requires the locked repo
+    # id, which the host verifies for equality against the same workload field
+    # this value is bound from. Re-read and rewrite the file after peft is
+    # finished with it, so no unsloth/peft version can undo the stamp. Gated so
+    # every other lane stays byte-identical: local runs with --compute-losses
+    # feed this string back to transformers_loss_loader as a model source to
+    # load from, where a hub id would break an offline run. Every failure
+    # raises; the snapshot path is never left in place as a fallback.
+    if runtime_v1_requested:
+        locked_ref = config.model.model_name
+        if not isinstance(locked_ref, str) or not locked_ref:
+            raise RuntimeError(
+                "runtime-v1 run has no usable model ref to stamp into adapter_config.json"
+            )
+        adapter_config_path = final_model_path / "adapter_config.json"
+        if not adapter_config_path.is_file():
+            raise RuntimeError("runtime-v1 run produced no adapter_config.json to stamp")
+        document = json.loads(adapter_config_path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            raise RuntimeError("adapter_config.json is not a JSON object")
+        document["base_model_name_or_path"] = locked_ref
+        adapter_config_path.write_text(
+            json.dumps(document, indent=2), encoding="utf-8"
+        )
+        print(f"[runtime_v1] stamped adapter_config base_model_name_or_path: {locked_ref}")
+
+    if protected_callback is not None and protected_before is not None:
+        from src.protected_smoke_evidence import finalize_protected_evidence
+
+        finalize_protected_evidence(
+            model=model,
+            trainer=trainer,
+            callback=protected_callback,
+            before=protected_before,
+            checkpoint_dir=Path(config.training.output_dir) / "checkpoint-1",
+            output_path=Path(args.protected_smoke_evidence),
+        )
 
     # aux_head: trainer.save_model does NOT serialize the separately-held head, so
     # persist it as a portable sidecar (weights + resolved config) alongside the
@@ -1260,9 +1740,19 @@ def run(args: argparse.Namespace):
         )
         print(f"[aux_head] saved sidecar (aux_head.safetensors + aux_head_config.json) to: {final_model_path}")
 
-    print(f"\n[OK] Training complete!")
+    print("\n[OK] Training complete!")
     print(f"  Model saved to: {final_model_path}")
     print(f"  Logs saved to: {logs_dir}/")
+
+    _mark_packaged_runtime_phase("POST_SAVE")
+    runtime_projection = build_runtime_v1_projection(
+        args=args,
+        config=config,
+        run_dir=run_dir,
+        final_model_path=final_model_path,
+    )
+    if runtime_projection is not None:
+        write_runtime_v1_projection_atomic(runtime_projection, run_dir)
 
     # Build and save training lineage
     print("\nBuilding training lineage...")
@@ -1277,6 +1767,8 @@ def run(args: argparse.Namespace):
         evolutionary_stats=evo_wrapper.get_stats() if evo_wrapper else None,
         preprocessing_metadata=preprocessing_metadata,
     )
+    if runtime_projection is not None:
+        lineage["synaptic_runtime_projection"] = runtime_projection
     actual_lineage_path = save_training_lineage(lineage, run_dir)
     run_metadata["lineage_path"] = str(actual_lineage_path)
 
@@ -1289,7 +1781,6 @@ def run(args: argparse.Namespace):
             from shared.experiment_tracking.lineage_enrichment import build_loss_lineage, write_json as write_lineage_json
             
             # Switch to eval mode
-            import torch
             model.eval()
             
             # Unsloth for_inference to optimize inference speed
@@ -1298,7 +1789,7 @@ def run(args: argparse.Namespace):
             
             dataset_path = config.data.train_dataset
             if not Path(dataset_path).exists():
-                dataset_path = Path(_REPO_ROOT) / dataset_path
+                dataset_path = Path(__file__).parent.parent.parent / dataset_path
                 
             losses = compute_per_example_losses(
                 model=model,

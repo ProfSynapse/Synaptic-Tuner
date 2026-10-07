@@ -6,9 +6,15 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional
+from shared.experiment_tracking.experiment import _atomic_write_text
+from shared.experiment_tracking.registry import _PathLock
+
+if TYPE_CHECKING:
+    from tuner.project import ProjectContext
 
 SCHEMA_VERSION = 1
 STAGE_EVENTS_FILENAME = "stage_events.jsonl"
@@ -20,17 +26,11 @@ ENV_STAGE_RUN_PREFIX = "CLOUD_STAGE_RUN_PREFIX"
 ENV_STAGE_JOB_REF = "CLOUD_STAGE_JOB_REF"
 ENV_STAGE_BUCKET_ID = "CLOUD_STAGE_BUCKET_ID"
 ENV_STAGE_LOG_DIR = "CLOUD_STAGE_LOG_DIR"
+ENV_SOURCE_LOCK_ID = "SYNAPTIC_SOURCE_LOCK_ID"
 
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    tmp_path.write_text(text, encoding="utf-8")
-    tmp_path.replace(path)
 
 
 def detect_cloud_job_ref() -> Optional[str]:
@@ -49,6 +49,7 @@ def apply_stage_logging_env(
     job_ref: Optional[str] = None,
     bucket_id: Optional[str] = None,
     log_dir: Optional[Path | str] = None,
+    source_lock_id: Optional[str] = None,
 ) -> None:
     os.environ[ENV_STAGE_NAME] = stage
     if provider:
@@ -61,6 +62,8 @@ def apply_stage_logging_env(
         os.environ[ENV_STAGE_BUCKET_ID] = bucket_id
     if log_dir:
         os.environ[ENV_STAGE_LOG_DIR] = str(log_dir)
+    if source_lock_id:
+        os.environ[ENV_SOURCE_LOCK_ID] = source_lock_id
 
 
 def normalize_failure(
@@ -114,14 +117,28 @@ class CloudStageLogger:
         run_prefix: Optional[str] = None,
         job_ref: Optional[str] = None,
         bucket_id: Optional[str] = None,
+        source_lock_id: Optional[str] = None,
+        project_context: "ProjectContext | None" = None,
     ) -> None:
-        self.log_dir = Path(log_dir)
+        resolved_log_dir = Path(log_dir)
+        if project_context is not None and project_context.mode == "host":
+            if not resolved_log_dir.is_absolute():
+                resolved_log_dir = project_context.state_root / "logs" / resolved_log_dir
+            resolved_log_dir = resolved_log_dir.resolve(strict=False)
+            if not any(
+                resolved_log_dir.is_relative_to(root.resolve(strict=False))
+                for root in project_context.writable_roots
+            ):
+                raise ValueError("Cloud stage log directory must remain below a project writable root")
+        self.log_dir = resolved_log_dir
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.stage = stage
         self.provider = provider
         self.run_prefix = run_prefix
         self.job_ref = job_ref
         self.bucket_id = bucket_id
+        self.source_lock_id = source_lock_id
+        self._lock = threading.RLock()
         self.events_path = self.log_dir / STAGE_EVENTS_FILENAME
         self.summary_path = self.log_dir / STAGE_SUMMARY_FILENAME
 
@@ -146,6 +163,7 @@ class CloudStageLogger:
             run_prefix=resolved_run_prefix,
             job_ref=resolved_job_ref,
             bucket_id=str(os.environ.get(ENV_STAGE_BUCKET_ID, "")).strip() or None,
+            source_lock_id=str(os.environ.get(ENV_SOURCE_LOCK_ID, "")).strip() or None,
         )
 
     def emit(
@@ -164,15 +182,82 @@ class CloudStageLogger:
             "job_ref": self.job_ref,
             "run_prefix": self.run_prefix,
             "bucket_id": self.bucket_id,
+            "source_lock_id": self.source_lock_id,
             "event": event,
             "status": status,
             "message": message,
             "details": dict(details or {}),
         }
-        with self.events_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
-        self._write_summary(payload)
+        with self._lock:
+            line = (
+                json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
+            ).encode("utf-8")
+            self._append_event_transaction(line, payload)
         return payload
+
+    def _append_event_transaction(
+        self, line: bytes, summary_payload: Mapping[str, Any]
+    ) -> None:
+        """Append one complete event and its summary as a rollback-safe unit."""
+
+        self.events_path.parent.mkdir(parents=True, exist_ok=True)
+        with _PathLock(self.events_path):
+            fd = os.open(
+                self.events_path,
+                os.O_CREAT | os.O_RDWR | getattr(os, "O_BINARY", 0),
+                0o600,
+            )
+            try:
+                boundary = self._last_complete_boundary(fd)
+                end = os.lseek(fd, 0, os.SEEK_END)
+                if end != boundary:
+                    os.ftruncate(fd, boundary)
+                    self._fsync_event_file(fd)
+                os.lseek(fd, boundary, os.SEEK_SET)
+                try:
+                    remaining = memoryview(line)
+                    while remaining:
+                        written = self._write_event_bytes(fd, remaining)
+                        if written <= 0:
+                            raise OSError("Zero-byte write while appending cloud stage event")
+                        remaining = remaining[written:]
+                    self._fsync_event_file(fd)
+                    self._write_summary(summary_payload)
+                except BaseException:
+                    try:
+                        os.ftruncate(fd, boundary)
+                        self._fsync_event_file(fd)
+                    except BaseException as rollback_error:
+                        raise RuntimeError(
+                            "Cloud stage event rollback could not be persisted"
+                        ) from rollback_error
+                    raise
+            finally:
+                os.close(fd)
+
+    @staticmethod
+    def _write_event_bytes(fd: int, data: memoryview) -> int:
+        return os.write(fd, data)
+
+    @staticmethod
+    def _fsync_event_file(fd: int) -> None:
+        os.fsync(fd)
+
+    @staticmethod
+    def _last_complete_boundary(fd: int) -> int:
+        end = os.lseek(fd, 0, os.SEEK_END)
+        if end == 0:
+            return 0
+        position = end
+        while position > 0:
+            size = min(position, 64 * 1024)
+            position -= size
+            os.lseek(fd, position, os.SEEK_SET)
+            chunk = os.read(fd, size)
+            index = chunk.rfind(b"\n")
+            if index >= 0:
+                return position + index + 1
+        return 0
 
     def emit_failure(
         self,
@@ -210,6 +295,7 @@ class CloudStageLogger:
             "job_ref": self.job_ref,
             "run_prefix": self.run_prefix,
             "bucket_id": self.bucket_id,
+            "source_lock_id": self.source_lock_id,
             "event": None,
             "status": "pending",
             "health": "unknown",
@@ -254,6 +340,7 @@ class CloudStageLogger:
                 "job_ref": payload.get("job_ref"),
                 "run_prefix": payload.get("run_prefix"),
                 "bucket_id": payload.get("bucket_id"),
+                "source_lock_id": payload.get("source_lock_id"),
                 "event": payload.get("event"),
                 "status": payload.get("status"),
                 "health": self._health_for_status(str(payload.get("status", ""))),

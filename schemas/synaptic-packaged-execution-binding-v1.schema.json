@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-packaged-execution-binding-v1.schema.json",
+  "title": "Synaptic Packaged Execution Binding v1",
+  "description": "Structural schema. The canonical parser additionally verifies every digest binding and that prepared_input.revision exactly equals the semantic digest embedded in prepared_input.ref. The prepared identity mirrors the public PreparedTrainingInputIdentity fields. Opaque refs are identity material, never paths or dereferenceable URIs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "run_ref", "runtime_release_digest", "provider_runtime_binding_digest",
+    "prepared_input", "workload_digest", "configuration_digest", "artifact_policy_digest", "binding_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "synaptic-packaged-execution-binding/v1"},
+    "run_ref": {"$ref": "#/$defs/opaqueRef"},
+    "runtime_release_digest": {"$ref": "#/$defs/digest"},
+    "provider_runtime_binding_digest": {"$ref": "#/$defs/digest"},
+    "prepared_input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ref", "revision", "content_digest", "size_bytes", "format"],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "description": "Content identity only. It is never dereferenced as a URI.",
+          "pattern": "^prepared://sha256/[0-9a-f]{64}$"
+        },
+        "revision": {
+          "description": "Semantic digest; canonical parsing requires equality with the ref suffix.",
+          "$ref": "#/$defs/digest"
+        },
+        "content_digest": {
+          "description": "SHA-256 digest of the exact prepared bytes.",
+          "$ref": "#/$defs/digest"
+        },
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864},
+        "format": {"$ref": "#/$defs/safeRef"}
+      }
+    },
+    "workload_digest": {"$ref": "#/$defs/digest"},
+    "configuration_digest": {"$ref": "#/$defs/digest"},
+    "artifact_policy_digest": {"$ref": "#/$defs/digest"},
+    "binding_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "opaqueRef": {
+      "type": "string", "minLength": 1, "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+\\-]{0,255}$"
+    },
+    "safeRef": {
+      "type": "string", "minLength": 1, "maxLength": 512,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+\\-]{0,511}$"
+    }
+  }
+}

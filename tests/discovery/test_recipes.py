@@ -696,11 +696,21 @@ def _fallback_grep(needle: str, paths: Iterable[Path]) -> list[str]:
     return hits
 
 
+# This module must spell the legacy paths to search for them, so its own lines
+# are not references.
+_THIS_MODULE = Path(__file__).resolve().relative_to(REPO_ROOT).as_posix()
+
+
+def _is_this_module(hit_path: str) -> bool:
+    return hit_path == _THIS_MODULE or hit_path.endswith("/" + _THIS_MODULE)
+
+
 def _filter_excluded(lines: Iterable[str]) -> list[str]:
     return [
         line
         for line in lines
         if not any(excl in line.split(":", 1)[0] for excl in REFERENCE_EXCLUDE_DIRS)
+        and not _is_this_module(line.split(":", 1)[0])
     ]
 
 
@@ -710,6 +720,16 @@ class TestReferenceCompleteness:
     Excludes docs/plans/ (the migration plan documents the rename) and
     .git/. All other source/test/docs/skill paths must be clean.
     """
+
+    def test_filter_drops_only_this_module_and_excluded_dirs(self) -> None:
+        kept = "docs/guide.md:3:see Trainers/local/jobs/sft.yaml"
+        hits = [
+            kept,
+            f"{_THIS_MODULE}:10:# Trainers/local/jobs/",
+            f"{(REPO_ROOT / _THIS_MODULE).as_posix()}:11:Trainers/cloud/jobs",
+            "docs/plans/rename.md:1:Trainers/cloud/jobs/",
+        ]
+        assert _filter_excluded(hits) == [kept]
 
     def test_no_local_jobs_references(self) -> None:
         hits = _filter_excluded(

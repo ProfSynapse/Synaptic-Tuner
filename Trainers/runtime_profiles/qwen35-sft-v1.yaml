@@ -1,0 +1,17 @@
+schema_version: syntunia-runtime-profile/v1
+name: qwen35-sft-v1
+
+compatibility:
+  models:
+    - name: Qwen/Qwen3.5-4B
+      revisions:
+        - 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  methods:
+    - sft
+
+runtime:
+  image: unsloth/unsloth@sha256:1644d635bc7c5b57ed64cabbab1ae00647dfb583c2135fdfb6a461aeeba52739
+  packaged_build_profile: qwen35_4b_packaged_sft_3360351c
+  inventory:
+    path: qwen35-sft-v1.inventory.json
+    sha256: sha256:ecf4d0a27e5455b946237bf97790cba308765c2e5cf538e560e0de4c372f88e3

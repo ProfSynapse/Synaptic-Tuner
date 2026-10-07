@@ -40,10 +40,7 @@ def load_rows(path: Path) -> Iterable[Dict[str, Any]]:
             line = line.strip()
             if not line:
                 continue
-            payload = json.loads(line)
-            if "_meta" in payload:
-                continue
-            yield payload
+            yield json.loads(line)
 
 
 def truncate(value: Any, max_chars: int) -> str:

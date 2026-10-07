@@ -6,6 +6,7 @@ from argparse import Namespace
 from typing import Optional
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import resolve_path
 
 
 class PromptOptimizeHandler(BaseHandler):
@@ -33,7 +34,14 @@ class PromptOptimizeHandler(BaseHandler):
         overrides = {}
         output_dir = getattr(self.args, "prompt_opt_output_dir", None)
         if output_dir:
-            overrides["output_dir"] = output_dir
+            overrides["output_dir"] = str(
+                resolve_path(
+                    output_dir,
+                    self.context,
+                    from_cli=True,
+                    access="write",
+                )
+            )
 
         try:
             from shared.prompt_optimization import PromptOptimizationService
@@ -41,6 +49,7 @@ class PromptOptimizeHandler(BaseHandler):
             result = PromptOptimizationService.from_config(
                 config_path,
                 overrides=overrides or None,
+                project_context=self.context,
             ).run()
         except Exception as exc:
             self.output_error(

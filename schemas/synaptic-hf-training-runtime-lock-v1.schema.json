@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-hf-training-runtime-lock-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "lock_id", "created_at", "image", "runtime", "anonymous_loading"],
+  "properties": {
+    "schema_version": {"const": "synaptic-hf-training-runtime-lock/v1"},
+    "lock_id": {"$ref": "#/$defs/sha256"},
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "image": {"$ref": "#/$defs/imageIdentity"},
+    "runtime": {
+      "type": "object", "additionalProperties": false,
+      "required": ["python_implementation", "python", "packages", "signatures"],
+      "properties": {
+        "python_implementation": {"const": "CPython"},
+        "python": {"const": "3.11.14"},
+        "packages": {"type": "object", "minProperties": 1, "maxProperties": 64, "propertyNames": {"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}, "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 128}},
+        "signatures": {"type": "object", "minProperties": 1, "maxProperties": 64, "propertyNames": {"pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}, "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 512}}
+      }
+    },
+    "anonymous_loading": {
+      "type": "object", "additionalProperties": false,
+      "required": ["token", "trust_remote_code", "use_safetensors"],
+      "properties": {"token": {"const": false}, "trust_remote_code": {"const": false}, "use_safetensors": {"const": true}}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"},
+    "layerDescriptor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["media_type", "digest", "size"],
+      "properties": {
+        "media_type": {"enum": ["application/vnd.oci.image.layer.v1.tar", "application/vnd.oci.image.layer.v1.tar+gzip", "application/vnd.oci.image.layer.v1.tar+zstd", "application/vnd.docker.image.rootfs.diff.tar.gzip", "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip"]},
+        "digest": {"$ref": "#/$defs/digest"},
+        "size": {"type": "integer", "minimum": 1, "maximum": 1099511627776}
+      }
+    },
+    "imageIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["registry_repository", "provider_repository", "requested_digest", "requested_media_type", "requested_kind", "index_digest", "index_media_type", "child_digest", "child_media_type", "config_digest", "config_media_type", "config_size", "platform", "layers", "provider_reference"],
+      "properties": {
+        "registry_repository": {"const": "docker.io/unsloth/unsloth"},
+        "provider_repository": {"const": "unsloth/unsloth"},
+        "requested_digest": {"$ref": "#/$defs/digest"},
+        "requested_media_type": {"enum": ["application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json", "application/vnd.docker.distribution.manifest.v2+json"]},
+        "requested_kind": {"enum": ["index", "manifest"]},
+        "index_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "index_media_type": {"anyOf": [{"enum": ["application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"]}, {"type": "null"}]},
+        "child_digest": {"$ref": "#/$defs/digest"},
+        "child_media_type": {"const": "application/vnd.docker.distribution.manifest.v2+json"},
+        "config_digest": {"$ref": "#/$defs/digest"},
+        "config_media_type": {"enum": ["application/vnd.oci.image.config.v1+json", "application/vnd.docker.container.image.v1+json"]},
+        "config_size": {"type": "integer", "minimum": 1, "maximum": 4194304},
+        "platform": {"const": "linux/amd64"},
+        "layers": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/layerDescriptor"}},
+        "provider_reference": {"type": "string", "pattern": "^unsloth/unsloth@sha256:[0-9a-f]{64}$"}
+      },
+      "allOf": [
+        {"if": {"properties": {"requested_kind": {"const": "index"}}}, "then": {"properties": {"requested_media_type": {"enum": ["application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"]}, "index_digest": {"$ref": "#/$defs/digest"}, "index_media_type": {"enum": ["application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"]}}}},
+        {"if": {"properties": {"requested_kind": {"const": "manifest"}}}, "then": {"properties": {"requested_media_type": {"const": "application/vnd.docker.distribution.manifest.v2+json"}, "index_digest": {"type": "null"}, "index_media_type": {"type": "null"}}}}
+      ]
+    }
+  }
+}

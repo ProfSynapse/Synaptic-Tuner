@@ -2,7 +2,11 @@
 
 Location: SynthChat/llm/caller.py
 Purpose: Call LLM clients (chat and structured_output) with retry logic,
-         client-chain fallback, and optional logging.
+         client-chain fallback, and optional logging. Clients are
+         ``shared.llm`` ``BaseLLMClient`` instances: ``chat`` yields
+         ``LLMCompletionV1`` (read ``.text``) and ``structured_output`` yields
+         ``LLMStructuredV1`` (read ``.value``); usage accounting happens in the
+         client layer, so these helpers return plain text / dict payloads.
 Usage: Called by SynthChatGenerator methods in generator.py whenever an
        LLM generation is needed.
 """
@@ -62,7 +66,7 @@ def call_llm(
                 }
                 if resolved_max_tokens is not None:
                     chat_kwargs["max_tokens"] = resolved_max_tokens
-                response = client.chat(**chat_kwargs)
+                completion = client.chat(**chat_kwargs)
             except Exception as exc:  # pragma: no cover - provider-specific failures
                 last_error = exc
                 if logger:
@@ -73,25 +77,15 @@ def call_llm(
                     )
                 continue
 
-            if isinstance(response, str):
-                if response.strip():
-                    if logger:
-                        logger.info(
-                            f"LLM chat success [{trace_label or 'unlabeled'}] "
-                            f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} "
-                            f"elapsed={time.monotonic() - started_at:.1f}s chars={len(response)}"
-                        )
-                    return response
-            elif response is not None:
-                response_text = str(response).strip()
-                if response_text:
-                    if logger:
-                        logger.info(
-                            f"LLM chat success [{trace_label or 'unlabeled'}] "
-                            f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} "
-                            f"elapsed={time.monotonic() - started_at:.1f}s chars={len(response_text)}"
-                        )
-                    return response_text
+            response_text = completion.text
+            if response_text.strip():
+                if logger:
+                    logger.info(
+                        f"LLM chat success [{trace_label or 'unlabeled'}] "
+                        f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} "
+                        f"elapsed={time.monotonic() - started_at:.1f}s chars={len(response_text)}"
+                    )
+                return response_text
 
             last_error = ValueError("LLM returned an empty response")
             if logger:
@@ -162,7 +156,7 @@ def call_llm_structured(
                 }
                 if resolved_max_tokens is not None:
                     structured_kwargs["max_tokens"] = resolved_max_tokens
-                payload = client.structured_output(**structured_kwargs)
+                structured = client.structured_output(**structured_kwargs)
             except Exception as exc:  # pragma: no cover - provider-specific failures
                 last_error = exc
                 if logger:
@@ -173,7 +167,8 @@ def call_llm_structured(
                     )
                 continue
 
-            if isinstance(payload, dict) and payload:
+            payload = structured.value
+            if payload:
                 if logger:
                     logger.info(
                         f"LLM structured success [{trace_label or schema.get('name', 'unlabeled')}] "

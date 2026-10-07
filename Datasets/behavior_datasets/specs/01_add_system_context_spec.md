@@ -89,7 +89,7 @@ Generate contextually appropriate workspace names based on the conversation:
 ## Validation
 After processing, run:
 ```bash
-python tools/validate_syngen.py Datasets/behavior_datasets/{dataset}/pairs_v1.2.jsonl
+python -m shared.validation.dataset_validator Datasets/behavior_datasets/{dataset}/pairs_v1.2.jsonl
 ```
 
 Expected output: 0 errors for ID mismatches.

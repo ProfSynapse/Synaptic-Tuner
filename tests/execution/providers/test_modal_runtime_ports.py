@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from tuner.execution.providers.modal.runtime import (
+    EnvironmentHmacAuthenticator,
+    GitDualCloneMaterializer,
+    SubprocessSftRunner,
+    _same_executable,
+)
+from tuner.execution.providers.modal.worker_ports import ModalProcessResult, ModalRemotePhaseError
+
+
+def test_runtime_import_does_not_load_legacy_remote_bundle_or_broker():
+    import subprocess
+    import sys
+    root = __import__("pathlib").Path(__file__).resolve().parents[3]
+    code = f"""
+import sys
+sys.path.insert(0, {str(root)!r})
+import tuner.execution.providers.modal.runtime
+for name in ('tuner.execution.providers.modal.remote',
+             'tuner.execution.providers.modal.bundle',
+             'tuner.execution.broker'):
+    assert name not in sys.modules, name
+"""
+    completed = subprocess.run(
+        [sys.executable, "-B", "-c", code], check=False, cwd=root,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+
+
+def test_remote_coordinator_import_closes_over_prepared_input_materializer():
+    import subprocess
+    import sys
+    root = __import__("pathlib").Path(__file__).resolve().parents[3]
+    code = f"""
+import sys
+sys.path.insert(0, {str(root)!r})
+import tuner.execution.providers.modal.coordinator_deployment
+assert 'tuner.execution.providers.modal.prepared_input' in sys.modules
+"""
+    completed = subprocess.run(
+        [sys.executable, "-B", "-c", code], check=False, cwd=root,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+
+
+def test_process_result_requires_exact_output_bytes():
+    with pytest.raises(TypeError, match="exact bytes"):
+        ModalProcessResult(0, bytearray(b"not-exact"))
+
+
+def test_runtime_identity_accepts_distinct_paths_to_same_binary(tmp_path):
+    binary = tmp_path / "python3.11"
+    alias = tmp_path / "python3"
+    other = tmp_path / "other-python3"
+    binary.write_bytes(b"locked-interpreter")
+    alias.hardlink_to(binary)
+    other.write_bytes(binary.read_bytes())
+    assert _same_executable(str(binary), str(alias)) is True
+    assert _same_executable(str(binary), str(other)) is False
+
+
+def test_environment_hmac_authenticator_requires_exact_base64_key_and_ref(monkeypatch):
+    import base64
+    monkeypatch.setenv("SYNAPTIC_EVIDENCE_MAC_KEY",base64.b64encode(b"k"*32).decode("ascii"))
+    authenticator=EnvironmentHmacAuthenticator(environment_key="SYNAPTIC_EVIDENCE_MAC_KEY",key_ref="evidence-v1")
+    tag=authenticator.sign("purpose/v1",b"payload","evidence-v1")
+    assert authenticator.verify("purpose/v1",b"payload",tag,"evidence-v1")
+    assert not authenticator.verify("purpose/v1",b"changed",tag,"evidence-v1")
+    with pytest.raises(ValueError,match="reference"):authenticator.sign("purpose/v1",b"payload","other")
+    monkeypatch.setenv("SYNAPTIC_EVIDENCE_MAC_KEY","not-base64")
+    with pytest.raises(ValueError,match="invalid"):authenticator.sign("purpose/v1",b"payload","evidence-v1")
+
+
+def test_subprocess_runner_uses_no_shell_and_never_returns_captured_secret_output(monkeypatch):
+    calls=[]
+    def run(argv,**kwargs):calls.append((argv,kwargs));return SimpleNamespace(returncode=7,stdout=b"token=secret",stderr=b"Bearer secret")
+    monkeypatch.setattr("tuner.execution.providers.modal.runtime.subprocess.run",run)
+    monkeypatch.setenv("HF_TOKEN","secret")
+    monkeypatch.setattr(SubprocessSftRunner, "_prepare_model", lambda *args: None)
+    runner=SubprocessSftRunner(secret_keys=("HF_TOKEN",),model_token_key="HF_TOKEN",timeout_seconds=10)
+    result=runner.run(("/python","/runtime.py","--canonical-workload-stdin"),cwd="/tmp",environment={"SAFE":"1"},stdin=b"workload",commit_prepared=lambda: None)
+    assert result.returncode==123 and result.stdout==result.stderr==b""
+    assert result.diagnostic_code=="trainer_nonzero"
+    argv,kwargs=calls[0]
+    assert argv==("/python","/runtime.py","--canonical-workload-stdin")
+    assert kwargs["shell"] is False and "HF_TOKEN" not in kwargs["env"]
+    assert kwargs["input"]==b"workload" and kwargs["timeout"]==10
+
+
+@pytest.mark.parametrize(
+    ("runtime_exit", "remote_exit", "diagnostic_code"),
+    (
+        (2, 121, "runtime_unclassified_rejection"),
+        (20, 124, "runtime_workload_rejected"),
+        (21, 122, "runtime_artifact_precondition"),
+        (22, 124, "runtime_invocation_rejected"),
+        (23, 123, "runtime_trainer_failed"),
+        (24, 123, "runtime_evidence_rejected"),
+        (25, 122, "runtime_artifact_rejected"),
+        (30, 124, "runtime_workload_document_rejected"),
+        (31, 124, "runtime_workload_engine_rejected"),
+        (32, 124, "runtime_workload_schema_rejected"),
+        (33, 124, "runtime_workload_reconstruction_rejected"),
+        (34, 124, "runtime_workload_fingerprint_rejected"),
+        (35, 124, "runtime_workload_roots_rejected"),
+    ),
+)
+def test_subprocess_runner_maps_closed_runtime_stages(
+    monkeypatch, runtime_exit, remote_exit, diagnostic_code
+):
+    monkeypatch.setenv("HF_TOKEN", "secret")
+    monkeypatch.setattr(
+        "tuner.execution.providers.modal.runtime.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=runtime_exit),
+    )
+    monkeypatch.setattr(SubprocessSftRunner, "_prepare_model", lambda *args: None)
+    result = SubprocessSftRunner(secret_keys=("HF_TOKEN",), model_token_key="HF_TOKEN", timeout_seconds=10).run(
+        ("/python", "/runtime.py", "--canonical-workload-stdin"),
+        cwd="/tmp", environment={}, stdin=b"workload", commit_prepared=lambda: None,
+    )
+    assert (result.returncode, result.diagnostic_code) == (
+        remote_exit, diagnostic_code
+    )
+
+
+def test_subprocess_runner_rejects_missing_secret_and_command_override(monkeypatch):
+    monkeypatch.delenv("HF_TOKEN",raising=False)
+    runner=SubprocessSftRunner(secret_keys=("HF_TOKEN",),model_token_key="HF_TOKEN",timeout_seconds=10)
+    with pytest.raises(ValueError,match="command"):
+        runner.run(("/python","/runtime.py","--other"),cwd="/tmp",environment={},stdin=b"x",commit_prepared=lambda: None)
+    with pytest.raises(ModalRemotePhaseError) as failure:
+        runner.run(("/python","/runtime.py","--canonical-workload-stdin"),cwd="/tmp",environment={},stdin=b"x",commit_prepared=lambda: None)
+    assert (failure.value.returncode,failure.value.diagnostic_code)==(120,"credential_unavailable")
+
+
+def test_remote_git_subprocess_ignores_home_and_global_system_config(monkeypatch):
+    calls=[]
+    def run(argv,**kwargs):
+        calls.append((argv,kwargs));return SimpleNamespace(returncode=0,stdout=b"ok")
+    monkeypatch.setattr("tuner.execution.providers.modal.runtime.subprocess.run",run)
+    assert GitDualCloneMaterializer._subprocess(("git","--version"))==b"ok"
+    environment=calls[0][1]["env"]
+    assert environment["HOME"]=="/tmp/synaptic-modal-git-home"
+    assert environment["GIT_CONFIG_NOSYSTEM"]=="1"
+    assert environment["GIT_CONFIG_GLOBAL"]==environment["GIT_CONFIG_SYSTEM"]
+    assert environment["GCM_INTERACTIVE"]=="Never"

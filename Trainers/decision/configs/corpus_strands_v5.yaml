@@ -1,0 +1,75 @@
+# strands-decider v5 short-task corpus (the base corpus of every strands recipe).
+#
+# 21 public classification tasks for training plus 7 held-out tasks, converted to
+# decision-row/v1 rows by the pinned strands-decider builder. Source inventory and
+# licences: https://github.com/strands-labs/strands-decider/blob/main/data/sources.md
+# (the builder does not redistribute data; each dataset's own card governs reuse).
+#
+# Not included here (follow-ups): the v14 multi-step rows (ContractNLI, MuSiQue,
+# BoardgameQA), the generated document questions, HelpSteer2 adequacy rows, and the
+# teacher/parent replay distributions. The v19 checkpoint trains on all of those;
+# this corpus alone reproduces the short-task stage only.
+builder: strands-decider
+builder_version: "0.1.0"
+output_dir: Datasets/decision/strands_v5
+train_file: train_v5.jsonl
+max_options: 24
+max_chars: 2000
+seed: 0
+
+recipes:
+  # train
+  - ag_news
+  - banking77
+  - clinc150
+  - dbpedia
+  - lang_id
+  - yahoo_topics
+  - spam
+  - toxicity
+  - mnli_entail
+  - boolq
+  - paws
+  - vitaminc
+  - wnli
+  - pubmed_qa
+  - yelp_stars
+  - sst5_sentiment
+  - app_reviews
+  - formality
+  - ruletaker_d0
+  - ruletaker_d1
+  - ruletaker_d2
+  # held out (routed to train_v5.holdout.jsonl)
+  - emotion
+  - massive_intent
+  - sarcasm
+  - hate_severity
+  - ruletaker_d3
+  - ruletaker_d5
+  - ruletaker_natlang
+
+holdout:
+  - emotion
+  - massive_intent
+  - sarcasm
+  - hate_severity
+  - ruletaker_d3
+  - ruletaker_d5
+  - ruletaker_natlang
+
+# The four held-out tasks with unseen label sets are the generalisation test; the
+# RuleTaker depths share a generator with trained ones, so drop them for eval.
+derived:
+  - file: holdout_v5_norule.jsonl
+    from: train_v5.holdout.jsonl
+    exclude_tasks: [ruletaker_d3, ruletaker_d5, ruletaker_natlang]
+
+# Published reproduction hashes (strands-decider data/README.md). The builder
+# loads Hugging Face datasets without pinned revisions, so an upstream change
+# breaks the match; "warn" records it in the manifest, "strict" fails the build.
+verify_hashes: warn
+expected_sha256:
+  train_v5.jsonl: 3d17d1484116d7f1f2f27d3d13714c71d60589b165a60e72513abad967b763fd
+  train_v5.holdout.jsonl: 352cab8ff8b70a718dad12c7c90265d353dc79ffe329b0f7d87f0140fb0abe56
+  holdout_v5_norule.jsonl: f5796ad2301903ffa144c8ae34731f23ea45ba91d99b2f5ab27ffd551fbd1a63

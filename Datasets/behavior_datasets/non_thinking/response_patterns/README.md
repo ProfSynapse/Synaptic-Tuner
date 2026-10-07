@@ -167,7 +167,7 @@ python train_kto.py \
 ### Validation
 ```bash
 # Validate individual pattern files
-python tools/validate_syngen.py \
+python -m shared.validation.dataset_validator \
   Datasets/behavior_datasets/response_patterns/text_only_pairs_v1.0.jsonl
 
 # Check interleaving

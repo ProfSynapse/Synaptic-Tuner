@@ -10,16 +10,20 @@ Purpose: Parse CLI args and drive ``tuner.batch.runner.run_batch_capture``.
 from __future__ import annotations
 
 from argparse import Namespace
+from pathlib import Path
 from typing import Optional
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import PathRef, ProjectContext
 
 
 class BatchCaptureHandler(BaseHandler):
     """Batched sequences-in / hidden-states-out capture."""
 
-    def __init__(self, args: Optional[Namespace] = None):
-        super().__init__(args=args)
+    def __init__(
+        self, args: Optional[Namespace] = None, context: ProjectContext | None = None
+    ):
+        super().__init__(args=args, context=context)
 
     @property
     def name(self) -> str:
@@ -43,6 +47,20 @@ class BatchCaptureHandler(BaseHandler):
             return 1
 
         try:
+            rows = PathRef.parse(str(rows)).resolve(
+                self.context, from_cli=True, access="read"
+            )
+            raw_out = str(out_dir)
+            if self.context.mode == "host" and "://" not in raw_out and not Path(raw_out).is_absolute():
+                raw_out = "artifact://" + raw_out.replace("\\", "/")
+            out_dir = PathRef.parse(raw_out).resolve(
+                self.context, from_cli=True, access="write" if self.context.mode == "host" else "read"
+            )
+        except Exception as exc:
+            self.output_error(str(exc), code="INVALID_BATCH_PATH")
+            return 1
+
+        try:
             summary = run_batch_capture(
                 rows_path=rows,
                 out_dir=out_dir,
@@ -57,6 +75,7 @@ class BatchCaptureHandler(BaseHandler):
                 sync_cmd=getattr(args, "sync_cmd", None),
                 dtype=getattr(args, "compute_dtype", None),
                 log=(lambda m: None) if self.json_mode else print,
+                context=self.context,
             )
         except Exception as exc:  # noqa: BLE001 - surface as a clean CLI error
             self.output_error(str(exc), code="BATCH_CAPTURE_FAILED")

@@ -16,38 +16,17 @@ from ..template_utils import _make_json_safe
 try:
     from shared.agentic_judge import AgenticTurnJudge
     from shared.agentic_loop import AgenticModelResponse, run_environment_episode
-    from Evaluator.schema_validator import ValidationResult, ValidatorIssue, validate_assistant_response
+    from Evaluator.schema_validator import validate_assistant_response
 except ImportError:
     AgenticTurnJudge = None
     AgenticModelResponse = None
     run_environment_episode = None
-    ValidationResult = None
-    ValidatorIssue = None
     validate_assistant_response = None
 
 
 def validate_agentic_synthchat_response(message: Any):
-    """Relax eval-only generator-format checks for synthetic loop rollouts."""
-    result = validate_assistant_response(message, None)
-    filtered_issues = []
-    for issue in result.issues:
-        message_text = str(issue.message)
-        if "does not match generator format" in message_text:
-            continue
-        filtered_issues.append(issue)
-
-    passed = all(str(issue.level).lower() != "error" for issue in filtered_issues)
-    return ValidationResult(
-        passed=passed,
-        issues=[
-            issue
-            if isinstance(issue, ValidatorIssue)
-            else ValidatorIssue(level=getattr(issue, "level", "ERROR"), message=getattr(issue, "message", str(issue)))
-            for issue in filtered_issues
-        ],
-        tool_calls=result.tool_calls,
-        context_validation=None,
-    )
+    """Validate a synthetic loop response structurally, without eval-context ID checks."""
+    return validate_assistant_response(message, None)
 
 
 def build_turn_judge_template_vars(
@@ -221,6 +200,9 @@ def generate_agentic_episode(
         loop_cfg.get("require_final_text_after_pass", loop_cfg.get("require_final_text", False))
     )
     final_text_prompt = loop_cfg.get("final_text_prompt")
+    continue_on_validation_error = bool(loop_cfg.get("continue_on_validation_error", False))
+    max_validation_retries = int(loop_cfg.get("max_validation_retries", 2) or 0)
+    validation_feedback_prompt = loop_cfg.get("validation_feedback_prompt")
     continue_on_execution_error = bool(
         loop_cfg.get("continue_on_execution_error", str(loop_cfg.get("mode", "strict")).strip().lower() == "agentic")
     )
@@ -290,6 +272,9 @@ def generate_agentic_episode(
             judge_stop_on_hard_failure=judge_stop_on_hard_failure,
             require_final_text_after_pass=require_final_text_after_pass,
             final_text_prompt=final_text_prompt,
+            continue_on_validation_error=continue_on_validation_error,
+            max_validation_retries=max_validation_retries,
+            validation_feedback_prompt=validation_feedback_prompt,
         )
     finally:
         session.close()
@@ -318,6 +303,7 @@ def generate_agentic_episode(
     environment_trace = episode.environment_result.to_dict()
     environment_trace["final_text_required"] = episode.final_text_required
     environment_trace["final_text_satisfied"] = episode.final_text_satisfied
+    environment_trace["validation_retries"] = episode.validation_retries
     return final_response, example, {
         **environment_trace,
         "judge_trace": list(episode.judge_trace),

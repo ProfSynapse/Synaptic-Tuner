@@ -124,6 +124,7 @@
 ## Subtool Schema Used
 
 ```yaml
+_subtool_keys: {group: agent, tool: tool, params: params}
 _subtools:
   vaultManager:
     moveFolder:

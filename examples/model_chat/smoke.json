@@ -1,0 +1,1 @@
+{"model":"HuggingFaceTB/SmolLM2-135M-Instruct","revision":"12fd25f77366fa6b3b4b768ec3050bf629380bac","adapter_path":null,"prompt":"Say hello in one short sentence.","max_tokens":48,"lifetime_seconds":900}

@@ -58,8 +58,8 @@ class Merged4BitStrategy(BaseSaveStrategy):
                         print("  (GPU may work once model loading begins)")
                     else:
                         raise SaveError(
-                            f"Insufficient GPU memory for 4-bit merge. "
-                            f"Try --save-method lora or free up GPU memory."
+                            "Insufficient GPU memory for 4-bit merge. "
+                            "Try --save-method lora or free up GPU memory."
                         )
                 except ImportError:
                     raise SaveError("PyTorch not installed")

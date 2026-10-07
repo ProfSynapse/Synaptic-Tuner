@@ -18,6 +18,7 @@ from typing import Optional
 
 from tuner.handlers.base import BaseHandler
 from tuner.discovery import TrainingRunDiscovery, CheckpointDiscovery
+from tuner.project import ProjectContext
 from tuner.ui import (
     print_menu,
     print_header,
@@ -30,11 +31,7 @@ from tuner.ui import (
     confirm,
     prompt,
     BOX,
-    RICH_AVAILABLE,
-    console,
-    COLORS,
 )
-from shared.ui import spinner
 from tuner.utils.validation import validate_repo_id, load_env_file
 
 
@@ -64,9 +61,11 @@ class UploadHandler(BaseHandler):
         exit_code = handler.handle()  # Returns JSON status
     """
 
-    def __init__(self, args: Optional[Namespace] = None):
+    def __init__(
+        self, args: Optional[Namespace] = None, context: ProjectContext | None = None
+    ):
         """Initialize handler with optional args."""
-        super().__init__(args=args)
+        super().__init__(args=args, context=context)
 
     @property
     def name(self) -> str:
@@ -84,14 +83,14 @@ class UploadHandler(BaseHandler):
         Returns dict with HF token status and available training runs.
         """
         # Load env and check token
-        env_file = self.repo_root / ".env"
+        env_file = self.project_root / ".env"
         load_env_file(env_file)
 
         hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
         hf_username = os.environ.get("HF_USERNAME", "")
 
         # Count training runs
-        discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+        discovery = TrainingRunDiscovery(repo_root=self.engine_root, context=self.context)
 
         sft_runs = discovery.discover("sft", limit=100)
         kto_runs = discovery.discover("kto", limit=100)
@@ -162,7 +161,7 @@ class UploadHandler(BaseHandler):
         print_header("UPLOAD", "Push your model to HuggingFace")
 
         # Step 1: Check HF_TOKEN
-        env_file = self.repo_root / ".env"
+        env_file = self.project_root / ".env"
         load_env_file(env_file)
 
         hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
@@ -197,7 +196,7 @@ class UploadHandler(BaseHandler):
             return 0
 
         # Step 3: List training runs
-        discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+        discovery = TrainingRunDiscovery(repo_root=self.engine_root, context=self.context)
         runs = discovery.discover(trainer_type=model_type, limit=10)
 
         if not runs:
@@ -267,7 +266,7 @@ class UploadHandler(BaseHandler):
 
         # Step 9: Confirmation
         print_config({
-            "Model": str(checkpoint_path.relative_to(self.repo_root)),
+            "Model": str(checkpoint_path),
             "Repository": repo_id,
             "Save Method": save_method,
             "GGUF": "Yes" if create_gguf else "No",
@@ -280,7 +279,7 @@ class UploadHandler(BaseHandler):
         # Step 10: Execute upload
         # Run as module from Trainers directory to handle relative imports properly
         python = self.get_conda_python()
-        trainers_dir = self.repo_root / "Trainers"
+        trainers_dir = self.engine_root / "Trainers"
 
         cmd = [
             python,
@@ -318,7 +317,7 @@ class UploadHandler(BaseHandler):
             Path to selected checkpoint, or None if cancelled
         """
         discovery = CheckpointDiscovery()
-        checkpoints = discovery.discover(run_dir=run_dir)
+        checkpoints = discovery.discover(run_dir=run_dir, context=self.context)
 
         if not checkpoints:
             print_error("No checkpoints found in training run")
@@ -408,7 +407,7 @@ class UploadHandler(BaseHandler):
 
         # Execute via subprocess to shared upload CLI
         python = self.get_conda_python()
-        trainers_dir = self.repo_root / "Trainers"
+        trainers_dir = self.engine_root / "Trainers"
 
         cmd = [
             python,
@@ -417,7 +416,7 @@ class UploadHandler(BaseHandler):
             "--gguf-quantizations", *quantizations,
         ]
 
-        print_info(f"Running GGUF conversion...")
+        print_info("Running GGUF conversion...")
         print()
 
         exit_code = subprocess.run(cmd, cwd=str(trainers_dir)).returncode

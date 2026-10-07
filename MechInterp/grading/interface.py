@@ -18,6 +18,9 @@ from __future__ import annotations
 import importlib
 from typing import Callable, Protocol
 
+from tuner.project import ProjectContext, load_project_manifest
+from tuner.project.plugins import resolve_plugin
+
 
 class Grader(Protocol):
     """A grader maps a per-row output dict to a grade dict."""
@@ -26,12 +29,33 @@ class Grader(Protocol):
         ...
 
 
-def load_grader(spec: str) -> Callable[[dict], dict]:
+def load_grader(
+    spec: str,
+    *,
+    project_context: ProjectContext | None = None,
+) -> Callable[[dict], dict]:
     """Import a grader from a "module.path:callable" string.
 
     Raises ValueError if the spec is malformed and the usual import errors if the
     module or attribute is missing.
     """
+    if spec.startswith("plugin://"):
+        manifest = None
+        if (
+            project_context is not None
+            and project_context.manifest_path is not None
+            and project_context.manifest_path.is_file()
+        ):
+            manifest = load_project_manifest(project_context.manifest_path)
+        grader = resolve_plugin(
+            spec,
+            kind="grader",
+            api="synaptic.plugin/grader/v1",
+            manifest=manifest,
+        ).load_trusted()
+        if not callable(grader):
+            raise ValueError(f"grader {spec!r} is not callable")
+        return grader
     if ":" not in spec:
         raise ValueError(
             f"grader spec {spec!r} must be 'module.path:callable'"

@@ -15,15 +15,37 @@ Each handler implements the IHandler interface and can be registered
 with the router for command dispatching.
 """
 
-from tuner.handlers.train_handler import TrainHandler
-from tuner.handlers.upload_handler import UploadHandler
-from tuner.handlers.eval_handler import EvalHandler
-from tuner.handlers.pipeline_handler import PipelineHandler
-from tuner.handlers.main_menu_handler import MainMenuHandler
-from tuner.handlers.synthchat_handler import SynthChatHandler
-from tuner.handlers.status_handler import StatusHandler
-from tuner.handlers.doctor_handler import DoctorHandler
-from tuner.handlers.ml_handler import MLHandler
+from __future__ import annotations
+
+from importlib import import_module
+
+_LAZY_EXPORTS = {
+    "TrainHandler": ("tuner.handlers.train_handler", "TrainHandler"),
+    "UploadHandler": ("tuner.handlers.upload_handler", "UploadHandler"),
+    "EvalHandler": ("tuner.handlers.eval_handler", "EvalHandler"),
+    "PipelineHandler": ("tuner.handlers.pipeline_handler", "PipelineHandler"),
+    "MainMenuHandler": ("tuner.handlers.main_menu_handler", "MainMenuHandler"),
+    "SynthChatHandler": ("tuner.handlers.synthchat_handler", "SynthChatHandler"),
+    "StatusHandler": ("tuner.handlers.status_handler", "StatusHandler"),
+    "DoctorHandler": ("tuner.handlers.doctor_handler", "DoctorHandler"),
+    "MLHandler": ("tuner.handlers.ml_handler", "MLHandler"),
+}
+
+
+def __getattr__(name: str):
+    """Resolve legacy handler exports without importing unrelated handlers."""
+
+    target = _LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute_name = target
+    value = getattr(import_module(module_name), attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
 
 __all__ = [
     "TrainHandler",

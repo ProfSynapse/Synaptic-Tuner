@@ -15,6 +15,11 @@ model:
   max_seq_length: 2048
   dtype: null  # Auto-detection
   load_in_4bit: false  # Qwen3.5 smoke test: use non-4bit path so local and HF Jobs match
+  model_revision: null  # Optional exact Hub commit; protected smokes require one
+  anonymous: false
+  trust_remote_code: null
+  use_safetensors: null
+  cache_dir: null
 
 # LoRA Adapter Configuration
 lora:
@@ -95,6 +100,10 @@ dataset:
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues
   test_size: 0.1  # For train/validation split (optional)
   split_dataset: false  # Enable to create train/val split
+  # Keep near-duplicate variants on one side of the split: dot-path into each
+  # raw row (e.g. "metadata.scenario"). null = random row split. See
+  # docs/common-tasks.md "Grouped validation split" for recommended keys.
+  validation_group_key: null
 
   # SFT-specific: filter for desirable examples only
   filter_desirable: false  # False because SFT dataset already filtered

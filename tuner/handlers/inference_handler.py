@@ -13,14 +13,12 @@ This handler implements the inference workflow:
 """
 
 import json
-import os
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
-from shared.utilities.paths import get_trainer_root, iter_training_output_dirs
+from shared.utilities.paths import get_trainer_root
 from tuner.handlers.base import BaseHandler
 
 # Import shared UI components
@@ -30,7 +28,6 @@ from shared.ui import (
     print_config,
     print_info,
     print_error,
-    print_success,
     confirm,
     prompt,
     console,
@@ -88,7 +85,14 @@ class InferenceHandler(BaseHandler):
 
     def _get_trainers_dir(self) -> Path:
         """Get the Trainers directory."""
-        return self.repo_root / "Trainers"
+        return self.engine_root / "Trainers"
+
+    def _training_output_dirs(self, trainer_type: str) -> list[Path]:
+        from tuner.discovery.training_runs import TrainingRunDiscovery
+
+        return TrainingRunDiscovery(
+            repo_root=self.engine_root, context=self.context
+        ).output_roots(trainer_type)
 
     def _get_llama_cpp_path(self) -> Optional[Path]:
         """Find llama.cpp executable."""
@@ -106,7 +110,7 @@ class InferenceHandler(BaseHandler):
         models = []
 
         for trainer_type in ("sft", "kto"):
-            for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
+            for output_dir in self._training_output_dirs(trainer_type):
                 if not output_dir.exists():
                     continue
 
@@ -149,7 +153,7 @@ class InferenceHandler(BaseHandler):
         models = []
 
         for trainer_type in ("sft", "kto"):
-            for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
+            for output_dir in self._training_output_dirs(trainer_type):
                 if not output_dir.exists():
                     continue
 
@@ -256,14 +260,14 @@ class InferenceHandler(BaseHandler):
             "-ngl", "99",  # Offload all layers to GPU
         ]
 
-        print_info(f"Starting llama.cpp...")
+        print_info("Starting llama.cpp...")
         print_info(f"Model: {model.path}")
         print_info("GPU layers: all")
         print()
 
         try:
             # Run interactively
-            result = subprocess.run(cmd, cwd=str(self.repo_root))
+            result = subprocess.run(cmd, cwd=str(self.engine_root))
             return result.returncode
         except KeyboardInterrupt:
             print("\n")
@@ -283,7 +287,7 @@ class InferenceHandler(BaseHandler):
         print_header("INTERACTIVE CHAT", f"Model: {model.display_name}")
 
         # Use the existing inference.py script
-        inference_script = get_trainer_root("sft", self.repo_root) / "src" / "inference.py"
+        inference_script = get_trainer_root("sft", self.engine_root) / "src" / "inference.py"
 
         if not inference_script.exists():
             print_error("inference.py not found.")
@@ -292,12 +296,12 @@ class InferenceHandler(BaseHandler):
         python = self.get_conda_python()
         cmd = [python, str(inference_script), str(model.path)]
 
-        print_info(f"Loading model with Unsloth...")
+        print_info("Loading model with Unsloth...")
         print_info(f"Path: {model.path}")
         print()
 
         try:
-            result = subprocess.run(cmd, cwd=str(self.repo_root))
+            result = subprocess.run(cmd, cwd=str(self.engine_root))
             return result.returncode
         except KeyboardInterrupt:
             print("\n")

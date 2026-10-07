@@ -12,9 +12,18 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from transformers import TrainerCallback
+from shared.experiment_tracking.experiment import _atomic_write_text
+
+# Hub release whose Buckets surface the repository qualifies. Mirrors
+# tuner.cloud.hf_provider_adapter.PINNED_HF_HUB_VERSION, which this module cannot
+# import: it is outside the offline SFT worker closure this file belongs to.
+_QUALIFIED_HF_BUCKETS_HUB_VERSION = "1.27.0"
+
+if TYPE_CHECKING:
+    from tuner.project import ProjectContext
 
 _logger = logging.getLogger(__name__)
 
@@ -136,14 +145,25 @@ def build_run_paths(base_output_dir: Path, provider: str, method: str, timestamp
     )
 
 
-def write_manifest(path: Path, payload: Dict[str, Any]) -> None:
+def write_manifest(
+    path: Path,
+    payload: Dict[str, Any],
+    *,
+    project_context: "ProjectContext | None" = None,
+) -> None:
     """Write a manifest file using stable JSON formatting.
 
     After writing, attempts to register the run in the unified experiment
     tracking registry (best-effort — failure is logged, never raised).
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path = Path(path).resolve(strict=False)
+    if project_context is not None and project_context.mode == "host":
+        if not any(
+            path.is_relative_to(root.resolve(strict=False))
+            for root in project_context.writable_roots
+        ):
+            raise ValueError("Cloud manifest path must remain below a project writable root")
+    _atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
     # Best-effort registration in unified tracking registry
     try:
@@ -151,7 +171,11 @@ def write_manifest(path: Path, payload: Dict[str, Any]) -> None:
         from shared.experiment_tracking.registry import RunRegistry
 
         record = manifest_to_run_record(payload)
-        RunRegistry().register_run(record)
+        RunRegistry(
+            project_context.tracking_root / "registry.jsonl"
+            if project_context is not None
+            else None
+        ).register_run(record)
     except Exception:
         import logging
         logging.getLogger(__name__).warning(
@@ -172,9 +196,13 @@ def build_manifest(
     publish_final_model: bool,
     publish_target_repo: Optional[str],
     status: str,
+    source_lock_uri: Optional[str] = None,
+    source_lock_sha256: Optional[str] = None,
+    resolved_config_uri: Optional[str] = None,
+    resolved_config_sha256: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build the canonical cloud run manifest."""
-    return {
+    manifest = {
         "provider": provider,
         "method": method,
         "status": status,
@@ -194,6 +222,23 @@ def build_manifest(
             "per_example_losses": str(run_paths.per_example_losses_path) if run_paths.per_example_losses_path else None,
         },
     }
+    if any(
+        value
+        for value in (
+            source_lock_uri,
+            source_lock_sha256,
+            resolved_config_uri,
+            resolved_config_sha256,
+        )
+    ):
+        manifest["provenance"] = {
+            "source_lock": {"uri": source_lock_uri, "sha256": source_lock_sha256},
+            "resolved_config": {
+                "uri": resolved_config_uri,
+                "sha256": resolved_config_sha256,
+            },
+        }
+    return manifest
 
 
 def ensure_hf_bucket(bucket_id: str, token: Optional[str] = None) -> str:
@@ -309,20 +354,29 @@ def sync_file_to_hf_bucket(local_path: Path, bucket_id: str, remote_path: str, t
     token = _normalize_token_value(token)
     bucket_id = ensure_hf_bucket(bucket_id, token=token)
 
+    # Buckets are not repositories: upload_file/create_commit reject any
+    # repo_type outside model/dataset/space. Files are added with the Buckets
+    # batch API, called as tuner.cloud.hf_provider_adapter calls it.
     try:
-        from huggingface_hub import HfApi  # type: ignore
+        import huggingface_hub  # type: ignore
     except ImportError as exc:
         raise RuntimeError(
-            "huggingface_hub HfApi is unavailable; install huggingface_hub>=1.5.0."
+            "huggingface_hub is not installed; HF Bucket uploads need the Buckets API "
+            f"(batch_bucket_files), qualified with huggingface_hub=={_QUALIFIED_HF_BUCKETS_HUB_VERSION}."
         ) from exc
+    batch_bucket_files = getattr(huggingface_hub, "batch_bucket_files", None)
+    if not callable(batch_bucket_files):
+        installed = getattr(huggingface_hub, "__version__", "unknown")
+        raise RuntimeError(
+            f"huggingface_hub {installed} has no Buckets API (batch_bucket_files); "
+            f"HF Bucket uploads are qualified with huggingface_hub=={_QUALIFIED_HF_BUCKETS_HUB_VERSION}."
+        )
 
-    api = HfApi(token=token)
     try:
-        api.upload_file(
-            path_or_fileobj=str(local_path),
-            path_in_repo=remote_path_stripped,
-            repo_id=bucket_id,
-            repo_type="bucket",
+        batch_bucket_files(
+            bucket_id,
+            add=[(str(local_path), remote_path_stripped)],
+            token=token,
         )
     except Exception as exc:
         raise RuntimeError(

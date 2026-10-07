@@ -1,3 +1,4 @@
+import hashlib
 import json
 import signal
 from argparse import Namespace
@@ -9,6 +10,22 @@ import pytest
 from Evaluator import cloud_hf_job
 from Evaluator.cloud_hf_job import _PeriodicBucketSyncer, _finalize_cloud_exit_code, _install_termination_handler
 from shared.cloud_stage_logging import StageLogger
+
+
+def _bind_source_lock_env(monkeypatch, tmp_path: Path) -> Path:
+    source_lock = tmp_path / "source-lock.json"
+    content = b'{"schema_version":"synaptic-source-lock/v1"}\n'
+    source_lock.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    monkeypatch.setenv("SYNAPTIC_SOURCE_LOCK_PATH", str(source_lock))
+    monkeypatch.setenv("SYNAPTIC_SOURCE_LOCK_URI", "tracking://experiments/eval/source-lock.json")
+    monkeypatch.setenv("SYNAPTIC_SOURCE_LOCK_SHA256", digest)
+    monkeypatch.setenv("SYNAPTIC_SOURCE_TRANSPORT_URI", "tracking://experiments/eval/cloud/hf/source-transport/descriptor.json")
+    monkeypatch.setenv("SYNAPTIC_SOURCE_TRANSPORT_SHA256", "a" * 64)
+    monkeypatch.setenv("SYNAPTIC_PROVISIONING_EVIDENCE_URI", "tracking://experiments/eval/cloud/hf/source-transport/provisioning-evidence.json")
+    monkeypatch.setenv("SYNAPTIC_PROVISIONING_EVIDENCE_SHA256", "b" * 64)
+    monkeypatch.setenv("SYNAPTIC_SOURCE_TRANSPORT_STATE", "CONSUMABLE")
+    return source_lock
 
 
 def test_finalize_cloud_exit_code_keeps_success_when_eval_passes(tmp_path: Path):
@@ -85,7 +102,8 @@ def test_termination_handler_without_progress_syncer_syncs_results(tmp_path: Pat
     assert summary["event"] == "terminated"
 
 
-def test_main_installs_termination_handler_before_initial_download(tmp_path: Path):
+def test_main_installs_termination_handler_before_initial_download(tmp_path: Path, monkeypatch):
+    _bind_source_lock_env(monkeypatch, tmp_path)
     args = Namespace(
         bucket_id="bucket-id",
         run_prefix="runs/demo",

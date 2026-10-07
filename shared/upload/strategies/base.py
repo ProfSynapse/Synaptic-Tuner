@@ -2,9 +2,9 @@
 Base save strategy with template method pattern.
 """
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from ..core.interfaces import ISaveStrategy, IModelLoader
 from ..core.types import ModelPath

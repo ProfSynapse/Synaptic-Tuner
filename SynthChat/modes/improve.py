@@ -365,7 +365,7 @@ def improve_mode(args, *, load_settings, create_llm_client):
         json.dump(report_payload, f, indent=2)
 
     # Print summary
-    print(f"\n=== Summary ===")
+    print("\n=== Summary ===")
     print(f"Total processed: {len(examples)}")
     print(f"Passed: {passed_count}")
     print(f"Failed: {failed_count}")

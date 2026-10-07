@@ -25,7 +25,6 @@ guard:
 
 from __future__ import annotations
 
-import pytest
 
 from Evaluator.client_factory import create_settings
 from Evaluator.config import OpenAIResponsesSettings
@@ -104,7 +103,7 @@ def test_eval_chain_omits_temperature_when_unset(monkeypatch):
         max_tokens=settings.max_tokens,
     )
 
-    assert result == "ok"
+    assert result.text == "ok"
     assert "temperature" not in captured["json"]
 
 

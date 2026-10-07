@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import ast
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+
+ROOT = Path(__file__).parents[2]
+
+
+def test_local_chat_http_client_dependency_is_declared():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "requests>=2.32,<3" in project["project"]["dependencies"]
+
+
+def test_modal_extra_and_launcher_lock_are_exact():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["project"]["optional-dependencies"]["modal"] == ["modal==1.5.4"]
+    lines = [
+        line.strip()
+        for line in (ROOT / "requirements" / "modal-launcher-v1.lock").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    pattern = re.compile(
+        r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^ ]+) --hash=sha256:([0-9a-f]{64})$"
+    )
+    parsed = [pattern.fullmatch(line) for line in lines]
+    assert all(parsed) and len(lines) == 37
+    packages = {match.group(1).lower().replace("_", "-") for match in parsed}
+    assert len(packages) == len(lines)
+    assert {
+        "modal", "pyyaml", "jsonschema", "packaging", "python-dotenv",
+        "aiohttp", "cbor2", "certifi", "click", "grpclib", "protobuf",
+        "rich", "synchronicity", "toml", "types-certifi", "types-toml",
+        "watchfiles", "typing-extensions",
+    }.issubset(packages)
+    modal = next(line for line in lines if line.startswith("modal=="))
+    assert modal == (
+        "modal==1.5.4 --hash=sha256:"
+        "3e54e26037c445af42f9a9ef9862b66bdd2e0b1faeced5fcc7adf3e5f59e44ed"
+    )
+
+
+def test_engine_modal_modules_do_not_import_the_optional_sdk_at_module_scope():
+    class ModuleScopeImports(ast.NodeVisitor):
+        def visit_FunctionDef(self, node):
+            pass
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Import(self, node):
+            assert all(alias.name != "modal" for alias in node.names), path
+
+        def visit_ImportFrom(self, node):
+            assert node.module != "modal" and not (node.module or "").startswith("modal."), path
+
+    root = ROOT / "tuner" / "execution" / "providers" / "modal"
+    for path in root.glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        ModuleScopeImports().visit(tree)
+
+
+def test_importing_public_api_does_not_materialize_modal_sdk():
+    before = set(sys.modules)
+    __import__("synaptic_tuner.api.v1")
+    added = set(sys.modules) - before
+    assert "modal" not in added
+
+
+def test_provider_specific_public_contract_still_does_not_import_modal_sdk():
+    before = set(sys.modules)
+    module = __import__("synaptic_tuner.api.v1.modal", fromlist=["*"])
+    added = set(sys.modules) - before
+    assert "modal" not in added
+    for removed in ("ModalTrainingRepository", "ModalDurablePreparationV1",
+                    "ModalPreparedRunV1", "ModalTrainingOperations",
+                    "ModalVerifiedRunsOperationsV1", "MountedModalWorkerV1",
+                    "MountedCompletionProducerV1", "build_modal_deployment",
+                    "compose_modal_training_operations", "compose_modal_verified_run_reads"):
+        assert not hasattr(module, removed)
+    from tuner.execution.providers.modal.coordinator_factories import modal_coordinator_registration
+    assert module.modal_coordinator_registration is modal_coordinator_registration
+    assert hasattr(module, "ModalFoundationRetentionDelegate")
+    assert hasattr(module, "ModalOperationalPreflightAdapter")
+    assert hasattr(module, "ModalSourceVerificationPorts")
+    from tuner.execution.providers.modal.coordinator_composition import compose_modal_coordinator
+    assert module.compose_modal_coordinator is compose_modal_coordinator
+    assert hasattr(module, "ExplicitModal154ReadFacade")
+    assert hasattr(module, "ModalDeploymentSelectionV1")
+    assert hasattr(module, "ModalDeploymentSpecV1")
+    assert hasattr(module, "ModalVerificationPolicyV1")
+    assert hasattr(module, "build_modal_coordinator_deployment")
+    assert hasattr(module, "compose_modal_source_finalizer")

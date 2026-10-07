@@ -1,130 +1,1471 @@
-# Modal Jobs Reference
+# Modal Training v1 Reference
 
-Modal is a serverless-container cloud lane for GPU jobs: define an `@app.function`
-that runs your work inside a pinned image on a Modal-provisioned GPU. Use it when
-a job needs a GPU class or an on-demand elasticity that the RunPod wrapper lane
-(`reference/runpod-jobs.md`) does not give you, or as a second independent
-provider when HF Jobs and RunPod are both flaky.
+Modal training is a submodule-first execution provider behind the public
+`TrainingAPI`. It is not a second training CLI and it is not launched with
+`modal run`. A consuming host supplies request configuration, durable storage,
+authorization grants, credential resolution, and evidence authentication. The
+engine supplies strict contracts, planning, verification, staging, the mutation
+broker, and the fixed remote worker.
 
-Like the RunPod lane, this is for arbitrary wrapper work. Cloud TRAINING through
-the tuner still goes via `tuner.py cloud-run` / `cloud-pipeline`; see
-`reference/cloud-training.md`.
+## Product flow
 
----
+Current qualification (2026-09-14): native attempt `modal-chat-20260914-h`
+completed and verified all five artifacts. Only `observe` and
+`artifact_streaming` are now advertised; logs, cancel, reconcile and cost-quote
+remain disabled. Earlier all-false statements below describe prior stages.
+See `docs/review/modal-native-training-qualification.md` for exact source,
+provider identities, retained evidence and independent-review limits. This is
+not chat qualification: rebuild and CPU-qualify the updated inference image,
+then run the separately bounded public train-and-chat path.
 
-## Launch: always `--detach` for real jobs
+1. The host calls `TrainingAPI.load(canonical_json)` through its configured
+   loader, retaining the exact request and project identity.
+2. `TrainingAPI.resolve(request)` obtains the exact source, model, dataset,
+   configuration, runtime and artifact-policy fingerprints from the host's
+   resolver; rich compilation contracts belong to `tuner.training.contracts`.
+3. `TrainingAPI.plan(resolved, provider)` retains a generic immutable plan and
+   provider context. Modal-specific configuration stays in authenticated
+   consumer-owned preparation, stage and launch catalogs, not a second plan API.
+4. `TrainingAPI.preflight(plan)` authenticates current source, deployment and
+   quote facts before explicit-client Volume/Secret readiness checks.
+5. `TrainingAPI.start(plan, preflight)` uses the generic durable coordinator;
+   its host authorization port supplies the exact effect grants. A restart
+   must reuse retained authority and outcomes, never infer a new submission.
+6. Post-start observation, reconciliation and verification belong to `RunsAPI`,
+   not `TrainingAPI.outcome` or a Modal-specific lifecycle facade.
 
-A plain `modal run <app>` ties the app's lifetime to the launching client. When
-that client goes away -- session end, dropped connection, killed babysitter --
-Modal sends the app a cancellation signal and the run dies; the app is created as
-an "ephemeral" app for exactly this reason.
+Correction (2026-09-09): the old `ModalTrainingOperations`, repository and
+composition entrypoints have been removed in the local coordinator cutover.
+The replacement uses existing generic Foundation/coordinator ports and
+`CoordinatorTrainingService`. The Modal registration's six advertised read,
+lifecycle, artifact-streaming, and cost-quote flags remain false pending consumer
+binding and security/release qualification. They are not a master start switch:
+exact authenticated preflight, consumer effect grants, and Foundation lineage are
+required. Do not treat these local code changes or provider-free tests as a newly
+qualified live path.
 
-For any job longer than a quick smoke, launch detached so the run outlives the
-client:
+`synaptic_tuner.api.v1.modal.compose_modal_coordinator` takes explicit
+`ModalCoordinatorStorePorts` and `ModalFoundationCompositionPorts`, plus the
+existing read-evidence collaborators. Its result supplies `training` and `runs`
+for `APIHost(HostPorts(training=composed.training, runs=composed.runs, artifacts=None,
+evaluation=None, chat=None, data=None, pipelines=None, clock=clock))`.
+Use the same clock object throughout composition. The factory performs no
+provider I/O; it does not choose storage, mint credentials, or activate the
+registration. Provider-free list/show proof does not enable live outcome, log,
+or artifact reads while the descriptor capabilities remain false.
+
+## Chat after training (embedded consumer workflow)
+
+The minimal consuming-layer example is `examples/modal_chat` in the repository
+root. It demonstrates single-attempt training and one-prompt chat with private
+saved state, not a new engine CLI or a complete live host factory. Its permanent
+attempt claim refuses automatic replay after a restart; the full generic
+coordinator/Foundation state still belongs to the live consumer process.
+Follow its README and supply real authenticated host/runtime composition.
+Current Modal training requires a clean pushed host superproject with the exact
+engine gitlink, so the in-repository example folder cannot itself act as the
+training source. Do not bypass this check or substitute historical test evidence.
+
+Use the checked-in `tuner.inference.run_chat.open_run_chat` entrypoint with the
+consuming project's authenticated `APIHost.runs`, retained run reference,
+selected runtime adapter. The adapter owns current run reverification, artifact
+admission and model preparation on its execution machine, then one bounded session;
+it does not add a CLI, registry, database, authority loader or publication step.
+For Linux/WSL local vLLM, use `Evaluator.local_run_chat.LocalVLLMRunChatRuntime`.
+Pass the private artifact destination and optional pinned-base preparer to that
+local adapter constructor, not to the generic `open_run_chat` call. Generic
+dispatch checks result consistency but does not authenticate an arbitrary adapter.
+The embedding example and ownership contract are in the repository-root
+`docs/architecture/verified-run-chat.md`. Use this existing composition instead
+of adding throwaway retrieval/start/chat scripts.
+
+Successful materialization persists the consumer's model files after session
+cleanup. The helper sends no hidden prompt and does not save conversations
+automatically. Full models need no upstream preparer; LoRA uses the existing
+`PinnedModelPreparer` seam for the exact authenticated base revision. Preparation
+belongs on the selected execution machine, not a manual local weight-staging
+step for cloud execution. Inference children remain credential-free and offline.
+Generic results expose run, artifact and model metadata; `local_model` is an
+optional local-only path capability and must be absent for remote results.
+
+Correction (2026-09-10): this is locally tested adapter composition, not live
+Modal inference qualification. The current Modal deployment is training-only.
+A Modal chat adapter still requires exact-source deployment, remote model and
+artifact preparation, authenticated access, provider-side lifetime/cost controls
+and separate live verification. A local session timer is not a cloud billing
+guarantee. Do not silently route to another runtime if a selected adapter fails.
+
+For Modal-native preparation, correlate the current verified workflow's complete
+artifact manifest with the authenticated native reader inventory; public
+role/hash/size values alone do not prove provider placement or the same attempt.
+The internal `ModalInferenceSourceBinder` is the reusable admission boundary for
+that correlation, composed with the same consumer's runs, stores and reader.
+It must not stream model archives to the operator. Its metadata result is not
+serving permission or proof that future mounted bytes are unchanged. Separate
+chat authority and remote byte verification remain required; see
+`docs/review/modal-inference-source-binding.md` for qualification limits.
+After fresh source admission, the internal `bind_modal_inference_workload`
+function reauthenticates the retained launch and matches the exact workload
+bytes to the native workload-record hash and size. It exposes intended pinned
+model/tokenizer identity, not actual archive kind or model usability. Its
+`load_in_4bit` field describes training configuration, not inference precision.
+Remote archive verification/loading and separate chat authority are still
+required; this adds no operator-side download or new manual workflow.
+
+Implementation reuse boundary: filesystem-local means local to the selected
+execution machine, including a Modal worker. Reuse the existing materialization,
+`ServingTarget`, pinned-base preparer and vLLM process controller there instead
+of creating parallel serving mechanics. The private byte-stream materialization
+extraction is implemented and locally tested; its reader supplies transport,
+not authentication. Broader qualification remains separate.
+Local RunsAPI verification and remote authenticated mounted-artifact admission
+must remain outside that shared core. Never transfer operator filesystem receipts
+as proof of remote files or treat a training image lock as an inference lock.
+
+The internal `ModalMountedInferenceArtifactReader.read_artifact` is the mounted
+byte transport for that shared core, not a new operator command. Construct it
+only after authenticating the remote launch, native inventory and exact physical
+Volume mapping. It checks bounded exact inventory, no-link descriptor-relative
+files, hashes, sizes and retained identities, but cannot authenticate a mount
+from a supplied Volume ID. The caller retains ownership of its root descriptor;
+stream consumers must close abandoned iterators (the shared materializer does).
+Remote launch composition, separate inference locks and chat authority remain
+unimplemented; this transport is not live Modal-chat qualification.
+
+Chat preparation must use its own session identity, inference resources and
+Foundation commands. Reuse the resource-quote and evidence-verifier contracts,
+but authenticate the separate inference configuration and recompute its resource
+commitment; never inherit a training quote or grant. Source/workload values must
+come directly from the existing fresh admission chain. A configuration signature
+does not replace inference image/lock review or authorize a serving allocation.
+This is internal adapter composition, not another operator step; current local
+implementation status is in `docs/review/modal-inference-preparation.md`.
+
+Retain chat STAGE/SUBMIT content through the internal
+`ModalInferenceCommandBinding` and `retain_modal_chat_command` helpers, using
+the consumer's existing `resolve`/`publish_if_absent` catalog semantics and a
+complete-content authentication authority. `load_modal_chat_command` performs
+authenticated read-only recovery. These helpers do not dispatch commands, issue
+grants or authenticate a stage receipt. A storage error must not trigger an
+overwrite or provider submission; the unchanged Foundation remains responsible
+for grants, predecessor evidence and one-shot execution. CANCEL binding is not
+available until an owned Sandbox target can be authenticated.
+
+The internal `ModalChatEffectExecutor` and `ModalChatReconciliationAdapter`
+connect authenticated retained chat commands to the existing Foundation broker
+and reconciliation service. Consumers supply their catalog, content authority
+and transport; use the chat resolvers with Foundation, not a direct executor
+call as an authorization boundary. Foundation alone consumes grants, verifies
+the actual stage predecessor and retains authenticated receipts. A lost dispatch
+response remains unresolved/orphaned without resubmission; failed lookup remains
+interrupted. These adapters do not yet supply a Modal SDK transport, authenticated
+remote worker, owned cleanup lease or live serving qualification. See
+`docs/review/modal-inference-effects.md`.
+
+Build chat launch evidence through `prepare_modal_chat_launch` and verify its
+single bounded argument through `admit_modal_chat_launch`. The host builder
+authenticates the actual Foundation STAGE receipt/record and complete SUBMIT
+predecessor; the worker admission compares the signed content to independently
+supplied exact configuration, command and mount-path expectations. Source/model
+and native inventory projections remain in the shared preparation snapshot.
+These pure helpers do not consume a SUBMIT grant: future SDK transport must use
+them only inside the existing authorized Foundation dispatch. Admission expiry
+is not a GPU billing deadline. Matching mount-path claims is not authentication
+of physical Volume mounts, and matching runtime commitments is not inspection
+of an inference image or lock. No executable worker or operator command is added.
+See `docs/review/modal-inference-launch.md` for the qualification boundary.
+
+The private `prepare_modal_chat_worker` composition freshly admits that launch
+before filesystem access, verifies mounted artifacts through the shared byte
+reader/materializer and prepares the existing `ServingTarget`. Full models do
+not invoke base-model preparation; LoRA uses the existing pinned-model preparer
+on the execution machine. The trusted deployment must bind exact selected
+Volume objects to the admitted mount roots. The worker checks retained local
+directory identities, not the provider's mount implementation. Its destination
+must be worker-private and outside the artifact/control/cache mounts. No mount
+anchor, operator-side weight upload or local Docker launcher is needed. This
+composition is not yet a runnable bootstrap, inference-lock check, serving lease
+or SDK adapter; see `docs/review/modal-inference-worker.md`.
+
+Correction (2026-09-10, implementation order): finish the exact chat command and
+remote worker boundaries before freezing the inference runtime lock. The current
+training lock and vLLM image tag cannot supply missing inference image, Python,
+dependency or bootstrap pins. Retained configuration/quote evidence is parsed
+structurally during recovery, not reclassified as fresh source admission or
+runtime qualification. See `docs/review/modal-inference-commands.md`.
+
+Runtime prerequisite update (2026-09-10): the existing vLLM startup spec accepts
+an explicit `python_executable`; the runtime uses that exact canonical absolute
+POSIX path rather than substituting the current interpreter. Selection alone
+does not authenticate the executable or inference image. The existing verified
+chat/local adapter also accepts `max_request_bytes` (default 1 MiB), enforcing
+the complete serialized HTTP JSON body before transport creation. A Modal
+composition must explicitly project its admitted interpreter and request limit
+into these fields; this update does not yet provide that composition, a runtime
+lock check or a runnable Modal service. See
+`docs/review/inference-runtime-prerequisites.md` for measured qualification.
+
+Serving-projection update (2026-09-10): the unreleased internal inference
+configuration requires a complete `serving` section; older bodies without it
+are rejected rather than filled with local defaults. Fractional generation/GPU
+values use integer thousandths and probe time uses milliseconds, preserving the
+existing integer-only canonical evidence format. Tensor parallelism derives
+from the exact configured accelerator count. The mounted worker returns its
+target inside `ModalChatWorkerPreparation.startup`, explicit generation/body
+bounds, the configured session policy and a retained copy of the original
+admission. It checks admission expiry again after model preparation.
+This is data projection, not a session or authority receipt. The future locked
+bootstrap must freshly verify and rederive these projections, then clamp startup
+and session durations to the original remaining deadline before and after
+startup. Never restart the full configured lifetime after preparation. No
+inference image/lock or Sandbox cleanup is qualified by this change; see
+`docs/review/modal-inference-serving-projection.md`.
+
+Shared-deadline update (2026-09-11): the existing `start_vllm_runtime`,
+`verified_vllm_chat` and `ChatSession` accept an optional absolute `deadline`
+in the controlling process's monotonic clock domain. It is never a serialized
+UTC timestamp. Pass the same deadline across startup and session composition;
+local startup/session/request/idle limits can shorten it, never extend it.
+Expired startup is rejected before filesystem/port/process work, with repeated
+checks after potentially slow preparation, port probing and readiness. Session
+watchdog/request waits use remaining time; late validated responses cannot
+commit history. This closes the shared-timer prerequisite, not the Modal
+bootstrap: the latter still must freshly authenticate the original claim,
+derive remaining time without renewal, verify the separate inference runtime
+and own Sandbox cleanup. No verifier callback or guessed runtime lock was added.
+See `docs/review/inference-shared-deadline.md`.
+
+Bootstrap implementation update (2026-09-11): the internal
+`open_modal_chat_worker` composes signed launch admission, concrete packaged
+inference-runtime verification, the existing mounted-model preparer and
+`verified_vllm_chat`. It derives one conservative monotonic deadline before
+preparation and does not renew it after startup. Fresh admission and rederived
+serving settings are required before startup and before yielding the session.
+No caller-supplied runtime verifier, alternate lock path, manual weight staging
+or new operator command is accepted. The distinct inference runtime manifest,
+worker closure and dependency lock are intentionally not supplied until their
+image/Python/dependency/source pins have been measured and independently reviewed;
+the concrete verifier therefore denies the current unqualified installation.
+Do not replace that denial with training pins or a bypass callback. This worker
+context is not yet a Modal deployment, authenticated remote request service or
+Sandbox cleanup adapter. Runtime-file checks assume the trusted immutable image
+and packaged source tree; they do not establish the provider's image identity
+or prevent arbitrary mutation of already imported Python code.
+
+Correction (2026-09-14): the separate runtime manifest, dependency provenance
+and 118-member worker closure now exist, initialized from the measured
+engine-installed candidate with exact reviewed additive bytes. Missing-resource
+statements above describe the earlier bootstrap stage. These starting pins
+still require the fresh-wheel CPU check and subsequent bounded GPU/chat smoke;
+the old candidate image is not a qualified image containing the new resources.
+
+Correction (2026-09-11, private chat connection): the executable worker reads one
+bounded startup frame from the authenticated SDK stdin of its newly created
+Sandbox, then serves bounded canonical chat frames on stdout. Use
+`inference_entrypoint.encode_modal_chat_start` for the startup frame; it carries
+the exact signed launch, independently supplied static expectation and declared
+credential **names**, never values. The image must pre-create
+`/workspace/modal-chat/{model,base,scratch}`. The deployment adapter remains
+responsible for the exact physical Volume mapping. Worker bootstrap still uses
+the concrete packaged runtime verifier; absent inference locks still deny.
+The executable accepts no command-line arguments and emits no raw exception
+diagnostics. This private module is not an operator-facing replacement for the
+provider-neutral run-chat workflow.
+
+The bootstrap yields the session plus its verified portable model identity;
+the ready frame carries that identity. Never infer full/LoRA kind from training
+configuration on the host. The host reconstructs `PreparedModelIdentity` from
+the bound ready frame and must compare its model/tokenizer refs and revisions
+to the authenticated workload before handing off the session.
+
+The remote channel uses the existing `ChatSession` watchdog and never derives a
+second deadline. It bounds startup-input waiting, frame size and blocked channel
+I/O, retains sequential request/session/launch bindings, and closes the session
+on EOF, stop or failure. Keep every public/encrypted service-port list empty:
+exposing the raw vLLM port would bypass the session's idle, turn and history
+limits. This replaces the earlier proposed HTTP access-token/tunnel path, not the
+existing ownership and authorization requirements. Provider-free channel tests
+are not live Modal qualification, and cleanup initiation is not proof of a
+provider billing deadline.
+
+For inference-runtime diagnosis, use the checked-in
+`scripts/capture_modal_inference_runtime.py` with explicit `--app`,
+`--environment`, exact digest `--image` and full `--source-commit` selections.
+This is a maintenance probe, not a training/chat submission API. Its CLI reads
+the environment-provided `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` pair by default.
+For an operator's existing CLI login, explicitly select `--modal-profile NAME`;
+that path reads only the named SDK profile's pair, with environment overrides
+disabled. Missing or blank credentials fail closed; neither path falls back to
+the other or calls `Client.from_env()`. Both construct an explicit client.
+Never put credential values in argv, reports or new files. It resolves only
+the selected existing app (`create_if_missing=False`) and creates one CPU-only
+Sandbox: 1 CPU, 2048 MiB, 300-second provider timeout/idle timeout, no GPU,
+Volumes, Secrets or runtime network. Image preparation is remote; no local
+Docker image pull or model download is required. Treat image preparation as a
+cloud operation, not a guaranteed free local preflight.
+
+The remote stdlib-only `scripts/inspect_modal_inference_runtime.py` captures
+actual interpreter identity/hash and installed distribution metadata without
+importing ML packages. Missing Modal/vLLM are explicit candidate facts, not
+successful runtime admission. Reports bind the copied inspection script's hash
+and record image/engine commit as operator selections only: the base probe has
+not installed that engine commit and does not attest the final image. Do not
+turn candidate metadata into production pins without independent review.
+
+The capture launcher has a 600-second host wait plus an independent bounded
+cleanup attempt, with no automatic create retry. Ambiguous creation is not
+absence. A delayed returned handle is retained for exact-target cleanup while
+the owning process lives, but its daemon operation is not durable after CLI
+process death; an indeterminate report is not proof of shutdown. Known resources
+are checked through the exact returned handle, never listing/adoption. Keep the
+closed ownership/cleanup report and resolve ambiguity before another attempt.
+
+For a failed capture that returned an exact Sandbox ID, diagnose that same
+instance through the maintenance command's explicit `--read-sandbox ID` mode.
+Keep the original image/source and app/environment selections as provenance;
+the latter flags alone do not attest a recovered Sandbox's environment. This
+mode requires a stopped exact instance, reads only bounded stdout/stderr, and
+performs no create, listing, termination or retry. It exposes only validated
+candidate metadata or the inspector's closed error codes, never arbitrary
+provider text. Unrecognized output retains the known exit code with a fixed
+unclassified marker, not a guessed cause. Its 30-second read deadline starts
+after explicit client construction; it does not bound SDK authentication.
+Do not infer failure cause from the capture process's generic
+`capture_failed` result or start another allocation to obtain diagnostics.
+
+An inspector metadata rejection is not permission to drop packages from the
+runtime inventory, accept duplicate distributions, raise limits or guess pins.
+Keep its validation intact and use closed, distinct diagnostics for enumeration
+limits, invalid names/versions, duplicate normalized names and metadata-read
+failures. A follow-up allocation still needs its own applicable authorization;
+reuse the exact stopped instance for read-only diagnosis first.
+
+Repeated discovery of one physical `dist-info` object is not a second installed
+distribution: CPython can enumerate it again when search paths repeat. The
+inspector may count a proven stable filesystem metadata identity once only when
+its normalized name and version also agree. Never deduplicate by package name,
+version, installation root or pathname alone; distinct installations remain
+invalid even if their versions match. Unproven/custom/ZIP identities cannot
+justify deduplication. Keep both the 512 unique-distribution cap and the 4096
+raw-discovery bound, and reject changes during identity verification.
+
+For a remaining collision, distinguish the closed diagnoses
+`DISTRIBUTION_IDENTITY_UNPROVEN` (a collision without physical identity proof),
+`DISTRIBUTION_PHYSICAL_DUPLICATE` (different proven metadata objects), and
+`DISTRIBUTION_PHYSICAL_METADATA_MISMATCH` (one proven object with conflicting
+name/version). These codes do not disclose package metadata or permit accepting
+any rejected inventory. Historical `DISTRIBUTION_IDENTITY_DUPLICATE` output
+cannot be retrospectively assigned one of these more precise causes.
+
+When closed collision codes establish an image-packaging problem, the same
+maintenance command supports explicit `--diagnose-distributions` to inspect a
+bounded structured inventory. Its distinct `DIAGNOSTIC_ONLY` report contains
+validated package names, versions and resolved metadata paths from the
+credential-free image, including conflicting installations. It is not a
+candidate runtime report and must never become a lock or serving admission.
+It exposes no environment values or raw exceptions. Keep normal candidate
+validation strict; fix the image's packaging rather than dropping conflicting
+entries. Use the same flag for exact stopped-instance readback of that mode.
+
+For the measured Python 3.12 vLLM base with conflicting Ubuntu system metadata,
+`--isolated-python` builds a candidate-only layer using the checked-in
+`scripts/prepare_modal_inference_python.py`. The helper creates an exclusive
+copied-interpreter venv at `/opt/synaptic-inference`, without pip or system-site
+packages, and one `.pth` exposing only the measured ML package directory
+`/usr/local/lib/python3.12/dist-packages`. It does not remove system files,
+filter inventory, install packages, export PYTHONPATH or prepare models.
+The probe invokes that exact interpreter with `-I`; this is still not the final
+engine/SDK image. Capture final runtime commitments only after all reviewed
+dependency and engine layers have been installed and independently qualified.
+
+The image-preparation helper also creates the private chat root and its exact
+`model`, `base`, and `scratch` directories with exclusive creation and private
+permissions. It rejects a noncanonical or symlinked parent before creation.
+This changes the helper digest: earlier candidate evidence does not prove the
+new directories or runtime-user access. Rebuild and measure those properties
+before using the candidate for chat; do not infer access from build success.
+
+Correction (2026-09-14): the helper also creates a missing immediate workspace
+parent after verifying its existing canonical ancestor. It does not recursively
+create a path chain, follow a symlink, or reuse an existing private chat root.
+
+Use `--check-private-directories` with `--isolated-python` on the existing
+capture command to measure that access. The actual Sandbox user must own all
+four canonical directories with mode 0700; a temporary write/fsync/read probe
+must succeed in each and leave no probe files. The strict report records the
+effective UID and exact paths. It remains candidate-only, not serving approval.
+The flag is incompatible with distribution-diagnostic mode. For read-only
+recovery of that same stopped probe, pass it with `--read-sandbox ID` too;
+otherwise the extra report fields are rejected rather than silently ignored.
+
+After isolated candidate inspection, `--modal-additions` (requires
+`--isolated-python`) installs only `requirements/modal-inference-additions.lock`
+into the venv with `--no-deps --require-hashes --only-binary=:all:` and runs
+`pip check`. This reviewed nine-package subset adds the absent SDK closure;
+never install the full training launcher lock over the ML image. Capture records
+the additive lock digest and requires measured Modal 1.5.4. The image still needs
+engine packaging and final runtime/source qualification before serving.
+
+For an engine-installed candidate, pair `--engine-wheel` with its exact
+`--engine-wheel-sha256`, plus `--isolated-python --modal-additions`. Build that
+wheel offline from committed source first. Capture verifies/stages bounded
+regular wheel bytes and installs without index access or dependency resolution,
+then runs `pip check`. Its report records the wheel digest/name and the exact
+hydrated provider Image ID; these are candidate provenance, not serving approval.
+An image without packaged inference commitments must still fail admission.
+
+To qualify the installed package on CPU, additionally pass
+`--check-private-directories --verify-runtime-lock-digest SHA256` with the
+engine-wheel options. Use the independently reviewed canonical manifest's
+digest. The inspector invokes the same concrete packaged-source, closure,
+physical-Python and exact-distribution checks used by serving; it does not
+fabricate a serving configuration or accept a verifier callback. The report
+must match the requested lock and its candidate metadata. This verifies the
+installed package, not grants, authenticated launch, mounted model bytes, GPU
+startup, chat, or provider shutdown. The outer report remains candidate-only.
+Pass the same digest for exact stopped-Sandbox readback. Missing, unsolicited,
+or mismatched verification fields fail closed. No automatic allocation retry
+is authorized by a failed or ambiguous qualification attempt.
+
+The capture now eagerly builds its image with the selected initialized app
+before attempting Sandbox creation. `image_build_failed` and
+`image_build_incomplete` report `create_attempted: false`; neither means the
+remote image-build object was deleted or its billing independently verified.
+Unknown failures after entering Sandbox creation remain ambiguous and retain
+the existing exact-handle cleanup rules. Image-build diagnostics and a Sandbox
+submission must not be conflated. For a build failure, the existing Modal CLI
+can read bounded recent logs from only the explicitly selected app and
+environment; emit only allowlisted closed preparation codes, never arbitrary
+build stdout, exception text, credentials, or logs from another environment.
+An app-scoped log result is not an exact Sandbox ownership receipt.
+
+Measured CPU qualification (2026-09-14): source
+`d6e29ed03e026bd0653967c109dffe69625e2b46` passed the concrete packaged-runtime
+check in Image `im-rwqrQYtujjHal3RpL3RYW5`; exact stopped-Sandbox readback
+confirmed the result. The 230-distribution map, interpreter hash, 118-source
+closure and all four private-directory probes passed without weakening runtime
+checks. See `docs/review/modal-inference-image-qualification.md` and its exact
+capture/readback records. This qualifies that installed CPU package only;
+GPU/model loading, real consumer authority, mounted artifacts and chat remain
+separate. Do not reuse the image after a change to any locked source or runtime
+pin, or cite its successful CPU check as an end-to-end chat smoke.
+
+Correction (2026-09-11, source freshness): bind the source once when opening a
+session. Before requesting its SUBMIT grant, use the existing binder's
+`assert_current(source)` to recheck current workflow/Foundation/native metadata
+without another verification transition or model-body read. Calling `bind`
+again invokes `RunsAPI.reverify`, advances the workflow revision and invalidates
+the earlier preparation even when the model is unchanged. A read-only guard is
+not serving permission; the consumer still supplies separate exact STAGE and
+SUBMIT grants through Foundation. This is internal adapter work, not an extra
+operator command.
+
+The internal `ModalRunChatRuntime` now connects those existing binders, consumer
+catalog/content authority, exact grant port, Foundation broker and ready-lease
+handoff to `open_run_chat`. Construct one runtime per session attempt; a failed
+open must not silently start another attempt. The normal context exit closes
+the owned Sandbox. Retain `runtime.owned_lease` when cleanup remains unresolved,
+and retain the transport's pending ownership if no ready lease was obtained.
+The engine neither selects persistence nor mints the consumer's grants. This
+composition is provider-free tested, not yet live-image or serving qualification.
+
+Correction (2026-09-11, inference image identity): the signed configuration's
+`image.registry_reference` and `image.image_digest` select the pinned **base**
+image. Required `image.provider_image_id` identifies the separately built final
+Modal Image. The embedded runtime manifest uses `base_registry_reference`, with
+no legacy alias. An image cannot practically embed a manifest naming that same
+image's final OCI digest; do not create that circular commitment. Build and
+review the source/dependency/runtime layers separately, then bind the returned
+provider Image ID in the authenticated configuration. SUBMIT must resolve that
+exact existing Image with the explicit client and verify its hydrated identity;
+it must not construct a new image or add operator source at submission time.
+Runtime-file checks and provider object identity checks are complementary, not
+substitutes. Neither a signed ID nor a base-image candidate report qualifies the
+actual installed runtime by itself.
+
+## Frozen live evidence
+
+This evidence describes the pre-coordinator implementation. It is historical
+evidence, not a live qualification of the replacement worker or public cutover.
+
+Modal SFT is live-proven for run
+`modal-sft-20260826T144636Z-7aec224e893d` and provider call
+`fc-01M0Z8K9MCPN3P368V3CK94TV2`. The host ledger records one submit attempt,
+provider success, verification invalidation, a read-only reopen, and final
+verification. The invalid result was a verifier location error: the logical
+`/workspace/run` root corresponded to Modal's resolved physical Volume mount.
+The correction is evidence-bound relocation, not an unbounded path search.
+
+The exact five verified artifact roles were published to a host-selected local
+destination, and repeated publication converged to the durable receipt. The
+portable sanitized fixture is
+`tests/fixtures/training_product/modal_live_v1/evidence-index.json`. Its typed
+completeness is authoritative: lifecycle and publication digests/projections
+are captured, but authenticated provider terminal/completion bytes and artifact
+payloads are not. Do not cite the fixture as a raw provider transcript.
+
+The cross-provider contract and proof matrix live in
+`docs/architecture/submodule-first-training-v1.md`.
+
+## Fixed v1 topology
+
+- Exact Modal SDK `1.5.4` and one explicit authenticated client; no ambient
+  profile or `Client.from_env()` fallback in engine code.
+- Fixed app `synaptic-training-v1`; the exact function name is derived by
+  `modal_function_name(deployment_ref)` and includes the deployment identity.
+- A stopped fixed-name app is retained as non-authorizing history, not treated
+  as true absence. With Modal SDK `1.5.4`, scoped lookup returns an empty current
+  `app_id`, the stopped identity as `previous_app_id`, and the retained
+  generation. Read its bounded historical layout through that previous ID,
+  bracket the read with an unchanged scoped lookup, and reject a selected-name
+  collision. The normal same-name redeploy creates a new current app; accept it
+  only when its ID differs from the stopped predecessor and its new-app
+  lifecycle generation is exactly `1`. The retained stopped version does not
+  carry into the new app. Later redeploys of a current app retain the same ID
+  and require exactly `N+1`. Transitional states, drift, ID reuse, unexpected
+  generations, or ambiguity fail closed before training submission and never
+  authorize an automatic retry or cleanup.
+- One A10 GPU, one canonical command argument, `retries=0`, and one detached
+  `.spawn()` call behind the authenticated Foundation effect broker.
+- One digest-pinned Unsloth registry image with its inherited entrypoint
+  cleared.
+- One existing Modal Volume v1 for control/log/evidence records and one
+  distinct existing Modal Volume v1 for input/output artifacts.
+- In the minimal consumer qualification workflow, provisioning those configured
+  Volumes, the attempt-derived model-cache Volume, and the runtime Secret is
+  creation-only (`allow_existing=False`). A separately authorized fresh attempt
+  must rotate every one of those names; changing only the attempt or deployment
+  reference will collide with retained resources. Preserve the failed claim and
+  resources, diagnose exact names read-only, and never convert an already-exists
+  result into retry, adoption, deletion, or cleanup authority.
+- Each effect is isolated below `operations/{effect_id}/`; jobs never share
+  global `input/`, `output/`, `logs/`, or `evidence/` paths.
+- The remote job independently clones the exact pushed host project and exact
+  engine commit, verifies the project gitlink, and invokes only
+  `Trainers/sft/runtime_v1.py --canonical-workload-stdin` without a shell.
+- Before invocation, the remote worker retains the verified full engine checkout
+  separately and stages only the authenticated offline-worker manifest members
+  at the execution engine root. A full checkout is not a prepared worker: extra
+  files, including Git metadata, fail the exact-closure guard. This preparation
+  is internal to the provider, not an additional operator command. Collisions
+  or invalid members fail before trainer invocation; never relax the guard or
+  retry a submitted job to recover from them.
+- The verified runtime is CPython 3.11.14 at `/opt/conda/bin/python3`; its
+  executable, image, complete hash-pinned launcher dependency closure,
+  deployment wrapper, remote worker/producer/runtime modules, SFT entrypoint,
+  and ML stack are checked in `modal-runtime-v1.lock.json`. The host enforces
+  this packaged lock before preflight and the remote materializer enforces it
+  again against the reconstructed exact checkout.
+
+## Storage and evidence
+
+Model preparation belongs on the execution machine, before the offline trainer.
+The provider must automatically obtain the exact configured model revision using
+the Hugging Face SDK and reuse verified cached weights. Do not require operators
+to download weights locally and upload them to Modal. Keep model credentials in
+the preparation wrapper, never in the trainer subprocess; preserve the runtime's
+exact revision, link-free snapshot, and offline checks. Cache integration must
+treat the persistent Volume as untrusted and must not let SDK filesystem writes
+follow attacker-controlled cache paths. This is an internal preparation phase,
+not a new submission command or a separate downloader service.
+
+Modal Volume is the authoritative provider-native artifact store for a Modal
+run. Hub publication is optional and separately authorized. The remote producer
+emits exactly five artifacts: workload record, training lineage, training
+metrics, final model, and tokenizer.
+
+### Training artifact retention policy
+
+The live Modal training policy admits at most **192 MiB for one artifact** and
+**256 MiB for the complete five-artifact set**. `final_model` remains a required
+member of that exact set even when intermediate checkpoints are not retained.
+These output-retention limits are separate from the 64 MiB prepared-input
+publication limit described below.
+
+For standalone downloads, pass the policy's per-artifact maximum (192 MiB),
+not its 256 MiB aggregate-set maximum. The packaged reader checks this bound
+when its lazy stream starts. Pinned Modal 1.5.4 yields whole provider blocks
+(8 MiB in its block implementation), not public-API-sized chunks. The provider
+facade must split them into at most 1 MiB chunks while preserving byte order,
+aggregate limits and final size/hash verification. Test a multi-MiB SDK-shaped
+block through the real facade and public artifact stream; tiny fake payloads
+do not exercise this boundary. A zero-byte local partial identifies pre-body
+failure only; it does not establish which authentication or transport check
+failed. Do not rerun a consumed submission to recover a download. The standalone
+host's process-local coordinator state is not durable download-resume support.
+
+Large LoRA output is not trusted merely because training reports success. Its
+publication and later retrieval stream bounded bytes, then verify the expected
+digest and re-list/read back the durable provider inventory before the run can
+verify. Before a paid launch, estimate the final adapter archive from a measured
+same-family/rank result and ensure the rank-scaled estimate fits both limits;
+do not treat an unmeasured rank as admitted. Any future increase requires new
+size/transfer evidence and a synchronized review of host and remote policy.
+
+The control Volume contains operation-scoped, authenticated structured logs,
+terminal evidence, and the completion manifest. The host database stores the
+expected workflow/effect identities, one-shot authority consumption, provider
+job reference and verification result using the existing generic stores. Exact
+Modal configuration, signed stage material and launch envelopes are published
+through consumer-owned catalogs before the unchanged Foundation dispatches.
+Restart reuses the retained signed launch and assessment. The engine does not
+select or ship a concrete database and must not create SQLite state.
+
+Mounted Volume writes are committed explicitly after the producer finishes.
+The artifact Volume is committed before the control Volume so an intentionally
+visible completion record cannot precede its artifacts. Any uncertainty after
+staging or `.spawn()` is reconciliation-only; it does not recreate submission
+authority.
+
+Prepared training inputs keep the provider-neutral request unchanged. The
+prepared `ref`, `revision`, content digest, byte size, and format remain the
+authority. Inputs at or below 2 MiB retain the legacy inline bundle transport.
+Inputs above 2 MiB and at or below the existing 64 MiB prepared-publication
+limit use one operation-scoped `payload.bin` object on the consumer-owned
+artifact Volume. The signed bundle contains only its canonical descriptor; it
+never contains the prose or an operator filesystem path. Staging reopens and
+reverifies the local prepared publication, uploads without overwrite, streams
+an exact size/hash readback, and writes control material last. An exact remote
+payload can complete recovery of the same authenticated stage even when the
+local source is no longer available; a fresh stage cannot. This does not raise
+the generic bundle or control limits, add a public provider verb, or create a
+cross-run cache.
+
+Treat both mounts as hostile shared storage. On the locked Linux runtime,
+reads and writes traverse through retained directory descriptors and open leaves
+relative to those descriptors, preventing an ancestor substitution between
+validation and I/O. Reads are bounded and compare descriptor identity before
+and after; writes use exclusive leaf creation. Named Modal Secrets are the only credential path;
+secret-like environment keys or symbolic secret values are rejected before
+image construction.
+
+## Three proof levels
+
+1. **Provider-free barrier** — schemas, canonical parsing, hostile binding
+   tests, exact SDK surface construction, image inspection, network-disabled
+   image runtime checks, compilation, and packaging. No credentials, provider
+   calls, GPU, or spend.
+2. **Authenticated live preflight** — explicit-client account/workspace/
+   environment binding, existing Volume identities, deployed Function version,
+   Modal image identity, secret names/required keys, and a current quote. This
+   may read provider state but may not submit training.
+3. **Paid smoke** — after the exact tree is independently accepted, committed,
+   pushed, and granted, stage once and call `.spawn()` once. Observe and verify
+   by the durable provider job ID and Volume evidence. Never retry an ambiguous
+   submission.
+
+## Failure diagnostics (including closed start context)
+
+Packaged trainer failures recognize the already-loaded Torch OOM exception
+identity as `SFT_TRAINER_CHILD_EXEC_TORCH_OOM`, with a finite milestone suffix
+when the installed trainer set the trusted callback. Torch's CUDA alias shares
+the general Torch OOM class; this label does not establish device, allocation
+size, allocation source, or batch capacity. Otherwise unknown library errors
+retain that callback's finite milestone as `SFT_TRAINER_CHILD_EXEC_OTHER_<MILESTONE>`;
+without a valid marker they retain legacy `SFT_TRAINER_CHILD_EXEC_OTHER`.
+Existing codes remain accepted. Discarded historical `EXEC_OTHER` diagnostics
+cannot establish OOM retrospectively or justify recipe changes or replay.
+No exception text, class names, traceback, paths, locals or trainer logs are
+transported by these labels. The alias is defined in
+[pinned Torch source](https://github.com/pytorch/pytorch/blob/v2.11.0/torch/cuda/__init__.py).
+
+`RUN_START_INDETERMINATE` spans the whole public start call, not just GPU
+submission. Optional `exception_chain` diagnostics retain at most four closed
+exception categories/recognized coordinator or Foundation enum codes and four
+allowlisted repo-relative file/line locations per entry. They inspect suppressed
+context without emitting messages, source lines, locals, credentials or private
+paths. Collection/validation failure preserves the original closed phase.
+An exception chain narrows local boundaries; it does not prove the root cause,
+no external effect, successful training, or permission to replay. If an earlier
+process retained only the broad phase, these diagnostics cannot recover its lost
+exception after exit. Use an independently reviewed provider-free reproduction
+before proposing a fix; a fake-provider pass is not live transport qualification.
+
+The local source-wheel gate reports fixed input, HEAD, and tracked-status
+categories. Before/after labels refer to the commit-archive boundary;
+`STATUS_*_TIMEOUT` identifies a subprocess timeout, `STATUS_*_DIRTY` identifies
+nonempty successful status output, and `*_UNAVAILABLE` does not establish a
+cause. No Git output, path, or exception text is projected. Preserve the exact
+failed claim and diagnose read-only; neither a later clean check nor the older
+`SOURCE_STATE_INVALID` category proves a historical timeout. Do not change the
+model recipe, relax clean-source admission, or replay a claim based on that inference.
+Tracked-status checks have a 120-second bound to accommodate slow mounted
+filesystems; HEAD checks remain bounded at 30 seconds. A timeout still fails
+closed rather than skipping the check or retrying the attempt.
+
+For a CPU-only standalone attempt that stops at `RELEASE_OBSERVE` before deployment,
+use the checked-in private maintenance diagnostic before another cost-incurring
+qualification attempt:
 
 ```bash
-modal run --detach <app_module>::<function>
+python scripts/inspect_modal_release_lookup.py \
+  --journal /absolute/private/attempt-<effect-id>/modal-host.sqlite3 \
+  --claim-ref deploy-<exact-release-digest> \
+  --environment <operator-selected-environment> \
+  --modal-profile <explicit-profile>
 ```
 
-Monitor a detached run by its app id:
+Select the exact consumed attempt and deploy-claim ref from its retained local
+state; never pick the latest attempt or infer the app name from resource names.
+The command checks one owner-private journal claim and makes one bounded,
+read-only `AppGetByDeploymentName` call. It emits only closed response-shape or
+failure categories, not names, IDs, credentials, provider payloads, or exception
+text. The profile and environment are operator selections, not authenticated
+by the claim; the journal hash detects corruption but is not a MAC against
+same-owner tampering. `ABSENT` is current scoped lookup evidence only, not
+proof of never-deployment, shutdown, cleanup, or retry authority. Preserve the
+failed attempt and its resources. This diagnostic is not a public training API
+or a substitute for exact-source CPU qualification.
+
+If raw lookup reports a shape the production reader should admit but the
+attempt failed at readback, repeat the diagnostic with `--production-reader`.
+That mode performs one bounded logical read through the pinned runtime reader
+(one lookup when absent, up to three read-only RPCs when present) and emits
+only `READER_ABSENT`, `READER_PRESENT`, or `READER_UNAVAILABLE`; it remains
+non-authorizing and must not be used to replay the failed attempt.
+For a present deployment, `--production-reader --check-function <configured-name>`
+also compares one read-only named Function hydration with the current layout.
+`FUNCTION_MATCH` is a current-state diagnostic only; it is not a call receipt,
+version-pinned invocation, or retry authority.
+
+After a qualification claim is consumed, the standalone JSON CLI projects only
+fixed, non-authorizing failure fields for `FIXTURE_STAGE`, `DISPATCH_SUBMIT`,
+`CALL_OBSERVE`, or `RECEIPT_VERIFY`. `DISPATCH_SUBMIT / INDETERMINATE` does not
+prove whether the remote Function spawned. Preserve its exact attempt journal
+and resources; diagnose read-only and use a fresh create-only attempt only
+after an independently reviewed correction.
+The dispatch result may narrow further to `DISPATCH_FUNCTION_IDENTITY`
+(pre-spawn hydration/ID check), `DISPATCH_SPAWN_INDETERMINATE` (spawn entered
+or returned without a valid call ID), or `DISPATCH_CATALOG_INDETERMINATE`
+(a call ID existed but durable catalog retention failed). The last two never
+grant replay authority. Other pre-spawn failures and bounded timeouts remain
+the conservative `DISPATCH_SUBMIT` result.
+
+The standalone host's SQLite attempt journal and call catalogs are
+thread-affine. Resolve and publish catalog entries on the storage-owning
+caller thread; the 60-second worker boundary wraps only provider lookup,
+hydration, identity check, spawn and call-ID extraction. A timed-out provider
+worker may still spawn after the host reports ambiguity. Keep the consumed
+claim and never replay it or infer that no call exists from an empty catalog.
+
+If a fresh CPU attempt has an exact retained call ID but fails at
+`CALL_OBSERVE`, inspect only that consumed claim with the checked-in read-only
+diagnostic:
 
 ```bash
-modal app logs <app-id>
-modal app list          # find the app id
+python3 scripts/inspect_modal_qualification_call.py \
+  --journal /absolute/private/attempt/modal-host.sqlite3 \
+  --claim-ref qualify-<exact-deployment-facts-digest> \
+  --call-id fc-<exact-retained-id> \
+  --modal-profile <named-profile>
 ```
 
-### `--detach` alone does not survive a graceful client death
+The diagnostic authenticates the claim-to-catalog call binding before one
+bounded, retry-disabled raw status read and emits only a closed,
+non-authorizing result category. It does not deserialize the result body,
+print logs or provider exceptions, submit, cancel, or grant retry authority.
+For the exact pinned CPython 3.11.14/Modal 1.5.4 pair, `WORKER_COMPLETED`,
+`WORKER_FAILED`, `WORKER_PARENT_SETUP`, `WORKER_INSTALLED_CHILD`,
+`WORKER_PARENT_RELEASE`, and `WORKER_CHILD_RESULT` mean the small inline
+provider bytes match one of the historical fixed serialized dictionaries exactly,
+without unpickling. The stage labels name only failed boundaries, not an
+exception or proven root cause. Fresh host attempts project them as closed,
+non-retryable `CALL_PARENT_SETUP`, `CALL_INSTALLED_CHILD`,
+`CALL_PARENT_RELEASE`, and `CALL_CHILD_RESULT` phases; all other worker
+failures remain generic.
+`PROVIDER_SUCCESS_UNKNOWN` means an opaque result exists but did not meet
+those narrow comparison conditions; it is not evidence of failure. None of
+these categories authenticates the signed qualification receipt or permits
+GPU training or replay. Preserve the attempt and investigate the worker
+boundary before a fresh, separately reviewed qualification.
 
-`--detach` protects the APP from client disconnect, but not the in-flight call.
-If the client process receives a graceful signal (SIGINT/SIGTERM) while blocked
-on `.remote()`, the unwinding call sends an explicit input-cancel RPC -- the log
-shows "Received a cancellation signal while processing input" -- and the running
-function dies even though the app was detached. Only SIGKILL or a network drop
-leaves the input running.
+The installed-child check must run under its own `-I` subprocess, not require
+the ambient Modal Function parent to have `sys.flags.isolated`. Keep the child
+isolation assertion, stripped child environment, sealed fixture and exact
+child-output verification. After changing the packaged worker, review and
+refresh only its packaged-worker closure; a fresh committed wheel and CPU
+qualification are required before a GPU smoke.
+`CALL_PARENT_RELEASE` means the generic qualifier's parent failed its pinned
+wheel/trainer-reference check before child launch; it is not a measurement of
+the parent's interpreter or complete installed runtime. `CALL_CHILD_RESULT`
+covers child invocation, timeout, bounded output read, or a non-admitted result.
+Neither label warrants relaxing the child's exact interpreter or installed-package
+checks. Keep the generic/local child qualifier parent-process-agnostic. Modal
+training additionally admits the Function parent, so its CPU self-check must
+exercise that same parent runtime check before issuing successful qualification;
+child-only success cannot qualify a different parent process. New Modal CPU
+self-checks report `CALL_PARENT_RUNTIME_<PREDICATE>` (or the inspector's
+`WORKER_PARENT_RUNTIME_<PREDICATE>`) for the shared release check, distinguishing
+Python implementation, version and executable path; executable digest; installed
+runtime inspection; locked record comparisons; and wheel/trainer assets.
+`PARENT_RUNTIME_UNAVAILABLE` is the unexpected-fault fallback. Inner
+`PARENT_RUNTIME_INSTALLED_*` labels separate retained inputs, wheel bytes,
+distribution metadata, bootstrap dependencies, provenance, installed members,
+worker closure, and inventory enumeration/bounds/duplicates. Legacy
+`INSTALLED_RUNTIME` remains a broad fallback; it cannot establish a duplicate
+or provenance cause. The isolated child and Function parent can have different
+metadata search contexts, so child success alone does not justify removing
+parent inspection or copying an inference-image workaround without measurement.
+Repeated distribution enumeration may collapse only proven stable physical
+metadata identities with matching normalized name and version. Distinct or
+unproven duplicate names must still reject. Preserve the 4096 raw-occurrence
+bound, unique-inventory cap, and exact final release inventory digest/count;
+never deduplicate by name/version or ignore an extra installation. Duplicate
+diagnostics may classify the first offending pair by fixed reason, authenticated
+main/bootstrap/other role, and whether metadata is inside or outside the pinned
+purelib/platlib roots. Unprovable origins remain unknown; an outside entry alone
+does not prove provider injection. These closed labels preserve rejection and
+disclose no package names, paths, versions, or exception text. Do not narrow the
+parent inventory from this observation without an execution-boundary review.
+For the measured `VERSION_MISMATCH_OTHER_CROSS_ROOT` parent-only rejection, a
+CPU diagnostic may compare the complete stably proven reviewed-root inventory
+against the release digest/count and run the existing strict isolated child
+qualifier. This exact-stage continuation must always return failure, never sign
+a qualification receipt or commit outputs, and never authorize GPU execution.
+Use only fixed match/mismatch/unproven and child-pass/fail labels; an unproven
+root or entry cannot be treated as an inventory match. Even child success does
+not independently authorize dropping the privileged parent's overlay detection.
 
-The robust fix is to remove the blocking client entirely: have the local
-entrypoint use `.spawn()` instead of `.remote()`.
+Approved policy (2026-09-28): after the exact `ROOT_MATCH_CHILD_PASS` measurement
+and explicit operator acceptance, hosted-parent admission/revalidation selects
+the complete inventory under authenticated, stable purelib/platlib roots and
+compares its exact digest/count with the release. Python identity, main/bootstrap
+wheel bytes, provenance, installed members, closure and trainer assets remain
+checked. Unproven root/metadata identities and inventory mismatches reject.
+The default inspector and isolated child retain full ambient inventory checks;
+scope is explicit at the parent boundary, never a catch-and-retry fallback.
+This policy accepts outside-root dependencies in the privileged parent rather
+than detecting all overlays; it is not loaded-module-origin attestation. It does
+not relax the trainer's model, image, dependency, credential or artifact pins.
 
-```python
-@app.local_entrypoint()
-def main():
-    call = my_fn.spawn(...)   # returns immediately after scheduling
-    print(f"spawned {call.object_id}")
+Use a fresh ordinary `train --qualify --fresh-attempt` with the same
+recipe to measure this boundary on CPU before another GPU smoke; prior
+child-only receipts do not establish the new parent check. Parent admission and
+revalidation may accept a different executable spelling only through the measured
+same-bin/prefix, resolved regular-file identity, locked digest, and Linux
+running-executable proof; every remaining installed-runtime check still runs.
+The isolated child retains strict executable-path admission and the exact
+configured invocation. Never infer equivalence from Python versions alone or
+admit a different environment. Historical `PYTHON_EXECUTABLE_EQUIVALENT` CPU
+diagnostics deliberately failed before inventory/child checks; they establish
+only the interpreter proof, not full runtime qualification or replay authority.
+
+After a signed CPU receipt, the standalone train path reports only fixed,
+non-secret host boundaries: `RUN_HOST_ASSEMBLY` during host composition;
+`RUN_PUBLIC_PREPARE`, `RUN_PUBLIC_LOAD`, `RUN_PUBLIC_RESOLVE`,
+`RUN_PUBLIC_PLAN`, and `RUN_PUBLIC_PREFLIGHT` at the five public planning
+calls. Within public resolution, `RUN_RESOLVE_RICH`, `RUN_RESOLVE_DERIVE`,
+and `RUN_RESOLVE_REPARSE` identify only the fixed rich-resolution, coordinator
+material derivation, and independent reparse boundaries. `RUN_START_INDETERMINATE`
+begins once `start` is invoked. That last phase
+never proves that a remote job was not spawned, even if the local call catalog
+is empty. Every phase retains the consumed attempt and has
+`retry_authorized: false`. After an accepted start, the runner reads the
+durable workflow phase before trying a provider observation. A stage or submit
+reconciliation phase is reported as closed `RUN_STAGE_RECONCILE_REQUIRED` or
+`RUN_SUBMIT_RECONCILE_REQUIRED`; terminal failure or contradiction is likewise
+closed. These are state reports, not proof that a provider effect did or did
+not occur and never authorize retry. Unknown post-start failures remain generic.
+Do not replay or clean up a failed attempt based on an absent local catalog
+entry.
+
+The pinned Modal 1.5.4 Volume batch uploader seeks to the beginning and end
+of each file-like input while hashing/uploading it. A read-only stream is not
+an upload-compatible input even if its bytes are correct. The host stager must
+consume the retained one-use source into a bounded seekable private spool,
+verify its exact size and digest before the provider write, keep it open through
+batch commit, and independently verify the uploaded object before returning a
+stage receipt. A failed stage may leave an indeterminate Foundation effect;
+preserve that attempt and use a fresh attempt after a reviewed fix.
+
+For a submitted packaged call that ended with a generic host result, use the
+checked-in `scripts/inspect_modal_packaged_call.py` only with the exact private
+journal, submit-command digest, retained call ID, and Modal profile. It
+authenticates the submit claim and binding before one read-only raw provider
+poll, does not unpickle or print provider output, and reports only fixed
+diagnostic categories. `WORKER_FAILED` means the exact packaged worker's fixed
+failure result was returned; it does not disclose the failing operation,
+verify a run, or authorize replay. The public reader likewise recognizes only
+that precise failure dictionary; near misses remain unknown.
+
+For that same call-only command, add `--include-provider-status` to include
+`provider_status` from the same single authenticated, non-consuming poll.
+The only labels are `SUCCESS`, `FAILURE`, `TERMINATED`, `TIMEOUT`,
+`INIT_FAILURE`, `INTERNAL_FAILURE`, `IDLE_TIMEOUT`, `MEMORY_MANAGER_EVICTION`
+and `UNKNOWN` for other enum values; pending, expired, malformed or unavailable
+responses report null. Default JSON and exit behavior are unchanged. The option
+cannot be combined with marker, evaluation-metadata or artifact-probe modes.
+This is provider enum metadata, not exception text, a worker stage, root cause,
+artifact verification or replay authority. It reads no failure payloads, blobs
+or logs and never deserializes remote objects.
+
+For a completed call whose local download stops before its first chunk, the
+same inspector accepts `--probe-final-model-first-chunk` together with the exact
+`--journal`, `--claim-ref`, `--call-id`, and `--modal-profile`. It validates the
+retained call/binding and markers, derives only that submit's final-model path,
+and reads using that exact bound Volume ID. No separate SDK Volume hydration
+is required: the marker and metadata RPCs already address that ID, and another
+lookup adds neither generation pinning nor artifact authority. This applies
+only to this diagnostic, not product admission. It bounds the block probe at
+1 MiB + 1 byte; it never uses the SDK's multi-block prefetch path. Only fixed
+`DIAGNOSTIC_ONLY` size categories are emitted, never contents, signed URLs or
+raw errors. Encoded/redirected responses and inconsistent metadata reject.
+This is not a full download, authenticated artifact verification, retained MAC
+authority, recovery, or permission to replay. Preserve the original attempt.
+
+For same-job request failures, retain only a closed request-failure category and
+bounded attempt elapsed time in the authenticated evaluation record. Do not
+persist exception text, HTTP bodies, URLs, prompts, or arbitrary paths. A legacy
+`evaluation_error` with null response/latency locates failure before a valid
+response; it does not establish a timeout, server rejection, or an assertion
+failure. Once the worker exits, discarded exception detail and suppressed child
+output cannot be reconstructed from that record. Reproduce the real client path
+locally, review the diagnostic change, refresh only affected existing source
+commitments, and use a fresh ordinarily CPU-qualified attempt to measure the
+live boundary. Keep prior artifacts and consumed authority intact; never change
+model, prompt, concurrency, or deadlines based on the generic label alone.
+
+For a completed same-job rehearsal that fails specifically at evaluation readback, the
+inspector also accepts `--inspect-evaluation-metadata` with the exact journal,
+submit-command digest, call ID, and profile. It correlates the retained binding
+and markers, reads only that operation's evaluation record (16 MiB maximum) and
+MAC (128 bytes maximum), and emits fixed outcomes, sizes, digests, and binding/
+encoding comparison flags. It never emits prompts, responses, signed URLs,
+credentials, or exception text. `mac_authentication: UNVERIFIED` is intentional:
+the original host's ephemeral MAC key is not recovered by this diagnostic.
+Self-consistency does not verify a run, qualify serving, or authorize replay.
+Keep the consumed attempt and its training artifacts intact. The host readback
+phase includes both the remote read and local save; its label alone is not a
+root-cause diagnosis. Test record validation in the pinned lightweight launcher,
+not only an ML-equipped test environment; execution-only evaluator imports must
+not be required merely to validate a signed record.
+
+For an unresolved provider timeout, the same exact bound evaluation-metadata
+read may provide physical phase evidence; `FILE_UNAVAILABLE` is inconclusive,
+not proof of missing data. Alternatively, use the mutually exclusive
+`--inspect-training-completion-metadata` mode with the same exact journal,
+submit digest, call ID and profile. It marker-checks before/after reading only
+the control Volume's derived `evidence/packaged-completion.json` (64 KiB) and
+`.mac` (128 bytes). Output contains sizes/digests and fixed schema, binding and
+five-role inventory comparison flags, always `mac_authentication: UNVERIFIED`.
+It reads no weights, logs or arbitrary paths. Physical matching metadata does
+not authenticate artifacts or prove training passed, commits finished, or
+evaluation began. The worker publishes training outputs/completion and commits
+both Volumes before evaluation; evaluation output is published after evaluation
+returns. Preserve this ordering as a hypothesis boundary, not a timeout cause.
+
+Packaged workers emit best-effort `SYNAPTIC_PHASE ` lines containing only
+`schema_version: synaptic-modal-packaged-phase/v1`, fixed `phase`, fixed `edge`
+(`START`, `RETURN`, `ERROR`), `elapsed_ms` (0–86400000 from worker entry), and
+`request_ordinal` (1–32 for `CHAT_REQUEST`, null otherwise). The finite phases
+cover trainer execution, training publication, each training commit, evaluation
+preparation/identity validation, vLLM preparation/spawn/readiness, chat batch/
+request, cleanup, evaluation publication and its artifact commit. Request edges
+are immediate, independent of ordered evaluator callbacks; batch return occurs
+only after requests drain. Ordinals identify request-entry order, not scenarios.
+The 256-record/512-byte line caps limit diagnostics only, never workloads.
+Ordinary trace callback/output failures do not change workload results. Missing,
+capped or unmatched edges remain inconclusive; a last outstanding boundary is
+not proof of cause, successful cleanup, artifacts or retry authority. Preserve
+the recipe and deadlines when using one reviewed instrumented smoke to locate
+the operation; do not increase timeouts merely because the provider timed out.
+
+For the opt-in same-job evaluation, `generation.max_tokens: null` deliberately
+omits the request-level output ceiling. Available model context, model/server
+defaults, job deadlines, and bounded request/response storage still apply; this
+is not infinite generation. Explicit positive integer budgets remain supported.
+Optional `generation.chat_template_kwargs` transports bounded finite JSON to
+vLLM; model-specific values stay in the recipe and should match the training
+template settings. The Qwen prose rehearsal selects `enable_thinking: false` in
+both places and requires `finish_reason: stop` plus configured rejection of
+thinking-only text. Those assertions qualify completed-text mechanics, not
+chapter quality. Audit the saved replies before authorizing full training.
+
+For a first chapter-writing review, use a few complete context bundles and save
+the generated drafts for the author's review. A nonempty reply and natural stop
+are mechanical checks, not a writing-quality judgment; no LLM judge or prompt
+variation suite is required for that workflow. Private inline scenarios may live
+in a gitignored recipe loaded by the existing `train --job-config` command.
+The post-training evaluation configuration, canonical training configuration,
+and compiled workload each have a 1 MiB serialized bound. Enclosing coordinator
+material, the Modal ordinary bundle member, and the signed packaged dispatch
+each have a 2 MiB bound; JSON escaping and signed/encoded envelope overhead count.
+Check the complete serialized recipe before submission rather than truncating or
+silently narrowing prompts. These are transport limits, not a per-message token
+budget or proof that a model fits the context. The separate serving limits remain
+1 MiB per HTTP request and response and 64 KiB retained per-case response;
+`max_tokens: null` removes only the request-level output-token ceiling. See
+[full-context transport review](../../../docs/review/full-context-evaluation-transport.md)
+for the verified boundaries and provider-free tests.
+Same-job requests reuse the existing evaluator's concurrent runner against one
+vLLM server and adapter, with workers bounded by the configured `max_num_seqs`
+and case count. Results retain case order and requests drain before GPU cleanup.
+Same-job requests use the remaining configured evaluation window after startup
+and elapsed case work; they have no separate 120-second clamp. Expired cases
+do not start requests, and replies returned after the deadline cannot reach
+correctness assertions. Requests' HTTP timeout bounds connect/read inactivity,
+not total wall time: a slowly arriving bounded body can overrun that window.
+Normal returns/errors drain request workers before bounded TERM/KILL runtime
+cleanup. Evaluation runs synchronously in the packaged worker, without a
+separate evaluation-child timer; the provider Function's configured execution
+timeout is the outer backstop, not a guarantee that finally/cleanup completed.
+Longer context and concurrency settings still require GPU qualification; a
+provider-free config plan is not evidence that they fit the selected hardware.
+
+When that exact submit has marker material but no retained call ID, use the same
+inspector with `--inspect-markers` instead of `--call-id`. Supply the exact
+`--journal`, submit-command `--claim-ref`, and named `--modal-profile`. This
+authenticates the private claim, binding, and facts-matched marker catalog before
+bounded 32-byte reads. It reports only role-level `MATCH`, `NOT_FOUND` (an exact
+provider not-found status), or `UNAVAILABLE`; the last is inconclusive. It never
+lists, writes, commits, spawns, or authorizes replay. Marker presence/absence and
+an empty call catalog alone do not establish historical call execution.
+
+Host marker uploads use `batch_upload(force=False)`; context exit publishes the
+upload. Do not append `Volume.commit()`, which is for mounted-container changes.
+Raw async reads using the persistent Modal client must run on its SDK
+synchronizer loop, following the checked-in inspectors, not a new `asyncio.run`
+loop. Pass a free async function to `synchronizer.create_blocking`, with the
+reader supplied explicitly: the pinned bridge rejects ordinary bound methods.
+Qualify the actual production bridge using pinned dependencies without network
+effects; testing a different free-function shape misses this failure. Test
+doubles must model batch publication, accepted call shapes, and loop affinity rather than
+merely mirroring the host implementation. This does not remove the worker's
+required mounted cache/artifact/control commits.
+
+New packaged workers return the same v1 success shape but a fixed v2 failure
+shape with one closed `failure_stage`: entrypoint setup, dispatch authentication,
+staged input, path claim, one of the generic SFT executor's admitted stages,
+completion, or a Volume commit. The read-only inspector reports `WORKER_<STAGE>`
+only for an exact locally serialized result; the public train command reports
+`RUN_WORKER_<STAGE>` only after an authenticated call. Legacy fixed failures
+remain `WORKER_FAILED` / `RUN_WORKER_FAILED`. These labels locate a boundary,
+not an exception, root cause, successful optimizer step, or retry grant. The
+runner also uses closed post-submit labels for workflow, read binding, call
+observation, outcome, verification, and artifact download; never infer remote
+state from a single label.
+`SFT_PREPARATION` spans model preparation, the model-cache commit, expected
+snapshot location, and initial inventory. If the exact retained call exposes
+only that broad stage, do not infer a Hub, download, filesystem, or commit cause.
+New workers report `SFT_PREPARATION_MODEL_{UNAVAILABLE,SDK_ADMISSION,INPUT,WORKSPACE_SETUP,METADATA_FETCH,METADATA_VALIDATION,DOWNLOAD,VERIFICATION,PERSISTENT_PUBLICATION,DESTINATION_COPY,DESTINATION_VERIFICATION}`
+or `SFT_PREPARATION_{CACHE_COMMIT,PATH,SNAPSHOT_INVENTORY}`. The legacy broad
+stage remains accepted. Use these fixed substages in a fresh reviewed attempt;
+keep SDK text, credential-derived details, model paths, and arbitrary exception
+messages out of diagnostics. A substage identifies an operation, not a cause.
+Preserve consumed attempts and all existing source, model, snapshot,
+cache-publication, and artifact checks. Shared model preparation must remain
+independent of the packaged SFT module so inference does not acquire a new
+training-only dependency through diagnostic exception types. Private model
+preparation must create the repository and every validated member-parent
+directory explicitly at 0700 before SDK writes. Create parents depth-first;
+`mkdir(parents=True, mode=0o700)` alone leaves intermediate modes dependent on
+ambient umask. Preserve descriptor-bound publication checks and process-global
+umask. Cover nested members with the real binding under umask 022 and 002; a
+local permission reproduction is separate from evidence of a remote cause.
+For a persistent-publication rejection, newer workers can report
+`SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION_<PREDICATE>`, with finite
+`SOURCE_CHAIN_*`, `CLAIM_*`, or `COPY_*` suffixes. The broad legacy stage remains
+a fallback. These labels identify the rejected operation or predicate, never
+permission to retry or skip a guard. Keep initial checks distinct from later
+rechecks; do not attribute a remote filesystem behavior from a local test alone.
+Publication error translation belongs at the Modal publisher adapter so shared
+model preparation does not acquire provider-only imports in the inference closure.
+For new workers, `SFT_ADMISSION_{CONTRACTS,RELEASE,PATHS,INPUT,ENVIRONMENT,INVOCATION,COMMITMENT}`
+identifies the existing admission subcheck; legacy `SFT_ADMISSION` remains
+accepted. Replay exact retained pure contracts locally before changing a recipe.
+CPU qualification's installed-runtime check does not prove every training-parent
+or attempt-specific admission check. New labels disclose no exception text and
+do not authorize replay; review the runtime/worker/inference source commitments
+after changing code in their existing inventories.
+
+The installed training entrypoint additionally reports fixed setup substages:
+`ENTRYPOINT_IMPORTS`, `ENTRYPOINT_DISPATCH_AUTH`, `ENTRYPOINT_PROVIDER_ID`,
+`ENTRYPOINT_VOLUME_ID`, `ENTRYPOINT_CALL_ID`, `ENTRYPOINT_MOUNTS`, and
+`ENTRYPOINT_WORKER_SETUP` (private scratch and worker construction). The
+original `ENTRYPOINT_SETUP` remains a fallback for an unexpected escape after
+worker construction or an older result. Each
+label identifies only the operation boundary reached; none discloses the
+exception, establishes root cause, or authorizes replay. Use the exact
+claim-bound packaged-call inspector to confirm a host-projected label.
+If `ENTRYPOINT_MOUNTS` recurs, the fixed role-and-predicate labels
+`ENTRYPOINT_MOUNT_{CONTROL,ARTIFACTS,MODEL_CACHE}_{DIR,LINK}` identify which
+mount's directory or no-symlink check failed; the original label remains for
+distinctness and other failures before worker setup. `DIR` does not prove absence, and
+`LINK` does not authorize relaxing the hostile-path guard.
+
+For a `MOUNT_*_LINK` boundary that remains unexplained, the checked-in private
+`scripts/probe_modal_gpu_mounts.py` is a **diagnostic-only** L40S topology
+probe. Run its provider-free tests and review the exact script before each
+separately authorized paid invocation; use the pinned CPython 3.11.14/Modal
+1.5.4 launcher and a new owner-private claim directory every time. The command
+creates a fresh app and three fresh empty v1 Volumes, then executes one
+no-training Function without Secrets, dataset/model access or network. The
+Function must be non-serialized with only its own script source mounted:
+`serialized=True` was rejected at `FunctionCreate`, while
+`serialized=False, include_source=True` deployed and returned a result with
+the same pinned image ID. The probe retains a one-shot claim and does not
+retry, cancel, delete or replay ambiguous effects. Only fixed categories are
+admitted from bounded raw result bytes; neither raw link targets nor provider
+exceptions are reported. The optional `/workspace` mount parent and
+`--inspect-links` mode are claim-bound diagnostics, not production settings.
+Fresh empty Volumes deliberately protect prior attempt data, so this is not
+proof of the failed Function's exact Volume-to-path binding. A symlink result
+does not authorize following the link, changing `mounted_io`, or training;
+a different result is also inconclusive because the diagnostic Function's
+Secret/access policy differs. Preserve all attempt and probe resources for
+later review.
+Live L40S probes of fresh Volumes returned `LINK` for all three roots under
+both `/mnt` and `/workspace`; changing the mount parent alone is not a fix.
+The metadata-only link probe returned `ABS_TARGET_OWNER_SELF` for all three
+`/mnt` roots. This observes an absolute directory target owned by the Function's
+effective UID with no group/world write mode bits; it does **not** authenticate
+the target against a Volume ID or prove safety against replacement, ACLs, or
+child-process pathname access. Do not follow the links or relax `mounted_io`
+from these observations. Exact raw-result matching requires canonicalizing
+repeated category string objects before pickle serialization; value equality
+alone is insufficient because pickle memoization can change the bytes.
+For a newly constructed App, pinned Modal 1.5.4 `Image.build(app)` requires an
+initialized app ID and fails before deployment. The probe instead performs a
+bounded read-only `ImageFromId` equality check before resource creation, then
+requires the deployed image handle to be hydrated with that exact ID before
+spawning. Never retry a consumed probe claim after a pre-deployment failure.
+
+The packaged training parent must explicitly hydrate the three exact mounted
+Volume identities and synchronously commit verified cache, artifact, then
+control writes before reporting success. Modal's `restrict_modal_access=True`
+blocks those internal Volume APIs; background or shutdown commits on v1 Volumes
+do not provide the same acknowledged order. New standalone training plans
+therefore set `restrict_modal_access=False` only for the trusted, signed training
+Function. This grants that parent broader Modal resource access and must be
+reviewed as a security policy choice. A compromised parent can reach other
+resources allowed by its Modal workspace; signed dispatch does not confine it
+after compromise. Prefer a dedicated least-privilege Modal environment/token
+where available. The offline trainer child receives a fresh credential-free
+environment, but its offline flags are not operating-system network isolation.
+The policy does not change the CPU self-check, exact Volume/Secret IDs, one-use
+dispatch, or artifact verification. Historical restricted plan/facts records
+remain parseable but are not a working recipe for this explicit-commit training path. A CPU receipt
+cannot prove this GPU-parent access boundary; only a fresh training call can.
+
+The first Qwen 3.5 4B smoke recipe selects `L40S` as a measured-rate but
+unqualified-fit candidate; `A100-80GB` remains a reviewed fallback. Both use
+the exact current scoped GPU rate key, and the operator estimate is not a
+provider billing cap. Do not infer 32K training fit from the local Docker dry
+smoke. The packaged image profile must advertise the same workload schema as
+`PACKAGED_SFT_WORKLOAD_SCHEMA`; the earlier `synaptic-sft-workload/v1` value
+disagreed with the packaged compiler and would fail public rich resolution
+before GPU start. Preserve that profile-to-compiler assertion in provider-free
+tests rather than overriding the profile value in a fake release alone.
+
+Model-first correction: training and chat are independent processes. For chat
+development, start from `examples/model_chat/README.md` and the checked-in
+`scripts/chat_model.py` command; do not rerun training to rebuild ephemeral host
+authority. Its current `--check` is provider-free and execution is model-first
+on an already available GPU runtime. The standalone Modal adapter is wired
+(`examples/model_chat/modal_launch.py`, below) with exact-instance cleanup and a
+provider timeout, and has one live success recorded in
+`docs/review/modal-chat-standalone-live.md`. This is not a claim of verified
+training provenance.
+
+Before any Modal chat attempt, prove the command locally with the checked-in
+`scripts/chat_model_local_docker.sh <attempt-name>`. It runs `scripts/chat_model.py`
+on a local GPU inside the exact `base_registry_reference` digest from the
+inference runtime lock, keeping results in a named Docker volume; see "Local
+proof on the reviewed inference image" in `examples/model_chat/README.md`. A
+local `CHAT_SAVED_AND_CLOSED` is not provider shutdown proof and does not
+qualify the Modal path.
+
+The checked-in Modal path for that command is `examples/model_chat/modal_launch.py`:
+one finite GPU Sandbox on the lock's image digest with the engine source mounted,
+`timeout = lifetime + startup_margin_seconds` and an equal `idle_timeout`, then
+`terminate` plus `Sandbox.from_id(...).poll()` as the only shutdown proof. Inputs are
+the unchanged chat JSON plus `examples/model_chat/modal-smoke-provider.json`; run
+`--check` first (provider-free). See "Modal proof in a finite-lifetime Sandbox" in
+`examples/model_chat/README.md`; the raw reply lands in Modal's log stream.
+
+The minimal consumer launcher emits fixed host chat phases and a bounded,
+non-authorizing failure record containing only allowlisted exception classes
+and relative source locations. Suppressed exception context is inspected without
+printing messages, locals, credential-derived data or raw tracebacks. Preserve
+the original failure if exact cleanup also fails; inspect its separate closed
+cleanup record. Save post-verification workflows by digest without rewriting the
+immutable submission-ownership row. Neither diagnostics nor a saved workflow
+authorize replay of a consumed attempt.
+
+Raw trainer stdout/stderr, tokens, provider responses, and exception text do not
+cross the remote contract. Persist closed status codes and redacted structured
+records. For a failed live smoke, collect the provider call status, Modal logs,
+operation-scoped Volume inventory, authenticated terminal/log records, exact
+source/deployment/runtime locks, and host lifecycle history before changing
+trainer hyperparameters.
+
+Provider/runtime failures should be fixed in the provider profile, runtime lock,
+deployment wrapper, or reusable engine contract. Model, dataset, tool schema,
+and training choices stay in host configuration; do not hardcode the current
+smoke into runtime code.
+
+## Minimal consumer request and replay adapters
+
+Deployment identity correction (2026-09-14): the Python-aligned attempt
+returned successfully from `App.deploy` and retained its acknowledgement, then
+failed the local definition-ID readback before any training submission. Both
+ordinary `Function.from_name` and current app layout omit that ID. The tested
+version-pinned lookup was unavailable; Modal documents it as a Team/Enterprise
+feature. Do not upgrade an account or accept an empty ID as verified identity.
+The consumer now uses bounded read-only exact-name/environment app metadata
+and exact-app layout, bracketing the layout with an unchanged deployed
+generation. Before/after deployment must advance exactly one generation;
+subsequent reads must preserve it, the app ID and the exact single private
+function without classes. Keep locally returned definition metadata distinct
+from these observed current-state facts. No list, history, source download,
+provider mutation or new client belongs in the read adapter. An ambiguous
+read cannot grant a retry or prove shutdown. Current-state verification is
+not version-pinned invocation and cannot remove an external administrator's
+race after the last check. See [Modal's version-pinned lookup guidance](https://modal.com/docs/guide/trigger-deployed-functions#version-pinned-lookups).
+
+Launcher compatibility correction (2026-09-14): the fixed deployment uses
+`serialized=True`. The failed attempts used host CPython 3.12.9 while the exact
+image metadata reported 3.11.14. These violate Modal's documented serialized
+Python compatibility requirement; they do not alone prove the server's precise
+rejection reason. Effectful `examples/modal_chat/launch.py` modes now require
+the packaged training lock's CPython implementation and exact version before
+credentials, private attempt storage or provisioning. Keep the image and trainer
+pins unchanged. Use a separate CPython 3.11.14 venv and install only
+`examples/modal_chat/requirements.lock` with `--no-deps --require-hashes
+--only-binary :all:`; the existing Python/uv setup commands are in the example
+README. This is host setup, not local training or Docker. Provider-free `check`
+mode remains available on other supported project interpreters. The consumer
+lock includes the 37-package remote launcher lock plus Requests and its two
+otherwise absent dependencies, needed by host chat imports. It leaves remote
+dependency/runtime pins unchanged. Source/runtime
+and live qualification gates still apply; version agreement is not proof of a
+successful deployment. See [Modal's serialized-function guidance](https://modal.com/docs/guide/jupyter-notebooks#known-issues).
+
+## Read-only training rate observation
+
+Use the named SDK profile explicitly when observing current training rates:
+
+```bash
+python -B examples/modal_chat/launch.py \
+  --project-root /absolute/consumer \
+  --configuration configuration/training.json \
+  --mode quote-training \
+  --modal-profile <name>
 ```
 
-With `modal run --detach` + `.spawn()`, the client exits on its own within
-seconds and there is never an in-flight input for a dying client to cancel.
-Completion is then observed out-of-band: `modal app logs` plus a DONE marker on
-the checkpoint Volume (see the crash-proof pattern below). Note Modal's caveat
-that detach keeps only the LAST triggered function alive -- one spawn per
-`modal run` invocation.
+This is a non-authorizing, read-only rate observation. It validates the local
+source, configuration, and prepared dataset before it reads only the selected
+existing environment and current workspace billing rates. It neither provisions
+nor deploys, accesses Secrets or Volumes, consumes attempt state, submits or
+spawns work, nor allocates a GPU. The estimate is GPU-only and explicitly lists
+excluded costs; it is not a billing cap or permission to train. Do not print
+profile credentials or any other secret material.
 
----
+For reproducibility, run it from a clean WSL/Linux CPython 3.11.14 environment
+with the hash-pinned launcher requirements. Preserve canonical configuration
+bytes exactly—host formatters must not rewrite them. Under WSL, keep the private
+prepared bundle on a POSIX filesystem with private modes.
 
-## Image setup gotchas
+Candidate launcher update (2026-09-14): the reusable consuming-layer
+`examples/modal_chat/launch.py` now composes explicit profile credentials,
+fresh resource provisioning and exact deployment ownership, real source
+resolution, public training start, and separately authorized chat. Its default
+mode is credential-free local checking. Explicit `qualify-training` records
+native authenticated training/artifact evidence while public capabilities are
+disabled; it does not invoke chat or require an inference image. `train-chat`
+refuses before cloud activity until observation/artifact capabilities are
+qualified. Keep one-shot claims, owned cleanup and source/quote checks intact.
+The consumer owns all example settings, identities, authorities and state.
 
-- **Clear a hijacking ENTRYPOINT.** Images that ship a process supervisor (the
-  Unsloth images run `supervisord`) will hijack the container and never run your
-  function. Reset the entrypoint when building the image:
-  `image = base_image.entrypoint([])`.
-- **Bake the hf_xet mitigation into the image env.** The `hf_xet` CAS backend
-  hangs without a timeout on multi-GB model pulls (see gotcha #5 in
-  `reference/runpod-jobs.md`); it is a `huggingface_hub` issue, not provider
-  specific, so Modal hits it too. Set both in the image env (or the function's
-  secrets):
+Prepared-input check update (2026-09-21): provider-free launcher admission now
+distinguishes an ordinary `project://` dataset file from a private
+content-addressed `prepared://sha256/` bundle. It verifies the latter's v1/v2
+publication and semantic digest, then checks the configured SFT controls before
+any provider action: v1 accepts raw-text controls and v2 requires `messages`.
+Do not replace this with a regular-file check on the bundle directory or defer a
+format mismatch until after provisioning.
 
-  ```python
-  image = image.env({
-      "HF_HUB_DISABLE_XET": "1",
-      "HF_HUB_ENABLE_HF_TRANSFER": "0",
-  })
-  ```
+Consumer deployment diagnostics retain only closed local phases and exception
+categories, bounded allowlisted traceback file/line locations, and known object
+IDs in the existing private catalog. Do not save raw exception messages, source
+lines, locals or credential material. Diagnostic records are non-authorizing:
+they neither grant a retry nor prove publication or provider shutdown. Preserve
+failed attempt claims and use exact scoped provider metadata to reconcile them.
 
----
+The workload bundle boundary accepts canonical finite JSON numbers because
+real SFT learning rates and dropout values are fractional. Only the typed
+workload member uses that parser; command/evidence parsers remain integer-only.
+Source-lock refresh after this correction invalidates prior inference-image
+admission for the updated source; rebuild and requalify before chat. The
+historical CPU capture does not qualify changed locked source.
 
-## Crash-proof long-run pattern
+Correction (2026-09-14, attempt D): deployment verification passed and the
+single submitted call reached the remote worker, then terminated with failure
+before source preparation. Exact-call Modal logs identified the worker's
+integer-only workload reparse. Use the same bounded finite-number workload
+parser in bundle admission, worker derivation/revalidation and inference
+workload/preparation reads. Keep all command and evidence parsers integer-only.
+Regression configuration must contain numeric learning rates and dropout;
+the earlier shared fixture's string rate did not exercise this boundary.
+This correction does not establish a successful training or chat run.
 
-Modal containers can die mid-run (preemption, OOM, node loss). A long job must be
-able to survive a container death and resume rather than restart from zero. The
-pattern that holds up:
+Correction (2026-09-14, attempt E): the worker passed workload admission and
+returned a terminal failed result with code 124. Its exact operation log
+recorded `model_preparation_failed`; retained source binds the cache to
+`/workspace/run/modal-chat-20260914-e/cache`, which the old runner incorrectly
+rejected for lacking a `run-` prefix. Bind this path to the authenticated
+execution source's exact run ID instead. This is not a Hub download error.
+The SDK's `FunctionCall.from_id` is also lazy: initialize it using the same
+explicit client before identity validation and polling. A missing identity
+before hydration must not make the host skip its wait and read unfinished
+terminal evidence. Only the exact SDK polling timeout establishes pending;
+errors or unknown state never authorize resubmission.
 
-1. **Write outputs to container-local disk first.** Fast, simple; the local disk
-   is scratch and disappears with the container.
-2. **Mirror to a `modal.Volume` on a background daemon thread.** A ~120s loop
-   copies new/changed output files into the mounted Volume and calls
-   `vol.commit()`. Catch and log every exception inside the loop -- a failed
-   mirror tick must NEVER kill the run.
-3. **Restore from the Volume before starting work.** At function entry, copy any
-   prior outputs back from the Volume onto local disk so the native script's own
-   resume logic engages (finds its last checkpoint / done markers and continues).
-4. **Let container death respawn and resume.** Decorate the function with retries
-   so a killed container comes back and re-enters step 3:
+Inference corrections (2026-09-14): for the pinned SDK, resolve the exact
+`Image.from_id` handle using `image.build(existing_app)`, then verify the
+returned handle, hydrated state and actual image ID before Sandbox creation.
+This particular loader performs only `ImageFromId`; it has no image build
+steps and does not call `ImageGetOrCreate`. The preset ID alone is not a
+provider observation. Keep private model-root descriptors open throughout
+preparation and inventory capture, rechecking their current path identities
+before and after capture. The old close-and-reopen check could miss inode
+reuse after directory replacement. These fixes require updated source locks
+and fresh CPU image qualification; they do not establish live chat success.
 
-   ```python
-   @app.function(retries=modal.Retries(max_retries=3, backoff_coefficient=1.0))
-   ```
+Correction (2026-09-14, attempt F): the pinned model loaded, but the first
+training forward pass failed in Triton's C helper compilation. Exact saved
+trainer diagnostics identified `collect2` failing to find `ld`. The consumer
+configured only `LANG`, while the offline child intentionally replaces its
+environment. Configure `PATH=/usr/bin:/bin` explicitly in the authenticated
+`runtime_environment`; do not inherit the operator or remote parent environment.
+A local credential-free compiler probe reproduced the missing-linker failure
+without PATH and succeeded with that exact PATH. This diagnoses the recorded
+failure, not a successful training run or verification of every remote tool.
 
-5. **Write a DONE marker at the very end.** A sentinel file (mirrored to the
-   Volume) lets a respawn distinguish "finished, nothing to do" from "died
-   partway, resume".
+Correction (2026-09-14, attempt G): `/usr/bin:/bin` is insufficient for the
+image as a whole. The same authenticated environment is applied to Image.env;
+G failed during FunctionCreate before submitting training. Scoped app readback
+matched the predeployment generation/layout, with G's function absent. Exact-ID
+metadata readback reported Python 3.11.14 for F's image but no Python version
+for G's image. Use `/opt/conda/bin:/usr/bin:/bin` for this pinned profile so both
+the configured interpreter and system linker are discoverable. This is a
+configuration correction, not permission to change Python/image pins or adopt
+G's resources. Modal requires Python and pip on the image PATH; see
+[existing-image requirements](https://modal.com/docs/guide/existing-images).
 
-The Volume is checkpoint/scratch space, not the system of record: the final
-result still has to land on the durable store (an HF staging repo) per the
-artifact contract in `reference/runpod-jobs.md`. A long run that produces a real
-model must opt into publishing it to the Hub -- the code default is off so a bare
-`modal run` cannot silently publish.
+Attempt F also exposed a delayed-read evidence defect: issuing a new timestamped
+Foundation assessment changes the binding retained at submission. Read paths
+must authenticate and reuse the exact retained assessment while freshly checking
+the actual Foundation record and provider evidence. Never relax binding equality
+or invent fresh submission authority to make a read succeed. The saved F
+diagnostics are non-authorizing; its launcher exited before qualification was
+retained, and later read-only diagnostics cannot replace its lost in-memory MAC
+authority. Preserve the attempt claim and the known failed call.
 
----
+Use the checked-in `examples/modal_chat/requests.py` bridge around an actual
+configured rich `TrainingService`; do not replace source resolution or recipe
+compilation with a planning test fixture. Allocate the run before resolving and
+retain the original request plus compiled coordinator material. Cached material
+must match the exact request, project, and allocated run, including when it is
+used to construct the request-scoped Modal preparation adapter.
 
-## When to prefer Modal vs RunPod
+`examples/modal_chat/replay.py` supplies the source/deployment replay port using
+the consumer's existing private SQLite catalogs. It retains each purpose and
+challenge forever and accepts repeat admission only for identical evidence.
+Authentication and freshness remain the production source finalizer's job.
+These consumer adapters do not activate provider capabilities or prove that a
+training job or chat session ran. Keep the composed host alive; the permanent
+attempt claim is not full coordinator restart recovery.
 
-- **RunPod wrapper lane** (`reference/runpod-jobs.md`): byte-pinned image + git
-  commit on a specific single-GPU class; the launcher owns pod teardown. Good for
-  reproducing a job that must match a known GPU exactly.
-- **Modal**: serverless elasticity, native retries/Volumes for crash recovery,
-  detached runs that survive the client. Good for long or bursty work, or a
-  different GPU class.
+## Runtime-lock maintenance
 
-Both lanes obey the same staging prerequisite and artifact contract (see
-`reference/runpod-jobs.md`): referenced repos exist on the Hub at pinned
-revisions before launch, and results land on the Hub as the durable record.
+For first-time inference commitment creation, use the checked-in offline
+`scripts/initialize_modal_inference_lock.py` with explicit `--accepted-evidence`,
+`--accepted-evidence-sha256`, `--base-registry-reference`, and
+`--additive-lock-sha256`. Paths are repository-relative. Default invocation
+only proposes resource digests; `--write` exclusively creates the three absent
+resources and refuses to overwrite any existing target. The accepted candidate,
+reviewed additive bytes, and source inventory must be reviewed before writing.
+The dependency resource is canonical build-provenance JSON, not a pip installer
+lock for packages already fixed by the base image digest. It records the exact
+additive installer bytes and full measured distribution map. Candidate and
+current additive hashes must agree; CRLF conversion is not permission to accept
+different bytes. This initializer targets the reviewed isolated CPython 3.12.13
+and Modal 1.5.4 profile and preserves the existing fixed 119-source inventory.
+It grants no runtime qualification: build a fresh wheel containing the resources,
+then run the concrete CPU image check and the separately authorized GPU/chat
+smoke. Do not run this standalone maintenance tool concurrently with serving;
+its parser validation temporarily redirects local module state and restores it.
+An interrupted exclusive write can leave a partial set; inspect that exact
+local set before recovery, never overwrite targets or automatically delete it.
+
+For the separate inference image, use `python3 scripts/regenerate_modal_inference_lock.py`
+to check already-reviewed inference locks, or add `--write` for an intentional
+source-content refresh and then rerun the check. This offline tool preserves
+the fixed 119-source inventory, dependency bytes, and runtime pins. It cannot
+initialize missing locks or qualify a CPU candidate for live chat. Run it only
+as a standalone maintenance process, never inside a serving process.
+The current inventory deliberately adds
+`tuner/execution/providers/modal/prepared_input.py` because the inference
+closure reaches it through `coordinator_bundle.py`. The maintenance contract
+checks every declared Python member's static local imports against the fixed
+inventory so a transitive local dependency cannot be omitted while a stale
+inventory still reports `CURRENT`.
+
+The two lock replacements are individually atomic but not transactional. If
+interrupted between replacements, verification and reruns fail closed; recover
+the reviewed consistent lock pair before retrying. Do not bypass validation.
+Local pathname/race checks are best effort, not hostile-storage guarantees.
+
+When a file already named by `modal-runtime-v1.lock.json` changes, verify the
+lock from the repository root:
+
+```bash
+python3 scripts/regenerate_modal_runtime_lock.py
+```
+
+The default is read-only and exits nonzero when a declared source hash is
+stale. `CURRENT` means only that the declared source hashes agree with
+the current canonical, policy-valid lock; it is not independent approval of
+the dependency, image, Python, SDK, or ML-stack pins. After reviewing the
+source change, refresh only those SHA-256 values and then verify again:
+
+```bash
+python3 scripts/regenerate_modal_runtime_lock.py --write
+python3 scripts/regenerate_modal_runtime_lock.py
+```
+
+The same check and `--write` also keep the checked-in token-profile example
+(`.skills/fine-tuning/configs/qwen35_4b_token_profile.yaml`) pinned to the lock's
+SHA-256: stale files are named on stderr, `--write` prints the changed paths, and
+only that example's `expected_lock_sha256` line is rewritten. Run
+`python3 .skills/scripts/sync_skill_trees.py` afterwards to refresh the skill mirrors.
+
+This is an offline local maintenance command. It does not contact Modal, load
+the provider SDK, resolve packages, inspect an image, or authenticate source or
+quote evidence. It preserves the exact reviewed inventory and preserves all
+non-hash fields supplied by the current policy-valid lock without approving
+them. Inventory or pin changes require a separate deliberate lock/schema
+review; never use this command to discover, add, remove, or redirect locked
+members. Its pathname and identity rechecks are
+best-effort protection for local maintenance races, not hostile-volume
+retained-directory-descriptor or compare-and-swap safety.
+
+Correction (2026-09-09): extraction of low-level worker ports and source-staging
+helpers deliberately expanded the lock, schema, runtime policy and maintenance
+inventory together from eight to ten files. The new members are `worker_ports.py`
+and `worker_source.py`; runtime/image/dependency/Python pins are unchanged.
+This is the currently composed worker's source lock, not qualification of the
+still-disabled Foundation worker. Its eventual production cutover must review
+and lock the new bootstrap path before enabling execution.
+
+Correction (2026-09-09, coordinator cutover): the reviewed declaration now has
+97 members. The bounded static import audit plus explicitly reviewed lazy
+imports covers 91 Python files and one resource. Three additional public API
+files (`context.py`, `execution.py`, `sources.py`) remain conservative integrity
+pins, and the launcher dependency lock and SFT entrypoint are separate runtime
+pins. The wrapper digest now identifies `coordinator_deployment.py`; removed
+legacy remote/producer files are not part of the new declaration. This audit is
+not arbitrary dynamic-import discovery or a live-runtime proof. The separate
+trainer closure still has 66 members: its old public rich-training module has
+been replaced by `tuner/training/contracts.py`, with reviewed importer hashes.

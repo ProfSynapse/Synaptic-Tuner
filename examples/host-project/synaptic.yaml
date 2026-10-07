@@ -1,0 +1,39 @@
+schema_version: synaptic-project/v1
+
+project:
+  id: example-research
+  name: Example Research Project
+
+engine:
+  requires: ">=1.0,<2.0"
+  api: v1
+
+paths:
+  configs: project://experiments
+  artifacts: project://.synaptic/artifacts
+  state: project://.synaptic/state
+  tracking: project://.synaptic/tracking
+  cache: project://.synaptic/cache
+  tmp: project://.synaptic/tmp
+
+configuration:
+  default_profile: default
+  profiles:
+    default:
+      - engine://configs/defaults.yaml
+      - project://experiments/defaults.yaml
+
+plugins:
+  search_paths:
+    - project://experiments/common
+  bindings: {}
+
+policies:
+  engine_writes: deny
+  source_writes: deny
+  external_paths: warn_local_deny_cloud
+  dirty_sources: deny_cloud
+  repository_schemes: [https, ssh]
+  repository_hosts: [github.com]
+  nested_submodules: true
+  max_submodule_depth: 4

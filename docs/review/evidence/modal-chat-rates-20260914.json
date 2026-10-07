@@ -1,0 +1,19 @@
+{
+  "schema_version": "synaptic-modal-chat-rate-observation/v1",
+  "observed_after_utc": "2026-09-14 13:36:30 UTC",
+  "source": "Modal SDK 1.5.4 billing rates CLI",
+  "modal_profile": "synaptic-labs",
+  "selected_usd_rates": {
+    "cpu_hour_cost": "0.04730",
+    "cpu_hour_cost_sandbox": "0.141900",
+    "gpu_hour_cost_a10g": "1.10000",
+    "mem_gib_hour_cost": "0.00800",
+    "mem_gib_hour_cost_sandbox": "0.024000",
+    "volume_storage_gib_month_cost": "0.09000"
+  },
+  "limitations": [
+    "Read-only selected workspace rate-card metadata, not a job quote or actual bill.",
+    "No environment or cloud object listing.",
+    "Any execution quote must read rates again at issuance."
+  ]
+}

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from shared.llm import create_client, LLMError
 from shared.llm.base import BaseLLMClient
@@ -19,7 +19,6 @@ from shared.cloud_stage_logging import stage_logger_from_env
 
 from .config import LMStudioSettings, OllamaSettings, OpenRouterSettings, OpenAIResponsesSettings, UnslothSettings
 from .protocols import BackendError, BackendResponse
-from .base_client import extract_message_content
 
 
 class SharedLLMAdapter:
@@ -37,6 +36,7 @@ class SharedLLMAdapter:
         settings: LMStudioSettings | OllamaSettings | OpenRouterSettings | OpenAIResponsesSettings,
         timeout: float = 60.0,
         retries: int = 2,
+        client: BaseLLMClient | None = None,
     ):
         """Initialize adapter with shared LLM client.
 
@@ -45,10 +45,17 @@ class SharedLLMAdapter:
             settings: Evaluator settings object
             timeout: HTTP request timeout (passed to shared client)
             retries: Number of retries (shared client handles internally)
+            client: A prebuilt shared client to adapt. When given, no client is
+                created and nothing is read from the environment; the reference
+                host uses this to inject a client built from a resolved SecretRef.
         """
         self.settings = settings
         self.timeout = timeout
         self.retries = retries
+
+        if client is not None:
+            self.client: BaseLLMClient = client
+            return
 
         # Create shared LLM client
         # Note: API keys/hosts come from environment
@@ -85,7 +92,7 @@ class SharedLLMAdapter:
             # the client's instance thinking_effort (set at construction from
             # settings.thinking_effort, the upstream #98 path), so no per-call
             # effort argument is needed here.
-            response_text = self.client.chat(
+            completion = self.client.chat(
                 messages=list(messages),
                 temperature=self.settings.temperature,
                 max_tokens=self.settings.max_tokens,
@@ -93,11 +100,12 @@ class SharedLLMAdapter:
 
             latency_s = time.perf_counter() - start
 
-            # Wrap in BackendResponse format
+            # Wrap in BackendResponse format; usage rides along when measured.
             return BackendResponse(
-                message=response_text,
-                raw={"content": response_text},  # Simplified raw format
-                latency_s=latency_s
+                message=completion.text,
+                raw={"content": completion.text},  # Simplified raw format
+                latency_s=latency_s,
+                usage=completion.usage,
             )
 
         except LLMError as e:
@@ -224,6 +232,7 @@ class SharedOpenRouterAdapter(SharedLLMAdapter):
         settings: OpenRouterSettings,
         timeout: float = 60.0,
         retries: int = 2,
+        client: BaseLLMClient | None = None,
     ):
         """Initialize OpenRouter adapter.
 
@@ -231,12 +240,14 @@ class SharedOpenRouterAdapter(SharedLLMAdapter):
             settings: OpenRouter settings
             timeout: Request timeout
             retries: Retry attempts
+            client: A prebuilt shared client (no environment read when given)
         """
         super().__init__(
             provider="openrouter",
             settings=settings,
             timeout=timeout,
-            retries=retries
+            retries=retries,
+            client=client,
         )
 
     @property
@@ -265,12 +276,14 @@ class SharedOpenAIResponsesAdapter(SharedLLMAdapter):
         settings: OpenAIResponsesSettings,
         timeout: float = 60.0,
         retries: int = 2,
+        client: BaseLLMClient | None = None,
     ):
         super().__init__(
             provider="openai_responses",
             settings=settings,
             timeout=timeout,
             retries=retries,
+            client=client,
         )
 
     @property
@@ -329,11 +342,12 @@ class SharedOpenAIResponsesAdapter(SharedLLMAdapter):
 
             # Serialize back to a string so $.content and $.content_json both
             # populate via build_response_view's string branch.
-            text = json.dumps(result)
+            text = json.dumps(result.value)
             return BackendResponse(
                 message=text,
-                raw={"content": text, "content_json": result},
+                raw={"content": text, "content_json": result.value},
                 latency_s=latency_s,
+                usage=result.usage,
             )
 
         except LLMError as e:
@@ -438,7 +452,7 @@ class SharedUnslothAdapter:
             start = time.perf_counter()
 
             # Use shared client's chat method
-            response_text = self.client.chat(
+            completion = self.client.chat(
                 messages=list(messages),
                 temperature=self.settings.temperature,
                 max_tokens=self.settings.max_tokens
@@ -447,12 +461,13 @@ class SharedUnslothAdapter:
             latency_s = time.perf_counter() - start
 
             return BackendResponse(
-                message=response_text,
+                message=completion.text,
                 raw={
-                    "content": response_text,
+                    "content": completion.text,
                     "model": self.settings.model,
                 },
-                latency_s=latency_s
+                latency_s=latency_s,
+                usage=completion.usage,
             )
 
         except LLMError as e:

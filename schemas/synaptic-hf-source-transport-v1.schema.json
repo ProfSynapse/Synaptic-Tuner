@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-hf-source-transport-v1.schema.json",
+  "title": "Synaptic Hugging Face source transport v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "profile", "provider", "source_lock", "capsule", "checkout_policy", "bundle", "volume"],
+  "properties": {
+    "schema_version": {"const": "synaptic-hf-source-transport/v1"},
+    "run_id": {"$ref": "#/$defs/segment"},
+    "profile": {"const": "C"},
+    "provider": {"const": "hf_jobs"},
+    "source_lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256", "path"],
+      "properties": {
+        "uri": {"$ref": "#/$defs/trackingUri"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "path": {"const": "source-lock.json"}
+      }
+    },
+    "capsule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_commit", "uri", "root", "manifest"],
+      "properties": {
+        "engine_commit": {"$ref": "#/$defs/commit"},
+        "uri": {"$ref": "#/$defs/trackingUri"},
+        "root": {"const": "capsule"},
+        "manifest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": {"const": "capsule/synaptic-bootstrap-capsule.json"},
+            "sha256": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    },
+    "checkout_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "path", "sha256"],
+      "properties": {
+        "uri": {"$ref": "#/$defs/trackingUri"},
+        "path": {"const": "checkout-policy.json"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "content_sha256"],
+      "properties": {
+        "uri": {"$ref": "#/$defs/trackingUri"},
+        "content_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "volume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "source", "path", "mount_path", "read_only"],
+      "properties": {
+        "type": {"const": "bucket"},
+        "source": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 255},
+        "path": {"$ref": "#/$defs/relativePath"},
+        "mount_path": {"const": "/workspace/synaptic-bootstrap-input"},
+        "read_only": {"const": true}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "commit": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+    "segment": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "relativePath": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "maxLength": 1024},
+    "trackingUri": {"type": "string", "pattern": "^tracking://[A-Za-z0-9][A-Za-z0-9._/-]*$", "maxLength": 2048}
+  }
+}

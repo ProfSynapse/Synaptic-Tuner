@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import json
 import shlex
-from argparse import Namespace
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.utilities.env import get_hf_token, load_env_file
-from tuner.cloud import decode_hf_job_label, load_huggingface_hub
+from tuner.cloud import RUNTIME_LAYOUT_SCHEMA, decode_hf_job_label, load_huggingface_hub
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
-from tuner.ui import BOX, confirm, print_config, print_error, print_header, print_info, print_success, print_table
+from tuner.ui import confirm, print_config, print_error, print_header, print_info, print_success, print_table
 
 
 class CloudJobsHandler(BaseHandler):
@@ -57,7 +56,19 @@ class CloudJobsHandler(BaseHandler):
         owner = getattr(job, "owner", None)
         created_at = getattr(job, "created_at", None)
         command = getattr(job, "command", None) or []
-        return {
+        labels = getattr(job, "labels", None) or {}
+        volumes = []
+        for volume in getattr(job, "volumes", None) or []:
+            volumes.append(
+                {
+                    "type": getattr(volume, "type", None),
+                    "source": getattr(volume, "source", None),
+                    "path": getattr(volume, "path", None),
+                    "mount_path": getattr(volume, "mount_path", None),
+                    "read_only": getattr(volume, "read_only", None),
+                }
+            )
+        normalized = {
             "id": getattr(job, "id", ""),
             "stage": getattr(status, "stage", None),
             "message": getattr(status, "message", None),
@@ -66,9 +77,19 @@ class CloudJobsHandler(BaseHandler):
             "image": getattr(job, "docker_image", None) or getattr(job, "space_id", None),
             "flavor": getattr(job, "flavor", None),
             "url": getattr(job, "url", None),
-            "labels": getattr(job, "labels", None) or {},
+            "labels": labels,
             "command": command,
+            "volumes": volumes,
         }
+        source_mode = labels.get("source_mode")
+        if source_mode in {"standalone", "superproject", "dual_clone"}:
+            normalized["source"] = {
+                "mode": source_mode,
+                "project_commit": labels.get("project_commit"),
+                "engine_commit": labels.get("engine_commit"),
+                "runtime_layout": labels.get("runtime_layout") or RUNTIME_LAYOUT_SCHEMA,
+            }
+        return normalized
 
     def _list_jobs(self, hub, token: str, namespace: Optional[str], limit: int) -> List[Dict[str, Any]]:
         jobs = hub.list_jobs(namespace=namespace, token=token)
@@ -111,8 +132,11 @@ class CloudJobsHandler(BaseHandler):
         )
         if bucket_id:
             bucket_id = decode_hf_job_label(str(bucket_id))
+            # Read labels emitted by the pre-=2F= encoding as well.
+            bucket_id = bucket_id.replace("..", "/")
         if prefix:
             prefix = decode_hf_job_label(str(prefix))
+            prefix = prefix.replace("..", "/")
         if bucket_id and prefix:
             return {"bucket_id": bucket_id.strip("/"), "prefix": prefix.strip("/")}
 

@@ -37,7 +37,7 @@ def main():
     print("-" * 30)
 
     try:
-        from unsloth import FastVisionModel
+        from unsloth import FastVisionModel  # noqa: F401  availability probe
         print("  FastVisionModel: AVAILABLE")
         print("  Supported models: Qwen-VL, LLaVA, Pixtral, PaliGemma")
     except ImportError as e:
@@ -50,7 +50,7 @@ def main():
     print("-" * 30)
 
     try:
-        from unsloth import FastLanguageModel
+        from unsloth import FastLanguageModel  # noqa: F401  availability probe
         print("  FastLanguageModel: AVAILABLE")
         print("  Supported models: Llama, Mistral, Qwen, Gemma, Phi, etc.")
     except ImportError as e:

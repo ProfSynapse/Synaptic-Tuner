@@ -1,0 +1,33 @@
+# Tool-call format registry fixture for dataset validator tests.
+# Same shape as SynthChat/config/tool_call_formats.yaml; the names are
+# deliberately unrelated to the bundled toy wrapper.
+
+formats:
+  # Wrapper format: every call goes through one wrapper function.
+  ticketed:
+    wrapper_name: dispatchAction
+    argument_fields:
+      required:
+        - ticketRef
+        - command
+      properties:
+        ticketRef: { type: string, minLength: 1 }
+        command: { type: string, minLength: 1 }
+    extra_argument_fields:
+      priority:
+        type: string
+        enum: [low, high]
+    argument_required: [ticketRef, command]
+    command_field: command
+    prompt_bound_fields:
+      ticketRef:
+        - pattern: 'ticket:\s*(\S+)'
+          in_tag: ticket_context
+        - pattern: 'linked:\s*(\S+)'
+          in_tag: linked_tickets
+
+  # Wrapper-less format: each tool is called directly.
+  direct:
+    wrapper_name: null
+    extra_argument_fields: {}
+    argument_required: []

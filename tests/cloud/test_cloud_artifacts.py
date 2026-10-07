@@ -1,6 +1,6 @@
 import subprocess
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -58,8 +58,11 @@ def test_resolve_repo_provenance_detached_head_leaves_branch_unset(_no_repo_env,
     assert branch is None  # "HEAD" is not a useful branch label
 
 
-def test_resolve_repo_provenance_non_git_returns_none(_no_repo_env, tmp_path):
+def test_resolve_repo_provenance_non_git_returns_none(_no_repo_env, tmp_path, monkeypatch):
     # A directory that is not a git repo and no env contract -> nothing to record.
+    # Stop git discovery at tmp_path so a pytest basetemp inside a checkout
+    # (the repository's scratch/ convention) cannot supply an enclosing repo.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     assert resolve_repo_provenance(tmp_path) == (None, None)
 
 
@@ -241,40 +244,116 @@ def test_sync_directory_to_hf_bucket_uses_resolved_bucket_id(tmp_path):
     ) in calls
 
 
+def _bucket_hub(*, version="1.27.0"):
+    """Fake hub modelling the documented Buckets and repository upload surfaces.
+
+    batch_bucket_files has the keyword-only signature that
+    tuner.cloud.hf_provider_adapter probes on the pinned client, and
+    upload_file rejects non-repository types the way create_commit does.
+    """
+    hub = ModuleType("huggingface_hub")
+    hub.__version__ = version
+    batches = []
+
+    def create_bucket(bucket_id, **kwargs):
+        return SimpleNamespace(bucket_id=f"test-user/{bucket_id.split('/')[-1]}")
+
+    def batch_bucket_files(bucket_id, *, add=None, copy=None, delete=None, token=None):
+        batches.append(
+            {"bucket_id": bucket_id, "add": add, "copy": copy, "delete": delete, "token": token}
+        )
+
+    class HfApi:
+        def __init__(self, token=None):
+            self.token = token
+
+        def upload_file(self, *, path_or_fileobj, path_in_repo, repo_id, repo_type=None, **kwargs):
+            if repo_type not in (None, "model", "dataset", "space"):
+                raise ValueError("Invalid repo type, must be one of [None, 'model', 'dataset', 'space']")
+            raise AssertionError("a bucket upload must not create a repository commit")
+
+    hub.create_bucket = create_bucket
+    hub.batch_bucket_files = batch_bucket_files
+    hub.HfApi = HfApi
+    return hub, batches
+
+
 def test_sync_file_to_hf_bucket_uses_resolved_bucket_id(tmp_path):
     local_file = tmp_path / "training.jsonl"
     local_file.write_text("{\"step\": 5}\n", encoding="utf-8")
+    hub, batches = _bucket_hub()
 
-    mock_hub = ModuleType("huggingface_hub")
-    calls = []
-
-    def create_bucket(bucket_id, **kwargs):
-        class BucketInfo:
-            pass
-
-        bucket = BucketInfo()
-        bucket.bucket_id = f"test-user/{bucket_id.split('/')[-1]}"
-        return bucket
-
-    def sync_bucket(src, dst, token=None):
-        calls.append((src, dst, token))
-
-    mock_hub.sync_bucket = sync_bucket
-    mock_hub.create_bucket = create_bucket
-
-    with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+    with patch.dict("sys.modules", {"huggingface_hub": hub}):
         sync_file_to_hf_bucket(
             local_file,
             "toolset-training-artifacts",
-            "runs/hf_jobs/sft/20260314_120000-abcdef12/logs/training.jsonl",
+            "/runs/hf_jobs/sft/20260314_120000-abcdef12/logs/training.jsonl/",
             token="hf_test_token",
         )
 
-    assert (
-        str(local_file.parent),
-        "hf://buckets/test-user/toolset-training-artifacts/runs/hf_jobs/sft/20260314_120000-abcdef12/logs",
-        "hf_test_token",
-    ) in calls
+    assert batches == [
+        {
+            "bucket_id": "test-user/toolset-training-artifacts",
+            "add": [
+                (
+                    str(local_file),
+                    "runs/hf_jobs/sft/20260314_120000-abcdef12/logs/training.jsonl",
+                )
+            ],
+            "copy": None,
+            "delete": None,
+            "token": "hf_test_token",
+        }
+    ]
+
+
+def test_sync_file_to_hf_bucket_never_treats_a_bucket_as_a_repository(tmp_path):
+    # Regression: upload_file(repo_type="bucket") is rejected by the Hub client
+    # for every release, so single-file bucket pushes could never succeed.
+    local_file = tmp_path / "metrics.json"
+    local_file.write_text("{}", encoding="utf-8")
+    hub, batches = _bucket_hub()
+
+    with patch.dict("sys.modules", {"huggingface_hub": hub}):
+        sync_file_to_hf_bucket(local_file, "test-user/artifacts", "metrics.json")
+
+    assert [batch["add"] for batch in batches] == [[(str(local_file), "metrics.json")]]
+
+
+def test_sync_file_to_hf_bucket_reports_an_installed_hub_without_buckets(tmp_path):
+    local_file = tmp_path / "metrics.json"
+    local_file.write_text("{}", encoding="utf-8")
+    hub, _ = _bucket_hub(version="0.36.2")
+    del hub.batch_bucket_files
+
+    with patch.dict("sys.modules", {"huggingface_hub": hub}):
+        with pytest.raises(RuntimeError) as caught:
+            sync_file_to_hf_bucket(local_file, "test-user/artifacts", "metrics.json")
+
+    message = str(caught.value)
+    assert "huggingface_hub 0.36.2 has no Buckets API (batch_bucket_files)" in message
+    assert "huggingface_hub==1.27.0" in message
+
+
+def test_sync_file_to_hf_bucket_wraps_upload_failures(tmp_path):
+    local_file = tmp_path / "metrics.json"
+    local_file.write_text("{}", encoding="utf-8")
+    hub, _ = _bucket_hub()
+
+    def denied(bucket_id, *, add=None, copy=None, delete=None, token=None):
+        raise PermissionError("permission denied")
+
+    hub.batch_bucket_files = denied
+    with patch.dict("sys.modules", {"huggingface_hub": hub}):
+        with pytest.raises(RuntimeError, match="HF bucket file upload failed for test-user/artifacts/metrics.json: permission denied"):
+            sync_file_to_hf_bucket(local_file, "test-user/artifacts", "metrics.json")
+
+
+def test_bucket_upload_qualification_matches_the_pinned_buckets_client():
+    from shared import cloud_artifacts
+    from tuner.cloud.hf_provider_adapter import PINNED_HF_HUB_VERSION
+
+    assert cloud_artifacts._QUALIFIED_HF_BUCKETS_HUB_VERSION == PINNED_HF_HUB_VERSION
 
 
 def test_sync_directory_to_hf_bucket_raises_real_sync_error(tmp_path):

@@ -46,6 +46,14 @@ class VLLMClient(OpenAICompatClient):
 
     settings: VLLMSettings  # Type narrowing for IDE support
 
+    def _build_payload(self, messages):
+        payload = super()._build_payload(messages)
+        for name in ("presence_penalty", "top_k", "min_p", "repetition_penalty"):
+            value = getattr(self.settings, name)
+            if value is not None:
+                payload[name] = value
+        return payload
+
     @property
     def _client_name(self) -> str:
         return "vLLM"

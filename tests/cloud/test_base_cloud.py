@@ -9,9 +9,6 @@ Covers:
 - get_gpu_display_name: known/unknown
 """
 
-import os
-import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,7 +19,6 @@ from tuner.backends.training.cloud.base_cloud import (
     get_gpu_display_name,
     load_cloud_config,
     load_named_image_profiles,
-    load_gpu_pricing,
     poll_until_done,
     resolve_repo_source,
     resolve_repo_url,
@@ -43,7 +39,6 @@ class TestLoadCloudConfig:
     def test_returns_cloud_section(self, cloud_config_path):
         result = load_cloud_config(cloud_config_path)
         assert "hf_jobs" in result
-        assert "modal" in result
         assert "runpod" in result
 
     def test_returns_empty_dict_on_malformed_yaml(self, tmp_path):
@@ -109,16 +104,104 @@ class TestResolveRepoUrl:
 
 
 class TestResolveRepoSource:
+    @staticmethod
+    def _canonical(repo_root, url="https://github.com/test/canonical.git"):
+        import subprocess
+
+        exclude = repo_root / ".git" / "info" / "exclude"
+        exclude.write_text(
+            exclude.read_text(encoding="utf-8") + "\n/origin.git/\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "config", "core.autocrlf", "false"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "add", "--renormalize", "."],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+        )
+        changed = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            cwd=repo_root,
+            capture_output=True,
+        ).returncode
+        if changed:
+            subprocess.run(
+                ["git", "commit", "-m", "Normalize hermetic cloud fixture"],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+            )
+        subprocess.run(
+            ["git", "remote", "set-url", "origin", url],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+        )
+        return lambda _location, _exact_ref, expected_head: expected_head
+
     def test_returns_exact_repo_metadata(self, repo_root, clean_env):
-        source = resolve_repo_source(repo_root)
+        proof = self._canonical(repo_root)
+        source = resolve_repo_source(repo_root, remote_proof=proof)
         assert source.branch == "main"
         assert source.commit
-        assert source.url.endswith("origin.git")
+        assert source.url == "https://github.com/test/canonical.git"
+        assert source.canonical_source is not None
 
     def test_uses_cloud_repo_url_override(self, repo_root, clean_env):
         clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/override.git")
-        source = resolve_repo_source(repo_root)
+        proof = self._canonical(repo_root, "https://github.com/test/override.git")
+        source = resolve_repo_source(repo_root, remote_proof=proof)
         assert source.url == "https://github.com/test/override.git"
+
+    def test_rejects_local_path_remote_for_paid_launch(self, repo_root, clean_env):
+        with pytest.raises(CloudProviderError, match="canonical identity"):
+            resolve_repo_source(repo_root, remote_proof=lambda *_args: True)
+
+    @pytest.mark.parametrize(
+        "unsafe_url",
+        [
+            "https://token-value@github.com/test/repo.git",
+            "https://github.com/test/repo.git?token=token-value",
+            "ext::sh -c token-value",
+            "file:///tmp/token-value.git",
+        ],
+    )
+    def test_rejects_unsafe_override_without_echoing_url(
+        self, repo_root, clean_env, unsafe_url
+    ):
+        clean_env.setenv("CLOUD_REPO_URL", unsafe_url)
+        with pytest.raises(CloudProviderError) as error:
+            resolve_repo_source(repo_root)
+        assert "token-value" not in str(error.value)
+
+    def test_rejects_unsafe_configured_remote_without_raw_fallback(self, repo_root, clean_env):
+        import subprocess
+
+        subprocess.run(
+            ["git", "remote", "set-url", "origin", "https://token-value@github.com/test/repo.git"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+        )
+        with pytest.raises(CloudProviderError) as error:
+            resolve_repo_source(repo_root)
+        assert "token-value" not in str(error.value)
+
+    def test_delegates_supported_remote_to_canonical_git_source(self, repo_root, clean_env):
+        proof = self._canonical(repo_root)
+        source = resolve_repo_source(
+            repo_root,
+            remote_proof=proof,
+        )
+        assert source.url == "https://github.com/test/canonical.git"
+        assert source.canonical_source is not None
+        assert source.canonical_source.commit == source.commit
 
     def test_rejects_detached_head(self, repo_root, clean_env):
         import subprocess
@@ -131,16 +214,18 @@ class TestResolveRepoSource:
             text=True,
         ).stdout.strip()
         subprocess.run(["git", "checkout", commit], cwd=repo_root, check=True, capture_output=True)
+        proof = self._canonical(repo_root)
 
         with pytest.raises(CloudProviderError, match="named git branch"):
-            resolve_repo_source(repo_root)
+            resolve_repo_source(repo_root, remote_proof=proof)
 
     def test_rejects_dirty_tracked_worktree(self, repo_root, clean_env):
+        proof = self._canonical(repo_root)
         config_path = repo_root / "Trainers" / "sft" / "configs" / "config.yaml"
         config_path.write_text(config_path.read_text() + "\n# dirty\n")
 
         with pytest.raises(CloudProviderError, match="clean tracked worktree"):
-            resolve_repo_source(repo_root)
+            resolve_repo_source(repo_root, remote_proof=proof)
 
     def test_rejects_unpushed_commit(self, repo_root, clean_env):
         import subprocess
@@ -154,9 +239,16 @@ class TestResolveRepoSource:
             check=True,
             capture_output=True,
         )
-
+        self._canonical(repo_root)
+        remote_head = subprocess.run(
+            ["git", "rev-parse", "origin/main"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
         with pytest.raises(CloudProviderError, match="exact commit to be pushed"):
-            resolve_repo_source(repo_root)
+            resolve_repo_source(repo_root, remote_proof=lambda *_args: remote_head)
 
     def test_handles_git_timeout(self, clean_env):
         import subprocess
@@ -283,14 +375,8 @@ class TestEstimateCost:
         assert result is None
 
     def test_zero_hours_returns_zero_cost(self):
-        result = estimate_cost("modal", "T4", 0.0)
+        result = estimate_cost("hf_jobs", "a10g-small", 0.0)
         assert result == "~$0.00"
-
-    def test_modal_gpu_pricing(self):
-        result = estimate_cost("modal", "H100", 2.0)
-        pricing = load_gpu_pricing()
-        expected = pricing["modal"]["H100"]["price"] * 2.0
-        assert result == f"~${expected:.2f}"
 
     def test_runpod_gpu_pricing(self):
         result = estimate_cost("runpod", "NVIDIA RTX A6000", 1.0)
@@ -315,7 +401,3 @@ class TestGetGpuDisplayName:
     def test_unknown_provider_returns_raw_type(self):
         name = get_gpu_display_name("nonexistent", "a10g-small")
         assert name == "a10g-small"
-
-    def test_modal_h100(self):
-        name = get_gpu_display_name("modal", "H100")
-        assert name == "H100 (80GB)"

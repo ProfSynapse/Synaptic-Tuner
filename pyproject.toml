@@ -1,0 +1,124 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synaptic-tuner"
+dynamic = ["version"]
+description = "Agentic-first toolkit for synthetic data, model training, evaluation, and deployment"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Synaptic Labs" }]
+dependencies = [
+  "PyYAML>=6,<7",
+  "jsonschema>=4.18,<5",
+  "packaging>=23,<27",
+  "python-dotenv>=1,<2",
+  "requests>=2.32,<3",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+modal = ["modal==1.5.4"]
+
+[project.scripts]
+synaptic = "tuner.cli.main:main"
+
+# Third-party distributions declare logical bindings in authoritative,
+# versioned groups such as `synaptic_tuner.plugins.renderer.v1`. Synaptic Tuner
+# itself intentionally ships no default project plug-ins.
+
+[tool.setuptools.dynamic]
+version = { attr = "synaptic_tuner._version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "tuner*",
+  "synaptic_tuner*",
+  "shared*",
+  "SynthChat*",
+  "Evaluator*",
+  "MechInterp*",
+  "Trainers*",
+]
+namespaces = true
+
+[tool.setuptools.package-data]
+"tuner.execution.providers.modal" = [
+  "modal-runtime-v1.lock.json",
+  "modal-wheel-builder.lock.json",
+  "inference-runtime.lock.json",
+  "inference-worker-closure.json",
+  "inference-dependencies.lock",
+]
+"tuner.runtime" = ["manifests/offline-sft-worker-v1.json", "manifests/packaged-training-worker-v1.json"]
+"Trainers.sft.configs" = ["config.yaml"]
+
+# The Modal runtime lock and exact packaged SFT default config ship as assets. Broader
+# runtime scripts, schemas, templates, containers, and configuration assets are
+# still source-tree assets pending the full publication inventory.
+
+# Lint: start with pyflakes (F) only; widen rule families deliberately later.
+# Formatting is intentionally not enforced.
+[tool.ruff]
+target-version = "py310"
+extend-exclude = [
+  "Datasets",                 # dataset artifacts and one-off data scripts
+  "scratch",                  # local scratch workspace
+  ".agents",                  # generated mirror of .skills/
+  ".claude",                  # generated mirror of .skills/ (and worktrees)
+  "Trainers/notebooks",       # Jupyter notebooks
+  "*.ipynb",
+]
+
+[tool.ruff.lint]
+select = ["F"]
+
+# Files below are members of hashed source inventories (modal-runtime-v1 lock,
+# Modal inference worker closure, offline SFT and packaged training worker
+# closures). Any byte change requires a reviewed hash refresh with the
+# scripts/regenerate_*.py tools, so their pre-existing findings are deferred
+# here. Fix each file and delete its entry at the next deliberate lock refresh
+# that covers it. Do not add new entries.
+[tool.ruff.lint.per-file-ignores]
+"Evaluator/config.py" = ["F401"]
+"Evaluator/enums.py" = ["F401"]
+"Trainers/sft/src/data_loader.py" = ["F541"]
+"Trainers/sft/src/model_loader.py" = ["F401", "F541"]
+"Trainers/shared/callbacks/checkpoints.py" = ["F541"]
+"Trainers/shared/callbacks/lr_schedules.py" = ["F541"]
+"shared/cloud_artifacts.py" = ["F401"]
+"shared/utilities/paths.py" = ["F401"]
+# F821: string annotations naming training_sources types (import cycle);
+# fix with an `if TYPE_CHECKING:` import.
+"synaptic_tuner/api/v1/training_facade.py" = ["F821"]
+"tuner/execution/coordinator_v1/foundation.py" = ["F401"]
+"tuner/execution/coordinator_v1/model.py" = ["F401"]
+"tuner/execution/coordinator_v1/ports.py" = ["F401"]
+"tuner/execution/providers/modal/contracts.py" = ["F401"]
+"tuner/execution/providers/modal/control.py" = ["F401"]
+"tuner/execution/providers/modal/coordinator_reader.py" = ["F401"]
+"tuner/execution/providers/modal/inference_channel.py" = ["F401"]
+"tuner/execution/providers/modal/manifest.py" = ["F403", "F405"]
+"tuner/execution/providers/modal/resolution.py" = ["F401"]
+"tuner/execution/providers/modal/runtime.py" = ["F401"]
+"tuner/execution/service.py" = ["F403", "F405"]
+"tuner/project/git_verification.py" = ["F401"]
+"tuner/runtime/packaged_sft_child.py" = ["F401"]
+"tuner/runtime/packaged_training_worker.py" = ["F401", "F841"]
+# F821: string return annotation for a lazily exported name; fix with an
+# `if TYPE_CHECKING:` import.
+"tuner/training/__init__.py" = ["F821"]
+# F822: names in __all__ are served by the module-level __getattr__; fix with
+# a targeted noqa.
+"tuner/training/contracts.py" = ["F822"]

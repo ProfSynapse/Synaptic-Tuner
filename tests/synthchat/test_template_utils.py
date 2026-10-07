@@ -1,7 +1,6 @@
 """Tests for SynthChat.template_utils — pure utility functions."""
 from __future__ import annotations
 
-import pytest
 from SynthChat.template_utils import (
     _clean_path,
     _deep_merge_dicts,

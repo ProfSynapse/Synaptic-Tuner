@@ -33,8 +33,6 @@ def _iter_records(paths: Iterable[Path]) -> Iterable[Tuple[Path, int, Dict[str, 
         with path.open("r", encoding="utf-8") as handle:
             for line_index, line in enumerate(handle):
                 row = json.loads(line)
-                if line_index == 0 and "_meta" in row:
-                    continue
                 metadata = row.get("metadata")
                 if not isinstance(metadata, dict):
                     continue

@@ -24,7 +24,11 @@ from Trainers.ml.pipeline_builder import build_pipeline
 logger = logging.getLogger(__name__)
 
 
-def main(config_path: str) -> Path:
+def main(
+    config_path: str,
+    *,
+    validated_config: TrainingConfig | None = None,
+) -> Path:
     """Run the full training pipeline.
 
     Steps:
@@ -43,9 +47,13 @@ def main(config_path: str) -> Path:
         Path to the output run directory.
     """
     # 1. Config
-    with open(config_path) as f:
-        raw_config = yaml.safe_load(f)
-    config = TrainingConfig(**raw_config)
+    if validated_config is None:
+        with open(config_path) as f:
+            raw_config = yaml.safe_load(f)
+        config = TrainingConfig(**raw_config)
+    else:
+        config = validated_config
+        raw_config = config.model_dump(mode="json")
     logger.info("Training: %s (%s)", config.task.name, config.task.type.value)
 
     # 2. Data

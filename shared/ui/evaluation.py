@@ -6,11 +6,11 @@ Real-time display of evaluation progress, results, and statistics.
 
 import time
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Any
 from threading import Event
 
 from .theme import COLORS, BOX
-from .console import console, RICH_AVAILABLE, clear_screen
+from .console import console, RICH_AVAILABLE
 
 
 @dataclass
@@ -421,7 +421,7 @@ def rich_evaluation_summary(
 
     # Overall summary panel
     summary_text = Text()
-    summary_text.append(f"\nEvaluated ", style="white")
+    summary_text.append("\nEvaluated ", style="white")
     summary_text.append(f"{stats['total']}", style=f"bold {COLORS['aqua']}")
     summary_text.append(" tests: ", style="white")
     summary_text.append(f"{stats['passed']} passed", style="bold green")
@@ -433,7 +433,7 @@ def rich_evaluation_summary(
     # Pass rate
     pass_rate = (stats['passed'] / stats['total'] * 100) if stats['total'] > 0 else 0
     rate_style = COLORS['aqua'] if pass_rate >= 90 else ("yellow" if pass_rate >= 70 else COLORS['orange'])
-    summary_text.append(f"Pass Rate: ", style="white")
+    summary_text.append("Pass Rate: ", style="white")
     summary_text.append(f"{pass_rate:.1f}%", style=f"bold {rate_style}")
 
     console.print(Panel(

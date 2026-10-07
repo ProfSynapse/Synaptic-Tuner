@@ -10,10 +10,12 @@ These tests prove:
 - The registry builds verifiers by spec and rejects unknown types.
 """
 
+import json
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -401,3 +403,46 @@ class TestRegistry:
         out = cv.verify(_sample("only a here"))
         assert out.score == pytest.approx(1.0)
         assert out.passed is True
+
+
+# ---------------------------------------------------------------------------
+# args_match builtin — mappings select the compared call fields
+# ---------------------------------------------------------------------------
+
+ARGS_MATCH_SPEC = ROOT / "tests" / "fixtures" / "verifiers" / "args_match_selected_fields.yaml"
+
+
+def _tool_call_text(name, arguments):
+    payload = json.dumps({"name": name, "arguments": arguments})
+    return f"<tool_call>\n{payload}\n</tool_call>"
+
+
+class TestArgsMatchSelectedFields:
+
+    def _verifier_and_truth(self):
+        spec = yaml.safe_load(ARGS_MATCH_SPEC.read_text(encoding="utf-8"))
+        params = spec["params"]
+        selected = next(m["gt_path"] for m in params["mappings"] if not m.get("use_tool_name"))
+        truth = {
+            params["gt_tool_field"]: "notes_read",
+            params["gt_args_field"]: {selected: "notes/a.md", "mode": "full"},
+        }
+        return build_verifier(spec), params, selected, truth
+
+    def test_unselected_call_fields_do_not_affect_score(self):
+        verifier, params, selected, truth = self._verifier_and_truth()
+        arguments = dict(truth[params["gt_args_field"]], mode="summary")
+
+        out = verifier.verify(_sample(_tool_call_text("notes_read", arguments), ground_truth=truth))
+
+        assert out.score == pytest.approx(1.0)
+        assert out.passed is True
+
+    def test_selected_call_field_mismatch_lowers_score(self):
+        verifier, params, selected, truth = self._verifier_and_truth()
+        arguments = dict(truth[params["gt_args_field"]], **{selected: "notes/b.md"})
+
+        out = verifier.verify(_sample(_tool_call_text("notes_read", arguments), ground_truth=truth))
+
+        assert out.score == pytest.approx(0.5)
+        assert out.passed is False

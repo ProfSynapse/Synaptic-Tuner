@@ -1,0 +1,294 @@
+"""Supported Synaptic Tuner API v1.
+
+Operational implementations are imported only when an operational export is
+requested. Training uses the generic planning/start facade; subsequent run
+operations use RunsAPI. Importing a contract module cannot therefore load
+``tuner.*``, a provider SDK, SQLite, or host code.
+"""
+
+from __future__ import annotations
+
+from importlib import import_module
+from typing import Any
+
+
+_LAZY_MODULE_ATTRIBUTES = {
+    "artifacts_facade": {
+        "ArtifactDestination", "ArtifactsAPI", "ArtifactsOperations",
+        "DestinationPage", "PublicationPage", "PublicationRef",
+        "PublicationRequest", "PublicationResult", "PublicationState",
+        "PublicationVerification",
+    },
+    "capabilities": {"CapabilityDescriptor"},
+    "context": {"PathRef", "ProjectContext"},
+    "evaluation_facade": {
+        "EvaluationAPI", "EvaluationListRequest", "EvaluationModelRef",
+        "EvaluationOperationCode", "EvaluationOperationError", "EvaluationOperations",
+        "EvaluationOutcome", "EvaluationPage", "EvaluationPlan", "EvaluationPreflight",
+        "EvaluationRequest", "EvaluationResult", "EvaluationResultRequest",
+        "EvaluationRunRef", "EvaluationRunState", "EvaluationStart",
+        "EvaluationVerdictCounts", "JudgeVerdict", "ScoreV1",
+    },
+    "data_facade": {
+        "DataAPI", "DataListRequest", "DataMode", "DataOperationCode", "DataOperationError",
+        "DataOperations", "DataOutcome", "DataPage", "DataPlan", "DataPreflight",
+        "DataRequest", "DataResult", "DataRunRef", "DataRunState", "DataScenarioOutcome",
+        "DataScenarioTarget", "DataStart", "DatasetDescriptor", "DatasetListRequest",
+        "DatasetPage", "DatasetValidateRequest", "ValidationFinding", "ValidationFindingCode",
+        "ValidationReport",
+    },
+    "ingestion_facade": {
+        "AuthorizedSourceRef", "BindingPreview", "FieldMapping", "FieldSelector", "FieldSelectorKind", "FieldValueKind",
+        "FrontmatterMode", "INGESTION_PLAN_SCHEMA_VERSION", "INGESTION_RESULT_SCHEMA_VERSION", "IngestionAPI", "IngestionDiagnosticCode", "IngestionListRequest", "IngestionObservation",
+        "IngestionObservationKind", "IngestionObservationPage", "IngestionObservationsRequest", "IngestionOperationCode",
+        "IngestionOperationError", "IngestionOperations", "IngestionOutcome", "IngestionPage", "IngestionPlan", "IngestionPreflight",
+        "IngestionPreview", "IngestionRequest", "IngestionResult", "IngestionRunRef", "IngestionRunState", "IngestionStart",
+        "IngestionVerification", "MarkdownProfileV1", "MetadataDeclaration", "MetadataPolicyRef", "NormalizedBundleRef",
+        "ParsingProfile", "ProposalEvidenceCode", "RelationshipDeclaration", "SchemaRef", "SourceAdmissionKind", "SourceAdmissionRequest",
+        "SourceMatcher", "SourceSnapshotRef", "StructureBinding", "StructureDefinition", "StructureProposal", "StructureProposalRequest",
+        "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest", "validate_ingestion_identity",
+    },
+    "pipelines_facade": {
+        "ADMITTED_STAGES", "PipelineEvaluateSpec", "PipelineListRequest", "PipelineOperationCode",
+        "PipelineOperationError", "PipelinePage", "PipelinePlan", "PipelineRecord", "PipelineRef",
+        "PipelineRequest", "PipelineStage", "PipelineStageName", "PipelineStart", "PipelineState",
+        "PipelineTrainSpec", "PipelinesAPI", "PipelinesOperations", "StageState",
+        "stage_attempt_key", "stage_input_digest",
+    },
+    "chat_facade": {
+        "ChatAPI", "ChatListRequest", "ChatModelIdentity", "ChatModelKind", "ChatModelSource",
+        "ChatOpenRequest", "ChatOperationCode", "ChatOperationError", "ChatOperations",
+        "ChatSession", "ChatSessionPage", "ChatSessionPolicyV1", "ChatSessionRef",
+        "ChatSessionState", "ChatTurn", "ChatTurnRef", "ChatTurnRequest",
+    },
+    "events": {"EventEnvelope", "ResultEnvelope"},
+    "execution": {
+        "ArtifactRef", "ArtifactState", "ErrorCode",
+        "ExecutionError", "ExecutionGrant", "PreparedTrainingInputIdentity",
+        "RunRef", "RunState", "RunStatus",
+    },
+    "host": {
+        "APIHost", "Clock", "EvidenceAuthenticator", "EvidenceReplayStore",
+        "GitRemoteReader", "GrantProvider", "HostPorts", "LifecycleRepository",
+        "SecretProvider",
+    },
+    "observations": {
+        "ChatTokenPayloadV1", "ChatTurnCompletedPayloadV1", "ChatTurnStartedPayloadV1",
+        "DataRowWrittenPayloadV1", "DataScenarioCompletedPayloadV1",
+        "DataStageGateEvaluatedPayloadV1", "EvaluationCaseScoredPayloadV1",
+        "EvaluationCaseStartedPayloadV1", "EvaluationStageCompletedPayloadV1",
+        "ObservationFamily", "ObservationKind", "ObservationPage", "ObservationRecordV1",
+        "ObservationStreamRef", "ObservationsRequest", "PipelineStageCompletedPayloadV1",
+        "PipelineStageStartedPayloadV1", "TrainingPhaseObservedPayloadV1",
+    },
+    "persistence": {
+        "AttemptAdmission", "AttemptDisposition", "AuthorizationMismatch",
+        "EffectCollision", "EffectDisposition", "EffectIdentity", "EffectKind",
+        "EffectObservation", "EffectRecord", "EffectState",
+        "EvidenceReplayRepository", "EventCode", "ExecutionScope", "GrantBinding",
+        "InvalidTransition", "LifecycleEvent", "LifecyclePhase", "LifecycleRecord",
+        "LifecycleRunPage", "MessageCode", "OperationBindingV1", "ReplayDisposition",
+        "RevisionConflict", "RunAlreadyExists", "RunNotFound", "VerificationStatus",
+        "apply_lifecycle_event",
+    },
+    "plugins": {"PluginBinding", "PluginContext"},
+    "planning": {"ResolvedTrainingRequest", "TrainingPlan"},
+    "ports": {
+        "ClockPort", "DurableRecordStorePort", "DurableStreamStorePort",
+        "GrantAuthorityPort", "SecretResolverPort", "StoragePartition", "StoredPageV1",
+        "StoredRecordV1", "StoredStreamEntryV1", "StoredStreamPageV1",
+    },
+    "providers": {"ProviderCapabilities", "ProviderDescriptor", "ProviderRef"},
+    "publication": {
+        "ArtifactDestinationRegistryPortV1", "ArtifactSpoolPortV1",
+        "AuthenticatedDestinationInventoryV1", "AuthenticatedDestinationV1",
+        "AuthenticatedLookupV1", "AuthenticatedPublicationReceiptV1",
+        "AuthenticatedPublicationTombstoneV1", "AuthenticatedVerifiedSourceV1",
+        "DestinationArtifactV1", "DestinationInventoryV1",
+        "DestinationPublicationPortV1", "EvidenceAuthorityPortV1", "LookupOutcomeV1",
+        "LookupRecoveryPermitV1", "MaterializedSourceV1", "PublicationCodeV1",
+        "PublicationErrorV1", "PublicationEventKindV1", "PublicationEventV1",
+        "PublicationOperationsV1", "PublicationPhaseV1", "PublicationRecordV1",
+        "PublicationStorePortV1", "PublicationTransitionKernelV1",
+        "RecoveryDecisionV1", "RecoveryDispositionV1",
+        "SpooledArtifactV1", "SpoolSinkPortV1", "StrongInMemoryPublicationStoreV1",
+        "TransferAdmissionV1", "TransferDispositionV1", "TransferOwnershipV1",
+        "VerifiedArtifactSourcePortV1",
+    },
+    "results": {"TrainingRunRef", "TrainingRunState", "VerifiedArtifact"},
+    "runs_facade": {
+        "RunArtifactRequest", "RunArtifactStream", "RunListRequest",
+        "RunLogEntry", "RunLogLevel", "RunLogPage", "RunLogsRequest",
+        "RunOperationCode", "RunOperationError", "RunOutcome", "RunPage",
+        "RunVerification", "RunsAPI", "RunsOperations",
+    },
+    "secrets": {"SecretRef"},
+    "sources": {
+        "AuthenticatedSourceEvidenceV1", "ExecutionSourceV1",
+        "GitCliLocalSourceInspector", "LocalSourceInspectionPort",
+        "PushedSourceVerificationPort", "SourceLock", "SourceLockBindingV1",
+        "SourceLockProvenanceViewV1", "validate_source_lock_provenance_v1",
+    },
+    "training_facade": {
+        "AuthorizationRequirement", "TrainingAPI", "TrainingOperations",
+        "TrainingPreflight", "TrainingRequest", "TrainingStart",
+    },
+    "training_input": {
+        "SFTTrainingHyperparametersV1", "TrainingArtifactRequirementsV1",
+        "TrainingDatasetInputV1", "TrainingDurationV1", "TrainingInputV1",
+        "TrainingMethodV1", "TrainingModelInputV1",
+    },
+    "training_input_loader": {
+        "LoadedTrainingInputContractV1", "TrainingInputContractCodeV1",
+        "TrainingInputContractErrorV1", "TrainingInputContractIdentityV1",
+        "load_training_input_contract_v1",
+    },
+    "training_sources": {
+        "LocalTrainingInputPathV1", "OneUseTrainingInputUploadV1",
+        "PreparedTrainingInputResultV1",
+        "PreparedTrainingInputV1", "RetainedPreparedTrainingInputSourceV1",
+        "TrainingInputSourceV1", "TrainingNormalizerConfigV1",
+        "TrainingPreparationConfigV1",
+    },
+    "usage": {"SpendRef", "UsageAvailability", "UsageRecordV1"},
+}
+
+_LAZY_ATTRIBUTES = {
+    name: module_name
+    for module_name, names in _LAZY_MODULE_ATTRIBUTES.items()
+    for name in names
+}
+
+_FORMAL_EXPORTS = (
+    "APIHost", "AttemptAdmission", "AttemptDisposition", "ArtifactDestination",
+    "ArtifactDestinationRegistryPortV1", "ArtifactRef",
+    "ArtifactSpoolPortV1", "ArtifactState", "ArtifactsAPI", "ArtifactsOperations",
+    "AuthenticatedDestinationInventoryV1", "AuthenticatedDestinationV1",
+    "AuthenticatedLookupV1", "AuthenticatedPublicationReceiptV1",
+    "AuthenticatedPublicationTombstoneV1", "AuthenticatedVerifiedSourceV1",
+    "AuthorizationRequirement",
+    "AuthorizationMismatch", "CapabilityDescriptor",
+    "ErrorCode", "EffectCollision", "EffectDisposition", "EffectIdentity", "EffectKind",
+    "EffectObservation", "EffectRecord", "EffectState", "EvidenceReplayRepository",
+    "EventEnvelope", "ExecutionError", "ExecutionGrant", "ExecutionScope",
+    "EvidenceAuthenticator", "EvidenceReplayStore", "Clock", "GitRemoteReader",
+    "GitCliLocalSourceInspector", "GrantProvider", "GrantBinding", "HostPorts",
+    "LifecycleRepository", "LifecycleEvent", "LifecyclePhase", "LifecycleRecord",
+    "LifecycleRunPage", "MessageCode", "DestinationArtifactV1",
+    "DestinationInventoryV1", "DestinationPage", "DestinationPublicationPortV1",
+    "EvidenceAuthorityPortV1", "LookupOutcomeV1", "LookupRecoveryPermitV1",
+    "MaterializedSourceV1", "PathRef", "PluginBinding", "PluginContext",
+    "OperationBindingV1", "ProjectContext", "ProviderCapabilities", "ProviderDescriptor", "ProviderRef",
+    "PublicationCodeV1", "PublicationErrorV1",
+    "PublicationEventKindV1", "PublicationEventV1", "PublicationOperationsV1",
+    "PublicationPage", "PublicationPhaseV1", "PublicationRecordV1", "PublicationRef",
+    "PublicationRequest", "PublicationResult", "PublicationState",
+    "PublicationStorePortV1", "PublicationTransitionKernelV1",
+    "PublicationVerification", "RecoveryDecisionV1",
+    "RecoveryDispositionV1", "ResolvedTrainingRequest",
+    "ResultEnvelope", "RunArtifactRequest",
+    "RunArtifactStream", "RunListRequest", "RunLogEntry", "RunLogLevel", "RunLogPage",
+    "RunLogsRequest", "RunOperationCode", "RunOperationError", "RunOutcome", "RunPage",
+    "RunRef", "RunAlreadyExists",
+    "RunNotFound", "RunState", "RunStatus", "RunVerification", "RunsAPI",
+    "RunsOperations", "ReplayDisposition", "RevisionConflict", "SecretRef",
+    "SecretProvider", "SourceLock", "SourceLockBindingV1",
+    "SourceLockProvenanceViewV1", "validate_source_lock_provenance_v1",
+    "AuthenticatedSourceEvidenceV1", "ExecutionSourceV1",
+    "LocalSourceInspectionPort", "PushedSourceVerificationPort", "TrainingAPI",
+    "TrainingOperations", "TrainingPlan", "TrainingPreflight", "TrainingRequest",
+    "TrainingRunRef", "TrainingRunState", "TrainingStart",
+    "TransferAdmissionV1", "TransferDispositionV1", "TransferOwnershipV1",
+    "VerificationStatus", "VerifiedArtifact", "VerifiedArtifactSourcePortV1",
+    "SpooledArtifactV1", "SpoolSinkPortV1", "StrongInMemoryPublicationStoreV1",
+    "InvalidTransition", "apply_lifecycle_event",
+    "SFTTrainingHyperparametersV1", "TrainingArtifactRequirementsV1",
+    "TrainingDatasetInputV1", "TrainingDurationV1", "TrainingInputV1",
+    "TrainingMethodV1", "TrainingModelInputV1",
+    "LoadedTrainingInputContractV1", "TrainingInputContractCodeV1",
+    "TrainingInputContractErrorV1", "TrainingInputContractIdentityV1",
+    "load_training_input_contract_v1",
+    "LocalTrainingInputPathV1", "OneUseTrainingInputUploadV1",
+    "PreparedTrainingInputIdentity", "PreparedTrainingInputResultV1",
+    "PreparedTrainingInputV1", "RetainedPreparedTrainingInputSourceV1",
+    "TrainingInputSourceV1", "TrainingNormalizerConfigV1",
+    "TrainingPreparationConfigV1",
+    "ObservationFamily", "ObservationKind", "ObservationStreamRef",
+    "ObservationRecordV1", "ObservationsRequest", "ObservationPage",
+    "TrainingPhaseObservedPayloadV1", "EvaluationCaseStartedPayloadV1",
+    "EvaluationCaseScoredPayloadV1", "EvaluationStageCompletedPayloadV1",
+    "ChatTurnStartedPayloadV1", "ChatTurnCompletedPayloadV1", "ChatTokenPayloadV1",
+    "DataRowWrittenPayloadV1", "DataStageGateEvaluatedPayloadV1",
+    "DataScenarioCompletedPayloadV1", "PipelineStageStartedPayloadV1",
+    "PipelineStageCompletedPayloadV1",
+    "UsageAvailability", "SpendRef", "UsageRecordV1",
+    "ClockPort", "SecretResolverPort", "GrantAuthorityPort",
+    "DurableRecordStorePort", "DurableStreamStorePort", "StoragePartition",
+    "StoredRecordV1", "StoredPageV1", "StoredStreamEntryV1", "StoredStreamPageV1",
+    "EvaluationAPI", "EvaluationListRequest", "EvaluationModelRef",
+    "EvaluationOperationCode", "EvaluationOperationError", "EvaluationOperations",
+    "EvaluationOutcome", "EvaluationPage", "EvaluationPlan", "EvaluationPreflight",
+    "EvaluationRequest", "EvaluationResult", "EvaluationResultRequest",
+    "EvaluationRunRef", "EvaluationRunState", "EvaluationStart",
+    "EvaluationVerdictCounts", "JudgeVerdict", "ScoreV1",
+    "DataAPI",
+    "DataListRequest",
+    "DataMode",
+    "DataOperationCode",
+    "DataOperationError",
+    "DataOperations",
+    "DataOutcome",
+    "DataPage",
+    "DataPlan",
+    "DataPreflight",
+    "DataRequest",
+    "DataResult",
+    "DataRunRef",
+    "DataRunState",
+    "DataScenarioOutcome",
+    "DataScenarioTarget",
+    "DataStart",
+    "DatasetDescriptor",
+    "DatasetListRequest",
+    "DatasetPage",
+    "DatasetValidateRequest",
+    "ValidationFinding",
+    "ValidationFindingCode",
+    "ValidationReport",
+    "ADMITTED_STAGES", "PipelineEvaluateSpec", "PipelineListRequest", "PipelineOperationCode",
+    "PipelineOperationError", "PipelinePage", "PipelinePlan", "PipelineRecord", "PipelineRef",
+    "PipelineRequest", "PipelineStage", "PipelineStageName", "PipelineStart", "PipelineState",
+    "PipelineTrainSpec", "PipelinesAPI", "PipelinesOperations", "StageState",
+    "stage_attempt_key", "stage_input_digest",
+    "ChatAPI", "ChatListRequest", "ChatModelIdentity", "ChatModelKind", "ChatModelSource",
+    "ChatOpenRequest", "ChatOperationCode", "ChatOperationError", "ChatOperations",
+    "ChatSession", "ChatSessionPage", "ChatSessionPolicyV1", "ChatSessionRef",
+    "ChatSessionState", "ChatTurn", "ChatTurnRef", "ChatTurnRequest",
+    "AuthorizedSourceRef", "BindingPreview", "FieldMapping", "FieldSelector", "FieldSelectorKind", "FieldValueKind",
+    "FrontmatterMode", "INGESTION_PLAN_SCHEMA_VERSION", "INGESTION_RESULT_SCHEMA_VERSION", "IngestionAPI", "IngestionDiagnosticCode", "IngestionListRequest", "IngestionObservation",
+    "IngestionObservationKind", "IngestionObservationPage", "IngestionObservationsRequest", "IngestionOperationCode",
+    "IngestionOperationError", "IngestionOperations", "IngestionOutcome", "IngestionPage", "IngestionPlan", "IngestionPreflight",
+    "IngestionPreview", "IngestionRequest", "IngestionResult", "IngestionRunRef", "IngestionRunState", "IngestionStart",
+    "IngestionVerification", "MarkdownProfileV1", "MetadataDeclaration", "MetadataPolicyRef", "NormalizedBundleRef",
+    "ParsingProfile", "ProposalEvidenceCode", "RelationshipDeclaration", "SchemaRef", "SourceAdmissionKind", "SourceAdmissionRequest",
+    "SourceMatcher", "SourceSnapshotRef", "StructureBinding", "StructureDefinition", "StructureProposal", "StructureProposalRequest",
+    "StructureRef", "StructureSet", "TextProjection", "UnitBoundary", "run_authority_digest", "validate_ingestion_identity",
+)
+
+if not set(_FORMAL_EXPORTS).issubset(_LAZY_ATTRIBUTES):  # pragma: no cover - module invariant
+    raise RuntimeError("formal API exports must all have an explicit lazy attribute binding")
+
+__all__ = list(_FORMAL_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _LAZY_ATTRIBUTES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.{module_name}"), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY_ATTRIBUTES))

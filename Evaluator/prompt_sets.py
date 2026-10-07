@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 from .config import PromptFilter
+from tuner.project import ProjectContext, resolve_path
 
 
 @dataclass
@@ -41,8 +42,25 @@ class PromptCase:
         return messages
 
 
-def load_prompt_cases(path: Path) -> List[PromptCase]:
+def load_prompt_cases(
+    path: Path | str,
+    *,
+    project_context: ProjectContext | None = None,
+    declaring_file: Path | None = None,
+    from_cli: bool = False,
+) -> List[PromptCase]:
     """Load prompt cases from a JSON or JSONL file."""
+    path = (
+        resolve_path(
+            path,
+            project_context,
+            declaring_file=declaring_file,
+            from_cli=from_cli,
+            access="read",
+        )
+        if project_context is not None
+        else Path(path)
+    )
     if path.suffix.lower() == ".jsonl":
         raw_cases = _load_jsonl(path)
     else:

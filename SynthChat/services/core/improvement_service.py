@@ -57,14 +57,14 @@ class ImprovementService:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
 
-            # Call LLM - shared.llm.chat() returns str directly
-            response = self.llm_client.chat(
+            # Call LLM - shared.llm chat() returns LLMCompletionV1
+            completion = self.llm_client.chat(
                 messages=messages,
                 temperature=self.scope_config.llm.improvement_temperature,
                 max_tokens=self.scope_config.llm.improvement_max_tokens
             )
 
-            return response if isinstance(response, str) else str(response)
+            return completion.text
 
         except Exception as e:
             self.logger.error(f"Improvement call error: {e}")

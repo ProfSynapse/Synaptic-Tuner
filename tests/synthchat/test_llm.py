@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 from SynthChat.llm.client_pool import LLMClientPool
 from SynthChat.llm.caller import call_llm, call_llm_structured
+from shared.llm.usage import LLMCompletionV1, LLMStructuredV1
 
 
 class _FakeClient:
@@ -25,10 +26,10 @@ class _FakeClient:
         return self._model_name
 
     def chat(self, messages, temperature=0.7, max_tokens=2048):
-        return "fake response"
+        return LLMCompletionV1("fake response")
 
     def structured_output(self, messages, schema, temperature=0.3, max_tokens=2048):
-        return {"result": "ok"}
+        return LLMStructuredV1({"result": "ok"})
 
 
 class _FailClient(_FakeClient):
@@ -176,8 +177,8 @@ class TestCallLlm:
                 nonlocal call_count
                 call_count += 1
                 if call_count < 2:
-                    return ""
-                return "ok"
+                    return LLMCompletionV1("")
+                return LLMCompletionV1("ok")
 
         result = call_llm(prompt="hello", default_client=EmptyThenOk(), randomize=False, max_retries=3)
         assert result == "ok"
@@ -220,7 +221,7 @@ class TestCallLlmStructured:
             model_name = "test"
             default_max_tokens = None
             def chat(self, **kwargs):
-                return '{"key": "value"}'
+                return LLMCompletionV1('{"key": "value"}')
 
         result = call_llm_structured(
             prompt="hello",
@@ -236,7 +237,7 @@ class TestCallLlmStructured:
             model_name = "test"
             default_max_tokens = None
             def chat(self, **kwargs):
-                return "not json at all"
+                return LLMCompletionV1("not json at all")
 
         with pytest.raises(ValueError, match="non-JSON"):
             call_llm_structured(
@@ -254,7 +255,7 @@ class TestCallLlmStructured:
             default_max_tokens = None
             def structured_output(self, messages, schema, **kwargs):
                 captured["messages"] = messages
-                return {"ok": True}
+                return LLMStructuredV1({"ok": True})
 
         call_llm_structured(
             prompt="question",

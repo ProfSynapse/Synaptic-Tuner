@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
-from .config import ConfigLoader, ScopeConfig
+from .config import ConfigLoader
 from .services.data import RubricRepository
 from .services.parsing import ConversationParser, ScopeExtractor
 from .utils import PromptRenderer
@@ -487,7 +487,6 @@ class ImprovementEngine:
         user_parts.extend(["**Assistant:**", "```", assistant_content or "(null)", "```"])
 
         # Include tool_calls if present (critical for tool-calling rubrics)
-        import json
         conversations = example.get("conversations", [])
         for conv in conversations:
             if conv.get("role") == "assistant" and "tool_calls" in conv:
@@ -701,9 +700,9 @@ class ImprovementEngine:
 
         # Log whether the example changed
         if improved_example == example:
-            self.logger.warning(f"    Improvement NOT applied - example unchanged")
+            self.logger.warning("    Improvement NOT applied - example unchanged")
         else:
-            self.logger.info(f"    Improvement applied successfully")
+            self.logger.info("    Improvement applied successfully")
 
         # Return example, prompts, content for logging
         return improved_example, user_prompt, improved_content, system_prompt

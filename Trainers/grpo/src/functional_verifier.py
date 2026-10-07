@@ -11,7 +11,6 @@ from shared.verifiers.extraction import extract
 from shared.verifiers.builtins.args_match import (
     compare_args_overlap,
     normalize_tool_call,
-    normalize_value,
 )
 
 logger = logging.getLogger(__name__)

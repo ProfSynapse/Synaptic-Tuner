@@ -1,6 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# These exact installer/provenance bytes are hashed into inference evidence.
+requirements/modal-inference-additions.lock text eol=lf
+tuner/execution/providers/modal/inference-dependencies.lock text eol=lf
+
 # Shell scripts must use LF
 *.sh text eol=lf
 *.bash text eol=lf
@@ -13,6 +17,14 @@
 *.yml text eol=lf
 *.json text eol=lf
 *.toml text eol=lf
+
+# Hash-bound launcher inputs must retain committed bytes on Windows
+requirements-hf-training-smoke.lock text eol=lf
+requirements/modal-launcher-v1.lock text eol=lf
+Datasets/tools_datasets/non_thinking/contentManager/smoke_tools_v2.5.jsonl text eol=lf
+
+# Ingestion fixture that must keep its BOM + CRLF bytes in the repository itself
+tests/fixtures/ingestion/markdown_v1/nested/beta.md -text
 
 # Windows scripts use CRLF
 *.ps1 text eol=crlf

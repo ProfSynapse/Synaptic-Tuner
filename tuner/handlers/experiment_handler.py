@@ -16,11 +16,11 @@ from shared.experiment_tracking import (
     load_experiment_spec,
 )
 from tuner.cloud.hardware_planner import StagePlan, plan_experiment_hardware
-from shared.utilities.env import load_env_file
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
 from tuner.handlers.stages import HFEvalStageRunner, HFLossStageRunner, HFTrainingStageRunner
 from tuner.ui import confirm, print_config, print_error, print_header, print_info, print_success
+from tuner.project import PathRef
 
 
 class ExperimentHandler(BaseHandler):
@@ -37,10 +37,20 @@ class ExperimentHandler(BaseHandler):
         spec_path = getattr(self.args, "experiment_spec", None) or getattr(self.args, "experiment_config", None)
         if not spec_path:
             raise CloudProviderError("run-experiment requires --experiment-spec <path>.")
-        path = Path(spec_path).expanduser().resolve()
+        if self.context.path_mode == "project_v1":
+            path = PathRef.parse(str(spec_path)).resolve(
+                self.context,
+                from_cli=True,
+                access="read",
+            )
+        else:
+            path = Path(spec_path).expanduser()
+            if not path.is_absolute():
+                path = self.context.invocation_cwd / path
+            path = path.resolve()
         if not path.exists():
             raise CloudProviderError(f"Experiment spec not found: {path}")
-        return load_experiment_spec(path), path
+        return load_experiment_spec(path, project_context=self.context), path
 
     def _print_plan(self, spec: ExperimentSpec) -> None:
         print_config(
@@ -114,7 +124,6 @@ class ExperimentHandler(BaseHandler):
         return spec, plans
 
     def handle(self) -> int:
-        load_env_file()
         hardware_plans: dict[str, StagePlan] = {}
         try:
             spec, spec_path = self._load_spec()
@@ -135,9 +144,13 @@ class ExperimentHandler(BaseHandler):
             print_error(str(exc))
             return 1
 
-        tracking_service = TrackingService(getattr(self.args, "base_dir", ".tracking"))
+        tracking_service = TrackingService(
+            getattr(self.args, "base_dir", None),
+            project_context=self.context,
+        )
+        spec_identity = spec.config_uri or str(spec_path)
         experiment = tracking_service.find_recoverable_experiment(
-            spec_path=str(spec_path),
+            spec_path=spec_identity,
             provider=spec.provider,
             method=spec.method,
         )
@@ -165,11 +178,12 @@ class ExperimentHandler(BaseHandler):
             training_runner=HFTrainingStageRunner(repo_root=self.repo_root, tracking_service=tracking_service),
             eval_runner=HFEvalStageRunner(repo_root=self.repo_root, tracking_service=tracking_service),
             loss_runner=HFLossStageRunner(repo_root=self.repo_root, tracking_service=tracking_service),
-            base_dir=getattr(self.args, "base_dir", ".tracking"),
+            base_dir=tracking_service.base_dir,
+            project_context=self.context,
         )
 
         try:
-            experiment = orchestrator.run(spec, spec_path=str(spec_path), experiment=experiment)
+            experiment = orchestrator.run(spec, spec_path=spec_identity, experiment=experiment)
         except Exception as exc:
             if self.json_mode:
                 self.output_error(str(exc), code="EXPERIMENT_RUN_ERROR")

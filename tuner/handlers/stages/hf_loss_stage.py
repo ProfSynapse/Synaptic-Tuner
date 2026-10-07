@@ -27,13 +27,18 @@ from tuner.cloud import (
     CloudJobSpec,
     HF_BUCKET_SYNC_OVERLAY_PACKAGES,
     HFJobExecutor,
-    RepoCheckoutSpec,
     build_bash_command,
     build_hf_job_secrets,
-    build_repo_checkout_steps,
     load_huggingface_hub,
 )
 from tuner.core.exceptions import CloudProviderError
+from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
+from tuner.project import ProjectContext
+from ._util import (
+    HFSourcePreparation,
+    hf_verified_source_steps,
+    load_tracked_hf_source_preparation,
+)
 
 
 class HFLossStageRunner:
@@ -49,29 +54,23 @@ class HFLossStageRunner:
         spec: ExperimentSpec,
         training_run: RunRecord,
         results_prefix: str,
+        source_preparation: HFSourcePreparation,
     ) -> str:
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
-        from tuner.backends.training.cloud.base_cloud import load_project_deps, resolve_repo_source
+        from tuner.backends.training.cloud.base_cloud import load_project_deps
 
         project_deps = load_project_deps(cloud_config_path)
-        repo_source = resolve_repo_source(self.repo_root)
-        checkout_steps = build_repo_checkout_steps(
-            RepoCheckoutSpec(
-                url=repo_source.url,
-                branch=repo_source.branch,
-                commit=repo_source.commit,
-            )
-        )
+        engine_root = source_preparation.remote_engine_root
 
         sync_deps = " ".join(shlex.quote(dep) for dep in HF_BUCKET_SYNC_OVERLAY_PACKAGES)
         parts = [
-            f"$(command -v python3 || command -v python) -m pip install --upgrade {' '.join(shlex.quote(dep) for dep in project_deps)}",
-            "mkdir -p /tmp/hf-bucket-sync-site",
-            f"$(command -v python3 || command -v python) -m pip install --upgrade --target /tmp/hf-bucket-sync-site {sync_deps}",
+            *hf_verified_source_steps(source_preparation),
+            f"cd {engine_root} && $(command -v python3 || command -v python) -m pip install --upgrade {' '.join(shlex.quote(dep) for dep in project_deps)}",
+            "mkdir -p /workspace/cache/hf-bucket-sync-site",
+            f"$(command -v python3 || command -v python) -m pip install --upgrade --target /workspace/cache/hf-bucket-sync-site {sync_deps}",
             "export HF_BUCKET_SYNC_PYTHON=$(command -v python3 || command -v python)",
-            "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site",
+            "export HF_BUCKET_SYNC_PYTHONPATH=/workspace/cache/hf-bucket-sync-site",
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
-            *checkout_steps,
         ]
         if spec.loss.pip_packages:
             parts.append(
@@ -92,13 +91,17 @@ class HFLossStageRunner:
             spec.dataset.file,
             "--results-prefix",
             results_prefix,
+            "--output-root",
+            "/workspace/artifacts/loss",
         ]
         max_seq_length = spec.loss.max_seq_length or spec.training.max_seq_length
         if max_seq_length is not None:
             loss_cmd.extend(["--max-seq-length", str(max_seq_length)])
         if not spec.loss.completion_only:
             loss_cmd.append("--no-completion-only")
-        parts.append("cd /workspace/repo && " + " ".join(shlex.quote(arg) for arg in loss_cmd))
+        parts.append("mkdir -p /workspace/artifacts/loss/results")
+        parts.append("cp -- /workspace/artifacts/source-lock.json /workspace/artifacts/loss/results/source-lock.json")
+        parts.append(f"cd {engine_root} && " + " ".join(shlex.quote(arg) for arg in loss_cmd))
         return " && ".join(parts)
 
     def _poll_job(self, huggingface_hub, *, job_id: str, timeout_hours: float) -> int:
@@ -287,9 +290,33 @@ class HFLossStageRunner:
         if not bucket_id or not artifact_prefix:
             raise CloudProviderError("Training stage did not capture the HF artifact prefix and bucket.")
 
-        huggingface_hub = load_huggingface_hub(require_apis=("run_job", "inspect_job", "fetch_job_logs"))
+        if not experiment.source_lock_uri or not experiment.source_lock_sha256:
+            raise CloudProviderError("Loss stage requires the training stage SourceLock identity.")
+        context = self.tracking_service.project_context or ProjectContext.standalone(engine_root=self.repo_root)
+        from tuner.backends.training.cloud.base_cloud import load_cloud_config
+        volume_settings = load_cloud_config(
+            self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        ).get("hf_jobs", {}).get("bootstrap_volume", {})
+        if not isinstance(volume_settings, dict):
+            raise CloudProviderError("hf_jobs.bootstrap_volume must be a mapping.")
+        source_preparation = load_tracked_hf_source_preparation(
+            context,
+            tracking_service=self.tracking_service,
+            experiment=experiment,
+            volume_settings=volume_settings,
+        )
+        require_current_hf_source_submission_authorization(route="stage.loss")
+        huggingface_hub = load_huggingface_hub(
+            require_apis=("run_job", "inspect_job", "fetch_job_logs", "Volume")
+        )
+        proven_volume = source_preparation.prove_volume(huggingface_hub)
         results_prefix = f"{artifact_prefix.strip('/')}/analysis/loss"
-        command = self._build_command(spec=spec, training_run=training_run, results_prefix=results_prefix)
+        command = self._build_command(
+            spec=spec,
+            training_run=training_run,
+            results_prefix=results_prefix,
+            source_preparation=source_preparation,
+        )
         timeout_hours = spec.loss.timeout_hours or spec.training.timeout_hours or 4.0
         flavor = spec.loss.gpu or spec.training.gpu or "a10g-small"
         image = spec.training.cloud_image or training_run.tags.get("image") or ""
@@ -310,6 +337,7 @@ class HFLossStageRunner:
                     "provider": "hf_jobs",
                     "experiment_id": experiment.experiment_id,
                 },
+                volumes=(proven_volume,),
             )
         )
         artifact_root = f"hf://buckets/{bucket_id}/{results_prefix}"

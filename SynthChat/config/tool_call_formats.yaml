@@ -33,6 +33,35 @@ formats:
     # Required top-level fields inside function.arguments
     argument_required: [sessionId, workspaceId, memory, goal, tool]
 
+    # Argument field holding the free-form CLI command string. Recovery of
+    # malformed wrapper JSON reads it up to the next declared field, and the
+    # environment executor expands it into concrete tool calls.
+    command_field: tool
+
+    # Backslash escapes decoded inside double-quoted arguments of the
+    # command_field CLI command string, on top of POSIX shell quoting (\" and
+    # \\). The CLI schema (cli-first-tool-schemas.json) tells models to write multi-line
+    # content with newline characters (\n); a literal backslash-n in the decoded
+    # command string is that same newline. Formats without this key keep plain
+    # POSIX quoting.
+    command_escapes:
+      n: "\n"
+      t: "\t"
+      r: "\r"
+
+    # Wrapper fields whose values the system prompt supplies. Each source is a
+    # regex with one capture group, optionally scoped to a prompt section tag;
+    # the dataset validator accepts a value only if some source yields it.
+    prompt_bound_fields:
+      sessionId:
+        - pattern: 'sessionId:\s*["'']([^"'']+)["'']'
+          in_tag: session_context
+      workspaceId:
+        - pattern: 'workspaceId:\s*["'']([^"'']+)["'']'
+          in_tag: session_context
+        - pattern: '\(id:\s*["'']([^"'']+)["'']\)'
+          in_tag: available_workspaces
+
     # LLM generation prompt lines (appended before the base prompt)
     generation_instructions:
       - "Return a single JSON object only."
@@ -49,17 +78,15 @@ formats:
       - "Use content as null when the response is tool-only."
       - "When the task is already complete, when clarification is needed, or when you are asked for a final confirmation, respond with text instead of calling tools."
 
-    # Instruction line for the available_tools section of workspace prompts
+    # Instruction line for the available_tools section of workspace prompts.
+    # {required_fields_csv} lists argument_required; a line naming it is
+    # omitted for a format that requires no fields.
     available_tools_instruction: >-
-      Required wrapper fields: {context_required_csv}.
+      Required wrapper fields: {required_fields_csv}.
 
   # -- Example: Plain OpenAI-style tool calls (no wrapper) --
   openai_native:
     wrapper_name: null  # No wrapper -- each tool gets its own tool_calls entry
-
-    context_fields:
-      required: []
-      properties: {}
 
     call_item: null  # Not used -- tools are called directly
 
@@ -84,11 +111,6 @@ formats:
   # -- Example: MCP-style tool calls --
   mcp_style:
     wrapper_name: use_mcp_tool
-
-    context_fields:
-      required: [server_name]
-      properties:
-        server_name: { type: string, minLength: 1 }
 
     call_item:
       properties:

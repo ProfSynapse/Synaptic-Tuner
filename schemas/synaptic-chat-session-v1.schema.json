@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-chat-session-v1.schema.json",
+  "title": "Synaptic Chat Session v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "ref", "state", "model", "run", "turns", "history_bytes", "policy", "diagnostic_code"
+  ],
+  "$defs": {
+    "text": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "revision": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+    "seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 86400}
+  },
+  "properties": {
+    "schema_version": {"const": "synaptic-chat-session/v1"},
+    "ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["session_id", "project_ref"],
+      "properties": {
+        "session_id": {"$ref": "#/$defs/text"},
+        "project_ref": {"$ref": "#/$defs/text"}
+      }
+    },
+    "state": {
+      "enum": ["opening", "ready", "serving", "closing", "closed", "cleanup_unresolved"]
+    },
+    "model": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["model_ref", "model_revision", "tokenizer_revision", "model_kind"],
+          "properties": {
+            "model_ref": {"$ref": "#/$defs/text"},
+            "model_revision": {"$ref": "#/$defs/revision"},
+            "tokenizer_revision": {"$ref": "#/$defs/revision"},
+            "model_kind": {"enum": ["full", "lora"]}
+          }
+        }
+      ]
+    },
+    "run": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["run_id", "project_ref"],
+          "properties": {
+            "run_id": {"$ref": "#/$defs/text"},
+            "project_ref": {"$ref": "#/$defs/text"}
+          }
+        }
+      ]
+    },
+    "turns": {"type": "integer", "minimum": 0, "maximum": 10000},
+    "history_bytes": {"type": "integer", "minimum": 0, "maximum": 67108864},
+    "policy": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "request_timeout_seconds", "idle_timeout_seconds", "absolute_lifetime_seconds",
+        "max_turns", "max_history_bytes"
+      ],
+      "properties": {
+        "request_timeout_seconds": {"$ref": "#/$defs/seconds"},
+        "idle_timeout_seconds": {"$ref": "#/$defs/seconds"},
+        "absolute_lifetime_seconds": {"$ref": "#/$defs/seconds"},
+        "max_turns": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "max_history_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864}
+      }
+    },
+    "diagnostic_code": {"type": ["string", "null"], "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"state": {"enum": ["opening", "ready", "serving", "closing"]}}},
+      "then": {"properties": {"diagnostic_code": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"state": {"const": "cleanup_unresolved"}}},
+      "then": {"properties": {"diagnostic_code": {"type": "string"}}}
+    },
+    {
+      "if": {"properties": {"model": {"type": "null"}}},
+      "then": {
+        "properties": {
+          "turns": {"const": 0},
+          "history_bytes": {"const": 0},
+          "state": {"enum": ["opening", "closed", "cleanup_unresolved"]}
+        }
+      }
+    }
+  ]
+}

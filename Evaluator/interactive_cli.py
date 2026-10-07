@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
@@ -30,13 +31,19 @@ from .config import (
 from .enums import BackendType
 from .client_factory import create_client
 from .vllm_client import VLLMClient
+from tuner.inference.vllm_runtime import (
+    ExplicitNetworkLoRA,
+    ExplicitNetworkVLLMSource,
+    VLLMStartupSpec,
+    start_vllm_runtime,
+)
 from .prompt_sets import load_prompt_cases
 from .reporting import build_run_payload, console_summary, render_markdown, write_json
 from .runner import evaluate_cases
+from tuner.project import ProjectContext, resolve_path
 
 # Import live dashboard and UI components
 try:
-    sys.path.insert(0, str(Path(__file__).parent.parent))
     from shared.ui import LiveEvaluationDashboard, RICH_AVAILABLE as _SHARED_RICH
     from .ui import rich_summary, rich_failure_details
     _DASHBOARD_AVAILABLE = True
@@ -76,9 +83,14 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: List[str] | None = None) -> int:
+def main(
+    argv: List[str] | None = None,
+    *,
+    project_context: ProjectContext | None = None,
+) -> int:
     """Main entry point for interactive CLI."""
     args = parse_args(argv or sys.argv[1:])
+    args.project_context = project_context
 
     print_banner("Model Evaluator", "Interactive CLI")
 
@@ -129,6 +141,21 @@ def _select_backend(preset: Optional[str]) -> Optional[BackendType]:
 # LM Studio Evaluation
 # ---------------------------------------------------------------------------
 
+def _resolve_input(value: str, args: argparse.Namespace) -> Path:
+    context = getattr(args, "project_context", None)
+    if context is None or value == str(DEFAULT_PROMPT_SET):
+        return expand_path(value)
+    return resolve_path(value, context, from_cli=True, access="read")
+
+
+def _resolve_output_dir(args: argparse.Namespace) -> Path:
+    context = getattr(args, "project_context", None)
+    if context is None:
+        return expand_path(args.output_dir)
+    if context.mode == "host" and args.output_dir == str(DEFAULT_RESULTS_DIR):
+        return context.artifact_root / "evaluations"
+    return resolve_path(args.output_dir, context, from_cli=True, access="write")
+
 def _run_lmstudio_evaluation(args: argparse.Namespace) -> int:
     """Run evaluation using LM Studio backend."""
     print(color("\n--- LM Studio Backend ---", "cyan"))
@@ -138,13 +165,13 @@ def _run_lmstudio_evaluation(args: argparse.Namespace) -> int:
 
     # Handle "Run All" option
     if isinstance(prompt_set_selection, list):
-        prompt_set_paths = [expand_path(p) for p in prompt_set_selection]
+        prompt_set_paths = [_resolve_input(p, args) for p in prompt_set_selection]
         run_all_suites = True
     else:
-        prompt_set_paths = [expand_path(prompt_set_selection)]
+        prompt_set_paths = [_resolve_input(prompt_set_selection, args)]
         run_all_suites = False
 
-    results_dir = expand_path(args.output_dir)
+    results_dir = _resolve_output_dir(args)
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # Validate prompt paths
@@ -213,8 +240,12 @@ def _run_vllm_evaluation(args: argparse.Namespace) -> int:
 
     print(color("\n--- vLLM Backend ---", "cyan"))
 
-    # Check vLLM status
-    status = vllm_setup.get_vllm_status()
+    settings_kwargs = build_settings_kwargs(args)
+    host = settings_kwargs.get("host", "127.0.0.1")
+    port = settings_kwargs.get("port", 8000)
+
+    # Probe the same endpoint that the client and owned runtime will use.
+    status = vllm_setup.get_vllm_status(host=host, port=port)
 
     # Display status
     print(f"\nvLLM installed: {color('Yes' if status.is_installed else 'No', 'green' if status.is_installed else 'red')}")
@@ -229,7 +260,7 @@ def _run_vllm_evaluation(args: argparse.Namespace) -> int:
         if not _prompt_install_vllm():
             return 1
         # Re-check status
-        status = vllm_setup.get_vllm_status()
+        status = vllm_setup.get_vllm_status(host=host, port=port)
         if not status.is_installed:
             print(color("vLLM installation failed.", "red"))
             return 1
@@ -245,13 +276,13 @@ def _run_vllm_evaluation(args: argparse.Namespace) -> int:
     prompt_set_selection = _select_prompt_set() if args.prompt_set == str(DEFAULT_PROMPT_SET) else args.prompt_set
 
     if isinstance(prompt_set_selection, list):
-        prompt_set_paths = [expand_path(p) for p in prompt_set_selection]
+        prompt_set_paths = [_resolve_input(p, args) for p in prompt_set_selection]
         run_all_suites = True
     else:
-        prompt_set_paths = [expand_path(prompt_set_selection)]
+        prompt_set_paths = [_resolve_input(prompt_set_selection, args)]
         run_all_suites = False
 
-    results_dir = expand_path(args.output_dir)
+    results_dir = _resolve_output_dir(args)
     results_dir.mkdir(parents=True, exist_ok=True)
 
     for prompt_path in prompt_set_paths:
@@ -266,50 +297,49 @@ def _run_vllm_evaluation(args: argparse.Namespace) -> int:
 
     run_count = args.runs if args.runs and args.runs > 0 else prompt_run_count()
 
-    # Start vLLM server if not already running
-    server_started = False
-    settings_kwargs = build_settings_kwargs(args)
-    host = settings_kwargs.get("host", "127.0.0.1")
-    port = settings_kwargs.get("port", 8000)
+    # Register ownership immediately, before settings/client construction can
+    # fail. An already-running external endpoint is never entered or stopped.
+    with ExitStack() as owned_runtime:
+        if not status.server_running:
+            requested_name = "finetuned" if lora_path else model_name
+            source = ExplicitNetworkVLLMSource(
+                model_ref=str(model_path),
+                lora=(
+                    ExplicitNetworkLoRA("finetuned", Path(lora_path).absolute())
+                    if lora_path else None
+                ),
+            )
+            spec = VLLMStartupSpec(
+                source=source,
+                served_model_name=requested_name,
+                host=host,
+                port=port,
+                gpu_memory_utilization=vllm_setup.DEFAULT_GPU_MEMORY_UTILIZATION,
+                tensor_parallel_size=vllm_setup.resolve_tensor_parallel_size(str(model_path)),
+                tokenizer_mode=vllm_setup.resolve_tokenizer_mode(str(model_path)),
+                startup_timeout_s=600,
+            )
+            runtime = start_vllm_runtime(
+                spec,
+                cwd=Path.cwd(),
+                environment=vllm_setup.network_runtime_environment(),
+            )
+            owned_runtime.enter_context(runtime)
+            model_name = runtime.served_model_name
+        else:
+            print(color(f"\nvLLM server already running at {status.server_url}", "green"))
 
-    if not status.server_running:
-        print(color(f"\nStarting vLLM server with model: {model_path}", "cyan"))
-
-        lora_modules = None
-        if lora_path:
-            lora_modules = {"finetuned": str(lora_path)}
-
-        if not vllm_setup.start_vllm_server(
-            model=str(model_path),
+        settings = VLLMSettings(
+            model=model_name,
             host=host,
             port=port,
-            lora_modules=lora_modules,
-            timeout=600,  # 10 minutes for model download + load
-            show_logs=True,
-        ):
-            print(color("Failed to start vLLM server.", "red"))
-            return 1
-        server_started = True
-
-        # Use LoRA adapter name if we loaded one
-        if lora_path:
-            model_name = "finetuned"
-    else:
-        print(color(f"\nvLLM server already running at {status.server_url}", "green"))
-
-    settings = VLLMSettings(
-        model=model_name,
-        host=host,
-        port=port,
-        temperature=0.2,
-        top_p=0.9,
-        max_tokens=1024,
-        model_path=str(model_path) if model_path else None,
-        lora_adapter=str(lora_path) if lora_path else None,
-    )
-    client = VLLMClient(settings=settings, timeout=args.timeout, retries=args.retries)
-
-    try:
+            temperature=0.2,
+            top_p=0.9,
+            max_tokens=1024,
+            model_path=str(model_path) if model_path else None,
+            lora_adapter=str(lora_path) if lora_path else None,
+        )
+        client = VLLMClient(settings=settings, timeout=args.timeout, retries=args.retries)
         return _run_evaluation_loop(
             client=client,
             settings=settings,
@@ -320,11 +350,6 @@ def _run_vllm_evaluation(args: argparse.Namespace) -> int:
             args=args,
             backend_name="vllm",
         )
-    finally:
-        # Stop server if we started it
-        if server_started:
-            print(color("\nStopping vLLM server...", "cyan"))
-            vllm_setup.stop_vllm_server()
 
 
 def _prompt_install_vllm() -> bool:
@@ -408,7 +433,9 @@ def _select_vllm_model(
             print(f"Could not list models: {e}")
 
     # Discover training runs
-    training_runs = vllm_setup.discover_training_runs()
+    training_runs = vllm_setup.discover_training_runs(
+        project_context=getattr(args, "project_context", None)
+    )
 
     print(color("\nSelect model source:", "magenta"))
     print(f"{color('[1]', 'yellow')} Training output (local fine-tuned model)")

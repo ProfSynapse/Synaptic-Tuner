@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import List, Dict
 
 from tuner.core.config import CheckpointInfo
+from tuner.project import ProjectContext
 
 
 class CheckpointDiscovery:
@@ -115,7 +116,9 @@ class CheckpointDiscovery:
         return metrics
 
     @staticmethod
-    def discover(run_dir: Path) -> List[CheckpointInfo]:
+    def discover(
+        run_dir: Path, *, context: ProjectContext | None = None
+    ) -> List[CheckpointInfo]:
         """
         Discover all checkpoints in a training run.
 
@@ -159,6 +162,13 @@ class CheckpointDiscovery:
             └── logs/
                 └── training_*.jsonl   <- Metrics source
         """
+        run_dir = run_dir.resolve(strict=False)
+        if context is not None and context.mode == "host":
+            allowed = (context.artifact_root, context.tracking_root)
+            if not any(run_dir.is_relative_to(root.resolve(strict=False)) for root in allowed):
+                raise ValueError(
+                    f"Training run is outside host artifact/tracking roots: {run_dir}"
+                )
         checkpoints = []
 
         # Load metrics from logs

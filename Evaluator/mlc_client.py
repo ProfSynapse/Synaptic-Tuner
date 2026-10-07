@@ -15,10 +15,7 @@ from __future__ import annotations
 import atexit
 import json
 import os
-import pathlib
-import signal
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Mapping, Optional, Sequence

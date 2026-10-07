@@ -9,7 +9,6 @@ virtualenv on top of the Unsloth Docker image.
 from __future__ import annotations
 
 import argparse
-import inspect
 import json
 import os
 import sys
@@ -32,6 +31,118 @@ from src.env_rewards import build_env_reward_function
 from src.env_rollout import build_prompt_registry, build_rollout_func
 from src.env_runtime import build_cloud_bootstrap_commands, detect_openenv_runtime_support
 from src.training_callbacks import DASHBOARD_AVAILABLE, RICH_AVAILABLE, LiveDashboardCallback, MetricsTableCallback
+from shared.training_utils import build_trainer_config, reject_unknown_config_keys
+
+
+# Every YAML key this entrypoint and its env modules read. load_config refuses
+# any other key so a typo cannot silently fall back to a default. Schema literal
+# (see shared/training_utils.py): ``None`` is a leaf whose value is not walked,
+# ``{...}`` a closed section. Readers outside this file: ``env_training`` rollout
+# keys in src/env_rollout.py, ``env_training.runtime`` in src/env_runtime.py,
+# ``env_training.prompt_augmentation`` in src/env_dataset.py, and ``rewards`` in
+# src/env_rewards.py. tests/trainers/grpo/test_grpo_config_keys.py fails if this
+# drifts from the keys the code reads.
+ENV_GRPO_CONFIG_SCHEMA = {
+    "model": {"model_name": None},
+    "dataset": {
+        "dataset_name": None,
+        "dataset_file": None,
+        "local_file": None,
+        "num_proc": None,
+    },
+    "training": {
+        "output_dir": None,
+        "per_device_train_batch_size": None,
+        "gradient_accumulation_steps": None,
+        "num_generations": None,
+        "max_prompt_length": None,
+        "max_completion_length": None,
+        "temperature": None,
+        "learning_rate": None,
+        "weight_decay": None,
+        "warmup_ratio": None,
+        "lr_scheduler_type": None,
+        "num_train_epochs": None,
+        "max_steps": None,
+        "beta": None,
+        "logging_steps": None,
+        "save_steps": None,
+        "save_total_limit": None,
+        "report_to": None,
+        "fp16": None,
+        "bf16": None,
+        "optim": None,
+        "use_vllm": None,
+        "vllm_mode": None,
+        "extra_args": None,
+    },
+    "lora": {
+        "enabled": None,
+        "r": None,
+        "lora_alpha": None,
+        "lora_dropout": None,
+        "bias": None,
+        "task_type": None,
+        "target_modules": None,
+    },
+    "env_training": {
+        "require_environment_passed": None,
+        "require_environment_config": None,
+        "required_stage_reviews": None,
+        "debug_rollouts_path": None,
+        "allow_transformers_rollout_func": None,
+        "prompt_augmentation": {"system_append": None, "insert_if_missing": None},
+        "env_backend": None,
+        "max_turns": None,
+        "max_tool_steps": None,
+        "stop_on_text_response": None,
+        "stop_on_environment_pass": None,
+        "require_final_text_after_pass": None,
+        "final_text_prompt": None,
+        "continue_on_execution_error": None,
+        "tool_result_format": None,
+        "token_faithful": None,
+        "context_token_policy": None,
+        "runtime": {
+            "repo_root_in_container": None,
+            "isolated_venv_dir": None,
+            "local_venv_dir": None,
+            "project_pip_deps": None,
+            "python_packages": None,
+        },
+    },
+    "seed": None,
+    "rewards": {
+        "success_reward": None,
+        "failure_penalty": None,
+        "step_penalty": None,
+        "max_tool_steps_penalty": None,
+        "text_before_completion_penalty": None,
+        "require_final_text_satisfied": None,
+        "final_text_failure_penalty": None,
+        "no_tool_call_penalty": None,
+        "tool_call_parse_reward": None,
+        "expected_tool_reward": None,
+        "expected_tool_order_reward": None,
+        "final_text_satisfied_reward": None,
+        "max_progress_reward": None,
+        "tool_text_mix_penalty": None,
+        "placeholder_path_penalty": None,
+        "invalid_wrapper_arg_penalty": None,
+        "tool_status_rewards": None,
+        "environment_issue_penalties": None,
+        "wrapper_name": None,
+        "wrapper_cli_field": None,
+        "placeholder_patterns": None,
+    },
+}
+
+# Internal GRPOConfig defaults whose acceptance depends on the installed TRL.
+# Only these may be omitted when unsupported, and only when the YAML did not set
+# them (a YAML-set value is always refused if unsupported):
+#   max_prompt_length - removed from GRPOConfig in trl 0.28 (present in 0.24);
+#                       older isolated runtimes still apply the 4096 default.
+_VERSION_DEPENDENT_GRPO_DEFAULTS = frozenset({"max_prompt_length"})
 
 
 def build_grpo_trainer_class(*, allow_transformers_rollout_func: bool):
@@ -65,6 +176,7 @@ def load_config(config_path: str | None = None) -> Dict[str, Any]:
         config_path = str(Path(__file__).parent / "configs" / "env_config.yaml")
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
+    reject_unknown_config_keys(ENV_GRPO_CONFIG_SCHEMA, config, source=str(config_path))
     config["_config_path"] = str(Path(config_path).resolve())
     return config
 
@@ -89,7 +201,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=None, help="Override training.learning_rate")
     parser.add_argument("--num-epochs", type=int, default=None, help="Override training.num_train_epochs")
     parser.add_argument("--max-steps", type=int, default=None, help="Override training.max_steps")
-    parser.add_argument("--max-seq-length", type=int, default=None, help="Override model.max_seq_length")
+    parser.add_argument("--save-steps", type=int, default=None, help="Override training.save_steps")
+    parser.add_argument("--save-total-limit", type=int, default=None, help="Override training.save_total_limit")
+    parser.add_argument("--seed", type=int, default=None, help="Override seed (GRPOConfig.seed)")
     return parser.parse_args(argv)
 
 
@@ -120,8 +234,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         training_cfg["num_train_epochs"] = args.num_epochs
     if args.max_steps is not None:
         training_cfg["max_steps"] = args.max_steps
-    if args.max_seq_length is not None:
-        model_cfg["max_seq_length"] = args.max_seq_length
+    if args.save_steps is not None:
+        training_cfg["save_steps"] = args.save_steps
+    if args.save_total_limit is not None:
+        training_cfg["save_total_limit"] = args.save_total_limit
+    if args.seed is not None:
+        config["seed"] = args.seed
 
     if args.print_cloud_bootstrap:
         runtime_cfg = ((config.get("env_training") or {}).get("runtime") or {})
@@ -289,9 +407,25 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         "use_vllm": bool(training_cfg.get("use_vllm", False)),
         "vllm_mode": str(training_cfg.get("vllm_mode", "colocate")),
     }
-    grpo_kwargs.update(dict(training_cfg.get("extra_args") or {}))
-    allowed_grpo_args = set(inspect.signature(GRPOConfig.__init__).parameters) - {"self"}
-    grpo_args = GRPOConfig(**{k: v for k, v in grpo_kwargs.items() if k in allowed_grpo_args})
+    if config.get("seed") is not None:
+        # GRPOConfig.seed drives transformers.set_seed for the whole run.
+        grpo_kwargs["seed"] = int(config["seed"])
+    # Arguments the YAML (or a CLI override written into it) set; any of these
+    # the installed GRPOConfig rejects raises instead of being dropped.
+    grpo_origins = {name: f"training.{name}" for name in grpo_kwargs if name in training_cfg}
+    if "seed" in grpo_kwargs:
+        grpo_origins["seed"] = "seed"
+    extra_args = training_cfg.get("extra_args") or {}
+    if not isinstance(extra_args, dict):
+        raise TypeError("training.extra_args must be a mapping/dict")
+    grpo_kwargs.update(extra_args)
+    grpo_origins.update({name: f"training.extra_args.{name}" for name in extra_args})
+    grpo_args = build_trainer_config(
+        GRPOConfig,
+        grpo_kwargs,
+        origins=grpo_origins,
+        version_dependent_defaults=_VERSION_DEPENDENT_GRPO_DEFAULTS,
+    )
 
     use_dashboard = DASHBOARD_AVAILABLE and RICH_AVAILABLE
     if use_dashboard:

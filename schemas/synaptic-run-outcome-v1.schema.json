@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-run-outcome-v1.schema.json",
+  "title": "Synaptic Run Outcome v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run", "state", "artifacts", "diagnostic_code"],
+  "properties": {
+    "schema_version": {"const": "synaptic-run-outcome/v1"},
+    "run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_id", "project_ref"],
+      "properties": {
+        "run_id": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+        "project_ref": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"}
+      }
+    },
+    "state": {"enum": ["planned", "queued", "running", "succeeded", "failed", "cancel_requested", "cancelled", "reconcile_required"]},
+    "artifacts": {
+      "type": "object",
+      "propertyNames": {"pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sha256", "size_bytes"],
+        "properties": {
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "size_bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "diagnostic_code": {"type": ["string", "null"], "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"}
+  }
+}

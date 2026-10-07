@@ -1,5 +1,3 @@
-import json
-import logging
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +5,8 @@ from types import SimpleNamespace
 import pytest
 import pandas as pd
 
-from shared.experiment_tracking.experiment import Experiment, save_experiment
+from shared.experiment_tracking import TrackingService
+from shared.experiment_tracking.experiment import Experiment
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _SPEC = spec_from_file_location("compare_runs", REPO_ROOT / "Tools" / "compare_runs.py")
@@ -56,7 +55,7 @@ def test_compare_runs_basic(tmp_path, fake_base_losses_path, sample_losses_a_pat
     # So `experiment.base_losses_path` should be `.tracking/experiments/exp_1/base_losses.jsonl`
     
     exp.base_losses_path = ".tracking/experiments/exp_1/base_losses.jsonl"
-    save_experiment(exp, str(base_dir))
+    TrackingService(base_dir).save_experiment(exp)
     
     args = SimpleNamespace(
         experiment_id="exp_1",
@@ -107,7 +106,7 @@ def test_single_run_features(tmp_path, fake_base_losses_path, sample_losses_a_pa
         run_ids=["run_A"],
     )
     exp.base_losses_path = ".tracking/experiments/exp_1/base_losses.jsonl"
-    save_experiment(exp, str(base_dir))
+    TrackingService(base_dir).save_experiment(exp)
     
     args = SimpleNamespace(experiment_id="exp_1", base_dir=str(base_dir))
     
@@ -142,7 +141,7 @@ def test_missing_run_losses_handled(tmp_path, fake_base_losses_path):
         run_ids=["run_missing"],
     )
     exp.base_losses_path = ".tracking/experiments/exp_1/base_losses.jsonl"
-    save_experiment(exp, str(base_dir))
+    TrackingService(base_dir).save_experiment(exp)
     
     args = SimpleNamespace(experiment_id="exp_1", base_dir=str(base_dir))
     

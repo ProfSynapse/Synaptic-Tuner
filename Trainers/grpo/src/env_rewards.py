@@ -45,7 +45,7 @@ def build_env_reward_function(reward_cfg: Dict[str, Any]) -> Callable[..., List[
         final_text_satisfied = kwargs.get("final_text_satisfied") or []
         stop_reasons = kwargs.get("stop_reason") or []
         total_turns = kwargs.get("total_turns") or []
-        total_tool_calls = kwargs.get("total_tool_calls") or []
+        kwargs.get("total_tool_calls") or []
         executed_tool_names = kwargs.get("executed_tool_names") or []
         executed_tool_statuses = kwargs.get("executed_tool_statuses") or []
         environment_issue_levels = kwargs.get("environment_issue_levels") or []
@@ -59,7 +59,6 @@ def build_env_reward_function(reward_cfg: Dict[str, Any]) -> Callable[..., List[
                 passed = False
             stop_reason = stop_reasons[index] if index < len(stop_reasons) else ""
             turns = int(total_turns[index]) if index < len(total_turns) else 0
-            tool_calls = int(total_tool_calls[index]) if index < len(total_tool_calls) else 0
             executed = _as_string_list(executed_tool_names[index] if index < len(executed_tool_names) else [])
             statuses = _as_string_list(executed_tool_statuses[index] if index < len(executed_tool_statuses) else [])
             issue_levels = _as_string_list(environment_issue_levels[index] if index < len(environment_issue_levels) else [])

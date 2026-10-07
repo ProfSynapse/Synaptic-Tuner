@@ -1,0 +1,1 @@
+{"schema_version":"synaptic-model-chat-modal-provider/v1","environment_name":"synaptic-smoke-v1","app_name":"synaptic-model-chat-v1","gpu":"A10","cpu_millicores":4000,"memory_mb":16384,"startup_margin_seconds":300}

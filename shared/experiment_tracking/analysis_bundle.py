@@ -1,38 +1,52 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from .experiment import Experiment
+from .experiment import Experiment, _atomic_write_bytes, _atomic_write_text
 from .benchmark_ledger import upsert_benchmark_ledger
 from .recommendation_engine import build_recommendation_bundle, render_draft_next_spec
 from .schema import LossResult, RunRecord
+from tuner.project import ProjectContext
+
+
+def _portable_output(path: Path, context: ProjectContext | None) -> str:
+    if context is None or context.mode != "host":
+        return str(path)
+    for scheme, root in (
+        ("tracking", context.tracking_root),
+        ("artifact", context.artifact_root),
+    ):
+        try:
+            relative = path.resolve(strict=False).relative_to(root.resolve(strict=False))
+        except ValueError:
+            continue
+        return f"{scheme}://{relative.as_posix()}"
+    raise ValueError("Analysis output is outside project writable roots")
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    _atomic_write_text(path, json.dumps(payload, indent=2))
 
 
 def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row) + "\n")
+    payload = "".join(json.dumps(row) + "\n" for row in rows)
+    _atomic_write_text(path, payload)
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
-        path.write_text("", encoding="utf-8")
+        _atomic_write_bytes(path, b"")
         return
     headers = list(rows[0].keys())
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=headers)
-        writer.writeheader()
-        writer.writerows(rows)
+    handle = io.StringIO(newline="")
+    writer = csv.DictWriter(handle, fieldnames=headers)
+    writer.writeheader()
+    writer.writerows(rows)
+    _atomic_write_text(path, handle.getvalue())
 
 
 def _run_row(record: RunRecord) -> dict[str, Any]:
@@ -67,9 +81,20 @@ def write_analysis_bundle(
     base_dir: str | Path = ".tracking",
     eval_payload: Optional[dict[str, Any]] = None,
     loss_results: Optional[list[LossResult]] = None,
+    project_context: ProjectContext | None = None,
 ) -> dict[str, str]:
-    base_dir = Path(base_dir)
-    analysis_dir = base_dir / "experiments" / experiment.experiment_id / "analysis"
+    base_dir = Path(base_dir).resolve(strict=False)
+    analysis_dir = (
+        base_dir / "experiments" / experiment.experiment_id / "analysis"
+    ).resolve(strict=False)
+    if project_context is not None and project_context.mode == "host":
+        tracking_root = project_context.tracking_root.resolve(strict=False)
+        if not base_dir.is_relative_to(tracking_root):
+            raise ValueError("Analysis base directory must remain below tracking_root")
+        if not analysis_dir.is_relative_to(base_dir) or not analysis_dir.is_relative_to(
+            tracking_root
+        ):
+            raise ValueError("Analysis directory escapes the project tracking root")
     analysis_dir.mkdir(parents=True, exist_ok=True)
     training_run = next((run for run in runs if (run.stage or "") == "training"), None)
     evaluation_run = next((run for run in runs if (run.stage or "") == "evaluation"), None)
@@ -95,12 +120,23 @@ def write_analysis_bundle(
             "loss_lineage": _artifact_path(loss_run, "loss_lineage.json"),
         },
         "eval_summary": (eval_payload or {}).get("summary", {}),
+        "provenance": {
+            "source_lock": {
+                "uri": experiment.source_lock_uri,
+                "sha256": experiment.source_lock_sha256,
+            },
+            "resolved_config": {
+                "uri": experiment.resolved_config_uri,
+                "sha256": experiment.resolved_config_sha256,
+            },
+        },
     }
     summary_json = analysis_dir / "experiment_summary.json"
     _write_json(summary_json, summary_payload)
 
     summary_md = analysis_dir / "experiment_summary.md"
-    summary_md.write_text(
+    _atomic_write_text(
+        summary_md,
         "\n".join(
             [
                 f"# Experiment {experiment.experiment_id}",
@@ -112,7 +148,6 @@ def write_analysis_bundle(
                 f"- Runs: {len(runs)}",
             ]
         ),
-        encoding="utf-8",
     )
 
     run_rows = [_run_row(run) for run in runs]
@@ -120,16 +155,16 @@ def write_analysis_bundle(
     _write_csv(run_matrix, run_rows)
 
     outputs = {
-        "experiment_summary_json": str(summary_json),
-        "experiment_summary_md": str(summary_md),
-        "run_matrix_csv": str(run_matrix),
+        "experiment_summary_json": _portable_output(summary_json, project_context),
+        "experiment_summary_md": _portable_output(summary_md, project_context),
+        "run_matrix_csv": _portable_output(run_matrix, project_context),
     }
 
     if eval_payload:
         failed_records = [record for record in (eval_payload.get("records") or []) if not record.get("passed", False)]
         failure_path = analysis_dir / "failure_slices" / "eval_failures.jsonl"
         _write_jsonl(failure_path, failed_records)
-        outputs["eval_failures_jsonl"] = str(failure_path)
+        outputs["eval_failures_jsonl"] = _portable_output(failure_path, project_context)
 
     if loss_results:
         loss_rows = [
@@ -148,13 +183,13 @@ def write_analysis_bundle(
         feature_csv = analysis_dir / "feature_dataset.csv"
         _write_jsonl(feature_jsonl, loss_rows)
         _write_csv(feature_csv, loss_rows)
-        outputs["feature_dataset_jsonl"] = str(feature_jsonl)
-        outputs["feature_dataset_csv"] = str(feature_csv)
+        outputs["feature_dataset_jsonl"] = _portable_output(feature_jsonl, project_context)
+        outputs["feature_dataset_csv"] = _portable_output(feature_csv, project_context)
 
         high_loss = sorted(loss_rows, key=lambda row: row["loss"], reverse=True)[:25]
         high_loss_path = analysis_dir / "failure_slices" / "high_loss_examples.jsonl"
         _write_jsonl(high_loss_path, high_loss)
-        outputs["high_loss_examples_jsonl"] = str(high_loss_path)
+        outputs["high_loss_examples_jsonl"] = _portable_output(high_loss_path, project_context)
 
     recommendation_bundle = build_recommendation_bundle(
         experiment=experiment,
@@ -166,11 +201,14 @@ def write_analysis_bundle(
     candidates = recommendation_bundle["candidates"]
     next_run_candidates = analysis_dir / "next_run_candidates.json"
     _write_json(next_run_candidates, recommendation_bundle)
-    outputs["next_run_candidates_json"] = str(next_run_candidates)
+    outputs["next_run_candidates_json"] = _portable_output(next_run_candidates, project_context)
 
     draft_next_spec = analysis_dir / "draft_next_spec.yaml"
-    draft_next_spec.write_text(render_draft_next_spec(recommendation_bundle["draft_next_spec"]), encoding="utf-8")
-    outputs["draft_next_spec_yaml"] = str(draft_next_spec)
+    _atomic_write_text(
+        draft_next_spec,
+        render_draft_next_spec(recommendation_bundle["draft_next_spec"]),
+    )
+    outputs["draft_next_spec_yaml"] = _portable_output(draft_next_spec, project_context)
 
     hypothesis_context = analysis_dir / "hypothesis_context.json"
     _write_json(
@@ -182,9 +220,13 @@ def write_analysis_bundle(
             "recommendation_bundle": recommendation_bundle,
         },
     )
-    outputs["hypothesis_context_json"] = str(hypothesis_context)
+    outputs["hypothesis_context_json"] = _portable_output(hypothesis_context, project_context)
 
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = (
+        project_context.artifact_root / "benchmark-ledger"
+        if project_context is not None and project_context.mode == "host"
+        else Path(__file__).resolve().parents[2]
+    )
     benchmark_ledger_csv = upsert_benchmark_ledger(
         repo_root=repo_root,
         experiment=experiment,
@@ -192,6 +234,6 @@ def write_analysis_bundle(
         eval_payload=eval_payload,
         loss_results=loss_results,
     )
-    outputs["benchmark_ledger_csv"] = benchmark_ledger_csv
+    outputs["benchmark_ledger_csv"] = _portable_output(Path(benchmark_ledger_csv), project_context)
 
     return outputs

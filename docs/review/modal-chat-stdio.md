@@ -1,0 +1,439 @@
+# Private Modal chat channel
+
+Working-tree qualification, 2026-09-11. Engine only. This record does not claim
+a deployed model, a live response, reviewed inference image pins, or confirmed
+cloud chat shutdown. The initially provider-free work is followed by the dated
+CPU-probe correction below; no GPU model response is claimed.
+
+## Connection and ownership
+
+The remote executable is `tuner.execution.providers.modal.inference_entrypoint`.
+It accepts no argv. Its first bounded canonical JSON line carries an exact
+signed launch and independently supplied static expectation over the explicit
+client's authenticated Sandbox stdin. Credential names must match the selected
+Secret requirements exactly; raw values never belong in the frame. This frame
+is transport, not an authorization grant or proof of physical Volume mapping.
+
+The image must pre-create `/workspace/modal-chat/model`, `/workspace/modal-chat/base`
+and `/workspace/modal-chat/scratch`. These private directories must not overlap
+the three selected mounts. The entrypoint creates no directory, cloud object,
+client or public endpoint. It constructs the existing HMAC authenticator and
+execution-machine pinned-model preparer. Signed launch admission precedes the
+preparation-token read, and the concrete bootstrap checks the inference runtime
+before any model preparation. The child inference environment uses a fixed PATH
+and selected CUDA runtime variables, never operator PATH, PYTHONPATH, provider
+credentials, model tokens or evidence keys.
+
+After bootstrap yields the exact existing `ChatSession`, `inference_channel`
+serves canonical ready/chat/stop/closed/error frames. Every frame binds session
+and signed-launch digest; requests have consecutive integer identities. Only
+one input read is outstanding, and a subsequent read is released only after
+processing the current request. Output writes are also observed through one
+daemon task. The channel polls the existing session watchdog; it does not derive
+or restart a second session deadline. EOF, malformed frames, stop, idle expiry,
+request failure and output failure close that same session and owned runtime.
+The executable suppresses ordinary diagnostics and text-bearing SystemExit at
+the process boundary; internal control exceptions still trigger normal cleanup.
+
+The ready frame also carries `PreparedModelIdentity` derived from the worker's
+verified materialized target. The bootstrap's internal result now pairs that
+portable identity with the exact session; it is not a new grant. The host must
+compare its model/tokenizer refs and revisions to the authenticated workload.
+Archive kind is learned from the remote verified target, never guessed from a
+training option. Full/LoRA bootstrap tests cover that projection.
+
+This replaces the plan's proposed HTTP tunnel/access-token path. The raw vLLM
+server remains on loopback with no exposed Sandbox service ports, so cloud
+clients cannot bypass the session's turn, history and idle controls. Stream
+authentication does not substitute for Foundation authority consumption or
+exact-resource binding.
+
+## Bounds and qualification limits
+
+The first-frame wait is 30 seconds and its maximum size is 256 KiB. Signed
+launch bytes remain bounded by the existing 96 KiB limit. Subsequent request
+and response bounds come from admitted configuration, capped by the channel
+codec at 1 MiB. Worker-input/output time bounds are logical waits: Python cannot
+cancel an arbitrary already-blocked syscall in a daemon thread. The worker's
+runtime watchdog and provider lifetime policy remain necessary independent
+cleanup mechanisms, not a proven hard billing deadline.
+
+Measured SDK 1.5.4 source distinguishes `Sandbox.wait()` (returns None) from
+`terminate(wait=True)` (returns the exit code). Sandbox stdout is text and
+line-oriented. Its internal line accumulator has no application-frame bound
+before newline, so the host's post-yield frame validation is not a hard bound on
+SDK memory allocation. The fixed worker protocol and suppressed diagnostics
+are part of the trusted source contract; no private SDK mutation is used to
+pretend this limitation has disappeared. Conversation response frames travel
+through Modal's stdout/log transport.
+
+The entrypoint and worker channel are now minimum required members of the
+inference runtime source inventory. The actual inference manifest, complete
+dependency lock and worker closure remain absent until image/runtime inspection
+and independent review. No training lock is reused and no verifier is bypassed.
+
+The initial integrated entrypoint/channel/runtime-verifier selection passed
+65 tests in 5.63 seconds on the existing isolated CPython 3.12.9 / pytest 8.4.2
+lane, with plugins and pytest cache disabled. This includes an actual synthetic
+environment-backed HMAC launch reaching the real missing-lock denial before
+model preparation. Positive executable/channel cases use an in-process backend
+and replace runtime acquisition; they do not load ML packages or call Modal.
+The earlier 40-test selection is a subset, not an additive result. These counts
+precede the required ready-model projection update; final qualification must
+rerun the affected selections with that protocol change.
+
+Correction (2026-09-11, recovered protocol qualification): the nine-file
+entrypoint/channel/client/runtime/capture/inspection/bootstrap selection passed
+173 tests in 137.82 seconds after the required ready-model change. The channel
+client's 41 tests also passed separately in 0.25 seconds; they are a subset.
+One test had computed its future deadline at collection time, making it fail
+only after earlier tests consumed that margin; the deadline is now computed at
+test execution. This run preceded integration of the separate image-schema and
+source-freshness changes and does not qualify the final SDK transport or adapter.
+
+The unchanged training runtime source lock checked CURRENT at 97 members.
+Further integrated host-adapter, inspection, regression and packaging results
+will be recorded only after their actual runs complete.
+
+Correction (2026-09-11, integrated regression): the broader inference selection
+passed 560 tests in 1134.05 seconds before the final creation-ownership changes
+and new transport/consumer tests were integrated. A subsequent nine-module run
+finished with 173 passing and one failing test in 172.40 seconds. Its twelve
+consumer integration tests passed, including interrupted lease transfer; the
+failure was the transport test for channel-constructor cleanup ownership.
+That failed run is not a green final qualification. The selections overlap;
+their counts must not be added.
+
+Correction (2026-09-11, repaired qualification): after the completed-cleanup
+ownership fix below, the same nine-module selection passed 175 tests in 193.74
+seconds. The channel-client selection separately passed 42 tests in 0.18 seconds.
+The final transport tests then split the previously timing-sensitive scenario
+into deterministic completed and pending cases; that 21-test selection passed
+in 95.32 seconds against the same source. These overlapping provider-free runs
+qualify the covered source behavior, not an image, model response or deployment.
+
+Correction (2026-09-11, exact-source package qualification): source commit
+`bbdbbd56d9af4d18b5d4d3dab5e7cfdf3d1494d3` was archived with Windows Git and
+built offline with no dependency resolution. The resulting
+`synaptic_tuner-1.1.0-py3-none-any.whl` is 2,108,895 bytes, SHA-256
+`71474dc27b2eb1566984b986e3b0bb13664c275584c4316962fff30559acf216`.
+Installed into a fresh dependency-only environment, it passed the checked-in
+neutral-directory import/resource probe: 51 engine imports and both training
+resources, with Modal, Torch, NumPy, pandas and pytest absent. All three
+inference resources remain absent and unqualified; this check does not bypass
+their concrete runtime denial. The final two deterministic transport regressions
+also passed after integration in 8.25 seconds (the other 19 were deselected).
+The training source lock remained CURRENT at 97 members and the offline SFT
+closure at 66 members / 679,487 payload bytes. Skill mirrors were verified in
+sync, and both maintenance scripts now trigger PR conformance. No push, merge,
+cloud operation or live response is claimed by this record.
+
+Correction (2026-09-11, operator login selection): the maintenance capture CLI
+now accepts explicit `--modal-profile NAME`, resolving only that named SDK
+profile's credential pair with `use_env=False`; its default remains environment
+credentials only. Neither path falls back to the other. The installed SDK 1.5.4
+configuration shape was checked without credential lookup, with its configuration
+file redirected to `/dev/null`: `from modal.config import config` supplies the
+singleton, not the `modal.config` module. Corrected module-shaped tests prevent
+that distinction being hidden by a fake. The integrated capture/inspection
+selection passed 38 tests in 0.26 seconds. This source-only maintenance update
+does not change the installed engine wheel qualified above.
+
+Resume checkpoint (2026-09-11): the operator-selected CLI profile was identified
+as `synaptic-labs` without printing credentials or listing cloud objects. The
+committed capture/inspection scripts at
+`228920705f4ccfb3b42daceeee22aa45a2f12acb` were extracted from an immutable Git
+archive. The proposed CPU probe selects only app `synaptic-training-v1` in
+environment `synaptic-smoke-v1` and base image
+`docker.io/vllm/vllm-openai@sha256:116aa00ee0b68855616a56e1d7e1ae937e591a8bd6969ee45cbcedb246ddf355`.
+The platform approval reviewer rejected execution before process launch because
+this stored-profile cloud operation can incur charges and requires exact
+moment-of-execution approval. No provider request, Sandbox allocation, image
+capture or GPU chat occurred. Do not bypass this rejection; obtain explicit
+approval for the same bounded command before attempting it again.
+
+Correction (2026-09-11, explicitly approved CPU attempt): the operator approved
+the exact command and it executed once. The capture process exited 125 with
+`capture_failed`, returning Sandbox `sb-Hf9Gir2Fxu8Ns6b2BppBeg` and reporting
+`cleanup_requested=true`, `cleanup_confirmed=true`, `ownership_known=true`.
+The code requires exact-handle termination followed by a non-pending poll before
+reporting cleanup confirmed. No candidate runtime metadata was returned, and no
+second attempt was started. The preserved closed process result is in
+`evidence/modal-inference-cpu-probe-2289207.json`. This result does not identify
+the remote inspection failure cause; exact-instance read-only diagnosis is next.
+
+The existing maintenance command now supports `--read-sandbox ID` for this
+diagnosis. It requires an exact stopped Sandbox, performs no create/list/stop
+calls, and reads bounded stdout/stderr under one 30-second deadline after client
+construction. It preserves the known exit code and returns only validated
+candidate metadata, allowlisted inspector errors or fixed unknown-output codes.
+The integrated capture/inspection tests passed 49 tests in 0.26 seconds. This
+read mode does not authorize another probe or adopt the Sandbox for serving.
+
+Exact-instance diagnosis (2026-09-11): the committed read-only command read
+`sb-Hf9Gir2Fxu8Ns6b2BppBeg` without allocation or termination. The provider exit
+code is 125 and the inspector's validated stderr reports `METADATA_INVALID`.
+The result is preserved in `evidence/modal-inference-cpu-read-2289207.json`.
+This identifies the metadata-validation class, not which metadata constraint
+failed; it does not justify weakening duplicate checks or inventing runtime pins.
+
+Follow-up preparation (2026-09-11): the inspector now distinguishes distribution
+count limits, enumeration failures, metadata reads, invalid names, invalid
+versions and duplicate normalized identities with six closed error codes. No
+package values or raw exceptions are emitted, and existing limits and duplicate
+rejection remain unchanged. The capture reader accepts these exact codes.
+The integrated inspection/diagnosis selection passed 59 tests in 0.27 seconds.
+This is improved diagnosis, not a claimed fix for the image's unknown metadata
+condition. A further CPU allocation has not yet been made.
+
+Correction (2026-09-11, approved follow-up): source `13298f3` executed once in
+the same dedicated environment. Sandbox `sb-ZnGMHCeYmrWG4VrgmOTdMM` failed with
+provider exit 125; exact-target cleanup was confirmed before read-only diagnosis.
+Its inspector error is `DISTRIBUTION_IDENTITY_DUPLICATE`, preserved with the
+process result in `evidence/modal-inference-cpu-{probe,read}-13298f3.json`.
+This code alone does not distinguish repeated discovery of the same physical
+metadata object from conflicting installed distributions.
+
+A credential-free local CPython reproduction discovered 30 distribution objects
+for 15 physical metadata directories when the same search root was supplied
+twice. The current inspector rejected this benign repetition with the same code.
+The corrective path must count only proven repetitions of one physical metadata
+object once; separate installations with the same name/version must still fail.
+The operator authorized at most one corrective CPU rerun after a tested fix and
+confirmed cleanup. That remaining rerun has not been used.
+
+The narrow inspector correction uses exact filesystem `PathDistribution`
+metadata identity before and after reading the normalized name/version. Stable
+repetitions can be counted once; distinct or unproven duplicate identities and
+identity changes remain rejected. The unique-distribution limit stays 512, with
+a separate 4096-occurrence traversal bound. On the same credential-free local
+reproduction, the corrected inspector accepted 15 unique distributions from 30
+occurrences. This does not prove which duplicate existed in the cloud image.
+
+Final corrective selection (2026-09-11): all 66 capture/inspection tests passed
+in 0.27 seconds under isolated CPython 3.12.9, including unstable identity on
+the first discovery, same-object aliases and distinct same-name installations.
+
+Correction (2026-09-11, corrective rerun consumed): source
+`f94e437d5b6a49edf090c9274d45fc457bdc1b02` executed the one authorized corrective
+CPU allocation. Sandbox `sb-SJySLXJYyL5pL6QCrArv7d` exited 125; the capture
+confirmed exact-target cleanup, and the read-only stopped-instance command
+again returned `DISTRIBUTION_IDENTITY_DUPLICATE`. Both closed results are
+preserved in `evidence/modal-inference-cpu-{probe,read}-f94e437.json`.
+The archived inspector SHA-256 was
+`76d459a694b2f5957b09f160404b6efff9d75f7af3c78f1a595f97fe62ac248b`.
+The same-object local correction therefore did not resolve this image's
+metadata condition. This result still cannot distinguish separate physical
+installations, unavailable identity proof or conflicting metadata on one object.
+No runtime candidate was accepted, no GPU was launched, and no further CPU
+allocation remains authorized by the follow-up-plus-one-corrective approval.
+Further local diagnosis may refine closed reason codes; another cloud probe
+requires new authority. Do not relax inventory verification or guess pins.
+
+The corrective capture and exact-read console outputs were scanned by credential
+shape (HF/Modal-style tokens, bearer values, JWTs and private-key headers), with
+no matches. This check covers the emitted closed reports only; raw provider logs
+were suppressed and are not claimed to have been retained or scanned.
+
+Local diagnostic follow-up (2026-09-11): inspector collisions now distinguish
+`DISTRIBUTION_IDENTITY_UNPROVEN`, `DISTRIBUTION_PHYSICAL_DUPLICATE` and
+`DISTRIBUTION_PHYSICAL_METADATA_MISMATCH`, without changing acceptance policy.
+The stopped-reader allowlist retains the historical generic code and accepts
+these three exact codes; it still emits no raw metadata or provider text.
+All 74 integrated capture/inspection tests passed in 0.26 seconds, including
+serialized failure-output non-disclosure and the reverse physical-identity map.
+This refinement has not executed remotely and does not reinterpret either
+historical duplicate failure. The production inference verifier is unchanged.
+
+Qualification boundary: the concrete engine verifier still has its separate
+duplicate-occurrence check in `inference_runtime.py`. Its identity policy must
+be reconciled with the measured installed-image facts before final runtime
+qualification; a successful base-image candidate is not proof that this engine
+verifier or a GPU chat session will pass. No inference pins have been invented.
+
+## Remaining live path
+
+Engine-installed candidate success (2026-09-11): capture source `42da029`
+installed the exact `1e32e56` wheel and passed in Sandbox
+`sb-LTHkK1MJ6RQYyFHoe0N96J`; exact termination and stopped poll were confirmed.
+The hydrated Modal Image ID is `im-GddhKUqSRXy9dTeawAekzN`. Full evidence in
+`evidence/modal-inference-engine-42da029.json` records 230 unique distributions,
+including Synaptic Tuner 1.1.0, Modal 1.5.4 and vLLM 0.17.1, with the same
+CPython 3.12.13 path/hash. Image build `pip check` passed. The exact-wheel
+capture/inspection/preparation/additions selection passed 113 tests in 0.40
+seconds before this run. Emitted candidate metadata passed the credential-shape
+scan. This is package/image candidate evidence, not a model response or final
+runtime admission; the three inference commitment resources are not yet packaged.
+
+Consumer boundary audit: the existing embedded `open_run_chat` and internal
+`ModalRunChatRuntime` are the intended path. The complete checked-in test
+composition uses synthetic stores/grants/artifacts, and the historical live
+fixture explicitly omits payloads and authenticated command/completion material.
+It cannot supply a real training run for this smoke. End-to-end chat therefore
+needs either an existing consumer's retained authenticated run/resource bindings
+or an explicitly scoped example consumer. No EHR changes or fixture-as-live
+substitutions are authorized by this image work. The provider descriptor's six
+false lifecycle flags are not a master switch for the separate chat adapter;
+they must not be presented as proof of generic lifecycle readiness.
+
+Engine-wheel preparation (2026-09-11): exact package sources from commit
+`1e32e56a1351b4a95a1680ff1f0fc18f269d9655` built offline without dependency
+resolution as `synaptic_tuner-1.1.0-py3-none-any.whl` (2,108,890 bytes), SHA-256
+`101bb22a9efef9d811536b1ae4441555dad646b5bf52507201ecab2921ba338a`.
+Archive inspection confirms the updated engine requirement metadata and exact
+manifest source hash. The three inference commitment resources are still absent;
+this intermediate wheel cannot pass final inference admission. The existing
+training/offline closure and production inference verifier selection passed
+33 tests after the compatibility/source-hash refresh.
+
+SDK candidate success (2026-09-11): source `1280300` passed strict capture in
+Sandbox `sb-ExiSJ8TJGFTxSCA37MYM69`; exact cleanup was confirmed. Evidence
+`evidence/modal-inference-sdk-1280300.json` records 229 unique distributions,
+Modal 1.5.4, vLLM 0.17.1 and the same CPython 3.12.13 executable/hash. The image
+build also completed `pip check`. No existing ML package was selected for
+replacement by the nine-entry additive lock.
+
+Engine compatibility correction: `packaging>=23,<27` accepts the image's
+measured Packaging 26.0. The engine requirement check now explicitly uses
+`bool(specifier.prereleases)` to preserve Packaging 25's implicit prerelease
+exclusion and explicit prerelease opt-in. The integrated manifest and optional
+Modal dependency selection passed 23 tests on both Packaging 25.0 and 26.0.
+The existing offline trainer closure and containing training-runtime lock were
+refreshed by their checked-in hash-only tools: inventories remain 66 and 97,
+and runtime/image/dependency selections are unchanged. The only trainer source
+change is this one-line compatibility rule (+23 bytes). These refreshes are
+source-integrity maintenance, not a new training qualification.
+
+Isolated candidate success (2026-09-11): source `a3d76b3` passed strict capture
+in Sandbox `sb-srcV306hLidnqZKG2BN1x4` with exact cleanup confirmed. Evidence
+`evidence/modal-inference-isolated-a3d76b3.json` records CPython 3.12.13 at
+`/opt/synaptic-inference/bin/python`, SHA-256
+`185be5c01624944b5c422a8d1e4995a7df010036a99c9f9d84a80a09ae1bd72d`, and 220
+unique distributions. Modal remains absent. The interpreter-preparation and
+capture selection passed 99 tests in 0.41 seconds before this run.
+
+The next additive SDK image layer uses nine exact version/hash lines from the
+existing launcher lock, excluding all shared/ML packages. Integrated maintenance
+and additive-lock tests passed 104 tests in 0.45 seconds. The unchanged base has
+Packaging 26.0 while engine metadata currently requires <26; engine compatibility
+must be tested separately, not solved by shadowing or downgrading the image's
+shared package. No GPU or final inference admission has occurred.
+
+Inventory diagnosis (2026-09-11): source `eefc6a6` produced a successful
+`DIAGNOSTIC_ONLY` report from Sandbox `sb-Sj9OVAZ63CtcLlZ9SnPbuO`; capture exit 0
+confirms exact termination and a stopped poll. The full structured non-secret
+report is `evidence/modal-inference-inventory-eefc6a6.json`. Its 243 entries
+contain seven conflicting names across `/usr/lib/python3/dist-packages` and
+`/usr/local/lib/python3.12/dist-packages`: cryptography, distro,
+importlib-metadata, pyjwt, setuptools, six and zipp. Thus the failure is mixed
+OS/interpreter package discovery, not duplicate enumeration of one object.
+The measured ML stack includes vLLM 0.17.1, Torch 2.10.0+cu129 and Transformers
+4.57.6; Modal is absent. These diagnostic facts are not runtime pins or serving
+qualification. The emitted report passed the same credential-shape scan.
+
+The candidate packaging correction uses a dedicated copied Python interpreter
+and one reviewed ML-site path, leaving system Python untouched. Normal exact
+distribution verification stays strict. Final SDK/dependency installation,
+engine source packaging and complete runtime locks still follow separately.
+
+Update (2026-09-11, physical collision): source `e531329` executed once as
+approved. Sandbox `sb-8wENkdwVnbrNrEKJRMD6hU` exited 125 and exact cleanup was
+confirmed. Its stopped read reports `DISTRIBUTION_PHYSICAL_DUPLICATE`; the two
+closed records are in `evidence/modal-inference-cpu-{probe,read}-e531329.json`.
+This proves distinct metadata objects collide, not which package is affected.
+The user then authorized continued small diagnostics without per-probe approval,
+with a stop before spend over $10. Track the sequence cumulatively, preserve
+cleanup and ambiguity checks, and do not treat this as authorization to merge
+main, rotate keys, delete persistent data or touch another project.
+
+The existing capture/inspection command now has explicit diagnostic-only mode
+(`--diagnose-distributions`). Its bounded structured package name/version/path
+inventory can describe conflicting installs, but is not a candidate manifest or
+runtime admission. Normal strict capture remains unchanged. This avoids guessing
+the image fix from a failure class or weakening production inventory validation.
+The remote process remains credential-free; no raw exceptions or environment
+values are emitted. The selected image is unchanged.
+
+Cost planning: on 2026-09-11, https://modal.com/pricing lists Sandbox CPU at
+$0.00003942 per physical-core second and memory at $0.00000667 per GiB-second.
+At one core and 2 GiB for 300 seconds, nominal compute is $0.015828, excluding
+image preparation, bursting and other usage. This estimate is not an actual
+account charge or a hard provider billing cap.
+
+Correction (2026-09-11, SDK integration): the explicit-client transport now
+implements SDK-free STAGE and one SUBMIT attempt behind the existing Foundation
+executor. It authenticates the actual retained STAGE record/assessment before
+signing launch content, validates the complete startup frame before provider
+reads, resolves exactly the selected app, final Image and three Volumes, and
+passes only named Secrets. It creates one private stdio Sandbox, sends one
+startup frame and publishes its exact ready lease after model-identity checks.
+Its 18 tests passed independently against the integrated lead tree in 70.64
+seconds. Tests use fake SDK effects and actual Foundation launch evidence;
+this is not deployment qualification. The consumer `ModalRunChatRuntime`
+is covered by the twelve integration tests recorded above, not that older
+transport-only result.
+
+Review caught and corrected post-create control-interrupt cleanup, mutation
+during binding authentication, startup validation happening after allocation,
+and reuse of the channel constructor's existing cleanup owner. Pending creation
+retains process-local late-handle evidence, with no create retry or listing/
+adoption. Known ownership is retained before bounded cleanup, including when a
+second interruption occurs. A late cleanup callback's completion result is not
+retained as authoritative shutdown proof. After process death, this in-memory
+ownership is not durable recovery; preserve Foundation ambiguity and never
+infer that the resource is absent. Provider lifetime limits remain necessary.
+
+Correction (2026-09-11, ownership transfer): creation ownership is registered
+before starting its worker, and returned handles are retained before queue
+publication. The capture launcher has the same interruption protection. One-use
+ready-lease transfer keeps its retained value available to recovery after take.
+Independent review passed these current-process ownership guarantees. The
+subsequent failing test exposed a separate fast-cleanup race: constructor errors
+must retain the exact channel lease even when termination already completed,
+otherwise the outer transport can terminate again. That contract is now fixed;
+deterministic completed and pending regressions check exactly one termination.
+This does not turn process-local ownership into durable recovery or a hard
+provider billing bound.
+
+Inspect the chosen image on a bounded credential-free CPU Sandbox,
+review and package actual inference runtime/dependency/source locks, then qualify
+the exact pushed source with one authenticated trained run, real chat response
+and confirmed exact-instance termination. The CPU candidate report alone cannot
+qualify a final installed engine image or authorize a GPU session.
+
+Correction (2026-09-11, inference lock maintenance):
+`scripts/regenerate_modal_inference_lock.py` checks and refreshes content hashes
+only for an existing reviewed 118-source inference closure. It preserves runtime
+pins and dependency bytes and refuses missing locks; it does not initialize the
+three still-missing inference resources. Its two replacements are individually
+atomic, not a transaction: interruption between them fails closed and requires
+recovery of a reviewed consistent pair before retrying. CPU package inspection,
+including the engine-installed candidate above, is not final runtime admission
+or a successful model response.
+
+The integrated maintenance contract suite passed 11 tests in 0.44 seconds under
+isolated CPython 3.12.9/pytest 8.4.2 from the execution checkout. Direct invocation
+from that checkout without operator `PYTHONPATH` returned `FILE_MISSING`/125 as
+expected while the inference locks remain absent. Canonical skill mirrors are
+in sync. These are local tooling checks, not cloud inference evidence.
+
+Correction (2026-09-11, example consumer continuation): image preparation now
+exclusively creates `/workspace/modal-chat/{model,base,scratch}` with private
+permissions, rejecting symlinked parent chains before filesystem writes.
+The integrated capture/inspection/preparation selection passed 114 tests in
+0.45 seconds. No new image was built for this change: the earlier CPU candidate
+does not prove these directories exist or that its runtime user can access them.
+The minimal consumer is documented under `examples/modal_chat`; it does not
+remove the requirement for a pushed host superproject with an exact engine
+gitlink, or supply missing final inference locks and authenticated run evidence.
+
+The integrated minimal consumer and its private SQLite attempt/catalog store
+passed 22 tests in 0.20 seconds. The existing Modal/generic run-chat selection
+passed 27 tests in 77.43 seconds. Consumer/storage independent review passed
+after the response-allocation and interrupted-cleanup cases were corrected;
+the lead added explicit oversized ASCII/Unicode response coverage. All checks
+were provider-free, from the execution checkout, with isolated CPython 3.12.9
+and pytest 8.4.2. No cloud objects, pushes, merges, EHR edits, or paid runs were
+performed during this example-consumer continuation. Live host composition,
+the pushed superproject source, final inference resources/image qualification,
+and the real trained-run/chat smoke remain uncompleted.

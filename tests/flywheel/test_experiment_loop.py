@@ -13,13 +13,14 @@ Tests for the autonomous experiment loop:
 """
 from __future__ import annotations
 
-import json
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
+
+from shared.llm.usage import LLMCompletionV1
 
 from shared.flywheel.experiment_config import (
     ExperimentConfig,
@@ -292,7 +293,7 @@ class TestLLMAdvisor:
             llm_backend="openrouter",
         )
         mock_client = MagicMock()
-        mock_client.chat.return_value = (
+        mock_client.chat.return_value = LLMCompletionV1(
             "```yaml\nlearning_rate: 0.0002\nr: 16\nlora_alpha: 32\n```"
         )
         advisor._client = mock_client
@@ -331,7 +332,7 @@ class TestLLMAdvisor:
         def mock_chat(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            return f"```yaml\nlearning_rate: {call_count}e-4\nr: 16\nlora_alpha: 32\n```"
+            return LLMCompletionV1(f"```yaml\nlearning_rate: {call_count}e-4\nr: 16\nlora_alpha: 32\n```")
 
         mock_client.chat.side_effect = mock_chat
         advisor._client = mock_client
@@ -509,7 +510,6 @@ class TestPhaseTransition:
         assert set(config.keys()) == set(sample_config.search_space.keys())
 
     def test_phase1_uses_llm(self, sample_config, sample_results):
-        import pandas as pd
 
         sample_config.search_strategy = "llm_surrogate"
         sample_config.surrogate_phase_threshold = 10
@@ -527,7 +527,6 @@ class TestPhaseTransition:
         assert config["learning_rate"] == 2e-4
 
     def test_phase2_uses_surrogate(self, sample_config):
-        import pandas as pd
 
         # Create enough results to pass threshold
         sample_config.search_strategy = "llm_surrogate"
@@ -615,7 +614,7 @@ class TestMaxStepsEnforcement:
         with patch("shared.flywheel.experiment_loop.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stderr="")
 
-            result = loop._run_single_experiment(
+            loop._run_single_experiment(
                 "exp_test", {"learning_rate": 1e-4},
             )
 

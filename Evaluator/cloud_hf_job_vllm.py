@@ -8,6 +8,8 @@ per-example loss with Transformers in the same job.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
+import hashlib
 import json
 import os
 import subprocess
@@ -18,12 +20,18 @@ from pathlib import Path
 from time import perf_counter
 from typing import Optional
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(os.environ.get("SYNAPTIC_ENGINE_ROOT") or Path(__file__).resolve().parent.parent).resolve()
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from Evaluator.cli import main as evaluator_main
-from Evaluator.vllm_setup import start_vllm_server, stop_vllm_server
+from Evaluator import vllm_setup
+from tuner.inference.vllm_runtime import (
+    ExplicitNetworkLoRA,
+    ExplicitNetworkVLLMSource,
+    VLLMStartupSpec,
+    start_vllm_runtime,
+)
 from shared.cloud_stage_logging import StageLogger, apply_stage_logging_env, detect_cloud_job_ref
 from shared.cloud_eval_progress import EVAL_PROGRESS_LOG_FILENAME
 from shared.experiment_tracking.lineage_enrichment import (
@@ -33,6 +41,37 @@ from shared.experiment_tracking.lineage_enrichment import (
 )
 from shared.experiment_tracking.per_example_loss import compute_per_example_losses_parallel
 from shared.utilities.env import get_hf_token
+
+
+def _bind_source_lock(lineage: dict) -> dict:
+    payload = dict(lineage)
+    uri = str(os.environ.get("SYNAPTIC_SOURCE_LOCK_URI") or "").strip()
+    digest = str(os.environ.get("SYNAPTIC_SOURCE_LOCK_SHA256") or "").strip()
+    if not uri or len(digest) != 64:
+        raise RuntimeError("Verified HF evaluation is missing its SourceLock identity.")
+    payload["source_lock"] = {"uri": uri, "sha256": digest}
+    descriptor_uri = str(os.environ.get("SYNAPTIC_SOURCE_TRANSPORT_URI") or "").strip()
+    descriptor_sha = str(os.environ.get("SYNAPTIC_SOURCE_TRANSPORT_SHA256") or "").strip()
+    evidence_uri = str(os.environ.get("SYNAPTIC_PROVISIONING_EVIDENCE_URI") or "").strip()
+    evidence_sha = str(os.environ.get("SYNAPTIC_PROVISIONING_EVIDENCE_SHA256") or "").strip()
+    state = str(os.environ.get("SYNAPTIC_SOURCE_TRANSPORT_STATE") or "").strip()
+    if not descriptor_uri or len(descriptor_sha) != 64 or not evidence_uri or len(evidence_sha) != 64 or state != "CONSUMABLE":
+        raise RuntimeError("Verified HF evaluation is missing its CONSUMABLE source-transport identity.")
+    payload["source_transport"] = {"uri": descriptor_uri, "sha256": descriptor_sha, "state": state}
+    payload["provisioning_evidence"] = {"uri": evidence_uri, "sha256": evidence_sha}
+    return payload
+
+
+def _persist_source_lock(results_dir: Path) -> None:
+    source_value = str(os.environ.get("SYNAPTIC_SOURCE_LOCK_PATH") or "").strip()
+    if not source_value:
+        raise RuntimeError("Verified HF evaluation is missing its mounted SourceLock path.")
+    source = Path(source_value)
+    expected = str(os.environ.get("SYNAPTIC_SOURCE_LOCK_SHA256") or "")
+    content = source.read_bytes()
+    if len(expected) != 64 or hashlib.sha256(content).hexdigest() != expected:
+        raise RuntimeError("Verified HF evaluation SourceLock artifact mismatch.")
+    (results_dir / "source-lock.json").write_bytes(content)
 
 from .cloud_hf_job import _PeriodicBucketSyncer, _finalize_cloud_exit_code, _install_termination_handler
 
@@ -255,7 +294,7 @@ def _compute_exact_loss_outputs(
         started_at=loss_started_at,
         finished_at=loss_finished_at,
     )
-    write_lineage_json(analysis_dir / "loss_lineage.json", loss_lineage)
+    write_lineage_json(analysis_dir / "loss_lineage.json", _bind_source_lock(loss_lineage))
     progress_syncer.sync_once()
 
 
@@ -283,6 +322,7 @@ def main() -> int:
     model_dir = output_root / "model"
     results_dir = output_root / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
+    _persist_source_lock(results_dir)
     progress_dir = results_dir / "logs"
     progress_log_path = progress_dir / EVAL_PROGRESS_LOG_FILENAME
     stage_logger = StageLogger(
@@ -344,146 +384,152 @@ def main() -> int:
         token=hf_token,
     )
 
-    server_started = False
-    try:
-        progress_syncer.start()
-        stage_logger.emit("runtime_ready", message="Starting vLLM runtime", details={"backend": "vllm"})
-        eval_started_at = datetime.now(timezone.utc).isoformat()
-        stage_logger.emit(
-            "model_load_started",
-            message="Starting vLLM server model load",
-            details={"backend": "vllm", "model": base_model_name, "timeout_seconds": args.vllm_timeout},
-        )
-        model_load_start = perf_counter()
-        server_started = start_vllm_server(
-            model=base_model_name,
-            host=args.vllm_host,
-            port=args.vllm_port,
-            gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-            tensor_parallel_size=args.vllm_tensor_parallel_size,
-            lora_modules={"finetuned": str(model_dir)},
-            timeout=args.vllm_timeout,
-            show_logs=True,
-        )
-        if not server_started:
-            raise RuntimeError("Failed to start the vLLM server in the cloud eval job.")
-        stage_logger.emit(
-            "model_load_completed",
-            message="vLLM server model load completed",
-            details={
-                "backend": "vllm",
-                "model": base_model_name,
-                "timeout_seconds": args.vllm_timeout,
-                "elapsed_seconds": round(perf_counter() - model_load_start, 3),
-            },
-        )
-        stage_logger.emit("runtime_ready", message="vLLM server ready", details={"backend": "vllm"})
-
-        cli_args = [
-            "--backend",
-            "vllm",
-            "--model",
-            "finetuned",
-            "--host",
-            args.vllm_host,
-            "--port",
-            str(args.vllm_port),
-            "--config-dir",
-            args.config_dir,
-            "--output",
-            str(output_json),
-            "--markdown",
-            str(output_md),
-            "--lineage",
-            str(lineage_json),
-            "--partial-output-json",
-            str(partial_output_json),
-            "--partial-markdown",
-            str(partial_output_md),
-            "--failure-json",
-            str(failure_json),
-            "--progress-jsonl",
-            str(progress_log_path),
-            "--no-dashboard",
-        ]
-
-        if args.preset:
-            cli_args.extend(["--preset", args.preset])
-        if args.scenarios:
-            for scenario in args.scenarios:
-                cli_args.extend(["--scenario", scenario])
-        if args.tags:
-            cli_args.extend(["--tags", args.tags])
-        if args.env_backend and args.env_backend != "none":
-            cli_args.extend(["--env-backend", args.env_backend])
-        if args.env_template:
-            cli_args.extend(["--env-template", args.env_template])
-        if args.env_tool_schema:
-            cli_args.extend(["--env-tool-schema", args.env_tool_schema])
-        if args.env_exec_config:
-            cli_args.extend(["--env-exec-config", args.env_exec_config])
-        if args.upload_to_hf:
-            cli_args.extend(["--upload-to-hf", args.upload_to_hf, "--hf-token", hf_token])
-            if args.update_model_card:
-                cli_args.append("--update-model-card")
-
-        exit_code = evaluator_main(cli_args)
-        eval_finished_at = datetime.now(timezone.utc).isoformat()
-        if lineage_json.exists():
-            lineage_payload = json.loads(lineage_json.read_text(encoding="utf-8"))
-            enriched = enrich_evaluation_lineage(
-                lineage_payload,
-                backend="vllm",
-                hardware_flavor=None,
-                started_at=eval_started_at,
-                finished_at=eval_finished_at,
-                tensor_parallel_size=args.vllm_tensor_parallel_size or None,
-                worker_count=args.loss_workers or None,
-            )
-            write_lineage_json(lineage_json, enriched)
-        if args.with_loss:
+    with ExitStack() as owned_runtime:
+        try:
+            progress_syncer.start()
+            stage_logger.emit("runtime_ready", message="Starting vLLM runtime", details={"backend": "vllm"})
+            eval_started_at = datetime.now(timezone.utc).isoformat()
             stage_logger.emit(
-                "work_started",
-                message="Starting exact loss pass",
-                details={"phase": "exact_loss", "examples_done": 0},
+                "model_load_started",
+                message="Starting vLLM server model load",
+                details={"backend": "vllm", "model": base_model_name, "timeout_seconds": args.vllm_timeout},
             )
-            stop_vllm_server()
-            server_started = False
-            _compute_exact_loss_outputs(
-                args=args,
-                model_dir=model_dir,
-                results_dir=results_dir,
-                hf_token=hf_token,
-                progress_syncer=progress_syncer,
-                stage_logger=stage_logger,
+            model_load_start = perf_counter()
+            runtime = start_vllm_runtime(
+                VLLMStartupSpec(
+                    source=ExplicitNetworkVLLMSource(
+                        model_ref=base_model_name,
+                        lora=ExplicitNetworkLoRA("finetuned", model_dir.absolute()),
+                    ),
+                    served_model_name="finetuned",
+                    host=args.vllm_host,
+                    port=args.vllm_port,
+                    gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+                    tensor_parallel_size=vllm_setup.resolve_tensor_parallel_size(
+                        base_model_name, args.vllm_tensor_parallel_size,
+                    ),
+                    tokenizer_mode=vllm_setup.resolve_tokenizer_mode(base_model_name),
+                    startup_timeout_s=args.vllm_timeout,
+                ),
+                cwd=Path.cwd(),
+                environment=vllm_setup.network_runtime_environment(),
             )
-    except Exception as exc:
-        traceback.print_exc()
-        stage_logger.emit_failure(exc, message="vLLM evaluation job failed", traceback_text=traceback.format_exc())
-        failure_payload = {
-            "status": "failed",
-            "error": f"{type(exc).__name__}: {exc}",
-            "traceback": traceback.format_exc(),
-        }
-        failure_json.write_text(json.dumps(failure_payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        progress_syncer.sync_once()
-        _sync_bucket(
-            str(results_dir),
-            f"hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}",
-            token=hf_token,
-        )
-        final_exit_code = _finalize_cloud_exit_code(1, output_json)
-        if final_exit_code == 0:
-            print(
-                "Evaluation artifacts were written before optional post-processing failed. "
-                "Returning success for cloud job status."
+            owned_runtime.enter_context(runtime)
+            stage_logger.emit(
+                "model_load_completed",
+                message="vLLM server model load completed",
+                details={
+                    "backend": "vllm",
+                    "model": base_model_name,
+                    "timeout_seconds": args.vllm_timeout,
+                    "elapsed_seconds": round(perf_counter() - model_load_start, 3),
+                },
             )
-        return final_exit_code
-    finally:
-        progress_syncer.stop()
-        progress_syncer.sync_once()
-        if server_started:
-            stop_vllm_server()
+            stage_logger.emit("runtime_ready", message="vLLM server ready", details={"backend": "vllm"})
+
+            cli_args = [
+                "--backend",
+                "vllm",
+                "--model",
+                "finetuned",
+                "--host",
+                args.vllm_host,
+                "--port",
+                str(args.vllm_port),
+                "--config-dir",
+                args.config_dir,
+                "--output",
+                str(output_json),
+                "--markdown",
+                str(output_md),
+                "--lineage",
+                str(lineage_json),
+                "--partial-output-json",
+                str(partial_output_json),
+                "--partial-markdown",
+                str(partial_output_md),
+                "--failure-json",
+                str(failure_json),
+                "--progress-jsonl",
+                str(progress_log_path),
+                "--no-dashboard",
+            ]
+
+            if args.preset:
+                cli_args.extend(["--preset", args.preset])
+            if args.scenarios:
+                for scenario in args.scenarios:
+                    cli_args.extend(["--scenario", scenario])
+            if args.tags:
+                cli_args.extend(["--tags", args.tags])
+            if args.env_backend and args.env_backend != "none":
+                cli_args.extend(["--env-backend", args.env_backend])
+            if args.env_template:
+                cli_args.extend(["--env-template", args.env_template])
+            if args.env_tool_schema:
+                cli_args.extend(["--env-tool-schema", args.env_tool_schema])
+            if args.env_exec_config:
+                cli_args.extend(["--env-exec-config", args.env_exec_config])
+            if args.upload_to_hf:
+                cli_args.extend(["--upload-to-hf", args.upload_to_hf])
+                if args.update_model_card:
+                    cli_args.append("--update-model-card")
+
+            exit_code = evaluator_main(cli_args)
+            eval_finished_at = datetime.now(timezone.utc).isoformat()
+            if lineage_json.exists():
+                lineage_payload = json.loads(lineage_json.read_text(encoding="utf-8"))
+                enriched = enrich_evaluation_lineage(
+                    lineage_payload,
+                    backend="vllm",
+                    hardware_flavor=None,
+                    started_at=eval_started_at,
+                    finished_at=eval_finished_at,
+                    tensor_parallel_size=args.vllm_tensor_parallel_size or None,
+                    worker_count=args.loss_workers or None,
+                )
+                write_lineage_json(lineage_json, _bind_source_lock(enriched))
+            if args.with_loss:
+                stage_logger.emit(
+                    "work_started",
+                    message="Starting exact loss pass",
+                    details={"phase": "exact_loss", "examples_done": 0},
+                )
+                if not runtime.close():
+                    raise RuntimeError("vLLM cleanup remains unresolved before exact loss")
+                _compute_exact_loss_outputs(
+                    args=args,
+                    model_dir=model_dir,
+                    results_dir=results_dir,
+                    hf_token=hf_token,
+                    progress_syncer=progress_syncer,
+                    stage_logger=stage_logger,
+                )
+        except Exception as exc:
+            traceback.print_exc()
+            stage_logger.emit_failure(exc, message="vLLM evaluation job failed", traceback_text=traceback.format_exc())
+            failure_payload = {
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {exc}",
+                "traceback": traceback.format_exc(),
+            }
+            failure_json.write_text(json.dumps(failure_payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            progress_syncer.sync_once()
+            _sync_bucket(
+                str(results_dir),
+                f"hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}",
+                token=hf_token,
+            )
+            final_exit_code = _finalize_cloud_exit_code(1, output_json)
+            if final_exit_code == 0:
+                print(
+                    "Evaluation artifacts were written before optional post-processing failed. "
+                    "Returning success for cloud job status."
+                )
+            return final_exit_code
+        finally:
+            progress_syncer.stop()
+            progress_syncer.sync_once()
 
     _sync_bucket(
         str(results_dir),

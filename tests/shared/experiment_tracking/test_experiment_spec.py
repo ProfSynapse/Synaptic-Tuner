@@ -5,6 +5,7 @@ import textwrap
 import pytest
 
 from shared.experiment_tracking import load_experiment_spec
+from tuner.project import ProjectContext
 
 
 def test_load_experiment_spec_round_trip(tmp_path):
@@ -266,3 +267,31 @@ def test_load_experiment_spec_rejects_invalid_post_training_mode(tmp_path):
 
     with pytest.raises(ValueError, match="unsupported post_training.mode"):
         load_experiment_spec(spec_path)
+
+
+def test_load_experiment_spec_records_portable_resolved_config_source(tmp_path):
+    host = tmp_path / "host"
+    engine = host / "vendor" / "engine"
+    spec_path = host / "experiments" / "experiment.yaml"
+    engine.mkdir(parents=True)
+    spec_path.parent.mkdir(parents=True)
+    spec_path.write_text(
+        textwrap.dedent(
+            """
+            experiment:
+              name: portable
+              provider: hf_jobs
+              method: sft
+              dataset: {source: org/data, file: train.jsonl}
+              training: {model_name: org/model}
+            """
+        ),
+        encoding="utf-8",
+    )
+    context = ProjectContext.host(engine_root=engine, project_root=host)
+
+    spec = load_experiment_spec(spec_path, project_context=context)
+
+    assert spec.resolved_config is not None
+    assert spec.resolved_config.sources[0]["uri"] == "project://experiments/experiment.yaml"
+    assert len(spec.resolved_config.resolved_sha256) == 64

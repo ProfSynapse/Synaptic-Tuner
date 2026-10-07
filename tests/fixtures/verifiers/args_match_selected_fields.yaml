@@ -1,0 +1,16 @@
+# args_match verifier spec: `mappings` select which call fields are compared.
+# Only the tool name and the `path` argument count; other arguments are ignored.
+type: args_match
+params:
+  scheme: mappings
+  gt_tool_field: tool_name
+  gt_args_field: arguments
+  pass_threshold: 1.0
+  mappings:
+    - use_tool_name: true
+      strategy: equals
+      weight: 1.0
+    - pred_path: path
+      gt_path: path
+      strategy: equals
+      weight: 1.0

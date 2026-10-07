@@ -7,9 +7,42 @@ import yaml
 
 from SynthChat.generator import SynthChatGenerator
 from SynthChat.schemas.tool_response_schema import build_tool_generation_prompt, build_tool_response_schema
-from SynthChat.config.format_resolver import get_default_tool_call_format
+from SynthChat.config.format_resolver import get_default_tool_call_format, load_tool_call_formats
 from shared.agentic_judge import AgenticTurnJudge
 from shared.environments import EnvironmentValidator
+from shared.llm.usage import LLMCompletionV1, LLMStructuredV1
+
+
+# Tool scenarios that do not name a format use the configured default tool-call
+# format (SynthChat/config/tool_call_formats.yaml). Assistant payloads are built
+# from that format: its wrapper name, its required argument fields, and CLI
+# command strings that the environment expands into concrete tools.
+_CONFIGURED_TOOL_CALL_FORMAT = load_tool_call_formats()["default"]
+
+
+def _configured_tool_call_response(*commands, session_id, workspace_id, memory, goal, call_id="call_001"):
+    arguments = {
+        "sessionId": session_id,
+        "workspaceId": workspace_id,
+        "memory": memory,
+        "goal": goal,
+        "tool": ", ".join(commands),
+    }
+    missing = set(_CONFIGURED_TOOL_CALL_FORMAT["argument_required"]) - set(arguments)
+    assert not missing, f"configured tool-call format requires {sorted(missing)}"
+    return {
+        "content": None,
+        "tool_calls": [
+            {
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": _CONFIGURED_TOOL_CALL_FORMAT["wrapper_name"],
+                    "arguments": json.dumps(arguments),
+                },
+            }
+        ],
+    }
 
 
 def _tool_calls_array_schema(schema: dict) -> dict:
@@ -44,7 +77,7 @@ class _FakeLLMClient:
         self.messages.append({"messages": messages, "temperature": temperature, "max_tokens": max_tokens})
         if not self._responses:
             raise AssertionError("No more fake responses available")
-        return self._responses.pop(0)
+        return LLMCompletionV1(self._responses.pop(0))
 
     def structured_output(self, messages, schema, temperature=0.3, max_tokens=2048):
         self.structured_messages.append(
@@ -57,7 +90,7 @@ class _FakeLLMClient:
         )
         if not self._structured_responses:
             raise AssertionError("No more fake structured responses available")
-        return self._structured_responses.pop(0)
+        return LLMStructuredV1(self._structured_responses.pop(0))
 
 
 class _FakeLogger:
@@ -84,13 +117,13 @@ class _RetryJudgeClient:
         self.calls += 1
         if self.calls < 3:
             raise RuntimeError("transient judge failure")
-        return {
+        return LLMStructuredV1({
             "passed": True,
             "hard_failure": False,
             "should_stop": False,
             "feedback_to_model": "Looks good.",
             "feedback_for_trace": "Recovered after retries.",
-        }
+        })
 
 
 class _AlwaysFailStructuredClient(_FakeLLMClient):
@@ -166,56 +199,26 @@ def test_synthchat_generator_renders_mocked_workspace_prompt_from_generated_envi
         }
     )
 
-    assistant_json = json.dumps(
-        {
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": "call_001",
-                    "type": "function",
-                    "function": {
-                        "name": "useTools",
-                        "arguments": {
-                            "context": {
-                                "sessionId": "session_1732300800000_env001",
-                                "workspaceId": "ws_generated_ops",
-                                "memory": "Need to update the production note only.",
-                                "goal": "Find and update the production config note.",
-                            },
-                            "calls": [
-                                {
-                                    "agent": "searchManager",
-                                    "tool": "searchContent",
-                                    "params": {"query": "api.old.example.com", "path": "Ops/"},
-                                },
-                                {
-                                    "agent": "contentManager",
-                                    "tool": "read",
-                                    "params": {"path": "Ops/production-config.md", "startLine": 1},
-                                },
-                                {
-                                    "agent": "contentManager",
-                                    "tool": "update",
-                                    "params": {
-                                        "path": "Ops/production-config.md",
-                                        "startLine": 1,
-                                        "content": "---\ntitle: Production Config\ntype: config\nenvironment: production\n---\napi_base_url: https://api.prod.example.com\nretry_policy: exponential\n",
-                                    },
-                                },
-                            ],
-                        },
-                    },
-                }
-            ],
-        }
+    assistant_response = _configured_tool_call_response(
+        'search content "api.old.example.com" --paths \'["Ops/"]\'',
+        'content read "Ops/production-config.md" 1',
+        (
+            'content replace "Ops/production-config.md" '
+            '"api_base_url: https://api.old.example.com" '
+            '"api_base_url: https://api.prod.example.com" 6 6'
+        ),
+        session_id="session_1732300800000_env001",
+        workspace_id="ws_generated_ops",
+        memory="Need to update the production note only.",
+        goal="Find and update the production config note.",
     )
 
     client = _FakeLLMClient(
         [
             environment_json,
             "Please update the production config note to use the new API base URL.",
-            assistant_json,
-        ]
+        ],
+        structured_responses=[assistant_response],
     )
     validator = EnvironmentValidator(backend="local")
     generator = SynthChatGenerator(
@@ -230,7 +233,7 @@ def test_synthchat_generator_renders_mocked_workspace_prompt_from_generated_envi
 
     scenario = {
         "type": "tool",
-        "tool": "contentManager_update",
+        "tool": "contentManager_replace",
         "system_template": "mocked_workspace_vault",
         "system_context": {
             "available_workspaces": [
@@ -271,6 +274,11 @@ def test_synthchat_generator_renders_mocked_workspace_prompt_from_generated_envi
     assert "Ops/production-config.md" in system_prompt
     assert result.example["metadata"]["generated_environment"]["system_context"]["workspace_id"] == "ws_generated_ops"
     assert result.example["metadata"]["environment"]["passed"] is True
+    assert [tool["name"] for tool in result.example["metadata"]["environment"]["executed_tools"]] == [
+        "searchManager_content",
+        "contentManager_read",
+        "contentManager_replace",
+    ]
 
 
 def test_agentic_turn_judge_retries_before_failing():
@@ -426,16 +434,15 @@ def test_use_tools_response_schema_allows_text_only_responses():
     tool_calls_schema = schema["properties"]["tool_calls"]
     assert "anyOf" in tool_calls_schema
     assert {"type": "null"} in tool_calls_schema["anyOf"]
-    assert any(
-        isinstance(option, dict)
-        and option.get("type") == "array"
-        and option.get("maxItems") == 0
+    assert all(
+        "items" in option
         for option in tool_calls_schema["anyOf"]
+        if isinstance(option, dict) and option.get("type") == "array"
     )
 
 
 def test_use_tools_generation_prompt_explicitly_allows_text_or_tools():
-    fmt = get_default_tool_call_format()
+    fmt = _CONFIGURED_TOOL_CALL_FORMAT
     prompt = build_tool_generation_prompt(
         format_config=fmt,
         base_prompt="Continue the task.",
@@ -445,6 +452,8 @@ def test_use_tools_generation_prompt_explicitly_allows_text_or_tools():
     assert "either call tools or respond via text" in prompt
     assert "set tool_calls to null or []" in prompt
     assert "When the task is already complete" in prompt
+    assert f"function.name is '{fmt['wrapper_name']}'" in prompt
+    assert "Allowed concrete tools for this task: contentManager_write." in prompt
 
 
 def test_synthchat_generator_loads_environment_generation_scenarios():
@@ -501,41 +510,22 @@ def test_synthchat_generator_adds_filterable_labels_for_environment_success():
             },
         }
     )
-    assistant_json = json.dumps(
-        {
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": "call_001",
-                    "type": "function",
-                    "function": {
-                        "name": "useTools",
-                        "arguments": {
-                            "context": {
-                                "sessionId": "session_1732300800000_envlabels001",
-                                "workspaceId": "ws_generated_ops",
-                                "memory": "Update the production config note.",
-                                "goal": "Set the production API base URL.",
-                            },
-                            "calls": [
-                                {
-                                    "agent": "contentManager",
-                                    "tool": "update",
-                                    "params": {
-                                        "path": "Ops/production-config.md",
-                                        "startLine": 1,
-                                        "content": "---\ntitle: Production Config\ntype: config\n---\napi_base_url: https://api.prod.example.com\n",
-                                    },
-                                }
-                            ],
-                        },
-                    },
-                }
-            ],
-        }
+    assistant_response = _configured_tool_call_response(
+        (
+            'content replace "Ops/production-config.md" '
+            '"api_base_url: https://api.old.example.com" '
+            '"api_base_url: https://api.prod.example.com" 5 5'
+        ),
+        session_id="session_1732300800000_envlabels001",
+        workspace_id="ws_generated_ops",
+        memory="Update the production config note.",
+        goal="Set the production API base URL.",
     )
 
-    client = _FakeLLMClient([environment_json, "Update the production config note.", assistant_json])
+    client = _FakeLLMClient(
+        [environment_json, "Update the production config note."],
+        structured_responses=[assistant_response],
+    )
     validator = EnvironmentValidator(backend="local")
     generator = SynthChatGenerator(
         config_dir=config_dir,
@@ -549,7 +539,7 @@ def test_synthchat_generator_adds_filterable_labels_for_environment_success():
 
     scenario = {
         "type": "tool",
-        "tool": "contentManager_update",
+        "tool": "contentManager_replace",
         "tags": ["vault", "retrieval"],
         "system_template": "mocked_workspace_vault",
         "environment_mode": "generated",
@@ -573,11 +563,11 @@ def test_synthchat_generator_adds_filterable_labels_for_environment_success():
     assert "scenario:env_label_success" in flat
     assert "type:tool" in flat
     assert "environment_mode:generated" in flat
-    assert "tool:contentManager_update" in flat
+    assert "tool:contentManager_replace" in flat
     assert "kto_candidate:positive" in flat
     assert filter_labels["environment_passed"] is True
     assert filter_labels["kto_candidate_label"] is True
-    assert filter_labels["executed_tools"] == ["contentManager_update"]
+    assert filter_labels["executed_tools"] == ["contentManager_replace"]
 
 
 def test_synthchat_generator_provided_environment_mode_skips_generation():
@@ -928,41 +918,18 @@ def test_synthchat_generator_labels_behavioral_environment_failures_for_filterin
     scenarios_dir = repo_root / "SynthChat" / "scenarios"
     rubrics_dir = repo_root / "SynthChat" / "rubrics"
 
-    assistant_json = json.dumps(
-        {
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": "call_001",
-                    "type": "function",
-                    "function": {
-                        "name": "useTools",
-                        "arguments": {
-                            "context": {
-                                "sessionId": "session_1732300800000_envlabels002",
-                                "workspaceId": "ws_generated_ops",
-                                "memory": "Need to triage the rate limit note.",
-                                "goal": "Mark the right note as triaged.",
-                            },
-                            "calls": [
-                                {
-                                    "agent": "contentManager",
-                                    "tool": "update",
-                                    "params": {
-                                        "path": "Inbox/oauth-cleanup.md",
-                                        "content": "status: triaged",
-                                        "startLine": 1,
-                                        "endLine": 1,
-                                    },
-                                }
-                            ],
-                        },
-                    },
-                }
-            ],
-        }
+    # Triages the wrong note without the expected retrieval step.
+    assistant_response = _configured_tool_call_response(
+        'content replace "Inbox/oauth-cleanup.md" "status: open" "status: triaged" 3 3',
+        session_id="session_1732300800000_envlabels002",
+        workspace_id="ws_generated_ops",
+        memory="Need to triage the rate limit note.",
+        goal="Mark the right note as triaged.",
     )
-    client = _FakeLLMClient(["Find the rate limit note and triage it.", assistant_json])
+    client = _FakeLLMClient(
+        ["Find the rate limit note and triage it."],
+        structured_responses=[assistant_response],
+    )
     validator = EnvironmentValidator(backend="local")
     generator = SynthChatGenerator(
         config_dir=config_dir,
@@ -976,7 +943,7 @@ def test_synthchat_generator_labels_behavioral_environment_failures_for_filterin
 
     scenario = {
         "type": "tool",
-        "tool": "contentManager_update",
+        "tool": "contentManager_replace",
         "system_template": "mocked_workspace_vault",
         "environment_mode": "provided",
         "environment": {
@@ -1004,7 +971,7 @@ def test_synthchat_generator_labels_behavioral_environment_failures_for_filterin
                 }
             ],
         },
-        "expected_tools": ["searchManager_searchContent"],
+        "expected_tools": ["searchManager_content"],
         "system_context": {
             "session_id": "session_1732300800000_envlabels002",
             "workspace_id": "ws_generated_ops",
@@ -1033,6 +1000,7 @@ def test_synthchat_generator_labels_behavioral_environment_failures_for_filterin
     assert filter_labels["environment_passed"] is False
     assert filter_labels["kto_candidate_label"] is False
     assert "missing_expected_tool" in filter_labels["issue_labels"]
+    assert filter_labels["executed_tools"] == ["contentManager_replace"]
 
 
 def test_synthchat_generator_retries_empty_llm_response_for_assistant_stage():
@@ -1041,46 +1009,22 @@ def test_synthchat_generator_retries_empty_llm_response_for_assistant_stage():
     scenarios_dir = repo_root / "SynthChat" / "scenarios"
     rubrics_dir = repo_root / "SynthChat" / "rubrics"
 
-    assistant_json = json.dumps(
-        {
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": "call_001",
-                    "type": "function",
-                    "function": {
-                        "name": "useTools",
-                        "arguments": {
-                            "context": {
-                                "sessionId": "session_1732300800000_retry001",
-                                "workspaceId": "ws_retry_ops",
-                                "memory": "Update the production config note.",
-                                "goal": "Set the production API base URL.",
-                            },
-                            "calls": [
-                                {
-                                    "agent": "contentManager",
-                                    "tool": "update",
-                                    "params": {
-                                        "path": "Ops/production-config.md",
-                                        "startLine": 1,
-                                        "content": "---\ntitle: Production Config\ntype: config\n---\napi_base_url: https://api.prod.example.com\n",
-                                    },
-                                }
-                            ],
-                        },
-                    },
-                }
-            ],
-        }
+    assistant_response = _configured_tool_call_response(
+        (
+            'content replace "Ops/production-config.md" '
+            '"api_base_url: https://api.old.example.com" '
+            '"api_base_url: https://api.prod.example.com" 5 5'
+        ),
+        session_id="session_1732300800000_retry001",
+        workspace_id="ws_retry_ops",
+        memory="Update the production config note.",
+        goal="Set the production API base URL.",
     )
 
+    # The first structured assistant reply is empty and must be retried.
     client = _FakeLLMClient(
-        [
-            "Update the production config note.",
-            None,
-            assistant_json,
-        ]
+        ["Update the production config note."],
+        structured_responses=[{}, assistant_response],
     )
     validator = EnvironmentValidator(backend="local")
     generator = SynthChatGenerator(
@@ -1095,7 +1039,7 @@ def test_synthchat_generator_retries_empty_llm_response_for_assistant_stage():
 
     scenario = {
         "type": "tool",
-        "tool": "contentManager_update",
+        "tool": "contentManager_replace",
         "environment_mode": "provided",
         "environment": {
             "fixture": {
@@ -1134,10 +1078,10 @@ def test_synthchat_generator_retries_empty_llm_response_for_assistant_stage():
         randomize_params=False,
     )
 
-    assert len(client.messages) == 3
+    assert len(client.structured_messages) == 2
     assert result.example["metadata"]["environment"]["passed"] is True
     assistant = result.example["conversations"][-1]
-    assert assistant["tool_calls"][0]["function"]["name"] == "useTools"
+    assert assistant["tool_calls"][0]["function"]["name"] == _CONFIGURED_TOOL_CALL_FORMAT["wrapper_name"]
 
 
 def test_synthchat_generator_uses_structured_environment_and_tool_response_schemas():
@@ -1185,46 +1129,15 @@ def test_synthchat_generator_uses_structured_environment_and_tool_response_schem
         },
     }
 
-    structured_assistant = {
-        "content": None,
-        "tool_calls": [
-            {
-                "id": "call_001",
-                "type": "function",
-                "function": {
-                    "name": "useTools",
-                    "arguments": {
-                        "context": {
-                            "sessionId": "session_structured_001",
-                            "workspaceId": "ws_alpha",
-                            "memory": "Need to match the project note format.",
-                            "goal": "Promote the inbox note into the Alpha project folder.",
-                        },
-                        "calls": [
-                            {
-                                "agent": "contentManager",
-                                "tool": "read",
-                                "params": {"path": "Projects/Alpha/example-project.md", "startLine": 1},
-                            },
-                            {
-                                "agent": "contentManager",
-                                "tool": "write",
-                                "params": {
-                                    "path": "Projects/Alpha/alpha-prototype.md",
-                                    "content": "---\ntitle: Alpha Prototype\nstatus: active\ntype: project\n---\nPrototype notes that should be preserved.\n",
-                                },
-                            },
-                            {
-                                "agent": "storageManager",
-                                "tool": "archive",
-                                "params": {"path": "Inbox/alpha-prototype.md"},
-                            },
-                        ],
-                    },
-                },
-            }
-        ],
-    }
+    structured_assistant = _configured_tool_call_response(
+        'content read "Projects/Alpha/example-project.md" 1',
+        'storage move "Inbox/alpha-prototype.md" "Projects/Alpha/alpha-prototype.md"',
+        'content replace "Projects/Alpha/alpha-prototype.md" "status: inbox" "status: active" 3 3',
+        session_id="session_structured_001",
+        workspace_id="ws_alpha",
+        memory="Need to match the project note format.",
+        goal="Promote the inbox note into the Alpha project folder.",
+    )
 
     client = _FakeLLMClient(
         responses=["Promote the alpha prototype note into the project folder."],
@@ -1243,8 +1156,8 @@ def test_synthchat_generator_uses_structured_environment_and_tool_response_schem
 
     scenario = {
         "type": "tool",
-        "tool": "contentManager_write",
-        "expected_tools": ["contentManager_read", "contentManager_write", "storageManager_archive"],
+        "tool": "storageManager_move",
+        "expected_tools": ["contentManager_read", "storageManager_move", "contentManager_replace"],
         "environment_mode": "generated",
         "system_template": "mocked_workspace_vault",
         "environment_generation": {
@@ -1270,7 +1183,12 @@ def test_synthchat_generator_uses_structured_environment_and_tool_response_schem
     assistant = result.example["conversations"][-1]
     assert result.example["metadata"]["scenario"] == "structured_tool_case"
     assert result.example["metadata"]["environment"]["passed"] is True
-    assert assistant["tool_calls"][0]["function"]["name"] == "useTools"
+    assert assistant["tool_calls"][0]["function"]["name"] == _CONFIGURED_TOOL_CALL_FORMAT["wrapper_name"]
+    assert [tool["name"] for tool in result.example["metadata"]["environment"]["executed_tools"]] == [
+        "contentManager_read",
+        "storageManager_move",
+        "contentManager_replace",
+    ]
     assert len(client.structured_messages) == 2
 
 
@@ -1404,38 +1322,14 @@ def test_use_tools_schema_is_constrained_to_single_wrapper_and_allowed_tools():
             "selected_workspace": {"id": "ws_ops", "name": "Ops"},
         },
     }
-    structured_assistant = {
-        "content": None,
-        "tool_calls": [
-            {
-                "id": "call_001",
-                "type": "function",
-                "function": {
-                    "name": "useTools",
-                    "arguments": {
-                        "context": {
-                            "sessionId": "session_structured_003",
-                            "workspaceId": "ws_ops",
-                            "memory": "Need to inspect then update the ops note.",
-                            "goal": "Update the production note.",
-                        },
-                        "calls": [
-                            {
-                                "agent": "searchManager",
-                                "tool": "searchContent",
-                                "params": {"query": "api.old.example.com", "limit": 5},
-                            },
-                            {
-                                "agent": "contentManager",
-                                "tool": "read",
-                                "params": {"path": "Ops/production.md", "startLine": 1},
-                            },
-                        ],
-                    },
-                },
-            }
-        ],
-    }
+    structured_assistant = _configured_tool_call_response(
+        'search content "api.old.example.com" --limit 5',
+        'content read "Ops/production.md" 1',
+        session_id="session_structured_003",
+        workspace_id="ws_ops",
+        memory="Need to inspect then update the ops note.",
+        goal="Update the production note.",
+    )
 
     client = _FakeLLMClient(
         responses=["Update the production note."],
@@ -1454,8 +1348,8 @@ def test_use_tools_schema_is_constrained_to_single_wrapper_and_allowed_tools():
 
     scenario = {
         "type": "tool",
-        "tool": "contentManager_update",
-        "expected_tools": ["searchManager_searchContent", "contentManager_read"],
+        "tool": "contentManager_replace",
+        "expected_tools": ["searchManager_content", "contentManager_read"],
         "environment_mode": "generated",
         "system_template": "mocked_workspace_vault",
         "environment_generation": {
@@ -1478,18 +1372,28 @@ def test_use_tools_schema_is_constrained_to_single_wrapper_and_allowed_tools():
         randomize_params=False,
     )
 
-    assistant_schema = client.structured_messages[-1]["schema"]
-    tool_calls_schema = _tool_calls_array_schema(assistant_schema)
-    function_args = tool_calls_schema["items"]["properties"]["function"]["properties"]["arguments"]
-    inner_call = function_args["properties"]["calls"]["items"]["properties"]
-    context_props = function_args["properties"]["context"]["properties"]
+    wrapper_name = _CONFIGURED_TOOL_CALL_FORMAT["wrapper_name"]
+    assistant_request = client.structured_messages[-1]
+    tool_calls_schema = _tool_calls_array_schema(assistant_request["schema"])
+    function_schema = tool_calls_schema["items"]["properties"]["function"]["properties"]
+    function_args = function_schema["arguments"]
 
+    # One call to the configured wrapper; its arguments are a JSON string whose
+    # description names the configured argument fields.
     assert tool_calls_schema["maxItems"] == 1
-    assert inner_call["agent"]["enum"] == ["contentManager", "searchManager"]
-    assert inner_call["tool"]["enum"] == ["read", "searchContent", "update"]
-    assert context_props["sessionId"]["const"] == "session_structured_003"
-    assert context_props["workspaceId"]["const"] == "ws_ops"
-    assert result.example["conversations"][-1]["tool_calls"][0]["function"]["name"] == "useTools"
+    assert function_schema["name"]["const"] == wrapper_name
+    assert function_args["type"] == "string"
+    for field_name in _CONFIGURED_TOOL_CALL_FORMAT["argument_required"]:
+        assert field_name in function_args["description"]
+
+    # The allowed concrete tools are named in the generation prompt.
+    prompt = assistant_request["messages"][-1]["content"]
+    assert (
+        "Allowed concrete tools for this task: "
+        "contentManager_read, contentManager_replace, searchManager_content."
+    ) in prompt
+    assert f"function.name is '{wrapper_name}'" in prompt
+    assert result.example["conversations"][-1]["tool_calls"][0]["function"]["name"] == wrapper_name
 
 
 def test_generate_batch_reuses_environment_seed_across_rollouts():
@@ -1650,64 +1554,21 @@ def test_synthchat_generator_can_run_shared_agentic_loop():
             "Done. The daily note is created.",
         ],
         structured_responses=[
-            {
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "call_001",
-                        "type": "function",
-                        "function": {
-                            "name": "useTools",
-                            "arguments": {
-                                "context": {
-                                    "sessionId": "session_loop_001",
-                                    "workspaceId": "ws_loop_001",
-                                    "memory": "Need to find the template first.",
-                                    "goal": "Create the daily note.",
-                                },
-                                "calls": [
-                                    {
-                                        "agent": "searchManager",
-                                        "tool": "searchDirectory",
-                                        "params": {"query": "daily-note", "paths": ["Templates/"]},
-                                    }
-                                ],
-                            },
-                        },
-                    }
-                ],
-            },
-            {
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "call_002",
-                        "type": "function",
-                        "function": {
-                            "name": "useTools",
-                            "arguments": {
-                                "context": {
-                                    "sessionId": "session_loop_001",
-                                    "workspaceId": "ws_loop_001",
-                                    "memory": "Template located; now create the note.",
-                                    "goal": "Create the daily note.",
-                                },
-                                "calls": [
-                                    {
-                                        "agent": "contentManager",
-                                        "tool": "write",
-                                        "params": {
-                                            "path": "Journal/Daily/2026-03-15.md",
-                                            "content": "---\ntitle: 2026-03-15\ntype: daily\n---\n## Summary\nReady.\n",
-                                            "overwrite": True,
-                                        },
-                                    }
-                                ],
-                            },
-                        },
-                    }
-                ],
-            },
+            _configured_tool_call_response(
+                'search directory "daily-note" --paths \'["Templates/"]\'',
+                session_id="session_loop_001",
+                workspace_id="ws_loop_001",
+                memory="Need to find the template first.",
+                goal="Create the daily note.",
+            ),
+            _configured_tool_call_response(
+                'content write "Journal/Daily/2026-03-15.md" "## Summary" --overwrite',
+                session_id="session_loop_001",
+                workspace_id="ws_loop_001",
+                memory="Template located; now create the note.",
+                goal="Create the daily note.",
+                call_id="call_002",
+            ),
         ],
     )
     validator = EnvironmentValidator(backend="local")
@@ -1724,7 +1585,7 @@ def test_synthchat_generator_can_run_shared_agentic_loop():
     scenario = {
         "type": "tool",
         "tool": "contentManager_write",
-        "expected_tools": ["searchManager_searchDirectory", "contentManager_write"],
+        "expected_tools": ["searchManager_directory", "contentManager_write"],
         "environment_mode": "provided",
         "system_template": "mocked_workspace_vault",
         "assistant_generation": {"schema": "use_tools_response"},
@@ -1774,6 +1635,7 @@ def test_synthchat_generator_can_run_shared_agentic_loop():
     env_trace = result.example["metadata"]["environment"]
     assert env_trace["passed"] is True
     assert env_trace["episode_trace"]["total_turns"] == 2
+    assert [tool["name"] for tool in env_trace["executed_tools"]] == ["searchManager_directory", "contentManager_write"]
     assert any(entry["kind"] == "tool_feedback" for entry in result.example["conversation_trace"])
 
 
@@ -1788,37 +1650,13 @@ def test_generate_single_can_use_turn_judge_and_require_final_text():
             "Update the file and let me know when it's done.",
         ],
         structured_responses=[
-            {
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "call_001",
-                        "type": "function",
-                        "function": {
-                            "name": "useTools",
-                            "arguments": {
-                                "context": {
-                                    "sessionId": "session_loop_judge_001",
-                                    "workspaceId": "ws_loop_judge_001",
-                                    "memory": "Need to update the file.",
-                                    "goal": "Write the final file.",
-                                },
-                                "calls": [
-                                    {
-                                        "agent": "contentManager",
-                                        "tool": "write",
-                                        "params": {
-                                            "path": "Inbox/final.md",
-                                            "content": "complete",
-                                            "overwrite": True,
-                                        },
-                                    }
-                                ],
-                            },
-                        },
-                    }
-                ],
-            },
+            _configured_tool_call_response(
+                'content write "Inbox/final.md" "complete" --overwrite',
+                session_id="session_loop_judge_001",
+                workspace_id="ws_loop_judge_001",
+                memory="Need to update the file.",
+                goal="Write the final file.",
+            ),
             {
                 "passed": True,
                 "hard_failure": False,
@@ -1925,37 +1763,13 @@ def test_turn_judge_should_stop_does_not_preempt_environment_stop_conditions():
             "Update the file and let me know when it's done.",
         ],
         structured_responses=[
-            {
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "call_001",
-                        "type": "function",
-                        "function": {
-                            "name": "useTools",
-                            "arguments": {
-                                "context": {
-                                    "sessionId": "session_loop_judge_002",
-                                    "workspaceId": "ws_loop_judge_002",
-                                    "memory": "Need to update the file.",
-                                    "goal": "Write the final file.",
-                                },
-                                "calls": [
-                                    {
-                                        "agent": "contentManager",
-                                        "tool": "write",
-                                        "params": {
-                                            "path": "Inbox/final.md",
-                                            "content": "complete",
-                                            "overwrite": True,
-                                        },
-                                    }
-                                ],
-                            },
-                        },
-                    }
-                ],
-            },
+            _configured_tool_call_response(
+                'content write "Inbox/final.md" "complete" --overwrite',
+                session_id="session_loop_judge_002",
+                workspace_id="ws_loop_judge_002",
+                memory="Need to update the file.",
+                goal="Write the final file.",
+            ),
             {
                 "passed": True,
                 "hard_failure": False,

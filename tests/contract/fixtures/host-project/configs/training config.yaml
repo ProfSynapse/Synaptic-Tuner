@@ -1,0 +1,12 @@
+schema_version: synaptic-config/v1
+
+data:
+  source: ../data/private dataset.jsonl
+
+training:
+  method: sft
+  max_steps: 1
+
+output:
+  artifacts: artifact://contract run
+  state: state://contract run

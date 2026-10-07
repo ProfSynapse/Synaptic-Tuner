@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from tuner.project import ProjectContext, resolve_path
+
 from .service import PromptOptimizationError, PromptSubject
 
 
@@ -33,10 +35,12 @@ class EvaluatorScoringAdapter:
         config_path: Path,
         repo_root: Path,
         score_floor: float,
+        project_context: ProjectContext | None = None,
     ) -> None:
         self.evaluation_config = dict(evaluation_config)
         self.config_path = config_path
         self.repo_root = repo_root
+        self.project_context = project_context
         self.score_floor = _clamp_score(score_floor)
         self.evaluator_config = _mapping(
             self.evaluation_config.get("evaluator") or self.evaluation_config,
@@ -96,7 +100,9 @@ class EvaluatorScoringAdapter:
         from Evaluator.runner import evaluate_cases
 
         config_dir = self._resolve_path(str(self.evaluator_config.get("config_dir", "Evaluator/config")))
-        loader = ConfigLoader(config_dir)
+        loader = ConfigLoader(
+            config_dir, project_context=self.project_context
+        )
 
         preset = self.evaluator_config.get("preset")
         scenario_files = self.evaluator_config.get("scenarios")
@@ -254,6 +260,7 @@ class EvaluatorScoringAdapter:
             metrics["case_records"] = [
                 _case_record_for_persistence(
                     record_to_dict(record),
+                    raw_response=record.raw_response,
                     include_raw_response=self.persist_raw_response,
                 )
                 for record in records
@@ -343,6 +350,25 @@ class EvaluatorScoringAdapter:
         return injected
 
     def _resolve_path(self, raw_path: str) -> Path:
+        if self.project_context is not None:
+            if raw_path == "Evaluator/config":
+                if (self.project_context.config_root / "scenarios").is_dir():
+                    return self.project_context.config_root
+                host_dir = self.project_context.config_root / "Evaluator"
+                if host_dir.is_dir():
+                    return host_dir
+                return self.project_context.engine_root / "Evaluator" / "config"
+            path = resolve_path(
+                raw_path,
+                self.project_context,
+                declaring_file=self.config_path,
+                access="read",
+            )
+            if path.exists():
+                return path
+            raise EvaluatorScoringConfigError(
+                f"Evaluator config path not found: {raw_path}"
+            )
         path = Path(raw_path).expanduser()
         candidates = [path] if path.is_absolute() else [self.repo_root / path, self.config_path.parent / path]
         for candidate in candidates:
@@ -428,7 +454,11 @@ class EvaluatorScoringAdapter:
             from pathlib import Path as _Path
 
             interaction_logger = InteractionLogger(
-                output_dir=_Path("Evaluator/interactions"),
+                output_dir=(
+                    self.project_context.tracking_root / "prompt_optimization" / "judge"
+                    if self.project_context is not None
+                    else _Path("Evaluator/interactions")
+                ),
                 enabled=True,
                 prefix="judge_opt",
             )
@@ -571,21 +601,21 @@ def _usage_summary(raw_response: Any) -> dict[str, Any] | None:
 
 
 def _case_record_for_persistence(
-    record_dict: dict[str, Any], *, include_raw_response: bool
+    record_dict: dict[str, Any], *, raw_response: Any, include_raw_response: bool
 ) -> dict[str, Any]:
-    """Reduce a full record_to_dict() payload for candidate-stream persistence.
+    """Extend a public record_to_dict() payload for candidate-stream persistence.
 
-    By default drops the heavy ``raw_response`` blob (it can be large and is not
-    needed for score analysis) and replaces it with a compact ``usage`` summary so
-    per-case token cost stays parseable. When ``include_raw_response`` is set, the
-    full blob is preserved verbatim instead. All other fields (judge dimensions,
-    correctness verdict, response_text, tags, ...) pass through unchanged.
+    The public projection carries no ``raw_response`` (it is attacker-influenced
+    provider text), so the raw body is taken from ``EvaluationRecord.raw_response``
+    directly. By default only a compact ``usage`` summary lifted from it is
+    attached so per-case token cost stays parseable; when ``include_raw_response``
+    is set, the full blob is attached verbatim as well. All other fields (judge
+    dimensions, correctness verdict, response_text, tags, ...) pass through unchanged.
     """
     out = dict(record_dict)
-    raw_response = out.get("raw_response")
     usage = _usage_summary(raw_response)
-    if not include_raw_response:
-        out.pop("raw_response", None)
+    if include_raw_response:
+        out["raw_response"] = raw_response
     if usage is not None:
         out["usage"] = usage
     return out

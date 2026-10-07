@@ -11,21 +11,43 @@ implications. Tests focus on:
 - _build_startup_command does not leak tokens
 """
 
-import os
-import time
+import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tuner.backends.training.cloud.runpod_backend import (
     RunPodBackend,
-    _DEFAULT_TRAINING_TIMEOUT,
-    _POLL_INTERVAL,
-    _POD_STARTUP_TIMEOUT,
 )
-from tuner.core.config import CloudTrainingConfig, TrainingConfig
+from tuner.backends.training.cloud.base_cloud import RepoSource
+from tuner.core.config import CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
+from tuner.project.source_bundle import GitSource, RepositoryLocation
+
+
+def _canonical_repo_source(repo_root: Path) -> RepoSource:
+    """Return a hermetic paid-cloud source pinned to the fixture repository HEAD."""
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    canonical_source = GitSource(
+        location=RepositoryLocation.parse("https://github.com/test/repo.git"),
+        branch="main",
+        commit=commit,
+        dirty=False,
+        pushed=True,
+    )
+    return RepoSource(
+        url=canonical_source.location.canonical_url,
+        branch=canonical_source.branch,
+        commit=canonical_source.commit,
+        canonical_source=canonical_source,
+    )
 
 
 def _cloud_config(**overrides):
@@ -103,7 +125,12 @@ class TestRunPodValidateEnvironment:
 class TestRunPodLoadConfig:
     def test_loads_sft_config(self, repo_root):
         backend = RunPodBackend(repo_root)
-        config = backend.load_config("sft")
+        repo_source = _canonical_repo_source(repo_root)
+        with patch(
+            "tuner.backends.training.cloud.runpod_backend.resolve_repo_source",
+            return_value=repo_source,
+        ):
+            config = backend.load_config("sft")
         assert isinstance(config, CloudTrainingConfig)
         assert config.method == "sft"
         assert config.platform == "runpod"
@@ -112,8 +139,9 @@ class TestRunPodLoadConfig:
         assert config.runpod_volume_gb == 50
         assert config.artifact_backend == "runpod_network_volume"
         assert config.artifact_identifier == "runpod-vol-123"
+        assert config.repo_url == "https://github.com/test/repo.git"
         assert config.repo_branch == "main"
-        assert config.repo_commit
+        assert config.repo_commit == repo_source.commit
 
     def test_raises_on_unknown_method(self, repo_root):
         backend = RunPodBackend(repo_root)
@@ -517,3 +545,24 @@ class TestGeneratePodName:
         # Timestamp format: YYYYMMDD-HHMMSS
         parts = name.split("-")
         assert len(parts) >= 3
+
+
+class TestRunPodValidationSplitForwarding:
+    def test_startup_command_forwards_grouped_split(self, repo_root, clean_env):
+        backend = RunPodBackend(repo_root)
+        config = _cloud_config(
+            method="kto", split_dataset=True, test_size=0.2, validation_group_key="scenario_id"
+        )
+        cmd = backend._build_startup_command(config, {})
+        assert "python train_kto.py" in cmd
+        assert cmd.endswith("--split-dataset --test-size 0.2 --validation-group-key scenario_id")
+
+    def test_startup_command_unchanged_without_split(self, repo_root, clean_env):
+        backend = RunPodBackend(repo_root)
+        cmd = backend._build_startup_command(_cloud_config(test_size=0.1), {})
+        assert "--split-dataset" not in cmd and "--test-size" not in cmd
+
+    def test_startup_command_refuses_group_key_without_split(self, repo_root, clean_env):
+        backend = RunPodBackend(repo_root)
+        with pytest.raises(ConfigurationError, match="requires dataset.split_dataset"):
+            backend._build_startup_command(_cloud_config(validation_group_key="scenario_id"), {})

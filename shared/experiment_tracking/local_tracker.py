@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any, Generator
 
 from .tracker import ExperimentTracker
+from .experiment import _atomic_write_bytes
+from tuner.project import ProjectContext
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +40,24 @@ class LocalTracker(ExperimentTracker):
                     Created automatically if it does not exist.
     """
 
-    def __init__(self, output_dir: str | Path) -> None:
-        self._output_dir = Path(output_dir)
+    def __init__(
+        self,
+        output_dir: str | Path,
+        *,
+        project_context: ProjectContext | None = None,
+    ) -> None:
+        self._project_context = project_context
+        candidate = Path(output_dir).expanduser()
+        if project_context is not None and project_context.mode == "host":
+            if not candidate.is_absolute():
+                candidate = project_context.artifact_root / candidate
+            candidate = candidate.resolve(strict=False)
+            if not any(
+                candidate.is_relative_to(root.resolve(strict=False))
+                for root in project_context.writable_roots
+            ):
+                raise ValueError("LocalTracker output must remain below a project writable root")
+        self._output_dir = candidate
         self._experiment_name: str = "default"
         self._run_data: dict[str, Any] = {}
         self._metadata: dict[str, Any] = {}
@@ -128,8 +146,8 @@ class LocalTracker(ExperimentTracker):
         """Write accumulated run data to tracking.json."""
         self._output_dir.mkdir(parents=True, exist_ok=True)
         out_path = self._output_dir / "tracking.json"
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(self._run_data, f, indent=2)
+        payload = json.dumps(self._run_data, indent=2).encode("utf-8")
+        _atomic_write_bytes(out_path, payload)
 
     def _auto_register(self) -> None:
         """Best-effort registration of the completed run in the unified registry.
@@ -145,7 +163,11 @@ class LocalTracker(ExperimentTracker):
                 self._run_data,
                 str(self._output_dir.resolve()),
             )
-            registry = RunRegistry()
+            registry = RunRegistry(
+                self._project_context.tracking_root / "registry.jsonl"
+                if self._project_context is not None
+                else None
+            )
             registry.register_run(record)
         except Exception as exc:
             logger.warning("Auto-registration failed (non-fatal): %s", exc)

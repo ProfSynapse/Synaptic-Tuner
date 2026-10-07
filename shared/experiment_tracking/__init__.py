@@ -1,69 +1,49 @@
-"""
-shared/experiment_tracking/
+"""Import-light facade for experiment tracking and orchestration."""
 
-Experiment tracking abstraction layer. Provides a unified interface for
-logging hyperparameters, metrics, and artifacts across different backends,
-plus a centralized JSONL registry for cross-run discovery and linkage.
+from __future__ import annotations
 
-Backends:
-    - "local": Zero-dependency JSON file tracker (always available).
-    - "mlflow": Full MLflow integration (requires pip install mlflow).
+from importlib import import_module
 
-Registry:
-    - RunRecord: Common schema for all run types.
-    - RunRegistry: Append-only JSONL index at {repo}/.tracking/registry.jsonl.
-    - RunFilter: Query filter for run discovery.
-    - Adapters: Bridge existing lineage/manifest formats to RunRecord.
+_EXPORT_MODULES = {
+    "LocalTracker": ".local_tracker",
+    "write_analysis_bundle": ".analysis_bundle",
+    "ExperimentOrchestrator": ".experiment_orchestrator",
+    "StageResult": ".experiment_orchestrator",
+    "ExecutionStageSpec": ".experiment_spec", "ExperimentSpec": ".experiment_spec",
+    "load_experiment_spec": ".experiment_spec", "RunRegistry": ".registry",
+    "RunFilter": ".schema", "RunRecord": ".schema", "LossResult": ".schema",
+    "ExperimentTracker": ".tracker",
+    "compute_per_example_losses": ".per_example_loss",
+    "save_losses": ".per_example_loss", "load_losses": ".per_example_loss",
+    "Experiment": ".experiment", "create_experiment": ".experiment",
+    "load_experiment": ".experiment", "TrackingService": ".service",
+}
 
-Usage:
-    from shared.experiment_tracking import create_tracker
-
-    tracker = create_tracker(backend="local", output_dir="./output")
-    tracker.set_experiment("my_experiment")
-    with tracker.start_run("run_001"):
-        tracker.log_params({"learning_rate": 0.05})
-        tracker.log_metrics({"accuracy": 0.91})
-
-    # Query runs
-    from shared.experiment_tracking import RunRegistry, RunFilter
-
-    registry = RunRegistry()
-    recent_sft = registry.find_runs(RunFilter(run_type="sft"))
-"""
-from .local_tracker import LocalTracker
-from .analysis_bundle import write_analysis_bundle
-from .experiment_orchestrator import ExperimentOrchestrator, StageResult
-from .experiment_spec import ExecutionStageSpec, ExperimentSpec, load_experiment_spec
-from .registry import RunRegistry
-from .schema import RunFilter, RunRecord, LossResult
-from .tracker import ExperimentTracker
-from .per_example_loss import compute_per_example_losses, save_losses, load_losses
-from .experiment import Experiment, create_experiment, load_experiment, save_experiment
-from .service import TrackingService
+__all__ = [
+    "ExperimentTracker", "ExperimentOrchestrator", "ExecutionStageSpec",
+    "ExperimentSpec", "Experiment", "LossResult", "LocalTracker", "RunFilter",
+    "RunRecord", "RunRegistry", "StageResult", "TrackingService",
+    "compute_per_example_losses", "create_tracker", "create_experiment",
+    "load_experiment", "load_experiment_spec", "write_analysis_bundle",
+]
 
 
-def create_tracker(
-    backend: str = "local", output_dir: str = "."
-) -> ExperimentTracker:
-    """Create an experiment tracker by backend name.
+def __getattr__(name: str):
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module_name, __name__), name)
+    globals()[name] = value
+    return value
 
-    Args:
-        backend: Tracker backend — "mlflow" or "local".
-        output_dir: Output directory for LocalTracker's JSON file.
-                    Ignored when backend is "mlflow" and mlflow is installed.
 
-    Returns:
-        An ExperimentTracker instance ready to use.
+def create_tracker(backend: str = "local", output_dir: str = "."):
+    """Create the requested tracker, preserving the local fallback contract."""
 
-    Notes:
-        If backend is "mlflow" but the mlflow package is not installed,
-        a warning is emitted and LocalTracker is returned as a fallback.
-    """
     if backend == "mlflow":
         try:
-            from .mlflow_tracker import MLflowTracker
-
-            return MLflowTracker()
+            tracker_type = getattr(import_module(".mlflow_tracker", __name__), "MLflowTracker")
+            return tracker_type()
         except ImportError:
             import warnings
 
@@ -72,28 +52,8 @@ def create_tracker(
                 "Install with: pip install mlflow",
                 stacklevel=2,
             )
-            return LocalTracker(output_dir)
-    return LocalTracker(output_dir)
+    return __getattr__("LocalTracker")(output_dir)
 
 
-__all__ = [
-    "ExperimentTracker",
-    "ExperimentOrchestrator",
-    "ExecutionStageSpec",
-    "ExperimentSpec",
-    "Experiment",
-    "LossResult",
-    "LocalTracker",
-    "RunFilter",
-    "RunRecord",
-    "RunRegistry",
-    "StageResult",
-    "TrackingService",
-    "compute_per_example_losses",
-    "create_tracker",
-    "create_experiment",
-    "load_experiment",
-    "load_experiment_spec",
-    "save_experiment",
-    "write_analysis_bundle",
-]
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_EXPORT_MODULES) | {"create_tracker"})

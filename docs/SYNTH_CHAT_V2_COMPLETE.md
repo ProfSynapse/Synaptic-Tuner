@@ -318,7 +318,7 @@ top_p = random.uniform(0.92, 0.98)      # Tighter nucleus
 
 1. Try it: `python Tools/selfplay_generator_v2.py --model your-model --output test.jsonl --num-examples 100`
 2. Inspect: `head -5 test.jsonl | jq`
-3. Validate: `python tools/validate_syngen.py test.jsonl`
+3. Validate: `python -m shared.validation.dataset_validator test.jsonl`
 4. Train: `cd Trainers/kto && python train_kto.py --local-file ../../test.jsonl`
 5. Evaluate: Check if model improves on behavioral tests
 6. Iterate: Generate more data with refined model

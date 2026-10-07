@@ -8,7 +8,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from shared.verifiers.extraction import ExtractedAnswer, extract
+from shared.verifiers.extraction import extract
 from shared.validation.parsing import parse_response
 
 

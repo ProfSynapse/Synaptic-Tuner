@@ -22,6 +22,7 @@ from typing import Optional
 import yaml
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import resolve_path
 from tuner.ui import (
     print_menu,
     print_header,
@@ -144,9 +145,42 @@ class MLHandler(BaseHandler):
             "Test Split": str(data.get("test_size", 0.2)),
             "Features": f"{num_cols} numeric, {cat_cols} categorical",
             "Output": output.get("dir", "./ml_output"),
-            "Config": str(config_path.relative_to(self.repo_root)),
+            "Config": str(config_path),
         }
         return summary
+
+    def _validated_host_config(self, config_path: Path):
+        """Resolve host-owned ML IO once, before the trainer runtime starts."""
+
+        if self.context.mode != "host":
+            return None
+        from Trainers.ml.config import TrainingConfig
+
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        data = dict(raw.get("data") or {})
+        for key in ("train_path", "test_path"):
+            if data.get(key):
+                data[key] = str(
+                    resolve_path(
+                        data[key],
+                        self.context,
+                        declaring_file=config_path,
+                        access="read",
+                    )
+                )
+        output = dict(raw.get("output") or {})
+        output_value = output.get("dir")
+        output["dir"] = str(
+            self.artifact_root / "ml"
+            if not output_value
+            else resolve_path(
+                output_value,
+                self.context,
+                declaring_file=config_path,
+                access="write",
+            )
+        )
+        return TrainingConfig(**{**raw, "data": data, "output": output})
 
     def _run_training(self, config_path: str) -> int:
         """
@@ -161,7 +195,12 @@ class MLHandler(BaseHandler):
         try:
             from Trainers.ml.train import main as ml_train_main
 
-            run_dir = ml_train_main(config_path)
+            validated_config = self._validated_host_config(Path(config_path))
+            run_dir = (
+                ml_train_main(config_path, validated_config=validated_config)
+                if validated_config is not None
+                else ml_train_main(config_path)
+            )
             print_info(f"Training complete. Output: {run_dir}")
             return 0
         except Exception as e:
@@ -222,7 +261,9 @@ class MLHandler(BaseHandler):
         # CLI mode: --config <path> provided
         config_path_arg = getattr(self.args, "ml_config", None) if self.args else None
         if config_path_arg:
-            config_path = Path(config_path_arg)
+            config_path = resolve_path(
+                config_path_arg, self.context, from_cli=True, access="read"
+            )
             if not config_path.exists():
                 msg = f"Config file not found: {config_path}"
                 if self.json_mode:

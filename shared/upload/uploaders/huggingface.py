@@ -5,11 +5,11 @@ Uploads models and files to HuggingFace Hub.
 """
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from .base import BaseUploader
 from ..core.types import RepositoryId, Credential
-from ..core.exceptions import UploadError, AuthenticationError, DependencyError
+from ..core.exceptions import UploadError, DependencyError
 
 
 class HuggingFaceUploader(BaseUploader):
@@ -108,7 +108,7 @@ class HuggingFaceUploader(BaseUploader):
             )
 
             url = f"https://huggingface.co/{repo_id}"
-            print(f"\n✓ Model uploaded successfully!")
+            print("\n✓ Model uploaded successfully!")
             print(f"View at: {url}")
 
             return url
@@ -175,7 +175,7 @@ class HuggingFaceUploader(BaseUploader):
             self.upload_file(file_path, repo_id, credential, path_in_repo)
             print("  ✓ Uploaded")
 
-        print(f"\n✓ All files uploaded!")
+        print("\n✓ All files uploaded!")
         print(f"View at: https://huggingface.co/{repo_id}/tree/main")
 
     def get_repo_url(self, repo_id: RepositoryId) -> str:

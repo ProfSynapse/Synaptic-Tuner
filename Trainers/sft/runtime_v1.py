@@ -1,0 +1,2608 @@
+"""Concrete provider-neutral process entrypoint for canonical SFT workloads."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import hmac
+import json
+import math
+import os
+import re
+import stat
+import subprocess
+import sys
+import tarfile
+from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
+from pathlib import Path, PurePosixPath
+from typing import BinaryIO, Mapping, Protocol, runtime_checkable
+
+
+MAX_WORKLOAD_BYTES = 1024 * 1024
+MAX_LINEAGE_BYTES = 4 * 1024 * 1024
+EXECUTION_SOURCE_SCHEMA = "synaptic-execution-source/v1"
+RUNTIME_SCHEMA = "synaptic-training-runtime/v1"
+_WORKLOAD_FINGERPRINT_DOMAIN = b"synaptic-training-workload/v1\0"
+_PREPARED_DATASET_REF_RE = re.compile(r"prepared://sha256/([0-9a-f]{64})")
+_MAX_PREPARED_DATASET_BYTES = 64 * 1024 * 1024
+# Reviewed Linux UAPI values from include/uapi/linux/memfd.h and fcntl.h.
+_LINUX_MFD_CLOEXEC = 0x0001
+_LINUX_MFD_ALLOW_SEALING = 0x0002
+_LINUX_F_ADD_SEALS = 1033
+_LINUX_F_GET_SEALS = 1034
+_LINUX_F_SEAL_SEAL = 0x0001
+_LINUX_F_SEAL_SHRINK = 0x0002
+_LINUX_F_SEAL_GROW = 0x0004
+_LINUX_F_SEAL_WRITE = 0x0008
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_MODEL_REVISION_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+_MODEL_REF_PART_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
+_ENTRYPOINT = PurePosixPath("Trainers/sft/runtime_v1.py")
+_OFFLINE_WORKER = PurePosixPath("tuner/runtime/offline_sft_worker.py")
+_CLOSURE_ENV = (
+    "SYNAPTIC_WORKER_CLOSURE_MANIFEST",
+    "SYNAPTIC_WORKER_CLOSURE_DIGEST",
+)
+_ROOT_ENV = {
+    "engine": "SYNAPTIC_ENGINE_ROOT",
+    "project": "SYNAPTIC_PROJECT_ROOT",
+    "artifacts": "SYNAPTIC_ARTIFACT_ROOT",
+    "state": "SYNAPTIC_STATE_ROOT",
+    "tracking": "SYNAPTIC_TRACKING_ROOT",
+    "cache": "SYNAPTIC_CACHE_ROOT",
+    "tmp": "SYNAPTIC_TMP_ROOT",
+}
+_WRITABLE_NAMES = ("artifacts", "state", "tracking", "cache", "tmp")
+_INHERITED_ENV = (
+    "PATH",
+    "SystemRoot",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "LD_LIBRARY_PATH",
+    "CUDA_VISIBLE_DEVICES",
+    "NVIDIA_VISIBLE_DEVICES",
+    "PYTHONIOENCODING",
+    "LANG",
+    "LC_ALL",
+)
+_MODEL_CONFIGS = frozenset({"adapter_config.json", "config.json"})
+_MODEL_PAYLOADS = re.compile(
+    r"^(adapter_model|model)(?:-(\d{5})-of-(\d{5}))?\.safetensors$"
+)
+_TOKENIZER_CONFIGS = frozenset({"tokenizer_config.json"})
+_TOKENIZER_PAYLOADS = frozenset({"tokenizer.json"})
+_TOKENIZER_OPTIONAL = frozenset(
+    {
+        "added_tokens.json",
+        "special_tokens_map.json",
+        "chat_template.jinja",
+        "merges.txt",
+        "vocab.json",
+    }
+)
+_MODEL_OPTIONAL = frozenset({"generation_config.json", "README.md"})
+_KNOWN_IGNORED = frozenset({"training_args.bin"})
+_MAX_INDEX_BYTES = 16 * 1024 * 1024
+_MAX_SHARDS = 1024
+_MAX_TENSORS = 1_000_000
+_MAX_ARCHIVE_MEMBER_BYTES = 32 * 1024 * 1024 * 1024
+_MAX_SAFETENSORS_HEADER_BYTES = 16 * 1024 * 1024
+_SAFETENSORS_DTYPES = {
+    "BOOL": 1,
+    "U8": 1,
+    "I8": 1,
+    "F8_E4M3": 1,
+    "F8_E5M2": 1,
+    "I16": 2,
+    "U16": 2,
+    "F16": 2,
+    "BF16": 2,
+    "I32": 4,
+    "U32": 4,
+    "F32": 4,
+    "I64": 8,
+    "U64": 8,
+    "F64": 8,
+}
+_EXECUTION_EVIDENCE_SCHEMA = "synaptic-sft-execution-evidence/v1"
+_SFT_KEYS = {
+    "batch_size",
+    "gradient_accumulation_steps",
+    "learning_rate",
+    "max_steps",
+    "num_epochs",
+    "max_seq_length",
+    "seed",
+    "save_steps",
+    "save_total_limit",
+    "lora_rank",
+    "lora_alpha",
+    "lora_dropout",
+    "lora_target_modules",
+    "use_dora",
+    "use_rslora",
+    "init_lora_weights",
+    "split_dataset",
+    "dataset_format",
+    "completion_only_loss",
+    "assistant_only_loss",
+    "use_preassigned_splits",
+    "prompt_render",
+    "packing",
+    "require_memory_efficient_loss",
+    "chat_template_kwargs",
+}
+_PREPARED_SFT_KEYS = {
+    "dataset_format",
+    "completion_only_loss",
+    "assistant_only_loss",
+    "use_preassigned_splits",
+}
+_MESSAGE_SFT_KEYS = _PREPARED_SFT_KEYS | {
+    "prompt_render",
+    "packing",
+    "require_memory_efficient_loss",
+}
+_REQUIRED_SFT_KEYS = _SFT_KEYS - {"max_steps", "num_epochs", "chat_template_kwargs"} - _MESSAGE_SFT_KEYS
+_RESERVED_CHAT_TEMPLATE_KWARGS = frozenset({
+    "messages", "tokenize", "add_generation_prompt", "return_dict",
+    "return_tensors", "continue_final_message", "chat_template",
+})
+
+
+class RuntimeV1Error(RuntimeError):
+    """Closed runtime contract failure."""
+
+
+class TrainerFailed(RuntimeV1Error):
+    pass
+
+
+_RUNTIME_STAGE_EXITS = {
+    "runtime_workload_rejected": 20,
+    "runtime_artifact_precondition": 21,
+    "runtime_invocation_rejected": 22,
+    "runtime_trainer_failed": 23,
+    "runtime_evidence_rejected": 24,
+    "runtime_artifact_rejected": 25,
+    "runtime_workload_document_rejected": 30,
+    "runtime_workload_engine_rejected": 31,
+    "runtime_workload_schema_rejected": 32,
+    "runtime_workload_reconstruction_rejected": 33,
+    "runtime_workload_fingerprint_rejected": 34,
+    "runtime_workload_roots_rejected": 35,
+    "runtime_evidence_dataset_binding": 36,
+    "runtime_evidence_projection_binding": 37,
+    "runtime_evidence_output_directory": 38,
+    "runtime_evidence_metrics": 39,
+}
+
+
+def _mark_runtime_stage(error: RuntimeV1Error, diagnostic_code: str) -> RuntimeV1Error:
+    if diagnostic_code not in _RUNTIME_STAGE_EXITS:
+        raise ValueError("runtime diagnostic stage is invalid")
+    if not isinstance(getattr(error, "diagnostic_code", None), str):
+        error.diagnostic_code = diagnostic_code
+    return error
+
+
+def _json_type_equal(left: object, right: object) -> bool:
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, Mapping):
+        return set(left) == set(right) and all(
+            _json_type_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _json_type_equal(a, b) for a, b in zip(left, right)
+        )
+    return left == right
+
+
+def _version_tuple(value: object, label: str) -> tuple[int, ...]:
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"0|[1-9]\d*(?:\.(?:0|[1-9]\d*)){1,3}", value) is None
+    ):
+        raise RuntimeV1Error(f"{label} is not a strict runtime version")
+    return tuple(int(part) for part in value.split("."))
+
+
+def _validate_portable_runtime_requirements(requirements: object) -> None:
+    if not isinstance(requirements, Mapping) or set(requirements) != {
+        "schema_version",
+        "python",
+        "isolation",
+        "allowed_environment",
+        "trainer_projection_schema",
+        "artifact_formats",
+    }:
+        raise RuntimeV1Error("portable runtime requirements are malformed")
+    python = requirements["python"]
+    if not isinstance(python, Mapping) or set(python) != {
+        "implementation",
+        "minimum_version",
+        "maximum_version_exclusive",
+    }:
+        raise RuntimeV1Error("portable Python requirements are malformed")
+    if python["implementation"] != sys.implementation.name:
+        raise RuntimeV1Error("runtime Python implementation is unsupported")
+    minimum = _version_tuple(python["minimum_version"], "minimum Python version")
+    maximum = _version_tuple(
+        python["maximum_version_exclusive"], "maximum Python version"
+    )
+    current = tuple(sys.version_info[: max(len(minimum), len(maximum))])
+    minimum_cmp = minimum + (0,) * (len(current) - len(minimum))
+    maximum_cmp = maximum + (0,) * (len(current) - len(maximum))
+    if not minimum_cmp <= current < maximum_cmp:
+        raise RuntimeV1Error(
+            "runtime Python version is outside the portable requirement"
+        )
+    if not _json_type_equal(
+        requirements["isolation"], {"no_user_site": True, "safe_path": True}
+    ):
+        raise RuntimeV1Error("portable runtime isolation requirements are malformed")
+    allowed = requirements["allowed_environment"]
+    formats = requirements["artifact_formats"]
+    if (
+        not isinstance(allowed, list)
+        or len(allowed) != len(set(allowed))
+        or any(not isinstance(item, str) or not item for item in allowed)
+        or requirements["trainer_projection_schema"]
+        != "synaptic-sft-trainer-projection/v1"
+        or not isinstance(formats, Mapping)
+        or set(formats) != {"model", "tokenizer"}
+        or formats["model"] != ["peft-safetensors", "full-safetensors"]
+        or formats["tokenizer"] != "tokenizer-json"
+    ):
+        raise RuntimeV1Error("portable runtime requirements are unsupported")
+
+
+def _reject_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON number is prohibited: {value}")
+
+
+def _finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("non-finite JSON number is prohibited")
+    return parsed
+
+
+def _unique_pairs(values: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in values:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def read_bounded_workload(stream: BinaryIO) -> bytes:
+    payload = stream.read(MAX_WORKLOAD_BYTES + 1)
+    if not isinstance(payload, bytes):
+        raise RuntimeV1Error("workload stdin must be a binary stream")
+    if not payload or len(payload) > MAX_WORKLOAD_BYTES:
+        raise RuntimeV1Error("workload stdin is empty or exceeds its byte bound")
+    if stream.read(1):
+        raise RuntimeV1Error("workload stdin exceeds its byte bound")
+    return payload
+
+
+def read_authenticated_workload_file(
+    path: Path,
+    *,
+    control_root: Path,
+    expected_byte_count: int,
+    expected_sha256: str,
+    expected_fingerprint: str,
+) -> bytes:
+    """Read one sealed workload through retained POSIX directory descriptors."""
+
+    if not isinstance(path, Path) or not isinstance(control_root, Path):
+        raise TypeError("workload file and control root must be Path values")
+    if (
+        not path.is_absolute()
+        or not control_root.is_absolute()
+        or "//" in path.as_posix()
+        or "//" in control_root.as_posix()
+        or "\\" in path.as_posix()
+        or "\\" in control_root.as_posix()
+        or any(part in {"", ".", ".."} for part in path.parts[1:])
+        or any(part in {"", ".", ".."} for part in control_root.parts[1:])
+    ):
+        raise RuntimeV1Error("workload file paths must be canonical and absolute")
+    if path != control_root / "workload.json":
+        raise RuntimeV1Error("workload file must be the fixed control-root member")
+    if (
+        type(expected_byte_count) is not int
+        or isinstance(expected_byte_count, bool)
+        or not 1 <= expected_byte_count <= MAX_WORKLOAD_BYTES
+    ):
+        raise RuntimeV1Error("workload file byte count is invalid")
+    if (
+        type(expected_sha256) is not str
+        or _DIGEST_RE.fullmatch(expected_sha256) is None
+    ):
+        raise RuntimeV1Error("workload file digest is invalid")
+    if (
+        type(expected_fingerprint) is not str
+        or _DIGEST_RE.fullmatch(expected_fingerprint) is None
+    ):
+        raise RuntimeV1Error("workload file fingerprint is invalid")
+    _require_posix_descriptor_file_transport()
+    directory_descriptors: list[int] = []
+    confirmation_descriptors: list[int] = []
+    file_descriptor: int | None = None
+    confirmation_file_descriptor: int | None = None
+    try:
+        directory_descriptors, directory_identities = _open_directory_chain(
+            control_root
+        )
+        root_descriptor = directory_descriptors[-1]
+        file_descriptor = os.open(
+            "workload.json",
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=root_descriptor,
+        )
+        before = os.fstat(file_descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_WORKLOAD_BYTES:
+            raise RuntimeV1Error("workload file must be bounded and regular")
+        chunks: list[bytes] = []
+        remaining = MAX_WORKLOAD_BYTES + 1
+        while remaining:
+            chunk = os.read(file_descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        after = os.fstat(file_descriptor)
+        if len(payload) > MAX_WORKLOAD_BYTES:
+            raise RuntimeV1Error("workload file exceeds its byte bound")
+        if _file_identity(before) != _file_identity(after):
+            raise RuntimeV1Error("workload file changed while it was read")
+        if (
+            tuple(
+                _directory_descriptor_identity(os.fstat(descriptor))
+                for descriptor in directory_descriptors
+            )
+            != directory_identities
+        ):
+            raise RuntimeV1Error("workload ancestry changed while it was read")
+        confirmation_descriptors, confirmation_identities = _open_directory_chain(
+            control_root
+        )
+        if confirmation_identities != directory_identities:
+            raise RuntimeV1Error("workload ancestry changed while it was read")
+        confirmation_file_descriptor = os.open(
+            "workload.json",
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=confirmation_descriptors[-1],
+        )
+        confirmed = os.fstat(confirmation_file_descriptor)
+        if _file_identity(after) != _file_identity(confirmed):
+            raise RuntimeV1Error("workload file changed while it was read")
+    except OSError as exc:
+        raise RuntimeV1Error("workload descriptor traversal failed closed") from exc
+    finally:
+        for descriptor in (
+            confirmation_file_descriptor,
+            file_descriptor,
+        ):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        for descriptor in reversed(confirmation_descriptors + directory_descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+    if len(payload) != expected_byte_count:
+        raise RuntimeV1Error("workload file byte count does not match its binding")
+    observed_sha256 = hashlib.sha256(payload).hexdigest()
+    if not hmac.compare_digest(observed_sha256, expected_sha256):
+        raise RuntimeV1Error("workload file digest does not match its binding")
+    observed_fingerprint = hashlib.sha256(
+        _WORKLOAD_FINGERPRINT_DOMAIN + payload
+    ).hexdigest()
+    if not hmac.compare_digest(observed_fingerprint, expected_fingerprint):
+        raise RuntimeV1Error("workload file fingerprint does not match its binding")
+    return payload
+
+
+def _require_posix_descriptor_file_transport() -> None:
+    required_flags = ("O_NOFOLLOW", "O_DIRECTORY", "O_CLOEXEC", "O_NONBLOCK")
+    if (
+        os.name != "posix"
+        or os.open not in getattr(os, "supports_dir_fd", set())
+        or any(
+            not hasattr(os, name) or type(getattr(os, name)) is not int
+            for name in required_flags
+        )
+    ):
+        raise RuntimeV1Error("sealed workload files require POSIX descriptor traversal")
+
+
+def _directory_descriptor_identity(value: os.stat_result) -> tuple[int, int]:
+    if not stat.S_ISDIR(value.st_mode):
+        raise RuntimeV1Error("workload ancestry must contain only directories")
+    return value.st_dev, value.st_ino
+
+
+def _open_directory_chain(
+    root: Path,
+) -> tuple[list[int], tuple[tuple[int, int], ...]]:
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptors = [os.open(root.anchor, flags)]
+    try:
+        for component in root.parts[1:]:
+            descriptors.append(os.open(component, flags, dir_fd=descriptors[-1]))
+        identities = tuple(
+            _directory_descriptor_identity(os.fstat(descriptor))
+            for descriptor in descriptors
+        )
+        return descriptors, identities
+    except BaseException:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise
+
+
+def _canonical_document(payload: bytes) -> dict[str, object]:
+    if payload.startswith(b"\xef\xbb\xbf"):
+        raise RuntimeV1Error("workload must not contain a BOM")
+    try:
+        document = json.loads(
+            payload.decode("utf-8", errors="strict"),
+            object_pairs_hook=_unique_pairs,
+            parse_constant=_reject_constant,
+            parse_float=_finite_float,
+        )
+    except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise RuntimeV1Error("workload is not strict JSON") from exc
+    if not isinstance(document, dict):
+        raise RuntimeV1Error("workload root must be an object")
+    try:
+        canonical = json.dumps(
+            document,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeV1Error("workload cannot be canonically encoded") from exc
+    if canonical != payload:
+        raise RuntimeV1Error("workload is not canonically encoded")
+    return document
+
+
+def _ensure_engine_import(engine_root: Path) -> None:
+    value = str(engine_root)
+    if value not in sys.path:
+        sys.path.insert(0, value)
+
+
+def _authenticate_worker_closure(
+    environment: Mapping[str, str], engine_root: Path, engine_file: Path
+) -> object:
+    manifest_text = environment.get(_CLOSURE_ENV[0])
+    expected_digest = environment.get(_CLOSURE_ENV[1])
+    if (
+        not isinstance(manifest_text, str)
+        or not manifest_text
+        or not Path(manifest_text).is_absolute()
+        or not isinstance(expected_digest, str)
+        or _DIGEST_RE.fullmatch(expected_digest) is None
+    ):
+        raise RuntimeV1Error("offline worker closure binding is unavailable")
+    manifest_path = Path(manifest_text)
+    if manifest_path.name != "offline-sft-worker-v1.json":
+        raise RuntimeV1Error("offline worker closure manifest path is not fixed")
+    document = _strict_json_bytes(
+        _read_regular(manifest_path, maximum=1024 * 1024),
+        label="offline worker closure manifest",
+    )
+    if not isinstance(document, Mapping):
+        raise RuntimeV1Error("offline worker closure manifest is malformed")
+    projected = dict(document)
+    recorded_digest = projected.pop("closure_digest", None)
+    observed_digest = hashlib.sha256(_canonical_json(projected)).hexdigest()
+    if (
+        not isinstance(recorded_digest, str)
+        or not hmac.compare_digest(recorded_digest, expected_digest)
+        or not hmac.compare_digest(recorded_digest, observed_digest)
+    ):
+        raise RuntimeV1Error("offline worker closure digest does not match")
+    raw_members = document.get("members")
+    loader_member = None
+    if isinstance(raw_members, list):
+        loader_member = next(
+            (
+                item
+                for item in raw_members
+                if isinstance(item, Mapping)
+                and item.get("path") == _OFFLINE_WORKER.as_posix()
+            ),
+            None,
+        )
+    if not isinstance(loader_member, Mapping):
+        raise RuntimeV1Error("offline worker closure lacks its validator")
+    loader_path = engine_root.joinpath(*_OFFLINE_WORKER.parts)
+    loader_payload = _read_regular(loader_path, maximum=1024 * 1024)
+    if (
+        loader_member.get("size_bytes") != len(loader_payload)
+        or loader_member.get("sha256")
+        != hashlib.sha256(loader_payload).hexdigest()
+    ):
+        raise RuntimeV1Error("offline worker closure validator is not authentic")
+    module_name = "_synaptic_offline_sft_worker_v1"
+    module = type(sys)(module_name)
+    module.__file__ = str(loader_path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    try:
+        exec(compile(loader_payload, str(loader_path), "exec"), module.__dict__)
+        closure = module.load_offline_sft_worker_environment(
+            environment, engine_root=engine_root
+        )
+        if engine_file.resolve(strict=True) == Path(__file__).resolve(strict=True):
+            module.verify_loaded_owned_module_origins(
+                closure, engine_root=engine_root
+            )
+            module.install_owned_module_guard(closure, engine_root=engine_root)
+    except Exception as exc:
+        raise RuntimeV1Error("offline worker closure validation failed") from exc
+    return closure
+
+
+def _validate_schema(document: Mapping[str, object], engine_root: Path) -> None:
+    try:
+        from jsonschema.validators import validator_for
+        from referencing import Registry, Resource
+    except ImportError as exc:
+        raise RuntimeV1Error("runtime schema dependencies are unavailable") from exc
+    schema_path = engine_root / "schemas" / "synaptic-sft-workload-v1.schema.json"
+    source_path = engine_root / "schemas" / "synaptic-execution-source-v1.schema.json"
+    schema = _read_json_file(schema_path, maximum=128 * 1024)
+    source_schema = _read_json_file(source_path, maximum=128 * 1024)
+    schema_id = source_schema.get("$id")
+    if not isinstance(schema_id, str):
+        raise RuntimeV1Error("execution-source schema identity is invalid")
+    validator_type = validator_for(schema)
+    validator_type.check_schema(schema)
+    registry = Registry().with_resource(
+        schema_id, Resource.from_contents(source_schema)
+    )
+    errors = tuple(validator_type(schema, registry=registry).iter_errors(document))
+    if errors:
+        raise RuntimeV1Error("workload failed the SFT v1 schema")
+
+
+def _read_json_file(
+    path: Path, *, maximum: int, require_canonical: bool = False
+) -> dict[str, object]:
+    content = _read_regular(path, maximum=maximum)
+    try:
+        value = json.loads(
+            content.decode("utf-8"),
+            object_pairs_hook=_unique_pairs,
+            parse_constant=_reject_constant,
+            parse_float=_finite_float,
+        )
+    except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise RuntimeV1Error("runtime JSON artifact is invalid") from exc
+    if not isinstance(value, dict):
+        raise RuntimeV1Error("runtime JSON artifact must be an object")
+    if require_canonical and _canonical_json(value) != content:
+        raise RuntimeV1Error("engine JSON record is not canonical")
+    return value
+
+
+def _strict_json_bytes(content: bytes, *, label: str) -> object:
+    if content.startswith(b"\xef\xbb\xbf"):
+        raise RuntimeV1Error(f"{label} must not contain a BOM")
+    try:
+        return json.loads(
+            content.decode("utf-8", errors="strict"),
+            object_pairs_hook=_unique_pairs,
+            parse_constant=_reject_constant,
+            parse_float=_finite_float,
+        )
+    except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise RuntimeV1Error(f"{label} is not strict JSON") from exc
+
+
+def _read_regular(path: Path, *, maximum: int) -> bytes:
+    _assert_no_redirected_components(path)
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise RuntimeV1Error("required runtime file is unavailable") from exc
+    if not stat.S_ISREG(info.st_mode) or path.is_symlink() or info.st_size > maximum:
+        raise RuntimeV1Error("runtime file must be bounded, regular, and link-free")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise RuntimeV1Error("runtime file could not be read") from exc
+    try:
+        with os.fdopen(descriptor, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
+                raise RuntimeV1Error("runtime file must be bounded and regular")
+            content = stream.read(maximum + 1)
+            after = os.fstat(stream.fileno())
+        current = path.lstat()
+    except OSError as exc:
+        raise RuntimeV1Error("runtime file could not be read") from exc
+    if len(content) > maximum:
+        raise RuntimeV1Error("runtime file exceeds its byte bound")
+    if _file_identity(before) != _file_identity(after) or _stable_path_identity(
+        after
+    ) != _stable_path_identity(current):
+        raise RuntimeV1Error("runtime file changed while it was read")
+    return content
+
+
+def _close_retained_fds(descriptors: tuple[int, ...]) -> None:
+    for descriptor in descriptors:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+
+def _linux_memfd_create(name: str) -> int:
+    if sys.platform != "linux" or not name.isascii():
+        raise RuntimeV1Error("prepared dataset immutable source is unavailable")
+    flags = _LINUX_MFD_CLOEXEC | _LINUX_MFD_ALLOW_SEALING
+    native = getattr(os, "memfd_create", None)
+    if callable(native):
+        if (
+            getattr(os, "MFD_CLOEXEC", _LINUX_MFD_CLOEXEC) != _LINUX_MFD_CLOEXEC
+            or getattr(os, "MFD_ALLOW_SEALING", _LINUX_MFD_ALLOW_SEALING)
+            != _LINUX_MFD_ALLOW_SEALING
+        ):
+            raise RuntimeV1Error("prepared dataset immutable source is unavailable")
+        return native(name, flags)
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        create = getattr(libc, "memfd_create")
+        create.argtypes = (ctypes.c_char_p, ctypes.c_uint)
+        create.restype = ctypes.c_int
+        descriptor = create(name.encode("ascii"), flags)
+        if descriptor < 0:
+            error_number = ctypes.get_errno()
+            raise OSError(error_number, "memfd_create failed")
+        return descriptor
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        raise RuntimeV1Error("prepared dataset immutable source is unavailable") from None
+
+
+def _sealed_prepared_dataset(content: bytes, *, content_digest: str) -> tuple[int, Path]:
+    """Retain one immutable Linux source for trainer ingestion and projection."""
+
+    descriptor = -1
+    try:
+        import fcntl
+
+        if (
+            sys.platform != "linux"
+            or not hasattr(os, "pread")
+            or not Path("/proc/self/fd").is_dir()
+        ):
+            raise RuntimeV1Error("prepared dataset immutable source is unavailable")
+        uapi = {
+            "F_ADD_SEALS": _LINUX_F_ADD_SEALS,
+            "F_GET_SEALS": _LINUX_F_GET_SEALS,
+            "F_SEAL_WRITE": _LINUX_F_SEAL_WRITE,
+            "F_SEAL_GROW": _LINUX_F_SEAL_GROW,
+            "F_SEAL_SHRINK": _LINUX_F_SEAL_SHRINK,
+            "F_SEAL_SEAL": _LINUX_F_SEAL_SEAL,
+        }
+        if any(getattr(fcntl, name, value) != value for name, value in uapi.items()):
+            raise RuntimeV1Error("prepared dataset immutable source is unavailable")
+        descriptor = _linux_memfd_create("synaptic-prepared-dataset")
+        view = memoryview(content)
+        offset = 0
+        while offset < len(view):
+            written = os.write(descriptor, view[offset:])
+            if written <= 0:
+                raise RuntimeV1Error("prepared dataset immutable source write failed")
+            offset += written
+        os.fsync(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        required_seals = (
+            _LINUX_F_SEAL_WRITE
+            | _LINUX_F_SEAL_GROW
+            | _LINUX_F_SEAL_SHRINK
+            | _LINUX_F_SEAL_SEAL
+        )
+        fcntl.fcntl(descriptor, _LINUX_F_ADD_SEALS, required_seals)
+        observed_seals = fcntl.fcntl(descriptor, _LINUX_F_GET_SEALS)
+        info = os.fstat(descriptor)
+        if (
+            observed_seals & required_seals != required_seals
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_size != len(content)
+        ):
+            raise RuntimeV1Error("prepared dataset immutable source sealing failed")
+        digest = hashlib.sha256()
+        offset = 0
+        while offset < len(content):
+            chunk = os.pread(descriptor, min(1024 * 1024, len(content) - offset), offset)
+            if not chunk:
+                raise RuntimeV1Error("prepared dataset immutable source readback failed")
+            digest.update(chunk)
+            offset += len(chunk)
+        if offset != len(content) or digest.hexdigest() != content_digest:
+            raise RuntimeV1Error("prepared dataset immutable source readback failed")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        path = Path(f"/proc/self/fd/{descriptor}")
+        path_info = path.stat()
+        if _file_identity(info) != _file_identity(path_info):
+            raise RuntimeV1Error("prepared dataset immutable source identity changed")
+        return descriptor, path
+    except RuntimeV1Error:
+        if descriptor >= 0:
+            _close_retained_fds((descriptor,))
+        raise
+    except (ImportError, AttributeError, OSError, ValueError):
+        if descriptor >= 0:
+            _close_retained_fds((descriptor,))
+        raise RuntimeV1Error("prepared dataset immutable source is unavailable") from None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeRoots:
+    engine: Path
+    project: Path
+    artifacts: Path
+    state: Path
+    tracking: Path
+    cache: Path
+    tmp: Path
+
+    @property
+    def writable(self) -> tuple[Path, ...]:
+        return tuple(getattr(self, name) for name in _WRITABLE_NAMES)
+
+
+def _model_snapshot_path(model: Mapping[str, object], cache_root: Path) -> Path:
+    model_ref = model.get("ref")
+    revision = model.get("revision")
+    if (
+        not isinstance(model_ref, str)
+        or not isinstance(revision, str)
+        or _MODEL_REVISION_RE.fullmatch(revision) is None
+    ):
+        raise RuntimeV1Error("resolved model identity is malformed")
+    parts = model_ref.split("/")
+    if len(parts) not in (1, 2) or any(
+        _MODEL_REF_PART_RE.fullmatch(part) is None or "--" in part or ".." in part
+        for part in parts
+    ):
+        raise RuntimeV1Error("resolved model ref has no canonical snapshot layout")
+    return (
+        cache_root / "model" / ("models--" + "--".join(parts)) / "snapshots" / revision
+    )
+
+
+def _require_local_model_snapshot(
+    model: Mapping[str, object],
+    roots: RuntimeRoots,
+    environment: Mapping[str, str],
+) -> Path:
+    expected = _model_snapshot_path(model, roots.cache)
+    locked_cache = environment.get("SYNAPTIC_CACHE_ROOT")
+    raw = environment.get("SYNAPTIC_MODEL_SNAPSHOT")
+    if (
+        not isinstance(locked_cache, str)
+        or not isinstance(raw, str)
+        or raw != str(_model_snapshot_path(model, Path(locked_cache)))
+    ):
+        raise RuntimeV1Error("model snapshot does not match its canonical binding")
+    if (
+        environment.get("HF_HUB_OFFLINE") != "1"
+        or environment.get("TRANSFORMERS_OFFLINE") != "1"
+    ):
+        raise RuntimeV1Error("runtime requires exact offline model controls")
+    _assert_no_redirected_components(expected)
+    try:
+        info = expected.lstat()
+        supplied = Path(raw).resolve(strict=True)
+        resolved = expected.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeV1Error("required local model snapshot is unavailable") from exc
+    if (
+        resolved != expected
+        or supplied != resolved
+        or roots.cache not in resolved.parents
+        or not stat.S_ISDIR(info.st_mode)
+        or _is_redirect(expected)
+        or expected.name != model["revision"]
+    ):
+        raise RuntimeV1Error(
+            "local model snapshot must be contained, exact, and link-free"
+        )
+    pending = [expected]
+    regular_files = 0
+    while pending:
+        current = pending.pop()
+        try:
+            entries = tuple(os.scandir(current))
+        except OSError as exc:
+            raise RuntimeV1Error("local model snapshot could not be inspected") from exc
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                entry_info = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise RuntimeV1Error(
+                    "local model snapshot member is unavailable"
+                ) from exc
+            if _is_redirect(path):
+                raise RuntimeV1Error("local model snapshot contains a redirect")
+            if stat.S_ISDIR(entry_info.st_mode):
+                pending.append(path)
+            elif stat.S_ISREG(entry_info.st_mode):
+                regular_files += 1
+            else:
+                raise RuntimeV1Error(
+                    "local model snapshot contains a non-regular member"
+                )
+    if regular_files == 0:
+        raise RuntimeV1Error("local model snapshot contains no regular files")
+    return resolved
+
+
+def bind_runtime_roots(
+    document: Mapping[str, object],
+    environment: Mapping[str, str],
+    *,
+    engine_file: Path,
+) -> RuntimeRoots:
+    execution_source = document.get("execution_source")
+    if not isinstance(execution_source, Mapping):
+        raise RuntimeV1Error("workload execution source is missing")
+    runtime = execution_source.get("runtime")
+    if (
+        not isinstance(runtime, Mapping)
+        or runtime.get("schema_version") != RUNTIME_SCHEMA
+    ):
+        raise RuntimeV1Error("execution source lacks the runtime contract")
+    expected = runtime.get("roots")
+    if not isinstance(expected, Mapping) or set(expected) != set(_ROOT_ENV):
+        raise RuntimeV1Error("runtime-roots contract is incomplete")
+    capability_roots = runtime.get("capability_roots")
+    if (
+        not isinstance(capability_roots, Mapping)
+        or set(capability_roots) != {"writable"}
+        or not isinstance(capability_roots.get("writable"), str)
+    ):
+        raise RuntimeV1Error("runtime capability-roots contract is incomplete")
+    writable_boundary = Path(capability_roots["writable"])
+    if not writable_boundary.is_absolute():
+        raise RuntimeV1Error("runtime capability roots must be absolute")
+    if any(
+        writable_boundary not in Path(expected[name]).parents
+        for name in _WRITABLE_NAMES
+    ):
+        raise RuntimeV1Error(
+            "writable runtime roots escape their locked capability root"
+        )
+    _assert_no_redirected_components(
+        writable_boundary, allowed_redirect=writable_boundary
+    )
+    if not writable_boundary.exists() or not writable_boundary.is_dir():
+        raise RuntimeV1Error("writable capability root is unavailable")
+    try:
+        resolved_boundary = writable_boundary.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeV1Error("writable capability root is unavailable") from exc
+    if not resolved_boundary.is_dir():
+        raise RuntimeV1Error("writable capability root must resolve to a directory")
+    roots: dict[str, Path] = {}
+    for name, variable in _ROOT_ENV.items():
+        raw = environment.get(variable)
+        locked = expected.get(name)
+        if not isinstance(raw, str) or not raw or raw != locked:
+            raise RuntimeV1Error(
+                "environment root does not match the locked runtime root"
+            )
+        path = Path(raw)
+        if not path.is_absolute():
+            raise RuntimeV1Error("runtime roots must be absolute")
+        _assert_no_redirected_components(
+            path,
+            allowed_redirect=(writable_boundary if name in _WRITABLE_NAMES else None),
+        )
+        if not path.exists() or not path.is_dir() or _is_redirect(path):
+            raise RuntimeV1Error("runtime roots must be existing link-free directories")
+        resolved = path.resolve(strict=True)
+        if name not in _WRITABLE_NAMES and resolved != path:
+            raise RuntimeV1Error("runtime root contains an unresolved alias")
+        if name in _WRITABLE_NAMES and resolved_boundary not in resolved.parents:
+            raise RuntimeV1Error(
+                "writable runtime root escapes its resolved capability root"
+            )
+        roots[name] = resolved
+    result = RuntimeRoots(**roots)
+    _validate_root_topology(result, execution_source, engine_file=engine_file)
+    return result
+
+
+def _is_redirect(path: Path) -> bool:
+    if path.is_symlink() or (
+        hasattr(os.path, "isjunction") and os.path.isjunction(path)
+    ):
+        return True
+    try:
+        attributes = path.lstat().st_file_attributes
+    except (AttributeError, OSError):
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+def _assert_no_redirected_components(
+    path: Path, *, allowed_redirect: Path | None = None
+) -> None:
+    """Reject redirection except at one authenticated capability boundary."""
+
+    absolute = path.absolute()
+    allowed = allowed_redirect.absolute() if allowed_redirect is not None else None
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current = current / part
+        try:
+            current.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise RuntimeV1Error("runtime path component is unavailable") from exc
+        if _is_redirect(current) and current != allowed:
+            raise RuntimeV1Error("runtime path traverses a redirected component")
+
+
+def _file_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def _stable_path_identity(value: os.stat_result) -> tuple[int, int, int, int]:
+    # Windows reports a different ctime for an open handle and a path stat even
+    # when both identify the same unchanged file.
+    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
+
+
+def _require_contained_regular(path: Path, root: Path, *, label: str) -> Path:
+    _assert_no_redirected_components(path)
+    try:
+        resolved = path.resolve(strict=True)
+        info = path.lstat()
+    except OSError as exc:
+        raise RuntimeV1Error(f"{label} is unavailable") from exc
+    if resolved != root and root not in resolved.parents:
+        raise RuntimeV1Error(f"{label} escapes its locked root")
+    if resolved != path or not stat.S_ISREG(info.st_mode) or _is_redirect(path):
+        raise RuntimeV1Error(f"{label} must be a regular link-free file")
+    return resolved
+
+
+def _validate_root_topology(
+    roots: RuntimeRoots,
+    execution_source: Mapping[str, object],
+    *,
+    engine_file: Path,
+) -> None:
+    expected_entrypoint = roots.engine / Path(*_ENTRYPOINT.parts)
+    actual_entrypoint = _require_contained_regular(
+        engine_file, roots.engine, label="runtime entrypoint"
+    )
+    expected_entrypoint = _require_contained_regular(
+        expected_entrypoint, roots.engine, label="runtime entrypoint"
+    )
+    if actual_entrypoint != expected_entrypoint:
+        raise RuntimeV1Error("runtime entrypoint is outside the locked engine root")
+    topology = execution_source.get("topology")
+    sources = execution_source.get("sources")
+    if not isinstance(sources, Mapping) or not isinstance(
+        sources.get("engine"), Mapping
+    ):
+        raise RuntimeV1Error("source topology is incomplete")
+    if (
+        not isinstance(topology, Mapping)
+        or topology.get("execution_mode") != "dual_clone"
+    ):
+        raise RuntimeV1Error("runtime v1 requires the finalized dual-clone topology")
+    if roots.engine == roots.project:
+        raise RuntimeV1Error("dual-clone roots must be distinct")
+    # Engine/project relationships are governed by the locked source topology
+    # above.  In particular, a superproject intentionally contains its engine
+    # submodule.  Writable capabilities, however, must remain disjoint from
+    # both source roots and from one another.
+    for writable in roots.writable:
+        for source in (roots.engine, roots.project):
+            if (
+                writable == source
+                or writable in source.parents
+                or source in writable.parents
+            ):
+                raise RuntimeV1Error("runtime roots overlap")
+    for index, writable in enumerate(roots.writable):
+        for other in roots.writable[index + 1 :]:
+            if (
+                writable == other
+                or writable in other.parents
+                or other in writable.parents
+            ):
+                raise RuntimeV1Error("runtime roots overlap")
+
+
+def _resolve_relative(root: Path, value: str, *, require_file: bool) -> Path:
+    if not isinstance(value, str) or not value or "\\" in value or "://" in value:
+        raise RuntimeV1Error("project path reference is invalid")
+    relative = PurePosixPath(value)
+    if relative.is_absolute() or any(
+        part in {"", ".", ".."} for part in relative.parts
+    ):
+        raise RuntimeV1Error("project path reference escapes its root")
+    candidate = root.joinpath(*relative.parts)
+    _assert_no_redirected_components(root)
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if _is_redirect(current):
+            raise RuntimeV1Error("project path reference traverses a redirect")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeV1Error("project path reference does not exist") from exc
+    if root not in resolved.parents:
+        raise RuntimeV1Error("project path reference escapes its root")
+    if require_file:
+        _require_contained_regular(candidate, root, label="project input")
+    return resolved
+
+
+def decode_and_validate_workload(
+    payload: bytes,
+    environment: Mapping[str, str],
+    *,
+    engine_file: Path,
+) -> tuple[object, RuntimeRoots]:
+    try:
+        document = _canonical_document(payload)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_document_rejected")
+    try:
+        provisional_engine = environment.get("SYNAPTIC_ENGINE_ROOT", "")
+        if not provisional_engine or not Path(provisional_engine).is_absolute():
+            raise RuntimeV1Error("engine root is unavailable")
+        provisional_path = Path(provisional_engine)
+        _assert_no_redirected_components(provisional_path)
+        try:
+            engine_root = provisional_path.resolve(strict=True)
+        except OSError as exc:
+            raise RuntimeV1Error("engine root is unavailable") from exc
+        expected_entrypoint = engine_root / Path(*_ENTRYPOINT.parts)
+        if _require_contained_regular(
+            engine_file, engine_root, label="runtime entrypoint"
+        ) != _require_contained_regular(
+            expected_entrypoint, engine_root, label="runtime entrypoint"
+        ):
+            raise RuntimeV1Error("engine root does not own this runtime entrypoint")
+        _authenticate_worker_closure(environment, engine_root, engine_file)
+        _ensure_engine_import(engine_root)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_engine_rejected")
+    try:
+        _validate_schema(document, engine_root)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_schema_rejected")
+    from tuner.training.contracts import CanonicalDocument
+    from tuner.project.execution_source import ExecutionSourceV1
+    from tuner.training.methods.sft import compile_sft_workload
+
+    try:
+        configuration = document.get("configuration")
+        if not isinstance(configuration, Mapping) or not isinstance(
+            configuration.get("document"), Mapping
+        ):
+            raise RuntimeV1Error("workload configuration is invalid")
+        resolved_config = CanonicalDocument.from_mapping(configuration["document"])
+        revision = hashlib.sha256(
+            resolved_config.canonical_json.encode("utf-8")
+        ).hexdigest()
+        if configuration.get("revision") != revision:
+            raise RuntimeV1Error("resolved configuration revision does not match")
+        execution_source = ExecutionSourceV1.from_dict(document["execution_source"])
+        workload = compile_sft_workload(
+            resolved_config=resolved_config,
+            execution_source=execution_source,
+        )
+        if workload.canonical_bytes != payload:
+            raise RuntimeV1Error(
+                "workload bytes do not match deterministic compilation"
+            )
+    except (TypeError, ValueError) as exc:
+        error = RuntimeV1Error("workload could not be reconstructed")
+        raise _mark_runtime_stage(
+            error, "runtime_workload_reconstruction_rejected"
+        ) from exc
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_reconstruction_rejected")
+    expected_fingerprint = environment.get("SYNAPTIC_WORKLOAD_FINGERPRINT")
+    if expected_fingerprint != workload.fingerprint:
+        raise _mark_runtime_stage(
+            RuntimeV1Error(
+                "workload fingerprint does not match the dispatcher binding"
+            ),
+            "runtime_workload_fingerprint_rejected",
+        )
+    try:
+        roots = bind_runtime_roots(document, environment, engine_file=engine_file)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_roots_rejected")
+    return workload, roots
+
+
+@dataclass(frozen=True, slots=True)
+class TrainerInvocation:
+    argv: tuple[str, ...]
+    cwd: Path
+    environment: tuple[tuple[str, str], ...]
+    run_dir: Path
+    final_model_dir: Path
+    tokenizer_dir: Path
+    lineage_path: Path
+    projection_path: Path
+    expected_projection: Mapping[str, object]
+    stdout_path: Path
+    stderr_path: Path
+    retained_fds: tuple[int, ...] = field(default=(), repr=False)
+
+    def __post_init__(self) -> None:
+        if type(self.retained_fds) is not tuple or any(
+            type(descriptor) is not int or descriptor <= 0
+            for descriptor in self.retained_fds
+        ):
+            raise TypeError("retained trainer descriptors are invalid")
+        try:
+            dataset_path = self.argv[self.argv.index("--local-file") + 1]
+        except (ValueError, IndexError):
+            raise ValueError("trainer dataset argument is missing") from None
+        match = re.fullmatch(r"/proc/self/fd/([1-9][0-9]*)", dataset_path)
+        if self.retained_fds:
+            if len(self.retained_fds) != 1 or match is None or int(match.group(1)) != self.retained_fds[0]:
+                raise ValueError("trainer immutable dataset descriptor is not bound")
+        elif match is not None:
+            raise ValueError("trainer dataset descriptor is not retained")
+
+
+@dataclass(frozen=True, slots=True)
+class TrainerEvidence:
+    exit_code: int
+    final_model_dir: Path
+    tokenizer_dir: Path
+    lineage: Mapping[str, object]
+    projection: Mapping[str, object]
+    metrics: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if type(self.exit_code) is not int:
+            raise TypeError("trainer exit code must be an exact integer")
+
+
+@runtime_checkable
+class TrainerRunner(Protocol):
+    def run(self, invocation: TrainerInvocation) -> TrainerEvidence: ...
+
+
+def build_trainer_invocation(
+    workload: object,
+    roots: RuntimeRoots,
+    environment: Mapping[str, str],
+) -> TrainerInvocation:
+    document = workload.document
+    config = document["configuration"]["document"]
+    model = config["model"]
+    dataset = config["dataset"]
+    sft = config["sft"]
+    if not all(isinstance(value, Mapping) for value in (model, dataset, sft)):
+        raise RuntimeV1Error("resolved SFT configuration is malformed")
+    unknown = set(sft) - _SFT_KEYS
+    if unknown:
+        raise RuntimeV1Error("resolved SFT configuration contains unsupported keys")
+    missing = _REQUIRED_SFT_KEYS - set(sft)
+    if missing:
+        raise RuntimeV1Error("resolved SFT configuration is not fully specified")
+    present_prepared_keys = _MESSAGE_SFT_KEYS & set(sft)
+    dataset_claims_raw = dataset.get("format") == "syntunia-sft-row/v1"
+    dataset_claims_messages = dataset.get("format") == "syntunia-sft-row/v2"
+    if dataset_claims_raw:
+        if (
+            present_prepared_keys != _PREPARED_SFT_KEYS
+            or sft.get("dataset_format") != "raw_text"
+        ):
+            raise RuntimeV1Error(
+                "runtime v1 raw-text configuration must bind every raw dataset field"
+            )
+        if dataset.get("format") != "syntunia-sft-row/v1":
+            raise RuntimeV1Error(
+                "runtime v1 raw-text dataset must declare syntunia-sft-row/v1"
+            )
+        for key in ("completion_only_loss", "assistant_only_loss", "use_preassigned_splits"):
+            if not isinstance(sft[key], bool):
+                raise RuntimeV1Error(f"{key} must be a boolean")
+        if sft["completion_only_loss"] or sft["assistant_only_loss"]:
+            raise RuntimeV1Error("runtime v1 raw-text training requires full-sequence loss")
+        if not sft["use_preassigned_splits"] or sft["split_dataset"]:
+            raise RuntimeV1Error(
+                "runtime v1 raw-text training requires only preassigned splits"
+            )
+    elif dataset_claims_messages:
+        if present_prepared_keys != _MESSAGE_SFT_KEYS:
+            raise RuntimeV1Error(
+                "runtime v1 message configuration must bind every prepared dataset field"
+            )
+        for key in (
+            "completion_only_loss",
+            "assistant_only_loss",
+            "use_preassigned_splits",
+            "packing",
+            "require_memory_efficient_loss",
+        ):
+            if not isinstance(sft[key], bool):
+                raise RuntimeV1Error(f"{key} must be a boolean")
+        if (
+            sft.get("dataset_format") != "messages"
+            or sft.get("prompt_render") != "prompt_completion"
+            or not sft["completion_only_loss"]
+            or sft["assistant_only_loss"]
+            or not sft["use_preassigned_splits"]
+            or sft["split_dataset"]
+            or sft["packing"]
+            or not sft["require_memory_efficient_loss"]
+        ):
+            raise RuntimeV1Error(
+                "runtime v1 authoritative messages require preassigned "
+                "prompt-completion training with packing disabled and the "
+                "memory-efficient loss guard"
+            )
+    elif present_prepared_keys:
+        raise RuntimeV1Error(
+            "runtime v1 prepared dataset controls require a prepared dataset format"
+        )
+    if "chat_template_kwargs" in sft:
+        _validated_chat_template_kwargs(sft)
+    model_revision = model.get("revision")
+    if model.get("tokenizer_revision") != model_revision:
+        raise RuntimeV1Error("runtime v1 requires one exact model/tokenizer snapshot")
+    model_snapshot = _require_local_model_snapshot(model, roots, environment)
+    content_digest = dataset.get("content_digest")
+    dataset_ref = dataset.get("ref")
+    prepared_match = (
+        _PREPARED_DATASET_REF_RE.fullmatch(dataset_ref)
+        if isinstance(dataset_ref, str)
+        else None
+    )
+    if isinstance(dataset_ref, str) and dataset_ref.startswith("project://"):
+        dataset_path = _resolve_relative(
+            roots.project, dataset_ref.removeprefix("project://"), require_file=True
+        )
+        sources = document["execution_source"]["sources"]
+        project_revision = sources["project"]["commit"]
+        if dataset.get("revision") != project_revision:
+            raise RuntimeV1Error(
+                "project dataset revision must match the locked project commit"
+            )
+        maximum_dataset_bytes = 8 * 1024 * 1024 * 1024
+    elif prepared_match is not None:
+        prepared_digest = prepared_match.group(1)
+        size_bytes = dataset.get("size_bytes")
+        if (
+            set(dataset) != {
+                "ref", "revision", "content_digest", "size_bytes", "format",
+            }
+            or dataset.get("revision") != prepared_digest
+            or dataset.get("format") not in {
+                "syntunia-sft-row/v1", "syntunia-sft-row/v2"
+            }
+            or type(size_bytes) is not int
+            or not 0 < size_bytes <= _MAX_PREPARED_DATASET_BYTES
+            or not isinstance(content_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", content_digest) is None
+        ):
+            raise RuntimeV1Error("prepared dataset identity is malformed")
+        dataset_path = (
+            roots.state
+            / "prepared-inputs"
+            / content_digest
+            / "private-dataset.jsonl"
+        )
+        dataset_path = _require_contained_regular(
+            dataset_path, roots.state, label="prepared dataset"
+        )
+        maximum_dataset_bytes = _MAX_PREPARED_DATASET_BYTES
+    else:
+        raise RuntimeV1Error("runtime v1 dataset reference scheme is unsupported")
+    dataset_content = _read_regular(
+        dataset_path, maximum=maximum_dataset_bytes,
+    )
+    if (
+        not isinstance(content_digest, str)
+        or hashlib.sha256(dataset_content).hexdigest() != content_digest
+        or (
+            prepared_match is not None
+            and len(dataset_content) != dataset.get("size_bytes")
+        )
+    ):
+        raise RuntimeV1Error("dataset content does not match its identity")
+
+    trainer_root = roots.state / "runtime-v1-trainer"
+    if trainer_root.exists():
+        raise RuntimeV1Error("trainer state path already exists")
+    output_root = trainer_root / "output"
+    run_dir = output_root / "runtime-v1"
+    final_model_dir = run_dir / "final_model"
+    _require_contained_regular(
+        roots.engine / "Trainers" / "sft" / "train_sft.py",
+        roots.engine,
+        label="SFT trainer",
+    )
+    worker_path = _require_contained_regular(
+        roots.engine.joinpath(*_OFFLINE_WORKER.parts),
+        roots.engine,
+        label="offline SFT worker",
+    )
+    requirements = document.get("runtime_requirements")
+    _validate_portable_runtime_requirements(requirements)
+    runtime_lock = document["execution_source"].get("runtime")
+    interpreter = (
+        runtime_lock.get("interpreter") if isinstance(runtime_lock, Mapping) else None
+    )
+    execution_environment = (
+        runtime_lock.get("environment") if isinstance(runtime_lock, Mapping) else None
+    )
+    if not isinstance(interpreter, Mapping) or set(interpreter) != {
+        "implementation",
+        "version",
+        "executable",
+        "executable_digest",
+    }:
+        raise RuntimeV1Error("execution interpreter is missing or malformed")
+    if interpreter["implementation"] != sys.implementation.name or interpreter[
+        "version"
+    ] != ".".join(str(part) for part in sys.version_info[:3]):
+        raise RuntimeV1Error(
+            "execution interpreter identity does not match this runtime"
+        )
+    python_executable = interpreter["executable"]
+    if not isinstance(python_executable, str) or Path(python_executable).resolve(
+        strict=True
+    ) != Path(sys.executable).resolve(strict=True):
+        raise RuntimeV1Error("resolved runtime interpreter does not match this runtime")
+    planned_environment = (
+        execution_environment.get("variables")
+        if isinstance(execution_environment, Mapping)
+        and execution_environment.get("clear_inherited") is True
+        else None
+    )
+    allowed_environment = requirements.get("allowed_environment")
+    if (
+        not isinstance(planned_environment, Mapping)
+        or not isinstance(allowed_environment, list)
+        or any(
+            not isinstance(k, str) or not isinstance(v, str)
+            for k, v in planned_environment.items()
+        )
+        or not set(planned_environment).issubset(set(allowed_environment))
+    ):
+        raise RuntimeV1Error(
+            "resolved runtime environment violates portable requirements"
+        )
+    for name in _CLOSURE_ENV:
+        if (
+            not isinstance(environment.get(name), str)
+            or not environment.get(name)
+        ):
+            raise RuntimeV1Error("offline worker closure binding changed")
+    argv = [
+        str(Path(python_executable).resolve()),
+        "-I",
+        str(worker_path),
+        "--",
+        "--model-name",
+        str(model["ref"]),
+        "--model-revision",
+        str(model_revision),
+        "--anonymous-model",
+        "--model-cache-dir",
+        str(roots.cache / "model"),
+        "--model-snapshot",
+        str(model_snapshot),
+        "--local-file",
+        str(dataset_path),
+        "--output-root",
+        str(output_root),
+        "--run-timestamp",
+        "runtime-v1",
+        "--no-dashboard",
+        "--quiet",
+        "--runtime-v1-workload-fingerprint",
+        workload.fingerprint,
+        "--runtime-v1-configuration-revision",
+        str(document["configuration"]["revision"]),
+        "--runtime-v1-tokenizer-revision",
+        str(model["tokenizer_revision"]),
+        "--runtime-v1-dataset-revision",
+        str(dataset["revision"]),
+        "--runtime-v1-dataset-digest",
+        str(content_digest),
+    ]
+    _append_sft_arguments(argv, sft, model)
+    child_env = dict(planned_environment)
+    child_env.pop("PYTHONPATH", None)
+    child_env.update({name: environment[name] for name in _CLOSURE_ENV})
+    child_env.update({_ROOT_ENV[name]: str(getattr(roots, name)) for name in _ROOT_ENV})
+    child_env.update(
+        {
+            "SYNAPTIC_WORKLOAD_FINGERPRINT": workload.fingerprint,
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONSAFEPATH": "1",
+            "HF_HOME": str(roots.cache / "huggingface"),
+            "TRANSFORMERS_CACHE": str(roots.cache / "transformers"),
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "SYNAPTIC_MODEL_SNAPSHOT": str(model_snapshot),
+            "WANDB_DISABLED": "true",
+        }
+    )
+    retained_fds: tuple[int, ...] = ()
+    trainer_dataset_path = dataset_path
+    try:
+        if prepared_match is not None:
+            descriptor, trainer_dataset_path = _sealed_prepared_dataset(
+                dataset_content, content_digest=content_digest,
+            )
+            retained_fds = (descriptor,)
+            dataset_index = argv.index("--local-file") + 1
+            argv[dataset_index] = str(trainer_dataset_path)
+        expected_projection = _expected_trainer_projection(
+            workload,
+            dataset_path=trainer_dataset_path,
+            run_dir=run_dir,
+            final_model_dir=final_model_dir,
+        )
+        return TrainerInvocation(
+            argv=tuple(argv),
+            cwd=roots.tmp,
+            environment=tuple(sorted(child_env.items())),
+            run_dir=run_dir,
+            final_model_dir=final_model_dir,
+            tokenizer_dir=final_model_dir,
+            lineage_path=run_dir / "training_lineage.json",
+            projection_path=run_dir / "runtime_v1_projection.json",
+            expected_projection=expected_projection,
+            stdout_path=roots.tracking / "trainer.stdout.log",
+            stderr_path=roots.tracking / "trainer.stderr.log",
+            retained_fds=retained_fds,
+        )
+    except Exception:
+        _close_retained_fds(retained_fds)
+        raise
+
+
+def _append_sft_arguments(
+    argv: list[str], sft: Mapping[str, object], model: Mapping[str, object]
+) -> None:
+    mappings = (
+        ("batch_size", "--batch-size", _positive_int),
+        ("gradient_accumulation_steps", "--gradient-accumulation", _positive_int),
+        ("learning_rate", "--learning-rate", _positive_decimal),
+        ("max_steps", "--max-steps", _positive_int),
+        ("num_epochs", "--num-epochs", _positive_int),
+        ("max_seq_length", "--max-seq-length", _positive_int),
+        ("seed", "--seed", _nonnegative_int),
+        ("save_steps", "--save-steps", _positive_int),
+        ("save_total_limit", "--save-total-limit", _positive_int),
+        ("lora_rank", "--lora-r", _positive_int),
+        ("lora_alpha", "--lora-alpha", _positive_int),
+        ("lora_dropout", "--lora-dropout", _nonnegative_decimal),
+    )
+    if ("max_steps" in sft) == ("num_epochs" in sft):
+        raise RuntimeV1Error("runtime v1 requires exactly one training duration")
+    for key, flag, normalize in mappings:
+        if key in sft:
+            argv.extend((flag, normalize(sft[key], key)))
+    targets = sft.get("lora_target_modules")
+    if targets is not None:
+        if (
+            not isinstance(targets, list)
+            or not targets
+            or any(
+                not isinstance(item, str)
+                or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", item)
+                for item in targets
+            )
+        ):
+            raise RuntimeV1Error("lora_target_modules is invalid")
+        argv.extend(("--lora-target-modules", ",".join(targets)))
+    for key, flag in (("use_dora", "--use-dora"), ("use_rslora", "--use-rslora")):
+        if key in sft:
+            if not isinstance(sft[key], bool):
+                raise RuntimeV1Error(f"{key} must be a boolean")
+            if sft[key]:
+                argv.append(flag)
+    if "init_lora_weights" in sft:
+        value = sft["init_lora_weights"]
+        if isinstance(value, bool):
+            serialized = "true" if value else "false"
+        elif isinstance(value, str) and value in {"gaussian", "loftq", "corda"}:
+            serialized = value
+        else:
+            raise RuntimeV1Error("init_lora_weights is invalid")
+        argv.extend(("--init-lora-weights", serialized))
+    if "split_dataset" in sft:
+        if not isinstance(sft["split_dataset"], bool):
+            raise RuntimeV1Error("split_dataset must be a boolean")
+        if sft["split_dataset"]:
+            argv.append("--split-dataset")
+    if sft.get("dataset_format") == "raw_text":
+        argv.extend(
+            (
+                "--no-completion-only-loss",
+                "--no-assistant-only-loss",
+                "--use-preassigned-splits",
+                "--runtime-v1-dataset-schema",
+                "syntunia-sft-row/v1",
+                "--runtime-v1-dataset-format",
+                "raw_text",
+            )
+        )
+    elif sft.get("dataset_format") == "messages":
+        argv.extend(
+            (
+                "--completion-only-loss",
+                "--no-assistant-only-loss",
+                "--use-preassigned-splits",
+                "--aux-head-prompt-render",
+                "prompt_completion",
+                "--require-memory-efficient-loss",
+                "--runtime-v1-dataset-schema",
+                "syntunia-sft-row/v2",
+                "--runtime-v1-dataset-format",
+                "messages",
+            )
+        )
+    if "chat_template_kwargs" in sft:
+        argv.extend(("--chat-template-kwargs", _validated_chat_template_kwargs(sft)))
+    load_in_4bit = model["load_in_4bit"]
+    if not isinstance(load_in_4bit, bool):
+        raise RuntimeV1Error("model.load_in_4bit must be a boolean")
+    argv.append("--load-in-4bit" if load_in_4bit else "--no-load-in-4bit")
+
+
+def _validated_chat_template_kwargs(sft: Mapping[str, object]) -> str:
+    kwargs = sft["chat_template_kwargs"]
+    if sft.get("dataset_format") == "raw_text" or type(kwargs) is not dict or not kwargs:
+        raise RuntimeV1Error("chat_template_kwargs requires rendered messages")
+    if set(kwargs) & _RESERVED_CHAT_TEMPLATE_KWARGS:
+        raise RuntimeV1Error("chat_template_kwargs overrides renderer controls")
+    nodes = 0
+
+    def check(item: object, depth: int) -> None:
+        nonlocal nodes
+        nodes += 1
+        if nodes > 64 or depth > 4:
+            raise RuntimeV1Error("chat_template_kwargs exceeds its structure limit")
+        if type(item) is dict:
+            for key, child in item.items():
+                if type(key) is not str or not key:
+                    raise RuntimeV1Error("chat_template_kwargs contains an invalid key")
+                try:
+                    key_size = len(key.encode("utf-8"))
+                except UnicodeEncodeError:
+                    raise RuntimeV1Error("chat_template_kwargs contains an invalid key") from None
+                if key_size > 128:
+                    raise RuntimeV1Error("chat_template_kwargs contains an invalid key")
+                check(child, depth + 1)
+        elif type(item) is list:
+            for child in item:
+                check(child, depth + 1)
+        elif type(item) is str:
+            try:
+                size = len(item.encode("utf-8"))
+            except UnicodeEncodeError:
+                raise RuntimeV1Error("chat_template_kwargs contains invalid text") from None
+            if size > 1024:
+                raise RuntimeV1Error("chat_template_kwargs contains an oversized string")
+        elif type(item) is float:
+            if not math.isfinite(item):
+                raise RuntimeV1Error("chat_template_kwargs must be finite JSON")
+        elif type(item) not in (int, bool, type(None)):
+            raise RuntimeV1Error("chat_template_kwargs must contain only JSON values")
+
+    check(kwargs, 0)
+    try:
+        encoded = json.dumps(kwargs, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=False, allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError):
+        raise RuntimeV1Error("chat_template_kwargs must be finite JSON") from None
+    if len(encoded) > 4096:
+        raise RuntimeV1Error("chat_template_kwargs exceeds its byte limit")
+    return encoded.decode("utf-8")
+
+
+def _positive_int(value: object, name: str) -> str:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise RuntimeV1Error(f"{name} must be a positive integer")
+    return str(value)
+
+
+def _nonnegative_int(value: object, name: str) -> str:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise RuntimeV1Error(f"{name} must be a non-negative integer")
+    return str(value)
+
+
+def _decimal(value: object, name: str, *, positive: bool) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        raise RuntimeV1Error(f"{name} must be a decimal scalar")
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise RuntimeV1Error(f"{name} must be finite") from exc
+    if not number.is_finite() or number < 0 or (positive and number == 0):
+        raise RuntimeV1Error(f"{name} is outside its accepted range")
+    return format(number, "f")
+
+
+def _positive_decimal(value: object, name: str) -> str:
+    return _decimal(value, name, positive=True)
+
+
+def _nonnegative_decimal(value: object, name: str) -> str:
+    return _decimal(value, name, positive=False)
+
+
+class SubprocessTrainerRunner:
+    def run(self, invocation: TrainerInvocation) -> TrainerEvidence:
+        if invocation.retained_fds and os.name != "posix":
+            raise RuntimeV1Error("retained trainer descriptors are unavailable")
+        invocation.stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        with (
+            invocation.stdout_path.open("xb") as stdout,
+            invocation.stderr_path.open("xb") as stderr,
+        ):
+            run_options: dict[str, object] = {}
+            if invocation.retained_fds:
+                run_options["pass_fds"] = invocation.retained_fds
+            completed = subprocess.run(
+                invocation.argv,
+                cwd=invocation.cwd,
+                env=dict(invocation.environment),
+                stdin=subprocess.DEVNULL,
+                stdout=stdout,
+                stderr=stderr,
+                check=False,
+                **run_options,
+            )
+        if completed.returncode != 0:
+            return TrainerEvidence(
+                completed.returncode,
+                invocation.final_model_dir,
+                invocation.tokenizer_dir,
+                {},
+                {},
+                {},
+            )
+        lineage = _read_json_file(invocation.lineage_path, maximum=MAX_LINEAGE_BYTES)
+        projection = _read_json_file(
+            invocation.projection_path,
+            maximum=MAX_LINEAGE_BYTES,
+            require_canonical=True,
+        )
+        metrics = lineage.get("results")
+        return TrainerEvidence(
+            completed.returncode,
+            invocation.final_model_dir,
+            invocation.tokenizer_dir,
+            lineage,
+            projection,
+            metrics if isinstance(metrics, Mapping) else {},
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeResult:
+    workload_fingerprint: str
+    inventory_path: Path
+    artifacts: tuple[Mapping[str, object], ...]
+
+
+def execute_runtime(
+    payload: bytes,
+    *,
+    environment: Mapping[str, str],
+    runner: TrainerRunner,
+    engine_file: Path = Path(__file__),
+) -> RuntimeResult:
+    try:
+        workload, roots = decode_and_validate_workload(
+            payload, environment, engine_file=engine_file
+        )
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_workload_rejected")
+    return execute_compiled_sft(
+        payload, workload=workload, roots=roots, environment=environment,
+        runner=runner,
+    )
+
+
+def execute_compiled_sft(
+    payload: bytes, *, workload: object, roots: object,
+    environment: Mapping[str, str], runner: TrainerRunner,
+    invocation_builder=None, lineage_builder=None,
+) -> RuntimeResult:
+    """Execute admitted configuration; callers own transport and source admission.
+
+    Keep this core inside the legacy source closure. Installed-package callers
+    supply their invocation and lineage builders without importing that branch
+    into the legacy worker or manufacturing legacy execution-source evidence.
+    """
+    if not isinstance(runner, TrainerRunner):
+        raise TypeError("runner must implement TrainerRunner")
+    if any(roots.artifacts.iterdir()):
+        raise _mark_runtime_stage(
+            RuntimeV1Error("artifact root must be empty"),
+            "runtime_artifact_precondition",
+        )
+    try:
+        invocation = (invocation_builder or build_trainer_invocation)(workload, roots, environment)
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_invocation_rejected")
+    try:
+        evidence = runner.run(invocation)
+    finally:
+        _close_retained_fds(invocation.retained_fds)
+    if not isinstance(evidence, TrainerEvidence):
+        raise TypeError("trainer runner returned invalid evidence")
+    if type(evidence.exit_code) is not int:
+        raise TypeError("trainer exit code must be an exact integer")
+    if evidence.exit_code != 0:
+        raise _mark_runtime_stage(
+            TrainerFailed("trainer process failed"), "runtime_trainer_failed"
+        )
+    try:
+        try:
+            _validate_trainer_evidence(evidence, invocation, workload)
+            execution_evidence = _build_execution_evidence(workload, invocation, evidence)
+            execution_evidence_bytes = _canonical_json(execution_evidence)
+        except RuntimeV1Error as error:
+            raise _mark_runtime_stage(error, "runtime_evidence_projection_binding")
+        try:
+            for directory in (evidence.final_model_dir, evidence.tokenizer_dir):
+                _validate_artifact_directory(directory, roots.state)
+        except RuntimeV1Error as error:
+            raise _mark_runtime_stage(error, "runtime_evidence_output_directory")
+        try:
+            metrics = _normalize_metrics(evidence.metrics)
+        except RuntimeV1Error as error:
+            raise _mark_runtime_stage(error, "runtime_evidence_metrics")
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_evidence_rejected")
+    artifacts: list[dict[str, object]] = []
+    artifacts.append(
+        _write_artifact(roots.artifacts, "workload_record", "workload.json", payload)
+    )
+    lineage = lineage_builder(workload, invocation, evidence, execution_evidence) if lineage_builder is not None else {
+        "schema_version": "synaptic-sft-training-lineage/v1",
+        "workload_fingerprint": workload.fingerprint,
+        "execution_source": workload.document["execution_source"],
+        "configuration_revision": workload.document["configuration"]["revision"],
+        "identities": workload.document["identities"],
+        "trainer_exit_code": evidence.exit_code,
+        "execution_evidence": execution_evidence,
+        "execution_evidence_sha256": hashlib.sha256(
+            execution_evidence_bytes
+        ).hexdigest(),
+        "trainer_lineage": evidence.lineage,
+    }
+    artifacts.append(
+        _write_artifact(
+            roots.artifacts,
+            "training_lineage",
+            "training_lineage.json",
+            _canonical_json(lineage),
+        )
+    )
+    artifacts.append(
+        _write_artifact(
+            roots.artifacts,
+            "training_metrics",
+            "training_metrics.json",
+            _canonical_json(metrics),
+        )
+    )
+    artifacts.append(
+        _archive_artifact(
+            roots.artifacts,
+            role="final_model",
+            filename="final_model.tar",
+            source=evidence.final_model_dir,
+            artifact_kind="model",
+            locked_model_ref=workload.document["configuration"]["document"]["model"][
+                "ref"
+            ],
+        )
+    )
+    artifacts.append(
+        _archive_artifact(
+            roots.artifacts,
+            role="tokenizer",
+            filename="tokenizer.tar",
+            source=evidence.tokenizer_dir,
+            artifact_kind="tokenizer",
+        )
+    )
+    inventory = {
+        "schema_version": "synaptic-artifact-inventory/v1",
+        "workload_fingerprint": workload.fingerprint,
+        "artifacts": artifacts,
+    }
+    inventory_path = roots.state / "runtime-v1-inventory.json"
+    try:
+        _write_exclusive(inventory_path, _canonical_json(inventory))
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_artifact_rejected")
+    return RuntimeResult(workload.fingerprint, inventory_path, tuple(artifacts))
+
+
+def _canonical_json(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeV1Error("runtime value cannot be canonically encoded") from exc
+
+
+def _normalize_metrics(values: Mapping[str, object]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in values.items():
+        if not isinstance(key, str) or not key:
+            raise RuntimeV1Error("trainer metric key is invalid")
+        if value is None or isinstance(value, (str, bool, int)):
+            result[key] = value
+        elif isinstance(value, float) and math.isfinite(value):
+            result[key] = value
+        else:
+            raise RuntimeV1Error("trainer metrics must be finite JSON scalars")
+    return result
+
+
+def _expected_trainer_projection(
+    workload: object,
+    *,
+    dataset_path: Path,
+    run_dir: Path,
+    final_model_dir: Path,
+) -> dict[str, object]:
+    document = workload.document
+    config = document["configuration"]["document"]
+    model = config["model"]
+    dataset = config["dataset"]
+    sft = config["sft"]
+    dataset_text = str(dataset_path)
+    if re.fullmatch(r"/proc/self/fd/[1-9][0-9]*", dataset_text) is None:
+        dataset_text = str(dataset_path.resolve())
+    projection = {
+        "schema_version": "synaptic-sft-trainer-projection/v1",
+        "workload_fingerprint": workload.fingerprint,
+        "configuration_revision": document["configuration"]["revision"],
+        "model": {
+            "ref": model["ref"],
+            "revision": model["revision"],
+            "tokenizer_revision": model["tokenizer_revision"],
+            "load_in_4bit": model["load_in_4bit"],
+        },
+        "dataset": {
+            "resolved_path": dataset_text,
+            "revision": dataset["revision"],
+            "content_digest": dataset["content_digest"],
+        },
+        "training": {
+            "batch_size": sft["batch_size"],
+            "gradient_accumulation_steps": sft["gradient_accumulation_steps"],
+            "learning_rate": float(sft["learning_rate"]),
+            "max_steps": sft.get("max_steps", -1),
+            "num_epochs": sft.get("num_epochs", 1),
+            "max_seq_length": sft["max_seq_length"],
+            "seed": sft["seed"],
+            "save_steps": sft["save_steps"],
+            "save_total_limit": sft["save_total_limit"],
+            "split_dataset": sft["split_dataset"],
+        },
+        "lora": {
+            "rank": sft["lora_rank"],
+            "alpha": sft["lora_alpha"],
+            "dropout": float(sft["lora_dropout"]),
+            "target_modules": sft["lora_target_modules"],
+            "use_dora": sft["use_dora"],
+            "use_rslora": sft["use_rslora"],
+            "init_lora_weights": sft["init_lora_weights"],
+        },
+        "outputs": {
+            "run_dir": str(run_dir.resolve()),
+            "final_model_dir": str(final_model_dir.resolve()),
+        },
+        "status": "completed",
+    }
+    if sft.get("dataset_format") in {"raw_text", "messages"}:
+        projection["dataset"].update(
+            {"schema_version": dataset["format"], "format": sft["dataset_format"]}
+        )
+        projection["training"].update(
+            {
+                "completion_only_loss": sft["completion_only_loss"],
+                "assistant_only_loss": sft["assistant_only_loss"],
+                "use_preassigned_splits": sft["use_preassigned_splits"],
+            }
+        )
+        if sft.get("dataset_format") == "messages":
+            projection["training"].update(
+                {
+                    "prompt_render": sft["prompt_render"],
+                    "packing": sft["packing"],
+                    "require_memory_efficient_loss": sft[
+                        "require_memory_efficient_loss"
+                    ],
+                }
+            )
+    return projection
+
+
+def _validate_trainer_evidence(
+    evidence: TrainerEvidence,
+    invocation: TrainerInvocation,
+    workload: object,
+) -> None:
+    try:
+        dataset_ref = workload.document["configuration"]["document"]["dataset"]["ref"]
+        dataset_path = invocation.argv[invocation.argv.index("--local-file") + 1]
+        prepared = isinstance(dataset_ref, str) and _PREPARED_DATASET_REF_RE.fullmatch(dataset_ref)
+        if prepared is not None:
+            if (
+                len(invocation.retained_fds) != 1
+                or dataset_path != f"/proc/self/fd/{invocation.retained_fds[0]}"
+            ):
+                raise RuntimeV1Error("trainer evidence lost the immutable dataset binding")
+        elif invocation.retained_fds:
+            raise RuntimeV1Error("project dataset unexpectedly retained a private descriptor")
+    except RuntimeV1Error as error:
+        raise _mark_runtime_stage(error, "runtime_evidence_dataset_binding")
+    if (
+        evidence.final_model_dir != invocation.final_model_dir
+        or evidence.tokenizer_dir != invocation.tokenizer_dir
+    ):
+        raise RuntimeV1Error("trainer evidence returned an unexpected output path")
+    lineage = evidence.lineage
+    projection = evidence.projection
+    if not isinstance(lineage, Mapping) or not isinstance(projection, Mapping):
+        raise RuntimeV1Error("trainer lineage is missing")
+    if not _json_type_equal(projection, invocation.expected_projection):
+        raise RuntimeV1Error("trainer lineage does not bind the accepted invocation")
+    if not _json_type_equal(lineage.get("synaptic_runtime_projection"), projection):
+        raise RuntimeV1Error("trainer lineage does not contain the accepted projection")
+    _canonical_json(lineage)
+    _canonical_json(projection)
+
+
+def _build_execution_evidence(
+    workload: object,
+    invocation: TrainerInvocation,
+    evidence: TrainerEvidence,
+) -> dict[str, object]:
+    config = workload.document["configuration"]["document"]
+    dataset_index = invocation.argv.index("--local-file") + 1
+    return {
+        "schema_version": _EXECUTION_EVIDENCE_SCHEMA,
+        "workload_fingerprint": workload.fingerprint,
+        "configuration_revision": workload.document["configuration"]["revision"],
+        "model": {
+            "ref": config["model"]["ref"],
+            "revision": config["model"]["revision"],
+            "tokenizer_revision": config["model"]["tokenizer_revision"],
+            "load_in_4bit": config["model"]["load_in_4bit"],
+        },
+        "dataset": {
+            "ref": config["dataset"]["ref"],
+            "resolved_path": invocation.argv[dataset_index],
+            "revision": config["dataset"]["revision"],
+            "content_digest": config["dataset"]["content_digest"],
+        },
+        "sft": config["sft"],
+        "argv": list(invocation.argv),
+        "environment": dict(invocation.environment),
+        "cwd": str(invocation.cwd),
+        "outputs": {
+            "run_dir": str(invocation.run_dir),
+            "final_model_dir": str(invocation.final_model_dir),
+            "tokenizer_dir": str(invocation.tokenizer_dir),
+            "lineage_path": str(invocation.lineage_path),
+        },
+        "result": {"exit_code": evidence.exit_code, "status": "completed"},
+    }
+
+
+def _validate_artifact_directory(path: Path, state_root: Path) -> None:
+    _assert_no_redirected_components(path)
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeV1Error("trainer artifact directory is missing") from exc
+    if (
+        not resolved.is_dir()
+        or state_root not in resolved.parents
+        or _is_redirect(path)
+    ):
+        raise RuntimeV1Error("trainer artifact directory escapes writable state")
+    for item in resolved.iterdir():
+        _assert_no_redirected_components(item)
+        try:
+            info = item.lstat()
+        except OSError as exc:
+            raise RuntimeV1Error("trainer artifact entry is unavailable") from exc
+        if _is_redirect(item) or not stat.S_ISREG(info.st_mode):
+            raise RuntimeV1Error(
+                "trainer artifacts contain a nested, redirected, or special entry"
+            )
+
+
+def _write_exclusive(path: Path, content: bytes) -> None:
+    try:
+        with path.open("xb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError as exc:
+        raise RuntimeV1Error("runtime artifact write failed") from exc
+
+
+def _write_artifact(
+    root: Path, role: str, filename: str, content: bytes
+) -> dict[str, object]:
+    path = root / filename
+    _write_exclusive(path, content)
+    return {
+        "role": role,
+        "path": filename,
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "size": len(content),
+    }
+
+
+def _archive_artifact(
+    root: Path,
+    *,
+    role: str,
+    filename: str,
+    source: Path,
+    artifact_kind: str,
+    locked_model_ref: str | None = None,
+) -> dict[str, object]:
+    members = _select_artifact_members(
+        source, artifact_kind, locked_model_ref=locked_model_ref
+    )
+    destination = root / filename
+    try:
+        with destination.open("xb") as raw:
+            with tarfile.open(fileobj=raw, mode="w") as archive:
+                for path in members:
+                    relative = path.relative_to(source).as_posix()
+                    _add_stable_archive_member(archive, path, relative)
+            raw.flush()
+            os.fsync(raw.fileno())
+    except (OSError, tarfile.TarError) as exc:
+        raise RuntimeV1Error("runtime artifact archive failed") from exc
+    content_digest = hashlib.sha256()
+    size = 0
+    with destination.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            content_digest.update(chunk)
+            size += len(chunk)
+    return {
+        "role": role,
+        "path": filename,
+        "sha256": content_digest.hexdigest(),
+        "size": size,
+    }
+
+
+def _select_artifact_members(
+    source: Path, artifact_kind: str, *, locked_model_ref: str | None = None
+) -> tuple[Path, ...]:
+    try:
+        files = {
+            item.name: item
+            for item in source.iterdir()
+            if stat.S_ISREG(item.lstat().st_mode)
+        }
+    except OSError as exc:
+        raise RuntimeV1Error("trainer artifact layout is unreadable") from exc
+    validated_tokenizer = _validate_tokenizer_files(files)
+    if artifact_kind == "model":
+        adapter = "adapter_config.json" in files
+        full = "config.json" in files
+        if adapter == full:
+            raise RuntimeV1Error(
+                "trainer model output must contain exactly one model family"
+            )
+        family = "adapter_model" if adapter else "model"
+        config_name = "adapter_config.json" if adapter else "config.json"
+        payloads = sorted(
+            name
+            for name in files
+            if (match := _MODEL_PAYLOADS.fullmatch(name)) and match.group(1) == family
+        )
+        opposite = [
+            name
+            for name in files
+            if (match := _MODEL_PAYLOADS.fullmatch(name)) and match.group(1) != family
+        ]
+        if opposite:
+            raise RuntimeV1Error("trainer model output mixes model families")
+        index_name = f"{family}.safetensors.index.json"
+        selected = [config_name] + payloads
+        if index_name in files:
+            selected.append(index_name)
+        selected += sorted(_MODEL_OPTIONAL & files.keys())
+        configs = [config_name]
+    elif artifact_kind == "tokenizer":
+        configs = sorted(_TOKENIZER_CONFIGS & files.keys())
+        payloads = sorted(_TOKENIZER_PAYLOADS & files.keys())
+        selected = configs + payloads + sorted(_TOKENIZER_OPTIONAL & files.keys())
+    else:
+        raise RuntimeV1Error("unsupported runtime artifact kind")
+    if not configs or not payloads:
+        raise RuntimeV1Error(
+            f"trainer {artifact_kind} output lacks recognizable config or payload"
+        )
+    if any(
+        not 0 < files[name].lstat().st_size <= _MAX_ARCHIVE_MEMBER_BYTES
+        for name in selected
+    ):
+        raise RuntimeV1Error(
+            f"trainer {artifact_kind} artifact contains an empty or oversized file"
+        )
+    if artifact_kind == "model":
+        for name in configs:
+            _validate_model_config(files[name], name, locked_model_ref=locked_model_ref)
+        tensor_info = {
+            name: _validate_safetensors_file(files[name]) for name in payloads
+        }
+        _validate_model_shards(payloads, files, tensor_info, family)
+        if "generation_config.json" in files:
+            generation = _read_json_file(
+                files["generation_config.json"], maximum=4 * 1024 * 1024
+            )
+            if not isinstance(generation, Mapping) or not _bounded_json_tree(
+                generation
+            ):
+                raise RuntimeV1Error("generation_config.json is malformed")
+        if (
+            "README.md" in files
+            and not _read_utf8_text(files["README.md"], maximum=4 * 1024 * 1024).strip()
+        ):
+            raise RuntimeV1Error("README.md is empty")
+        unknown = set(files) - set(selected) - _KNOWN_IGNORED - validated_tokenizer
+        if unknown:
+            raise RuntimeV1Error("trainer model output contains an unsupported file")
+        if (
+            "training_args.bin" in files
+            and not 0 < files["training_args.bin"].stat().st_size <= 16 * 1024 * 1024
+        ):
+            raise RuntimeV1Error("training_args.bin is empty or oversized")
+    else:
+        if set(selected) != validated_tokenizer:
+            raise RuntimeV1Error("tokenizer selection does not match validated files")
+    return tuple(files[name] for name in selected)
+
+
+def _validate_model_config(
+    path: Path, name: str, *, locked_model_ref: str | None
+) -> None:
+    document = _read_json_file(path, maximum=4 * 1024 * 1024)
+    if name == "adapter_config.json":
+        if (
+            document.get("peft_type") != "LORA"
+            or not isinstance(document.get("base_model_name_or_path"), str)
+            or document["base_model_name_or_path"] != locked_model_ref
+        ):
+            raise RuntimeV1Error("trainer adapter config is not recognizable LoRA")
+    elif not isinstance(document.get("model_type"), str) or not document["model_type"]:
+        raise RuntimeV1Error("trainer model config is not recognizable")
+
+
+def _validate_tokenizer_config(path: Path) -> None:
+    document = _read_json_file(path, maximum=4 * 1024 * 1024)
+    if (
+        not isinstance(document.get("tokenizer_class"), str)
+        or not document["tokenizer_class"]
+    ):
+        raise RuntimeV1Error("trainer tokenizer config is not recognizable")
+
+
+def _validate_tokenizer_json(path: Path) -> None:
+    document = _read_json_file(path, maximum=512 * 1024 * 1024)
+    model = document.get("model")
+    if (
+        not isinstance(document.get("version"), str)
+        or not document["version"]
+        or not isinstance(model, Mapping)
+        or not isinstance(model.get("type"), str)
+        or not model["type"]
+        or not isinstance(model.get("vocab"), (Mapping, list))
+        or not model["vocab"]
+    ):
+        raise RuntimeV1Error("trainer tokenizer JSON is not recognizable")
+
+
+def _validate_tokenizer_files(files: Mapping[str, Path]) -> set[str]:
+    present = (_TOKENIZER_CONFIGS | _TOKENIZER_PAYLOADS | _TOKENIZER_OPTIONAL) & set(
+        files
+    )
+    for name in present:
+        path = files[name]
+        if not 0 < path.lstat().st_size <= _MAX_ARCHIVE_MEMBER_BYTES:
+            raise RuntimeV1Error("tokenizer sidecar is empty or oversized")
+        if name == "tokenizer_config.json":
+            _validate_tokenizer_config(path)
+        elif name == "tokenizer.json":
+            _validate_tokenizer_json(path)
+        elif name in {"vocab.json", "added_tokens.json"}:
+            document = _read_json_file(path, maximum=512 * 1024 * 1024)
+            if (
+                not isinstance(document, Mapping)
+                or not document
+                or len(document) > 2_000_000
+                or any(
+                    not isinstance(token, str)
+                    or not token
+                    or not isinstance(index, int)
+                    or isinstance(index, bool)
+                    or index < 0
+                    for token, index in document.items()
+                )
+            ):
+                raise RuntimeV1Error(f"{name} is not a recognizable token mapping")
+        elif name == "special_tokens_map.json":
+            document = _read_json_file(path, maximum=4 * 1024 * 1024)
+            if (
+                not isinstance(document, Mapping)
+                or len(document) > 4096
+                or not _bounded_json_tree(document)
+            ):
+                raise RuntimeV1Error("special_tokens_map.json is malformed")
+        elif name == "merges.txt":
+            text = _read_utf8_text(path, maximum=512 * 1024 * 1024)
+            lines = [
+                line for line in text.splitlines() if line and not line.startswith("#")
+            ]
+            if not lines or any(len(line.split()) != 2 for line in lines):
+                raise RuntimeV1Error("merges.txt is malformed")
+        elif name == "chat_template.jinja":
+            text = _read_utf8_text(path, maximum=4 * 1024 * 1024)
+            if not text.strip():
+                raise RuntimeV1Error("chat_template.jinja is empty")
+    return present
+
+
+def _read_utf8_text(path: Path, *, maximum: int) -> str:
+    raw = _read_regular(path, maximum=maximum)
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeV1Error("tokenizer text sidecar is not UTF-8") from exc
+
+
+def _bounded_json_tree(value: object, *, depth: int = 0) -> bool:
+    if depth > 12:
+        return False
+    if value is None or isinstance(value, (str, bool, int)):
+        return not isinstance(value, str) or len(value) <= 1_000_000
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return len(value) <= 100_000 and all(
+            _bounded_json_tree(item, depth=depth + 1) for item in value
+        )
+    if isinstance(value, Mapping):
+        return len(value) <= 100_000 and all(
+            isinstance(key, str)
+            and len(key) <= 4096
+            and _bounded_json_tree(item, depth=depth + 1)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _validate_model_shards(
+    payloads: list[str],
+    files: Mapping[str, Path],
+    tensor_info: Mapping[str, tuple[frozenset[str], int]],
+    family: str,
+) -> None:
+    matches = [_MODEL_PAYLOADS.fullmatch(name) for name in payloads]
+    sharded = [
+        match for match in matches if match is not None and match.group(2) is not None
+    ]
+    index_name = f"{family}.safetensors.index.json"
+    if sharded:
+        totals = {int(match.group(3)) for match in sharded}
+        if len(totals) != 1:
+            raise RuntimeV1Error("model shards declare inconsistent totals")
+        total = totals.pop()
+        numbers = {int(match.group(2)) for match in sharded}
+        if (
+            not 1 <= total <= _MAX_SHARDS
+            or numbers != set(range(1, total + 1))
+            or len(payloads) != total
+        ):
+            raise RuntimeV1Error("model shard set is incomplete")
+        if index_name not in files:
+            raise RuntimeV1Error("sharded model output lacks its index")
+        index = _read_json_file(files[index_name], maximum=_MAX_INDEX_BYTES)
+        if (
+            set(index) != {"metadata", "weight_map"}
+            or not isinstance(index["metadata"], Mapping)
+            or not isinstance(index["weight_map"], Mapping)
+        ):
+            raise RuntimeV1Error("model shard index is malformed")
+        metadata = index["metadata"]
+        if set(metadata) - {"total_size"} or (
+            "total_size" in metadata
+            and (
+                not isinstance(metadata["total_size"], int)
+                or isinstance(metadata["total_size"], bool)
+                or metadata["total_size"]
+                != sum(info[1] for info in tensor_info.values())
+            )
+        ):
+            raise RuntimeV1Error("model shard index metadata is invalid")
+        weight_map = index["weight_map"]
+        if not 0 < len(weight_map) <= _MAX_TENSORS or any(
+            not isinstance(name, str) or not name or shard not in payloads
+            for name, shard in weight_map.items()
+        ):
+            raise RuntimeV1Error("model shard index weight map is invalid")
+        indexed = {shard: set() for shard in payloads}
+        for name, shard in weight_map.items():
+            indexed[shard].add(name)
+        if any(indexed[name] != set(tensor_info[name][0]) for name in payloads):
+            raise RuntimeV1Error(
+                "model shard index does not exactly describe payload tensors"
+            )
+    else:
+        if (
+            len(payloads) != 1
+            or payloads[0] != f"{family}.safetensors"
+            or index_name in files
+        ):
+            raise RuntimeV1Error("unsharded model output is inconsistent")
+
+
+def _validate_safetensors_file(path: Path) -> tuple[frozenset[str], int]:
+    _assert_no_redirected_components(path)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        with os.fdopen(descriptor, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            prefix = stream.read(8)
+            if len(prefix) != 8:
+                raise RuntimeV1Error("safetensors header is truncated")
+            header_size = int.from_bytes(prefix, "little", signed=False)
+            if not 0 < header_size <= _MAX_SAFETENSORS_HEADER_BYTES:
+                raise RuntimeV1Error("safetensors header length is invalid")
+            header = stream.read(header_size)
+            if len(header) != header_size:
+                raise RuntimeV1Error("safetensors header is truncated")
+            data_read = 0
+            has_nonzero_data = False
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                data_read += len(chunk)
+                has_nonzero_data = has_nonzero_data or chunk.count(0) != len(chunk)
+    except OSError as exc:
+        raise RuntimeV1Error("safetensors payload is unreadable") from exc
+    document = _strict_json_bytes(header, label="safetensors header")
+    if not isinstance(document, Mapping):
+        raise RuntimeV1Error("safetensors header must be an object")
+    _validate_safetensors_index(document, info.st_size - 8 - header_size)
+    if data_read != info.st_size - 8 - header_size or not has_nonzero_data:
+        raise RuntimeV1Error("safetensors tensor payload is empty or all-zero")
+    return frozenset(name for name in document if name != "__metadata__"), data_read
+
+
+def _validate_safetensors_index(document: Mapping[str, object], data_size: int) -> None:
+    metadata = document.get("__metadata__")
+    if metadata is not None and (
+        not isinstance(metadata, Mapping)
+        or any(
+            not isinstance(k, str) or not isinstance(v, str)
+            for k, v in metadata.items()
+        )
+    ):
+        raise RuntimeV1Error("safetensors metadata is invalid")
+    intervals: list[tuple[int, int]] = []
+    for name, descriptor in document.items():
+        if name == "__metadata__":
+            continue
+        if not isinstance(name, str) or not name or not isinstance(descriptor, Mapping):
+            raise RuntimeV1Error("safetensors tensor descriptor is invalid")
+        dtype = descriptor.get("dtype")
+        shape = descriptor.get("shape")
+        offsets = descriptor.get("data_offsets")
+        if (
+            not isinstance(dtype, str)
+            or dtype not in _SAFETENSORS_DTYPES
+            or not isinstance(shape, list)
+            or any(
+                not isinstance(v, int) or isinstance(v, bool) or v < 0 for v in shape
+            )
+            or not isinstance(offsets, list)
+            or len(offsets) != 2
+            or any(
+                not isinstance(v, int) or isinstance(v, bool) or v < 0 for v in offsets
+            )
+        ):
+            raise RuntimeV1Error("safetensors tensor descriptor is invalid")
+        start, end = offsets
+        elements = math.prod(shape)
+        if end <= start or end - start != elements * _SAFETENSORS_DTYPES[dtype]:
+            raise RuntimeV1Error("safetensors tensor span is invalid")
+        intervals.append((start, end))
+    if not intervals:
+        raise RuntimeV1Error("safetensors payload has no tensors")
+    intervals.sort()
+    cursor = 0
+    for start, end in intervals:
+        if start != cursor:
+            raise RuntimeV1Error("safetensors tensor offsets are not contiguous")
+        cursor = end
+    if cursor != data_size:
+        raise RuntimeV1Error("safetensors file length does not match declared tensors")
+
+
+def _add_stable_archive_member(
+    archive: tarfile.TarFile,
+    path: Path,
+    relative: str,
+) -> None:
+    _assert_no_redirected_components(path)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, "rb") as content:
+        before = os.fstat(content.fileno())
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or not 0 < before.st_size <= _MAX_ARCHIVE_MEMBER_BYTES
+        ):
+            raise RuntimeV1Error(
+                "archive member must be bounded, nonempty, and regular"
+            )
+        info = tarfile.TarInfo(relative)
+        info.size = before.st_size
+        info.mode = 0o644
+        info.mtime = 0
+        info.uid = info.gid = 0
+        info.uname = info.gname = ""
+        digest = hashlib.sha256()
+        archive.addfile(info, _HashingReader(content, digest))
+        after = os.fstat(content.fileno())
+        content.seek(0)
+        confirm = hashlib.file_digest(content, "sha256").hexdigest()
+    current = path.lstat()
+    if (
+        _file_identity(before) != _file_identity(after)
+        or _stable_path_identity(after) != _stable_path_identity(current)
+        or digest.hexdigest() != confirm
+    ):
+        raise RuntimeV1Error("trainer artifact changed during archival")
+
+
+class _HashingReader:
+    def __init__(self, stream: BinaryIO, digest: object) -> None:
+        self._stream = stream
+        self._digest = digest
+
+    def read(self, size: int = -1) -> bytes:
+        content = self._stream.read(size)
+        self._digest.update(content)
+        return content
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Canonical SFT runtime v1")
+    transport = parser.add_mutually_exclusive_group(required=True)
+    transport.add_argument("--canonical-workload-stdin", action="store_true")
+    transport.add_argument("--canonical-workload-file")
+    parser.add_argument("--canonical-workload-control-root")
+    parser.add_argument("--canonical-workload-byte-count", type=int)
+    parser.add_argument("--canonical-workload-sha256")
+    parser.add_argument("--canonical-workload-fingerprint")
+    return parser
+
+
+def _read_workload_input(args: argparse.Namespace) -> bytes:
+    file_bindings = (
+        args.canonical_workload_control_root,
+        args.canonical_workload_byte_count,
+        args.canonical_workload_sha256,
+        args.canonical_workload_fingerprint,
+    )
+    if args.canonical_workload_stdin:
+        if any(value is not None for value in file_bindings):
+            raise RuntimeV1Error(
+                "stdin workload transport cannot include file bindings"
+            )
+        return read_bounded_workload(sys.stdin.buffer)
+    if any(value is None for value in file_bindings):
+        raise RuntimeV1Error("file workload transport requires the complete binding")
+    return read_authenticated_workload_file(
+        Path(args.canonical_workload_file),
+        control_root=Path(args.canonical_workload_control_root),
+        expected_byte_count=args.canonical_workload_byte_count,
+        expected_sha256=args.canonical_workload_sha256,
+        expected_fingerprint=args.canonical_workload_fingerprint,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        payload = _read_workload_input(args)
+        result = execute_runtime(
+            payload,
+            environment=os.environ,
+            runner=SubprocessTrainerRunner(),
+        )
+    except RuntimeV1Error as error:
+        print("SFT_RUNTIME_V1_REJECTED", file=sys.stderr)
+        return _RUNTIME_STAGE_EXITS.get(getattr(error, "diagnostic_code", ""), 2)
+    print(
+        _canonical_json(
+            {
+                "workload_fingerprint": result.workload_fingerprint,
+                "inventory_path": str(result.inventory_path),
+            }
+        ).decode("utf-8")
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

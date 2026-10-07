@@ -9,7 +9,6 @@ import pytest
 
 from shared.experiment_tracking.local_tracker import LocalTracker
 from shared.experiment_tracking.registry import RunRegistry
-from shared.experiment_tracking.schema import RunRecord
 
 
 class TestAutoRegistration:

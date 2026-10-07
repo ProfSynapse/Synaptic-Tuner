@@ -139,7 +139,7 @@ def test_eval_chain_includes_reasoning_when_instance_effort_set(monkeypatch):
         max_tokens=settings.max_tokens,
     )
 
-    assert result == "ok"
+    assert result.text == "ok"
     assert captured["json"]["reasoning"] == {"effort": "minimal"}
 
 

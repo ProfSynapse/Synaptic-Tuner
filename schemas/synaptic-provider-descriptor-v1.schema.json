@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-provider-descriptor-v1.schema.json",
+  "title": "Synaptic Provider Descriptor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "provider_id", "display_name", "implementation_version", "capabilities"],
+  "properties": {
+    "schema_version": {"const": "synaptic-provider-descriptor/v1"},
+    "provider_id": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "display_name": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "implementation_version": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observe", "logs", "cancel", "reconcile", "artifact_streaming", "cost_quote"],
+      "properties": {
+        "observe": {"type": "boolean"},
+        "logs": {"type": "boolean"},
+        "cancel": {"type": "boolean"},
+        "reconcile": {"type": "boolean"},
+        "artifact_streaming": {"type": "boolean"},
+        "cost_quote": {"type": "boolean"}
+      }
+    }
+  }
+}

@@ -73,14 +73,14 @@ class JudgeService:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
 
-            # Call LLM
+            # Call LLM - shared.llm structured_output() returns LLMStructuredV1
             judgment = self.llm_client.structured_output(
                 messages=messages,
                 schema=schema,
                 temperature=self.scope_config.llm.judge_temperature
             )
 
-            return judgment
+            return judgment.value
 
         except Exception as e:
             self.logger.error(f"Judge call error: {e}")

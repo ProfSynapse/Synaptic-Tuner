@@ -24,12 +24,17 @@ from tuner.cloud import (
     CloudJobSpec,
     HF_BUCKET_SYNC_OVERLAY_PACKAGES,
     HFJobExecutor,
-    RepoCheckoutSpec,
     build_bash_command,
     build_hf_job_secrets,
-    build_repo_checkout_steps,
     load_huggingface_hub,
     resolve_hf_bucket_id,
+)
+from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
+from tuner.handlers.stages._util import (
+    HFSourcePreparation,
+    hf_verified_source_steps,
+    preflight_hf_source_lock,
+    prepare_hf_source,
 )
 from tuner.handlers.base import BaseHandler
 from tuner.handlers.cloud_eval_dashboard import (
@@ -52,14 +57,13 @@ from tuner.backends.training.cloud.base_cloud import (
     load_project_deps,
     poll_until_done,
     resolve_cloud_image,
-    resolve_repo_source,
 )
 from tuner.core.exceptions import CloudProviderError
 
 logger = logging.getLogger(__name__)
 
-_HF_EVAL_RUNTIME_OVERLAY = "/tmp/hf-eval-runtime-site"
-_HF_EVAL_BUCKET_SYNC_OVERLAY = "/tmp/hf-eval-bucket-sync-site"
+_HF_EVAL_RUNTIME_OVERLAY = "/workspace/cache/hf-eval-runtime-site"
+_HF_EVAL_BUCKET_SYNC_OVERLAY = "/workspace/cache/hf-eval-bucket-sync-site"
 _HF_EVAL_RUNTIME_PIP_PACKAGES = [
     "-r",
     "Evaluator/requirements.txt",
@@ -106,8 +110,8 @@ class HFJobsCloudEvalAdapter(CloudEvalProviderAdapter):
 class CloudEvalHandler(BaseHandler):
     """Submit a cloud evaluation run to Hugging Face Jobs."""
 
-    def __init__(self, args: Optional[Namespace] = None):
-        super().__init__(args=args)
+    def __init__(self, args: Optional[Namespace] = None, context=None):
+        super().__init__(args=args, context=context)
         self.last_job_id: Optional[str] = None
         self.last_eval_prefix: Optional[str] = None
         self.last_bucket_id: Optional[str] = None
@@ -164,11 +168,32 @@ class CloudEvalHandler(BaseHandler):
                 return timeout_hours
         return 4.0
 
-    def _validate_environment(self):
+    def _validate_environment(self, *, for_launch: bool = True):
         hf_token = get_hf_token()
         if not hf_token:
             raise CloudProviderError("HF_TOKEN not set. Required for cloud evaluation.")
-        return load_huggingface_hub(require_apis=("run_job", "create_bucket", "HfApi"))
+        required = ("run_job", "create_bucket", "HfApi", "Volume") if for_launch else ("create_bucket", "HfApi")
+        return load_huggingface_hub(require_apis=required)
+
+    def _prepare_source(self, *, timestamp: str, hf_settings: dict) -> HFSourcePreparation:
+        inherited = getattr(self.args, "_source_preparation", None)
+        if inherited is not None:
+            if not isinstance(inherited, HFSourcePreparation):
+                raise CloudProviderError("Invalid inherited HF source preparation.")
+            return inherited
+        volume_settings = hf_settings.get("bootstrap_volume", {})
+        if not isinstance(volume_settings, dict):
+            raise CloudProviderError("hf_jobs.bootstrap_volume must be a mapping.")
+        run_id = f"hf-eval-{timestamp}"
+        source_lock = preflight_hf_source_lock(self.context, run_id=run_id)
+        return prepare_hf_source(
+            self.context,
+            run_id=run_id,
+            config_path=self.repo_root / "Evaluator" / "config" / "eval_run.yaml",
+            volume_settings=volume_settings,
+            runtime={"provider": "hf_jobs", "task": "evaluation"},
+            source_lock=source_lock,
+        )
 
     def _resolve_bucket_id(self, huggingface_hub, bucket_id: str) -> str:
         return resolve_hf_bucket_id(
@@ -265,6 +290,7 @@ class CloudEvalHandler(BaseHandler):
     def _build_eval_command(
         self,
         *,
+        source_preparation: HFSourcePreparation,
         helper_module: str,
         bucket_id: str,
         run_prefix: str,
@@ -285,27 +311,20 @@ class CloudEvalHandler(BaseHandler):
         loss_max_seq_length: Optional[int],
         loss_completion_only: bool,
     ) -> str:
-        repo_source = resolve_repo_source(self.repo_root)
         cloud_config_path = self._cloud_config_path()
         project_deps = load_project_deps(cloud_config_path)
         quoted_project_deps = " ".join(shlex.quote(dep) for dep in project_deps)
         quoted_eval_runtime_deps = " ".join(shlex.quote(dep) for dep in _HF_EVAL_RUNTIME_PIP_PACKAGES)
         quoted_bucket_sync_deps = " ".join(shlex.quote(dep) for dep in _HF_EVAL_BUCKET_SYNC_PIP_PACKAGES)
-        checkout_steps = build_repo_checkout_steps(
-            RepoCheckoutSpec(
-                url=repo_source.url,
-                branch=repo_source.branch,
-                commit=repo_source.commit,
-            )
-        )
+        engine_root = source_preparation.remote_engine_root
         python_cmd = "$(command -v python3 || command -v python)"
 
         parts = [
-            *checkout_steps,
-            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_project_deps}",
+            *hf_verified_source_steps(source_preparation),
+            f"cd {engine_root} && {python_cmd} -m pip install --upgrade {quoted_project_deps}",
             f"mkdir -p {_HF_EVAL_RUNTIME_OVERLAY} {_HF_EVAL_BUCKET_SYNC_OVERLAY}",
-            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --no-deps --target {_HF_EVAL_RUNTIME_OVERLAY} {quoted_eval_runtime_deps}",
-            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --no-deps --target {_HF_EVAL_BUCKET_SYNC_OVERLAY} {quoted_bucket_sync_deps}",
+            f"cd {engine_root} && {python_cmd} -m pip install --upgrade --no-deps --target {_HF_EVAL_RUNTIME_OVERLAY} {quoted_eval_runtime_deps}",
+            f"cd {engine_root} && {python_cmd} -m pip install --upgrade --no-deps --target {_HF_EVAL_BUCKET_SYNC_OVERLAY} {quoted_bucket_sync_deps}",
             f"export PYTHONPATH={_HF_EVAL_RUNTIME_OVERLAY}${{PYTHONPATH:+:$PYTHONPATH}}",
             f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
             f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_EVAL_BUCKET_SYNC_OVERLAY}",
@@ -313,7 +332,7 @@ class CloudEvalHandler(BaseHandler):
         ]
         if pip_packages:
             quoted_pip_packages = " ".join(shlex.quote(pkg) for pkg in pip_packages)
-            parts.append(f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_pip_packages}")
+            parts.append(f"cd {engine_root} && {python_cmd} -m pip install --upgrade {quoted_pip_packages}")
 
         eval_cmd = [
             "python3",
@@ -327,6 +346,8 @@ class CloudEvalHandler(BaseHandler):
             eval_prefix,
             "--config-dir",
             "Evaluator/config",
+            "--output-root",
+            "/workspace/artifacts/evaluations",
         ]
         if preset:
             eval_cmd.extend(["--preset", preset])
@@ -358,7 +379,7 @@ class CloudEvalHandler(BaseHandler):
             if not loss_completion_only:
                 eval_cmd.append("--loss-no-completion-only")
 
-        parts.append("cd /workspace/repo && " + " ".join(shlex.quote(arg) for arg in eval_cmd))
+        parts.append(f"cd {engine_root} && " + " ".join(shlex.quote(arg) for arg in eval_cmd))
         return " && ".join(parts)
 
     def _resolve_eval_runtime(self) -> str:
@@ -692,7 +713,7 @@ class CloudEvalHandler(BaseHandler):
 
         if self.json_mode:
             try:
-                huggingface_hub = self._validate_environment()
+                huggingface_hub = self._validate_environment(for_launch=False)
                 hf_settings = self._hf_jobs_settings()
                 bucket_id = self._resolve_bucket_id(
                     huggingface_hub,
@@ -718,8 +739,13 @@ class CloudEvalHandler(BaseHandler):
         print_header("CLOUD EVALUATION", "Run cloud evaluation on Hugging Face Jobs")
 
         try:
-            huggingface_hub = self._validate_environment()
+            require_current_hf_source_submission_authorization(route="cloud-eval.handle")
             hf_settings = self._hf_jobs_settings()
+            timestamp = self._new_eval_timestamp()
+            source_preparation = self._prepare_source(timestamp=timestamp, hf_settings=hf_settings)
+            source_preparation.require_consumable()
+            huggingface_hub = self._validate_environment()
+            proven_volume = source_preparation.prove_volume(huggingface_hub)
             bucket_id = self._resolve_bucket_id(
                 huggingface_hub,
                 getattr(self.args, "bucket", None) or hf_settings.get("artifact_identifier", ""),
@@ -765,12 +791,12 @@ class CloudEvalHandler(BaseHandler):
         loss_max_seq_length = getattr(self.args, "loss_max_seq_length", None)
         loss_completion_only = not bool(getattr(self.args, "loss_no_completion_only", False))
 
-        timestamp = self._new_eval_timestamp()
         eval_prefix = self._build_eval_prefix(selected_run["prefix"], timestamp)
         self.last_eval_prefix = eval_prefix
         self.last_bucket_id = bucket_id
         self.last_results_uri = f"hf://buckets/{bucket_id}/{eval_prefix}"
         command = self._build_eval_command(
+            source_preparation=source_preparation,
             helper_module=helper_module,
             bucket_id=bucket_id,
             run_prefix=selected_run["prefix"],
@@ -831,6 +857,7 @@ class CloudEvalHandler(BaseHandler):
                         "provider": "hf_jobs",
                         "run_prefix": selected_run["prefix"].split("/")[-1],
                     },
+                    volumes=(proven_volume,),
                 )
             )
         except Exception as exc:

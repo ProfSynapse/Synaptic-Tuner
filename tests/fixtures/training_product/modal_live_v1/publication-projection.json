@@ -1,0 +1,18 @@
+{
+  "artifacts": [
+    {"kind": "final_model", "sha256": "6a96a3206017256190d5a674aabcbaec22fea06608f6141aaa78a11f9f9ee05c", "size": 3737600, "uri_scheme": "local"},
+    {"kind": "tokenizer", "sha256": "0fdc70673782b3c98212c4f4c9f9222035cba9a163c66c3b7c7a52da2b914225", "size": 4802560, "uri_scheme": "local"},
+    {"kind": "training_lineage", "sha256": "ba8df32e0c68b5e05e32394fc4253964ffddaf1600b03a8917694dd312eda716", "size": 13134, "uri_scheme": "local"},
+    {"kind": "training_metrics", "sha256": "86e42337f76787c25871bf731e92c65504461132bbd71adc823110e00563952b", "size": 100, "uri_scheme": "local"},
+    {"kind": "workload_record", "sha256": "baa8f3e96becde24afc72a46fbb2e69fc5b6e1bb2e070ab0d2ba093da30b9a77", "size": 6123, "uri_scheme": "local"}
+  ],
+  "created_at": "2026-08-26T15:53:17Z",
+  "destination_ref": "local-default",
+  "plan_fingerprint": "d565721b8a625f6b2671d4e1c1d4e20ca915d6783909b4a7c0b1037c696dfb7f",
+  "project_ref": "epistemic-humility-research",
+  "receipt_sha256": "28fa75cbb215b17cc5a6f10d90495c9a7579ca35a182eeb86e6990125abbc6e8",
+  "run_id": "modal-sft-20260826T144636Z-7aec224e893d",
+  "schema_version": "synaptic-artifact-publication-projection/v1",
+  "source_schema_version": "synaptic-artifact-publication/v1"
+}
+

@@ -96,7 +96,7 @@ curl https://openrouter.ai/api/v1/models \
 **"Dataset validation failed"**
 ```bash
 # Run validation to see specific errors
-python3 .skills/synethetic-data-generation/scripts/validate_syngen.py <file>
+python3 -m shared.validation.dataset_validator <file>
 
 # Common fixes:
 # - Check JSON syntax (missing commas, quotes)
@@ -115,6 +115,37 @@ head -1 <dataset_file> | python -m json.tool
 ```
 
 ### Training Issues
+
+**"N config key(s) are not declared by the trainer schema"**
+- The SFT/KTO/DPO loaders, both GRPO entrypoints, and tier presets refuse any
+  YAML key the trainer does not read, at any nesting level, instead of
+  silently using a default.
+- The error lists each offending dotted path (e.g. `training.lerning_rate`,
+  `rewards.items[0].wieght`) with a "did you mean" suggestion. Fix the
+  spelling or delete the key; there is no override.
+- A key that is genuinely consumed must be declared: a dataclass field in
+  `Trainers/{sft,kto,dpo}/configs/config_loader.py`, or `GRPO_CONFIG_SCHEMA` /
+  `ENV_GRPO_CONFIG_SCHEMA` in `Trainers/grpo/train_grpo.py` /
+  `train_env_grpo.py` (`tests/trainers/grpo/test_grpo_config_keys.py` checks
+  those against the keys the code reads).
+
+**"GRPOConfig in the installed trl X does not accept ... argument(s)"**
+- A setting from your YAML (a `training.*` key, `training.extra_args.*`, or a
+  switch such as `training.use_gspo` -> `importance_sampling_level`) is not
+  supported by the installed TRL. It is no longer dropped silently.
+- Remove the setting or install a TRL version that supports it (check with
+  `python -c "import trl; print(trl.__version__)"`). Example: TRL 0.28 removed
+  GRPO `max_prompt_length`.
+- HF env-GRPO launches refuse `max_seq_length` / `--train-max-seq-length`
+  (the env trainer has no such setting; use `training.max_completion_length`).
+- Launchers refuse settings their target trainer has no flag for: HF Jobs
+  training accepts only sft/kto/dpo/grpo, local-run accepts `model.revision`
+  only for sft, and experiment-loop search keys must map to a trainer flag.
+  `tests/contract/test_trainer_argv_contract.py` parses every launcher's
+  argv with the real trainer parsers.
+- Only internal defaults named in a trainer's version-dependent set (env-GRPO:
+  `max_prompt_length`) are omitted on unsupported versions, with an `[INFO]`
+  line. SFT/KTO/DPO pass explicit arguments, so TRL itself raises `TypeError`.
 
 **"Training logs not appearing"**
 - Check `logs/training_latest.jsonl` exists in run directory
@@ -246,7 +277,7 @@ curl http://localhost:1234/v1/chat/completions \
 python -m SynthChat.services.rubric_runner --list
 
 # 3. Validate input file format
-python3 .skills/synethetic-data-generation/scripts/validate_syngen.py <input_file>
+python3 -m shared.validation.dataset_validator <input_file>
 
 # 4. Run with verbose logging
 python -m SynthChat.services.rubric_runner \

@@ -69,7 +69,7 @@ arguments: {"context": {...}, "filePath": "...", "content": "..."}
 ### Your Current Pipeline
 
 1. **Training Data:** Text-based format (5,515 examples)
-2. **Validation:** `tools/validate_syngen.py` - parses `tool_call:` and `arguments:`
+2. **Validation:** `shared/validation/dataset_validator.py` - parses `tool_call:` and `arguments:`
 3. **Evaluation:** `Evaluator/schema_validator.py` - expects text format
 4. **Inference:** Ollama/LM Studio - returns raw text
 5. **Parsing:** You control the parsing layer
@@ -81,7 +81,7 @@ arguments: {"context": {...}, "filePath": "...", "content": "..."}
 If you convert to MCP format, you would need to update:
 
 1. ✏️ **Dataset (✓ Script provided):** `tools/convert_to_mcp_format.py`
-2. ✏️ **Validator:** Rewrite `validate_syngen.py` to parse JSON blocks
+2. ✏️ **Validator:** Rewrite `shared/validation/dataset_validator.py` to parse JSON blocks
 3. ✏️ **Evaluator:** Update `schema_validator.py` to extract `tool_use` blocks
 4. ✏️ **Inference parsing:** Update post-processing to parse JSON format
 5. ⚠️ **Re-train models:** All existing trained models would be incompatible
@@ -273,7 +273,7 @@ cd Trainers/sft
 ### Option 2: Convert to MCP Format
 
 1. Run conversion script
-2. Update validator (`validate_syngen.py`)
+2. Update validator (`shared/validation/dataset_validator.py`)
 3. Update evaluator (`schema_validator.py`)
 4. Update inference parsing
 5. Re-train models on new format

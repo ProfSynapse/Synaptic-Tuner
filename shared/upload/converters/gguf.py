@@ -11,7 +11,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from .base import BaseConverter
 from ..core.types import ModelPath, QuantizationMethod
@@ -56,7 +56,7 @@ class GGUFConverter(BaseConverter):
         """
         # Check if Unsloth is available (required for save_pretrained_gguf)
         try:
-            import unsloth
+            import unsloth  # noqa: F401  availability probe
             return (True, "")
         except ImportError:
             return (False, "Unsloth is required for GGUF conversion. Install with: pip install unsloth")
@@ -262,7 +262,7 @@ class GGUFConverter(BaseConverter):
             True if successful
         """
         try:
-            import gguf
+            import gguf  # noqa: F401  availability probe
             return True
         except ImportError:
             pass
@@ -372,8 +372,8 @@ class GGUFConverter(BaseConverter):
         print(f"Output directory: {output_dir}")
         print(f"Quantizations: {', '.join(quantizations)}")
         if is_vl_model:
-            print(f"Model type: Vision-Language (using Unsloth's VL support)")
-        print(f"Method: Unsloth save_pretrained_gguf")
+            print("Model type: Vision-Language (using Unsloth's VL support)")
+        print("Method: Unsloth save_pretrained_gguf")
         print()
 
         # Setup steps - ensure all dependencies and tools are available
@@ -418,11 +418,11 @@ class GGUFConverter(BaseConverter):
             print("[1/3] Using pre-loaded model")
 
         # Use Unsloth's save_pretrained_gguf
-        print(f"\n[2/3] Creating GGUF files...")
+        print("\n[2/3] Creating GGUF files...")
         gguf_files = []
 
         # Create f16 base first
-        print(f"  Creating f16 (full precision) GGUF...")
+        print("  Creating f16 (full precision) GGUF...")
         try:
             model.save_pretrained_gguf(
                 str(gguf_dir),
@@ -453,7 +453,7 @@ class GGUFConverter(BaseConverter):
             except Exception as e:
                 print(f"  ⚠ {quant.upper()} creation failed: {e}")
 
-        print(f"\n[3/3] Summary")
+        print("\n[3/3] Summary")
         print(f"✓ GGUF files created: {len(gguf_files)} total")
         print(f"Saved to: {gguf_dir}")
 
@@ -471,7 +471,6 @@ class GGUFConverter(BaseConverter):
         Unsloth creates files like 'unsloth.Q4_K_M.gguf', we rename to
         '{model_name}-Q4_K_M.gguf'.
         """
-        quant_upper = quant_method.upper().replace("_", "-")
         quant_variants = [
             quant_method.upper(),
             quant_method.upper().replace("_", "-"),

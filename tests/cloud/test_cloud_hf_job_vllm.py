@@ -1,3 +1,4 @@
+import hashlib
 import json
 from argparse import Namespace
 from pathlib import Path
@@ -9,6 +10,22 @@ from Evaluator import cloud_hf_job_vllm
 from Evaluator.cloud_hf_job_vllm import _compute_exact_loss_outputs, _load_base_model_name, _parse_args
 from shared.cloud_stage_logging import StageLogger
 from shared.experiment_tracking.schema import LossResult
+
+
+def _bind_source_lock_env(monkeypatch, tmp_path: Path) -> Path:
+    source_lock = tmp_path / "source-lock.json"
+    content = b'{"schema_version":"synaptic-source-lock/v1"}\n'
+    source_lock.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    monkeypatch.setenv("SYNAPTIC_SOURCE_LOCK_PATH", str(source_lock))
+    monkeypatch.setenv("SYNAPTIC_SOURCE_LOCK_URI", "tracking://experiments/eval/source-lock.json")
+    monkeypatch.setenv("SYNAPTIC_SOURCE_LOCK_SHA256", digest)
+    monkeypatch.setenv("SYNAPTIC_SOURCE_TRANSPORT_URI", "tracking://experiments/eval/cloud/hf/source-transport/descriptor.json")
+    monkeypatch.setenv("SYNAPTIC_SOURCE_TRANSPORT_SHA256", "a" * 64)
+    monkeypatch.setenv("SYNAPTIC_PROVISIONING_EVIDENCE_URI", "tracking://experiments/eval/cloud/hf/source-transport/provisioning-evidence.json")
+    monkeypatch.setenv("SYNAPTIC_PROVISIONING_EVIDENCE_SHA256", "b" * 64)
+    monkeypatch.setenv("SYNAPTIC_SOURCE_TRANSPORT_STATE", "CONSUMABLE")
+    return source_lock
 
 
 def test_load_base_model_name_reads_adapter_config(tmp_path: Path):
@@ -46,7 +63,8 @@ def test_parse_args_supports_tensor_parallel_and_loss_workers(monkeypatch):
     assert args.loss_workers == 2
 
 
-def test_compute_exact_loss_outputs_emits_progress_events(tmp_path: Path):
+def test_compute_exact_loss_outputs_emits_progress_events(tmp_path: Path, monkeypatch):
+    _bind_source_lock_env(monkeypatch, tmp_path)
     args = Namespace(
         loss_dataset_path=str(tmp_path / "dataset.jsonl"),
         loss_dataset_name=None,
@@ -98,7 +116,8 @@ def test_compute_exact_loss_outputs_emits_progress_events(tmp_path: Path):
     assert summary["details"]["examples_done"] == 2
 
 
-def test_main_installs_termination_handler_before_initial_download(tmp_path: Path):
+def test_main_installs_termination_handler_before_initial_download(tmp_path: Path, monkeypatch):
+    _bind_source_lock_env(monkeypatch, tmp_path)
     args = Namespace(
         bucket_id="bucket-id",
         run_prefix="runs/demo",

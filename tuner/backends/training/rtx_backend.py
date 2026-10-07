@@ -22,7 +22,6 @@ Dependencies:
     - Trainers/grpo/configs/env_config.yaml
 """
 
-import os
 import sys
 import yaml
 import subprocess

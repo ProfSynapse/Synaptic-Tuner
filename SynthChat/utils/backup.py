@@ -72,7 +72,7 @@ class BackupManager:
 
         # Create backup of current file before overwriting
         if target_path.exists():
-            temp_backup = self.create_backup(str(target_path))
+            self.create_backup(str(target_path))
 
         # Restore from backup
         shutil.copy2(backup_path, target_path)

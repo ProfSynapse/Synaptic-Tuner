@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from argparse import Namespace
 
-from shared.experiment_tracking.experiment import Experiment, save_experiment
+from shared.experiment_tracking import TrackingService
+from shared.experiment_tracking.experiment import Experiment
 from tuner.handlers.experiment_analysis_handler import ExperimentAnalysisHandler
 
 
 def test_experiment_analysis_handler_reports_saved_bundle(tmp_path, capsys):
+    tracking_service = TrackingService(tmp_path)
     experiment = Experiment(
         experiment_id="exp_20260322_010203",
         name="analysis-smoke",
@@ -22,7 +24,7 @@ def test_experiment_analysis_handler_reports_saved_bundle(tmp_path, capsys):
         stage_statuses={"training": "completed", "evaluation": "completed", "loss": "completed"},
         derived_outputs={},
     )
-    save_experiment(experiment, base_dir=tmp_path)
+    tracking_service.save_experiment(experiment)
     analysis_dir = tmp_path / "experiments" / experiment.experiment_id / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
@@ -43,7 +45,7 @@ def test_experiment_analysis_handler_reports_saved_bundle(tmp_path, capsys):
 
     experiment.derived_outputs["experiment_summary_json"] = str(summary_path)
     experiment.derived_outputs["next_run_candidates_json"] = str(candidates_path)
-    save_experiment(experiment, base_dir=tmp_path)
+    tracking_service.save_experiment(experiment)
 
     handler = ExperimentAnalysisHandler(
         args=Namespace(

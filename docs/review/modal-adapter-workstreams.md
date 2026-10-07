@@ -1,0 +1,588 @@
+# Modal adapter workstreams
+
+Checkpoint: 2026-09-09. Engine-only implementation; no EHR changes.
+
+The common base is local commit
+`af71ffee2540a51d573f5cd5365772a53b6d3f0e`. Its preparation adapter is
+intentionally non-operational. Existing tests establish provider-free
+regressions, not live cloud or trained-model readiness.
+
+## Complete slice map
+
+| Slice | Deliverable | Dependency / ownership |
+| --- | --- | --- |
+| 0. Preparation | Generic planning, binding, canonical preparation; executable preflight refuses | Complete locally at the common base |
+| 1. Effects | Foundation stage, submit, cancel and conservative lookup/reconciliation | Integrated and independently reviewed; provider-free proof only |
+| 2. Authenticated reads | Full submit-proof validation before status/log/inventory/byte reads | Integrated and independently reviewed; the corresponding advertised flags remain false and live reads are unqualified |
+| 3. Remote wire and shared authority | One canonical command lineage through staging, remote admission and worker evidence; packaged source/runtime locks updated together | Integrated; current explicit 97-pin bootstrap and 66-member trainer inventories |
+| 4. Real preflight and restart | Authenticated deployment/client/Volume/quote checks; exact configuration retained through consumer-owned persistence | Integrated; fake-provider tests, not live account or database crash proof |
+| 5. Public cutover and consumer proof | Existing lazy registry and generic coordinator composition; remove old lifecycle and Modal-specific host field; minimal consumer fixture inside engine | Integrated, independently reviewed, 2,043 provider-free tests and installed-wheel check passed |
+| 6. Retrieved-model usability | Verified local materialization and explicit model-load/inference check; no claim that training completion alone proves usable weights | Materializer, pinned-base preparation and verified-local vLLM composition integrated; fake-effect qualification only, live model-load/inference proof open |
+| 7. Bounded chat | Easy local/Modal conversation using shared inference/evaluation plumbing, explicit stop and bounded GPU lifetime | Local controller and runtime-first consumer entrypoint integrated; Modal inference adapter/deployment remains open; no perpetual endpoint by default |
+| 8. Qualification and release | Repeatable provider-free CI now; integrated conformance, independent audit, scoped live proof, docs and feature-branch integration later | Sol conformance lane now; lead owns final activation/release decisions |
+
+This map is for the agreed Modal/submodule-first scope, not a requirement to
+implement every cloud provider before the first release. Main-branch merge,
+publication and release are not authorized by assigning these tasks.
+
+## First-wave ownership
+
+All three agents use `gpt-5.6-sol`. Worktrees live under
+`/home/profsynapse/code/synaptic-tuner-worktrees/`.
+
+| Agent | Worktree / branch | Exclusive writable paths | Checkpoint |
+| --- | --- | --- | --- |
+| `/root/modal_effects_slice` | `modal-effects` / `feat/modal-effects` | `tuner/execution/providers/modal/coordinator_effects.py`; `tests/execution/providers/test_modal_coordinator_effects.py`; `docs/review/modal-effects-slice.md` | Exact immutable binding integrated; scope fix reviewed; 64 focused tests independently passed under pytest 8.4.2 |
+| `/root/modal_reader_slice` | `modal-reader` / `feat/modal-reader` | `tuner/execution/providers/modal/coordinator_reader.py`; `tests/execution/providers/test_modal_coordinator_reader.py`; `docs/review/modal-reader-slice.md` | Complete authenticated Foundation derivation and adversarial reader checks integrated; independent final review passed |
+| `/root/modal_conformance_slice` | `modal-conformance` / `feat/modal-conformance` | `.github/workflows/provider-free-conformance.yml`; `docs/review/modal-conformance-slice.md` | Includes binding/effects/reader tests, verified immutable Actions, neutral-CWD wheel/resource checks; CI not dispatched |
+
+Lead worktree: `modal-coordinator-adapter`, branch
+`feat/modal-coordinator-adapter`. Lead owns this record, shared contracts,
+preparation, registration/composition, existing runtime files, public exports,
+integration and review. Agents must request path expansion rather than edit
+another lane. No agent commits, pushes, merges, installs dependencies, accesses
+credentials or makes cloud calls in this wave.
+
+Approved next-wave extensions: effects owns new `coordinator_staging.py`, its
+test and `modal-staging-slice.md` only; conformance owns the new runtime-lock
+regeneration script/test/review note plus a scoped AGENTS maintenance rule and
+canonical Modal skill-reference section with synchronized mirrors. Lead copied
+the shared preparation adapter, command-binding module and binding tests into
+both runtime worktrees as read-only dependencies for those agents.
+
+Subsequent bounded lanes: effects owns new `coordinator_launch.py`, its test
+and review note, plus a scoped stage-reference identity helper/test correction;
+conformance independently reviews launch and the integrated candidate. Reader
+owns new `coordinator_bundle.py`, its test and review note after agreeing its
+Foundation-native member/digest contract. Existing reader implementation is
+frozen. These are local wire-preparation changes, not production activation.
+
+Measured integration checkpoints: 923 tests passed on pytest 9.0.2 before the
+final reader changes; 926 passed on pytest 8.4.2 with runtime-lock checks and
+the exact effects binding. Neither count is a final all-patch qualification.
+The pytest 8 environment is a temporary venv using existing system packages;
+it does not change the training environment and is not a clean CI runner.
+
+Correction (2026-09-09): a separately created clean temporary environment,
+without system-site packages or the Modal SDK, passed the integrated 1,070-test
+selection in 166.20 seconds using CPython 3.12.9 / pytest 8.4.2. It includes
+final effects, reader, staging and Volume identity checks, but predates launch
+and lock-regenerator integration. The latter module separately passed 13 tests
+in 0.29 seconds. The installed non-editable wheel imported all five integrated
+adapter modules and both packaged runtime resources from a neutral working
+directory. These are local checks; CI and live Modal execution remain unrun.
+
+Launch review found a cross-material substitution gap: authenticating a stage
+record and stage material separately does not prove the record established
+that material. Correction (2026-09-09): launch now requires the authenticated
+provider stage reference to equal `modal-stage-claim:<sha256(claim)>`; the
+cross-material substitution regression passes and independent review is
+closed. The exact 68-test launch/staging/binding/preparation selection passed
+independently.
+
+The subsequently combined lead selection passed **1,091 tests in 164.73
+seconds**, including launch and lock regeneration, in the same clean pytest 8
+environment. A test-only improvement then made the launch fixture's tag cover
+the complete payload rather than its length; all eight launch tests passed
+again in 5.57 seconds. The launch-integrated installed wheel and both packaged
+resources passed neutral-directory checks without the Modal SDK. No CI run or
+production activation is implied.
+
+Current next-wave work: effects owns `tuner/training/coordinator_material.py`,
+its training test and review note; reader owns the Foundation bundle codec,
+its provider test and review note; conformance owns `coordinator_wire.py`, its
+provider test and review note. Lead supplies shared files as read-only inputs
+and reviews boundary derivations before integration. The material lane must
+connect the generic planning DTO to exact recompiled source/workload bytes,
+keep domain fingerprints distinct from raw SHA-256, and retain no mutable
+caller input. The wire lane receives no host grant/signing services.
+
+Correction (2026-09-09, subsequent integration): the first bounded adapter
+checkpoint is committed locally as `eecdb93f1f614f8458b5dba9ae90cb24fbe3ddc8`.
+Resolved material, the eight-member bundle, remote wire admission and the
+single-argument dispatch codec have since passed their independent reviews.
+The lead measured 1,177 tests passing in 167.59 seconds before dispatch
+integration, then 19 dispatch/wire tests in 11.78 seconds. These are separate
+runs, not one combined result. The candidate wheel containing those four new
+modules imports from its installation in a neutral directory without Modal;
+its SHA-256 is
+`5404e0972a607433499fe38d2937fb966b82d9a9d0419e473a04b568fec52760`.
+
+The current bounded lanes are now worker mechanics extraction (effects),
+Foundation-native worker admission/orchestration (reader), and host semantic
+submit preparation plus a real coordinator/bundle test fixture (conformance).
+The latter positive path uses real stage and submit records, semantic bundle
+compilation, dispatch encoding and wire admission; only the external authority
+ports are provider-free fakes. Lead review and combined tests precede local
+integration. Worker extraction changes locked runtime sources, so the lock
+inventory and hashes must be updated together before qualification.
+
+Worker review correction (2026-09-09): checking a dispatch's shape and static
+deployment identity is not launch authentication. The mounted worker must
+verify its embedded launch claim before any Volume-file read, then perform
+full stage/bundle admission before source or process effects. The admitted
+invocation is immutable reconstructed data, not a new authority service or
+permission to execute independently of that admission boundary.
+
+The next combined lead run passed **1,192 tests in 175.25 seconds**, including
+dispatch and real host submit preparation, under the same clean pytest 8
+environment. This checkpoint predates worker extraction and its runtime-lock
+refresh. No cloud call, CI dispatch, push or merge has occurred.
+
+This material/dispatch checkpoint is local commit
+`353cdeeca93b07ea638e3f5508e71686b96ca8e8`. The subsequent worker-mechanics
+extraction passed independent review, and the lead passed 166 focused tests in
+1.62 seconds after updating its lock. The lock schema, runtime policy and
+maintenance script explicitly require ten members, including the extracted
+`worker_ports.py` and `worker_source.py`; its check reports `CURRENT` and both
+skill mirrors are synchronized. Image, dependency, SDK, Python and ML-stack
+pins are unchanged. The unchanged 66-member offline trainer closure does not
+contain these provider bootstrap files.
+
+Import correction (2026-09-09): previous adapter checks proved absence of the
+SDK and old training lifecycle, not absence of every legacy provider import.
+The internal package initializer still eagerly imported the old bundle then.
+It now has no reexports, and a fresh-process runtime import loads neither the
+legacy remote module, bundle nor broker. The public Modal API files remain
+unchanged and its import still needs no optional SDK.
+
+The corrected Foundation worker has now been integrated for combined testing;
+its author measured 12 focused tests passing after fixing pre-read launch
+authentication and source/workload digest reconstruction. It is still not
+installed in the production wrapper. The effects lane owns the new completion
+producer; conformance owns a Foundation host transport with one-attempt
+spawn/cancel and conservative indeterminate reconciliation. Consumer-owned
+retained stage and launch facts must be connected during composition; these
+new source protocols grant no authority and add no engine database.
+
+The worker/extraction combined checkpoint passed **1,210 tests in 181.88
+seconds**. Subsequent review strengthened mounted artifact I/O with streaming
+hash verification, exclusive output-directory claims and bounded exact regular
+file inventories; malformed bounds/content now fail before creating output
+paths. Those helper and existing producer regressions passed 43 tests in 0.80
+seconds. The lock's mounted-I/O source hash was deliberately refreshed; this
+postdates the extraction-only hash-delta audit above.
+
+The Foundation producer passed 15 focused tests, including actual temporary
+filesystem publication and verification of all three evidence MACs; independent
+review also passed. The host transport passed independent review and then 12
+focused tests after added malformed-result/deployment/verifier cases. These
+modules are integrated locally, not installed in production composition.
+
+Read integration exposed a timestamp gap: the old log wire has only code and
+message, while the public log entry requires a timestamp. The conformance lane
+now owns a separate timestamped Foundation log codec, leaving the old parser
+unchanged; reader owns authenticated metadata-only inventory and separate bounded
+artifact streams. Effects owns operational preflight design using existing Host
+evidence authority, exact Volume/Secret hydration and an explicitly authenticated
+price-policy fact. No invented live pricing API or secret-value read is required.
+
+The combined worker/producer/transport checkpoint passed **1,264 tests in
+199.55 seconds**. Its installed wheel passed SDK-free imports of 16 modules
+and both packaged resources from a neutral directory; wheel SHA-256:
+`34d74b732b66b4f55fefce38f891085465e68d68bc0ecbda39d5f3a7b609b18f`.
+That wheel and full-suite result predate the timestamped log revision. After
+integrating that revision, the lead separately measured **97 tests passing in
+26.74 seconds** across logs, producer, worker, transport, facade and mounted
+I/O. Independent review closed the mounted-input and pending-poll fixes.
+Authenticated read transport and operational preflight remain under review;
+none of these local results activates the public cloud path.
+
+The next combined run, including timestamped logs, passed **1,279 tests in
+201.16 seconds**. The ten-member runtime lock reports `CURRENT`, skill mirrors
+are synchronized, and the working diff passes whitespace checks. Read transport
+and preflight are not included in this result. Review corrected an earlier
+nonterminal assumption: a provider poll timeout cannot prove either queued or
+running, so the read transport must report unavailable rather than invent a
+phase until authenticated evidence establishes one.
+
+That reviewed checkpoint is committed locally as
+`2c42bef67a96283568e6834f78d88744df20308d`. Operational preflight was then
+independently reviewed and integrated; the lead measured 112 preflight,
+preparation, bundle and facade tests passing in 3.29 seconds. Its quote policy
+requires a maximum five-minute age/lifetime, with full source/deployment/quote
+authentication and trusted identities checked before provider reads. The
+factories lane and consumer-owned retention/delegation lane are now active;
+the reader lane is adding unpatched-facade fake-Volume integration coverage.
+
+The reader subsequently passed final independent review with the unpatched
+explicit-client facade and fake SDK Volumes. Its lead integration, preflight
+and factories advertising six false capability flags passed **1,326 tests in
+223.91 seconds** together. The
+installed wheel passed neutral-directory imports of 20 modules and both
+packaged resources with no Modal SDK; SHA-256:
+`af7724f83af1a8c3c95c5893e75f177b32ef267550c2f257121e1cdba18c05b4`.
+Generic load/resolve/plan service composition and the candidate remote wrapper
+are now separately in progress. An import probe measured 86 engine source
+files loaded by the current worker/producer/runtime entrypoints: the current
+ten-member lock is not a complete new-bootstrap inventory. That inventory
+must be explicitly qualified before remote activation; the 66-member trainer
+closure is a separate artifact.
+
+The reviewed read/preflight/factories checkpoint is local commit `ec02dc0`.
+The next integrated selection passed **1,369 tests in 233.76 seconds** in the
+same clean environment. It includes the concrete generic training service,
+consumer-owned retention, and candidate deployment builder. Both
+stage and submit now have direct post-publication crash/fresh-wrapper retry
+regressions; retained launch assessments and signatures are reused exactly.
+The candidate builder rejects any declared Secret keys beyond its two distinct
+model/evidence symbols, including Modal host-token names. This checks the
+declaration, not the contents of an existing provider Secret. The last installed
+wheel result above predates these three modules.
+
+Current non-overlapping work is internal compilation-contract ownership
+(reader), an actual service/Foundation/Modal transport consumer proof (effects),
+and an independently checked bootstrap inventory (conformance). The lead owns
+public cutover, lock updates, combined testing and integration. Agent status is
+explicitly polled while this session is active; a completed handoff triggers
+review and the next bounded task rather than a pause for user input.
+
+## Shared contract checkpoint
+
+### Public cutover checkpoint (2026-09-09 local / 2026-09-10 UTC)
+
+The complete combined selection passed **2,043 tests in 286.36 seconds** under
+clean CPython 3.12.9 / pytest 8.4.2, without system-site packages or Modal SDK.
+It includes coordinator/Foundation, all remaining Modal provider tests, generic
+training/runtime, the 82 SFT runtime tests, and adjacent Docker provider tests
+(provider-free; no Docker process). Earlier attempts exposed the stale SFT
+internal import and then a test's unresolved interpreter-symlink expectation;
+both were corrected before this green run. The rich compiler regressions were
+preserved under internal training ownership; removed lifecycle facades have no
+compatibility aliases.
+
+Both source inventories independently report `CURRENT`: 97 Modal pins and 66
+offline trainer members. CI trigger coverage was measured for every member of
+both inventories. The two direct offline manifest/package-data tests passed;
+the third test's Git subprocess cannot resolve this WSL worktree's Windows Git
+administrative path. Its same checked-in regenerator instead passed separately
+with the exact Git metadata supplied only to that command. This is not a claim
+that all three tests ran together locally. GitHub CI has not been dispatched.
+
+The non-editable candidate wheel built offline, then passed neutral-directory
+imports of 27 modules, public cutover/removed-module checks, and both packaged
+resources with the Modal SDK absent. Wheel SHA-256:
+`157c676053e3555f5411542cbe1ee2204044f598fe9a853a321ea44dee1d060c`.
+This wheel predates the separately reviewed seekable-archive prerequisite.
+
+Independent review found no remaining local-commit blocker. The candidate engine
+composition reuses the existing runs service and exact factory-owned reader;
+`APIHost` list/show work while provider reads remain deliberately disabled.
+The vLLM startup cleanup is separately committed as `a6fb43e`; its 18 mocked
+regressions passed in 1.02 seconds using system-site evaluator dependencies,
+not the clean coordinator environment. No server, cloud object, paid job,
+publication, push, merge, or EHR change was made for these checkpoints.
+
+The next slice is verified private local model materialization. Its receipt
+replay and freshly hash-checked artifact streams form the admission chain;
+training success alone does not permit loading arbitrary files. A seekable
+archive-validator prerequisite is independently reviewed, but safe extraction,
+model loading, and bounded chat remain separate implementation/qualification
+work. Active agents continue in isolated non-overlapping worktrees with manual
+clock-based status polling.
+
+Follow-up checkpoint: `f6571a9` records the atomic public cutover;
+`a1f1826` records the separately reviewed seekable archive validator. After
+both, the same expanded selection passed **2,057 tests in 275.87 seconds** in
+the clean environment. This supersedes the test count, not the earlier wheel
+digest: the last wheel still predates the archive helper change. All 95 Python
+members of the Modal lock also parse with Python 3.11 grammar; that static
+check is not execution under the pinned Linux CPython 3.11 runtime.
+
+Correction (2026-09-09, packaging follow-through): a fresh offline wheel of
+the reviewed source through `cdf4a07`, including the archive helper, passed
+27 installed-module imports, public-cutover assertions, and both packaged
+resource checks from `/tmp` without the Modal SDK. Its SHA-256 is
+`83e0f5ae41238fce623c74c6c89a2f335336a43aa2bf9c517a60bc8c97abd5b4`.
+This supersedes the earlier wheel result only; it includes neither active
+materializer nor process-family draft and is not a live runtime qualification.
+
+Correction (2026-09-09, materializer integration): independent review passed
+the materializer, including exclusive extraction, source/member identity
+checks, and rollback that preserves unknown or replaced leaves. The integrated
+materializer, all runtime tests, and process-family tests passed **181 tests
+in 1.54 seconds** in the clean environment. Its trust boundary is the injected
+reviewed Runs operations; an arbitrary API wrapper is not authentication.
+Cleanup is identity-checked best effort in a private root, not a sandbox
+against hostile same-user races. This remains an internal, unregistered
+materializer, not a model-load or inference check. The next
+chat prerequisite is exact process-family ownership; the committed vLLM
+cleanup only proves direct-child behavior. A separately reviewed internal
+Linux process-group lease has now passed 25 integrated tests in 0.84 seconds,
+including real CPU parent/descendant cleanup, retained startup-failure cleanup,
+and unknown-state denial/retry. It is not wired into vLLM yet and does not
+prove GPU cleanup, detached-session containment, or survival across restart.
+Its deadlines bound userspace polling, not arbitrary kernel syscall latency.
+LoRA chat additionally requires an
+exact locally verified base snapshot and tokenizer, reusing existing automatic
+model preparation rather than adding an operator weight-staging step.
+
+The combined materializer/process checkpoint at `2a345fb` passed **2,116 tests
+in 279.40 seconds**. A subsequent test-only process cleanup correction avoids
+signaling a manually reaped leader and bounds the final reap; its 26 tests
+passed separately in 0.85 seconds. These are separate runs, not a combined
+2,117-test result. The current installed wheel imports 29 modules and both
+packaged resources without Modal from a neutral directory; SHA-256:
+`2e5d44cf682164b880b885cc53631f110861149b51bc51cf60767adf69e5dd53`.
+
+Next isolated lanes: reader owns `tuner/inference/serving_target.py`, its
+inference test and review note; effects owns the Modal inference-model adapter,
+its provider test and review note. The former owns the shared bounded local
+snapshot inventory; the latter reuses existing automatic model preparation.
+Neither adds a downloader, cache framework, engine database, or model-loader
+claim. Review of checked-in platform guidance confirms managed vLLM hosting
+is already Linux/WSL-only; native Windows HTTP clients remain supported.
+
+Correction (2026-09-09, serving-target preparation): both lanes passed
+independent cross-review and the integrated selection passed **231 tests in
+1.67 seconds**, including all inference/runtime tests, original pinned-model
+preparation tests, the new adapter, and process ownership. The snapshot helper
+admits metadata and aggregate quotas before hashing; full models require no
+base preparation and LoRA targets bind the exact prepared base revision.
+Both source inventories remain current without regeneration. The last wheel
+above predates these two modules.
+
+Correction (2026-09-10, owned runtime and caller migration): the explicit vLLM
+runtime and both caller migrations are integrated locally; the old global
+start/stop API is removed without aliases. The 77-test evaluator/runtime/
+cleanup selection passed in 2.72 seconds with system-site dependencies, and
+the separate clean 115-test inference/runtime selection passed in 1.08 seconds.
+Both source inventories remain CURRENT. CPU evaluator CI is configured but
+unrun. The chat controller remains under independent failure-path review;
+actual model-load/GPU qualification and end-user chat composition remain open.
+
+Correction (2026-09-10, subsequent chat integration): local commit `b9d33f7`
+contains the atomic runtime/caller migration. Its full provider-free selection
+passed **2,182 tests in 276.03 seconds**, before the chat integration. The
+reviewed bounded controller, generic HTTP policy and verified-local chat
+composition then passed a separate **181-test selection in 1.44 seconds**.
+Minimal CI requires `requests` because setup/lifecycle tests import it eagerly;
+that dependency is now explicit. The new composition reuses existing startup
+and evaluation interfaces, submits no hidden prompt and owns teardown across
+client/session failures. End-user CLI/consumer wiring, actual model-load/inference
+evidence, live Modal qualification and feature-branch integration remain open.
+
+The local chat/HTTP checkpoint is `a0a9ae6`. A non-editable wheel built from its
+immutable archive has SHA-256
+`1acfb1af5d9241feba5820ca463b8f4f4db377ae984365caf244ae1b740fc1ee`.
+In a fresh non-system-site environment it passed the checked-in neutral-directory
+wheel test: 32 installed modules and both resources, with Modal and PyTorch
+absent. Independent ZIP inspection found 713 unique entries, exact archived
+bytes for all seven inference/runtime/chat modules and both resources, and no
+retired public training/legacy remote modules. This is packaging evidence only.
+
+Consumer boundary: the existing `list-runs` registry and HF `cloud-eval` CLI are
+not authenticated Foundation run access. A consuming application supplies its
+already-composed `APIHost.runs` / `RunsAPI` and exact run reference; the engine
+must not fabricate retained stores, signing/grant services or provider authority
+to make a standalone chat command appear operational. The present reviewed
+Modal deployment is a training worker, not an inference/chat deployment.
+
+Final combined local checkpoint (2026-09-10): **2,259 tests passed in 284.26
+seconds** at `a0a9ae6`, including all previous coordinator/provider-free slices,
+verified materialization/preparation, owned runtime, HTTP policy, chat controller
+and full/LoRA composition tests. CPython 3.12.9 / pytest 8.4.2 used a clean
+non-system-site environment without Modal or PyTorch. The separate 97-pin and
+66-member source-inventory checks remain CURRENT, and canonical skill mirrors
+are synchronized. The runner-selection/baseline failures from the exploratory
+evaluator suite are documented in `verified-vllm-chat-slice.md`; they are not
+part of this green selection. CI, live model/GPU/Modal inference and publication
+remain unexecuted. All assigned agent implementations and reviews have been
+consumed into local integration; none is pending a handoff.
+
+Correction (2026-09-10, embedded verified-run chat): the consumer composition is
+now implemented as `tuner.inference.run_chat.open_run_chat`, with an injected
+`RunChatRuntime` and a concrete `Evaluator.local_run_chat.LocalVLLMRunChatRuntime`.
+It reuses authenticated `APIHost.runs`, verified materialization and exact
+full/LoRA preparation, opens one bounded session, sends no hidden prompt and
+retains the consumer's model files after owned cleanup. A second fake runtime
+proves the generic seam needs no vLLM/provider registry. No standalone CLI,
+new authority/storage loader or public re-export is added. This closes the
+embedded consumer-wiring item, not real GPU loading or Modal inference serving.
+
+All three Sol workstreams were polled, reviewed and integrated. The focused
+combined selection passed **109 tests in 0.56 seconds** on clean CPython 3.12.9 /
+pytest 8.4.2; independent final adapter/integration/consumer review passed
+**21 tests in 0.32 seconds**. The embedding guide was checked against real
+constructor signatures and corrected to distinguish preparation validation
+from the fresh pre-spawn file/inventory validation. Canonical fine-tuning
+guidance and both managed copies are synchronized. CI now selects all new
+tests and both new wheel imports. The 97-pin and 66-member inventories remain
+CURRENT without hash refresh. See `run-chat-slice.md` and
+`../architecture/verified-run-chat.md` for evidence and limits.
+
+The full established provider-free selection plus this slice's 29 new cases
+passed **2,288 tests in 265.15 seconds**. Final test-only formatting was followed
+by another **109 passed in 0.55 seconds**. The earlier exploratory evaluator
+baseline exclusions remain unchanged; this is not a claim that every evaluator
+test is green. Both source-inventory checks were run separately as above.
+
+Remaining release work still includes exact-source packaging/CI qualification,
+live GPU model loading and inference evidence, and a separately qualified Modal
+chat adapter with remote preparation, authenticated access and provider-side
+lifetime/cost safeguards. The existing Modal training deployment is not that
+adapter. No provider/credential access, cloud mutation, GPU run, push, merge,
+publication or EHR modification was performed for this consumer slice.
+
+The embedded consumer source checkpoint is local commit `8032f5e`. Its immutable
+offline wheel (SHA-256
+`eb276815360aa725f3a07784560c5296c2d981ee9aad33dbe29e6b5bf4eff0f1`)
+passed the archived neutral-directory CI import/resource step locally: **34
+installed modules and both resources**, with Modal/PyTorch absent. Independent
+archive/RECORD inspection passed for all 715 entries and matched all 707 Python
+files to committed source. This closes this slice's local package/import check,
+not execution of GitHub CI or the outstanding live inference qualification.
+
+Correction (2026-09-10, remote-first boundary): a Modal runtime could not honestly
+accept the initial local `ServingTarget`, because it bound operator-local paths
+and device/inode identities. `open_run_chat` now passes the exact run before
+materialization. Local destination/preparer policy moved into the local adapter;
+the generic result exposes immutable run/model/artifact metadata and an optional
+explicitly local-only model capability. Runtime acquisition checks run mutation
+and substitution inside the acquired context. Adapter code remains trusted and
+owns mandatory current authentication/admission; generic metadata typing is not
+authentication. No legacy signature or parallel provider-specific helper remains.
+
+The corrected focused selection passed **118 tests in 0.54 seconds** and an
+independent **118 in 0.61 seconds**. Local failed reverification denies all
+preparation/startup, and the remote-style consumer test streams no artifact bodies
+or local weights. This closes the interface defect, not Modal implementation.
+The bounded Modal follow-up is documented in
+`../plans/modal-bounded-chat-adapter-plan.md`: separate authenticated native-source
+binding/executor, remote preparation, one owned finite Sandbox and exact cleanup.
+Read-only review confirmed Foundation's existing generic stage/submit/cancel
+commands and durable grants can be reused unchanged. No cloud/credential access,
+resource mutation, new authority framework or EHR changes occurred.
+
+The final runtime-first broader selection passed **2,297 tests in 271.74 seconds**
+on clean CPython 3.12.9 / pytest 8.4.2 without Modal or PyTorch. Both source locks
+remain CURRENT, formatting and skill synchronization pass, and the guide's three
+constructor signatures bind without execution. The earlier whole-evaluator
+baseline exclusions still apply. This is local provider-free qualification only.
+
+Runtime-first source is locally committed as `ffbb363`. Its immutable offline
+wheel (SHA-256 `59bafa49d0210c9050b63013261d67180d6948021e72319af062c1d23e6f2075`)
+passed 34 installed imports, both resource checks and installed signature checks
+from a neutral directory. Independent ZIP/RECORD audit passed all 715 entries,
+with all 707 Python members matching committed source. Runtime-first plan slice
+1 is complete locally; actual Modal binding/executor, remote worker and Sandbox
+lifecycle implementation in slices 2–4 remain open. All assigned Sol handoffs
+and reviews have been consumed; no agent is pending integration.
+
+Native inference source checkpoint (2026-09-10): bounded-chat plan slice 2a is
+implemented with the existing native reader and generic Foundation read-request
+derivation. The binder requires the same consumer's current public verification
+and complete retained manifest, exact producer paths/Volume-entry identities,
+immutable source projections and stable workflow readback. It streams no artifact
+bodies and grants no serving authority. Reader owned the new source, conformance
+owned 18 adversarial tests, effects independently reviewed the source, and the
+lead integrated eight real-Foundation/signed-transport/import checks. Full
+provider-free qualification passed **2,323 tests in 312.23 seconds**; independent
+acceptance/integration qualification passed 26 tests in 22.70 seconds. Both source
+locks remain CURRENT. Details and fixture limitations are recorded in
+`modal-inference-source-binding.md`. Slice 2b workload/resource/mutation binding,
+the remote worker and the bounded Sandbox/session adapter remain open.
+
+The native source checkpoint is local commit `5d69327`. Its immutable wheel
+passed 35 installed imports, two resources and signature binding, plus independent
+716-entry ZIP/RECORD and 708-Python-member source equivalence checks. Exact
+wheel digest and environment limits are recorded in the source-binding review.
+
+Workload-correlation checkpoint (2026-09-10): the workload/model portion of
+bounded-chat slice 2b now reauthenticates the existing retained launch chain,
+correlates exact workload-record bytes and native placement, and binds intended
+immutable model revisions without reading model artifacts. Reader owned the new
+module, conformance owned its acceptance tests, effects independently reviewed
+it, and the lead added retained/owned post-authentication mutation regressions.
+The combined provider-free selection passed **2,339 tests in 329.86 seconds**,
+including all 16 workload cases; independent scoped review passed. Both source
+locks remain CURRENT and skill mirrors are synchronized. See
+`modal-inference-workload-binding.md` for qualification and fixture boundaries.
+Separate chat resource/mutation binding, remote execution and live qualification
+remain open. No cloud, credential, push, merge or EHR actions occurred.
+
+Workload source is local commit `7ae6f7a`. Its immutable offline wheel passed
+36 installed imports, two resources and signature binding, plus independent
+717-entry ZIP/RECORD and 709-Python-member archive-equivalence checks. The exact
+wheel digest and environment limits are recorded in the workload-binding review.
+
+Next reuse slice (2026-09-10): the existing SFT materializer now has one private
+post-admission byte-reader core, preserving the public RunsAPI verification
+boundary and retained root-descriptor ownership. Reader owned the single source
+file, conformance supplied 29 boundary tests, effects independently reviewed,
+and the lead integrated caller-run snapshot checks and measured a red/green
+ordering regression. The complete selected suite passed **2,368 tests in
+332.87 seconds** after correcting a stdin-based test-launch mistake; this is
+not a Modal mounted-source adapter or new serving authority. Details are in
+`sft-materialization-core.md`. Existing `ServingTarget`, pinned-base preparation
+and vLLM process control remain shared on the selected execution machine.
+
+Materialization source is locally committed as `ad8eafd`. Its immutable offline
+wheel passed 36 installed imports, two resources, public/private signature
+checks and type-hint resolution, plus independent 717-entry ZIP/RECORD and
+709-Python-member archive-equivalence checks. Exact digest, corrected launch
+evidence and qualification limits are recorded in the materialization review.
+All Sol implementation/review handoffs for this slice are integrated. The
+remaining bounded-chat work is inference-specific runtime/deployment policy,
+chat mutation binding, authenticated mounted-source worker and bounded remote
+session/cleanup qualification; none is made operational by this extraction.
+
+### Foundation binding contract
+
+The existing `ExecutionResolutionRequestV2` remains unchanged. A digest is an
+identity, not authentication: resolution must recover and authenticate the full
+canonical command and exact retained Modal configuration before I/O. Use the
+existing command-catalog pattern, not another registry or authority system.
+Both adapter lanes agreed provisionally on `catalog.resolve(command_digest)`
+and a separate `binding_authority.authenticate(value)` boundary. The immutable
+value retains exact command bytes, command digest, provider/profile/account/
+namespace, the explicit Modal client binding and verified deployment. Its
+authentication must cover all retained content, not merely a supplied digest.
+Adapters must also recheck configuration-derived commitments; missing fields
+needed to recompute the preparation adapter's profile digest remain an explicit
+integration requirement. The lead owns the concrete common type. Private
+structural typing protocols let the lanes proceed without importing an
+unimplemented shared module or changing generic Foundation contracts.
+
+The pre-submit binding cannot claim a provider job reference. Readers obtain
+that reference from the complete authenticated submit outcome. Remote read
+transports must retain authenticated identity and terminal/log metadata rather
+than returning unbound chunks or interpreting an unknown provider state as
+success. These provisional interfaces are not production-composition approval.
+
+Measured at the common base: `modal/mutation.py` parses legacy
+`MutationCommandV1`; `modal/remote.py` also imports that command;
+`modal/staging.py` requires `StageMaterialV1` whose expectation contains a
+legacy `OperationBindingV1`. These cannot be treated as Foundation-native
+transports merely by relabeling arguments. Port implementations tested with
+injected transports are intermediate work, not evidence of working production
+transport. Public readiness stays disabled until that dependency is resolved.
+
+Artifact inventory should not bulk-read model weights. Inventory authentication
+and bounded verified streaming are separate reader operations.
+
+## Monitoring and evidence
+
+Active-session polling correction (2026-09-09): the lead must not end a turn
+merely because an agent is still working or just reported completion. Check
+agent status against a 60-second clock deadline while doing local work; use
+short bounded waits when otherwise idle. Drain completed handoffs into review,
+fixes and integration immediately. A stopped session still cannot promise a
+background wakeup. Check the deadline between bounded work chunks, not only
+when messages arrive.
+
+Agents report directly at interface agreement, first tests, blockers and final
+handoff, with periodic updates during active work. The lead checks agent
+status/messages and reviews diffs and tests before integration. Handoffs must
+list exact paths, measured test results, unexecuted checks and remaining seams.
+
+PACT is not exposed among this session's tools or available skills. This is a
+repository checkpoint plus built-in agent coordination, not a PACT installation
+or a recurring background monitor. This file survives a restart; agent-process
+continuity and timed monitoring while the session is inactive are not promised.
+
+The baseline measurements used CPython 3.12.9 / pytest 9.0.2; the declared test
+extra requires pytest below 9. Preserve that distinction when reporting local
+regressions versus pinned-environment qualification. Candidate tests run with
+an empty credential environment and plugin autoload disabled, without
+`PYTHONPATH`, from the clean standalone engine source directory.
