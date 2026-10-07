@@ -4,7 +4,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from tuner.execution.coordinator_v1.model import ProviderLogQueryV1, ProviderRunPhaseV1
-from tuner.execution.foundation_v2.canonical import parse_canonical_object, safe_ref
+from tuner.execution.foundation_v2.canonical import (
+    MAX_CANONICAL_BYTES, canonical_bytes, parse_canonical_object, safe_ref,
+)
 from tuner.execution.foundation_v2.commands import StageCommandV2, SubmitCommandV2, parse_exact_command
 from tuner.training.recipes import RecipeRegistry
 
@@ -226,19 +228,39 @@ class ModalFoundationReadTransport:
         all_entries = tuple(entry for chunk in chunks for entry in chunk.records)
         after = -1 if query.after_sequence is None else query.after_sequence
         candidates = tuple(x for x in all_entries if x.sequence > after)
-        selected, used = [], 0
-        for entry in candidates:
-            if len(selected) >= query.limit or used + entry.size_bytes > query.maximum_bytes:
-                break
-            selected.append(entry); used += entry.size_bytes
         high = all_entries[-1].sequence if all_entries else -1
         terminal = self._terminal(binding, command, material, policy, job_ref, allow_absent=True)
         if terminal is not None and terminal.log_chain_digest != chain:
             raise ValueError("Modal terminal log chain mismatch")
         phase = None if terminal is None else {"completed":ProviderRunPhaseV1.SUCCEEDED,"failed":ProviderRunPhaseV1.FAILED,"cancelled":ProviderRunPhaseV1.CANCELLED}[terminal.status_code]
+        terminal_generation = identity.generation if phase else None
+        # The snapshot serializer defines the fixed envelope. Canonical
+        # entries and their separating commas are the only added bytes.
+        empty_evidence = {
+            truncated: len(ModalLogSnapshot.build(
+                (), identity, chain, query.log_query_digest, identity.generation,
+                high, phase, terminal_generation, truncated,
+            ).canonical_evidence)
+            for truncated in (False, True)
+        }
+        selected, used, entry_bytes = [], 0, 0
+        for entry in candidates:
+            if len(selected) >= query.limit or used + entry.size_bytes > query.maximum_bytes:
+                break
+            encoded_length = len(canonical_bytes(entry.to_dict()))
+            next_count = len(selected) + 1
+            truncated = next_count < len(candidates)
+            next_entry_bytes = entry_bytes + encoded_length + bool(selected)
+            if empty_evidence[truncated] + next_entry_bytes > min(MAX_CANONICAL_BYTES, 65536):
+                if not selected:
+                    raise ValueError("Modal log entry exceeds canonical evidence bound")
+                break
+            selected.append(entry)
+            used += entry.size_bytes
+            entry_bytes = next_entry_bytes
         return ModalLogSnapshot.build(tuple(selected), identity, chain, query.log_query_digest,
                                       identity.generation, high, phase,
-                                      identity.generation if phase else None, len(selected) < len(candidates))
+                                      terminal_generation, len(selected) < len(candidates))
 
     def artifact_inventory(self, binding: ModalCommandBinding, *, provider_job_ref: str) -> ModalArtifactInventory:
         binding, command, material, policy, job_ref = self._context(binding, provider_job_ref)
