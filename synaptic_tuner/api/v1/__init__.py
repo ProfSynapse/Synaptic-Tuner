@@ -80,6 +80,7 @@ _LAZY_MODULE_ATTRIBUTES = {
         "ObservationFamily", "ObservationKind", "ObservationPage", "ObservationRecordV1",
         "ObservationStreamRef", "ObservationsRequest", "PipelineStageCompletedPayloadV1",
         "PipelineStageStartedPayloadV1", "TrainingPhaseObservedPayloadV1",
+        "TrainingMetricObservedPayloadV1",
     },
     "persistence": {
         "AttemptAdmission", "AttemptDisposition", "AuthorizationMismatch",
@@ -215,7 +216,8 @@ _FORMAL_EXPORTS = (
     "TrainingPreparationConfigV1",
     "ObservationFamily", "ObservationKind", "ObservationStreamRef",
     "ObservationRecordV1", "ObservationsRequest", "ObservationPage",
-    "TrainingPhaseObservedPayloadV1", "EvaluationCaseStartedPayloadV1",
+    "TrainingPhaseObservedPayloadV1", "TrainingMetricObservedPayloadV1",
+    "EvaluationCaseStartedPayloadV1",
     "EvaluationCaseScoredPayloadV1", "EvaluationStageCompletedPayloadV1",
     "ChatTurnStartedPayloadV1", "ChatTurnCompletedPayloadV1", "ChatTokenPayloadV1",
     "DataRowWrittenPayloadV1", "DataStageGateEvaluatedPayloadV1",

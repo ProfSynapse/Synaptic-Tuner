@@ -158,6 +158,7 @@
   "ObservationsRequest",
   "ObservationPage",
   "TrainingPhaseObservedPayloadV1",
+  "TrainingMetricObservedPayloadV1",
   "EvaluationCaseStartedPayloadV1",
   "EvaluationCaseScoredPayloadV1",
   "EvaluationStageCompletedPayloadV1",

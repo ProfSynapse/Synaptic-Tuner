@@ -21,7 +21,8 @@ from synaptic_tuner.api.v1.observations import (
     EvaluationCaseStartedPayloadV1, EvaluationStageCompletedPayloadV1,
     ObservationFamily, ObservationKind, ObservationPage, ObservationRecordV1,
     ObservationStreamRef, ObservationsRequest, PipelineStageCompletedPayloadV1,
-    PipelineStageStartedPayloadV1, TrainingPhaseObservedPayloadV1,
+    PipelineStageStartedPayloadV1, TrainingMetricObservedPayloadV1,
+    TrainingPhaseObservedPayloadV1,
 )
 
 
@@ -32,6 +33,14 @@ AT = "2026-09-17T12:00:04Z"
 
 SAMPLE_PAYLOADS: dict[ObservationKind, object] = {
     ObservationKind.TRAINING_PHASE_OBSERVED: TrainingPhaseObservedPayloadV1("preparing"),
+    ObservationKind.TRAINING_METRIC_OBSERVED: TrainingMetricObservedPayloadV1(
+        step=12, total_steps=100, loss=-0.25, learning_rate=1e-4, epoch=0.5,
+        train_elapsed_seconds=120.0, job_elapsed_seconds=150.0,
+        gpu_current_allocated_bytes=1024, gpu_current_reserved_bytes=2048,
+        gpu_peak_allocated_bytes=1536, gpu_peak_reserved_bytes=3072,
+        gpu_utilization_percent=70.5, tokens_per_second=90.0,
+        estimated_samples_per_second=3.0,
+    ),
     ObservationKind.EVALUATION_CASE_STARTED: EvaluationCaseStartedPayloadV1("tool-choice#3"),
     ObservationKind.EVALUATION_CASE_SCORED: EvaluationCaseScoredPayloadV1("tool-choice#3", "passed", 0.82),
     ObservationKind.EVALUATION_STAGE_COMPLETED: EvaluationStageCompletedPayloadV1("scoring", 120),
@@ -69,6 +78,7 @@ def test_root_exports_have_only_canonical_contract_identities() -> None:
 def test_kind_vocabulary_is_closed_and_bound_per_family() -> None:
     assert tuple(kind.value for kind in ObservationKind) == (
         "training_phase_observed",
+        "training_metric_observed",
         "evaluation_case_started", "evaluation_case_scored", "evaluation_stage_completed",
         "chat_turn_started", "chat_turn_completed", "chat_token",
         "data_row_written", "data_stage_gate_evaluated", "data_scenario_completed",
@@ -184,6 +194,79 @@ def test_payload_vocabularies_and_bounds_are_closed() -> None:
         DataStageGateEvaluatedPayloadV1("scenario", "gate", 1)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="exact integer"):
         ChatTurnStartedPayloadV1(True)  # type: ignore[arg-type]
+
+
+def test_training_metric_all_unknown_fields_remain_null_and_bind_to_training_page() -> None:
+    payload = {name: None for name in SAMPLE_PAYLOADS[ObservationKind.TRAINING_METRIC_OBSERVED].to_dict()}
+    payload["step"] = 1
+    metric = TrainingMetricObservedPayloadV1.from_dict(payload)
+    assert metric.to_dict() == payload
+    record = ObservationRecordV1(
+        "synaptic-observation/v1", _stream(ObservationFamily.TRAINING), 7, AT,
+        ObservationKind.TRAINING_METRIC_OBSERVED, metric,
+    )
+    jsonschema.validate(record.to_dict(), SCHEMA)
+    assert ObservationRecordV1.from_dict(json.loads(json.dumps(record.to_dict()))) == record
+    page = ObservationPage(ObservationsRequest(record.stream, 6, 1), (record,), 7, True)
+    assert page.records == (record,)
+    with pytest.raises(ValueError, match="does not belong to the stream family"):
+        replace(record, stream=_stream(ObservationFamily.EVALUATION))
+    assert TrainingPhaseObservedPayloadV1("preparing").to_dict() == {"phase": "preparing"}
+
+
+def test_training_metric_every_wire_field_is_required_and_unknown_fields_reject() -> None:
+    payload = SAMPLE_PAYLOADS[ObservationKind.TRAINING_METRIC_OBSERVED].to_dict()
+    record = _record(ObservationKind.TRAINING_METRIC_OBSERVED).to_dict()
+    for name in payload:
+        missing = {key: value for key, value in payload.items() if key != name}
+        with pytest.raises(ValueError, match="missing fields"):
+            TrainingMetricObservedPayloadV1.from_dict(missing)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({**record, "payload": missing}, SCHEMA)
+    with pytest.raises(ValueError, match="unknown fields"):
+        TrainingMetricObservedPayloadV1.from_dict({**payload, "private_path": "forbidden"})
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({**record, "payload": {**payload, "private_path": "forbidden"}}, SCHEMA)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("step", 0), ("step", True), ("step", 1.0), ("step", 2**63),
+    ("total_steps", 11), ("total_steps", True), ("total_steps", 2**63),
+    ("loss", True), ("loss", float("nan")), ("loss", float("inf")),
+    ("loss", 10**1000),
+    ("learning_rate", -0.1), ("learning_rate", float("-inf")),
+    ("epoch", -0.1), ("train_elapsed_seconds", -1),
+    ("job_elapsed_seconds", float("nan")),
+    ("gpu_current_allocated_bytes", -1), ("gpu_current_allocated_bytes", True),
+    ("gpu_current_reserved_bytes", 1.0), ("gpu_current_reserved_bytes", 2**63),
+    ("gpu_peak_allocated_bytes", -1), ("gpu_peak_reserved_bytes", 2**63),
+    ("gpu_utilization_percent", -1), ("gpu_utilization_percent", 100.01),
+    ("tokens_per_second", -1), ("estimated_samples_per_second", -1),
+])
+def test_training_metric_rejects_invalid_numeric_values(field: str, value: object) -> None:
+    payload = SAMPLE_PAYLOADS[ObservationKind.TRAINING_METRIC_OBSERVED].to_dict()
+    payload[field] = value
+    with pytest.raises((TypeError, ValueError)):
+        TrainingMetricObservedPayloadV1.from_dict(payload)
+    if field != "total_steps" and (
+        type(value) is not float or value == value and value not in (float("inf"), float("-inf"))
+    ):
+        # JSON Schema validates JSON values; Python's NaN/Infinity are not JSON.
+        # Cross-field total_steps >= step is enforced by the Python contract.
+        if type(value) is not float or not value.is_integer():
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate({**_record(ObservationKind.TRAINING_METRIC_OBSERVED).to_dict(), "payload": payload}, SCHEMA)
+
+
+def test_training_metric_accepts_maximum_integer_bounds_and_negative_loss() -> None:
+    payload = SAMPLE_PAYLOADS[ObservationKind.TRAINING_METRIC_OBSERVED].to_dict()
+    payload.update(step=2**63 - 1, total_steps=2**63 - 1,
+                   gpu_current_allocated_bytes=2**63 - 1, gpu_current_reserved_bytes=2**63 - 1,
+                   gpu_peak_allocated_bytes=2**63 - 1, gpu_peak_reserved_bytes=2**63 - 1,
+                   gpu_utilization_percent=100, loss=-1.0)
+    parsed = TrainingMetricObservedPayloadV1.from_dict(payload)
+    assert parsed.to_dict() == payload
+    jsonschema.validate({**_record(ObservationKind.TRAINING_METRIC_OBSERVED).to_dict(), "payload": payload}, SCHEMA)
 
 
 def test_record_sequence_timestamp_and_stream_are_exact() -> None:
