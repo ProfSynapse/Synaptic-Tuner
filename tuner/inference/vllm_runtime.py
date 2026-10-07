@@ -13,7 +13,7 @@ import socket
 import sys
 import threading
 import time
-from typing import Callable, Mapping
+from typing import BinaryIO, Callable, Mapping
 
 from tuner.inference.owned_process import OwnedProcessLease, _UNKNOWN, _identity
 from tuner.inference.serving_target import ServingTarget
@@ -25,6 +25,7 @@ _MAX_REF = 512
 _MAX_STARTUP_SECONDS = 1800.0
 _MAX_PROBE_SECONDS = 30.0
 _MAX_RESPONSE_BYTES = 1 << 20
+_MAX_DIAGNOSTIC_PROBES = 1_000_000
 _LORA_BASE_ALIAS = "synaptic-base"
 _LOCAL_ENV_EXACT = frozenset(
     {
@@ -59,6 +60,20 @@ _OFFLINE_ENV = {
 
 class VLLMRuntimeError(RuntimeError):
     """The runtime could not be started or retained safely."""
+
+
+@dataclass(frozen=True, slots=True)
+class VLLMStartupDiagnostic:
+    """Closed readiness evidence from the last observed leader/probe state."""
+
+    failure: str
+    last_probe: str
+    leader_alive: bool | None
+    elapsed_seconds: float | None
+    probe_count: int | None
+
+
+_readiness_state = threading.local()
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +194,7 @@ def start_vllm_runtime(
     environment: Mapping[str, str],
     deadline: float | None = None,
     phase_callback: Callable | None = None,
+    startup_log: BinaryIO | None = None,
 ) -> VLLMRuntimeLease:
     """Validate, spawn, and wait for one explicitly scoped vLLM runtime."""
     absolute_deadline = _absolute_deadline(deadline)
@@ -201,6 +217,8 @@ def start_vllm_runtime(
         _deadline_now(absolute_deadline)
     process: OwnedProcessLease | None = None
     waiting = False
+    last_probe = "unknown"
+    probe_count = 0
     try:
         if not _port_available(projection.host, projection.port):
             raise VLLMRuntimeError("managed vLLM loopback port is already in use")
@@ -217,6 +235,8 @@ def start_vllm_runtime(
                 projection.argv,
                 cwd=projection.cwd,
                 environment=projection.environment,
+                **({"stdout": startup_log, "stderr": startup_log}
+                   if startup_log is not None else {}),
             )
         except BaseException:
             emit("VLLM_SPAWN", "ERROR")
@@ -226,21 +246,45 @@ def start_vllm_runtime(
         waiting = True
         while True:
             if not _leader_alive(process):
-                raise VLLMRuntimeError("vLLM process ended before readiness")
-            remaining = startup_deadline - _startup_now(absolute_deadline)
+                error = VLLMRuntimeError("vLLM process ended before readiness")
+                error.startup_diagnostic = VLLMStartupDiagnostic(
+                    "unknown", last_probe, None, _elapsed_now(now), probe_count,
+                )
+                raise error
+            checked_at = _startup_now(absolute_deadline)
+            remaining = startup_deadline - checked_at
             if remaining <= 0:
-                raise VLLMRuntimeError("vLLM readiness deadline expired")
+                error = VLLMRuntimeError("vLLM readiness deadline expired")
+                error.startup_diagnostic = VLLMStartupDiagnostic(
+                    "deadline", last_probe, True,
+                    _bounded_elapsed(checked_at, now), probe_count,
+                )
+                raise error
             timeout = min(projection.readiness_request_timeout_s, remaining)
-            if _ready(
+            _readiness_state.last_probe = "unknown"
+            if probe_count is not None:
+                probe_count = probe_count + 1 if probe_count < _MAX_DIAGNOSTIC_PROBES else None
+            ready = _ready(
                 projection.host,
                 projection.port,
                 projection.expected_model_names,
                 timeout,
-            ):
+            )
+            observed = getattr(_readiness_state, "last_probe", "unknown")
+            last_probe = observed if probe_count is not None and observed in {
+                "ready", "no_connect", "http_non_200", "invalid_response",
+                "names_mismatch", "unknown",
+            } else "unknown"
+            if ready:
                 if _startup_now(
                     absolute_deadline
                 ) >= startup_deadline or not _leader_alive(process):
-                    raise VLLMRuntimeError("vLLM readiness was not timely and live")
+                    error = VLLMRuntimeError("vLLM readiness was not timely and live")
+                    error.startup_diagnostic = VLLMStartupDiagnostic(
+                        "untimely", last_probe, None,
+                        _elapsed_now(now), probe_count,
+                    )
+                    raise error
                 emit("VLLM_READINESS", "RETURN")
                 waiting = False
                 return VLLMRuntimeLease(
@@ -272,6 +316,23 @@ def start_vllm_runtime(
             if not resolved:
                 error.cleanup_lease = process  # type: ignore[attr-defined]
         raise
+
+
+def _bounded_elapsed(current: object, started: object) -> float | None:
+    if (type(current) not in (int, float) or type(started) not in (int, float)
+            or not math.isfinite(current) or not math.isfinite(started)):
+        return None
+    elapsed = float(current) - float(started)
+    if not math.isfinite(elapsed) or not 0 <= elapsed <= 86400:
+        return None
+    return round(elapsed, 6)
+
+
+def _elapsed_now(started: object) -> float | None:
+    try:
+        return _bounded_elapsed(_monotonic(), started)
+    except Exception:
+        return None
 
 
 def _absolute_deadline(value: object) -> float | None:
@@ -637,32 +698,40 @@ def _port_available(host: str, port: int) -> bool:
 def _ready(
     host: str, port: int, expected_names: tuple[str, ...], timeout: float
 ) -> bool:
+    observation = _probe_ready(host, port, expected_names, timeout)
+    _readiness_state.last_probe = observation
+    return observation == "ready"
+
+
+def _probe_ready(
+    host: str, port: int, expected_names: tuple[str, ...], timeout: float
+) -> str:
     connection = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
         connection.request("GET", "/v1/models", headers={"Accept": "application/json"})
         response = connection.getresponse()
         if response.status != 200:
-            return False
+            return "http_non_200"
         length = response.getheader("Content-Length")
         if length is not None:
             try:
                 if int(length) > _MAX_RESPONSE_BYTES:
-                    return False
+                    return "invalid_response"
             except ValueError:
-                return False
+                return "invalid_response"
         raw = response.read(_MAX_RESPONSE_BYTES + 1)
         if len(raw) > _MAX_RESPONSE_BYTES:
-            return False
+            return "invalid_response"
         payload = json.loads(raw)
         if (
             type(payload) is not dict
             or set(payload) != {"object", "data"}
             or payload["object"] != "list"
         ):
-            return False
+            return "invalid_response"
         data = payload["data"]
         if type(data) is not list or not 1 <= len(data) <= 256:
-            return False
+            return "invalid_response"
         names = []
         for item in data:
             if (
@@ -671,11 +740,15 @@ def _ready(
                 or not item["id"]
                 or len(item["id"].encode("utf-8")) > _MAX_NAME
             ):
-                return False
+                return "invalid_response"
             names.append(item["id"])
-        return tuple(sorted(names)) == expected_names
-    except (OSError, http.client.HTTPException, ValueError, json.JSONDecodeError):
-        return False
+        return "ready" if tuple(sorted(names)) == expected_names else "names_mismatch"
+    except ConnectionRefusedError:
+        return "no_connect"
+    except (json.JSONDecodeError, UnicodeError):
+        return "invalid_response"
+    except (OSError, http.client.HTTPException, ValueError):
+        return "unknown"
     finally:
         connection.close()
 
