@@ -9,7 +9,7 @@ The [product boundary and frozen historical matrix](../architecture/submodule-fi
 | Area | Evidence and limit |
 |---|---|
 | API contracts and local behavior | A seven-facade phase-exit selection passed six fake-provider tests at the candidate checkout under local Python 3.13.9 / pytest 9.0.3. This is narrow provider-free evidence, outside the supported CI Python 3.12 / pytest 8 environment. The earlier 789 contract tests passed at `af04218c`; that result belongs to the older source. |
-| Current candidate checks | GitHub CI runs [37680245959](https://github.com/ProfSynapse/Synaptic-Tuner/actions/runs/37680245959) and [37680250554](https://github.com/ProfSynapse/Synaptic-Tuner/actions/runs/37680250554) target `80d9a063` and are still in progress at this checkpoint. An initial lint check failed on two unused bindings in tests; the evaluator-callers shard passed. Neither observation is a full green CI result, and Python 3.12 CI does not validate Python 3.10. Read-only local checks reported `CURRENT` for the 98-member training runtime lock, 119-member inference lock, 66-member offline worker closure and packaged worker; skill trees were synchronized. These checks do not replace installed-package or independent release review. |
+| Current candidate checks | Baseline GitHub CI runs [37680245959](https://github.com/ProfSynapse/Synaptic-Tuner/actions/runs/37680245959) and [37680250554](https://github.com/ProfSynapse/Synaptic-Tuner/actions/runs/37680250554) target `80d9a063`, before the preparation fixes below. Full CI failed on lint and core tests; both full-CI inference shards and the separate evaluator-callers shard passed. The combined provider-free inference shard remains in progress at this checkpoint. These are not green final-candidate results, and Python 3.12 CI does not validate Python 3.10. Read-only local checks reported `CURRENT` for the 98-member training runtime lock, 119-member inference lock, 66-member offline worker closure and packaged worker; skill trees were synchronized. These checks do not replace installed-package or independent release review. |
 | Tracked-diff audit | A path-level audit of 1,611 changed tracked paths found no binary additions; the two added JSONL files are test fixtures. It found no obvious private environment, key, model-weight or checkpoint paths. This was not a full file-content or Git-history secret scan, and untracked local files were outside its scope. |
 | Modal native training | Earlier exact-source live evidence established observation and verified streaming of the five training artifacts for its reviewed implementation. The current Modal descriptor advertises `observe` and `artifact_streaming`; `logs`, `cancel`, `reconcile`, and `cost_quote` are false. These flags do not themselves authorize start or qualify a new source revision. See [native training qualification](modal-native-training-qualification.md). |
 | Recent 9B technical smoke | Operator-local records for an earlier exact-source two-step smoke show five verified artifacts and three naturally completed generation responses. The responses copied material and had poor writing quality. Natural completion checks the generation boundary, not writing quality. These private records are not portable CI evidence. |
@@ -30,6 +30,17 @@ two affected test selections passed all 31 cases under isolated Linux CPython
 the training runtime environment was modified. These local patch checks are
 separate from the still-running baseline CI and must not be described as a
 green final-commit release gate.
+
+The baseline full CI completed with 12,488 passed, 328 skipped and 33 failures
+in its core shard; both inference shards passed (350 and 390 tests). In addition
+to the 32 failures described below, the exact completion-call census omitted
+the post-training evaluator. Its caller uses `Evaluator.vllm_client.VLLMClient`
+and belongs to the existing `OTHER_PROTOCOL_CALLERS` category. Adding that exact
+entry preserves the census assertion and does not change the runtime protocol.
+The census also excludes the explicitly gitignored `unsloth_compiled_cache`
+directory, so generated local trainer files do not masquerade as production
+call sites. All four contract tests passed locally; independent review confirmed
+the protocol classification and preserved exact-source assertion.
 
 The baseline provider-free core completed with 5,524 passed, 280 skipped and
 32 failures. Thirty failures were SDK-dependent diagnostic tests running without

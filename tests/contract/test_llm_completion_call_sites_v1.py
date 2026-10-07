@@ -26,7 +26,7 @@ import tokenize
 
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_DIRS = ("shared", "SynthChat", "Evaluator", "tuner", "synaptic_tuner", "scripts", "examples", "Trainers")
-SKIP_DIRS = frozenset({"__pycache__", "node_modules", "scratch", "_tmp", "_worktrees", "tests"})
+SKIP_DIRS = frozenset({"__pycache__", "unsloth_compiled_cache", "node_modules", "scratch", "_tmp", "_worktrees", "tests"})
 CALL_RE = re.compile(r"\.(chat|structured_output)\(")
 METHODS = frozenset({"chat", "structured_output"})
 ALLOWED_ATTRIBUTES = frozenset({"text", "value", "usage"})
@@ -61,6 +61,7 @@ OTHER_PROTOCOL_CALLERS = frozenset({
     "synaptic_tuner/api/v1/reference/chat.py",
     "tuner/execution/providers/modal/inference_channel.py",
     "tuner/inference/chat_session.py",
+    "tuner/runtime/post_training_eval.py",
 })
 DOCUMENTATION_ONLY = frozenset({
     "shared/judge/schema_builder.py",
