@@ -8,6 +8,7 @@ import stat
 import sys
 import traceback
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,117 @@ from tuner.training.packaged_compilation import compile_packaged_sft_workload, p
 from tests.runtime.test_packaged_runtime_releases import _release, _provider
 from tests.training.test_packaged_execution_material import packaged_fixture, rebound
 from tests.runtime.test_artifact_verification import _safetensors
+
+
+def test_packaged_metric_frames_validate_numeric_payload_and_exhaustion():
+    from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
+    payload = TrainingMetricObservedPayloadV1(step=2, total_steps=3, loss=-0.25,
+        learning_rate=0.001, epoch=0.5, train_elapsed_seconds=1.0,
+        job_elapsed_seconds=None, gpu_current_allocated_bytes=123,
+        gpu_current_reserved_bytes=124, gpu_peak_allocated_bytes=125,
+        gpu_peak_reserved_bytes=126, gpu_utilization_percent=None,
+        tokens_per_second=None, estimated_samples_per_second=2.0)
+    seen, exhausted = [], []
+    state = {"count": 0, "maximum": 1, "every_n_steps": 2,
+             "last_step": None, "exhausted": False, "disabled": False}
+    frame = seam._canonical({"schema_version": seam._METRIC_FRAME_SCHEMA,
+                             "kind": "metric", "payload": payload.to_dict()})
+    seam._deliver_metric_frame(frame, on_metric_frame=seen.append,
+                               on_metric_exhausted=lambda: exhausted.append(True), state=state)
+    seam._deliver_metric_frame(seam._canonical({"schema_version": seam._METRIC_FRAME_SCHEMA,
+                               "kind": "exhausted"}), on_metric_frame=seen.append,
+                               on_metric_exhausted=lambda: exhausted.append(True), state=state)
+    assert seen == [payload] and exhausted == [True]
+    assert state == {"count": 1, "maximum": 1, "every_n_steps": 2,
+                     "last_step": 2, "exhausted": True, "disabled": False}
+    seam._deliver_metric_frame(frame, on_metric_frame=seen.append,
+                               on_metric_exhausted=lambda: exhausted.append(True), state=state)
+    assert state["disabled"] and seen == [payload]
+
+
+def test_packaged_metric_sink_exception_disables_only_metric_lane():
+    from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
+    payload = TrainingMetricObservedPayloadV1(step=1, total_steps=None, loss=None,
+        learning_rate=0.1, epoch=None, train_elapsed_seconds=None,
+        job_elapsed_seconds=None, gpu_current_allocated_bytes=None,
+        gpu_current_reserved_bytes=None, gpu_peak_allocated_bytes=None,
+        gpu_peak_reserved_bytes=None, gpu_utilization_percent=None,
+        tokens_per_second=None, estimated_samples_per_second=None)
+    state = {"count": 0, "maximum": 2, "every_n_steps": 1,
+             "last_step": None, "exhausted": False, "disabled": False}
+    raw = seam._canonical({"schema_version": seam._METRIC_FRAME_SCHEMA,
+                           "kind": "metric", "payload": payload.to_dict()})
+    called = []
+    def fail(_payload):
+        called.append(True)
+        raise RuntimeError("PRIVATE_SENTINEL")
+    seam._deliver_metric_frame(raw, on_metric_frame=fail,
+                               on_metric_exhausted=lambda: None, state=state)
+    seam._deliver_metric_frame(raw, on_metric_frame=fail,
+                               on_metric_exhausted=lambda: None, state=state)
+    assert called == [True] and state["disabled"]
+
+
+@pytest.mark.parametrize("first_step,second_step,cadence", ((2, 2, 2), (4, 2, 2), (2, 3, 2)))
+def test_packaged_metric_frames_reject_replay_regression_and_off_cadence(
+        first_step, second_step, cadence):
+    from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
+    def frame(step):
+        payload = TrainingMetricObservedPayloadV1(step=step, total_steps=None, loss=0.5,
+            learning_rate=None, epoch=None, train_elapsed_seconds=None,
+            job_elapsed_seconds=None, gpu_current_allocated_bytes=None,
+            gpu_current_reserved_bytes=None, gpu_peak_allocated_bytes=None,
+            gpu_peak_reserved_bytes=None, gpu_utilization_percent=None,
+            tokens_per_second=None, estimated_samples_per_second=None)
+        return seam._canonical({"schema_version": seam._METRIC_FRAME_SCHEMA,
+                                "kind": "metric", "payload": payload.to_dict()})
+    state = {"count": 0, "maximum": 3, "every_n_steps": cadence,
+             "last_step": None, "exhausted": False, "disabled": False}
+    seen = []
+    seam._deliver_metric_frame(frame(first_step), on_metric_frame=seen.append,
+                               on_metric_exhausted=lambda: None, state=state)
+    seam._deliver_metric_frame(frame(second_step), on_metric_frame=seen.append,
+                               on_metric_exhausted=lambda: None, state=state)
+    assert len(seen) == 1 and state["disabled"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="packaged metric channel uses inherited POSIX descriptors")
+@pytest.mark.parametrize("sink_fails", (False, True))
+@pytest.mark.parametrize("select_fails", (False, True))
+def test_packaged_runner_drains_private_numeric_pipe_while_child_runs(
+        tmp_path, monkeypatch, sink_fails, select_fails):
+    from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
+    payload = TrainingMetricObservedPayloadV1(step=1, total_steps=None, loss=0.5,
+        learning_rate=None, epoch=None, train_elapsed_seconds=None,
+        job_elapsed_seconds=None, gpu_current_allocated_bytes=None,
+        gpu_current_reserved_bytes=None, gpu_peak_allocated_bytes=None,
+        gpu_peak_reserved_bytes=None, gpu_utilization_percent=None,
+        tokens_per_second=None, estimated_samples_per_second=None)
+    frame = seam._canonical({"schema_version": seam._METRIC_FRAME_SCHEMA,
+        "kind": "metric", "payload": payload.to_dict()}) + b"\n"
+    end = seam._canonical({"schema_version": seam._METRIC_FRAME_SCHEMA,
+        "kind": "exhausted"}) + b"\n"
+    read_fd, write_fd = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
+    script = "import os,sys; os.write(int(sys.argv[1]), bytes.fromhex(sys.argv[2])); sys.exit(17)"
+    invocation = core.TrainerInvocation(
+        (sys.executable, "-c", script, str(write_fd), (frame + end).hex(),
+         "--local-file", str(tmp_path / "dataset.jsonl")), tmp_path,
+        tuple(os.environ.items()), tmp_path / "run", tmp_path / "model",
+        tmp_path / "tokenizer", tmp_path / "lineage.json", tmp_path / "projection.json",
+        {}, tmp_path / "stdout.log", tmp_path / "stderr.log")
+    seen, exhausted = [], []
+    if select_fails:
+        monkeypatch.setattr(seam.select, "select", lambda *_args: (_ for _ in ()).throw(ValueError("FD_SETSIZE")))
+    def accept(payload):
+        seen.append(payload)
+        if sink_fails:
+            raise RuntimeError("PRIVATE_SENTINEL")
+    result = seam._run_progress_trainer(invocation, read_fd, write_fd, maximum=1, every_n_steps=1,
+        on_metric_frame=accept, on_metric_exhausted=lambda: exhausted.append(True))
+    assert result.exit_code == 17
+    assert seen == ([] if select_fails else [payload])
+    assert exhausted == ([] if sink_fails or select_fails else [True])
+    assert (tmp_path / "stdout.log").read_bytes() == b""
 
 
 @pytest.fixture
@@ -51,6 +163,37 @@ def material(tmp_path, monkeypatch):
     monkeypatch.setattr(seam, "_inspect_parent_release", lambda release: Path("/installed/Trainers/sft/train_sft.py"))
     return dict(runtime_release=release, provider_binding=provider, execution_binding=binding,
         workload_bytes=compiled.canonical_bytes, artifact_policy=components.artifact_policy, paths=paths)
+
+
+def test_optional_metric_fd_preserves_absent_child_bytes_and_reconstructs_exactly(material):
+    admitted = seam.admit_packaged_sft(**material)
+    try:
+        compiled = seam._admit_contracts(admitted.release, admitted.provider_binding,
+            admitted.execution, admitted.workload_bytes, admitted.artifact_policy)
+        workload = seam._runtime_projection(compiled)
+        dataset = PurePosixPath("/proc/self/fd/9")
+        snapshot = PurePosixPath("/private/cache/model/snapshot")
+        ordinary = seam._invocation_spec(admitted, workload, snapshot, dataset)
+        assert ordinary == seam._invocation_spec(admitted, workload, snapshot, dataset, metric_fd=None)
+        assert "metric_fd" not in seam._document(ordinary[3])
+        assert "--metric-fd" not in ordinary[0]
+        with pytest.raises(ValueError, match="PACKAGED_METRIC_TRANSPORT_REJECTED"):
+            seam._invocation_spec(admitted, workload, snapshot, dataset, metric_fd=13)
+        config = dict(workload.document["configuration"]["document"])
+        config["observation_capture"] = {
+            "schema_version": "synaptic-training-observation-capture/v1",
+            "every_n_steps": 2, "max_records": 3}
+        captured = SimpleNamespace(fingerprint=workload.fingerprint,
+            document={"configuration": {"document": config}})
+        first = seam._invocation_spec(admitted, captured, snapshot, dataset, metric_fd=13)
+        second = seam._invocation_spec(admitted, captured, snapshot, dataset, metric_fd=13)
+        assert first == second
+        assert seam._document(first[3])["metric_fd"] == 13
+        assert first[0][:7] == ordinary[0][:7]
+        assert first[0][8:] == ordinary[0][8:]
+        assert first[1] == ordinary[1]
+    finally:
+        admitted.close()
 
 
 def test_admission_is_read_only_and_path_free(material):

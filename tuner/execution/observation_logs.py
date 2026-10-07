@@ -3,7 +3,8 @@
 This internal codec does not authenticate a producer. Callers must obtain the
 expected run and log entries through the authenticated execution/read boundary.
 It neither enables provider logs nor assigns, renumbers or persists sequences.
-Only the numeric training metric is admitted; arbitrary phase text is not.
+Progress additionally admits one fixed capture-exhausted phase; arbitrary phase
+text is never exported. The metric-only codec preserves its original contract.
 """
 
 from __future__ import annotations
@@ -37,13 +38,19 @@ def _reject_constant(_value: str) -> object:
     raise ValueError(_ERROR)
 
 
-def _bound_record(record: ObservationRecordV1, run: TrainingRunRef) -> ObservationRecordV1:
+def _bound_record(record: ObservationRecordV1, run: TrainingRunRef, *,
+                  allow_capture_exhausted: bool = False) -> ObservationRecordV1:
     if type(run) is not TrainingRunRef or type(record) is not ObservationRecordV1:
         raise ValueError(_ERROR)
     run = TrainingRunRef.from_dict(run.to_dict())
     record = ObservationRecordV1.from_dict(record.to_dict())
+    admitted_kind = record.kind is ObservationKind.TRAINING_METRIC_OBSERVED or (
+        allow_capture_exhausted
+        and record.kind is ObservationKind.TRAINING_PHASE_OBSERVED
+        and record.payload.to_dict() == {"phase": "metric_capture_exhausted"}
+    )
     if (
-        record.kind is not ObservationKind.TRAINING_METRIC_OBSERVED
+        not admitted_kind
         or record.stream.family is not ObservationFamily.TRAINING
         or record.stream.project_ref != run.project_ref
         or record.stream.entity_id != run.run_id
@@ -69,8 +76,13 @@ def encode_training_metric_log(
     Legacy observation offsets remain legal elsewhere; this chart projection
     requires UTC ``Z`` without silently converting a timestamp.
     """
+    return _encode_training_log(record, expected_run=expected_run)
+
+
+def _encode_training_log(record, *, expected_run, allow_capture_exhausted=False):
     try:
-        record = _bound_record(record, expected_run)
+        record = _bound_record(record, expected_run,
+                               allow_capture_exhausted=allow_capture_exhausted)
         raw = canonical_bytes(record.to_dict())
         if len(raw) > _MAX_BYTES:
             raise ValueError(_ERROR)
@@ -95,6 +107,10 @@ def decode_training_metric_log(
     Invalid input never appears in the closed diagnostic. Canonical equality
     rejects alternate JSON encodings as well as unknown/missing fields.
     """
+    return _decode_training_log(entry, expected_run=expected_run)
+
+
+def _decode_training_log(entry, *, expected_run, allow_capture_exhausted=False):
     try:
         if type(entry) is not RunLogEntry:
             raise ValueError(_ERROR)
@@ -106,13 +122,31 @@ def decode_training_metric_log(
         document = json.loads(
             raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant,
         )
-        record = _bound_record(ObservationRecordV1.from_dict(document), expected_run)
-        rebuilt = encode_training_metric_log(record, expected_run=expected_run)
+        record = _bound_record(ObservationRecordV1.from_dict(document), expected_run,
+                               allow_capture_exhausted=allow_capture_exhausted)
+        rebuilt = _encode_training_log(record, expected_run=expected_run,
+                                       allow_capture_exhausted=allow_capture_exhausted)
         if rebuilt != entry:
             raise ValueError(_ERROR)
         return record
     except (ValueError, TypeError, AttributeError, KeyError, OverflowError, RecursionError):
         raise ValueError(_ERROR) from None
+
+
+def encode_training_progress_log(
+    record: ObservationRecordV1, *, expected_run: TrainingRunRef,
+) -> RunLogEntry:
+    """Admit metrics or the one closed, parent-issued capture budget status."""
+    return _encode_training_log(record, expected_run=expected_run,
+                                allow_capture_exhausted=True)
+
+
+def decode_training_progress_log(
+    entry: RunLogEntry, *, expected_run: TrainingRunRef,
+) -> ObservationRecordV1:
+    """Read numeric progress or exactly metric_capture_exhausted, never prose."""
+    return _decode_training_log(entry, expected_run=expected_run,
+                                allow_capture_exhausted=True)
 
 
 __all__: list[str] = []

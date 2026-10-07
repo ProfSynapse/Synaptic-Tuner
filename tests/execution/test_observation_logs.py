@@ -22,6 +22,8 @@ from synaptic_tuner.api.v1.runs_facade import RunLogLevel
 from tuner.execution.observation_logs import (
     decode_training_metric_log,
     encode_training_metric_log,
+    decode_training_progress_log,
+    encode_training_progress_log,
 )
 
 
@@ -71,6 +73,21 @@ def test_training_metric_projection_round_trips_complete_canonical_record() -> N
     assert entry.size_bytes == len(entry.message.encode("utf-8"))
     assert decode_training_metric_log(entry, expected_run=RUN) == record
     assert decode_training_metric_log(entry, expected_run=RUN).payload.learning_rate == 0.00015
+
+
+def test_progress_projects_only_closed_capture_status_without_widening_metric_codec():
+    record = replace(metric_record(), kind=ObservationKind.TRAINING_PHASE_OBSERVED,
+                     payload=TrainingPhaseObservedPayloadV1("metric_capture_exhausted"))
+    entry = encode_training_progress_log(record, expected_run=RUN)
+    assert decode_training_progress_log(entry, expected_run=RUN) == record
+    with pytest.raises(ValueError):
+        encode_training_metric_log(record, expected_run=RUN)
+    with pytest.raises(ValueError):
+        decode_training_metric_log(entry, expected_run=RUN)
+    for phase in ("PRIVATE_SENTINEL", "training_completed", "metric_capture_exhausted "):
+        with pytest.raises(ValueError):
+            encode_training_progress_log(replace(record,
+                payload=TrainingPhaseObservedPayloadV1(phase)), expected_run=RUN)
 
 
 def test_projection_accepts_utc_z_and_exact_4096_byte_message() -> None:

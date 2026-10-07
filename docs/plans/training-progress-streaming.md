@@ -1,144 +1,125 @@
 # Training progress chart feed
 
-Status: numeric contract, bounded log projection and optional local callback capture implemented; no live Modal chart feed is qualified. The existing training attempt must remain untouched. Modal advertises observe and artifact streaming, but not logs. Pending status and a trainer-start phase do not establish optimizer progress.
+Status: approved numeric child capture, signed remote progress storage and
+authenticated host readback are implemented. Provider-free verification does
+not qualify live delivery. Modal's logs capability remains disabled. The active
+training/evaluation attempt is unchanged; no paid qualification was launched.
 
-This updates the plan retained at `fd2a4b14` against merged main `73a3ba2c`. The historical local-state callback no longer exists. Do not restore its assumptions or create a second telemetry schema.
+## Contract and scope
 
-## Existing boundaries
+Reuse ObservationRecordV1 and its typed TRAINING_METRIC_OBSERVED payload,
+not a second telemetry vocabulary or private stdout export. Observations cannot
+authorize execution, change lifecycle state or establish artifact verification.
+The existing signed completion and five-artifact inventory remain unchanged.
 
-`synaptic_tuner/api/v1/observations.py` already defines a versioned, typed, append-only observation record with stream identity, sequence, timestamp, family and exact payload. Observations are non-authoritative: they cannot authorize execution, change lifecycle state or establish artifact verification. Reuse this contract for chart measurements. Its existing training-phase payload remains compatible; its arbitrary phase text is not a reviewed safe-text export boundary.
+Loss is objective-specific and may be negative. Current and peak GPU memory,
+training and whole-job elapsed time, measured token throughput and estimated
+sample throughput stay distinct. Unavailable values remain null. Memory
+occupancy is not GPU utilization. The parent supplies authenticated project/run
+identity, sequence and UTC receipt time; whole-job elapsed time remains null
+without a bound origin. Callback timestamps are not receipt timestamps.
 
-Current SFT metrics originate in `BaseMetricsCallback.on_log` (`Trainers/shared/callbacks/base.py`), with private JSONL output. The current samples-per-second calculation is estimated, timestamps are local, and current and peak GPU memory are distinct measurements. The packaged worker retains child stdout/stderr privately and publishes final `training_metrics.json` only after training. Neither private stdout nor final metrics constitutes a live public stream.
+Earlier local checkpoints: numeric contract `9b235855`, canonical log projection
+`2a8aff56`, optional callback `d9d63feb`, legacy paging fix `3f0498f4`.
+The approved offline inventory admission added the existing observations and
+timestamp modules (66 to 68 members). This bridge refreshes affected source
+hashes without changing package/image pins or adding offline inventory members.
+The provider module is covered by the exact-source packaged wheel, not the
+isolated trainer inventory or legacy bootstrap inventory.
 
-`RunsAPI.logs` already offers bounded pages and authenticated run-bound cursors. The legacy Modal coordinator has a private terminal log chain; the packaged Modal worker has no live log transport and advertises `logs=False`. Typed observation requests/pages do not yet have a public reader facade. Qualify a projection of the canonical observation record onto the packaged read path before promising live delivery; do not invent a competing training-event vocabulary inside message text.
+## Opt-in configuration
 
-## Dependency-ordered slices
+The recipe and compiled workload accept this exact optional object:
 
-1. **Numeric contract and local capture (implemented, not live).** `TRAINING_METRIC_OBSERVED` reuses observation identity, sequence and timestamp; the typed payload has exact numeric fields and null unknowns. Loss is objective-specific and may be negative. Time scopes, current versus peak GPU bytes, measured token throughput and estimated sample throughput stay distinct. No private text or paths belong in it. The optional callback captures independently of checkpoint retention, but has no packaged sink or provider capability.
-2. **Packaged capture and durable transport (proposed).** Bind an explicit fixed capture configuration into the packaged workload only when requested; absent configuration must preserve current canonical bytes. Feed the existing typed callback sink through the authenticated packaged child invocation, carry bounded numeric frames over a dedicated child-to-parent pipe rather than stdout, and attach retained project/run identity, sequence and UTC receipt time only in the trusted parent. Store bounded committed progress separately from the five-artifact completion, with explicit finite capture-budget exhaustion. Review affected locked inventories before edits.
-3. **Authenticated readback qualification.** Test the actual provider chain, run/cursor isolation, byte/page bounds, partial committed reads, reconnect ordering and privacy. Carry numeric payloads through the real authenticated read path. Keep Modal logs disabled until provider-free checks, independent review and a separately authorized live transport qualification pass. A contract test or successful training run alone is not transport qualification.
-4. **Host chart integration.** Consume accepted observations with run-bound cursors; persist chart points and cursor together. Show stale data as stale, not as zero. Surface gaps and invalid cursors; do not fabricate missing optimizer steps. The consuming host owns SSE/WebSocket/browser state. Browser disconnects never replay training.
+```yaml
+observation_capture:
+  schema_version: synaptic-training-observation-capture/v1
+  every_n_steps: 5
+  max_records: 10000
+```
 
-## Numeric contract acceptance
+Cadence is an integer from 1 to 1,000,000 optimizer steps; the capture budget is
+an integer from 1 to 10,000 metric records, plus one closed exhaustion record.
+These example values are not enabled by default. Omission preserves the
+previous canonical workload/invocation shape; explicit null is rejected.
+Capture is independent of checkpoint retention and primary-rank-only.
 
-The numeric contract was checkpointed at `9b235855`. The internal
-`tuner/execution/observation_logs.py` projection now encodes the full canonical
-metric observation into the existing log message, with a 4,096-byte UTF-8 bound.
-It requires the expected training run's exact project/run identity and UTC Z
-timestamp, preserves the original sequence, and verifies outer timestamp,
-sequence, event, level and byte count on readback. Duplicate keys, nonfinite
-numbers, alternate JSON encodings, wrong identities and malformed inputs fail
-with a fixed diagnostic. No arbitrary phase text is admitted. Matching a run
-name is not source authentication; this codec must be composed behind the
-authenticated producer/read boundary.
+## Implemented path
 
-Tests carry fractional metrics through the real Modal log-chunk parser and
-the coordinator's authenticated public paging/cursor fixture. These are
-provider-free format/read-path checks, not a live append qualification.
+1. MetricsTableCallback emits the typed numeric payload through an optional
+   packaged sink. Evaluation-only callback logs are not training measurements.
+2. A dedicated nonblocking inherited pipe carries canonical frames of at most
+   4,096 bytes. The sealed dataset FD and private stdout/stderr remain separate.
+   Parent validation checks exact fields, finite numbers, cadence and monotonic
+   optimizer steps. Pipe, callback and queue failures disable telemetry without
+   failing training; they do not imply clean budget exhaustion.
+3. The parent signs each bounded envelope with purpose
+   `modal-packaged-progress/v1`, binding the retained run, command, execution,
+   provider call and budget. Files live under `progress-v1-<effect digest>`,
+   outside the finalizer's create-only `operations/<effect>` root. Shards have
+   at most 256 metric/status leaves; each envelope is at most 8,192 bytes.
+   A bounded asynchronous queue avoids making training wait on remote I/O.
+4. Ordinary Modal Volume background commits publish these files. There is no
+   new per-metric commit RPC. SDK readers see the committed server view; they
+   are not mounted readers requiring `.reload`. See
+   [Modal background commits](https://modal.com/docs/guide/volumes#background-commits).
+5. The packaged reader authenticates bounded pages, then the host reader uses
+   existing reader authority and RunsAPI.logs projection. It does not poll
+   completion to obtain metrics. Foundation evidence contains entry digests,
+   not a duplicate unbounded copy of the log page.
 
-Test exact required field sets, null unknowns, finite numeric values, rejection of booleans and overflow, bounded integer steps and memory bytes, step/total consistency, utilization range, schema parity, public exports, and observation family/page binding. Existing observation kinds and wire shapes must remain unchanged. Loss may be negative for objectives that allow it; memory and rates cannot be negative. Memory occupancy must never be presented as measured GPU utilization.
+At exactly the configured record budget, the parent may append an authenticated
+TRAINING_PHASE_OBSERVED record with the sole admitted payload
+`{"phase":"metric_capture_exhausted"}`. This is an ordinary public log entry,
+not hidden verification metadata. The progress codec allows that exact status;
+the original metric-only codec stays strict. Arbitrary phase text, paths,
+prompts, exceptions and trainer JSONL are not exportable through this lane.
 
-Runtime validation is authoritative for exact Python integer types, finite-number conversion and cross-field step/total comparisons that standard JSON Schema cannot fully express. The no-text property is local to the new payload: existing stream identifiers and phase text still require source binding and privacy review before public transport. Existing observation pages have a count bound, not a serialized-byte bound; the later projection must apply its explicit byte budget.
+## Readback and consumer limitations
 
-Adding a kind to the closed v1 vocabulary is additive for current code, but an older consumer can reject a newly emitted kind. No emitter is enabled by the contract slice. Coordinate consumer support before the later emission rollout rather than assuming older clients ignore unknown kinds.
+Progress is best-effort: no final completeness or freshness guarantee, even
+after training completes. A missing tail is not zero loss, zero utilization,
+training completion or authorization to replay training. Queue overflow leaves
+an open prefix, not a false exhausted status. The page watermark names its
+last returned record or cursor anchor, not the global provider head.
 
-The later transport acceptance must additionally cover runs without checkpoint retention, configured sampling cadence, interrupted-stream recovery, complete UTF-8 bounded projection, authenticated multi-page reads, explicit capture exhaustion and unchanged terminal artifact verification. Completion and writing quality remain separate from progress observations.
+Each resumed numeric cursor authenticates its anchor and the chain within the
+returned page. It does **not** prove the chain back to genesis or provide
+durable cross-request rollback/fork detection. Consumers may retain canonical
+record digests and flag a changed sequence, but that is not a stronger server
+guarantee. Do not claim arbitrary reconnects prove a complete history.
 
-## Live bridge constraints found in source review
+The existing public API returns next_cursor only when a page is truncated.
+For live tail polling, retain the most recent non-null cursor, repeat from it
+when the current tail ends, and deduplicate by run and sequence while checking
+canonical bytes for disagreement. Do not replace that retained cursor with
+null on an empty/end page. Before the first full page, repeat from null. Host
+chart points and retained cursors belong to consumer persistence, not a new
+engine database. SSE/WebSocket/browser behavior is also host-owned.
 
-The local `MetricsTableCallback(..., metric_sink=callable)` seam now forwards
-typed numeric snapshots at its configured training-log interval, independently
-of checkpoint saves. It is disabled by default and is not injected by the CLI
-or packaged child. The sink receives a payload, not a run identity or a generic
-log dictionary; a future bound adapter must provide sequence, UTC time and
-retained execution identity before using the projection.
+Modal documents periodic background commits but not atomic visibility of an
+in-progress final-path write. A short/torn committed envelope currently fails
+closed and can temporarily reject a page containing an otherwise good prefix.
+No unauthenticated point escapes. Before enabling logs, qualify overlapping
+background commit/write behavior or review an atomic final-leaf publication
+mechanism. Do not promise consistently readable prefixes before that evidence.
 
-Capture is primary-rank-only and requires optimizer loss or learning-rate
-evidence, so evaluation-only logs are not charted as training steps. Training
-elapsed time is monotonic; the single-process sample-rate estimate subtracts
-the resumed initial step. Unavailable or invalid measurements stay null;
-whole-job time, token throughput and GPU utilization are not inferred. CUDA
-byte counters come directly from the active device. Optional capture/setup or
-sink failure disables only that sink with one fixed diagnostic, not an exception
-containing private values. Existing table/JSONL behavior remains unchanged.
+## Verification and remaining gates
 
-The user explicitly approved admitting the existing observation and timestamp
-contract modules to the offline trainer inventory, increasing it from 66 to
-68 members. The independent enumeration and hashes were updated; an isolated
-import test excludes site packages and the source checkout to verify this
-dependency closure. No package or image pin, trainer entrypoint, child transport
-contract or provider capability changed. This admission enables the local
-optional import; it does not qualify a remote metric feed.
+Provider-free tests cover absent-config compatibility, numeric-only frames,
+cadence, exhaustion, FD/callback failures, queue overflow, create-only namespace
+separation, delayed/partial committed visibility, torn-tail rejection, signed
+status at the exact budget, cursor 10,000, identity/tamper rejection, bounded
+host readback, empty-to-growing pages and public exhaustion visibility. The
+public fixture also covers retaining a tail cursor and deduplicating replay.
+Independent review found no remaining blocker within this disabled scope.
 
-The *legacy coordinator* finalizes one terminal log record at sequence zero,
-binds an immutable terminal chain digest, requires a contiguous zero-based
-chain and caps that whole chain at 256 records. Those rules belong to its old
-reader; they are not the packaged worker's transport contract. The packaged
-worker currently publishes signed completion and five artifacts, but no log
-stream. Its host reader rejects log requests before reading completion. Do not
-flip that capability or repurpose the immutable terminal chain as a live feed.
-Existing observations permit sequence gaps; transport must preserve them rather
-than renumbering. Bounded pages/chunks are necessary, but 256 points is not a
-whole-run budget for a potentially long training job.
+Live qualification remains separate and requires authorization. Only after
+provider-free checks, independent review and successful live qualification may
+modal_host_composition.py advertise logs. A successful training run, local
+callback test or CPU package proof alone is not live transport qualification.
 
-The Foundation canonical evidence limit is 16 KiB, as exercised by the worker
-reproducer; the public query's 262,144-byte message allowance is not an
-evidence allowance. Bound each canonical marker/evidence object including
-serialization overhead, each chunk and page, and the run's configurable finite
-capture budget independently. On budget exhaustion, publish an authenticated
-closed exhaustion status; do not silently truncate a chart into apparently
-complete data. Capture remains best-effort and must never stop training.
-
-The isolated child has a bound run reference, but no full project identity or
-authenticated whole-job start timestamp. Bind identity from retained execution
-context in the trusted parent; leave whole-job elapsed time null until a bound
-origin exists. Callback capture sends numeric fields only, never generic
-trainer JSONL. The approved observation/timestamp offline closure admission
-above enables the typed payload locally; it does not create a remote stream.
-
-## Proposed minimal packaged bridge
-
-Add an optional exact capture object to `tuner/training/modal_recipe.py`,
-`tuner/training/packaged_compilation.py` and the packaged workload schema. Its
-cadence and finite run budget are bound into the compiled workload; omission
-leaves invocation/workload bytes unchanged. In `Trainers/sft/train_sft.py`,
-enable the existing `MetricsTableCallback(metric_sink=...)` only for that
-configuration. Extend `tuner/runtime/packaged_sft_execution.py` and
-`packaged_sft_child.py` with one verified, dedicated inherited progress pipe;
-keep the sealed dataset FD and private stdout/stderr contracts intact. The
-child writes only bounded canonical numeric frames. The parent drains them
-during execution, validates payloads, attaches identity from the retained
-dispatch/binding, assigns sequence and UTC receipt time, and applies the
-existing `tuner/execution/observation_logs.py` projection. No arbitrary module
-path, environment plugin, transcript text or child-supplied project identity.
-
-In `tuner/execution/providers/modal/packaged_worker.py`, publish create-only
-bounded chunks and an authenticated marker *after* each complete batch under
-the existing private control Volume, separate from signed final completion.
-Commit the Volume writer so SDK readers can observe the batch. These SDK reads
-are not mounted-reader cache reads and do not require `.reload`. A marker
-binds run identity, previous marker digest, committed chunk digests and high
-sequence; an exhaustion marker makes the finite capture limit visible. In
-`packaged_reader.py` and `tuner/training/modal_host_reader.py`, verify the
-largest contiguous authenticated committed prefix while the call is pending,
-then page it through existing run-bound cursors. Host-retained cursor/high-water
-state can reject rollback of a prefix it has already seen. An unseen tail may
-be absent, a published prefix may lag, and even a completed run has **no
-telemetry completeness or freshness guarantee**. Progress never changes
-lifecycle authority, signed completion, or the five-artifact inventory; a new
-completion schema is unnecessary for this best-effort contract.
-
-Test exact absent-config byte compatibility, cadence and capture exhaustion,
-numeric-only child frames, FD/identity isolation, partial writes and committed
-visibility, marker tampering/rollback, interrupted and multi-page reads,
-canonical evidence/chunk/page limits, privacy, and unchanged completion and
-artifacts. Relevant suites are packaged compilation, SFT callback, packaged
-child/execution, Modal packaged worker/reader and host reader/public paging.
-The coordinated child transport, signed progress and readback change awaits
-scoped approval. Only after provider-free tests, independent review and
-separately authorized live qualification may `modal_host_composition.py`
-advertise logs; until then this protocol and capability remain **proposed**.
-
-## Deliberately separate work
-
-Checkpoint resume/continuation, evaluation-only recovery, tagged desktop releases, MLX, GGUF, richer GPU power sampling and cost charts are not prerequisites for the numeric chart contract. Do not relaunch or modify the active training attempt to add observability. No source-only contract change qualifies a model, hardware profile or live provider feature.
+Checkpoint continuation, evaluation-only recovery, releases, MLX, GGUF, richer
+GPU sampling and cost charts are separate work. Never replay or alter an active
+attempt to add observability. The old coordinator's immutable terminal chain
+and 256-record cap are not this packaged progress protocol.

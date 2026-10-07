@@ -7,17 +7,26 @@ import hashlib
 import json
 from typing import Iterator, Protocol
 
+from synaptic_tuner.api.v1.results import TrainingRunRef
+from synaptic_tuner.api.v1.runs_facade import RunLogEntry
+from synaptic_tuner.api.v1.observations import ObservationKind
+
 from tuner.execution.foundation_v2.canonical import (
-    digest_text,
+    canonical_bytes, digest_text,
     parse_canonical_object,
     safe_ref,
 )
+from tuner.execution.observation_logs import decode_training_progress_log
 
 from .contracts import operation_path, provider_entry_identity
 from .coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
 from .facade import ExplicitModal154ReadFacade
 from .packaged_binding import EXACT_ARTIFACT_ROLES, ModalPackagedCommandBinding
 from .packaged_deployment import ModalPackagedDeploymentObserver
+from .packaged_progress import (
+    MAX_PROGRESS_FILE_BYTES, PROGRESS_SHARD_SIZE, ZERO_DIGEST,
+    parse_progress_file, progress_path, progress_shard,
+)
 
 
 class ModalPackagedEvidenceVerifier(Protocol):
@@ -68,6 +77,101 @@ class ModalPackagedCompletionObservation:
             raise ValueError("packaged artifact inventory exceeds its total bound")
 
 
+def _progress_page_evidence(
+    run, effect_id, command_digest, provider_job_ref,
+    execution_binding_digest, entries, after_sequence,
+    high_watermark_sequence, marker_digest, exhausted, truncated,
+) -> bytes:
+    digest = hashlib.sha256()
+    for entry in entries:
+        digest.update(canonical_bytes(entry.to_dict()))
+        digest.update(b"\n")
+    return canonical_bytes({
+        "schema_version": "synaptic-modal-packaged-progress-page/v1",
+        "run": run.to_dict(),
+        "effect_id": effect_id,
+        "command_digest": command_digest,
+        "provider_job_ref": provider_job_ref,
+        "execution_binding_digest": execution_binding_digest,
+        "after_sequence": after_sequence,
+        "high_watermark_sequence": high_watermark_sequence,
+        "marker_digest": marker_digest,
+        "exhausted": exhausted,
+        "truncated": truncated,
+        "entries_sha256": digest.hexdigest(),
+    })
+
+
+@dataclass(frozen=True, slots=True)
+class ModalPackagedProgressPage:
+    run: TrainingRunRef
+    effect_id: str
+    command_digest: str
+    provider_job_ref: str
+    execution_binding_digest: str
+    entries: tuple[RunLogEntry, ...]
+    after_sequence: int | None
+    high_watermark_sequence: int
+    marker_digest: str | None
+    exhausted: bool
+    truncated: bool
+    canonical_evidence: bytes
+
+    @property
+    def expected_evidence(self) -> bytes:
+        return _progress_page_evidence(
+            self.run, self.effect_id, self.command_digest,
+            self.provider_job_ref, self.execution_binding_digest,
+            self.entries, self.after_sequence, self.high_watermark_sequence,
+            self.marker_digest, self.exhausted, self.truncated,
+        )
+
+    def __post_init__(self) -> None:
+        if type(self.run) is not TrainingRunRef or type(self.entries) is not tuple \
+                or any(type(entry) is not RunLogEntry for entry in self.entries):
+            raise TypeError("exact packaged progress page values required")
+        safe_ref(self.effect_id, "effect_id")
+        safe_ref(self.provider_job_ref, "provider_job_ref")
+        digest_text(self.command_digest, "command_digest")
+        digest_text(self.execution_binding_digest, "execution_binding_digest")
+        if type(self.high_watermark_sequence) is not int or self.high_watermark_sequence < -1:
+            raise ValueError("packaged progress watermark invalid")
+        if self.after_sequence is not None and (type(self.after_sequence) is not int \
+                or self.after_sequence < 0):
+            raise ValueError("packaged progress cursor invalid")
+        if self.marker_digest is not None:
+            digest_text(self.marker_digest, "marker_digest")
+        if type(self.exhausted) is not bool or type(self.truncated) is not bool \
+                or (self.truncated and (not self.entries or self.exhausted)):
+            raise ValueError("packaged progress page state invalid")
+        if self.exhausted and not self.entries and self.after_sequence is None:
+            raise ValueError("packaged progress empty exhaustion invalid")
+        if not self.entries and self.high_watermark_sequence != (
+            -1 if self.after_sequence is None else self.after_sequence
+        ):
+            raise ValueError("packaged progress empty page watermark invalid")
+        if (self.marker_digest is None) != (
+            not self.entries and self.after_sequence is None and not self.exhausted
+        ):
+            raise ValueError("packaged progress page marker invalid")
+        if any(a.sequence + 1 != b.sequence for a, b in zip(self.entries, self.entries[1:])) \
+                or (self.entries and self.entries[-1].sequence != self.high_watermark_sequence) \
+                or (self.entries and self.entries[0].sequence != (
+                    0 if self.after_sequence is None else self.after_sequence + 1
+                )):
+            raise ValueError("packaged progress page sequence invalid")
+        kinds = tuple(decode_training_progress_log(entry, expected_run=self.run).kind
+                      for entry in self.entries)
+        if any(kind is not ObservationKind.TRAINING_METRIC_OBSERVED
+               for kind in kinds[:-1]) or (kinds and (
+                   (kinds[-1] is ObservationKind.TRAINING_PHASE_OBSERVED) != self.exhausted
+               )):
+            raise ValueError("packaged progress page kind invalid")
+        if type(self.canonical_evidence) is not bytes \
+                or self.canonical_evidence != self.expected_evidence:
+            raise ValueError("packaged progress page evidence invalid")
+
+
 class ModalPackagedReader:
     __slots__ = ("_facade", "_observer", "_verifier", "_key_ref")
 
@@ -89,6 +193,122 @@ class ModalPackagedReader:
             raise TypeError("packaged evidence verifier required")
         self._facade, self._observer, self._verifier = facade, deployment_observer, verifier
         self._key_ref = safe_ref(key_ref, "key_ref")
+
+    def read_progress(
+        self, binding: ModalPackagedCommandBinding, *,
+        provider_job_ref: str, expected_run: TrainingRunRef,
+        after_sequence: int | None, limit: int, maximum_bytes: int,
+    ) -> ModalPackagedProgressPage:
+        """Read only the signed visible prefix; no completion poll is involved."""
+        if type(binding) is not ModalPackagedCommandBinding \
+                or type(expected_run) is not TrainingRunRef:
+            raise TypeError("exact packaged progress binding and run required")
+        if (after_sequence is not None and (type(after_sequence) is not int
+                or not 0 <= after_sequence <= 10_000)) \
+                or type(limit) is not int or not 1 <= limit <= 200 \
+                or type(maximum_bytes) is not int or not 4096 <= maximum_bytes <= 262144:
+            raise ValueError("packaged progress query bounds invalid")
+        preparation = binding.command.preparation
+        if expected_run != TrainingRunRef(preparation.run_id, preparation.project_ref):
+            raise ValueError("packaged progress run mismatch")
+        job_ref = safe_ref(provider_job_ref, "provider_job_ref")
+        facts = self._observer.observe(
+            binding.provider_facts,
+            runtime_release=binding.runtime_release,
+            provider_binding=binding.provider_binding,
+        )
+        effect_id = binding.command.operation.effect.effect_id
+        volume = facts.control_volume_id
+        shard_cache: dict[int, dict[int, int]] = {}
+
+        def listed(index: int) -> dict[int, int]:
+            shard = index // PROGRESS_SHARD_SIZE
+            if shard in shard_cache:
+                return shard_cache[shard]
+            prefix = progress_shard(effect_id, index) + "/"
+            rows = self._facade.list_prefix(volume, prefix, max_entries=PROGRESS_SHARD_SIZE + 1)
+            members: dict[int, int] = {}
+            for path, size, entry_id in rows:
+                name = path.removeprefix(prefix)
+                if (not path.startswith(prefix) or len(name) != 17
+                        or not name[:12].isdigit() or name[12:] != ".json"
+                        or int(name[:12]) // PROGRESS_SHARD_SIZE != shard
+                        or path != progress_path(effect_id, int(name[:12]))
+                        or type(size) is not int or not 1 <= size <= MAX_PROGRESS_FILE_BYTES
+                        or entry_id != provider_entry_identity(volume, path, size)):
+                    raise ValueError("packaged progress inventory invalid")
+                number = int(name[:12])
+                if number in members:
+                    raise ValueError("packaged progress inventory duplicate")
+                members[number] = size
+            if members and tuple(sorted(members)) != tuple(range(
+                shard * PROGRESS_SHARD_SIZE, shard * PROGRESS_SHARD_SIZE + len(members),
+            )):
+                raise ValueError("packaged progress inventory gap")
+            shard_cache[shard] = members
+            return members
+
+        declared_max = None
+
+        def read(index: int, previous: str | None):
+            nonlocal declared_max
+            members = listed(index)
+            if index not in members:
+                if any(number > index for number in members):
+                    raise ValueError("packaged progress inventory gap")
+                return None
+            path = progress_path(effect_id, index)
+            raw = self._facade.read_complete(volume, path, max_bytes=MAX_PROGRESS_FILE_BYTES)
+            if len(raw) != members[index]:
+                raise ValueError("packaged progress changed after listing")
+            entry, marker, declared_max, exhausted = parse_progress_file(
+                raw, verifier=self._verifier, key_ref=self._key_ref,
+                effect_id=effect_id, command_digest=binding.command_digest,
+                provider_job_ref=job_ref,
+                execution_binding_digest=binding.execution_binding.binding_digest,
+                run=expected_run, max_records=declared_max, index=index,
+                previous_digest=previous,
+            )
+            return entry, marker, exhausted
+
+        if after_sequence is None:
+            index, previous, high = 0, ZERO_DIGEST, -1
+            marker_digest = None
+        else:
+            anchor = read(after_sequence, None)
+            if anchor is None:
+                raise ValueError("packaged progress cursor anchor missing")
+            index, previous, high = after_sequence + 1, anchor[1], after_sequence
+            marker_digest = anchor[1]
+        entries: list[RunLogEntry] = []
+        used, exhausted, truncated = 0, (
+            anchor[2] if after_sequence is not None else False
+        ), False
+        while not exhausted and index <= 10_000:
+            next_item = read(index, previous)
+            if next_item is None:
+                break
+            entry, digest, is_status = next_item
+            if len(entries) >= limit or used + entry.size_bytes > maximum_bytes:
+                if not entries:
+                    raise ValueError("packaged progress entry exceeds page bound")
+                truncated = True
+                break
+            entries.append(entry)
+            used += entry.size_bytes
+            previous = marker_digest = digest
+            high = index
+            index += 1
+            if is_status:
+                exhausted = True
+                break
+        page_values = (
+            expected_run, effect_id, binding.command_digest, job_ref,
+            binding.execution_binding.binding_digest, tuple(entries),
+            after_sequence, high, marker_digest, exhausted, truncated,
+        )
+        evidence = _progress_page_evidence(*page_values)
+        return ModalPackagedProgressPage(*page_values, evidence)
 
     def observe_completion(
         self,
@@ -284,5 +504,6 @@ __all__ = [
     "ModalPackagedArtifactMember",
     "ModalPackagedCompletionObservation",
     "ModalPackagedEvidenceVerifier",
+    "ModalPackagedProgressPage",
     "ModalPackagedReader",
 ]

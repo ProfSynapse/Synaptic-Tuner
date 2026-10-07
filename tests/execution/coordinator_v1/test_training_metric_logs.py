@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 import pytest
 
+from synaptic_tuner.api.v1.observations import (
+    ObservationKind, TrainingPhaseObservedPayloadV1,
+)
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from synaptic_tuner.api.v1.runs_facade import RunLogsRequest
 from tuner.execution.coordinator_v1.cursors import decode_cursor
@@ -14,7 +18,9 @@ from tuner.execution.coordinator_v1.model import (
 )
 from tuner.execution.observation_logs import (
     decode_training_metric_log,
+    decode_training_progress_log,
     encode_training_metric_log,
+    encode_training_progress_log,
 )
 from tuner.execution.providers.modal.contracts import canonical_json
 from tuner.execution.providers.modal.coordinator_logs import (
@@ -69,20 +75,32 @@ def test_metric_entries_round_trip_through_actual_modal_chunks_without_renumberi
 
 
 class MetricReader(Reader):
-    def __init__(self):
+    def __init__(self, *, with_capture_status=False, tail_visible=True):
         super().__init__()
         self.after_sequences = []
+        self.with_capture_status = with_capture_status
+        self.tail_visible = tail_visible
 
     def logs(self, request, query):
         self.log_calls += 1
         self.after_sequences.append(query.after_sequence)
         ref = request.provider_run.reference
-        numbers = (0, 1) if query.after_sequence is None else (2,)
+        numbers = (0, 1) if query.after_sequence is None else (
+            (2,) if self.tail_visible else ()
+        )
         entries = tuple(
             encode_training_metric_log(metric_record(number, run=request.run),
                                        expected_run=request.run)
             for number in numbers
         )
+        if self.with_capture_status and query.after_sequence is not None \
+                and self.tail_visible:
+            status = replace(
+                metric_record(3, run=request.run),
+                kind=ObservationKind.TRAINING_PHASE_OBSERVED,
+                payload=TrainingPhaseObservedPayloadV1("metric_capture_exhausted"),
+            )
+            entries += (encode_training_progress_log(status, expected_run=request.run),)
         content = ProviderLogPageContentV1(
             "synaptic-provider-log-page-content/v1",
             request.request_digest,
@@ -132,3 +150,42 @@ def test_authenticated_runs_api_pages_metric_entries_with_bound_cursor():
     assert second.next_cursor is None
     assert reader.after_sequences == [None, 1]
     assert decode_training_metric_log(second.entries[0], expected_run=queued.run).sequence == 2
+
+
+def test_authenticated_runs_api_exports_only_fixed_capture_exhaustion_status():
+    store, queued, foundation = _queued_store()
+    reader = MetricReader(with_capture_status=True, tail_visible=False)
+    service, _ = operations(store, queued, foundation, reader=reader)
+
+    first = service.logs(RunLogsRequest(queued.run, limit=2, maximum_bytes=4096))
+    assert [entry.sequence for entry in first.entries] == [0, 1]
+    assert first.truncated is True and first.next_cursor is not None
+    retained_cursor = first.next_cursor
+
+    pending = service.logs(RunLogsRequest(
+        queued.run, cursor=retained_cursor, limit=2, maximum_bytes=4096,
+    ))
+    assert pending.entries == () and pending.next_cursor is None
+    reader.tail_visible = True
+
+    second = service.logs(RunLogsRequest(
+        queued.run, cursor=retained_cursor, limit=2, maximum_bytes=4096,
+    ))
+    assert [entry.sequence for entry in second.entries] == [2, 3]
+    assert second.truncated is False and second.next_cursor is None
+    assert decode_training_metric_log(second.entries[0], expected_run=queued.run).sequence == 2
+    status = decode_training_progress_log(second.entries[1], expected_run=queued.run)
+    assert status.kind is ObservationKind.TRAINING_PHASE_OBSERVED
+    assert status.payload.phase == "metric_capture_exhausted"
+    with pytest.raises(ValueError, match="invalid training metric log projection"):
+        decode_training_metric_log(second.entries[1], expected_run=queued.run)
+
+    # A terminal public page has no next cursor. Polling from the retained
+    # previous cursor is valid, and sequence-based deduplication is explicit.
+    replay = service.logs(RunLogsRequest(
+        queued.run, cursor=retained_cursor, limit=2, maximum_bytes=4096,
+    ))
+    deduped = {entry.sequence: entry for entry in (*first.entries, *second.entries,
+                                                  *replay.entries)}
+    assert tuple(deduped) == (0, 1, 2, 3)
+    assert reader.after_sequences == [None, 1, 1, 1]

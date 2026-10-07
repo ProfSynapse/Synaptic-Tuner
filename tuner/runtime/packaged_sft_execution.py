@@ -11,9 +11,12 @@ import importlib.metadata
 import json
 import os
 import platform
+import select
 import secrets
 import stat
+import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -116,6 +119,8 @@ _MAX_MODEL_MEMBER_BYTES = 32 * 1024 * 1024 * 1024
 _MAX_MODEL_BYTES = 512 * 1024 * 1024 * 1024
 _MAX_MODEL_MEMBERS = 10000
 _MAX_CHILD_BYTES = 4 * 1024 * 1024
+_MAX_METRIC_FRAME_BYTES = 4096
+_METRIC_FRAME_SCHEMA = "synaptic-training-metric-frame/v1"
 
 
 def _close_resources(resources):
@@ -839,7 +844,7 @@ def _copy_private_snapshot(snapshot, source_directories, inventory, paths, model
             raise PackagedSFTExecutionError("REVALIDATION") from None
 
 
-def _invocation_spec(admitted, workload, snapshot, dataset_path, model_snapshot=None):
+def _invocation_spec(admitted, workload, snapshot, dataset_path, model_snapshot=None, *, metric_fd=None):
     from Trainers.sft import runtime_v1 as core
     paths = admitted.paths
     config = workload.document["configuration"]["document"]
@@ -869,6 +874,10 @@ def _invocation_spec(admitted, workload, snapshot, dataset_path, model_snapshot=
         "artifact_policy": {"required_kinds": list(admitted.artifact_policy.required_kinds), "retain_checkpoints": admitted.artifact_policy.retain_checkpoints},
         "paths": {name: str(getattr(paths, name)) for name in paths.__dataclass_fields__},
         "environment": list(admitted.environment), "model_snapshot": model_snapshot}
+    if metric_fd is not None:
+        if type(metric_fd) is not int or metric_fd <= 2 or "observation_capture" not in config:
+            raise ValueError("PACKAGED_METRIC_TRANSPORT_REJECTED")
+        child["metric_fd"] = metric_fd
     child_raw = _canonical(child)
     if len(child_raw) > _MAX_CHILD_BYTES:
         raise ValueError("PACKAGED_CHILD_TRANSPORT_REJECTED")
@@ -888,13 +897,14 @@ def _invocation_spec(admitted, workload, snapshot, dataset_path, model_snapshot=
     return argv, env, child_path, child_raw, run, final
 
 
-def _invocation(admitted, workload, snapshot, dataset_bytes, model_snapshot=None):
+def _invocation(admitted, workload, snapshot, dataset_bytes, model_snapshot=None, *, metric_fd=None):
     from Trainers.sft import runtime_v1 as core
     paths = admitted.paths
     dataset = workload.document["configuration"]["document"]["dataset"]
     fd, dataset_path = core._sealed_prepared_dataset(dataset_bytes, content_digest=dataset["content_digest"])
     try:
-        argv, env, child_path, child_raw, run, final = _invocation_spec(admitted, workload, snapshot, dataset_path, model_snapshot)
+        argv, env, child_path, child_raw, run, final = _invocation_spec(
+            admitted, workload, snapshot, dataset_path, model_snapshot, metric_fd=metric_fd)
         core._write_exclusive(child_path, child_raw)
         return core.TrainerInvocation(argv, paths.tmp, tuple(sorted(env.items())), run, final, final,
             run / "training_lineage.json", run / "runtime_v1_projection.json",
@@ -903,6 +913,111 @@ def _invocation(admitted, workload, snapshot, dataset_bytes, model_snapshot=None
     except BaseException:
         core._close_retained_fds((fd,))
         raise
+
+
+def _deliver_metric_frame(raw, *, on_metric_frame, on_metric_exhausted, state):
+    """Validate one child-only numeric frame before calling the optional sink."""
+    from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
+    if state["disabled"]:
+        return
+    try:
+        frame = _document(raw, _MAX_METRIC_FRAME_BYTES)
+        if frame.get("schema_version") != _METRIC_FRAME_SCHEMA:
+            raise ValueError
+        if set(frame) == {"schema_version", "kind", "payload"} and frame["kind"] == "metric":
+            if state["count"] >= state["maximum"]:
+                raise ValueError
+            payload = TrainingMetricObservedPayloadV1.from_dict(frame["payload"])
+            if (payload.step % state["every_n_steps"] != 0 or
+                    (state["last_step"] is not None and payload.step <= state["last_step"])):
+                raise ValueError
+            state["count"] += 1
+            state["last_step"] = payload.step
+            on_metric_frame(payload)
+        elif set(frame) == {"schema_version", "kind"} and frame["kind"] == "exhausted":
+            if state["exhausted"] or state["count"] != state["maximum"]:
+                raise ValueError
+            state["exhausted"] = True
+            on_metric_exhausted()
+        else:
+            raise ValueError
+    except BaseException:
+        # Optional telemetry cannot change trainer success or disclose sink errors.
+        state["disabled"] = True
+
+
+def _run_progress_trainer(invocation, read_fd, write_fd, *, maximum, every_n_steps,
+                          on_metric_frame, on_metric_exhausted):
+    """Drain a private nonblocking pipe while the normal trainer subprocess runs."""
+    from Trainers.sft import runtime_v1 as core
+    invocation.stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    state = {"count": 0, "maximum": maximum, "every_n_steps": every_n_steps,
+             "last_step": None, "exhausted": False, "disabled": False}
+    pending = bytearray()
+    process = None
+    try:
+        with invocation.stdout_path.open("xb") as stdout, invocation.stderr_path.open("xb") as stderr:
+            process = subprocess.Popen(invocation.argv, cwd=invocation.cwd,
+                env=dict(invocation.environment), stdin=subprocess.DEVNULL,
+                stdout=stdout, stderr=stderr,
+                pass_fds=(*invocation.retained_fds, write_fd))
+            os.close(write_fd)
+            write_fd = None
+            # The pipe is drained even after telemetry is disabled, so the child
+            # never waits on an optional observation consumer.
+            exit_at = None
+            while True:
+                try:
+                    ready, _, _ = select.select([read_fd], [], [], 0.1)
+                except (OSError, ValueError):
+                    state["disabled"] = True
+                    break
+                if ready:
+                    try:
+                        block = os.read(read_fd, 8192)
+                    except OSError:
+                        state["disabled"] = True
+                        break
+                    if not block:
+                        break
+                    pending.extend(block)
+                    while b"\n" in pending:
+                        frame, _, remainder = pending.partition(b"\n")
+                        pending = bytearray(remainder)
+                        if len(frame) > _MAX_METRIC_FRAME_BYTES:
+                            state["disabled"] = True
+                        else:
+                            _deliver_metric_frame(bytes(frame), on_metric_frame=on_metric_frame,
+                                on_metric_exhausted=on_metric_exhausted, state=state)
+                    if len(pending) > _MAX_METRIC_FRAME_BYTES:
+                        state["disabled"] = True
+                        pending.clear()
+                if process.poll() is not None:
+                    if exit_at is None:
+                        exit_at = time.monotonic()
+                    elif time.monotonic() - exit_at >= 1.0:
+                        break
+            exit_code = process.wait()
+    finally:
+        try:
+            os.close(read_fd)
+        except OSError:
+            pass
+        if write_fd is not None:
+            try:
+                os.close(write_fd)
+            except OSError:
+                pass
+        if process is not None and process.poll() is None:
+            process.wait()
+    if exit_code != 0:
+        return core.TrainerEvidence(exit_code, invocation.final_model_dir, invocation.tokenizer_dir, {}, {}, {})
+    lineage = core._read_json_file(invocation.lineage_path, maximum=core.MAX_LINEAGE_BYTES)
+    projection = core._read_json_file(invocation.projection_path, maximum=core.MAX_LINEAGE_BYTES,
+                                      require_canonical=True)
+    metrics = lineage.get("results")
+    return core.TrainerEvidence(exit_code, invocation.final_model_dir, invocation.tokenizer_dir,
+                                lineage, projection, metrics if isinstance(metrics, Mapping) else {})
 
 
 def _bindings(admitted):
@@ -1012,7 +1127,8 @@ def _write_terminal_exclusive(path, payload, parent, check):
 
 
 def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_preparer: PackagedModelPreparer, runner=None,
-                                 on_training_complete=None) -> PackagedSFTResult:
+                                 on_training_complete=None, on_metric_frame=None,
+                                 on_metric_exhausted=None) -> PackagedSFTResult:
     """Consume one admitted execution; revalidation cannot renew its authority."""
     core = None
     snapshots = ()
@@ -1069,10 +1185,32 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
             raise ValueError
         private_copy = _copy_private_snapshot(snapshot, snapshots, inventory, admitted.paths, model)
         projection = _runtime_projection(compiled)
+        capture = compiled.document["configuration"]["document"].get("observation_capture")
+        progress_pipe = [None]
+        capture_enabled = (capture is not None and runner is None
+            and callable(on_metric_frame) and callable(on_metric_exhausted) and os.name == "posix")
         stage = "INVOCATION"
         def build(workload, roots, environment):
             private_copy.check()
-            return _invocation(admitted, workload, private_copy.snapshot, dataset_bytes, private_copy.manifest)
+            if not capture_enabled:
+                return _invocation(admitted, workload, private_copy.snapshot, dataset_bytes, private_copy.manifest)
+            try:
+                read_fd, write_fd = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
+            except OSError:
+                return _invocation(admitted, workload, private_copy.snapshot, dataset_bytes, private_copy.manifest)
+            if read_fd <= 2 or write_fd <= 2:
+                os.close(read_fd)
+                os.close(write_fd)
+                return _invocation(admitted, workload, private_copy.snapshot, dataset_bytes, private_copy.manifest)
+            try:
+                invocation = _invocation(admitted, workload, private_copy.snapshot,
+                    dataset_bytes, private_copy.manifest, metric_fd=write_fd)
+            except BaseException:
+                os.close(read_fd)
+                os.close(write_fd)
+                raise
+            progress_pipe[0] = (read_fd, write_fd)
+            return invocation
         def lineage(workload, invocation, evidence, execution_evidence):
             execution_evidence = {**execution_evidence, "schema_version": "synaptic-packaged-sft-execution-evidence/v1"}
             return {"schema_version": LINEAGE_SCHEMA, **_bindings(admitted),
@@ -1097,7 +1235,15 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
                     for directory in reversed(held):
                         directory.close()
                 stage = "TRAINER"
-                evidence = (runner or core.SubprocessTrainerRunner()).run(invocation)
+                if progress_pipe[0] is not None:
+                    read_fd, write_fd = progress_pipe[0]
+                    progress_pipe[0] = None
+                    evidence = _run_progress_trainer(invocation, read_fd, write_fd,
+                        maximum=capture["max_records"], every_n_steps=capture["every_n_steps"],
+                        on_metric_frame=on_metric_frame,
+                        on_metric_exhausted=on_metric_exhausted)
+                else:
+                    evidence = (runner or core.SubprocessTrainerRunner()).run(invocation)
                 if type(evidence) is core.TrainerEvidence and type(evidence.exit_code) is int:
                     child_failure_stage = CHILD_EXIT_STAGES.get(evidence.exit_code)
                 stage = "EVIDENCE_PRIVATE_COPY"
@@ -1186,6 +1332,12 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
         raise PackagedSFTExecutionError(stage) from None
     finally:
         post_training_scope[0] = False
+        if "progress_pipe" in locals() and progress_pipe[0] is not None:
+            for descriptor in progress_pipe[0]:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
         resources = [*snapshots, *artifact_directories, *artifact_files]
         if private_copy is not None:
             resources.append(private_copy)
