@@ -3,6 +3,9 @@
 Status: Phase 0 evidence and contract baseline
 Current implementation correction: see the dated coordinator checkpoint below;
 the frozen matrix remains historical evidence for its explicitly named commit.
+Current main-merge review pointer (2026-10-07):
+[`../review/api-v1-release-readiness.md`](../review/api-v1-release-readiness.md)
+tracks the `80d9a063` candidate's narrow scope, evidence limits and open gates.
 Approved roadmap: [`../plans/submodule-first-training-product-roadmap-plan.md`](../plans/submodule-first-training-product-roadmap-plan.md)
 
 This document is the authoritative product boundary and evidence matrix for the

@@ -4,7 +4,6 @@ import json
 import os
 import hashlib
 from contextlib import ExitStack
-from pathlib import Path
 
 import pytest
 
