@@ -1,6 +1,6 @@
 # Training progress chart feed
 
-Status: numeric contract and bounded log projection implemented; no live Modal chart feed is qualified. The existing training attempt must remain untouched. Modal advertises observe and artifact streaming, but not logs. Pending status and a trainer-start phase do not establish optimizer progress.
+Status: numeric contract, bounded log projection and optional local callback capture implemented; no live Modal chart feed is qualified. The existing training attempt must remain untouched. Modal advertises observe and artifact streaming, but not logs. Pending status and a trainer-start phase do not establish optimizer progress.
 
 This updates the plan retained at `fd2a4b14` against merged main `73a3ba2c`. The historical local-state callback no longer exists. Do not restore its assumptions or create a second telemetry schema.
 
@@ -45,6 +45,30 @@ Adding a kind to the closed v1 vocabulary is additive for current code, but an o
 The later capture/transport acceptance must additionally cover runs without checkpoint retention, configured sampling cadence, interrupted-stream recovery, complete UTF-8 bounded projection, authenticated multi-page reads and unchanged terminal artifact verification. Completion and writing quality remain separate from progress observations.
 
 ## Live bridge constraints found in source review
+
+The local `MetricsTableCallback(..., metric_sink=callable)` seam now forwards
+typed numeric snapshots at its configured training-log interval, independently
+of checkpoint saves. It is disabled by default and is not injected by the CLI
+or packaged child. The sink receives a payload, not a run identity or a generic
+log dictionary; a future bound adapter must provide sequence, UTC time and
+retained execution identity before using the projection.
+
+Capture is primary-rank-only and requires optimizer loss or learning-rate
+evidence, so evaluation-only logs are not charted as training steps. Training
+elapsed time is monotonic; the single-process sample-rate estimate subtracts
+the resumed initial step. Unavailable or invalid measurements stay null;
+whole-job time, token throughput and GPU utilization are not inferred. CUDA
+byte counters come directly from the active device. Optional capture/setup or
+sink failure disables only that sink with one fixed diagnostic, not an exception
+containing private values. Existing table/JSONL behavior remains unchanged.
+
+The user explicitly approved admitting the existing observation and timestamp
+contract modules to the offline trainer inventory, increasing it from 66 to
+68 members. The independent enumeration and hashes were updated; an isolated
+import test excludes site packages and the source checkout to verify this
+dependency closure. No package or image pin, trainer entrypoint, child transport
+contract or provider capability changed. This admission enables the local
+optional import; it does not qualify a remote metric feed.
 
 The current Modal producer finalizes one terminal log record at sequence zero
 and binds an immutable terminal chain digest. Its validator requires contiguous

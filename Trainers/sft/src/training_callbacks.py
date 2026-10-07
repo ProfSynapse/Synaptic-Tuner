@@ -9,7 +9,10 @@ paths. Shared lifecycle lives in `Trainers.shared.callbacks`.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
 
 # sys.path bootstrap is handled by Trainers/shared/callbacks/__init__.py.
 from Trainers.shared.callbacks import (
@@ -42,11 +45,14 @@ class MetricsTableCallback(BaseMetricsCallback):
         log_every_n_steps: int = 5,
         output_dir: str = "./sft_output",
         previous_log_entries: Optional[List[Dict[str, Any]]] = None,
+        *,
+        metric_sink: Callable[["TrainingMetricObservedPayloadV1"], None] | None = None,
     ):
         super().__init__(
             log_every_n_steps=log_every_n_steps,
             output_dir=output_dir,
             previous_log_entries=previous_log_entries,
+            metric_sink=metric_sink,
         )
         self.health_checker = SFTHealthChecker()
 
