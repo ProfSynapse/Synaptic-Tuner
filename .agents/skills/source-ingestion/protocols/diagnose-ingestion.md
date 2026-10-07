@@ -27,6 +27,12 @@ silently rewriting source material.
    absence, not malformed syntax. If source correction is appropriate, stop and
    obtain separate explicit authorization before editing the source; then create
    a fresh snapshot and plan.
+   The current CLI aggregates per-source failures and does not retain the failed
+   member or underlying parser code after its process exits. An aggregate code
+   alone cannot identify a note or establish malformed YAML as the cause. Use
+   separately authorized, bounded read-only source inspection to localize it;
+   do not replay ingestion solely to recover details, bypass the public lifecycle,
+   or guess a source repair from `parse_failed`.
 6. For `source_changed`, discard the stale plan and readmit the authorized
    selection. Do not pretend the old immutable snapshot still binds current
    bytes.

@@ -43,9 +43,13 @@ Each field has exactly:
 }
 ```
 
-Selector kinds are `document_body`, `logical_path`, and `frontmatter_field`.
-Only `frontmatter_field` has a non-null `key`. Value kinds are `string`,
-`boolean`, `int64`, `number`, `array`, and `object`; body and path are strings.
+Selector kinds are `document_body`, `document_text`, `logical_path`, and
+`frontmatter_field`. Only `frontmatter_field` has a non-null `key`.
+`document_text` maps the complete Markdown document after the existing UTF-8 BOM
+and line-ending normalization, including any valid YAML frontmatter. The parser
+still validates present frontmatter and exposes `document_body` and declared
+frontmatter fields independently. Value kinds are `string`, `boolean`, `int64`,
+`number`, `array`, and `object`; body, document text, and path are strings.
 
 Each text projection and metadata declaration has exactly `name` and
 `field_ref`; the reference must name a declared field. A text projection must
@@ -88,6 +92,7 @@ Validate every edited config with:
 python .skills/source-ingestion/scripts/validate_ingestion_config.py CONFIG
 ```
 
-The shipped template is the minimal proven body-plus-path recipe. Add
-frontmatter fields only when their keys and value kinds have been declared for
-the current intake.
+The shipped template is the minimal proven body-plus-path recipe. Add a
+`document_text` field and a text projection referencing its declared name when
+the full normalized Markdown is needed. Add frontmatter fields only when their
+keys and value kinds have been declared for the current intake.

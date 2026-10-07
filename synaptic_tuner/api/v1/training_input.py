@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import Enum
 from urllib.parse import urlsplit
 
+
 from ._contract import contract_digest
 
 
@@ -568,6 +569,87 @@ class TrainingArtifactRequirementsV1:
         return cls(value["required_kinds"], value["retain_checkpoints"])  # type: ignore[arg-type]
 
 
+@dataclass(frozen=True, slots=True)
+class TrainingContinuationInputV1:
+    """Parent artifact intent; the host must authenticate it through RunsAPI."""
+
+    schema_version: str
+    mode: str
+    parent_run_id: str
+    parent_project_ref: str
+    artifact_role: str
+    artifact_sha256: str
+    artifact_size_bytes: int
+    schedule_policy: str
+    schedule_transition_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if (type(self.schema_version) is not str or type(self.mode) is not str
+                or type(self.schedule_policy) is not str):
+            raise TypeError("continuation schema, mode and schedule policy must be exact strings")
+        if self.schema_version != "synaptic-training-continuation/v1":
+            raise ValueError("continuation schema is unsupported")
+        from ._contract import digest_text
+
+        for field in ("parent_run_id", "parent_project_ref", "artifact_role"):
+            object.__setattr__(self, field, _text(getattr(self, field), field, maximum_bytes=512))
+        object.__setattr__(self, "artifact_sha256", digest_text(
+            self.artifact_sha256, "artifact_sha256",
+        ))
+        object.__setattr__(self, "artifact_size_bytes", _exact_integer(
+            self.artifact_size_bytes, "artifact_size_bytes", minimum=1, maximum=2**63 - 1,
+        ))
+        if self.mode == "full_state_resume":
+            if self.artifact_role != "trainer_state" or self.schedule_policy not in {
+                "preserve", "explicit_extension",
+            }:
+                raise ValueError("full-state continuation requires trainer state and schedule policy")
+            if (self.schedule_policy == "explicit_extension") != (
+                self.schedule_transition_digest is not None
+            ):
+                raise ValueError("schedule extension requires an explicit transition digest")
+        elif self.mode == "adapter_warm_start":
+            if (self.artifact_role != "final_model" or self.schedule_policy != "reset"
+                    or self.schedule_transition_digest is not None):
+                raise ValueError("adapter warm-start requires final model and reset schedule")
+        else:
+            raise ValueError("continuation mode is unsupported")
+        if self.schedule_transition_digest is not None:
+            object.__setattr__(self, "schedule_transition_digest", digest_text(
+                self.schedule_transition_digest, "schedule_transition_digest",
+            ))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "mode": self.mode,
+            "parent_run": {"run_id": self.parent_run_id, "project_ref": self.parent_project_ref},
+            "artifact": {"role": self.artifact_role, "sha256": self.artifact_sha256,
+                         "size_bytes": self.artifact_size_bytes},
+            "schedule_policy": self.schedule_policy,
+            "schedule_transition_digest": self.schedule_transition_digest,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "TrainingContinuationInputV1":
+        value = _fields(value, frozenset({
+            "schema_version", "mode", "parent_run", "artifact",
+            "schedule_policy", "schedule_transition_digest",
+        }), "continuation")
+        if type(value["parent_run"]) is not dict or type(value["artifact"]) is not dict:
+            raise TypeError("continuation parent run and artifact must be objects")
+        parent = _fields(value["parent_run"], frozenset({"run_id", "project_ref"}),
+                         "continuation.parent_run")
+        artifact = _fields(value["artifact"], frozenset({"role", "sha256", "size_bytes"}),
+                           "continuation.artifact")
+        return cls(
+            value["schema_version"], value["mode"],  # type: ignore[arg-type]
+            parent["run_id"], parent["project_ref"],  # type: ignore[arg-type]
+            artifact["role"], artifact["sha256"], artifact["size_bytes"],  # type: ignore[arg-type]
+            value["schedule_policy"], value["schedule_transition_digest"],  # type: ignore[arg-type]
+        )
+
+
 class _DuplicateJSONKey(ValueError):
     pass
 
@@ -644,6 +726,7 @@ class TrainingInputV1:
     dataset: TrainingDatasetInputV1
     hyperparameters: SFTTrainingHyperparametersV1
     artifacts: TrainingArtifactRequirementsV1
+    continuation: TrainingContinuationInputV1 | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != _TRAINING_SCHEMA:
@@ -659,9 +742,11 @@ class TrainingInputV1:
         for value, expected_type, field in expected:
             if type(value) is not expected_type:
                 raise TypeError(f"{field} has an invalid exact type")
+        if self.continuation is not None and type(self.continuation) is not TrainingContinuationInputV1:
+            raise TypeError("continuation has an invalid exact type")
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "method": self.method.value,
             "model": self.model.to_dict(),
@@ -669,14 +754,18 @@ class TrainingInputV1:
             "hyperparameters": self.hyperparameters.to_dict(),
             "artifacts": self.artifacts.to_dict(),
         }
+        if self.continuation is not None:
+            result["continuation"] = self.continuation.to_dict()
+        return result
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> "TrainingInputV1":
+        supplied = frozenset(value) if type(value) is dict else frozenset()
         value = _fields(
             value,
             frozenset(
                 {"schema_version", "method", "model", "dataset", "hyperparameters", "artifacts"}
-            ),
+            ) | ({"continuation"} if "continuation" in supplied else set()),
             "training_input",
         )
         if value["schema_version"] != _TRAINING_SCHEMA:
@@ -689,6 +778,11 @@ class TrainingInputV1:
             if type(item) is not dict:
                 raise TypeError(f"{field} must be an object")
             nested[field] = item
+        continuation = value.get("continuation")
+        if "continuation" in supplied and continuation is None:
+            raise TypeError("continuation must be an object")
+        if continuation is not None and type(continuation) is not dict:
+            raise TypeError("continuation must be an object")
         return cls(
             schema_version=_TRAINING_SCHEMA,
             method=TrainingMethodV1.SFT,
@@ -698,6 +792,8 @@ class TrainingInputV1:
                 nested["hyperparameters"]
             ),
             artifacts=TrainingArtifactRequirementsV1.from_dict(nested["artifacts"]),
+            continuation=(TrainingContinuationInputV1.from_dict(continuation)
+                          if continuation is not None else None),
         )
 
     @classmethod
@@ -747,6 +843,7 @@ class TrainingInputV1:
 __all__ = [
     "SFTTrainingHyperparametersV1",
     "TrainingArtifactRequirementsV1",
+    "TrainingContinuationInputV1",
     "TrainingDatasetInputV1",
     "TrainingDurationV1",
     "TrainingInputV1",

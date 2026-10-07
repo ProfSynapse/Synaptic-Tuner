@@ -85,7 +85,7 @@ GLOB_REJECTED_SYNTAX = ("backslash", "colon", "control", "empty_segment", "dot_s
 MAX_FRONTMATTER_BYTES = 65_536
 MAX_YAML_DEPTH = 8
 MAX_YAML_NODES = 1_024
-MAX_YAML_MAPPING_ENTRIES = 128
+MAX_YAML_MAPPING_ENTRIES = 512
 MAX_YAML_SEQUENCE_ENTRIES = 256
 MAX_YAML_KEY_BYTES = 64
 MAX_YAML_SCALAR_BYTES = 4_096
@@ -276,6 +276,7 @@ class FrontmatterMode(str, Enum):
 
 class FieldSelectorKind(str, Enum):
     DOCUMENT_BODY = "document_body"
+    DOCUMENT_TEXT = "document_text"
     FRONTMATTER_FIELD = "frontmatter_field"
     LOGICAL_PATH = "logical_path"
 
@@ -549,8 +550,8 @@ class FieldMapping:
             raise TypeError("selector/value_kind have invalid types")
         object.__setattr__(self, "selector", FieldSelector.from_dict(self.selector.to_dict()))
         _bool(self.required, "required")
-        if self.selector.kind in {FieldSelectorKind.DOCUMENT_BODY, FieldSelectorKind.LOGICAL_PATH} and self.value_kind is not FieldValueKind.STRING:
-            raise ValueError("document_body and logical_path fields must be strings")
+        if self.selector.kind in {FieldSelectorKind.DOCUMENT_BODY, FieldSelectorKind.DOCUMENT_TEXT, FieldSelectorKind.LOGICAL_PATH} and self.value_kind is not FieldValueKind.STRING:
+            raise ValueError("document_body, document_text, and logical_path fields must be strings")
 
     def to_dict(self) -> dict[str, object]:
         return {"name": self.name, "selector": self.selector.to_dict(), "value_kind": self.value_kind.value, "required": self.required}

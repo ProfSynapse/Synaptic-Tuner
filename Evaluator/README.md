@@ -23,6 +23,29 @@ python tuner.py --help
 python -m Evaluator.cli --help
 ```
 
+### Inference configuration and private traces
+
+Explicit CLI generation flags override explicit `model.inference` values in
+`eval_run.yaml`; `run.model.inference` remains supported and overrides matching
+top-level keys. Omitted settings retain the CLI defaults (temperature omitted,
+top_p 0.9, max_tokens 1024, seed omitted). Explicit YAML values are now honored:
+the checked-in config requests temperature 0.7, max_tokens 2048, and seed 42,
+which older CLI versions ignored.
+
+For vLLM, `max_tokens: null` omits the request-level output ceiling; context,
+timeout, and transport limits still apply. Configure `chat_template_kwargs`
+(for example `{enable_thinking: false}`), `presence_penalty`, `top_k`, `min_p`,
+and `repetition_penalty` under the same inference mapping. These optional
+controls use the existing vLLM validation and are not silently applied to other
+backends. Results and lineage record resolved settings.
+
+`--private-trace-json PATH` optionally writes a separate, create-only local
+trace containing the raw provider response (including reasoning, finish reason,
+and usage when supplied) and conversation trace. Choose a private host-owned
+directory. The trace is not included in public JSON, Markdown, or HF uploads;
+existing files and public-output path collisions are rejected. Without the
+flag, no private trace file is written.
+
 ## Architecture
 
 ```

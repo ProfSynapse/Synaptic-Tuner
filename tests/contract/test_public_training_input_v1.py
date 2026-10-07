@@ -18,6 +18,7 @@ import pytest
 from synaptic_tuner.api.v1.training_input import (
     SFTTrainingHyperparametersV1,
     TrainingArtifactRequirementsV1,
+    TrainingContinuationInputV1,
     TrainingDatasetInputV1,
     TrainingDurationV1,
     TrainingInputV1,
@@ -30,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_NAMES = [
     "SFTTrainingHyperparametersV1",
     "TrainingArtifactRequirementsV1",
+    "TrainingContinuationInputV1",
     "TrainingDatasetInputV1",
     "TrainingDurationV1",
     "TrainingInputV1",

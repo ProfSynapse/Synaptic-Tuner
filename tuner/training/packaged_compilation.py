@@ -20,7 +20,8 @@ import re
 
 from synaptic_tuner.api.v1._contract import PreparedTrainingInputIdentity
 from synaptic_tuner.api.v1.training_input import (
-    SFTTrainingHyperparametersV1, TrainingModelInputV1,
+    SFTTrainingHyperparametersV1, TrainingContinuationInputV1,
+    TrainingModelInputV1,
 )
 from .contracts import ArtifactPolicy, CanonicalDocument
 from .recipes import CompiledWorkload, canonical_json_bytes, selected_execution_mode
@@ -67,10 +68,11 @@ def _validated_config(config: CanonicalDocument):
     if type(config) is not CanonicalDocument:
         raise TypeError("exact resolved configuration required")
     value = config.to_dict()
-    if type(value) is not dict or set(value) not in (
-        _CONFIG_FIELDS, _CONFIG_FIELDS | {"post_training"},
-    ):
+    if type(value) is not dict or set(value) - (_CONFIG_FIELDS | {"post_training", "continuation"}) or not _CONFIG_FIELDS.issubset(value):
         raise ValueError("packaged configuration has missing or unknown fields")
+    if "continuation" in value:
+        TrainingContinuationInputV1.from_dict(value["continuation"])
+        raise ValueError("packaged continuation execution unavailable: verified transfer and trainer restoration required")
     if "post_training" in value:
         from .post_training import validate_post_training_config
 

@@ -6,16 +6,21 @@ model:
   tokenizer_revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
   local_tokenizer_path: /replace/with/local/snapshots/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
 runtime:
-  provider: modal
-  lock_path: tuner/execution/providers/modal/modal-runtime-v1.lock.json
-  expected_lock_sha256: 9d1f651e9d7adf06061d71e7d55b86b848f7f526eea790be178494956dc2ccf5
+  kind: named_profile
+  name: qwen35-sft-v1
+  profiles_dir: Trainers/runtime_profiles
+  expected_profile_sha256: ed59de9a7a5b5b1ee90694660ecad60823c7b839eb7bca79df62e784c85be157
+  expected_inventory_sha256: ecf4d0a27e5455b946237bf97790cba308765c2e5cf538e560e0de4c372f88e3
 input:
   jsonl_path: /replace/with/private/prepared-dataset.jsonl
-  mode: text
-  text_field: text
+  mode: messages
+  messages_field: messages
+  prompt_render: prompt_completion
+  chat_template_kwargs:
+    enable_thinking: false
 budgets:
   # Run separate immutable profiles for each candidate sequence budget.
-  max_sequence_tokens: 2048
+  max_sequence_tokens: 32768
   completion_reserve_tokens: 0
 limits:
   max_input_bytes: 1073741824

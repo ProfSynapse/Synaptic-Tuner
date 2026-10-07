@@ -110,21 +110,226 @@ def _profile(tmp_path, monkeypatch, rows=None, mode="text"):
     return module, result, calls
 
 
-def test_checked_in_qwen_example_matches_current_profiler_contract():
+
+
+
+
+class ScaffoldTokenizer:
+    chat_template = "different scaffold"
+    eos_token_id = 999
+    def encode(self, text, add_special_tokens=False):
+        return list(range(len(text.split())))
+    def apply_chat_template(self, messages, tokenize=True, add_generation_prompt=False, **kwargs):
+        assert kwargs.get("enable_thinking") is False or not kwargs
+        text = " ".join(m["content"] for m in messages) + (" anchor disabled" if add_generation_prompt else " full closing scaffold extra")
+        return self.encode(text) if tokenize else text
+
+
+def test_exact_real_materializer_budget_privacy_and_verification(tmp_path, monkeypatch):
+    from shared.sft_preprocessing import materialize_sft_example
+    module = _load_module()
+    row = {"schema_version": "syntunia-sft-row/v2", "format": "messages", "split": "train", "messages": [{"role": "user", "content": "private prompt"}, {"role": "assistant", "content": "private target"}]}
+    config = _config(_snapshot(tmp_path / "snapshot"), _jsonl(tmp_path / "rows.jsonl", [row]), mode="messages")
+    config["input"].update(prompt_render="prompt_completion", chat_template_kwargs={"enable_thinking": False, "private_setting": "private literal"})
+    tokenizer = ScaffoldTokenizer()
+    _install_fake_transformers(monkeypatch)
+    def load(path, **kwargs):
+        tokenizer.name_or_path = path
+        return tokenizer
+    monkeypatch.setattr(sys.modules["transformers"].AutoTokenizer, "from_pretrained", load)
+    config["budgets"] = {"max_sequence_tokens": 2, "completion_reserve_tokens": 0}
+    result = module.profile(config)
+    actual = materialize_sft_example(tokenizer=tokenizer, record=row, max_seq_length=1000, assistant_only_loss=True, prompt_render="prompt_completion", chat_template_kwargs=config["input"]["chat_template_kwargs"])
+    assert result["total"]["max"] == len(actual.input_ids) == 7
+    assert actual.input_ids[-1] == tokenizer.eos_token_id
+    assert result["total"]["max"] != len(tokenizer.apply_chat_template(row["messages"]))
+    assert result["budget"]["over_limit_count"] == 1
+    assert result["components"]["assistant"]["max"] == 2
+    assert all(secret not in json.dumps(result) for secret in ("private prompt", "private target", "private literal", str(tmp_path)))
+    published = module.publish_profile(result, tmp_path / "exact")
+    module.verify_profile_directory(tmp_path / "exact.token-profile", published["profile_id"])
+    tampered = copy.deepcopy(result)
+    tampered["config_provenance"]["rendering"]["helper_source_sha256"] = "0" * 64
+    with pytest.raises(module.ProfilerError, match="PROFILE_ARTIFACT_INVALID"):
+        module._validate_profile_shape(tampered)
+    tampered = copy.deepcopy(result)
+    tampered["config_provenance"]["rendering"]["chat_template_kwargs_sha256"] = "0" * 64
+    assert module._compute_profile_id(tampered) != result["profile_semantic_id"]
+    normalized = module.validate_config(config)
+    with pytest.raises(module.ProfilerError, match="TOKEN_LIMIT_EXCEEDED"):
+        module._row_counts(tokenizer, row, normalized["input"], dict(normalized["limits"], max_tokens_per_record=5))
+    row["split"] = "invalid"
+    with pytest.raises(module.ProfilerError, match="CHAT_TEMPLATE_RENDER_FAILED"):
+        module._row_counts(tokenizer, row, normalized["input"], normalized["limits"])
+    row["split"] = "train"
+    tokenizer.eos_token_id = None
+    with pytest.raises(module.ProfilerError, match="CHAT_TEMPLATE_RENDER_FAILED"):
+        module._row_counts(tokenizer, row, normalized["input"], normalized["limits"])
+    monkeypatch.setattr(module, "SFT_HELPER_SHA256", "0" * 64)
+    with pytest.raises(module.ProfilerError, match="SFT_HELPER_SOURCE_MISMATCH"):
+        module._sft_materializer()
+
+
+@pytest.mark.parametrize("kwargs", [{"tokenize": False}, {"truncation": True}, {"bad-key": True}, {"x": float("nan")}, {"x": "a" * 4097}, {"x": object()}, {"x": [[[[[False]]]]]}])
+def test_exact_bounded_kwargs(kwargs):
+    module = _load_module()
+    with pytest.raises(module.ProfilerError, match="INVALID_CHAT_TEMPLATE_KWARGS"):
+        module._template_kwargs(kwargs)
+
+
+def test_legacy_profile_keeps_identity_shape(tmp_path, monkeypatch):
+    module, result, _ = _profile(tmp_path, monkeypatch)
+    assert set(result["config_provenance"]) == {"semantic_config_sha256", "component_label_max_chars"}
+    config = _config(tmp_path / "snapshot", tmp_path / "data.jsonl", mode="messages")
+    assert module.validate_config(config)["input"] == config["input"]
+
+
+def test_exact_render_rejects_alternate_messages_field(tmp_path):
+    module = _load_module()
+    config = _config(tmp_path / "snapshot", tmp_path / "rows.jsonl", mode="messages")
+    config["input"].update(prompt_render="prompt_completion", messages_field="alternate_messages")
+    with pytest.raises(module.ProfilerError, match="INVALID_INPUT_CONFIG"):
+        module.validate_config(config)
+    config["input"].pop("prompt_render")
+    assert module.validate_config(config)["input"]["messages_field"] == "alternate_messages"
+
+
+def _named_config(tmp_path, inventory_change=None):
+    directory = tmp_path / "profiles"
+    directory.mkdir()
+    versions = {"tokenizers": "0.23.2", "torch": "2.0", "transformers": "5.17.0", "trl": "1.0", "unsloth": "1.0", "unsloth-zoo": "1.0"}
+    image = "example/runtime@sha256:" + "b" * 64
+    inventory = {"schema_version": "syntunia-python-distribution-inventory/v1", "image": image, "distributions": [{"name": name, "version": version} for name, version in sorted(versions.items())], "runtime": {"python_implementation": "CPython", "python_version": ".".join(map(str, sys.version_info[:3])), "transformers_version": versions["transformers"], "torch_version": versions["torch"], "trl_version": versions["trl"], "unsloth_version": versions["unsloth"], "unsloth_zoo_version": versions["unsloth-zoo"]}}
+    if inventory_change:
+        inventory_change(inventory)
+    raw = json.dumps(inventory).encode()
+    (directory / "inventory.json").write_bytes(raw)
+    inventory_sha = hashlib.sha256(raw).hexdigest()
+    profile = {"schema_version": "syntunia-runtime-profile/v1", "name": "test-runtime", "compatibility": {"models": [{"name": "acme/test-model", "revisions": ["a" * 40]}], "methods": ["sft"]}, "runtime": {"image": image, "inventory": {"path": "inventory.json", "sha256": "sha256:" + inventory_sha}}}
+    raw = json.dumps(profile).encode()
+    (directory / "test-runtime.yaml").write_bytes(raw)
+    config = _config(_snapshot(tmp_path / "snapshot"), _jsonl(tmp_path / "rows.jsonl", [{"secret": "private text"}]))
+    config["runtime"] = {"kind": "named_profile", "name": "test-runtime", "profiles_dir": str(directory), "expected_profile_sha256": hashlib.sha256(raw).hexdigest(), "expected_inventory_sha256": inventory_sha}
+    return config
+
+
+def _named_transformers(monkeypatch):
+    calls = _install_fake_transformers(monkeypatch)
+    sys.modules["transformers"].__version__ = "5.17.0"
+    tokenizers = types.ModuleType("tokenizers")
+    tokenizers.__version__ = "0.23.2"
+    monkeypatch.setitem(sys.modules, "tokenizers", tokenizers)
+    return calls
+
+
+def test_named_profile_versions_binding_privacy_and_tamper(tmp_path, monkeypatch):
+    module = _load_module()
+    config = _named_config(tmp_path)
+    calls = _named_transformers(monkeypatch)
+    result = module.profile(config)
+    assert len(calls) == 1
+    assert result["runtime"]["tokenizers_version"] == "0.23.2"
+    assert result["runtime"]["admitted_model"] == {"ref": "acme/test-model", "model_revision": "a" * 40, "method": "sft"}
+    assert "private text" not in json.dumps(result) and str(tmp_path) not in json.dumps(result)
+    module.publish_profile(result, tmp_path / "named")
+    module.verify_profile_directory(tmp_path / "named.token-profile", result["profile_semantic_id"])
+    for key, value in (("name", "another"), ("profile_sha256", "0" * 64), ("inventory_sha256", "0" * 64), ("admitted_model", {"ref": "acme/other", "model_revision": "a" * 40, "method": "sft"})):
+        changed = copy.deepcopy(result)
+        changed["runtime"][key] = value
+        with pytest.raises(module.ProfilerError, match="PROFILE_ARTIFACT_INVALID"):
+            module._validate_profile_shape(changed)
+    moved = copy.deepcopy(config)
+    moved["runtime"]["profiles_dir"] = "another-private-path"
+    assert module._semantic_config(module.validate_config(moved), result["runtime"]) == module._semantic_config(module.validate_config(config), result["runtime"])
+
+
+@pytest.mark.parametrize("package,version,code", [("transformers", "5.16.0", "TRANSFORMERS_VERSION_MISMATCH"), ("tokenizers", "0.22.2", "TOKENIZERS_VERSION_MISMATCH")])
+def test_named_package_drift_fails_before_load(tmp_path, monkeypatch, package, version, code):
+    module = _load_module()
+    config = _named_config(tmp_path)
+    calls = _named_transformers(monkeypatch)
+    sys.modules[package].__version__ = version
+    with pytest.raises(module.ProfilerError, match=code):
+        module.profile(config)
+    assert not calls
+
+
+@pytest.mark.parametrize("mutation", ["profile_digest", "inventory_digest", "model", "revision", "prefixed_digest", "extra_key"])
+def test_named_admission_rejects_wrong_binding(tmp_path, mutation):
+    module = _load_module()
+    config = _named_config(tmp_path)
+    if mutation == "profile_digest":
+        config["runtime"]["expected_profile_sha256"] = "0" * 64
+    elif mutation == "inventory_digest":
+        config["runtime"]["expected_inventory_sha256"] = "0" * 64
+    elif mutation == "model":
+        config["model"]["ref"] = "acme/other"
+    elif mutation == "revision":
+        config["model"]["model_revision"] = "b" * 40
+    elif mutation == "prefixed_digest":
+        config["runtime"]["expected_profile_sha256"] = "sha256:" + "0" * 64
+    else:
+        config["runtime"]["lock_path"] = "private-path"
+    with pytest.raises(module.ProfilerError):
+        module._load_named_runtime(module.validate_config(config))
+
+
+@pytest.mark.parametrize("mutation", ["missing_tokenizers", "duplicate_distribution", "wrong_runtime_fact", "wrong_image", "python_version"])
+def test_named_inventory_failures(tmp_path, monkeypatch, mutation):
+    module = _load_module()
+    def change(inventory):
+        if mutation == "missing_tokenizers":
+            inventory["distributions"] = [row for row in inventory["distributions"] if row["name"] != "tokenizers"]
+        elif mutation == "duplicate_distribution":
+            inventory["distributions"].append(inventory["distributions"][0])
+        elif mutation == "wrong_runtime_fact":
+            inventory["runtime"]["transformers_version"] = "0.0"
+        elif mutation == "wrong_image":
+            inventory["image"] = "other/runtime@sha256:" + "c" * 64
+        else:
+            inventory["runtime"]["python_version"] = "0.0.0"
+    config = _named_config(tmp_path, change)
+    calls = _named_transformers(monkeypatch)
+    with pytest.raises(module.ProfilerError):
+        module.profile(config)
+    assert not calls
+
+
+def test_named_authenticated_inventory_reread_rejects_race(tmp_path, monkeypatch):
+    module = _load_module()
+    config = _named_config(tmp_path)
+    real_read = module._stable_read_file
+    def changed_read(path, maximum, code):
+        if path.name == "inventory.json":
+            return b"{}", None
+        return real_read(path, maximum, code)
+    monkeypatch.setattr(module, "_stable_read_file", changed_read)
+    with pytest.raises(module.ProfilerError, match="RUNTIME_PROFILE_DIGEST_MISMATCH"):
+        module._load_named_runtime(config)
+
+
+def test_checked_in_qwen_example_matches_named_profiler_contract():
     module = _load_module()
     config = module.validate_config(module.load_config(EXAMPLE_CONFIG))
 
     assert config["model"]["ref"] == "Qwen/Qwen3.5-4B"
     assert config["input"] == {
         "jsonl_path": "/replace/with/private/prepared-dataset.jsonl",
-        "mode": "text",
-        "text_field": "text",
+        "mode": "messages",
+        "messages_field": "messages",
+        "use_chat_template": True,
+        "add_generation_prompt": False,
+        "prompt_render": "prompt_completion",
+        "chat_template_kwargs": {"enable_thinking": False},
     }
-    assert config["runtime"] == {
-        "provider": "modal",
-        "lock_path": "tuner/execution/providers/modal/modal-runtime-v1.lock.json",
-        "expected_lock_sha256": LOCK_SHA,
-    }
+    from tuner.runtime_profiles import load_runtime_profile
+    actual = load_runtime_profile("qwen35-sft-v1", Path("Trainers/runtime_profiles")).resolve(model=config["model"]["ref"], model_revision=config["model"]["model_revision"], method="sft")
+    assert config["runtime"] == {"kind": "named_profile", "name": actual.name, "profiles_dir": "Trainers/runtime_profiles", "expected_profile_sha256": actual.profile_sha256.removeprefix("sha256:"), "expected_inventory_sha256": actual.inventory_sha256.removeprefix("sha256:")}
+    assert config["budgets"] == {"max_sequence_tokens": 32768, "completion_reserve_tokens": 0}
+    evidence = module._load_named_runtime(config)
+    assert evidence["transformers_version"] == "5.17.0"
+    assert evidence["tokenizers_version"] == "0.23.2"
+    assert evidence["image"] == actual.image
 
 
 def test_profile_binds_modal_lock_capsule_offline_and_exact_histograms(tmp_path, monkeypatch):

@@ -38,6 +38,8 @@ except ImportError:
 from .cli_utils import (
     build_metadata,
     build_settings_kwargs,
+    resolve_inference_settings,
+    resolved_inference_metadata,
     default_output_path,
     determine_exit_code,
 )
@@ -55,6 +57,7 @@ from .reporting import (
     console_summary,
     render_markdown,
     write_json,
+    write_private_trace,
     build_evaluation_lineage,
     generate_evaluation_model_card_section,
 )
@@ -381,12 +384,12 @@ Backend Configuration:
     parser.add_argument(
         "--temperature",
         type=float,
-        default=None,
+        default=argparse.SUPPRESS,
         help="Sampling temperature. Omitted from the request when not set "
         "(required for gpt-5-family reasoning models, which reject temperature).",
     )
-    parser.add_argument("--top-p", type=float, default=0.9)
-    parser.add_argument("--max-tokens", type=int, default=1024)
+    parser.add_argument("--top-p", type=float, default=argparse.SUPPRESS)
+    parser.add_argument("--max-tokens", type=int, default=argparse.SUPPRESS)
     parser.add_argument(
         "--reasoning-effort",
         choices=["minimal", "low", "medium", "high"],
@@ -394,7 +397,7 @@ Backend Configuration:
         help="gpt-5-family reasoning effort (default: minimal). minimal frees the "
         "max-tokens budget for output text; only applies to gpt-5 backends.",
     )
-    parser.add_argument("--seed", type=int, help="Optional generation seed")
+    parser.add_argument("--seed", type=int, default=argparse.SUPPRESS, help="Optional generation seed")
     parser.add_argument("--host", help="Override backend host (OLLAMA_HOST or LMSTUDIO_HOST)")
     parser.add_argument("--port", type=int, help="Override backend port (OLLAMA_PORT or LMSTUDIO_PORT)")
     parser.add_argument("--mlc-port", type=int, default=8000, help="Port for MLC/WebLLM HTTP server (default: 8000)")
@@ -402,6 +405,7 @@ Backend Configuration:
     parser.add_argument("--retries", type=int, default=2, help="HTTP retry attempts")
     parser.add_argument("--timeout", type=float, default=60.0, help="Request timeout (seconds)")
     parser.add_argument("--output", help="Where to write JSON results (defaults to Evaluator/results/run_<ts>.json)")
+    parser.add_argument("--private-trace-json", help="Opt-in private raw provider trace file (create-only; not uploaded)")
     parser.add_argument("--markdown", help="Optional Markdown summary output path")
     parser.add_argument("--dry-run", action="store_true", help="Skip backend calls (for smoke tests)")
     parser.add_argument(
@@ -630,6 +634,16 @@ def main(
     partial_output_path = resolve_path(args.partial_output_json, context, from_cli=True, access="write") if args.partial_output_json else None
     partial_markdown_path = resolve_path(args.partial_markdown, context, from_cli=True, access="write") if args.partial_markdown else None
     failure_path = resolve_path(args.failure_json, context, from_cli=True, access="write") if args.failure_json else None
+    private_trace_path = resolve_path(args.private_trace_json, context, from_cli=True, access="write") if args.private_trace_json else None
+    if private_trace_path is not None:
+        public_paths = [output_path, markdown_path, partial_output_path, partial_markdown_path, failure_path]
+        for value in (args.lineage, args.progress_jsonl):
+            if value:
+                public_paths.append(resolve_path(value, context, from_cli=True, access="write"))
+        if private_trace_path.resolve() in {path.resolve() for path in public_paths if path is not None}:
+            raise ValueError("private trace must be separate from public output paths")
+        if private_trace_path.exists() or private_trace_path.is_symlink():
+            raise FileExistsError("private trace path already exists")
     partial_write_every = max(1, int(args.partial_write_every or 5))
     if args.config_dir == "Evaluator/config":
         host_config = (
@@ -701,10 +715,7 @@ def main(
     settings = create_settings(
         backend=args.backend,
         model=args.model,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        max_tokens=args.max_tokens,
-        seed=args.seed,
+        **resolve_inference_settings(args, run_config),
         reasoning_effort=args.reasoning_effort,
         **settings_kwargs,
     )
@@ -1023,6 +1034,8 @@ def main(
     metadata = build_current_metadata()
     payload = build_run_payload(records, metadata=metadata)
     write_json(config.output_path, payload)
+    if private_trace_path is not None:
+        write_private_trace(private_trace_path, records)
     print(f"Results saved to {config.output_path}")
     if markdown_path:
         print(f"Markdown summary saved to {markdown_path}")
@@ -1056,10 +1069,7 @@ def main(
     model_card_section = None
     if args.lineage or args.upload_to_hf:
         eval_config = {
-            "temperature": args.temperature,
-            "top_p": args.top_p,
-            "max_tokens": args.max_tokens,
-            "seed": args.seed,
+            **resolved_inference_metadata(settings),
             "backend": args.backend,
         }
 

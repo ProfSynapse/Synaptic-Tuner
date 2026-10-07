@@ -30,14 +30,29 @@ configuration and compiled workload. Admission at an inner boundary does not
 promise admission at every enclosing boundary. Reject oversize input before
 submission; never truncate prompts or silently select smaller examples.
 
-## Unchanged serving limits
+## Serving and retained-response limits
 
-The same-job client retains a 1 MiB HTTP request bound, 1 MiB HTTP response bound,
-and 64 KiB retained per-case response bound. `max_tokens: null` still omits the
-request-level output token ceiling; it does not remove context, time, transport
-or artifact bounds. Scheduler concurrency remains configured through the existing
-evaluation and vLLM settings. This patch does not qualify any GPU's long-context
-serving capacity or assess writing quality.
+The same-job client has a 1 MiB HTTP request bound and a 1 MiB HTTP response bound.
+The response-retention correction aligns the per-case UTF-8 text bound with that
+same 1 MiB response budget. HTTP JSON overhead still counts; a text payload at
+the bound is not a promise that its larger HTTP envelope fits. The signed
+evaluation document keeps its separate 16 MiB aggregate bound. Publication and
+authenticated readback must use that evaluation-specific canonical serializer,
+not the 1 MiB workload-document serializer; workload/configuration limits are
+unchanged. No text is truncated to satisfy these boundaries.
+
+`max_tokens: null` omits the request-level output token ceiling; it does not
+remove context, time, transport or artifact bounds. Scheduler concurrency remains
+configured through the existing evaluation and vLLM settings. Mechanical
+nonempty/natural-completion checks do not assess writing quality.
+
+The measured failure behind this correction was a response accepted by the HTTP
+client and then discarded by the old 64 KiB recorder bound. Raising the recorder
+bound cannot recover that discarded historical text. The regression contract
+covers >64 KiB Unicode responses, exact/one-byte-over response and aggregate
+bounds, larger signed publication/readback, and unchanged canonical bytes for
+legacy-sized records. This is a provider-free correction, not a live serving
+qualification or permission to replay a consumed training attempt.
 
 ## Verification and release
 

@@ -39,14 +39,21 @@ normalize to JSON null; quoted null-like text remains a string. Strict CLI
 schema v2 binds this profile. A top-level frontmatter field whose value is null
 still cannot satisfy a non-null declared field kind.
 
-Both profiles preserve the same depth, node, mapping, sequence, key, scalar,
-and 64 KiB frontmatter bounds. Ambiguous or unsafe YAML features fail closed
+Both profiles share a 512-entry aggregate mapping bound across the entire
+frontmatter document, including nested mappings. Independent bounds remain:
+depth 8, 1024 nodes, 256 aggregate sequence entries, 64 UTF-8 bytes per key,
+4096 UTF-8 bytes per scalar, and 64 KiB frontmatter. Every bound applies, so
+meeting the mapping bound alone does not establish admission. Ambiguous or unsafe YAML features fail closed
 rather than being guessed or executed. Declared field types must match parsed
 values.
 
 Frontmatter keys are not automatically metadata. A key becomes an output field
 only through a `frontmatter_field` mapping, and becomes metadata only through an
 additional metadata declaration. This preserves declared semantic authority.
+
+The optional `document_text` selector exposes the full normalized Markdown,
+including valid frontmatter, as a string field. It does not bypass frontmatter
+validation or alter the independent body and frontmatter mappings.
 
 ## Failure rule
 

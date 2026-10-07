@@ -100,10 +100,16 @@ def create_settings(
     port: Optional[int] = None,
     temperature: Optional[float] = None,
     top_p: float = 0.9,
-    max_tokens: int = 1024,
+    max_tokens: Optional[int] = 1024,
     thinking_effort: Optional[str] = None,
     seed: Optional[int] = None,
     reasoning_effort: Optional[str] = None,
+    *,
+    chat_template_kwargs: Optional[dict[str, object]] = None,
+    presence_penalty: Optional[float] = None,
+    top_k: Optional[int] = None,
+    min_p: Optional[float] = None,
+    repetition_penalty: Optional[float] = None,
 ) -> BackendSettings:
     """Create backend settings for the specified backend type.
 
@@ -168,6 +174,17 @@ def create_settings(
     effective_effort = thinking_effort if thinking_effort is not None else reasoning_effort
     if backend in {BackendType.OPENROUTER, BackendType.OPENAI_RESPONSES}:
         kwargs["thinking_effort"] = effective_effort
+    vllm_options = {
+        "chat_template_kwargs": chat_template_kwargs,
+        "presence_penalty": presence_penalty,
+        "top_k": top_k,
+        "min_p": min_p,
+        "repetition_penalty": repetition_penalty,
+    }
+    if backend == BackendType.VLLM:
+        kwargs.update(vllm_options)
+    elif any(value is not None for value in vllm_options.values()):
+        raise ValueError("configured template/decode controls require the vllm backend")
     if host is not None:
         kwargs["host"] = host
     if port is not None:

@@ -17,6 +17,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import types
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,8 @@ from typing import Any, BinaryIO, Iterator
 PROFILE_SCHEMA = "syntunia-token-profile/v1"
 MANIFEST_SCHEMA = "syntunia-token-profile-manifest/v1"
 CLOSURE_ALGORITHM = "tokenizer-load-closure/1"
+SFT_HELPER_SHA256 = "2c58ecd13be29344f5896afcbb8d0b66c9acf25bcb18600d2907d991b4ec056b"
+SFT_HELPER_IMPLEMENTATION = "shared.sft_preprocessing.materialize_sft_example"
 MESSAGE_ROLE_BUCKETS = ("system", "developer", "user", "assistant", "tool")
 PROFILE_FILENAMES = ("manifest.json", "profile.json", "profile.csv")
 TOKENIZER_REQUIRED_FILES = frozenset({"tokenizer.json", "tokenizer_config.json"})
@@ -501,13 +504,19 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     model = {"ref": model_ref, "model_revision": _immutable_revision(source_model["model_revision"]), "tokenizer_revision": _immutable_revision(source_model["tokenizer_revision"]), "local_tokenizer_path": local_path}
 
     source_runtime = _require_mapping(config["runtime"], "INVALID_RUNTIME_CONFIG")
-    _require_exact_keys(source_runtime, {"provider", "lock_path", "expected_lock_sha256"}, "INVALID_RUNTIME_CONFIG")
-    if source_runtime["provider"] != "modal" or not isinstance(source_runtime["lock_path"], str) or not source_runtime["lock_path"]:
-        raise ProfilerError("INVALID_RUNTIME_CONFIG")
-    runtime = {"provider": "modal", "lock_path": source_runtime["lock_path"], "expected_lock_sha256": _digest(source_runtime["expected_lock_sha256"], "INVALID_RUNTIME_CONFIG")}
+    if source_runtime.get("kind") == "named_profile":
+        _require_exact_keys(source_runtime, {"kind", "name", "profiles_dir", "expected_profile_sha256", "expected_inventory_sha256"}, "INVALID_RUNTIME_CONFIG")
+        if not isinstance(source_runtime["name"], str) or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?", source_runtime["name"]) or not isinstance(source_runtime["profiles_dir"], str) or not source_runtime["profiles_dir"]:
+            raise ProfilerError("INVALID_RUNTIME_CONFIG")
+        runtime = {"kind": "named_profile", "name": source_runtime["name"], "profiles_dir": source_runtime["profiles_dir"], "expected_profile_sha256": _digest(source_runtime["expected_profile_sha256"], "INVALID_RUNTIME_CONFIG"), "expected_inventory_sha256": _digest(source_runtime["expected_inventory_sha256"], "INVALID_RUNTIME_CONFIG")}
+    else:
+        _require_exact_keys(source_runtime, {"provider", "lock_path", "expected_lock_sha256"}, "INVALID_RUNTIME_CONFIG")
+        if source_runtime["provider"] != "modal" or not isinstance(source_runtime["lock_path"], str) or not source_runtime["lock_path"]:
+            raise ProfilerError("INVALID_RUNTIME_CONFIG")
+        runtime = {"provider": "modal", "lock_path": source_runtime["lock_path"], "expected_lock_sha256": _digest(source_runtime["expected_lock_sha256"], "INVALID_RUNTIME_CONFIG")}
 
     source_input = _require_mapping(config["input"], "INVALID_INPUT_CONFIG")
-    allowed_input = {"jsonl_path", "mode", "text_field", "messages_field", "components", "use_chat_template", "add_generation_prompt"}
+    allowed_input = {"jsonl_path", "mode", "text_field", "messages_field", "components", "use_chat_template", "add_generation_prompt", "prompt_render", "chat_template_kwargs"}
     if set(source_input) - allowed_input:
         raise ProfilerError("INVALID_INPUT_CONFIG")
     jsonl_path, mode = source_input.get("jsonl_path"), source_input.get("mode")
@@ -522,13 +531,17 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
             raise ProfilerError("INVALID_INPUT_CONFIG")
         input_config["text_field"] = field
     elif mode == "messages":
-        if set(source_input) - {"jsonl_path", "mode", "messages_field", "use_chat_template", "add_generation_prompt"}:
+        if set(source_input) - {"jsonl_path", "mode", "messages_field", "use_chat_template", "add_generation_prompt", "prompt_render", "chat_template_kwargs"}:
             raise ProfilerError("INVALID_INPUT_CONFIG")
         field = source_input.get("messages_field", "messages")
         use_template, add_prompt = source_input.get("use_chat_template", True), source_input.get("add_generation_prompt", False)
         if not isinstance(field, str) or not field or use_template is not True or not isinstance(add_prompt, bool):
             raise ProfilerError("INVALID_INPUT_CONFIG")
         input_config.update(messages_field=field, use_chat_template=True, add_generation_prompt=add_prompt)
+        if "prompt_render" in source_input or "chat_template_kwargs" in source_input:
+            if source_input.get("prompt_render") != "prompt_completion" or add_prompt or field != "messages":
+                raise ProfilerError("INVALID_INPUT_CONFIG")
+            input_config.update(prompt_render="prompt_completion", chat_template_kwargs=_template_kwargs(source_input.get("chat_template_kwargs", {})))
     else:
         if set(source_input) != {"jsonl_path", "mode", "components"}:
             raise ProfilerError("INVALID_INPUT_CONFIG")
@@ -571,6 +584,59 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     return {"model": model, "runtime": runtime, "input": input_config, "budgets": budgets, "limits": limits}
 
 
+def _template_kwargs(value: Any) -> dict[str, Any]:
+    mapping = _require_mapping(value, "INVALID_CHAT_TEMPLATE_KWARGS")
+    reserved = {"tokenize", "add_generation_prompt", "conversation", "messages", "return_dict", "return_tensors", "padding", "truncation", "max_length", "continue_final_message", "return_assistant_tokens_mask", "chat_template"}
+    if len(mapping) > 32 or any(not isinstance(key, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", key) or key in reserved for key in mapping):
+        raise ProfilerError("INVALID_CHAT_TEMPLATE_KWARGS")
+    def check(item: Any, depth: int = 0) -> None:
+        if depth > 4:
+            raise ProfilerError("INVALID_CHAT_TEMPLATE_KWARGS")
+        if item is None or isinstance(item, (str, bool)):
+            return
+        if type(item) in (int, float) and math.isfinite(item):
+            return
+        if isinstance(item, list) and len(item) <= 64:
+            for child in item:
+                check(child, depth + 1)
+            return
+        if isinstance(item, dict) and len(item) <= 32 and all(isinstance(key, str) for key in item):
+            for child in item.values():
+                check(child, depth + 1)
+            return
+        raise ProfilerError("INVALID_CHAT_TEMPLATE_KWARGS")
+    try:
+        check(mapping)
+        encoded = _canonical_json(mapping).encode("utf-8")
+        if len(encoded) > 4096:
+            raise ProfilerError("INVALID_CHAT_TEMPLATE_KWARGS")
+        return json.loads(encoded)
+    except (TypeError, ValueError, OverflowError, RecursionError) as error:
+        raise ProfilerError("INVALID_CHAT_TEMPLATE_KWARGS") from error
+
+
+def _sft_materializer() -> Any:
+    # Execute only reviewed bytes, rather than importing a potentially shadowed
+    # host module or stale bytecode. This source is outside the Modal lock.
+    source, _ = _stable_read_file(Path(__file__).resolve().parents[3] / "shared" / "sft_preprocessing.py", CONFIG_MAX_BYTES, "SFT_HELPER_SOURCE_INVALID")
+    if _sha256_bytes(source) != SFT_HELPER_SHA256:
+        raise ProfilerError("SFT_HELPER_SOURCE_MISMATCH")
+    name = "_token_profile_reviewed_sft_helper"
+    module = types.ModuleType(name)
+    prior = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        exec(compile(source, SFT_HELPER_IMPLEMENTATION, "exec"), module.__dict__)
+        return module.materialize_sft_example
+    except Exception as error:
+        raise ProfilerError("SFT_HELPER_SOURCE_INVALID") from error
+    finally:
+        if prior is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = prior
+
+
 def _runtime_schema_path() -> Path:
     try:
         return Path(__file__).resolve().parents[3] / "schemas" / "synaptic-modal-runtime-lock-v1.schema.json"
@@ -598,6 +664,40 @@ def _load_runtime_commitment(runtime_config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(registry, str) or re.fullmatch(r"unsloth/unsloth:[^@]+@sha256:[0-9a-f]{64}", registry) is None:
         raise ProfilerError("RUNTIME_LOCK_INVALID")
     return {"provider": "modal", "runtime_lock_sha256": lock_sha, "runtime_schema_sha256": _sha256_bytes(schema_bytes), "registry_reference": registry, "python_version": python.get("version"), "transformers_version": ml_stack.get("transformers"), "tokenizer_stack_claim": "transformers_exact_image_committed_tokenizers_version_unavailable"}
+
+
+def _load_named_runtime(config: dict[str, Any]) -> dict[str, Any]:
+    root = str(Path(__file__).resolve().parents[3])
+    sys.path.insert(0, root)
+    try:
+        from tuner.runtime_profiles import load_runtime_profile
+        request = config["runtime"]
+        resolved = load_runtime_profile(request["name"], Path(request["profiles_dir"])).resolve(model=config["model"]["ref"], model_revision=config["model"]["model_revision"], method="sft")
+        if resolved.profile_sha256 != "sha256:" + request["expected_profile_sha256"] or resolved.inventory_sha256 != "sha256:" + request["expected_inventory_sha256"]:
+            raise ProfilerError("RUNTIME_PROFILE_DIGEST_MISMATCH")
+        # The validator authenticated the inventory digest. Derive tokenizers
+        # from this stable re-read only after proving the same exact bytes.
+        raw, _ = _stable_read_file(resolved.inventory_path, 4 * CONFIG_MAX_BYTES, "RUNTIME_PROFILE_INVALID")
+        if "sha256:" + _sha256_bytes(raw) != resolved.inventory_sha256:
+            raise ProfilerError("RUNTIME_PROFILE_DIGEST_MISMATCH")
+        inventory = _strict_json_loads(raw, "RUNTIME_PROFILE_INVALID")
+        from packaging.utils import canonicalize_name
+        versions = {canonicalize_name(item["name"]): item["version"] for item in inventory["distributions"]}
+        facts = resolved.runtime_facts
+        if facts.get("python_implementation") != "CPython" or not isinstance(facts.get("python_version"), str) or not isinstance(versions.get("tokenizers"), str) or not versions["tokenizers"]:
+            raise ProfilerError("RUNTIME_PROFILE_INVALID")
+        return {"kind": "named_profile", "name": resolved.name, "profile_sha256": request["expected_profile_sha256"], "inventory_sha256": request["expected_inventory_sha256"], "image": resolved.image, "python_implementation": "CPython", "python_version": facts["python_version"], "transformers_version": facts["transformers_version"], "tokenizers_version": versions["tokenizers"], "admitted_model": {"ref": config["model"]["ref"], "model_revision": config["model"]["model_revision"], "method": "sft"}, "tokenizer_stack_claim": "tokenizer_only_version_correspondence_not_full_image_or_module_origin_attestation"}
+    except ProfilerError:
+        raise
+    except Exception as error:
+        raise ProfilerError("RUNTIME_PROFILE_INVALID") from error
+    finally:
+        sys.path.pop(0)
+
+
+def _runtime_binding(runtime: dict[str, Any]) -> str:
+    request = {"kind": "named_profile", "name": runtime["name"], "expected_profile_sha256": runtime["profile_sha256"], "expected_inventory_sha256": runtime["inventory_sha256"]}
+    return _digest_record({"runtime_config": request, "admitted_model": runtime["admitted_model"]}, "token-profile-runtime-binding/1")
 
 
 def _semantic_config(config: dict[str, Any], runtime: dict[str, Any]) -> dict[str, Any]:
@@ -764,6 +864,15 @@ def _load_tokenizer(config: dict[str, Any], runtime: dict[str, Any]) -> tuple[An
             from transformers import AutoTokenizer  # type: ignore
         except Exception as error:
             raise ProfilerError("TRANSFORMERS_UNAVAILABLE") from error
+        if runtime.get("kind") == "named_profile":
+            if sys.implementation.name != "cpython" or ".".join(str(value) for value in sys.version_info[:3]) != runtime["python_version"]:
+                raise ProfilerError("PYTHON_VERSION_MISMATCH")
+            try:
+                import tokenizers
+            except Exception as error:
+                raise ProfilerError("TOKENIZERS_UNAVAILABLE") from error
+            if getattr(tokenizers, "__version__", None) != runtime["tokenizers_version"]:
+                raise ProfilerError("TOKENIZERS_VERSION_MISMATCH")
         installed = getattr(transformers, "__version__", None)
         if installed != runtime["transformers_version"]:
             raise ProfilerError("TRANSFORMERS_VERSION_MISMATCH")
@@ -847,7 +956,7 @@ def _message_content(message: dict[str, Any]) -> str:
     raise ProfilerError("INVALID_MESSAGES_ROW")
 
 
-def _row_counts(tokenizer: Any, row: dict[str, Any], input_config: dict[str, Any], limits: dict[str, int]) -> tuple[dict[str, int], int]:
+def _row_counts(tokenizer: Any, row: dict[str, Any], input_config: dict[str, Any], limits: dict[str, int], materializer: Any = None) -> tuple[dict[str, int], int]:
     token_limit = limits["max_tokens_per_record"]
     mode = input_config["mode"]
     if mode == "text":
@@ -871,9 +980,14 @@ def _row_counts(tokenizer: Any, row: dict[str, Any], input_config: dict[str, Any
     if not isinstance(messages, list) or not messages or len(messages) > limits["max_components"]:
         raise ProfilerError("INVALID_MESSAGES_ROW")
     components = {role: 0 for role in MESSAGE_ROLE_BUCKETS}
+    exact = input_config.get("prompt_render") == "prompt_completion"
+    if exact and (len(messages) < 2 or not isinstance(messages[-1], dict) or messages[-1].get("role") != "assistant"):
+        raise ProfilerError("INVALID_MESSAGES_ROW")
     normalized: list[dict[str, Any]] = []
     for message in messages:
         mapping = _require_mapping(message, "INVALID_MESSAGES_ROW")
+        if exact and (set(mapping) != {"role", "content"} or not isinstance(mapping.get("content"), str) or not mapping["content"]):
+            raise ProfilerError("INVALID_MESSAGES_ROW")
         role = mapping.get("role")
         if role not in MESSAGE_ROLE_BUCKETS:
             raise ProfilerError("INVALID_MESSAGES_ROW")
@@ -883,7 +997,21 @@ def _row_counts(tokenizer: Any, row: dict[str, Any], input_config: dict[str, Any
             raise ProfilerError("TOKEN_LIMIT_EXCEEDED")
         normalized.append(dict(mapping))
     try:
-        total = len(tokenizer.apply_chat_template(normalized, tokenize=True, add_generation_prompt=input_config["add_generation_prompt"]))
+        if exact:
+            record = dict(row)
+            # Exact mode accepts only the native field, preserving the actual
+            # record's declaration and avoiding projection over other messages.
+            record["messages"] = normalized
+            prepared = (materializer or _sft_materializer())(tokenizer=tokenizer, record=record, max_seq_length=sys.maxsize, assistant_only_loss=True, prompt_render="prompt_completion", chat_template_kwargs=input_config["chat_template_kwargs"])
+            if prepared.truncation_applied:
+                raise ProfilerError("TOKEN_LIMIT_EXCEEDED")
+            total = len(prepared.input_ids)
+            if not total or any(type(token) is not int or token < 0 for token in prepared.input_ids) or not any(label != -100 for label in prepared.labels):
+                raise ProfilerError("INVALID_MESSAGES_ROW")
+        else:
+            total = len(tokenizer.apply_chat_template(normalized, tokenize=True, add_generation_prompt=input_config["add_generation_prompt"]))
+    except ProfilerError:
+        raise
     except Exception as error:
         raise ProfilerError("CHAT_TEMPLATE_RENDER_FAILED") from error
     if total > token_limit:
@@ -932,9 +1060,10 @@ def _compute_profile_id(profile: dict[str, Any]) -> str:
 
 def profile(config: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_config(config)
-    runtime = _load_runtime_commitment(normalized["runtime"])
+    runtime = _load_named_runtime(normalized) if normalized["runtime"].get("kind") == "named_profile" else _load_runtime_commitment(normalized["runtime"])
     semantic_config_sha = _digest_record(_semantic_config(normalized, runtime), "token-profile-config/1")
     tokenizer, tokenizer_evidence = _load_tokenizer(normalized, runtime)
+    materializer = _sft_materializer() if normalized["input"].get("prompt_render") == "prompt_completion" else None
     chat_template_sha: str | None = None
     if normalized["input"]["mode"] == "messages":
         chat_template = getattr(tokenizer, "chat_template", None)
@@ -947,7 +1076,7 @@ def profile(config: dict[str, Any]) -> dict[str, Any]:
     input_hasher, input_bytes, row_count = hashlib.sha256(), [0], 0
     budget, reserve, over_count = normalized["budgets"]["max_sequence_tokens"], normalized["budgets"]["completion_reserve_tokens"], 0
     for row in _stream_rows(Path(normalized["input"]["jsonl_path"]), normalized["limits"], input_hasher, input_bytes):
-        components, total = _row_counts(tokenizer, row, normalized["input"], normalized["limits"])
+        components, total = _row_counts(tokenizer, row, normalized["input"], normalized["limits"], materializer)
         for name in component_names:
             component_histograms[name].add(components[name])
         total_histogram.add(total)
@@ -971,6 +1100,10 @@ def profile(config: dict[str, Any]) -> dict[str, Any]:
         "budget": {"max_sequence_tokens": budget, "completion_reserve_tokens": reserve, "prompt_budget_tokens": None if budget is None else budget - reserve, "evaluated_record_count": row_count, "threshold_semantics": "total + completion_reserve > max_sequence_tokens", "over_limit_count": None if budget is None else over_count, "over_limit_fraction_ppm": None if budget is None else (over_count * 1_000_000) // row_count, "over_limit": None if budget is None else over_histogram.distribution(), "slack": None if budget is None else slack_histogram.distribution()},
         "operational_provenance": {"snapshot_root_identity_sha256": tokenizer_evidence["source_root_identity_sha256"]},
     }
+    if runtime.get("kind") == "named_profile":
+        result["config_provenance"]["runtime_binding_sha256"] = _runtime_binding(runtime)
+    if materializer is not None:
+        result["config_provenance"]["rendering"] = {"prompt_render": "prompt_completion", "chat_template_kwargs_sha256": _digest_record(normalized["input"]["chat_template_kwargs"], "token-profile-template-kwargs/1"), "helper_source_sha256": SFT_HELPER_SHA256, "implementation": SFT_HELPER_IMPLEMENTATION, "source_claim": "reviewed_host_source_not_runtime_lock_attested"}
     result["profile_semantic_id"] = _compute_profile_id(result)
     return result
 
@@ -1066,11 +1199,23 @@ def _validate_profile_shape(profile: dict[str, Any]) -> None:
     if any(not isinstance(model[key], str) or re.fullmatch(r"[0-9a-f]{40}", model[key]) is None for key in ("model_revision", "tokenizer_revision")):
         raise ProfilerError("PROFILE_ARTIFACT_INVALID")
     runtime = _require_mapping(profile["runtime"], "PROFILE_ARTIFACT_INVALID")
-    _require_exact_keys(runtime, {"provider", "runtime_lock_sha256", "runtime_schema_sha256", "registry_reference", "python_version", "transformers_version", "tokenizer_stack_claim"}, "PROFILE_ARTIFACT_INVALID")
-    if runtime["provider"] != "modal" or not all(isinstance(runtime[key], str) and runtime[key] for key in ("registry_reference", "python_version", "transformers_version", "tokenizer_stack_claim")):
-        raise ProfilerError("PROFILE_ARTIFACT_INVALID")
-    _digest(runtime["runtime_lock_sha256"], "PROFILE_ARTIFACT_INVALID")
-    _digest(runtime["runtime_schema_sha256"], "PROFILE_ARTIFACT_INVALID")
+    named_runtime = runtime.get("kind") == "named_profile"
+    if named_runtime:
+        _require_exact_keys(runtime, {"kind", "name", "profile_sha256", "inventory_sha256", "image", "python_implementation", "python_version", "transformers_version", "tokenizers_version", "admitted_model", "tokenizer_stack_claim"}, "PROFILE_ARTIFACT_INVALID")
+        if not isinstance(runtime["name"], str) or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?", runtime["name"]) or not isinstance(runtime["image"], str) or not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", runtime["image"]) or runtime["python_implementation"] != "CPython" or runtime["tokenizer_stack_claim"] != "tokenizer_only_version_correspondence_not_full_image_or_module_origin_attestation":
+            raise ProfilerError("PROFILE_ARTIFACT_INVALID")
+        if any(not isinstance(runtime[key], str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)+(?:[A-Za-z0-9.+-]*)", runtime[key]) for key in ("python_version", "transformers_version", "tokenizers_version")):
+            raise ProfilerError("PROFILE_ARTIFACT_INVALID")
+        for key in ("profile_sha256", "inventory_sha256"):
+            _digest(runtime[key], "PROFILE_ARTIFACT_INVALID")
+        if runtime["admitted_model"] != {"ref": model["ref"], "model_revision": model["model_revision"], "method": "sft"}:
+            raise ProfilerError("PROFILE_ARTIFACT_INVALID")
+    else:
+        _require_exact_keys(runtime, {"provider", "runtime_lock_sha256", "runtime_schema_sha256", "registry_reference", "python_version", "transformers_version", "tokenizer_stack_claim"}, "PROFILE_ARTIFACT_INVALID")
+        if runtime["provider"] != "modal" or not all(isinstance(runtime[key], str) and runtime[key] for key in ("registry_reference", "python_version", "transformers_version", "tokenizer_stack_claim")):
+            raise ProfilerError("PROFILE_ARTIFACT_INVALID")
+        _digest(runtime["runtime_lock_sha256"], "PROFILE_ARTIFACT_INVALID")
+        _digest(runtime["runtime_schema_sha256"], "PROFILE_ARTIFACT_INVALID")
     tokenizer = _require_mapping(profile["tokenizer"], "PROFILE_ARTIFACT_INVALID")
     _require_exact_keys(tokenizer, {"load_closure", "chat_template_sha256"}, "PROFILE_ARTIFACT_INVALID")
     closure = _require_mapping(tokenizer["load_closure"], "PROFILE_ARTIFACT_INVALID")
@@ -1097,7 +1242,19 @@ def _validate_profile_shape(profile: dict[str, Any]) -> None:
     if tokenizer["chat_template_sha256"] is not None:
         _digest(tokenizer["chat_template_sha256"], "PROFILE_ARTIFACT_INVALID")
     config_provenance = _require_mapping(profile["config_provenance"], "PROFILE_ARTIFACT_INVALID")
-    _require_exact_keys(config_provenance, {"semantic_config_sha256", "component_label_max_chars"}, "PROFILE_ARTIFACT_INVALID")
+    provenance_keys = {"semantic_config_sha256", "component_label_max_chars"}
+    if named_runtime:
+        provenance_keys.add("runtime_binding_sha256")
+        if config_provenance.get("runtime_binding_sha256") != _runtime_binding(runtime):
+            raise ProfilerError("PROFILE_ARTIFACT_INVALID")
+    if "rendering" in config_provenance:
+        provenance_keys.add("rendering")
+        rendering = _require_mapping(config_provenance["rendering"], "PROFILE_ARTIFACT_INVALID")
+        _require_exact_keys(rendering, {"prompt_render", "chat_template_kwargs_sha256", "helper_source_sha256", "implementation", "source_claim"}, "PROFILE_ARTIFACT_INVALID")
+        if rendering["prompt_render"] != "prompt_completion" or rendering["helper_source_sha256"] != SFT_HELPER_SHA256 or rendering["implementation"] != SFT_HELPER_IMPLEMENTATION or rendering["source_claim"] != "reviewed_host_source_not_runtime_lock_attested":
+            raise ProfilerError("PROFILE_ARTIFACT_INVALID")
+        _digest(rendering["chat_template_kwargs_sha256"], "PROFILE_ARTIFACT_INVALID")
+    _require_exact_keys(config_provenance, provenance_keys, "PROFILE_ARTIFACT_INVALID")
     _digest(config_provenance["semantic_config_sha256"], "PROFILE_ARTIFACT_INVALID")
     component_label_max_chars = config_provenance["component_label_max_chars"]
     if isinstance(component_label_max_chars, bool) or not isinstance(component_label_max_chars, int) or not 0 < component_label_max_chars <= HARD_LIMITS["max_component_label_chars"]:

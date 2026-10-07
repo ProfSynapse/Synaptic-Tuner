@@ -168,13 +168,34 @@ def test_frontmatter_delimiters_are_exact_and_modes_are_closed() -> None:
     assert parsed.had_frontmatter is False
 
 
-def test_body_must_be_nonempty_after_exact_closer() -> None:
+@pytest.mark.parametrize("profile", [ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V1, ParsingProfile.MARKDOWN_YAML_FRONTMATTER_V2])
+def test_nested_rich_metadata_with_242_aggregate_mapping_entries(profile) -> None:
+    groups = "\n".join(f"    - name: group_{index}\n      category: example\n      enabled: true" for index in range(71))
+    settings = "\n".join(f"    setting_{index}: value_{index}" for index in range(25))
+    text = f"---\ntitle: Public fixture\nmetadata:\n  groups:\n{groups}\n  settings:\n{settings}\n---\nBody"
+    parsed = parse_markdown_v1(text.encode(), FrontmatterMode.REQUIRED, parsing_profile=profile)
+    metadata = parsed.frontmatter["metadata"]
+    assert len(metadata["groups"]) == 71
+    assert len(metadata["settings"]) == 25
+    assert metadata["groups"][70]["name"] == "group_70"
+    assert 2 + 2 + 71 * 3 + 25 == 242
+    assert parsed.body == "Body"
+
+
+@pytest.mark.parametrize("frontmatter", ["#" + "x" * 65536, "value: " + "x" * 4097, "values: [" + ", ".join("x" for _ in range(257)) + "]", "\n".join(f"key_{index}: x" for index in range(512)), "value: " + "[" * 9 + "x" + "]" * 9], ids=["bytes", "scalar", "sequence", "nodes", "depth"])
+def test_larger_mapping_cap_preserves_other_frontmatter_guards(frontmatter) -> None:
+    with pytest.raises(MarkdownParseErrorV1) as rejected:
+        parse_markdown_v1(f"---\n{frontmatter}\n---\nBody".encode(), FrontmatterMode.REQUIRED)
+    assert rejected.value.code is MarkdownParseCodeV1.FRONTMATTER_INVALID
+
+
+def test_body_requires_nonempty_content_after_exact_closer() -> None:
     with pytest.raises(MarkdownParseErrorV1) as empty:
         parse_markdown_v1(b"---\ntitle: Note\n---", FrontmatterMode.OPTIONAL)
     assert empty.value.code is MarkdownParseCodeV1.BODY_EMPTY
 
 
-def _structure(*, required_title: bool = True) -> StructureDefinition:
+def _structure(*, required_title: bool = True, include_document_text: bool = False) -> StructureDefinition:
     return StructureDefinition.define(
         name="MarkdownNote",
         version="1",
@@ -204,8 +225,20 @@ def _structure(*, required_title: bool = True) -> StructureDefinition:
                 FieldValueKind.BOOLEAN,
                 False,
             ),
+            *(
+                (FieldMapping(
+                    "source_markdown",
+                    FieldSelector(FieldSelectorKind.DOCUMENT_TEXT),
+                    FieldValueKind.STRING,
+                    True,
+                ),)
+                if include_document_text else ()
+            ),
         ),
-        text_projections=(TextProjection("text", "body"),),
+        text_projections=(
+            TextProjection("text", "body"),
+            *((TextProjection("complete", "source_markdown"),) if include_document_text else ()),
+        ),
     )
 
 
@@ -220,6 +253,24 @@ def test_maps_only_declared_fields_with_exact_types() -> None:
         "published": True,
         "title": "Example",
     }
+
+
+def test_document_text_maps_full_normalized_markdown_alongside_body_and_frontmatter() -> None:
+    content = b"\xef\xbb\xbf---\r\ntitle: Caf\xc3\xa9\r\npublished: true\r\n---\r\nBody \xe2\x9c\xa8\r\n"
+    parsed = parse_markdown_v1(content, FrontmatterMode.OPTIONAL)
+    mapped = map_markdown_fields_v1(parsed, "notes/example.md", _structure(include_document_text=True))
+    assert mapped == {
+        "body": "Body ✨\n",
+        "path": "notes/example.md",
+        "published": True,
+        "source_markdown": "---\ntitle: Café\npublished: true\n---\nBody ✨\n",
+        "title": "Café",
+    }
+    assert map_markdown_fields_v1(parsed, "notes/example.md", _structure())["body"] == mapped["body"]
+
+    plain = parse_markdown_v1(b"\xef\xbb\xbfPlain\r\n", FrontmatterMode.OPTIONAL)
+    plain_mapped = map_markdown_fields_v1(plain, "notes/plain.md", _structure(required_title=False, include_document_text=True))
+    assert plain_mapped["source_markdown"] == plain_mapped["body"] == "Plain\n"
 
 
 def test_mapping_rejects_missing_required_and_wrong_value_kind() -> None:
@@ -323,7 +374,21 @@ def test_surrogate_logical_path_is_closed_without_private_context() -> None:
     assert private_path not in str(invalid.value)
 
 
-def test_oversized_exact_dict_is_rejected_before_items_copy(
+def test_mapping_entry_cap_is_aggregate_across_nested_objects(monkeypatch) -> None:
+    copied_sizes = []
+    original = markdown._exact_dict_items
+    def record_copy(value):
+        copied_sizes.append(len(value))
+        return original(value)
+    monkeypatch.setattr(markdown, "_exact_dict_items", record_copy)
+    value = {"left": {f"key_{index}": index for index in range(256)}, "right": {f"key_{index}": index for index in range(255)}}
+    with pytest.raises(MarkdownParseErrorV1) as rejected:
+        ParsedMarkdownV1("Body", "Body", value, FrontmatterMode.OPTIONAL, True)
+    assert rejected.value.code is MarkdownParseCodeV1.FRONTMATTER_INVALID
+    assert copied_sizes == [2, 256]
+
+
+def test_oversized_513_entry_exact_dict_is_rejected_before_items_copy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     item_copy_calls = 0
@@ -334,7 +399,7 @@ def test_oversized_exact_dict_is_rejected_before_items_copy(
         raise AssertionError("oversized mappings must fail before tuple copying")
 
     monkeypatch.setattr(markdown, "_exact_dict_items", forbidden_items)
-    oversized = {f"key_{index}": index for index in range(129)}
+    oversized = {f"key_{index}": index for index in range(513)}
     with pytest.raises(MarkdownParseErrorV1) as invalid:
         ParsedMarkdownV1(
             "Body", "Body", oversized, FrontmatterMode.OPTIONAL, True

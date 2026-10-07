@@ -576,14 +576,17 @@ metrics, final model, and tokenizer.
 
 ### Training artifact retention policy
 
-The live Modal training policy admits at most **192 MiB for one artifact** and
-**256 MiB for the complete five-artifact set**. `final_model` remains a required
+The current Modal training policy admits at most **512 MiB for one artifact** and
+**768 MiB for the complete five-artifact set**. `final_model` remains a required
 member of that exact set even when intermediate checkpoints are not retained.
 These output-retention limits are separate from the 64 MiB prepared-input
-publication limit described below.
+publication limit described below. The earlier 192 MiB per-artifact and 256 MiB
+aggregate limits describe historical policy, not the current released source.
+The 9B smoke verified all five artifacts under the current policy; read the
+retained manifest for their actual sizes rather than inferring them from bounds.
 
-For standalone downloads, pass the policy's per-artifact maximum (192 MiB),
-not its 256 MiB aggregate-set maximum. The packaged reader checks this bound
+For standalone downloads, pass the policy's per-artifact maximum (512 MiB),
+not its 768 MiB aggregate-set maximum. The packaged reader checks this bound
 when its lazy stream starts. Pinned Modal 1.5.4 yields whole provider blocks
 (8 MiB in its block implementation), not public-API-sized chunks. The provider
 facade must split them into at most 1 MiB chunks while preserving byte order,
@@ -993,8 +996,9 @@ each have a 2 MiB bound; JSON escaping and signed/encoded envelope overhead coun
 Check the complete serialized recipe before submission rather than truncating or
 silently narrowing prompts. These are transport limits, not a per-message token
 budget or proof that a model fits the context. The separate serving limits remain
-1 MiB per HTTP request and response and 64 KiB retained per-case response;
-`max_tokens: null` removes only the request-level output-token ceiling. See
+1 MiB per HTTP request and response, 1 MiB retained per-case response, and
+16 MiB for the complete evaluation record. `max_tokens: null` removes only the
+request-level output-token ceiling. See
 [full-context transport review](../../../docs/review/full-context-evaluation-transport.md)
 for the verified boundaries and provider-free tests.
 Same-job requests reuse the existing evaluator's concurrent runner against one

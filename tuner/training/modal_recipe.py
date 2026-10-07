@@ -10,6 +10,7 @@ from types import MappingProxyType
 from synaptic_tuner.api.v1._contract import PreparedTrainingInputIdentity
 from synaptic_tuner.api.v1.training_input import (
     SFTTrainingHyperparametersV1, TrainingArtifactRequirementsV1,
+    TrainingContinuationInputV1,
     TrainingDatasetInputV1, TrainingDurationV1, TrainingInputV1,
     TrainingMethodV1, TrainingModelInputV1,
 )
@@ -54,11 +55,13 @@ class ModalSFTRecipeV1:
     timeout_seconds: int
     maximum_cost_minor_units: int | None
     post_training: dict[str, object] | None = None
+    continuation: TrainingContinuationInputV1 | None = None
 
     def training_input(self, dataset_ref: str) -> TrainingInputV1:
         return TrainingInputV1(
             "synaptic-training-input/v1", TrainingMethodV1.SFT, self.model,
             TrainingDatasetInputV1(dataset_ref), self.hyperparameters, self.artifacts,
+            self.continuation,
         )
 
     def packaged_config(self, identity: PreparedTrainingInputIdentity) -> CanonicalDocument:
@@ -77,6 +80,8 @@ class ModalSFTRecipeV1:
         }
         if self.post_training is not None:
             document["post_training"] = validate_post_training_config(self.post_training)
+        if self.continuation is not None:
+            document["continuation"] = self.continuation.to_dict()
         return CanonicalDocument.from_mapping(document)
 
     def artifact_policy(self) -> ArtifactPolicy:
@@ -195,6 +200,7 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
     cfg = _section(load_recipe(path, "cloud"), {
         "name", "description", "target", "method", "provider", "job", "run",
         "model", "dataset", "training", "lora", "artifacts", "post_training",
+        "continuation",
     }, "recipe")
     if cfg.get("target") != "cloud" or cfg.get("provider") != "modal" or cfg.get("method") != "sft":
         raise ValueError("Modal SFT requires target: cloud, provider: modal, method: sft")
@@ -257,6 +263,13 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
     if kinds != tuple(sorted(_ROLES)):
         raise ValueError("Modal SFT requires the complete five-artifact inventory")
     artifacts = TrainingArtifactRequirementsV1(kinds, artifact_cfg.get("retain_checkpoints", False))
+    continuation_cfg = cfg.get("continuation")
+    if "continuation" in cfg and continuation_cfg is None:
+        raise TypeError("continuation must be an object")
+    if continuation_cfg is not None and type(continuation_cfg) is not dict:
+        raise TypeError("continuation must be an object")
+    continuation = (TrainingContinuationInputV1.from_dict(continuation_cfg)
+                    if continuation_cfg is not None else None)
     hyperparameters = SFTTrainingHyperparametersV1(
         batch_size=training["batch_size"],
         gradient_accumulation_steps=training["gradient_accumulation"],
@@ -282,4 +295,5 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
         hyperparameters, artifacts, job["accelerator"],
         job["accelerator_count"], job["timeout_seconds"], maximum_cost,
         validate_post_training_config(cfg.get("post_training")),
+        continuation,
     )

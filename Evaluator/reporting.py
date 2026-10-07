@@ -524,6 +524,26 @@ def write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def write_private_trace(path: Path, records: Sequence[EvaluationRecord]) -> None:
+    """Opt-in host-local trace; never merged/uploaded with public results.
+
+    Create exclusively to reject existing files and symlinks. The host selects
+    the private directory; the file is created with mode 0600.
+    """
+    import os
+
+    document = {
+        "schema_version": RUN_TRACE_SCHEMA_VERSION,
+        "records": [record_trace_to_dict(record) for record in records],
+    }
+    encoded = (json.dumps(document, indent=2, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags, 0o600)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(encoded)
+
+
 def render_markdown(records: Sequence[EvaluationRecord], model_name: str = None, test_suite: str = None) -> str:
     """Render evaluation results as a markdown report.
 

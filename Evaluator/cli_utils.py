@@ -148,6 +148,30 @@ def build_settings_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
     return opts
 
 
+def resolve_inference_settings(args: argparse.Namespace, run_config: Any) -> Dict[str, Any]:
+    """Explicit CLI > explicit YAML (including null) > legacy CLI defaults."""
+    options: Dict[str, Any] = {
+        "temperature": None, "top_p": 0.9, "max_tokens": 1024, "seed": None,
+    }
+    options.update(run_config.inference_settings)
+    for name in ("temperature", "top_p", "max_tokens", "seed"):
+        if hasattr(args, name):
+            options[name] = getattr(args, name)
+    return options
+
+
+def resolved_inference_metadata(settings: Any) -> Dict[str, Any]:
+    """Capture settings actually used; omit absent opt-in controls for compatibility."""
+    values = {name: getattr(settings, name) for name in (
+        "temperature", "top_p", "max_tokens", "seed",
+    )}
+    for name in ("chat_template_kwargs", "presence_penalty", "top_k", "min_p", "repetition_penalty"):
+        value = getattr(settings, name, None)
+        if value is not None:
+            values[name] = value
+    return values
+
+
 # ---------------------------------------------------------------------------
 # Output Path Generation
 # ---------------------------------------------------------------------------
@@ -223,10 +247,7 @@ def build_metadata(
         "model": settings.model,
         "host": settings.host,
         "port": settings.port,
-        "temperature": settings.temperature,
-        "top_p": settings.top_p,
-        "max_tokens": settings.max_tokens,
-        "seed": settings.seed,
+        **resolved_inference_metadata(settings),
         "prompt_file": str(config.prompts_path),
         "prompt_total": total_prompts,
         "prompt_selected": selected_prompts,

@@ -21,6 +21,12 @@ from typing import BinaryIO, Mapping, Protocol, runtime_checkable
 
 MAX_WORKLOAD_BYTES = 1024 * 1024
 MAX_LINEAGE_BYTES = 4 * 1024 * 1024
+LOCAL_CHECKPOINT_SCHEMA = "synaptic-local-checkpoint/v1"
+LOCAL_PROGRESS_SCHEMA = "synaptic-local-training-progress/v1"
+_MAX_LOCAL_CHECKPOINT_FILES = 64
+_MAX_LOCAL_CHECKPOINT_MEMBER_BYTES = 4 * 1024 * 1024 * 1024
+_MAX_LOCAL_CHECKPOINT_BYTES = 8 * 1024 * 1024 * 1024
+_MAX_LOCAL_RECORD_BYTES = 16 * 1024
 EXECUTION_SOURCE_SCHEMA = "synaptic-execution-source/v1"
 RUNTIME_SCHEMA = "synaptic-training-runtime/v1"
 _WORKLOAD_FINGERPRINT_DOMAIN = b"synaptic-training-workload/v1\0"
@@ -652,6 +658,170 @@ def _read_regular(path: Path, *, maximum: int) -> bytes:
     ) != _stable_path_identity(current):
         raise RuntimeV1Error("runtime file changed while it was read")
     return content
+
+
+def _hash_local_checkpoint_file(path: Path) -> tuple[int, str]:
+    """Hash a stable, link-free trainer-owned checkpoint member without buffering it."""
+    _assert_no_redirected_components(path)
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        raise RuntimeV1Error("local checkpoint member is unavailable") from exc
+    if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+            or not 0 < before.st_size <= _MAX_LOCAL_CHECKPOINT_MEMBER_BYTES):
+        raise RuntimeV1Error("local checkpoint member is not a bounded regular file")
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                         | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            identity = _stable_path_identity if os.name == "nt" else _file_identity
+            if identity(opened) != identity(before):
+                raise RuntimeV1Error("local checkpoint member changed before read")
+            digest = hashlib.sha256()
+            size = 0
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                size += len(chunk)
+                if size > _MAX_LOCAL_CHECKPOINT_MEMBER_BYTES:
+                    raise RuntimeV1Error("local checkpoint member exceeds its byte bound")
+                digest.update(chunk)
+            after = os.fstat(stream.fileno())
+        if (size != before.st_size or identity(after) != identity(before)
+                or identity(path.lstat()) != identity(before)):
+            raise RuntimeV1Error("local checkpoint member changed during read")
+        return size, digest.hexdigest()
+    except OSError as exc:
+        raise RuntimeV1Error("local checkpoint member could not be read") from exc
+
+
+def _local_checkpoint_inventory(checkpoint: Path, step: int) -> dict[str, object]:
+    if type(step) is not int or step <= 0 or checkpoint.name != f"checkpoint-{step}":
+        raise RuntimeV1Error("local checkpoint step is invalid")
+    _assert_no_redirected_components(checkpoint)
+    try:
+        checkpoint_info = checkpoint.lstat()
+    except OSError as exc:
+        raise RuntimeV1Error("local checkpoint directory is unavailable") from exc
+    if not stat.S_ISDIR(checkpoint_info.st_mode):
+        raise RuntimeV1Error("local checkpoint directory is unavailable")
+    members = []
+    total = 0
+    for path in sorted(checkpoint.iterdir(), key=lambda item: item.name):
+        if (len(members) >= _MAX_LOCAL_CHECKPOINT_FILES or not path.name
+                or path.name.startswith(".") or "/" in path.name or "\\" in path.name):
+            raise RuntimeV1Error("local checkpoint inventory is invalid")
+        size, digest = _hash_local_checkpoint_file(path)
+        total += size
+        if total > _MAX_LOCAL_CHECKPOINT_BYTES:
+            raise RuntimeV1Error("local checkpoint exceeds its total byte bound")
+        members.append({"name": path.name, "size_bytes": size, "sha256": digest})
+    names = {item["name"] for item in members}
+    if not ({"trainer_state.json", "optimizer.pt", "scheduler.pt", "rng_state.pth"}
+            <= names and ({"adapter_model.safetensors", "model.safetensors"} & names)):
+        raise RuntimeV1Error("local checkpoint is missing full trainer state")
+    state = _strict_json_bytes(_read_regular(checkpoint / "trainer_state.json", maximum=1024 * 1024),
+                               label="local trainer state")
+    if type(state) is not dict or type(state.get("global_step")) is not int \
+            or state["global_step"] != step:
+        raise RuntimeV1Error("local checkpoint trainer step differs")
+    return {"schema_version": LOCAL_CHECKPOINT_SCHEMA, "step": step,
+            "checkpoint": checkpoint.name, "total_bytes": total, "members": members}
+
+
+def _write_local_record_exclusive(directory: Path, filename: str, record: Mapping[str, object]) -> Path:
+    _assert_no_redirected_components(directory)
+    directory.mkdir(mode=0o700, exist_ok=True)
+    raw = _canonical_json(record)
+    if len(raw) > _MAX_LOCAL_RECORD_BYTES:
+        raise RuntimeV1Error("local trainer record exceeds its byte bound")
+    path = directory / filename
+    temporary = directory / ("." + filename + "." + os.urandom(12).hex() + ".tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | getattr(os, "O_BINARY", 0), 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    if os.name == "posix":
+        directory_descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    return path
+
+
+def record_local_checkpoint(run_dir: Path, step: int, *, workload_fingerprint: str) -> Path:
+    """Record a complete trainer-local save; this is not cloud durability."""
+    if type(workload_fingerprint) is not str or not _DIGEST_RE.fullmatch(workload_fingerprint):
+        raise RuntimeV1Error("local checkpoint workload binding is invalid")
+    inventory = _local_checkpoint_inventory(run_dir / "checkpoints" / f"checkpoint-{step}", step)
+    inventory["workload_fingerprint"] = workload_fingerprint
+    return _write_local_record_exclusive(run_dir / "checkpoint-catalog", f"step-{step}.json", inventory)
+
+
+def verify_local_checkpoint_record(run_dir: Path, step: int, *, workload_fingerprint: str) -> dict[str, object]:
+    """Reject a partial, altered, or stale local save before any transport."""
+    if (type(step) is not int or step <= 0 or type(workload_fingerprint) is not str
+            or not _DIGEST_RE.fullmatch(workload_fingerprint)):
+        raise RuntimeV1Error("local checkpoint step is invalid")
+    raw = _read_regular(run_dir / "checkpoint-catalog" / f"step-{step}.json",
+                        maximum=_MAX_LOCAL_RECORD_BYTES)
+    declared = _strict_json_bytes(raw, label="local checkpoint record")
+    actual = _local_checkpoint_inventory(run_dir / "checkpoints" / f"checkpoint-{step}", step)
+    actual["workload_fingerprint"] = workload_fingerprint
+    if (raw != _canonical_json(declared) or type(declared) is not dict
+            or not _json_type_equal(declared, actual)):
+        raise RuntimeV1Error("local checkpoint record does not bind its files")
+    return actual
+
+
+def record_local_progress(run_dir: Path, *, workload_fingerprint: str, step: int, max_steps: int,
+                          epoch: float, loss: float, learning_rate: float | None = None) -> Path:
+    """Keep finite, bounded trainer-local progress without raw log content."""
+    if (type(workload_fingerprint) is not str or not _DIGEST_RE.fullmatch(workload_fingerprint)
+            or type(step) is not int or step <= 0 or type(max_steps) is not int
+            or max_steps < step or type(epoch) not in (int, float)
+            or not math.isfinite(epoch) or epoch < 0 or type(loss) not in (int, float)
+            or not math.isfinite(loss)):
+        raise RuntimeV1Error("local training progress is invalid")
+    if learning_rate is not None and (type(learning_rate) not in (int, float)
+                                      or not math.isfinite(learning_rate) or learning_rate < 0):
+        raise RuntimeV1Error("local training progress rate is invalid")
+    record = {"schema_version": LOCAL_PROGRESS_SCHEMA,
+              "workload_fingerprint": workload_fingerprint, "step": step,
+              "max_steps": max_steps, "epoch": float(epoch), "loss": float(loss)}
+    if learning_rate is not None:
+        record["learning_rate"] = float(learning_rate)
+    return _write_local_record_exclusive(run_dir / "progress-catalog", f"step-{step}.json", record)
+
+
+def verify_local_progress_record(run_dir: Path, step: int, *, workload_fingerprint: str) -> dict[str, object]:
+    if (type(step) is not int or step <= 0 or type(workload_fingerprint) is not str
+            or not _DIGEST_RE.fullmatch(workload_fingerprint)):
+        raise RuntimeV1Error("local training progress step is invalid")
+    raw = _read_regular(run_dir / "progress-catalog" / f"step-{step}.json",
+                        maximum=_MAX_LOCAL_RECORD_BYTES)
+    record = _strict_json_bytes(raw, label="local training progress")
+    if (type(record) is not dict or set(record) not in (
+            {"schema_version", "workload_fingerprint", "step", "max_steps", "epoch", "loss"},
+            {"schema_version", "workload_fingerprint", "step", "max_steps", "epoch", "loss", "learning_rate"})
+            or record.get("schema_version") != LOCAL_PROGRESS_SCHEMA
+            or record.get("workload_fingerprint") != workload_fingerprint
+            or type(record.get("step")) is not int or record["step"] != step
+            or type(record.get("max_steps")) is not int
+            or record["max_steps"] < step or raw != _canonical_json(record)):
+        raise RuntimeV1Error("local training progress record is invalid")
+    for key in ("epoch", "loss", "learning_rate"):
+        if key in record and (type(record[key]) not in (int, float)
+                              or not math.isfinite(record[key])
+                              or (key != "loss" and record[key] < 0)):
+            raise RuntimeV1Error("local training progress record is invalid")
+    return record
 
 
 def _close_retained_fds(descriptors: tuple[int, ...]) -> None:

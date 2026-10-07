@@ -18,6 +18,7 @@ from synaptic_tuner.api.v1.ingestion_facade import (
     IngestionRequest,
     IngestionRunState,
     MarkdownProfileV1,
+    MetadataDeclaration,
     ParsingProfile,
     SourceAdmissionKind,
     SourceAdmissionRequest,
@@ -38,6 +39,7 @@ from tuner.ingestion.bundle_v1 import (
     BundleDurabilityError,
     BundlePublicationUncertainV1,
     BundlePublicationUncertaintyPhaseV1,
+    load_verified_normalized_bundle_v1,
 )
 from tuner.ingestion import runtime_v1
 from tuner.ingestion.runtime_v1 import ProcessLocalIngestionOperationsV1
@@ -148,6 +150,51 @@ def test_synchronous_success_and_independent_disk_result(tmp_path: Path) -> None
     assert api.show(started.run) == outcome
     assert verification.verified
     assert verification.diagnostic_codes == ()
+
+
+def test_public_api_bundle_contains_full_text_body_and_declared_metadata(tmp_path: Path) -> None:
+    content = b"\xef\xbb\xbf---\r\ntitle: Caf\xc3\xa9\r\n---\r\nBody \xe2\x9c\xa8\r\n"
+    api, _, bundles, request = _composition(tmp_path, {"note.md": content})
+    legacy_plan = api.plan(request)
+    legacy_preflight = api.preflight(legacy_plan)
+    assert legacy_preflight.ready
+    legacy_outcome = api.show(api.start(legacy_plan, legacy_preflight).run)
+    assert legacy_outcome.bundle is not None
+    original = request.structures.structures[0]
+    definition = StructureDefinition.define(
+        name=original.ref.name,
+        version=original.ref.version,
+        markdown=original.markdown,
+        fields=original.fields + (
+            FieldMapping("source_markdown", FieldSelector(FieldSelectorKind.DOCUMENT_TEXT), FieldValueKind.STRING, True),
+        ),
+        text_projections=original.text_projections + (TextProjection("complete", "source_markdown"),),
+        metadata=(MetadataDeclaration("title", "title"),),
+        parsing_profile=original.parsing_profile,
+    )
+    structures = StructureSet(
+        (definition,),
+        (StructureBinding("markdown", SourceMatcher("**/*.md"), definition.ref),),
+    )
+    extended_request = IngestionRequest(
+        request.request_id,
+        request.project_ref,
+        request.snapshot,
+        structures,
+        request.output_ref,
+    )
+    plan = api.plan(extended_request)
+    preflight = api.preflight(plan)
+    assert preflight.ready
+    outcome = api.show(api.start(plan, preflight).run)
+    assert outcome.state is IngestionRunState.SUCCEEDED
+    assert outcome.bundle is not None
+    assert outcome.bundle.bundle_id != legacy_outcome.bundle.bundle_id
+    loaded = load_verified_normalized_bundle_v1(bundles / outcome.bundle.bundle_id)
+    fields = loaded.items[0].fields
+    assert fields["source_markdown"] == "---\ntitle: Café\n---\nBody ✨\n"
+    assert fields["body"] == "Body ✨\n"
+    assert fields["title"] == "Café"
 
 
 def test_preview_blocker_closes_preflight_and_start(tmp_path: Path) -> None:

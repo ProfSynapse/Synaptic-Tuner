@@ -604,6 +604,8 @@ def map_markdown_fields_v1(
         present = True
         if selector.kind is FieldSelectorKind.DOCUMENT_BODY:
             value: object = parsed.body
+        elif selector.kind is FieldSelectorKind.DOCUMENT_TEXT:
+            value = parsed.normalized_text
         elif selector.kind is FieldSelectorKind.LOGICAL_PATH:
             value = path
         elif selector.kind is FieldSelectorKind.FRONTMATTER_FIELD:

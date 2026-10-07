@@ -30,6 +30,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | One-shot RunPod wrapper job | `python3 scripts/runpod_run_job.py --run-tag <tag> --repo-url <git-url> --commit <full-sha> --wrapper <repo-relative.sh> --dry-run` |
 | Modal training | Public `TrainingAPI` with a host-owned durable grant; no manual `modal run` path |
 | Modal release-lookup diagnosis | `python scripts/inspect_modal_release_lookup.py --journal <exact-private-journal> --claim-ref deploy-<digest> --environment <name> --modal-profile <profile>` — read-only, non-authorizing; see `reference/modal-jobs.md` |
+| Isolate vLLM startup | `python scripts/probe_vllm_startup.py --configuration <startup.json> --check`; see repo-root `examples/model_chat/STARTUP_PROBE.md` before any GPU execution. No training, adapter, or chat request. |
 | Modal rate observation | `python -B examples/modal_chat/launch.py --project-root <consumer> --configuration <config> --mode quote-training --modal-profile <name>` — read-only; see `reference/modal-jobs.md` |
 | Chat with a verified SFT run | Embedded `open_run_chat` with a consumer-owned `RunsAPI` and runtime adapter; see `docs/architecture/verified-run-chat.md` (repo root) |
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
@@ -99,8 +100,6 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 ## CLI Discipline
 
 - Runtime profiles are configuration-driven: the recipe selects a named profile, and profile data binds exact model/revision/method compatibility, immutable image/inventory and its build configuration. Planning and execution must use the same bound selection. Never introduce model-specific profile switches or fallback maps in launcher code. Adding a candidate model profile is not successful GPU qualification; retain the exact smoke evidence before promotion. Check adapter artifact size as well as VRAM before a larger-model launch.
-- Modal packaged training has a shared generic artifact policy of 512 MiB per file and 768 MiB for the complete artifact set. Use the shared per-file bound for downloads and the aggregate bound for inventory admission; keep both checks and end-to-end hashes when sizing a larger adapter. The limit change does not qualify a candidate model or GPU.
-- Retain bounded optional generation finish reason and token usage for diagnosing why an evaluation response stopped. Neither field is a writing-quality score; review completed text separately.
 - Modal packaged training has a shared generic artifact policy of 512 MiB per file and 768 MiB for the complete artifact set. Use the shared per-file bound for downloads and the aggregate bound for inventory admission; keep both checks and end-to-end hashes when sizing a larger adapter. The limit change does not qualify a candidate model or GPU.
 - Retain bounded optional generation finish reason and token usage for diagnosing why an evaluation response stopped. Neither field is a writing-quality score; review completed text separately.
 

@@ -15,6 +15,7 @@ from tuner.cli.main import build_project_context, main as cli_main
 from tuner.cli.router import route_command
 from tuner.handlers.ingestion_handler import _selection_roots
 from tuner.ingestion.runtime_v1 import ProcessLocalIngestionOperationsV1
+from tuner.ingestion.bundle_v1 import load_verified_normalized_bundle_v1
 from tuner.ingestion.local_selection_v1 import (
     LocalSelectionCodeV1,
     LocalSelectionErrorV1,
@@ -206,6 +207,56 @@ def test_ingest_success_is_bounded_and_leak_free(
     assert str(source) not in captured.out
     assert secret_content not in captured.out
     assert "title" not in captured.out
+
+
+def test_cli_declared_document_text_is_verified_in_bundle(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "selected-private"
+    source.mkdir()
+    (source / "note.md").write_bytes(b"\xef\xbb\xbf---\r\ntitle: Caf\xc3\xa9\r\n---\r\nBody\r\n")
+    document = json.loads(_config())
+    structure = document["structure"]
+    structure["fields"].append({
+        "name": "whole_note",
+        "selector": {"kind": "document_text", "key": None},
+        "value_kind": "string",
+        "required": True,
+    })
+    structure["text_projections"].append({"name": "complete", "field_ref": "whole_note"})
+    structure["metadata"].append({"name": "title", "field_ref": "title"})
+    config = _write_config(tmp_path, json.dumps(document))
+    assert _skill_validator_accepts(config)
+    assert route_command(_args(config, f"notes={source}"), context=_context(tmp_path)) == 0
+    result = json.loads(capsys.readouterr().out)
+    loaded = load_verified_normalized_bundle_v1(
+        tmp_path / ".tracking" / "ingestion" / "bundles" / result["bundle_ref"]
+    )
+    fields = loaded.items[0].fields
+    assert fields["whole_note"] == "---\ntitle: Café\n---\nBody\n"
+    assert fields["body"] == "Body\n"
+    assert fields["title"] == "Café"
+
+
+@pytest.mark.parametrize("selector", (
+    {"kind": "document_text", "key": "title"},
+    {"kind": "document_text", "key": 1},
+    {"kind": "document_text", "key": None, "unknown": True},
+    {"kind": "unknown", "key": None},
+    {"kind": None, "key": None},
+    {"kind": "document_text"},
+))
+def test_cli_and_skill_validator_reject_invalid_document_text_selector(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], selector: dict[str, object]
+) -> None:
+    document = json.loads(_config())
+    document["structure"]["fields"].append({
+        "name": "whole_note", "selector": selector, "value_kind": "string", "required": True,
+    })
+    config = _write_config(tmp_path, json.dumps(document))
+    assert not _skill_validator_accepts(config)
+    assert route_command(_args(config, "notes=note.md"), context=_context(tmp_path)) == 2
+    assert json.loads(capsys.readouterr().out)["error_code"] == "invalid_input"
 
 
 def test_ingest_v2_accepts_member_above_legacy_budget_end_to_end(

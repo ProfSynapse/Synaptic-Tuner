@@ -43,11 +43,14 @@ class EvalRunConfig:
     # a temperature explicitly. Was a non-optional float (0.7); the default
     # changed to omitted per the full-opt-in directive.
     temperature: Optional[float] = None
-    max_tokens: int = 2048
+    max_tokens: Optional[int] = 2048
     seed: Optional[int] = None
     pass_threshold: float = 0.8
     parallel: bool = False
     max_workers: int = 4
+    # Append to preserve legacy positional construction. Only explicit keys:
+    # absence must not override the CLI's legacy defaults.
+    inference_settings: Dict[str, Any] = field(default_factory=dict)
 
 
 class ConfigLoader:
@@ -115,8 +118,21 @@ class ConfigLoader:
                         else:
                             run[key] = value
 
-        model_config = run.get("model", {})
-        inference = model_config.get("inference", {})
+        # The checked-in example uses top-level model; retain run.model support.
+        base_model = config.get("model", {})
+        run_model = run.get("model", {})
+        if not isinstance(base_model, dict) or not isinstance(run_model, dict):
+            raise ValueError("model configuration must be a mapping")
+        model_config = {**base_model, **run_model}
+        base_inference = base_model.get("inference", {})
+        run_inference = run_model.get("inference", {})
+        if not isinstance(base_inference, dict) or not isinstance(run_inference, dict):
+            raise ValueError("model inference must be a mapping")
+        inference = {**base_inference, **run_inference}
+        inference_keys = (
+            "temperature", "top_p", "max_tokens", "seed", "chat_template_kwargs",
+            "presence_penalty", "top_k", "min_p", "repetition_penalty",
+        )
 
         return EvalRunConfig(
             name=run.get("name", "Evaluation"),
@@ -131,6 +147,7 @@ class ConfigLoader:
             temperature=inference.get("temperature"),
             max_tokens=inference.get("max_tokens", 2048),
             seed=inference.get("seed"),
+            inference_settings={key: inference[key] for key in inference_keys if key in inference},
             pass_threshold=run.get("scoring", {}).get("pass_threshold", 0.8),
             parallel=bool(run.get("execution", {}).get("parallel", False)),
             max_workers=int(run.get("execution", {}).get("max_workers", 4) or 4),

@@ -233,7 +233,7 @@ from unsloth import is_bfloat16_supported  # noqa: E402
 suppress_transformers_logging()
 
 _mark_packaged_runtime_phase("TRAINER_IMPORT")
-from transformers import Trainer
+from transformers import Trainer, TrainerCallback
 from trl import SFTConfig
 
 from configs.config_loader import (
@@ -275,6 +275,33 @@ from shared.training_utils import (
     apply_tier_preset,
 )
 from shared.experiment_tracking.lineage_enrichment import enrich_training_lineage
+
+
+class RuntimeV1LocalStateCallback(TrainerCallback):
+    """Opt-in local capture only; a separate verified transport owns durability."""
+
+    def __init__(self, run_dir: Path, workload_fingerprint: str):
+        self.run_dir = run_dir
+        self.workload_fingerprint = workload_fingerprint
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not state.is_world_process_zero or not isinstance(logs, dict) or "loss" not in logs:
+            return
+        from Trainers.sft.runtime_v1 import record_local_progress
+        record_local_progress(
+            self.run_dir, workload_fingerprint=self.workload_fingerprint,
+            step=state.global_step, max_steps=state.max_steps,
+            epoch=state.epoch, loss=logs["loss"],
+            learning_rate=logs.get("learning_rate"),
+        )
+
+    def on_save(self, args, state, control, **kwargs):
+        if not state.is_world_process_zero:
+            return
+        from Trainers.sft.runtime_v1 import record_local_checkpoint
+        record_local_checkpoint(
+            self.run_dir, state.global_step, workload_fingerprint=self.workload_fingerprint
+        )
 
 # Evolutionary training (optional)
 try:
@@ -843,6 +870,8 @@ def parse_args(argv=None):
                        help=argparse.SUPPRESS)
     parser.add_argument("--runtime-v1-dataset-format", type=str,
                        help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-v1-capture-checkpoints", action="store_true",
+                       help=argparse.SUPPRESS)
     parser.add_argument("--runtime-profile-name", type=str,
                        help=argparse.SUPPRESS)
     parser.add_argument("--runtime-profile-digest", type=str,
@@ -865,6 +894,8 @@ def run(args: argparse.Namespace):
     """Execute training with the provided CLI arguments."""
     _mark_packaged_runtime_phase("CONFIG")
     runtime_v1_requested = _runtime_v1_projection_requested(args)
+    if args.runtime_v1_capture_checkpoints and not runtime_v1_requested:
+        raise ValueError("Local checkpoint capture requires a bound runtime-v1 invocation")
     resolved_runtime_profile = runtime_profile_metadata(args)
     if runtime_v1_requested and (
         args.model_snapshot is None
@@ -1510,6 +1541,10 @@ def run(args: argparse.Namespace):
         ]
     if protected_callback is not None:
         callbacks.append(protected_callback)
+    if args.runtime_v1_capture_checkpoints:
+        callbacks.append(RuntimeV1LocalStateCallback(
+            run_dir, args.runtime_v1_workload_fingerprint
+        ))
     if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
         callbacks.append(
             HFBucketSyncCallback(

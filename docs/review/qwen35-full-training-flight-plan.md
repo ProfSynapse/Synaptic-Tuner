@@ -8,7 +8,31 @@ qualified the isolated SFT → saved LoRA → same verified base snapshot → vL
 evaluation → authenticated record/verified downloads workflow. Its three simple
 cases did not qualify long-form writing quality.
 
-## Current one-epoch approval checkpoint (2026-10-01)
+## Current one-epoch completion checkpoint (2026-10-01)
+
+The accepted ordinary workflow completed ONE epoch from source
+`f0c743165bd49e2ec63b464d666c8838e968298b`, attempt
+`modal-5ed557434ed2af12f4c74228`, call `fc-01M3W8RV83NXC3A94V0YD43XMJ`.
+Original session 47781 exited 0 at 14:19:52.011954 Eastern. Final step was 22,
+epochs 1.0, training loss 2.2881187438964843 (not validation loss); trainer walltime
+1461.5 seconds is not whole-job duration. Peak allocated/reserved/visible memory
+was 34.725/40.002/44.392 GiB. Five terminal artifact roles, adapter configuration
+and safetensors, and saved evaluation were verified in
+`/home/profsynapse/.local/state/synaptic-training/modal-5ed557434ed2af12f4c74228-artifacts`.
+
+Retained-config evaluation passed all three nonempty/natural-stop mechanical
+checks: Shattered Crystal 733 words, Endless Nights 2485, Symphony of Shadows
+1595. Endless and Symphony each contain five substantive repeated paragraphs;
+human quality is pending, not established by mechanical completion.
+`evaluation.json` SHA: `c2d9691446ff62e7e6c1020378bbaa7922545d5340f16ec89649cc672ad5985a`.
+No replay. Checkpoint/resume is architecture-ready, NOT implemented; the read-only
+Modal-app audit remains queued without stop/delete authority. GGUF and publishing
+remain held. Joseph authorized vault copies of all three local notes to reopened
+Synaptic Labs Syntunia Products/Research; migration remains pending independent
+verification and must not overwrite/delete the anomalous older journal. Earlier
+approval/held/prelaunch passages below are historical, not current run status.
+
+## Historical one-epoch approval checkpoint (2026-10-01)
 
 Joseph approved ONE epoch with a four-hour ceiling. The accepted private recipe
 uses batch 4/accumulation 2, outer 14400 seconds, evaluation 3600 seconds,

@@ -245,6 +245,13 @@ def test_v1_declarations_are_markdown_file_only_and_bounded() -> None:
     with pytest.raises(ValueError):
         FieldSelector(FieldSelectorKind.FRONTMATTER_FIELD, "a" * 65)
     assert FieldSelector(FieldSelectorKind.FRONTMATTER_FIELD, "3rd party").key == "3rd party"
+    full_text_selector = FieldSelector(FieldSelectorKind.DOCUMENT_TEXT)
+    assert full_text_selector.to_dict() == {"kind": "document_text", "key": None}
+    assert FieldSelector.from_dict(full_text_selector.to_dict()) == full_text_selector
+    with pytest.raises(ValueError):
+        FieldSelector(FieldSelectorKind.DOCUMENT_TEXT, "title")
+    with pytest.raises(ValueError):
+        FieldMapping("full", full_text_selector, FieldValueKind.OBJECT, True)
     with pytest.raises(ValueError):
         _request(tags=("a" * 65,))
     with pytest.raises(ValueError):
