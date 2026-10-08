@@ -7,6 +7,9 @@
 model:
   # Use a merged/published SFT model on Hugging Face for env-GRPO.
   model_name: "professorsynapse/Nexus-Quark-L2.5.28"
+  # Optional exact Hub commit (or branch/tag) for the model AND tokenizer.
+  # null = the repo's default branch. Pin it for reproducible runs/smokes.
+  model_revision: null
 
 dataset:
   dataset_name: "professorsynapse/nexus-synthetic-data"
@@ -39,6 +42,12 @@ training:
   report_to: "none"
   use_vllm: false
   vllm_mode: "colocate"
+  # Extra kwargs for every chat-template render: the dataset prompt and each
+  # turn of the env rollout (first prompt and the per-turn context suffix).
+  # Model-specific, e.g. {enable_thinking: false} for Qwen3/Qwen3.5 so the
+  # generation prompt carries the empty think block. null = template defaults.
+  # Same key and validation as the SFT/GRPO trainers.
+  chat_template_kwargs: null
   extra_args:
     top_p: 0.9
     repetition_penalty: 1.1
@@ -81,9 +90,11 @@ env_training:
   # on the real tool-result / user-feedback context. Single-turn episodes are
   # byte-identical either way. Requires trl>=0.28.0 (env_mask support); the
   # rollout builder auto-falls back to the legacy flattened path otherwise.
-  # Each turn's re-rendered prompt is verified to extend the previous turn; on a
-  # mismatch the episode is truncated at the last consistent turn and reported
-  # as prefix_mismatch_count (see .skills/fine-tuning/reference/grpo-training.md).
+  # Each turn's prompt is built prefix-stably (previous prompt + sampled ids +
+  # only the new context ids); earlier turns are never re-rendered. Every
+  # transition is still verified as a safety net: on a mismatch the episode is
+  # truncated at the last consistent turn and reported as prefix_mismatch_count
+  # (see .skills/fine-tuning/reference/grpo-training.md).
   token_faithful: true
   # "mask" = faithful interleaved sequence + env_mask. "drop" = legacy flattened
   # behavior (assistant turns concatenated, context tokens dropped). Use "drop"

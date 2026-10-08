@@ -315,6 +315,7 @@ def test_rollout_func_emits_env_mask_when_faithful(monkeypatch):
     rollout = build_rollout_func(
         registry={"p": object()},
         env_training_cfg={"token_faithful": True, "context_token_policy": "mask"},
+        use_vllm=True,
         runtime_support={"has_env_mask": True},
     )
     out = rollout(["p"], trainer=None)
@@ -333,6 +334,7 @@ def test_rollout_func_omits_env_mask_when_unsupported(monkeypatch):
     rollout = build_rollout_func(
         registry={"p": object()},
         env_training_cfg={"token_faithful": True, "context_token_policy": "mask"},
+        use_vllm=True,
         runtime_support={"has_env_mask": False},  # older TRL
     )
     out = rollout(["p"], trainer=None)
@@ -350,6 +352,7 @@ def test_rollout_func_reports_prefix_mismatch_per_episode(monkeypatch, caplog):
     rollout = build_rollout_func(
         registry={"a": object(), "b": object()},
         env_training_cfg={"token_faithful": True, "context_token_policy": "mask"},
+        use_vllm=True,
         runtime_support={"has_env_mask": True},
     )
     with caplog.at_level(logging.WARNING, logger=env_rollout.logger.name):
@@ -393,15 +396,24 @@ class _StubTokenizer:
     def apply_chat_template(self, messages, **_kwargs):
         return "|".join(str(m.get("content")) for m in messages)
 
+    def encode(self, text, add_special_tokens=False):
+        return [ord(ch) for ch in text]
+
     def decode(self, ids, skip_special_tokens=True):
         return f"plain text reply {len(ids)}"
 
 
 def _run_stub_episode(monkeypatch, segments, *, faithful=True):
+    """Drive an episode with a scripted backend that REPORTS its own prompt ids.
+
+    The rollout records the prompt ids the generator says it conditioned on, so
+    a backend that altered them (here: scripted segments, including a diverged
+    one) is exactly what the prefix-check safety net must catch.
+    """
     monkeypatch.setattr(env_rollout, "EnvironmentValidator", _StubValidator)
     scripted = iter(segments)
 
-    def generate(_trainer, _prompts):
+    def generate(_trainer, _prompts, **_kwargs):
         prompt_ids, completion_ids, logprobs = next(scripted)
         return [{"prompt_ids": prompt_ids, "completion_ids": completion_ids, "logprobs": logprobs}]
 

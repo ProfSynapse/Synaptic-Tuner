@@ -338,32 +338,88 @@ env_training:
   flattened path** (with a warning) rather than train on context tokens.
 - Use `context_token_policy: drop` only to A/B against the old behavior.
 
-### How the sequence is built
+Related keys (not under `env_training`):
 
-For each episode the rollout records per-turn `(prompt_ids, completion_ids,
-logprobs)` from `generate_rollout_completions`, then assembles:
+```yaml
+model:
+  model_revision: null          # Hub commit/branch/tag for model AND tokenizer (CLI: --model-revision)
+training:
+  chat_template_kwargs: null    # e.g. {enable_thinking: false} for Qwen3/Qwen3.5
+```
 
-- `prompt_ids` = the first turn's rendered prompt.
-- `completion_ids` = assistant turn 1 ++ context(1→2) ++ assistant turn 2 ++ …,
-  where context tokens are the tail of the next turn's rendered prompt (the same
-  length-delta slicing TRL's internal tool loop uses). Assistant spans use the raw
-  sampled token ids, so trained tokens stay byte-faithful.
+- `model.model_revision` pins `AutoTokenizer.from_pretrained(..., revision=)` and
+  the trainer's model load (`GRPOConfig.model_init_kwargs.revision`). A different
+  `revision` in `training.extra_args.model_init_kwargs` is refused.
+- `training.chat_template_kwargs` uses the same key and validator as the SFT/GRPO
+  trainers. It is applied to the dataset prompt render and to **every** chat-template
+  render inside the rollout (first prompt and each per-turn context suffix).
+
+**TRL version note.** TRL 1.9 removed `trl.experimental.openenv.generate_rollout_completions`.
+The rollout imports it only when `training.use_vllm: true`, so the transformers
+rollout path works on any TRL `>=0.28` (including 1.9+). The vLLM path needs a TRL
+that still ships the helper (0.28–1.8). It sends token-id prompts: colocate mode
+works on all of those, while server mode needs a `VLLMClient.generate` that accepts
+token-id lists (TRL 1.x).
+
+### How the sequence is built (prefix-stable)
+
+The rollout never re-renders earlier turns. Turn 1's prompt is the chat-template
+render of the episode's initial messages. Every later prompt is built from ids:
+
+```
+prompt(t+1) = prompt(t) + completion(t) + suffix(t)
+```
+
+`suffix(t)` holds only what the model sees next: the assistant end-of-turn marker
+if the sampled completion lacks one, the new tool-result / feedback / final-text
+messages, and the generation prompt. It is computed with the technique TRL's own
+multi-turn tool loop uses (`GRPOTrainer._get_tool_suffix_ids`): render a fixed
+minimal conversation ending in an assistant turn with the new messages and
+generation prompt appended, and keep the ids after that assistant turn, aligned at
+the end-of-turn (EOS) id. TRL locates that boundary by rendering the dummy a second
+time without the new messages, which only works on prefix-preserving templates
+(TRL swaps in its own training template otherwise). Here the dummy assistant
+content is a sentinel and the suffix is the tokenized text after it, so templates
+that render the dummy differently depending on what follows (Qwen3.5) still work.
+If the completion ended with a stop id (tokenizer / generation-config EOS), the
+template's marker up to and including the first stop id is dropped. If it did not
+(truncated at `max_completion_length`, no EOS sampled), the whole marker is kept as
+masked context. Nothing is specific to one template.
+
+The prompt ids go to the generator directly (transformers `generate(input_ids=…)`;
+vLLM `{"prompt_token_ids": …}` in colocate mode, an id list in server mode), so the
+model conditions on exactly these ids. The decoded completion text is still
+appended to `messages` for response parsing and the environment; it is never
+re-tokenized into the prompt.
+
+Why: re-rendering the whole conversation each turn diverges from what the model
+saw. Qwen3.5's template drops `<think>` from every assistant turn before the latest
+user message, so with re-rendering every multi-turn episode would be truncated to
+turn 1. With prefix-stable construction the model keeps seeing its own earlier
+reasoning, exactly as sampled.
+
+The assembled episode is:
+
+- `prompt_ids` = the first turn's prompt.
+- `completion_ids` = assistant turn 1 ++ suffix(1) ++ assistant turn 2 ++ …. The
+  context ids are the tail of the next turn's prompt past `prompt + completion`.
+  Assistant spans are the raw sampled ids.
 - `env_mask` = 1 on assistant tokens, 0 on context tokens (same length as
   `completion_ids`).
 - `logprobs` = sampling log-probs on assistant tokens, 0.0 on context tokens.
 
-### Prefix verification (re-render drift)
+### Prefix verification (safety net)
 
-Each turn the rollout decodes the sampled ids to text and re-renders the whole
-conversation with the chat template, which can rewrite earlier tokens (end-of-turn
-markers re-added differently, boundary re-tokenization, templates that strip
-`<think>` blocks from earlier assistant turns). The length-delta slice is only
-valid if turn `t`'s prompt actually **starts with** `prompt(t-1) + completion(t-1)`,
-so every transition is checked. On the first transition that fails (including a
-prompt shorter than that prefix), the episode's faithful sequence is **truncated
-after the last consistent turn** — every kept token is exactly what the model saw
-or sampled. TRL accepts one row per episode, so later turns are dropped rather than
-spliced in with the wrong context; the episode reward is unchanged.
+Every transition is still checked: turn `t`'s prompt must **start with**
+`prompt(t-1) + completion(t-1)` (idea from agent-lightning's `ids_startswith`). The
+rollout records the prompt ids the generator reports it conditioned on, so this
+only fires if a backend altered them (for example by adding a BOS); with
+prefix-stable construction it should never fire in normal operation. On the first
+transition that fails (including a prompt shorter than that prefix), the episode's
+faithful sequence is **truncated after the last consistent turn**, so every kept
+token is exactly what the model saw or sampled. TRL accepts one row per episode, so
+later turns are dropped rather than spliced in with the wrong context. The episode
+reward is unchanged.
 
 Observability (no config key; always on in faithful mode):
 
@@ -374,9 +430,9 @@ Observability (no config key; always on in faithful mode):
   length, prompt length and first divergence position, plus a per-batch
   `N/M episodes` summary.
 
-Frequent mismatches mean the model's chat template is not prefix-stable across
-turns; most multi-turn signal is then being truncated. Fix the template or
-rendering (e.g. keep reasoning in earlier turns) rather than ignoring the warning.
+Any non-zero `prefix_mismatch_count` is a bug in the generation backend or the
+rollout, not a template quirk. Investigate it rather than ignoring the warning: the
+multi-turn signal for those episodes is being truncated.
 
 ### What TRL does with it (verified against trl source)
 
@@ -405,7 +461,14 @@ top.)
 
 `tests/trainers/grpo/test_env_rollout_faithful.py` covers single-turn parity, the
 interleaved multi-turn sequence, mask/logprob length alignment, the capability
-gate, and the rollout_func output contract. Before a full launch, run a short
+gate, the prefix check and the rollout_func output contract.
+`tests/trainers/grpo/test_env_rollout_prefix_stable.py` runs 3-turn episodes
+through a Qwen3.5-like template (zero mismatches, exact suffixes, truncated
+completions without EOS, chat-template kwargs, token-id prompts, no TRL rollout
+helper). `RUN_LIVE_HUB=1` adds the same check against the real Qwen3.5-4B tokenizer
+at the smoke recipe's pinned revision (tokenizer files only).
+`tests/trainers/grpo/test_env_grpo_model_revision.py` covers the revision pin and
+chat-template kwargs wiring in `train_env_grpo.py`. Before a full launch, run a short
 env-GRPO smoke job and confirm the run does not raise a length/logprob mismatch.
 
 ---
