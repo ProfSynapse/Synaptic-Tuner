@@ -1,0 +1,29 @@
+schema_version: syntunia-runtime-profile/v1
+name: qwen35-env-grpo-v1
+
+# Environment-backed GRPO (Trainers/grpo/train_env_grpo.py). Not launchable:
+# Modal planning still raises MODAL_METHOD_NOT_LAUNCHABLE for grpo until the
+# GRPO worker, bundle dispatch and TrainingService registration exist. This
+# profile pins the runtime only; it is not GPU, Modal-build or training
+# qualification.
+#
+# `image` is the immutable base the packaged build profile derives from. The
+# inventory is that base with the build profile's hash-pinned bootstrap wheels
+# applied (trl 1.13.0, datasets 4.8.5, unsloth/unsloth_zoo 2026.10.2); the
+# additive packaged-runtime closure (synaptic-tuner, modal and its deps) is
+# excluded, as in qwen35-sft-v1. Captured with
+# scripts/capture_runtime_profile_inventory.py --image-profile.
+compatibility:
+  models:
+    - name: Qwen/Qwen3.5-4B
+      revisions:
+        - 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  methods:
+    - grpo
+
+runtime:
+  image: unsloth/unsloth@sha256:1644d635bc7c5b57ed64cabbab1ae00647dfb583c2135fdfb6a461aeeba52739
+  packaged_build_profile: qwen35_4b_packaged_env_grpo
+  inventory:
+    path: qwen35-env-grpo-v1.inventory.json
+    sha256: sha256:79dcb6257bd5a8b0d8bdfe6bc4a47b0589908db859465ee22a00375b6507771f

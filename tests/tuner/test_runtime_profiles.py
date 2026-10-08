@@ -267,8 +267,81 @@ def test_runtime_profile_rejects_unknown_duplicate_or_malformed_methods(
         load_runtime_profile("qwen35-sft-v1", tmp_path)
 
 
-def test_checked_in_profiles_still_declare_only_sft() -> None:
-    """No GRPO runtime profile/image/lock exists yet (a later phase)."""
+GRPO_PROFILES = {"qwen35-env-grpo-v1"}
+
+
+def test_checked_in_profiles_declare_one_method_each() -> None:
     for path in sorted(PROFILES.glob("*.yaml")):
         profile = load_runtime_profile(path.stem, PROFILES)
-        assert profile.methods == ("sft",)
+        assert profile.methods == (("grpo",) if path.stem in GRPO_PROFILES else ("sft",))
+
+
+def _inventory_versions(path: Path) -> dict[str, str]:
+    from packaging.utils import canonicalize_name
+
+    return {
+        canonicalize_name(item["name"]): item["version"]
+        for item in json.loads(path.read_bytes())["distributions"]
+    }
+
+
+def test_env_grpo_profile_binds_base_and_captured_stack_inventory() -> None:
+    from tuner.cloud.derived_training_image import load_profile
+
+    grpo = load_runtime_profile("qwen35-env-grpo-v1", PROFILES)
+    sft = load_runtime_profile("qwen35-sft-v1", PROFILES)
+    assert grpo.image == sft.image
+    assert grpo.model_revisions == sft.model_revisions
+    assert grpo.packaged_build_profile == "qwen35_4b_packaged_env_grpo"
+    assert grpo.runtime_facts == {
+        **sft.runtime_facts,
+        "trl_version": "1.13.0",
+        "unsloth_version": "2026.10.2",
+        "unsloth_zoo_version": "2026.10.2",
+    }
+    # Same distribution set as the base; only the bootstrap-replaced pins move.
+    grpo_versions = _inventory_versions(grpo.inventory_path)
+    sft_versions = _inventory_versions(sft.inventory_path)
+    assert set(grpo_versions) == set(sft_versions)
+    changed = {name for name in sft_versions if grpo_versions[name] != sft_versions[name]}
+    assert changed == {"datasets", "trl", "unsloth", "unsloth-zoo"}
+    assert {name: grpo_versions[name] for name in changed} == {
+        "datasets": "4.8.5", "trl": "1.13.0", "unsloth": "2026.10.2", "unsloth-zoo": "2026.10.2",
+    }
+
+    build = load_profile(grpo.modal_build_profile_path(ROOT / "Trainers" / "image_profiles"))
+    assert build.base_image.removeprefix("docker.io/") == grpo.image
+    assert build.packages == ()
+    pins = {item["distribution"]: item["version"] for item in build.packaged_runtime["bootstrap"]}
+    # Every bootstrap wheel that replaces a base distribution is what the
+    # inventory records; the rest are additive packaged-runtime closure.
+    assert {name: pins[name] for name in pins if name in sft_versions} == {
+        name: grpo_versions[name] for name in changed
+    }
+    capabilities = build.packaged_runtime["capabilities"]
+    assert capabilities["compatibility"] == {
+        "methods": ["grpo"],
+        "models": [{"ref": "Qwen/Qwen3.5-4B",
+                    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"}],
+        "dataset_formats": ["syntunia-env-rollout-row/v1"],
+    }
+    assert capabilities["contracts"] == {
+        "workload_schema": "synaptic-packaged-env-grpo-workload/v1",
+        "prepared_input_schema": "synaptic-prepared-training-input/v1",
+        "artifact_contract_schema": "synaptic-env-grpo-artifacts/v1",
+    }
+
+
+def test_env_grpo_profile_rejects_sft_resolution() -> None:
+    profile = load_runtime_profile("qwen35-env-grpo-v1", PROFILES)
+    profile.resolve(
+        model="Qwen/Qwen3.5-4B",
+        model_revision="851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+        method="grpo",
+    )
+    with pytest.raises(RuntimeProfileError, match="does not support method 'sft'"):
+        profile.resolve(
+            model="Qwen/Qwen3.5-4B",
+            model_revision="851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+            method="sft",
+        )

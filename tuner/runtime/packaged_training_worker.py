@@ -492,6 +492,27 @@ def _ambient_inventory(expected: dict) -> list[dict[str, str]]:
     return inventory
 
 
+def _bootstrap_requirement_satisfied(requirement, bootstrap_versions: dict) -> None:
+    """Raise unless a reviewed bootstrap wheel or the pinned base satisfies it."""
+    name = re.sub(r"[-_.]+", "-", requirement.name.lower())
+    version = bootstrap_versions.get(name)
+    if version is None:
+        # The pinned base may already provide a dependency.
+        provider = importlib.metadata.distribution(requirement.name)
+        version = provider.version
+        if requirement.extras:
+            declared = {re.sub(r"[-_.]+", "-", extra.lower())
+                        for extra in provider.metadata.get_all("Provides-Extra") or ()}
+            if any(re.sub(r"[-_.]+", "-", extra.lower()) not in declared
+                   for extra in requirement.extras):
+                raise ValueError
+    elif requirement.extras:
+        # Extras of another bootstrap wheel are not part of the reviewed closure.
+        raise ValueError
+    if version not in requirement.specifier:
+        raise ValueError
+
+
 def inspect_installed_runtime(expected: dict, *, inventory_scope: str = "ambient") -> dict:
     """Measure reviewed wheel bytes, installed members and worker closure.
 
@@ -533,13 +554,23 @@ def inspect_installed_runtime(expected: dict, *, inventory_scope: str = "ambient
                     requirement = Requirement(text)
                     if requirement.marker is not None and not requirement.marker.evaluate({"extra": ""}):
                         continue
-                    name = re.sub(r"[-_.]+", "-", requirement.name.lower())
-                    version = bootstrap_versions.get(name)
-                    if version is None:
-                        # The pinned base may already provide a dependency.
-                        version = importlib.metadata.distribution(requirement.name).version
-                    if requirement.url or requirement.extras or version not in requirement.specifier:
+                    if requirement.url:
                         raise ValueError
+                    _bootstrap_requirement_satisfied(requirement, bootstrap_versions)
+                    # A requested extra (e.g. ``fsspec[http]``) is admitted only
+                    # when every requirement it adds is itself satisfied, one
+                    # level deep, without further extras or URLs.
+                    for extra in sorted(requirement.extras):
+                        provider = importlib.metadata.distribution(requirement.name)
+                        for extra_text in provider.requires or ():
+                            added = Requirement(extra_text)
+                            if added.marker is None or not added.marker.evaluate({"extra": extra}):
+                                continue
+                            if added.marker.evaluate({"extra": ""}):
+                                continue  # unconditional; not added by the extra
+                            if added.url or added.extras:
+                                raise ValueError
+                            _bootstrap_requirement_satisfied(added, bootstrap_versions)
         except BaseException:
             raise PackagedInstalledRuntimeInspectionError("BOOTSTRAP_DEPENDENCIES") from None
         try:

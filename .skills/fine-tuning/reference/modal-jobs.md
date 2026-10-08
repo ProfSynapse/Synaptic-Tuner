@@ -24,13 +24,78 @@ artifact contract is the five SFT roles plus `rollout_log`
 `allow_transformers_rollout_func: true`; the dataset must be a prepared offline
 `local_file` of `syntunia-env-rollout-row/v1` rows (no hub download).
 
-It is **not launchable yet**: there is no GRPO runtime profile, image, lock,
-env-row dataset publisher or worker (`tuner.runtime.packaged_env_grpo_worker` is
-a reserved entrypoint name). Runtime profiles may declare `grpo`, but every
-checked-in profile declares only `sft`, so a GRPO recipe fails at profile
-resolution, and `train --job-config` reports `MODAL_METHOD_NOT_LAUNCHABLE`
+TRL's `GRPOConfig` sets `generation_batch_size` to batch size x gradient
+accumulation x world size and requires it to hold whole prompt groups, so the
+contract rejects `batch_size * gradient_accumulation_steps` that is not
+divisible by `num_generations` (Modal runs use one accelerator).
+
+The runtime is pinned (see "GRPO runtime profile" below): runtime profile
+`qwen35-env-grpo-v1` (`methods: [grpo]`) and derived image profile
+`Trainers/image_profiles/qwen35_4b_packaged_env_grpo/profile.yaml`. A GRPO
+recipe naming that profile loads, but it is **not launchable yet**: there is no
+env-row dataset publisher, worker (`tuner.runtime.packaged_env_grpo_worker` is
+a reserved entrypoint name), bundle/worker dispatch or `grpo` TrainingService
+registration, so `train --job-config` reports `MODAL_METHOD_NOT_LAUNCHABLE`
 before any planning. Do not try to work around this with HF Jobs flags or a
 hand-edited profile.
+
+### GRPO runtime profile
+
+`qwen35-env-grpo-v1` uses the same immutable base as `qwen35-sft-v1`
+(`unsloth/unsloth@sha256:1644d6…`, Python 3.12.3, torch 2.11.0+cu128,
+transformers 5.17.0, peft 0.21.0, accelerate 1.15.0). Its build profile adds
+hash-pinned bootstrap wheels that replace part of the ML stack:
+
+| package | base | GRPO | why |
+|---|---|---|---|
+| trl | 0.24.0 | 1.13.0 | `env_mask` (>=0.28), rollout_func on the transformers path; needs PR #171's lazy openenv import (TRL >=1.9 has no `trl.experimental.openenv`) |
+| datasets | 4.3.0 | 4.8.5 | TRL 1.x requires datasets>=4.7 |
+| unsloth / unsloth_zoo | 2026.9.7 / 2026.9.6 | 2026.10.2 / 2026.10.2 | not imported on this path; kept because runtime-profile inventories must carry both version facts, and 2026.10.2 declares trl<=1.13.0, transformers<=5.17.0, datasets<5 |
+
+vLLM 0.26.0 stays installed and unused (`use_vllm: false`). Installing the
+closure leaves the base's four `pip check` findings byte-identical, so the
+generic before/after gate holds. The packaged inspector admits a bootstrap
+requirement with extras (datasets' `fsspec[http]`) only when the provider in the
+base declares that extra and every requirement it adds is satisfied.
+
+This is runtime pinning, not qualification. A CPU smoke in the captured image
+confirmed the versions, `_detect_env_mask_support()` is true, and `GRPOConfig`
+accepts the controls without `max_prompt_length`. Still unproven: a Modal build
+capture, Qwen3.5 weights loading under TRL 1.13, L40S memory and tokens/s. The
+image has no `flash-linear-attention`/`causal-conv1d`, so Gated-DeltaNet layers
+use the torch fallback.
+
+## Runtime-profile inventory capture
+
+A runtime profile binds `<name>.inventory.json` by SHA-256. Produce or check it
+with `scripts/capture_runtime_profile_inventory.py`, never by hand. The script
+runs a credential-free probe with `docker run --pull never --network none`, so
+pull the immutable base first (`docker pull <ref>`, about 10.5 GB compressed
+and 33 GB on disk for the Unsloth base). It writes canonical bytes that
+`tuner/runtime_profiles.py` loads unchanged, refuses to overwrite, and `--check`
+exits 1 with a per-distribution diff when a file is stale.
+
+- Image mode, for a profile that runs its image unchanged:
+  `--image <ref> --python /opt/unsloth-venv/bin/python3 --check|--output <file>`.
+- Profile mode, for a profile whose packaged build profile changes the stack:
+  `--image <ref> --image-profile Trainers/image_profiles/<name>/profile.yaml
+  --output <file>`. Stage the bootstrap wheels next to `profile.yaml` (they are
+  gitignored) or pass `--wheel-dir`; each is hash-checked. Get them with
+  `pip download --no-deps --only-binary=:all: --python-version 3.12
+  --platform manylinux2014_x86_64 <name>==<version>`. The script builds a local
+  capture image (`synaptic-inventory-capture/<profile>:<digest>`, base plus all
+  bootstrap wheels, with the packaged build's offline `--require-hashes` install
+  and `pip check` gate), probes the base and the capture image, and keeps only the
+  base's distributions at their installed versions. Bootstrap wheels that replace
+  a base distribution are recorded; the additive packaged-runtime closure
+  (synaptic-tuner, modal and its deps) is not. It fails closed if the image
+  removed a base distribution, added or changed anything undeclared, or installed
+  a pin at another version.
+
+Both modes reproduce `qwen35-sft-v1.inventory.json` byte-for-byte from the base
+(profile mode with the SFT build profile, 68 s build). The GRPO inventory came
+from profile mode (88 s build, 327 distributions). The capture image is a local
+artifact; remove it with `docker image rm` when done.
 
 ## Product flow
 
@@ -1403,6 +1468,20 @@ training job or chat session ran. Keep the composed host alive; the permanent
 attempt claim is not full coordinator restart recovery.
 
 ## Runtime-lock maintenance
+
+Lock decision for env-GRPO (2026-10-08): the GRPO runtime gets neither its own
+lock nor an extension of `modal-runtime-v1.lock.json`. That lock pins the
+coordinator deployment image (`registry_reference` unsloth 2026.1.2,
+Python 3.11, `ml_stack` torch 2.9.0 / transformers 4.57.1 / trl 0.24.0) and
+its source files. It does not describe the packaged training image, which is
+why its `ml_stack` disagrees with `qwen35-sft-v1.inventory.json`. Packaged
+training images are pinned by the runtime profile (base digest plus inventory
+SHA-256) and the derived image profile (hash-pinned wheels), for SFT and GRPO
+alike. The env-GRPO change refreshed only source hashes (`training_input.py`,
+`packaged_training_worker.py`) with the regenerate scripts below. Adding the
+GRPO worker sources (Phase 3: `Trainers/grpo/runtime_v1.py`, the worker
+module, its offline file manifest) changes a lock inventory, which needs a
+deliberate lock/schema review, as with `sft_runtime`.
 
 For first-time inference commitment creation, use the checked-in offline
 `scripts/initialize_modal_inference_lock.py` with explicit `--accepted-evidence`,

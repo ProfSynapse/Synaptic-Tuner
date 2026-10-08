@@ -72,6 +72,60 @@ def test_bootstrap_can_use_matching_dependency_from_pinned_base(installed):
     assert rejected.value.stage == "BOOTSTRAP_DEPENDENCIES"
 
 
+class _Metadata(dict):
+    def get_all(self, key, default=None):
+        value = self.get(key)
+        return default if value is None else list(value)
+
+
+def _base_with_http_extra(distributions, *, aiohttp_version="3.14.3"):
+    distributions["fsspec"] = SimpleNamespace(
+        version="2025.9.0",
+        metadata=_Metadata({"Name": "fsspec", "Provides-Extra": ["http", "s3"]}),
+        requires=[
+            "aiohttp!=4.0.0a0,!=4.0.0a1; extra == \"http\"",
+            "s3fs; extra == \"s3\"",
+        ],
+        files=[],
+    )
+    distributions["aiohttp"] = SimpleNamespace(
+        version=aiohttp_version, metadata=_Metadata({"Name": "aiohttp"}), requires=[], files=[],
+    )
+
+
+def test_bootstrap_dependency_extra_is_admitted_when_its_requirements_hold(installed):
+    # datasets>=4.7 (needed by trl>=1.0) requires fsspec[http]; aiohttp is in the base.
+    expected, _retained, _packages, distributions = installed
+    distributions["bootstrap"].requires = ["fsspec[http]<=2026.2.0,>=2023.1.0"]
+    _base_with_http_extra(distributions)
+    measured = worker.inspect_installed_runtime(expected)
+    assert {"fsspec", "aiohttp"} <= {
+        item["name"] for item in measured["installed_distributions"]["inventory"]
+    }
+
+
+@pytest.mark.parametrize("mutation", [
+    "extra-requirement-unsatisfied", "extra-undeclared", "extra-requirement-missing",
+    "extra-on-bootstrap-wheel", "extra-requirement-has-extras",
+])
+def test_bootstrap_dependency_extra_fails_closed(installed, mutation):
+    expected, _retained, _packages, distributions = installed
+    distributions["bootstrap"].requires = ["fsspec[http]<=2026.2.0,>=2023.1.0"]
+    _base_with_http_extra(distributions, aiohttp_version=(
+        "4.0.0a1" if mutation == "extra-requirement-unsatisfied" else "3.14.3"))
+    if mutation == "extra-undeclared":
+        distributions["bootstrap"].requires = ["fsspec[gcs]<=2026.2.0,>=2023.1.0"]
+    elif mutation == "extra-requirement-missing":
+        del distributions["aiohttp"]
+    elif mutation == "extra-on-bootstrap-wheel":
+        distributions["bootstrap"].requires = ["synaptic-tuner[extra]>=1"]
+    elif mutation == "extra-requirement-has-extras":
+        distributions["fsspec"].requires = ["aiohttp[speedups]; extra == \"http\""]
+    with pytest.raises(worker.PackagedInstalledRuntimeInspectionError) as rejected:
+        worker.inspect_installed_runtime(expected)
+    assert rejected.value.stage == "BOOTSTRAP_DEPENDENCIES"
+
+
 @pytest.mark.parametrize("mutation,stage", [
     ("missing-provenance", "PROVENANCE"), ("wrong-provenance", "PROVENANCE"),
     ("member", "MEMBERS"), ("wheel", "WHEEL_BYTES"),

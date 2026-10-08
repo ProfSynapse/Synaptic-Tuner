@@ -614,6 +614,13 @@ class EnvGRPOHyperparametersV1:
                 field,
                 _exact_integer(getattr(self, field), field, minimum=minimum, maximum=maximum),
             )
+        # TRL's GRPOConfig derives generation_batch_size as per-device batch x
+        # gradient accumulation x world size and requires whole prompt groups.
+        # Packaged Modal runs use exactly one accelerator (world size 1).
+        if (self.batch_size * self.gradient_accumulation_steps) % self.num_generations:
+            raise ValueError(
+                "batch_size * gradient_accumulation_steps must be divisible by num_generations"
+            )
         object.__setattr__(
             self,
             "learning_rate",
