@@ -43,6 +43,12 @@ class EpisodeRolloutResult:
     # result / user feedback) that the model conditioned on but did not emit.
     # Empty when the legacy flattened representation is used.
     env_mask: List[int] = field(default_factory=list)
+    # Number of turn transitions whose re-rendered prompt did not extend the
+    # previous turn's prompt + sampled completion (see _assemble_faithful_sequence).
+    # Non-zero means the faithful sequence was truncated at the last consistent
+    # turn. Always 0 on the legacy flattened path, which does not use later
+    # turns' prompts.
+    prefix_mismatch_count: int = 0
     executed_tool_names: List[str] = field(default_factory=list)
     executed_tool_statuses: List[str] = field(default_factory=list)
     environment_issue_levels: List[str] = field(default_factory=list)
@@ -75,56 +81,131 @@ def _assemble_flat_sequence(turn_segments: Sequence[TurnSegment]) -> Tuple[List[
     return base_prompt, completion, logprobs
 
 
-def _assemble_faithful_sequence(
-    turn_segments: Sequence[TurnSegment],
-) -> Tuple[List[int], List[int], List[int], List[float]]:
+@dataclass(frozen=True)
+class PrefixMismatch:
+    """A turn transition whose rendered prompt does not extend the prior turn.
+
+    ``turn_index`` is the 0-based index of the turn whose prompt diverged.
+    ``expected_prefix_len`` is ``len(prompt(t-1)) + len(completion(t-1))``;
+    ``prompt_len`` is ``len(prompt(t))``. ``diverge_at`` is the first position
+    where the ids differ, or ``None`` when the prompt is simply too short to
+    contain the expected prefix.
+    """
+
+    turn_index: int
+    expected_prefix_len: int
+    prompt_len: int
+    diverge_at: Optional[int]
+
+
+@dataclass
+class FaithfulSequence:
+    """Output of :func:`_assemble_faithful_sequence`.
+
+    ``completion_ids``, ``env_mask`` and ``logprobs`` are always the same length.
+    ``kept_turns`` is how many leading turns made it into the sequence; it is
+    smaller than the number of input turns only when ``mismatches`` is non-empty.
+    """
+
+    prompt_ids: List[int]
+    completion_ids: List[int]
+    env_mask: List[int]
+    logprobs: List[float]
+    kept_turns: int
+    mismatches: List[PrefixMismatch] = field(default_factory=list)
+
+
+def _find_prefix_mismatches(turn_segments: Sequence[TurnSegment]) -> List[PrefixMismatch]:
+    """Check every transition: does ``prompt(t)`` start with ``prompt(t-1) + completion(t-1)``?
+
+    The rollout loop decodes each completion to text and re-renders the whole
+    conversation with the chat template for the next turn. That re-render can
+    rewrite earlier ids (end-of-turn markers re-added differently, boundary
+    re-tokenization, templates that strip reasoning blocks from earlier
+    assistant turns), in which case the length delta between consecutive
+    prompts no longer identifies the new context ids. A transition where the
+    prompt is not longer than the expected prefix but still matches it exactly
+    (no context ids in between) is consistent and is not reported.
+    """
+    mismatches: List[PrefixMismatch] = []
+    for idx in range(1, len(turn_segments)):
+        prev_prompt, prev_completion, _prev_logprobs = turn_segments[idx - 1]
+        cur_prompt = turn_segments[idx][0]
+        expected = list(prev_prompt) + list(prev_completion)
+        if len(cur_prompt) >= len(expected) and list(cur_prompt[: len(expected)]) == expected:
+            continue
+        diverge_at: Optional[int] = None
+        for pos, (got, want) in enumerate(zip(cur_prompt, expected)):
+            if got != want:
+                diverge_at = pos
+                break
+        mismatches.append(
+            PrefixMismatch(
+                turn_index=idx,
+                expected_prefix_len=len(expected),
+                prompt_len=len(cur_prompt),
+                diverge_at=diverge_at,
+            )
+        )
+    return mismatches
+
+
+def _assemble_faithful_sequence(turn_segments: Sequence[TurnSegment]) -> FaithfulSequence:
     """Token-faithful representation: full interleaved sequence + per-token mask.
 
-    Returns ``(base_prompt_ids, completion_ids, env_mask, logprobs)`` where
     ``completion_ids`` is everything after the initial prompt — assistant turns
-    interleaved with the exact tool-result / user-feedback context tokens the
-    model saw between turns. ``env_mask`` is 1 on assistant-sampled tokens and 0
-    on external context tokens; ``logprobs`` carries the sampling log-prob on
-    assistant tokens and 0.0 on context tokens. All three lists are the same
-    length, matching TRL's ``env_mask`` contract (mask is multiplied into the
-    completion loss mask, so context tokens contribute nothing to the loss while
-    still being attended to).
+    interleaved with the exact tool-result / user-feedback context ids the model
+    saw between turns. ``env_mask`` is 1 on assistant-sampled ids and 0 on
+    external context ids; ``logprobs`` carries the sampling log-prob on
+    assistant ids and 0.0 on context ids. All three lists are the same length,
+    matching TRL's ``env_mask`` contract (mask is multiplied into the completion
+    loss mask, so context ids contribute nothing to the loss while still being
+    attended to).
 
-    Context tokens for the transition into turn ``t`` are recovered as the tail of
-    turn ``t``'s rendered prompt that extends past ``prompt(t-1) + completion(t-1)``
-    — the same length-delta slicing TRL's own internal tool loop uses. Assistant
-    spans use the raw sampled token ids (not re-templated text) so the trained
-    tokens stay byte-faithful to what was sampled.
+    Context ids for the transition into turn ``t`` are the tail of turn ``t``'s
+    rendered prompt past ``prompt(t-1) + completion(t-1)``. That slice is only
+    meaningful when ``prompt(t)`` actually starts with that prefix, so every
+    transition is verified first (idea borrowed from agent-lightning's
+    ``ids_startswith`` check). On the first transition that fails, the sequence
+    is truncated after the last consistent turn: every id kept is then exactly
+    what the model conditioned on or sampled, with correct logprob alignment.
+    A single TRL rollout row per episode cannot hold a second segment, so the
+    later turns are dropped rather than spliced in with a wrong context.
+    Assistant spans use the raw sampled ids (not re-templated text).
     """
     if not turn_segments:
-        return [], [], [], []
+        return FaithfulSequence([], [], [], [], kept_turns=0)
+
+    mismatches = _find_prefix_mismatches(turn_segments)
+    kept_turns = mismatches[0].turn_index if mismatches else len(turn_segments)
 
     base_prompt = list(turn_segments[0][0])
     completion: List[int] = []
     env_mask: List[int] = []
     logprobs: List[float] = []
 
-    _first_prompt, first_completion, first_logprobs = turn_segments[0]
-    completion.extend(first_completion)
-    env_mask.extend([1] * len(first_completion))
-    logprobs.extend(first_logprobs)
-
-    for idx in range(1, len(turn_segments)):
-        prev_prompt, prev_completion, _prev_logprobs = turn_segments[idx - 1]
+    for idx in range(kept_turns):
         cur_prompt, cur_completion, cur_logprobs = turn_segments[idx]
-
-        ext_len = len(cur_prompt) - len(prev_prompt) - len(prev_completion)
-        if ext_len > 0:
-            ext_ids = list(cur_prompt[-ext_len:])
+        if idx > 0:
+            prev_prompt, prev_completion, _prev_logprobs = turn_segments[idx - 1]
+            prefix_len = len(prev_prompt) + len(prev_completion)
+            ext_ids = list(cur_prompt[prefix_len:])
             completion.extend(ext_ids)
-            env_mask.extend([0] * ext_len)
-            logprobs.extend([0.0] * ext_len)
+            env_mask.extend([0] * len(ext_ids))
+            logprobs.extend([0.0] * len(ext_ids))
 
         completion.extend(cur_completion)
         env_mask.extend([1] * len(cur_completion))
-        logprobs.extend(cur_logprobs)
+        logprobs.extend(_align_logprobs(list(cur_logprobs), len(cur_completion)))
 
-    return base_prompt, completion, env_mask, logprobs
+    return FaithfulSequence(
+        prompt_ids=base_prompt,
+        completion_ids=completion,
+        env_mask=env_mask,
+        logprobs=logprobs,
+        kept_turns=kept_turns,
+        mismatches=mismatches,
+    )
 
 
 def build_prompt_registry(dataset) -> Dict[str, EpisodeSpec]:
@@ -216,7 +297,16 @@ def build_rollout_func(
             "environment_issue_levels": [item.environment_issue_levels for item in results],
             "expected_tool_names": [item.expected_tool_names for item in results],
             "completion_text": [item.completion_text for item in results],
+            "prefix_mismatch_count": [item.prefix_mismatch_count for item in results],
         }
+        mismatched = sum(1 for item in results if item.prefix_mismatch_count)
+        if mismatched:
+            logger.warning(
+                "env-GRPO rollout batch: %d/%d episodes had a re-rendered prompt prefix "
+                "mismatch and were truncated to their last consistent turn.",
+                mismatched,
+                len(results),
+            )
         if faithful:
             # TRL pops env_mask from the rollout output and multiplies it into the
             # completion loss mask (model tokens=1, external context tokens=0).
@@ -384,6 +474,34 @@ def _run_single_episode(
         if str(item).strip()
     ]
 
+    prefix_mismatch_count = 0
+    if faithful:
+        assembled = _assemble_faithful_sequence(turn_segments)
+        prompt_ids = assembled.prompt_ids
+        completion_ids = assembled.completion_ids
+        env_mask = assembled.env_mask
+        logprobs = assembled.logprobs
+        prefix_mismatch_count = len(assembled.mismatches)
+        if assembled.mismatches:
+            first = assembled.mismatches[0]
+            logger.warning(
+                "env-GRPO faithful rollout: turn %d prompt does not extend the previous "
+                "turn (expected prefix len %d, prompt len %d, first divergence at %s); "
+                "%d transition(s) inconsistent. Truncating episode sequence to the first "
+                "%d of %d turns. scenario=%s",
+                first.turn_index,
+                first.expected_prefix_len,
+                first.prompt_len,
+                "n/a (prompt shorter than prefix)" if first.diverge_at is None else first.diverge_at,
+                prefix_mismatch_count,
+                assembled.kept_turns,
+                len(turn_segments),
+                spec.scenario,
+            )
+    else:
+        prompt_ids, completion_ids, logprobs = _assemble_flat_sequence(turn_segments)
+        env_mask = []
+
     _write_debug_rollout(
         env_training_cfg=env_training_cfg,
         spec=spec,
@@ -396,13 +514,8 @@ def _run_single_episode(
         expected_tool_names=expected_tool_names,
         environment_result=environment_result,
         executed_tools=session.executed_tools,
+        prefix_mismatch_count=prefix_mismatch_count,
     )
-
-    if faithful:
-        prompt_ids, completion_ids, env_mask, logprobs = _assemble_faithful_sequence(turn_segments)
-    else:
-        prompt_ids, completion_ids, logprobs = _assemble_flat_sequence(turn_segments)
-        env_mask = []
 
     return EpisodeRolloutResult(
         prompt_ids=prompt_ids,
@@ -416,6 +529,7 @@ def _run_single_episode(
         total_tool_calls=len(session.executed_tools),
         final_text_satisfied=final_text_satisfied,
         env_mask=env_mask,
+        prefix_mismatch_count=prefix_mismatch_count,
         executed_tool_names=executed_tool_names,
         executed_tool_statuses=executed_tool_statuses,
         environment_issue_levels=environment_issue_levels,
@@ -445,6 +559,7 @@ def _write_debug_rollout(
     expected_tool_names: List[str],
     environment_result: Any,
     executed_tools: Any,
+    prefix_mismatch_count: int,
 ) -> None:
     debug_path = env_training_cfg.get("debug_rollouts_path")
     if not debug_path:
@@ -458,6 +573,7 @@ def _write_debug_rollout(
         "total_turns": total_turns,
         "total_tool_calls": total_tool_calls,
         "final_text_satisfied": final_text_satisfied,
+        "prefix_mismatch_count": prefix_mismatch_count,
         "expected_tool_names": expected_tool_names,
         "environment_issues": getattr(environment_result, "issues", []),
         "executed_tools": [

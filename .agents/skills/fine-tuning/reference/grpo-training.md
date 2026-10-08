@@ -352,6 +352,32 @@ logprobs)` from `generate_rollout_completions`, then assembles:
   `completion_ids`).
 - `logprobs` = sampling log-probs on assistant tokens, 0.0 on context tokens.
 
+### Prefix verification (re-render drift)
+
+Each turn the rollout decodes the sampled ids to text and re-renders the whole
+conversation with the chat template, which can rewrite earlier tokens (end-of-turn
+markers re-added differently, boundary re-tokenization, templates that strip
+`<think>` blocks from earlier assistant turns). The length-delta slice is only
+valid if turn `t`'s prompt actually **starts with** `prompt(t-1) + completion(t-1)`,
+so every transition is checked. On the first transition that fails (including a
+prompt shorter than that prefix), the episode's faithful sequence is **truncated
+after the last consistent turn** — every kept token is exactly what the model saw
+or sampled. TRL accepts one row per episode, so later turns are dropped rather than
+spliced in with the wrong context; the episode reward is unchanged.
+
+Observability (no config key; always on in faithful mode):
+
+- `prefix_mismatch_count` per episode — on `EpisodeRolloutResult`, as an extra
+  rollout output column (reaches reward functions as a kwarg), and in the
+  `debug_rollouts_path` JSONL record.
+- A per-episode `WARNING` from `env_rollout` with turn index, expected prefix
+  length, prompt length and first divergence position, plus a per-batch
+  `N/M episodes` summary.
+
+Frequent mismatches mean the model's chat template is not prefix-stable across
+turns; most multi-turn signal is then being truncated. Fix the template or
+rendering (e.g. keep reasoning in earlier turns) rather than ignoring the warning.
+
 ### What TRL does with it (verified against trl source)
 
 `completion_mask` is all-ones over `completion_ids`, so the full interleaved
