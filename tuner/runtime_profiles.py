@@ -14,6 +14,8 @@ from typing import Any, Mapping
 import yaml
 from packaging.utils import canonicalize_name
 
+from synaptic_tuner.api.v1.training_input import TrainingMethodV1
+
 
 PROFILE_SCHEMA = "syntunia-runtime-profile/v1"
 INVENTORY_SCHEMA = "syntunia-python-distribution-inventory/v1"
@@ -22,6 +24,8 @@ _PROFILE_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 _BUILD_PROFILE_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9_-]{0,126}[a-z0-9])?$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IMMUTABLE_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+# A profile may declare any method the public training contract defines.
+_KNOWN_METHODS = frozenset(method.value for method in TrainingMethodV1)
 
 
 class RuntimeProfileError(ValueError):
@@ -292,8 +296,12 @@ def load_runtime_profile(name: str, profiles_dir: Path) -> RuntimeProfile:
     methods = _nonempty_unique_strings(
         compatibility["methods"], "compatibility.methods"
     )
-    if methods != ("sft",):
-        raise RuntimeProfileError("Runtime profile schema v1 supports only method sft")
+    unknown_methods = sorted(set(methods) - _KNOWN_METHODS)
+    if unknown_methods:
+        raise RuntimeProfileError(
+            "Runtime profile declares unsupported methods: " + ", ".join(unknown_methods)
+            + " (supported: " + ", ".join(sorted(_KNOWN_METHODS)) + ")"
+        )
     runtime = profile["runtime"]
     if not isinstance(runtime, dict) or set(runtime) not in (
         {"image", "inventory"}, {"image", "inventory", "packaged_build_profile"}

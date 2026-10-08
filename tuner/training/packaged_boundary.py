@@ -27,13 +27,19 @@ from .coordinator_material import (
 from .recipes import CompiledWorkload, RecipeRegistry, canonical_json_bytes
 from .service import TrainingService, _PackagedCompilationHooks
 from .packaged_compilation import (
-    PACKAGED_CONTEXT_SCHEMA, PACKAGED_ENTRYPOINT, PACKAGED_SFT_WORKLOAD_SCHEMA,
-    _fields, compile_packaged_sft_workload, packaged_artifact_policy_digest,
+    PACKAGED_CONTEXT_SCHEMA, PACKAGED_ENTRYPOINT, PACKAGED_ENV_GRPO_ENTRYPOINT,
+    PACKAGED_ENV_GRPO_WORKLOAD_SCHEMA, PACKAGED_SFT_WORKLOAD_SCHEMA,
+    _fields, compile_packaged_workload, packaged_artifact_policy_digest,
 )
 
 
 ExecutionMaterialV1 = GitExecutionSourceV1 | PackagedExecutionBindingV1
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+# method -> (worker entrypoint, workload schema, hyperparameter section)
+_PACKAGED_METHOD_CONTRACTS = {
+    "sft": (PACKAGED_ENTRYPOINT, PACKAGED_SFT_WORKLOAD_SCHEMA, "sft"),
+    "grpo": (PACKAGED_ENV_GRPO_ENTRYPOINT, PACKAGED_ENV_GRPO_WORKLOAD_SCHEMA, "grpo"),
+}
 
 
 def compile_bound_packaged_workload(config, binding) -> CompiledWorkload:
@@ -41,7 +47,7 @@ def compile_bound_packaged_workload(config, binding) -> CompiledWorkload:
         raise TypeError("exact packaged execution binding required")
     # Reconstruct, rather than trusting a frozen object that may have been mutated.
     binding = PackagedExecutionBindingV1.from_dict(binding.to_dict())
-    workload = compile_packaged_sft_workload(resolved_config=config)
+    workload = compile_packaged_workload(resolved_config=config)
     if (binding.workload_digest != workload.fingerprint
             or binding.configuration_digest != workload.document["configuration"]["digest"]
             or binding.to_dict()["prepared_input"] != workload.document["identities"]["dataset"]):
@@ -72,13 +78,18 @@ def validate_packaged_material(*, request: TrainingRequest, material) -> Compile
         raise ValueError("unsupported packaged context")
     release = parse_packaged_runtime_release(context["runtime_release"])
     config = material.resolved_config.to_dict()
+    method = workload.method
+    entrypoint, workload_schema, section = _PACKAGED_METHOD_CONTRACTS[method]
+    compiled_roles = {item["role"] for item in workload.document["artifacts"]["requirements"]}
+    if not set(material.artifact_policy.required_kinds) <= compiled_roles:
+        raise ValueError("artifact policy requires roles absent from the method contract")
     if (
         release.manifest_digest != binding.runtime_release_digest
-        or release.worker_entrypoint != PACKAGED_ENTRYPOINT
-        or "sft" not in release.compatible_methods
+        or release.worker_entrypoint != entrypoint
+        or method not in release.compatible_methods
         or (config["model"]["ref"], config["model"]["revision"]) not in release.compatible_models
         or config["dataset"]["format"] not in release.compatible_dataset_formats
-        or release.workload_schema != PACKAGED_SFT_WORKLOAD_SCHEMA
+        or release.workload_schema != workload_schema
         or release.prepared_input_schema != "synaptic-prepared-training-input/v1"
         or release.artifact_contract_schema != workload.document["artifacts"]["schema_version"]
     ):
@@ -102,10 +113,10 @@ def validate_packaged_material(*, request: TrainingRequest, material) -> Compile
     public = TrainingInputV1.from_json(request.document.canonical_json)
     if (
         canonical_json_bytes(public.to_dict()) != canonical_json_bytes(request.document.to_dict())
-        or public.method.value != "sft"
+        or public.method.value != method
         or public.model.to_dict() != {key: config["model"][key] for key in ("ref", "revision", "tokenizer_revision")}
         or public.dataset.ref != config["dataset"]["ref"]
-        or canonical_json_bytes(public.hyperparameters.to_dict()) != canonical_json_bytes(config["sft"])
+        or canonical_json_bytes(public.hyperparameters.to_dict()) != canonical_json_bytes(config[section])
         or public.artifacts.required_kinds != material.artifact_policy.required_kinds
         or public.artifacts.retain_checkpoints != material.artifact_policy.retain_checkpoints
     ):

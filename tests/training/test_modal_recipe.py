@@ -24,7 +24,7 @@ from tuner.training.input_preparation import (
     PublishedPreparedDatasetNormalizerV1,
     TrainingInputPreparationServiceV1, default_dataset_format_verifiers_v1,
 )
-from tuner.training.modal_recipe import (load_modal_sft_recipe, plan_modal_sft_recipe,
+from tuner.training.modal_recipe import (load_modal_recipe, plan_modal_sft_recipe,
                                          resolve_modal_sft_build)
 from tuner.runtime_profiles import load_runtime_profile
 from tuner.handlers.train_handler import TrainHandler
@@ -42,11 +42,11 @@ def _load(monkeypatch, mutation):
     document = deepcopy(yaml.safe_load(RECIPE.read_text(encoding="utf-8")))
     mutation(document)
     monkeypatch.setattr(modal_recipe, "load_recipe", lambda _path, _runner: document)
-    return load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    return load_modal_recipe(RECIPE, profiles_root=PROFILES)
 
 
 def test_recipe_maps_to_exact_public_and_packaged_sft_controls():
-    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(RECIPE, profiles_root=PROFILES)
     identity = PreparedTrainingInputIdentity(
         "prepared://sha256/" + recipe.dataset_digest,
         recipe.dataset_digest, "a" * 64, 123,
@@ -88,7 +88,7 @@ def test_third_named_profile_selects_its_declared_packaged_build(tmp_path, monke
     recipe_document = deepcopy(yaml.safe_load(RECIPE.read_text(encoding="utf-8")))
     recipe_document["job"]["runtime_profile"] = "third-sft-profile"
     monkeypatch.setattr(modal_recipe, "load_recipe", lambda _path, _runner: recipe_document)
-    recipe = load_modal_sft_recipe(RECIPE, profiles_root=profiles)
+    recipe = load_modal_recipe(RECIPE, profiles_root=profiles)
     assert recipe.runtime_profile == "third-sft-profile"
     profile = load_runtime_profile(recipe.runtime_profile, profiles)
     build_path, intent = resolve_modal_sft_build(profile, profiles, recipe.model.ref,
@@ -167,7 +167,7 @@ def test_recipe_accepts_reviewed_a100_option(monkeypatch):
 
 @pytest.mark.parametrize("timeout", [1, 3600, 7200, 14400, 86400])
 def test_recipe_timeout_bound_preserves_legacy_workload_bytes(monkeypatch, timeout):
-    baseline = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    baseline = load_modal_recipe(RECIPE, profiles_root=PROFILES)
     requested = _load(monkeypatch, lambda data: data["job"].update(timeout_seconds=timeout))
     identity = PreparedTrainingInputIdentity("prepared://sha256/" + baseline.dataset_digest,
         baseline.dataset_digest, "a" * 64, 123, "syntunia-sft-row/v2")

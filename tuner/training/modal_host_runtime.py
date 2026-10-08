@@ -37,7 +37,7 @@ from tuner.execution.providers.modal.runtime_release_deployment import (
 from tuner.runtime.runtime_release_modal_training import run_modal_packaged_training
 from tuner.runtime.runtime_release_modal_self_check import run_runtime_release_self_check
 from tuner.training.contracts import ResourceSpec
-from tuner.training.modal_recipe import MODAL_SFT_ACCELERATOR_RATE_KEYS
+from tuner.training.modal_recipe import MODAL_ACCELERATOR_RATE_KEYS
 
 
 # Keys observed read-only in the selected Modal 1.5.4 workspace/environment;
@@ -269,14 +269,14 @@ def quote_modal_runtime_for_host(
 ) -> ModalRuntimeQuoteV1:
     """Bounded GPU-only nominal quote, never a provider billing cap."""
     if (type(recipe_resource) is not ResourceSpec
-            or recipe_resource.accelerator not in MODAL_SFT_ACCELERATOR_RATE_KEYS
+            or recipe_resource.accelerator not in MODAL_ACCELERATOR_RATE_KEYS
             or type(recipe_resource.accelerator_count) is not int
             or recipe_resource.accelerator_count != 1
             or not 1 <= recipe_resource.timeout_seconds <= 86400
             or type(maximum_cost_minor_units) is not int
             or maximum_cost_minor_units < 1):
         raise ValueError("Modal runtime resource or operator ceiling is unsupported")
-    key = MODAL_SFT_ACCELERATOR_RATE_KEYS[recipe_resource.accelerator]
+    key = MODAL_ACCELERATOR_RATE_KEYS[recipe_resource.accelerator]
     if type(key) is not str or _RATE_KEY.fullmatch(key) is None:
         raise ValueError("selected GPU scoped rate key is not independently verified")
     rates = _scoped_rates(sdk=sdk, client=client, client_binding=client_binding)

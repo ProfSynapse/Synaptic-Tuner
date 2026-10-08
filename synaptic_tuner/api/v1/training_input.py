@@ -15,6 +15,7 @@ from ._contract import contract_digest
 
 _TRAINING_SCHEMA = "synaptic-training-input/v1"
 _SFT_SCHEMA = "synaptic-sft-hyperparameters/v1"
+_ENV_GRPO_SCHEMA = "synaptic-env-grpo-hyperparameters/v1"
 _MAX_JSON_BYTES = 64 * 1024
 _MAX_REF_BYTES = 512
 _MAX_ITEM_BYTES = 128
@@ -32,6 +33,16 @@ _MAX_LORA_RANK = 4096
 _MAX_LORA_ALPHA = 65_536
 _MAX_SEED = 4_294_967_295
 _MAX_CHAT_TEMPLATE_KWARGS_BYTES = 4096
+_MAX_NUM_GENERATIONS = 1024
+_MAX_TEMPERATURE = 10.0
+_MAX_BETA = 10.0
+_MAX_TURNS = 1024
+_MAX_TOOL_STEPS = 4096
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+# Env-GRPO rollouts run in-process against the local environment validator;
+# remote sandboxes (for example e2b) need credentials and network egress.
+_ENV_GRPO_BACKENDS = frozenset({"local"})
+_ENV_GRPO_CONTEXT_TOKEN_POLICIES = frozenset({"mask", "drop"})
 _RESERVED_CHAT_TEMPLATE_KWARGS = frozenset({
     "messages", "tokenize", "add_generation_prompt", "return_dict",
     "return_tensors", "continue_final_message", "chat_template",
@@ -251,6 +262,7 @@ def _fields(value: object, expected: frozenset[str], name: str) -> dict[str, obj
 
 class TrainingMethodV1(str, Enum):
     SFT = "sft"
+    GRPO = "grpo"
 
 
 @dataclass(frozen=True, slots=True)
@@ -533,6 +545,163 @@ class SFTTrainingHyperparametersV1:
         )
 
 
+def _bounded_nonnegative_float(value: object, field: str, *, maximum_inclusive: float) -> float:
+    if type(value) not in (int, float):
+        raise TypeError(f"{field} must be a number")
+    try:
+        normalized = float(value)
+    except (OverflowError, TypeError, ValueError):
+        raise ValueError(f"{field} is outside its allowed range") from None
+    if not math.isfinite(normalized) or not 0.0 <= normalized <= maximum_inclusive:
+        raise ValueError(f"{field} is outside its allowed range")
+    return normalized
+
+
+@dataclass(frozen=True, slots=True)
+class EnvGRPOHyperparametersV1:
+    """Environment-backed GRPO controls (``Trainers/grpo/train_env_grpo.py``).
+
+    Rollouts are generated in-process by transformers (``use_vllm`` is false and
+    ``allow_transformers_rollout_func`` is true) against the local environment
+    validator. Reward weights are referenced by a logical ref plus content
+    digest rather than inlined, so the reward table stays a reviewed artifact.
+    """
+
+    batch_size: int
+    gradient_accumulation_steps: int
+    learning_rate: float
+    max_steps: int
+    seed: int
+    save_steps: int
+    save_total_limit: int
+    num_generations: int
+    max_completion_length: int
+    temperature: float
+    beta: float
+    lora_rank: int
+    lora_alpha: int
+    lora_dropout: float
+    lora_target_modules: tuple[str, ...]
+    env_backend: str
+    max_turns: int
+    max_tool_steps: int
+    token_faithful: bool
+    context_token_policy: str
+    reward_config_ref: str
+    reward_config_digest: str
+    use_vllm: bool
+    allow_transformers_rollout_func: bool
+
+    def __post_init__(self) -> None:
+        integer_bounds = {
+            "batch_size": (1, _MAX_BATCH_SIZE),
+            "gradient_accumulation_steps": (1, _MAX_GRADIENT_ACCUMULATION_STEPS),
+            "max_steps": (1, _MAX_STEPS),
+            "seed": (0, _MAX_SEED),
+            "save_steps": (1, _MAX_SAVE_STEPS),
+            "save_total_limit": (1, _MAX_SAVE_TOTAL_LIMIT),
+            # Group-relative advantages need at least two completions per prompt.
+            "num_generations": (2, _MAX_NUM_GENERATIONS),
+            "max_completion_length": (1, _MAX_SEQ_LENGTH),
+            "lora_rank": (1, _MAX_LORA_RANK),
+            "lora_alpha": (1, _MAX_LORA_ALPHA),
+            "max_turns": (1, _MAX_TURNS),
+            "max_tool_steps": (1, _MAX_TOOL_STEPS),
+        }
+        for field, (minimum, maximum) in integer_bounds.items():
+            object.__setattr__(
+                self,
+                field,
+                _exact_integer(getattr(self, field), field, minimum=minimum, maximum=maximum),
+            )
+        object.__setattr__(
+            self,
+            "learning_rate",
+            _finite_float(
+                self.learning_rate, "learning_rate",
+                minimum_exclusive=0.0, maximum_inclusive=_MAX_LEARNING_RATE,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "temperature",
+            _finite_float(
+                self.temperature, "temperature",
+                minimum_exclusive=0.0, maximum_inclusive=_MAX_TEMPERATURE,
+            ),
+        )
+        object.__setattr__(
+            self, "beta",
+            _bounded_nonnegative_float(self.beta, "beta", maximum_inclusive=_MAX_BETA),
+        )
+        object.__setattr__(self, "lora_dropout", _dropout(self.lora_dropout))
+        object.__setattr__(
+            self,
+            "lora_target_modules",
+            _canonical_items(
+                self.lora_target_modules, "lora_target_modules",
+                maximum_items=_MAX_TARGET_MODULES,
+            ),
+        )
+        for field in ("token_faithful", "use_vllm", "allow_transformers_rollout_func"):
+            object.__setattr__(self, field, _exact_bool(getattr(self, field), field))
+        backend = _text(self.env_backend, "env_backend", maximum_bytes=_MAX_ITEM_BYTES)
+        if backend not in _ENV_GRPO_BACKENDS:
+            raise ValueError("env_backend is unsupported")
+        policy = _text(
+            self.context_token_policy, "context_token_policy", maximum_bytes=_MAX_ITEM_BYTES
+        )
+        if policy not in _ENV_GRPO_CONTEXT_TOKEN_POLICIES:
+            raise ValueError("context_token_policy is unsupported")
+        if self.use_vllm:
+            raise ValueError("env-GRPO requires transformers rollouts; use_vllm must be false")
+        if not self.allow_transformers_rollout_func:
+            raise ValueError("env-GRPO requires allow_transformers_rollout_func")
+        object.__setattr__(
+            self, "reward_config_ref", _logical_ref(self.reward_config_ref, "reward_config_ref")
+        )
+        digest = _text(self.reward_config_digest, "reward_config_digest", maximum_bytes=64)
+        if _SHA256_HEX.fullmatch(digest) is None:
+            raise ValueError("reward_config_digest must be a lowercase SHA-256 hex digest")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": _ENV_GRPO_SCHEMA,
+            "batch_size": self.batch_size,
+            "gradient_accumulation_steps": self.gradient_accumulation_steps,
+            "learning_rate": self.learning_rate,
+            "max_steps": self.max_steps,
+            "seed": self.seed,
+            "save_steps": self.save_steps,
+            "save_total_limit": self.save_total_limit,
+            "num_generations": self.num_generations,
+            "max_completion_length": self.max_completion_length,
+            "temperature": self.temperature,
+            "beta": self.beta,
+            "lora_rank": self.lora_rank,
+            "lora_alpha": self.lora_alpha,
+            "lora_dropout": self.lora_dropout,
+            "lora_target_modules": list(self.lora_target_modules),
+            "env_backend": self.env_backend,
+            "max_turns": self.max_turns,
+            "max_tool_steps": self.max_tool_steps,
+            "token_faithful": self.token_faithful,
+            "context_token_policy": self.context_token_policy,
+            "reward_config_ref": self.reward_config_ref,
+            "reward_config_digest": self.reward_config_digest,
+            "use_vllm": self.use_vllm,
+            "allow_transformers_rollout_func": self.allow_transformers_rollout_func,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "EnvGRPOHyperparametersV1":
+        names = tuple(field for field in cls.__dataclass_fields__)
+        value = _fields(value, frozenset(names) | {"schema_version"}, "hyperparameters")
+        if value["schema_version"] != _ENV_GRPO_SCHEMA:
+            raise ValueError("hyperparameters schema is unsupported")
+        return cls(**{name: value[name] for name in names})  # type: ignore[arg-type]
+
+
 @dataclass(frozen=True, slots=True)
 class TrainingArtifactRequirementsV1:
     required_kinds: tuple[str, ...]
@@ -636,24 +805,31 @@ def validate_chat_template_kwargs(value: object) -> dict[str, object]:
     return json.loads(encoded)
 
 
+# Each method binds exactly one hyperparameter contract.
+_HYPERPARAMETERS: dict[TrainingMethodV1, type] = {
+    TrainingMethodV1.SFT: SFTTrainingHyperparametersV1,
+    TrainingMethodV1.GRPO: EnvGRPOHyperparametersV1,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class TrainingInputV1:
     schema_version: str
     method: TrainingMethodV1
     model: TrainingModelInputV1
     dataset: TrainingDatasetInputV1
-    hyperparameters: SFTTrainingHyperparametersV1
+    hyperparameters: SFTTrainingHyperparametersV1 | EnvGRPOHyperparametersV1
     artifacts: TrainingArtifactRequirementsV1
 
     def __post_init__(self) -> None:
         if self.schema_version != _TRAINING_SCHEMA:
             raise ValueError("training input schema is unsupported")
-        if type(self.method) is not TrainingMethodV1 or self.method is not TrainingMethodV1.SFT:
+        if type(self.method) is not TrainingMethodV1:
             raise TypeError("method must be exact TrainingMethodV1")
         expected = (
             (self.model, TrainingModelInputV1, "model"),
             (self.dataset, TrainingDatasetInputV1, "dataset"),
-            (self.hyperparameters, SFTTrainingHyperparametersV1, "hyperparameters"),
+            (self.hyperparameters, _HYPERPARAMETERS[self.method], "hyperparameters"),
             (self.artifacts, TrainingArtifactRequirementsV1, "artifacts"),
         )
         for value, expected_type, field in expected:
@@ -681,7 +857,10 @@ class TrainingInputV1:
         )
         if value["schema_version"] != _TRAINING_SCHEMA:
             raise ValueError("training input schema is unsupported")
-        if value["method"] != TrainingMethodV1.SFT.value:
+        method = next(
+            (item for item in TrainingMethodV1 if item.value == value["method"]), None
+        )
+        if type(value["method"]) is not str or method is None:
             raise ValueError("training method is unsupported")
         nested = {}
         for field in ("model", "dataset", "hyperparameters", "artifacts"):
@@ -691,12 +870,10 @@ class TrainingInputV1:
             nested[field] = item
         return cls(
             schema_version=_TRAINING_SCHEMA,
-            method=TrainingMethodV1.SFT,
+            method=method,
             model=TrainingModelInputV1.from_dict(nested["model"]),
             dataset=TrainingDatasetInputV1.from_dict(nested["dataset"]),
-            hyperparameters=SFTTrainingHyperparametersV1.from_dict(
-                nested["hyperparameters"]
-            ),
+            hyperparameters=_HYPERPARAMETERS[method].from_dict(nested["hyperparameters"]),
             artifacts=TrainingArtifactRequirementsV1.from_dict(nested["artifacts"]),
         )
 
@@ -745,6 +922,7 @@ class TrainingInputV1:
 
 
 __all__ = [
+    "EnvGRPOHyperparametersV1",
     "SFTTrainingHyperparametersV1",
     "TrainingArtifactRequirementsV1",
     "TrainingDatasetInputV1",

@@ -134,7 +134,7 @@ _LAZY_MODULE_ATTRIBUTES = {
         "TrainingPreflight", "TrainingRequest", "TrainingStart",
     },
     "training_input": {
-        "SFTTrainingHyperparametersV1", "TrainingArtifactRequirementsV1",
+        "EnvGRPOHyperparametersV1", "SFTTrainingHyperparametersV1", "TrainingArtifactRequirementsV1",
         "TrainingDatasetInputV1", "TrainingDurationV1", "TrainingInputV1",
         "TrainingMethodV1", "TrainingModelInputV1",
     },
@@ -202,7 +202,7 @@ _FORMAL_EXPORTS = (
     "VerificationStatus", "VerifiedArtifact", "VerifiedArtifactSourcePortV1",
     "SpooledArtifactV1", "SpoolSinkPortV1", "StrongInMemoryPublicationStoreV1",
     "InvalidTransition", "apply_lifecycle_event",
-    "SFTTrainingHyperparametersV1", "TrainingArtifactRequirementsV1",
+    "EnvGRPOHyperparametersV1", "SFTTrainingHyperparametersV1", "TrainingArtifactRequirementsV1",
     "TrainingDatasetInputV1", "TrainingDurationV1", "TrainingInputV1",
     "TrainingMethodV1", "TrainingModelInputV1",
     "LoadedTrainingInputContractV1", "TrainingInputContractCodeV1",

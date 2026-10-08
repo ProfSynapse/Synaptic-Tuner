@@ -12,7 +12,7 @@ import pytest
 from synaptic_tuner.api.v1._contract import PreparedTrainingInputIdentity
 from tuner.runtime.releases import PackagedExecutionBindingV1
 from tuner.training.contracts import CanonicalDocument
-from tuner.training.modal_recipe import load_modal_sft_recipe
+from tuner.training.modal_recipe import load_modal_recipe
 from tuner.training.packaged_boundary import compile_bound_packaged_workload
 from tuner.training.packaged_compilation import (
     compile_packaged_sft_workload,
@@ -89,7 +89,7 @@ def test_three_complete_unicode_contexts_compile_and_reach_trainer_intact():
     ).encode("utf-8")
     assert 512 * 1024 < len(encoded) < 1024 * 1024
     assert validate_post_training_config(evaluation) == evaluation
-    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(RECIPE, profiles_root=PROFILES)
     config = _config(replace(recipe, post_training=evaluation))
     workload = compile_packaged_sft_workload(resolved_config=config)
     assert 256 * 1024 < len(workload.canonical_bytes) < MAX_WORKLOAD_BYTES
@@ -159,7 +159,7 @@ def _config(recipe):
 
 
 def test_opt_in_evaluation_changes_bound_workload_and_preserves_training_artifacts():
-    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(RECIPE, profiles_root=PROFILES)
     baseline = _config(recipe)
     requested = _config(replace(recipe, post_training=_evaluation()))
     ordinary = compile_packaged_sft_workload(resolved_config=baseline)
@@ -173,7 +173,7 @@ def test_opt_in_evaluation_changes_bound_workload_and_preserves_training_artifac
 
 
 def test_checked_in_combined_recipe_compiles_exact_inline_evaluation():
-    recipe = load_modal_sft_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
     config = _config(recipe)
     compiled = compile_packaged_sft_workload(resolved_config=config)
 
@@ -188,7 +188,7 @@ def test_checked_in_combined_recipe_compiles_exact_inline_evaluation():
 
 def test_combined_recipe_cases_are_bound_to_host_execution_material():
     # This is still a completed-text smoke, not a style-quality qualification.
-    recipe = load_modal_sft_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
     config = _config(recipe).to_dict()
     assert config["sft"]["chat_template_kwargs"] == {"enable_thinking": False}
     generation = config["post_training"]["evaluation"]["generation"]
@@ -207,7 +207,7 @@ def test_combined_recipe_rejects_truncated_or_thinking_only_responses(content, f
     from Evaluator.response_view import build_response_view
     from shared.verifiers.builtins.assertion_verifier import evaluate_correctness
 
-    recipe = load_modal_sft_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
     scenarios = recipe.post_training["evaluation"]["scenarios"]
     raw = {"choices": [{"message": {"content": content}, "finish_reason": finish_reason}]}
     view = build_response_view(content, raw)
@@ -215,7 +215,7 @@ def test_combined_recipe_rejects_truncated_or_thinking_only_responses(content, f
 
 
 def test_combined_recipe_config_is_bound_to_host_execution_material():
-    recipe = load_modal_sft_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(COMBINED_RECIPE, profiles_root=PROFILES)
     config = _config(recipe)
     workload = compile_packaged_sft_workload(resolved_config=config)
     identity = config.to_dict()["dataset"]
@@ -244,7 +244,7 @@ def test_combined_recipe_config_is_bound_to_host_execution_material():
 def test_generation_transport_controls_are_bound_without_legacy_byte_changes(limit):
     from tuner.training.post_training import validate_post_training_config
     from tuner.training.recipes import canonical_json_bytes
-    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(RECIPE, profiles_root=PROFILES)
     legacy = _evaluation()
     assert canonical_json_bytes(validate_post_training_config(legacy)) == canonical_json_bytes(legacy)
     requested = _evaluation()
@@ -286,7 +286,7 @@ def test_optional_decode_controls_bind_compilation_and_schema_without_legacy_cha
     from jsonschema import Draft202012Validator
     from tuner.training.post_training import validate_post_training_config
     from tuner.training.recipes import canonical_json_bytes
-    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(RECIPE, profiles_root=PROFILES)
     legacy = _evaluation()
     legacy_bytes = canonical_json_bytes(legacy)
     assert canonical_json_bytes(validate_post_training_config(legacy)) == legacy_bytes
@@ -304,7 +304,7 @@ def test_optional_decode_controls_bind_compilation_and_schema_without_legacy_cha
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(schema)
     for compiled in (ordinary, workload, compile_packaged_sft_workload(resolved_config=_config(recipe)),
-            compile_packaged_sft_workload(resolved_config=_config(load_modal_sft_recipe(COMBINED_RECIPE, profiles_root=PROFILES)))):
+            compile_packaged_sft_workload(resolved_config=_config(load_modal_recipe(COMBINED_RECIPE, profiles_root=PROFILES)))):
         validator.validate(compiled.document)
 
 
@@ -334,7 +334,7 @@ def test_optional_decode_controls_reject_invalid_configuration_and_schema(name, 
 
 
 def test_opt_in_evaluation_rejects_unbound_or_invalid_controls():
-    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(RECIPE, profiles_root=PROFILES)
     valid = _config(replace(recipe, post_training=_evaluation())).to_dict()
     for post_training in (None, {"mode": "parallel", "evaluation": _evaluation()["evaluation"]}):
         candidate = dict(valid)

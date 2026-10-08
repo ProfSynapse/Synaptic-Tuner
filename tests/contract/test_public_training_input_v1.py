@@ -16,6 +16,7 @@ from typing import get_type_hints
 import pytest
 
 from synaptic_tuner.api.v1.training_input import (
+    EnvGRPOHyperparametersV1,
     SFTTrainingHyperparametersV1,
     TrainingArtifactRequirementsV1,
     TrainingDatasetInputV1,
@@ -28,6 +29,7 @@ from synaptic_tuner.api.v1.training_input import (
 
 ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_NAMES = [
+    "EnvGRPOHyperparametersV1",
     "SFTTrainingHyperparametersV1",
     "TrainingArtifactRequirementsV1",
     "TrainingDatasetInputV1",
@@ -101,7 +103,7 @@ def test_valid_document_is_exact_immutable_and_canonical() -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         value.schema_version = "changed"  # type: ignore[misc]
     assert not hasattr(value, "__dict__")
-    assert tuple(item.value for item in TrainingMethodV1) == ("sft",)
+    assert tuple(item.value for item in TrainingMethodV1) == ("sft", "grpo")
     assert "schema_version" not in {
         field.name for field in dataclasses.fields(SFTTrainingHyperparametersV1)
     }
@@ -522,6 +524,7 @@ def test_all_from_dict_annotations_are_exact_builtin_dicts() -> None:
         TrainingDatasetInputV1,
         TrainingDurationV1,
         SFTTrainingHyperparametersV1,
+        EnvGRPOHyperparametersV1,
         TrainingArtifactRequirementsV1,
         TrainingInputV1,
     ):
@@ -662,3 +665,160 @@ def test_training_input_source_imports_only_stdlib_and_contract_primitives() -> 
         if isinstance(node, ast.ImportFrom) and node.level == 1
     }
     assert relative == {"_contract"}
+
+
+# --- Environment-backed GRPO -------------------------------------------------
+
+
+def _grpo_hyperparameters() -> dict[str, object]:
+    return {
+        "schema_version": "synaptic-env-grpo-hyperparameters/v1",
+        "batch_size": 1,
+        "gradient_accumulation_steps": 4,
+        "learning_rate": 5e-06,
+        "max_steps": 20,
+        "seed": 42,
+        "save_steps": 10,
+        "save_total_limit": 2,
+        "num_generations": 4,
+        "max_completion_length": 220,
+        "temperature": 0.6,
+        "beta": 0.04,
+        "lora_rank": 16,
+        "lora_alpha": 32,
+        "lora_dropout": 0.05,
+        "lora_target_modules": ["k_proj", "q_proj", "v_proj"],
+        "env_backend": "local",
+        "max_turns": 6,
+        "max_tool_steps": 8,
+        "token_faithful": True,
+        "context_token_policy": "mask",
+        "reward_config_ref": "rewards://syntunia/env-grpo-default/v1",
+        "reward_config_digest": "c" * 64,
+        "use_vllm": False,
+        "allow_transformers_rollout_func": True,
+    }
+
+
+def _grpo_document() -> dict[str, object]:
+    document = _document()
+    document["method"] = "grpo"
+    document["hyperparameters"] = _grpo_hyperparameters()
+    document["artifacts"] = {
+        "required_kinds": ["final_model", "rollout_log", "training_lineage"],
+        "retain_checkpoints": False,
+    }
+    return document
+
+
+def test_grpo_document_round_trips_exactly_and_canonically() -> None:
+    value = TrainingInputV1.from_dict(_grpo_document())
+    assert value.method is TrainingMethodV1.GRPO
+    assert type(value.hyperparameters) is EnvGRPOHyperparametersV1
+    assert value.to_dict() == _grpo_document()
+    assert TrainingInputV1.from_json(value.canonical_json()) == value
+    assert value.input_digest() != _input().input_digest()
+    assert not hasattr(value.hyperparameters, "__dict__")
+
+
+def test_method_binds_exactly_one_hyperparameter_contract() -> None:
+    sft_with_grpo = _document()
+    sft_with_grpo["hyperparameters"] = _grpo_hyperparameters()
+    with pytest.raises(ValueError):
+        TrainingInputV1.from_dict(sft_with_grpo)
+    grpo_with_sft = _grpo_document()
+    grpo_with_sft["hyperparameters"] = _document()["hyperparameters"]
+    with pytest.raises(ValueError):
+        TrainingInputV1.from_dict(grpo_with_sft)
+    sft = _input()
+    with pytest.raises(TypeError):
+        TrainingInputV1(sft.schema_version, TrainingMethodV1.GRPO, sft.model, sft.dataset,
+                        sft.hyperparameters, sft.artifacts)
+
+
+@pytest.mark.parametrize("method", ["GRPO", "kto", "dpo", "", None, 1, ["grpo"]])
+def test_unknown_or_non_string_methods_are_rejected(method: object) -> None:
+    document = _grpo_document()
+    document["method"] = method
+    with pytest.raises((TypeError, ValueError)):
+        TrainingInputV1.from_dict(document)
+
+
+def test_grpo_every_missing_and_unknown_hyperparameter_fails() -> None:
+    for field in tuple(_grpo_hyperparameters()):
+        document = _grpo_document()
+        del document["hyperparameters"][field]  # type: ignore[attr-defined]
+        with pytest.raises(ValueError):
+            TrainingInputV1.from_dict(document)
+    for unknown in ("unknown", "max_prompt_length", "dataset_name", "vllm_mode", "env_url"):
+        document = _grpo_document()
+        document["hyperparameters"][unknown] = 1  # type: ignore[index]
+        with pytest.raises(ValueError):
+            TrainingInputV1.from_dict(document)
+
+
+@pytest.mark.parametrize("field,value,error", [
+    ("env_backend", "e2b", ValueError),
+    ("env_backend", "LOCAL", ValueError),
+    ("env_backend", " local", ValueError),
+    ("env_backend", 1, TypeError),
+    ("context_token_policy", "keep", ValueError),
+    ("use_vllm", True, ValueError),
+    ("allow_transformers_rollout_func", False, ValueError),
+    ("token_faithful", 1, TypeError),
+    ("use_vllm", 0, TypeError),
+    ("num_generations", 1, ValueError),
+    ("num_generations", 1025, ValueError),
+    ("num_generations", True, TypeError),
+    ("max_steps", 0, ValueError),
+    ("max_steps", 2.0, TypeError),
+    ("max_completion_length", 0, ValueError),
+    ("max_turns", 0, ValueError),
+    ("max_tool_steps", 0, ValueError),
+    ("temperature", 0.0, ValueError),
+    ("temperature", math.inf, ValueError),
+    ("temperature", 10.5, ValueError),
+    ("beta", -0.01, ValueError),
+    ("beta", math.nan, ValueError),
+    ("beta", "0.04", TypeError),
+    ("learning_rate", 0.0, ValueError),
+    ("lora_dropout", 1.0, ValueError),
+    ("lora_target_modules", ["q_proj", "k_proj"], ValueError),
+    ("lora_target_modules", [], ValueError),
+    ("reward_config_ref", "/abs/rewards.yaml", ValueError),
+    ("reward_config_ref", "../rewards.yaml", ValueError),
+    ("reward_config_ref", "https://example.com/r?token=x", ValueError),
+    ("reward_config_digest", "C" * 64, ValueError),
+    ("reward_config_digest", "c" * 63, ValueError),
+    ("reward_config_digest", "sha256:" + "c" * 64, ValueError),
+    ("seed", -1, ValueError),
+])
+def test_grpo_hostile_or_out_of_range_values_fail_closed(field, value, error) -> None:
+    document = _grpo_document()
+    document["hyperparameters"][field] = value  # type: ignore[index]
+    with pytest.raises(error):
+        TrainingInputV1.from_dict(document)
+
+
+def test_grpo_zero_beta_and_drop_policy_are_explicitly_allowed() -> None:
+    document = _grpo_document()
+    document["hyperparameters"].update(  # type: ignore[attr-defined]
+        beta=0, context_token_policy="drop", token_faithful=False,
+    )
+    value = TrainingInputV1.from_dict(document)
+    assert value.hyperparameters.beta == 0.0
+    assert type(value.hyperparameters.to_dict()["beta"]) is float
+
+
+def test_grpo_hyperparameters_reject_dict_subclass_and_wrong_schema() -> None:
+    class DictSubclass(dict):
+        pass
+
+    document = _grpo_document()
+    document["hyperparameters"] = DictSubclass(_grpo_hyperparameters())
+    with pytest.raises(TypeError):
+        TrainingInputV1.from_dict(document)
+    document = _grpo_document()
+    document["hyperparameters"]["schema_version"] = "synaptic-sft-hyperparameters/v1"  # type: ignore[index]
+    with pytest.raises(ValueError):
+        TrainingInputV1.from_dict(document)

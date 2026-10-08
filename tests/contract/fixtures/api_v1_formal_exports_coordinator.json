@@ -130,6 +130,7 @@
   "StrongInMemoryPublicationStoreV1",
   "InvalidTransition",
   "apply_lifecycle_event",
+  "EnvGRPOHyperparametersV1",
   "SFTTrainingHyperparametersV1",
   "TrainingArtifactRequirementsV1",
   "TrainingDatasetInputV1",
