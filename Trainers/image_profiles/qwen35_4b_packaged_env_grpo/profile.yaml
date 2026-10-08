@@ -1,0 +1,111 @@
+schema_version: synaptic-derived-training-image-profile/v1
+name: qwen35-4b-packaged-env-grpo
+platform: linux/amd64
+
+# Environment-backed GRPO on the same immutable Unsloth base as packaged SFT
+# (runtime profile qwen35-env-grpo-v1). The ML stack change is carried by
+# hash-pinned bootstrap wheels, installed offline with --no-deps
+# --require-hashes like the rest of the packaged runtime:
+#   trl 0.24.0 -> 1.13.0          (env_mask support; rollout_func on the
+#                                  transformers path; needs datasets>=4.7)
+#   datasets 4.3.0 -> 4.8.5
+#   unsloth 2026.9.7 -> 2026.10.2 (not imported on the env-GRPO path; kept so
+#   unsloth_zoo 2026.9.6 -> 2026.10.2  the declared caps cover trl<=1.13.0,
+#                                  transformers<=5.17.0 and datasets<5)
+# transformers 5.17.0, peft 0.21.0, accelerate 1.15.0 and torch 2.11.0+cu128
+# stay as measured in the base. vLLM 0.26.0 stays installed and unused
+# (use_vllm: false).
+#
+# The base has four pre-existing `pip check` findings (mistral-common numpy,
+# vllm numba, vllm torchcodec, decord platform). Installing this bootstrap
+# closure was measured to leave that output byte-identical, so the generic
+# before/after gate holds. Every bootstrap requirement is satisfied by the
+# closure or the base; datasets' fsspec[http] is satisfied by the base's
+# fsspec 2025.9.0 and aiohttp. Inventory: qwen35-env-grpo-v1.inventory.json,
+# captured with scripts/capture_runtime_profile_inventory.py.
+#
+# The synaptic-tuner wheel pin is the same as the packaged SFT profiles; a
+# Modal build replaces it with the wheel built from the accepted source commit.
+base_image: docker.io/unsloth/unsloth@sha256:1644d635bc7c5b57ed64cabbab1ae00647dfb583c2135fdfb6a461aeeba52739
+python_executable: /opt/unsloth-venv/bin/python3
+packages: []
+
+packaged_runtime:
+  wheel:
+    filename: synaptic_tuner-1.1.0-py3-none-any.whl
+    distribution: synaptic-tuner
+    version: 1.1.0
+    sha256: 5857815dc7694af1cbe8df98da44e3941fe157c0dd23651f992c9f9401a88d7d
+  bootstrap:
+    - filename: datasets-4.8.5-py3-none-any.whl
+      distribution: datasets
+      version: 4.8.5
+      sha256: 5079900781719c0e063a8efdd2cd95a31ad0c63209178669cd23cf1b926149ff
+    - filename: grpclib-0.4.9-py3-none-any.whl
+      distribution: grpclib
+      version: 0.4.9
+      sha256: 7762ec1c8ed94dfad597475152dd35cbd11aecaaca2f243e29702435ca24cf0e
+    - filename: h2-4.4.1-py3-none-any.whl
+      distribution: h2
+      version: 4.4.1
+      sha256: 0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6
+    - filename: hpack-4.2.0-py3-none-any.whl
+      distribution: hpack
+      version: 4.2.0
+      sha256: 858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986
+    - filename: hyperframe-6.1.0-py3-none-any.whl
+      distribution: hyperframe
+      version: 6.1.0
+      sha256: b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5
+    - filename: modal-1.5.4-py3-none-any.whl
+      distribution: modal
+      version: 1.5.4
+      sha256: 3e54e26037c445af42f9a9ef9862b66bdd2e0b1faeced5fcc7adf3e5f59e44ed
+    - filename: synchronicity-0.12.5-py3-none-any.whl
+      distribution: synchronicity
+      version: 0.12.5
+      sha256: fdbbb10d437bc08a6b0f814fc66fddd1b58ffed314533d42f1ab555801e781af
+    - filename: toml-0.10.2-py2.py3-none-any.whl
+      distribution: toml
+      version: 0.10.2
+      sha256: 806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b
+    - filename: trl-1.13.0-py3-none-any.whl
+      distribution: trl
+      version: 1.13.0
+      sha256: 7c7ae0c72e969450221cf4c7cfe69c532c5a83c727204f1c8ced38a9b79134ec
+    - filename: types_certifi-2021.10.8.3-py3-none-any.whl
+      distribution: types-certifi
+      version: 2021.10.8.3
+      sha256: b2d1e325e69f71f7c78e5943d410e650b4707bb0ef32e4ddf3da37f54176e88a
+    - filename: types_toml-0.10.8.20260518-py3-none-any.whl
+      distribution: types-toml
+      version: 0.10.8.20260518
+      sha256: 0e564ab05f6fde62a315b3b5a9b6624fda569399795d30a37e64705a70459303
+    - filename: unsloth-2026.10.2-py3-none-any.whl
+      distribution: unsloth
+      version: 2026.10.2
+      sha256: 6aba42395f7519cf7b4098478d17eff85c7009612f3f0701c47a74f76f2a99bb
+    - filename: unsloth_zoo-2026.10.2-py3-none-any.whl
+      distribution: unsloth-zoo
+      version: 2026.10.2
+      sha256: 71e532768808503222b09a6e33c9662768ed1459797fcfe72b67dd61798979a9
+  python:
+    implementation: cpython
+    version: 3.12.3
+    executable: /opt/unsloth-venv/bin/python3
+    executable_digest: e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f
+    purelib: /opt/unsloth-venv/lib/python3.12/site-packages
+    platlib: /opt/unsloth-venv/lib/python3.12/site-packages
+  capabilities:
+    compatibility:
+      methods:
+        - grpo
+      models:
+        - ref: Qwen/Qwen3.5-4B
+          revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+      dataset_formats:
+        - syntunia-env-rollout-row/v1
+    contracts:
+      workload_schema: synaptic-packaged-env-grpo-workload/v1
+      prepared_input_schema: synaptic-prepared-training-input/v1
+      artifact_contract_schema: synaptic-env-grpo-artifacts/v1

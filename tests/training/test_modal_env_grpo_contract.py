@@ -25,6 +25,7 @@ from tests.runtime.test_packaged_runtime_releases import _provider, _release
 from tests.training.test_packaged_execution_material import packaged_fixture
 from tuner.handlers.train_handler import TrainHandler
 from tuner.runtime.releases import PackagedExecutionBindingV1
+from tuner.runtime_profiles import load_runtime_profile
 from tuner.training.contracts import (
     ArtifactPolicy, CanonicalDocument, ResolvedTrainingComponents, ResourceSpec,
     RuntimeSpec, TrainingRequest,
@@ -95,7 +96,7 @@ def _grpo_recipe() -> dict[str, object]:
 
 @pytest.fixture
 def grpo_profiles(tmp_path: Path) -> Path:
-    """A test-only profile declaring grpo; no checked-in GRPO profile exists yet."""
+    """A test-only profile declaring grpo on the SFT inventory (no build profile)."""
     profiles = tmp_path / "Trainers" / "runtime_profiles"
     profiles.mkdir(parents=True)
     document = yaml.safe_load((PROFILES / "qwen35-sft-v1.yaml").read_text(encoding="utf-8"))
@@ -162,10 +163,29 @@ def test_sft_recipe_still_loads_with_sft_method():
 
 
 def test_grpo_recipe_requires_profile_declaring_grpo(monkeypatch):
-    """The checked-in SFT profile does not admit grpo, so no real recipe loads yet."""
+    """The checked-in SFT profile does not admit grpo."""
     with pytest.raises(ValueError, match="does not support method 'grpo'"):
         _load(monkeypatch, PROFILES,
               lambda data: data["job"].update(runtime_profile="qwen35-sft-v1"))
+
+
+def test_checked_in_grpo_profile_loads_recipe_but_is_not_launchable(monkeypatch, tmp_path):
+    from tuner.training import modal_recipe
+
+    document = _grpo_recipe()
+    document["job"]["runtime_profile"] = "qwen35-env-grpo-v1"
+    monkeypatch.setattr(modal_recipe, "load_recipe", lambda _path, _runner: document)
+    recipe = load_modal_recipe(SFT_RECIPE, profiles_root=PROFILES)
+    assert recipe.method is TrainingMethodV1.GRPO
+    assert recipe.runtime_profile == "qwen35-env-grpo-v1"
+    with pytest.raises(ModalMethodNotLaunchableError):
+        plan_modal_sft_recipe(SFT_RECIPE, project_root=tmp_path, profiles_root=PROFILES)
+    profile = load_runtime_profile("qwen35-env-grpo-v1", PROFILES)
+    # The SFT build binding refuses the GRPO build profile's capabilities.
+    with pytest.raises(ValueError, match="capability differs"):
+        modal_recipe.resolve_modal_sft_build(
+            profile, PROFILES, "Qwen/Qwen3.5-4B", REVISION,
+        )
 
 
 @pytest.mark.parametrize("mutation", [
@@ -221,7 +241,7 @@ def test_grpo_recipe_cannot_be_planned_or_launched(monkeypatch, grpo_profiles, t
 
     document = _grpo_recipe()
     monkeypatch.setattr(modal_recipe, "load_recipe", lambda _path, _runner: document)
-    with pytest.raises(ModalMethodNotLaunchableError, match="no runtime profile"):
+    with pytest.raises(ModalMethodNotLaunchableError, match="no prepared-dataset publisher"):
         plan_modal_sft_recipe(SFT_RECIPE, project_root=tmp_path, profiles_root=grpo_profiles)
     recipe = load_modal_recipe(SFT_RECIPE, profiles_root=grpo_profiles)
     with pytest.raises(ModalMethodNotLaunchableError):

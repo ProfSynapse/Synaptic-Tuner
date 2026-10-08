@@ -800,6 +800,33 @@ def test_grpo_hostile_or_out_of_range_values_fail_closed(field, value, error) ->
         TrainingInputV1.from_dict(document)
 
 
+@pytest.mark.parametrize("batch_size,accumulation,generations,accepted", [
+    (1, 4, 4, True),
+    (2, 4, 8, True),
+    (1, 8, 4, True),
+    (4, 1, 2, True),
+    (1, 4, 8, False),
+    (1, 3, 2, False),
+    (3, 1, 2, False),
+    (1, 4, 3, False),
+])
+def test_grpo_generation_batch_must_hold_whole_prompt_groups(
+    batch_size: int, accumulation: int, generations: int, accepted: bool,
+) -> None:
+    # TRL 1.13 GRPOConfig: generation_batch_size = batch x accumulation x world
+    # size (1 on Modal) must be divisible by num_generations.
+    document = _grpo_document()
+    document["hyperparameters"].update(  # type: ignore[attr-defined]
+        batch_size=batch_size, gradient_accumulation_steps=accumulation,
+        num_generations=generations,
+    )
+    if accepted:
+        assert TrainingInputV1.from_dict(document).hyperparameters.num_generations == generations
+    else:
+        with pytest.raises(ValueError, match="divisible by num_generations"):
+            TrainingInputV1.from_dict(document)
+
+
 def test_grpo_zero_beta_and_drop_policy_are_explicitly_allowed() -> None:
     document = _grpo_document()
     document["hyperparameters"].update(  # type: ignore[attr-defined]

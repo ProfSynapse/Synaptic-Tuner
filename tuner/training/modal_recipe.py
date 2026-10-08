@@ -3,7 +3,9 @@
 The recipe is keyed by ``method``: SFT and env-backed GRPO share the job,
 model and artifact sections and differ in their dataset and training controls.
 Only SFT can be planned and launched today; env-GRPO is accepted at the
-contract and compile level but has no runtime profile or worker yet.
+contract and compile level and has a pinned runtime profile
+(``qwen35-env-grpo-v1``), but no prepared-dataset publisher, worker or Modal
+dispatch yet.
 """
 
 from __future__ import annotations
@@ -169,8 +171,8 @@ def plan_modal_sft_recipe(recipe_path: Path, *, project_root: Path,
     recipe = load_modal_recipe(recipe_path, profiles_root=profiles_root)
     if recipe.method is not TrainingMethodV1.SFT:
         raise ModalMethodNotLaunchableError(
-            f"Modal {recipe.method.value} is accepted at contract/compile level but has no "
-            "runtime profile, prepared-dataset publisher or worker yet"
+            f"Modal {recipe.method.value} is accepted at contract/compile level and has a "
+            "pinned runtime profile, but no prepared-dataset publisher, worker or dispatch yet"
         )
     root = (project_root / ".tracking" / "datasets").resolve(strict=True)
     locator = project_root / recipe.dataset_locator

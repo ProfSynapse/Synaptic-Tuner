@@ -159,15 +159,36 @@ def _read_stable_regular_file(path: Path, *, maximum: int, label: str) -> bytes:
         os.close(descriptor)
 
 
+INVENTORY_MAX_BYTES = 4 * 1024 * 1024
+# Inventory facts that must equal the version of the named installed distribution.
+INVENTORY_VERSION_FACTS = {
+    "torch_version": "torch",
+    "transformers_version": "transformers",
+    "trl_version": "trl",
+    "unsloth_version": "unsloth",
+    "unsloth_zoo_version": "unsloth-zoo",
+}
+
+
 def _load_inventory(
     path: Path, *, expected_sha256: str, image: str
 ) -> tuple[dict[str, Any], int]:
     payload_bytes = _read_stable_regular_file(
-        path, maximum=4 * 1024 * 1024, label="Runtime profile inventory"
+        path, maximum=INVENTORY_MAX_BYTES, label="Runtime profile inventory"
     )
     actual_sha256 = "sha256:" + hashlib.sha256(payload_bytes).hexdigest()
     if actual_sha256 != expected_sha256:
         raise RuntimeProfileError("Runtime profile inventory digest mismatch")
+    return parse_runtime_inventory(payload_bytes, image=image)
+
+
+def parse_runtime_inventory(
+    payload_bytes: bytes, *, image: str
+) -> tuple[dict[str, Any], int]:
+    """Validate inventory bytes bound to ``image``; return it and its size."""
+
+    if len(payload_bytes) > INVENTORY_MAX_BYTES:
+        raise RuntimeProfileError("Runtime profile inventory exceeds its size limit")
     try:
         payload = json.loads(payload_bytes)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -227,14 +248,7 @@ def _load_inventory(
             "Runtime inventory facts must be finite JSON values"
         ) from exc
     versions = {normalized: version for normalized, version, _name in parsed}
-    fact_packages = {
-        "torch_version": "torch",
-        "transformers_version": "transformers",
-        "trl_version": "trl",
-        "unsloth_version": "unsloth",
-        "unsloth_zoo_version": "unsloth-zoo",
-    }
-    for fact, package in fact_packages.items():
+    for fact, package in INVENTORY_VERSION_FACTS.items():
         value = runtime.get(fact)
         if not isinstance(value, str) or versions.get(package) != value:
             raise RuntimeProfileError(

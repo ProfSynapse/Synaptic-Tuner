@@ -58,7 +58,7 @@
     },
     "bootstrap__synaptic_tuner__api__v1__training_input_py": {
       "path": "synaptic_tuner/api/v1/training_input.py",
-      "sha256": "833a937b4c53205fd5df8d17f5b22960c4ed73d08c886d28a64a421993646db6"
+      "sha256": "d491475f6a3f3e5ae18e75b2315f4cb28d427795626302b12ae2a5950a91bd41"
     },
     "bootstrap__tuner____init___py": {
       "path": "tuner/__init__.py",
