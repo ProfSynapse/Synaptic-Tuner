@@ -166,7 +166,9 @@ class ModalJobConfigHandler(BaseHandler):
         return True
 
     def handle(self) -> int:
-        from tuner.training.modal_recipe import load_modal_sft_recipe, plan_modal_sft_recipe
+        from tuner.training.modal_recipe import (
+            ModalMethodNotLaunchableError, load_modal_recipe, plan_modal_sft_recipe,
+        )
         import yaml
 
         requested = getattr(self.args, "job_config", None)
@@ -186,7 +188,7 @@ class ModalJobConfigHandler(BaseHandler):
             if getattr(self.args, "quote", False):
                 # Billing-rate observation needs only the declared resource,
                 # never the Windows-mounted dataset or build intent.
-                recipe = load_modal_sft_recipe(recipe_path, profiles_root=profiles_root)
+                recipe = load_modal_recipe(recipe_path, profiles_root=profiles_root)
                 return self._quote({
                     "accelerator": recipe.accelerator,
                     "accelerator_count": recipe.accelerator_count,
@@ -202,6 +204,12 @@ class ModalJobConfigHandler(BaseHandler):
             if getattr(self.args, "qualify", False):
                 return self._qualify(plan)
             return self._execute(plan)
+        except ModalMethodNotLaunchableError:
+            self.output_error(
+                "Recipe method is accepted at contract level but has no Modal runtime yet",
+                code="MODAL_METHOD_NOT_LAUNCHABLE",
+            )
+            return 2
         except (OSError, TypeError, ValueError, yaml.YAMLError):
             self.output_error("Modal recipe or prepared dataset is invalid", code="MODAL_RECIPE_INVALID")
             return 2

@@ -153,7 +153,7 @@ def _binding():
 
 
 def test_scoped_quote_reports_exclusions_and_enforces_ceiling(monkeypatch):
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
     })
     client = object()
@@ -251,7 +251,7 @@ def test_scoped_quote_rejects_extreme_decimal_rate(monkeypatch):
 
 
 def test_unverified_rate_key_fails_closed_before_effect(monkeypatch):
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": None, "L40S": "gpu_hour_cost_l40s",
     })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
@@ -269,7 +269,7 @@ def test_unverified_rate_key_fails_closed_before_effect(monkeypatch):
 
 
 def test_runner_default_resource_names_pass_real_preclaim_validator(monkeypatch):
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
     })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
@@ -321,7 +321,7 @@ def test_provider_rate_error_is_closed(monkeypatch):
 
 @pytest.mark.parametrize("accelerator", ["A100-80GB", "L40S"])
 def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkeypatch, accelerator):
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
     })
     _Workspace.rates["gpu_hour_cost_l40s"] = Decimal("1.95")
@@ -402,7 +402,7 @@ def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkey
 def test_source_archive_failure_projects_only_fixed_nonretryable_diagnosis(monkeypatch):
     from tuner.execution.providers.modal.runtime_build import SourceArchiveInvalid
 
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
     })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
@@ -451,7 +451,7 @@ def test_closed_build_stage_projection_never_leaks_hostile_error(
         monkeypatch, stage, reason, location):
     from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
 
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
     })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
@@ -489,7 +489,7 @@ def test_failed_image_identity_is_claim_bound_and_retained_on_owner_thread(
     import threading
     from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
 
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
     })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
@@ -577,7 +577,7 @@ def test_failed_image_identity_is_claim_bound_and_retained_on_owner_thread(
 def test_unretained_image_identity_does_not_project_from_failed_catalog(monkeypatch):
     from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
 
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
     })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
@@ -610,7 +610,7 @@ def test_inflight_image_timeout_cannot_publish_late_image_identity(monkeypatch):
         ModalBoundedOperationFailure, ModalBuildStageFailure, _FailedImageBuild, _bounded,
     )
 
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
     })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
@@ -674,7 +674,7 @@ def test_inflight_image_timeout_cannot_publish_late_image_identity(monkeypatch):
 ])
 def test_release_failure_after_claim_is_closed_without_second_deploy(
         monkeypatch, boundary, code, phase, failure_class):
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
     })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
@@ -737,7 +737,7 @@ def test_release_error_requires_exact_class_single_known_code():
 def test_build_app_cleanup_does_not_hide_prior_capture_failure(monkeypatch, capture_fails):
     from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
 
-    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+    monkeypatch.setattr(host, "MODAL_ACCELERATOR_RATE_KEYS", {
         "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
     })
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})

@@ -28,7 +28,7 @@ from tuner.execution.providers.modal.packaged_dispatch import (
 )
 from tuner.execution.providers.modal.packaged_staging import ModalPackagedStageReceipt
 from tuner.training.packaged_compilation import compile_packaged_sft_workload
-from tuner.training.modal_recipe import load_modal_sft_recipe
+from tuner.training.modal_recipe import load_modal_recipe
 from tests.training.test_modal_post_training_compilation import (
     RECIPE, PROFILES, _config, _three_complete_synthetic_contexts,
 )
@@ -294,7 +294,7 @@ def test_large_unicode_workload_base64_fits_dispatch_frame_bound():
         _canonical, _object, _packaged_workload,
     )
 
-    recipe = load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    recipe = load_modal_recipe(RECIPE, profiles_root=PROFILES)
     config = _config(replace(recipe, post_training=_three_complete_synthetic_contexts()))
     workload = compile_packaged_sft_workload(resolved_config=config)
     assert _packaged_workload(workload.canonical_bytes) == workload

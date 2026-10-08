@@ -7,6 +7,31 @@ authorization grants, credential resolution, and evidence authentication. The
 engine supplies strict contracts, planning, verification, staging, the mutation
 broker, and the fixed remote worker.
 
+## Methods: SFT is launchable; env-GRPO is contract/compile only
+
+Modal recipes are keyed by `method` (`tuner/training/modal_recipe.py`,
+`load_modal_recipe`). Only `method: sft` can be planned, qualified or run.
+
+`method: grpo` (environment-backed GRPO, `Trainers/grpo/train_env_grpo.py`) is
+accepted by the public contract (`TrainingMethodV1.GRPO` with
+`EnvGRPOHyperparametersV1`, schema `synaptic-env-grpo-hyperparameters/v1`), by
+the recipe loader, by packaged compilation (`compile_packaged_env_grpo_workload`,
+config `synaptic-packaged-env-grpo-config/v1`, workload
+`synaptic-packaged-env-grpo-workload/v1`) and by the host packaged boundary. Its
+artifact contract is the five SFT roles plus `rollout_log`
+(`logs/rollouts.jsonl`, per-episode `prefix_mismatch_count`). Rollouts must use
+`env_backend: local`, `use_vllm: false` and
+`allow_transformers_rollout_func: true`; the dataset must be a prepared offline
+`local_file` of `syntunia-env-rollout-row/v1` rows (no hub download).
+
+It is **not launchable yet**: there is no GRPO runtime profile, image, lock,
+env-row dataset publisher or worker (`tuner.runtime.packaged_env_grpo_worker` is
+a reserved entrypoint name). Runtime profiles may declare `grpo`, but every
+checked-in profile declares only `sft`, so a GRPO recipe fails at profile
+resolution, and `train --job-config` reports `MODAL_METHOD_NOT_LAUNCHABLE`
+before any planning. Do not try to work around this with HF Jobs flags or a
+hand-edited profile.
+
 ## Product flow
 
 Current qualification (2026-09-14): native attempt `modal-chat-20260914-h`

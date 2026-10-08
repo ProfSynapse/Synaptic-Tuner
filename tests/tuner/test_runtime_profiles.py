@@ -105,7 +105,7 @@ def test_runtime_profile_accepts_exact_recomputed_inventory_digest(
     assert load_runtime_profile("qwen35-sft-v1", tmp_path).distribution_count == 327
 
 
-def test_runtime_profile_schema_v1_rejects_non_sft_methods(tmp_path: Path) -> None:
+def test_runtime_profile_schema_v1_rejects_unknown_methods(tmp_path: Path) -> None:
     profile = yaml.safe_load(
         (PROFILES / "qwen35-sft-v1.yaml").read_text(encoding="utf-8")
     )
@@ -117,7 +117,7 @@ def test_runtime_profile_schema_v1_rejects_non_sft_methods(tmp_path: Path) -> No
         (PROFILES / "qwen35-sft-v1.inventory.json").read_bytes()
     )
 
-    with pytest.raises(RuntimeProfileError, match="supports only method sft"):
+    with pytest.raises(RuntimeProfileError, match="unsupported methods: kto"):
         load_runtime_profile("qwen35-sft-v1", tmp_path)
 
 
@@ -220,3 +220,55 @@ def test_stable_file_read_rejects_replacement_between_stat_and_open(
         runtime_profiles._read_stable_regular_file(
             target, maximum=1024, label="Runtime profile"
         )
+
+
+def _profile_with_methods(tmp_path: Path, methods: list[object]) -> None:
+    profile = yaml.safe_load((PROFILES / "qwen35-sft-v1.yaml").read_text(encoding="utf-8"))
+    profile["compatibility"]["methods"] = methods
+    (tmp_path / "qwen35-sft-v1.yaml").write_text(
+        yaml.safe_dump(profile, sort_keys=False), encoding="utf-8"
+    )
+    (tmp_path / "qwen35-sft-v1.inventory.json").write_bytes(
+        (PROFILES / "qwen35-sft-v1.inventory.json").read_bytes()
+    )
+
+
+@pytest.mark.parametrize("methods", [["grpo"], ["sft", "grpo"]])
+def test_runtime_profile_accepts_declared_grpo_method(tmp_path: Path, methods) -> None:
+    _profile_with_methods(tmp_path, methods)
+    profile = load_runtime_profile("qwen35-sft-v1", tmp_path)
+    assert profile.methods == tuple(methods)
+    assert profile.resolve(
+        model="Qwen/Qwen3.5-4B",
+        model_revision="851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+        method="grpo",
+    ) is profile
+
+
+def test_grpo_only_profile_does_not_admit_sft(tmp_path: Path) -> None:
+    _profile_with_methods(tmp_path, ["grpo"])
+    profile = load_runtime_profile("qwen35-sft-v1", tmp_path)
+    with pytest.raises(RuntimeProfileError, match="does not support method"):
+        profile.resolve(
+            model="Qwen/Qwen3.5-4B",
+            model_revision="851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+            method="sft",
+        )
+
+
+@pytest.mark.parametrize("methods", [
+    ["sft", "kto"], ["GRPO"], ["sft", "sft"], [], ["grpo", 1],
+])
+def test_runtime_profile_rejects_unknown_duplicate_or_malformed_methods(
+    tmp_path: Path, methods,
+) -> None:
+    _profile_with_methods(tmp_path, methods)
+    with pytest.raises(RuntimeProfileError):
+        load_runtime_profile("qwen35-sft-v1", tmp_path)
+
+
+def test_checked_in_profiles_still_declare_only_sft() -> None:
+    """No GRPO runtime profile/image/lock exists yet (a later phase)."""
+    for path in sorted(PROFILES.glob("*.yaml")):
+        profile = load_runtime_profile(path.stem, PROFILES)
+        assert profile.methods == ("sft",)

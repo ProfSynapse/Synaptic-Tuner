@@ -16,7 +16,7 @@ import yaml
 from synaptic_tuner.api.v1._contract import PreparedTrainingInputIdentity
 from synaptic_tuner.api.v1.training_input import TrainingInputV1
 from tests.contract.test_public_training_input_v1 import _document
-from tuner.training.modal_recipe import load_modal_sft_recipe
+from tuner.training.modal_recipe import load_modal_recipe
 from tuner.training.packaged_compilation import compile_packaged_sft_workload
 from Trainers.sft.runtime_v1 import (
     RuntimeV1Error, _append_sft_arguments, build_trainer_invocation,
@@ -36,7 +36,7 @@ def _recipe(monkeypatch, kwargs=None):
     if kwargs is not None:
         document["training"]["chat_template_kwargs"] = kwargs
     monkeypatch.setattr(modal_recipe, "load_recipe", lambda _path, _runner: document)
-    return load_modal_sft_recipe(RECIPE, profiles_root=PROFILES)
+    return load_modal_recipe(RECIPE, profiles_root=PROFILES)
 
 
 def test_omitted_kwargs_preserve_legacy_training_documents(monkeypatch):

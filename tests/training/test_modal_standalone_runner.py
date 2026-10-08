@@ -48,7 +48,7 @@ from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
 from tuner.training.modal_host_qualification import (
     ModalHostCPUQualificationV1, ModalHostQualificationUnavailable,
 )
-from tuner.training.modal_recipe import ModalSFTRecipePlanV1, load_modal_sft_recipe, resolve_modal_sft_build
+from tuner.training.modal_recipe import ModalSFTRecipePlanV1, load_modal_recipe, resolve_modal_sft_build
 from tuner.runtime_profiles import load_runtime_profile
 from tuner.training.packaged_compilation import (
     PACKAGED_SFT_WORKLOAD_SCHEMA, compile_packaged_sft_workload,
@@ -120,7 +120,7 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
     root = tmp_path / ".tracking" / "datasets"
     publication = prepare_dataset_v2(dataset_config, root)
     semantic = publication.semantic_identity
-    original = load_modal_sft_recipe(
+    original = load_modal_recipe(
         ROOT / "Trainers/recipes/qwen35_4b_32k_modal_prompt_completion.yaml",
         profiles_root=ROOT / "Trainers/runtime_profiles",
     )
