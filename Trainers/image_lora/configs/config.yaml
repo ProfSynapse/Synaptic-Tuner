@@ -67,13 +67,15 @@ modal:
   commit_every_seconds: 120
 
 # Cost model for the pre-launch estimate. Rates are Modal list prices read with
-# `modal billing rates` on 2026-10-10; seconds_per_step is an assumption to be
-# replaced by the measured value after a run (see docs/architecture/image-lora-modal.md).
+# `modal billing rates` on 2026-10-10. H100 timings are measured on the first run
+# (2026-10-10: Qwen-Image-2512 bf16, rank 32, 768/1024/1328 buckets, batch 1:
+# 1.52 s/step average, 11.9 s per 1024x1536 sample at 20 steps, ~13 min of
+# setup with a cold cache). Other GPUs are scaled guesses; keep them conservative.
 estimate:
   usd_per_hour:
     gpu: {H100: 3.95, A100-80GB: 2.50, H200: 4.54, L4: 0.80}
     cpu_core: 0.0473
     memory_gib: 0.008
-  seconds_per_step: {H100: 2.4, A100-80GB: 3.8, H200: 2.1}
-  seconds_per_sample_image: {H100: 34, A100-80GB: 55, H200: 30}
-  overhead_minutes: 25             # image pull, first weight download, latent/text caching
+  seconds_per_step: {H100: 1.6, A100-80GB: 2.8, H200: 1.4}
+  seconds_per_sample_image: {H100: 12, A100-80GB: 20, H200: 11}
+  overhead_minutes: 15             # image pull, model load, latent/text caching (+3.5 min on a cold cache)

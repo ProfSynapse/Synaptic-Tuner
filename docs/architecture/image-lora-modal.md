@@ -99,6 +99,42 @@ in order, each logged per file in `manifest.json`:
    kept only when the prompt actually shows them; objects and locations are also
    detected in the text. Every library image not selected is logged too.
 
+## Run record: first run (2026-10-10)
+
+| | |
+|---|---|
+| Base | `Qwen/Qwen-Image-2512` @ `25468b98e3276ca6700de15c6628e51b7de54a26`, ai-toolkit `f7a1fb9a` |
+| Data | 189 captioned images, buckets 768/1024/1328 (567 samples per pass) |
+| Config | LoRA rank 32 / alpha 32, lr 1e-4 constant, AdamW8bit, 3500 steps, batch 1, bf16, weighted timesteps, cached text embeddings |
+| GPU | 1x H100, 8 CPU, 64 GiB |
+| Time | 1 h 47 m wall: 3.4 min weight download (cold cache), ~10 min load and caching, 3500 steps at 1.52 s/step, 8 sample rounds of 6 images at 11.9 s each |
+| Cost | $8.67 (Modal billing: H100 $7.02, memory $0.91, CPU $0.67, egress $0.06); estimate at launch $15.51; GPU probes $0.02 |
+| Outputs | 7 checkpoints + final, each 590 MB (1680 BF16 tensors); final and steps 2000/2500/3000 fetched and verified; run Volume deleted, app stopped |
+
+**Result (owner's verdict: not good enough for the book; local generation parked).**
+Learned well: the house graphite style and monochrome (from step ~500), objects
+on their own (the kanabō alone: banded, spiked, wrap-gripped), and single
+characters when the prompt describes them. Did not learn: two-character scenes
+(identity and props blur between figures; in ComfyUI the kanabō became a katana
+when Gō and Hinata share a scene), relative scale (Gō rarely towers over Hinata),
+identity from the bare token (`go_char` without a description gives a generic
+warrior with hair; `ikari_char` stays a winged humanoid), and colour on fire and
+lava (red/orange leaks despite an all-grayscale dataset). Evaluation was stopped
+after 11 Qwen-Image-2512 + LoRA images.
+
+If revisited: per-character (and per-object) LoRAs instead of one combined LoRA;
+more images per character, with recurring appearance descriptors stripped from
+captions so the token carries identity; a deterministic monochrome post-step for
+fire/lava; LoRAs trained on the edit model (Qwen-Image-Edit-2511) so model sheets
+can be used as references at inference.
+
+The run used the worker as of the first commit on this branch; the two later
+worker changes (burst-written log, sample listing limited to files) were made
+after observing it. Base-weights cache storage costs about $5/month at list price
+(57.7 GB at $0.09/GB-month) while it is kept. It is safe to delete when no
+image LoRA work is planned (`modal volume delete synaptic-image-lora-base-cache`);
+the next launch recreates it and re-downloads the pinned weights (~3.5 min).
+
 ## Known limits
 
 - Mid-run Volume visibility is best effort. `Volume.commit()` reloads afterwards

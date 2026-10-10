@@ -63,10 +63,14 @@ a safetensors header check).
 
 ## Cost
 
-`plan` prints the estimate from `configs/config.yaml: estimate`. Replace
-`seconds_per_step` with the measured value after a run. First measured run
-(2026-10-10, H100, 189 images, 768/1024/1328 buckets, rank 32): see the
-run notes in `docs/architecture/image-lora-modal.md`.
+`plan` prints the estimate from `configs/config.yaml: estimate`. First measured
+run (2026-10-10, H100, 189 images, 768/1024/1328 buckets, rank 32, 3500 steps):
+1.52 s/step, 1 h 47 m wall, $8.67 billed. Record each new GPU/model measurement
+in the config and the run record in `docs/architecture/image-lora-modal.md`.
+
+Before a repeat, read the first run's result and "if revisited" list in
+`docs/architecture/image-lora-modal.md` (one combined LoRA learned style and
+single objects, not multi-character scenes, scale or token-only identity).
 
 ## Gotchas
 
