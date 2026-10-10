@@ -8,7 +8,7 @@ model:
 runtime:
   provider: modal
   lock_path: tuner/execution/providers/modal/modal-runtime-v1.lock.json
-  expected_lock_sha256: a64f7b2f87aeccc132e1be97158bbfa31b4978369489dbde266fbfef8c57af57
+  expected_lock_sha256: cd698b7c22a53f5db630498d9c314d8f4f27f352d65461622cb57de19b1a514b
 input:
   jsonl_path: /replace/with/private/prepared-dataset.jsonl
   mode: text

@@ -1,0 +1,81 @@
+# Trainers/image_lora/configs/config.yaml
+#
+# Default run config for the image_lora method (ai-toolkit on Modal). Every value
+# here is rendered into the ai-toolkit job or the Modal resource request by
+# src/run_config.py; nothing is hardcoded in the worker. Dataset-specific values
+# (trigger phrase, sample prompts) come from the dataset folder:
+#   <dataset>/manifest.json      -> trigger (written by build-dataset)
+#   <dataset>/sample_prompts.yaml -> fixed sample prompts (list of strings)
+#
+# Defaults follow ai-toolkit's Qwen-Image guidance (config/examples/
+# train_lora_qwen_image_24gb.yaml and the UI defaults for "Qwen-Image-2512"),
+# adjusted for an 80 GB card: no transformer quantization (bf16 fits once text
+# embeddings are cached and the text encoder is unloaded), larger buckets.
+
+method: image_lora
+
+model:
+  registry_name: qwen-image-2512
+  quantize_transformer: false      # 80 GB card: train the bf16 transformer directly
+  quantize_text_encoder: true      # qfloat8; only used to cache caption embeddings
+  low_vram: false
+
+network:
+  type: lora
+  rank: 32                         # ai-toolkit example uses 16 for one concept; ~30 entities + style
+  alpha: 32
+
+training:
+  steps: 3500
+  batch_size: 1
+  gradient_accumulation: 1
+  learning_rate: 1.0e-4
+  optimizer: adamw8bit
+  noise_scheduler: flowmatch
+  timestep_type: weighted          # ai-toolkit UI default for Qwen-Image
+  dtype: bf16
+  gradient_checkpointing: true
+  cache_text_embeddings: true      # trigger is written into every caption, so caching is safe
+  caption_dropout_rate: 0.05
+  resolutions: [768, 1024, 1328]   # each resolution is a separate pass over the dataset
+  seed: 42
+
+save:
+  every: 500
+  keep: 8                          # keep every checkpoint so the best one can be chosen
+  dtype: bf16
+
+sample:
+  every: 500
+  steps: 20
+  guidance_scale: 4.0
+  width: 1024
+  height: 1536
+  seed: 42
+  walk_seed: false                 # fixed seed per prompt so checkpoints are comparable
+  skip_first_sample: false         # keep the step-0 baseline
+
+modal:
+  gpu: H100                        # ai-toolkit Qwen-Image on 80 GB: H100 or A100-80GB
+  cpu: 8
+  memory_mib: 65536
+  environment: null                # default Modal environment of the active profile
+  cache_volume: synaptic-image-lora-base-cache   # shared, reused, never deleted by runs
+  run_volume_prefix: synaptic-image-lora-run     # per run; deleted after a verified fetch
+  hf_secret: hf-token              # existing named Secret; never copied per run
+  hf_secret_key: HF_TOKEN
+  commit_every_seconds: 120
+
+# Cost model for the pre-launch estimate. Rates are Modal list prices read with
+# `modal billing rates` on 2026-10-10. H100 timings are measured on the first run
+# (2026-10-10: Qwen-Image-2512 bf16, rank 32, 768/1024/1328 buckets, batch 1:
+# 1.52 s/step average, 11.9 s per 1024x1536 sample at 20 steps, ~13 min of
+# setup with a cold cache). Other GPUs are scaled guesses; keep them conservative.
+estimate:
+  usd_per_hour:
+    gpu: {H100: 3.95, A100-80GB: 2.50, H200: 4.54, L4: 0.80}
+    cpu_core: 0.0473
+    memory_gib: 0.008
+  seconds_per_step: {H100: 1.6, A100-80GB: 2.8, H200: 1.4}
+  seconds_per_sample_image: {H100: 12, A100-80GB: 20, H200: 11}
+  overhead_minutes: 15             # image pull, model load, latent/text caching (+3.5 min on a cold cache)

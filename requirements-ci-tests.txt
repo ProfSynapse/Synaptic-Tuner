@@ -26,6 +26,8 @@ lightgbm
 joblib
 safetensors
 tokenizers
+# image_lora build-dataset (decode, perceptual hash, resize)
+Pillow>=10
 # transformers 4.x keeps huggingface-hub<1.0, matching the training stack.
 transformers>=4.45,<5
 # transformers.Trainer needs accelerate on PyTorch (aux-head trainer tests).

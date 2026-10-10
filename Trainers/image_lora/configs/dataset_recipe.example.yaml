@@ -1,0 +1,77 @@
+# Example build-dataset recipe for the image_lora method.
+#
+# Copy this next to your dataset (outside the repo; images never go in git) and
+# point build-dataset at it:
+#   python Trainers/image_lora/train_image_lora.py build-dataset \
+#       --recipe /data/my-lora/recipe.yaml --out /data/my-lora --contact-sheets
+#
+# Notes are Obsidian-style Markdown with YAML frontmatter. "moment" notes
+# contribute one image each; "entity" notes (characters, objects, locations...)
+# contribute a card image plus every imageVariants[].image, and also define the
+# entity tokens used in captions. Every rule below is config, not code.
+
+name: my-project-v1
+trigger: "myproj ink style"            # first words of every caption
+
+image_dirs: ["/vault/Images"]          # where linked image file names resolve
+candidate_dirs: ["/vault/Images"]      # every image here gets an include/exclude line in manifest.json
+
+status_field: imageStatus
+approved_statuses: [completed, complete]   # moment images need one of these + an existing linked image
+entity_excluded_statuses: ["not started"]
+holdout_ids: []                            # moment ids kept out for evaluation
+
+sources:
+  - kind: moment
+    notes: ["/vault/Book/Moments/*.md"]
+    image_field: card_image
+    prompt_field: imagePrompt              # string, JSON-object string, or list
+    id_field: id
+    entity_link_fields: [relatedEntities, notableLocations]
+  - kind: entity
+    entity_type: character
+    notes: ["/vault/Book/World/Characters/*.md"]
+    image_field: card_image
+    variants_field: imageVariants
+  - kind: entity
+    entity_type: object
+    notes: ["/vault/Book/World/Objects/*.md"]
+
+tokens:                                    # "The Ash Fields" -> ash_fields_loc, "Bob's Club" -> club_obj
+  strip_articles: ["The", "A", "An"]
+  strip_possessive_owner: true
+  strip_of_suffix: true                    # "Sword of Kings" -> sword_obj
+  suffixes: {character: char, object: obj, location: loc, group: grp}
+  overrides: {}                            # note name -> token, when the rule gives a bad name
+
+text_detected_types: [object, location]    # add these tokens when the prompt text names them
+mention_required_types: [character]        # linked characters must be named in the prompt to count as shown
+mention_aliases: {}                        # note name -> descriptive phrases that also count as "shown"
+text_aliases: {}                           # note name -> extra spellings replaced by the token
+entity_reference_absent_text: "someone"    # other characters named in a single-entity reference
+
+relations:                                 # phrases added after the tokens
+  - subject: "Bob"
+    object: "Bob's Club"
+    default: "{subject} holding {object}"
+    patterns:
+      - regex: "strapped to his back"
+        phrase: "{subject} with {object} strapped to his back"
+
+exclude_filename_patterns: ["*-layer-*", "*chromakey*"]   # compositing layers
+max_transparency: 0.02                     # images with real alpha beyond this are layers too
+dedupe: {phash_max_distance: 6}
+
+image:
+  downscale_above: 2048
+  target_long_side: 1328
+  grayscale: {max_mean_chroma: 14, max_p99_chroma: 60, max_tint_residual: 6}
+
+captions:
+  max_prompt_words: 110
+  structured_fields: [scene.composition, scene.setting, scene.background, scene.lighting, scene.mood]
+  negative_sentence_patterns: ["^(No|NO|Avoid|Do not|Never|Omit|Without)\\b"]
+  drop_sentence_patterns: ["^Use case:", "\\bImage ?\\d+\\b"]
+  strip_phrase_patterns: ["\\bsumi-e\\b", "\\bmonochrome\\b", "\\bon textured rice paper\\b"]
+
+caption_fixes: {}                          # source file -> {relations: [...], replace: [[regex, text]], add_tokens: [...]}

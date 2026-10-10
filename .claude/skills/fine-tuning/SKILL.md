@@ -56,6 +56,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Warm Space deploy | `python3 Trainers/cloud/scripts/manage_space.py deploy --space-id <user>/<space> --template vllm_warm --base-image ghcr.io/<org>/<image>:<tag> --hardware a10g-small --sleep-time 3600 --var BASE_MODEL=<model>` |
 | ML training | `python tuner.py ml train --config Trainers/ml/configs/templates/regression.yaml` |
 | Decision model (Jev-style) smoke | `python tuner.py local-run --job-config Trainers/recipes/decision_qwen35_2b_pointer_smoke.yaml --yes` |
+| Image LoRA (Qwen-Image, Modal) | `python Trainers/image_lora/train_image_lora.py build-dataset --recipe <private recipe> --out <dataset>`, then `plan --dataset <dataset>`, `probe`, `launch --dataset <dataset> --output-dir <dir> --max-usd <cap>`, `status`/`fetch`/`cleanup --state <dir>/run_state.json`; see `reference/image-lora.md` |
 
 ## Training Methods at a Glance
 
@@ -66,6 +67,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | **GRPO** | Optimize against rewards | 5e-6 | 1 | Prompts + ground truth | Final online stage |
 | **Embedding** | Train a retrieval bi-encoder | 2e-5 | 1 | Triplets / pairs | Retrieval / RAG embedders |
 | **Decision** | Calibrated typed decisions (yes/no, choice, score) | 1e-4 (+1e-3 head) | 1 | State + typed question + gold | Routing / triage / policy checks (Jev-style) |
+| **Image LoRA** | Teach a diffusion model named characters, objects, places and a style | 1e-4 | steps, not epochs (~3-5k) | Images + caption .txt (trigger + entity tokens) | Illustration consistency (ai-toolkit on Modal) |
 
 **Recommended pipeline:** SFT → KTO → GRPO
 
@@ -100,6 +102,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - `Trainers/grpo/` — GRPO and env-GRPO trainer
 - `Trainers/embedding/` — embedding (SentenceTransformer bi-encoder) trainer, registry, and dual loader; see the `embedding-training` skill
 - `Trainers/decision/` — decision-model (Jev-style typed choice/yes-no/score) trainer, corpus builder, calibration; see `reference/decision-training.md`
+- `Trainers/image_lora/` — image LoRA method: note-driven dataset builder, ai-toolkit job rendering, Modal launcher with a shared base-weights cache and verified per-run cleanup; see `reference/image-lora.md`
 - `Trainers/archive/legacy_rtx3090/` — archived legacy RTX3090 trainer snapshots and outputs; do not use for new runs
 - `Datasets/` — JSONL training datasets
 - `SynthChat/scenarios/` — synthetic data and environment-backed scenarios
@@ -205,6 +208,7 @@ Load the specific reference you need:
 | **Evolutionary Config** | Experimental gradient-selection config schema and defaults | `reference/training-config.md` |
 | **LoRA Surgery** | Eval-guided post-training weight optimization | `reference/lora-surgery.md` |
 | **Decision Training** | Jev-style typed decision models: readouts, corpus, calibration, eval | `reference/decision-training.md` |
+| **Image LoRA** | Qwen-Image LoRAs via ai-toolkit on Modal: dataset recipes, captions/tokens, sizing, cost cap, fetch/verify/cleanup | `reference/image-lora.md` |
 | **Troubleshooting** | OOM errors, instability, platform issues | `reference/troubleshooting.md` |
 | **Tokenizer Profiling** | Offline token-length distributions and sequence-budget sizing | `reference/tokenizer-profiling.md` |
 | **Derived Training Images** | Immutable package-overlay planning, capture, diagnostic reporting, and live launch verification | `reference/derived-training-images.md` |
