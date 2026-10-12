@@ -304,7 +304,7 @@ class ModalPackagedWorkerRoots:
 class ModalPackagedWorker:
     """Admit one signed dispatch, run once, and publish signed completion."""
 
-    __slots__ = ("_facts", "_verifier", "_executor", "_signer", "_roots", "_bindings", "_private_root")
+    __slots__ = ("_facts", "_verifier", "_executor", "_signer", "_roots", "_bindings", "_private_root", "_publication_factory")
 
     def __init__(
         self,
@@ -316,6 +316,7 @@ class ModalPackagedWorker:
         roots: ModalPackagedWorkerRoots,
         volume_bindings: dict[str, object] | None = None,
         private_root: Path | None = None,
+        progress_publication_factory=None,
     ) -> None:
         if type(expected_facts) is not ModalPackagedRuntimeFactsV1:
             raise TypeError("exact packaged Modal facts required")
@@ -332,6 +333,9 @@ class ModalPackagedWorker:
         self._facts, self._verifier = expected_facts, dispatch_verifier
         self._executor, self._signer, self._roots = trainer_executor, evidence_signer, roots
         self._bindings, self._private_root = volume_bindings, private_root
+        if progress_publication_factory is not None and not callable(progress_publication_factory):
+            raise TypeError("SDK progress publication factory required")
+        self._publication_factory = progress_publication_factory
 
     def _paths(self, dispatch) -> PackagedSFTPaths:
         effect_id = dispatch.submit_command.operation.effect.effect_id
@@ -367,25 +371,27 @@ class ModalPackagedWorker:
         return PackagedSFTPaths(prepared, **paths)
 
     def _progress_publisher(self, dispatch, job_ref: str, max_records: int):
-        # Legacy unbound roots cannot attest atomic progress publication. This
-        # optional telemetry lane fails closed without changing training.
-        if self._bindings is None:
+        # Parent SDK publication requires original root/marker admission and
+        # an authenticated SDK adapter. Optional telemetry otherwise disables.
+        if self._bindings is None or self._publication_factory is None:
             raise ValueError("modal_packaged_progress_binding_required")
         effect_id = dispatch.submit_command.operation.effect.effect_id
         preparation = dispatch.submit_command.preparation
         run = TrainingRunRef(preparation.run_id, preparation.project_ref)
         control = self._bindings["control"]
-        claim = control.claim_directory
-        publish = lambda stage, path, raw: control.publish_exclusive(
-            stage, path, raw, MAX_PROGRESS_FILE_BYTES,
-        )
+        from .packaged_progress import ModalSDKProgressPublication, progress_root
+        publication = self._publication_factory(control, progress_root(effect_id), None)
+        if (type(publication) is not ModalSDKProgressPublication
+                or publication._binding is not control or publication._prefix != progress_root(effect_id)):
+            raise ValueError("modal_packaged_progress_publication_invalid")
+        publish = lambda path, raw: publication.publish_exclusive(path, raw, MAX_PROGRESS_FILE_BYTES)
         return PackagedProgressPublisher(
             signer=self._signer, key_ref=dispatch.key_ref,
             effect_id=effect_id, command_digest=dispatch.submit_command.digest,
             provider_job_ref=safe_ref(job_ref, "provider_job_ref"),
             execution_binding_digest=dispatch.execution_binding.binding_digest,
             run=run, max_records=max_records,
-            claim_directory=claim, publish_exclusive=publish,
+            publish_exclusive=publish,
         )
 
     def _publish_completion(self, dispatch, result, job_ref: str, paths: PackagedSFTPaths) -> bytes:

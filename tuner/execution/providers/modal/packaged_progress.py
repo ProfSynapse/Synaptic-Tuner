@@ -45,7 +45,7 @@ SDK_PUBLICATION_DIAGNOSTICS = frozenset({
 
 class SDKProgressPublicationError(ValueError):
     def __init__(self, code):
-        self.code = code if code in SDK_PUBLICATION_DIAGNOSTICS else "SDK_PUBLISH_UNAVAILABLE"
+        self.code = code if type(code) is str and code in SDK_PUBLICATION_DIAGNOSTICS else "SDK_PUBLISH_UNAVAILABLE"
         super().__init__("modal_sdk_progress_publication_unavailable")
 
 
@@ -73,10 +73,12 @@ class ModalSDKProgressPublication:
         self._check()
 
     def _check(self):
+        version = getattr(getattr(self._volume, "_metadata", None), "version", None)
+        # Pinned SDK1.5.4 normalizes legacy UNSPECIFIED(0) metadata to v1.
         if (getattr(self._volume, "is_hydrated", False) is not True
                 or getattr(self._volume, "object_id", None) != self._binding.volume_id
                 or getattr(self._volume, "client", None) is not self._client
-                or getattr(getattr(self._volume, "_metadata", None), "version", None) not in (0, 1)):
+                or type(version) is not int or version not in (0, 1)):
             raise SDKProgressPublicationError("SDK_PUBLISH_IDENTITY")
         try:
             self._binding._check_root()
@@ -94,13 +96,17 @@ class ModalSDKProgressPublication:
         return "/" + path
 
     def _bounded(self, operation):
-        remaining = 5.0 if self._deadline is None else min(5.0, self._deadline - time.monotonic())
+        started = time.monotonic()
+        deadline = started + 5.0 if self._deadline is None else min(started + 5.0, self._deadline)
+        remaining = deadline - started
         if remaining <= 0:
             raise SDKProgressPublicationError("SDK_PUBLISH_DEADLINE")
         result = Queue(maxsize=1)
         def invoke():
             try:
                 self._check()
+                if time.monotonic() >= deadline:
+                    raise SDKProgressPublicationError("SDK_PUBLISH_DEADLINE")
                 value = operation()
                 self._check()
                 result.put((None, value))
@@ -116,6 +122,8 @@ class ModalSDKProgressPublication:
         except Empty:
             # A late SDK completion remains possible. Never replay or adopt it.
             raise SDKProgressPublicationError("SDK_PUBLISH_DEADLINE") from None
+        if time.monotonic() >= deadline:
+            raise SDKProgressPublicationError("SDK_PUBLISH_DEADLINE")
         if code is not None:
             raise SDKProgressPublicationError(code)
         return value
@@ -166,7 +174,7 @@ class ModalSDKProgressPublication:
                 if (type(path) is not str or type(size) is not int or not 0 < size <= MAX_PROGRESS_FILE_BYTES
                         or getattr(item, "type", None) != 1 or len(entries) >= max_entries):
                     raise SDKProgressPublicationError("SDK_PUBLISH_INVENTORY")
-                path = path.lstrip("/")
+                path = path[1:] if path.startswith("/") else path
                 self._path(path)
                 if path.rsplit("/", 1)[0] != directory:
                     raise SDKProgressPublicationError("SDK_PUBLISH_INVENTORY")

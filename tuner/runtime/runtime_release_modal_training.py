@@ -58,6 +58,7 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
         ModalPackagedWorker,
         ModalPackagedWorkerRoots,
     )
+    from tuner.execution.providers.modal.packaged_progress import ModalSDKProgressPublication
     from tuner.execution.providers.modal.runtime_release_qualification import (
         QUALIFICATION_HMAC_ENV_KEY,
         ModalRuntimeQualificationHmacAuthenticator,
@@ -212,7 +213,10 @@ def _run_with_modal(dispatch_bytes: bytes, *, sdk: object,
             trainer_executor=InstalledPackagedSFTTrainerExecutor(model_preparer=prepare),
             evidence_signer=authenticator,
             roots=ModalPackagedWorkerRoots(control, artifacts, cache),
-            **({"volume_bindings": bindings, "private_root": scratch}
+            **({"volume_bindings": bindings, "private_root": scratch,
+                "progress_publication_factory": lambda binding, prefix, deadline: ModalSDKProgressPublication(
+                    binding=binding, volume=handles["control"], client=client,
+                    prefix=prefix, deadline=deadline)}
                if bindings is not None else {}),
         )
         if _stage is not None:

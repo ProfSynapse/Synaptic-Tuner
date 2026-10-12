@@ -9,6 +9,7 @@ import pytest
 from tuner.execution.providers.modal.packaged_progress import (
     ModalSDKProgressPublication, SDKProgressPublicationError,
 )
+from tuner.execution.providers.modal import packaged_progress as progress
 from tests import test_modal_volume_root_binding as roots
 
 
@@ -125,7 +126,7 @@ def test_invalid_input_rejects_before_sdk_effect(bound, path, raw):
     assert volume.calls == []
 
 
-@pytest.mark.parametrize("mutation", ["client", "id", "version", "root"])
+@pytest.mark.parametrize("mutation", ["client", "id", "version", "version_bool", "root"])
 def test_identity_substitution_rejects_before_effect(bound, mutation):
     binding, layout = bound
     client = object()
@@ -134,7 +135,63 @@ def test_identity_substitution_rejects_before_effect(bound, mutation):
     if mutation == "client": volume.client = object()
     if mutation == "id": volume.object_id = "vo-Other"
     if mutation == "version": volume._metadata.version = 2
+    if mutation == "version_bool": volume._metadata.version = True
     if mutation == "root": layout[0].unlink()
     with pytest.raises(SDKProgressPublicationError):
         pub.publish_exclusive("operations/probe/progress/final/000.json", b"{}")
     assert volume.calls == []
+
+
+@pytest.mark.parametrize("mutation", ["client", "root"])
+def test_post_effect_identity_failure_retains_unknown_result_without_adoption(bound, monkeypatch, mutation):
+    binding, layout = bound
+    client = object()
+    volume = MemoryVolume(binding, client)
+    pub = publisher(binding, volume, client)
+    original = volume.batch_upload
+    @contextmanager
+    def changed_after_upload(force=False):
+        with original(force) as batch:
+            yield batch
+        if mutation == "client": volume.client = object()
+        else: layout[0].unlink()
+    monkeypatch.setattr(volume, "batch_upload", changed_after_upload)
+    path = "operations/probe/progress/final/000.json"
+    with pytest.raises(SDKProgressPublicationError):
+        pub.publish_exclusive(path, b"{}")
+    assert volume.files[path] == b"{}"
+    with pytest.raises(SDKProgressPublicationError) as replay:
+        pub.publish_exclusive(path, b"{}")
+    assert replay.value.code == "SDK_PUBLISH_REPLAY" and len(volume.calls) == 1
+
+
+@pytest.mark.parametrize("timing", ["scheduled_after_deadline", "returned_after_deadline"])
+def test_absolute_operation_deadline_rejects_delayed_start_and_late_success(bound, monkeypatch, timing):
+    binding, _ = bound
+    client = object()
+    volume = MemoryVolume(binding, client)
+    clock = [0.0]
+    monkeypatch.setattr(progress.time, "monotonic", lambda: clock[0])
+    def thread(*, target, **kwargs):
+        def start():
+            if timing == "scheduled_after_deadline": clock[0] = 6.0
+            target()
+        return SimpleNamespace(start=start)
+    monkeypatch.setattr(progress, "Thread", thread)
+    original_upload = volume.batch_upload
+    @contextmanager
+    def late_upload(force=False):
+        with original_upload(force) as batch:
+            yield batch
+        clock[0] = 6.0
+    if timing == "returned_after_deadline": volume.batch_upload = late_upload
+    pub = publisher(binding, volume, client)
+    path = "operations/probe/progress/final/000.json"
+    with pytest.raises(SDKProgressPublicationError) as expired:
+        pub.publish_exclusive(path, b"{}")
+    assert expired.value.code == "SDK_PUBLISH_DEADLINE"
+    assert len(volume.calls) == (0 if timing == "scheduled_after_deadline" else 1)
+    assert (path in volume.files) is (timing == "returned_after_deadline")
+    with pytest.raises(SDKProgressPublicationError) as replay:
+        pub.publish_exclusive(path, b"{}")
+    assert replay.value.code == "SDK_PUBLISH_REPLAY"
