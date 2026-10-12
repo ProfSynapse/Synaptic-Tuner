@@ -265,6 +265,7 @@ class ModalJobConfigHandler(BaseHandler):
                 "excluded_billing_dimensions": [
                     "build", "cpu", "memory", "storage", "usage-beyond-timeout",
                 ],
+                **({"progress": result.progress} if getattr(result, "progress", None) is not None else {}),
             }, success=evaluation_passed is not False)
             return 2 if evaluation_passed is False else 0
         except Exception as error:

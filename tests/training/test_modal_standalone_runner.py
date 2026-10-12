@@ -120,7 +120,7 @@ def _facts(release):
     )
 
 
-def _setup(tmp_path, monkeypatch, *, failed=False):
+def _setup(tmp_path, monkeypatch, *, failed=False, capture=False):
     monkeypatch.setattr(runner.platform, "python_version", lambda: "3.11.14")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("HF_TOKEN", "fixture-token")
@@ -145,6 +145,11 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
         semantic.dataset_digest, semantic.dataset_sha256, semantic.dataset_bytes,
         "syntunia-sft-row/v2",
     )
+    if capture:
+        recipe = replace(recipe, observation_capture={
+            "schema_version": "synaptic-training-observation-capture/v1",
+            "every_n_steps": 1, "max_records": 10,
+        })
     config = recipe.packaged_config(identity)
     profile_root = tmp_path / "Trainers/runtime_profiles"
     image_root = tmp_path / "Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c"
@@ -994,3 +999,61 @@ def test_post_cpu_start_rejection_remains_indeterminate(tmp_path, monkeypatch):
     assert caught.value.phase == "RUN_START_INDETERMINATE"
     assert caught.value.retry_authorized is False
     assert events == ["bootstrap", "cpu"]
+
+
+def test_capture_with_disabled_logs_retains_no_local_feed(tmp_path, monkeypatch, capsys):
+    plan, context, events = _setup(tmp_path, monkeypatch, capture=True)
+    def forbidden(*args, **kwargs):
+        pytest.fail('disabled logs must not be called')
+    monkeypatch.setattr(RunsAPI, 'logs', forbidden)
+    handler = ModalJobConfigHandler(Namespace(
+        modal_profile='explicit', modal_environment='main', json=True,
+    ), context)
+    assert handler._execute(plan) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['data']['progress'] == {'status': 'progress_capability_disabled', 'records_path': None}
+    assert not list((tmp_path/'state'/'synaptic-training').glob('progress-*.jsonl'))
+
+
+@pytest.mark.parametrize('read_failure', [False, True])
+def test_pending_wait_polls_public_progress_and_closes_retention(tmp_path, monkeypatch, capsys, read_failure):
+    from tuner.execution.coordinator_v1.operations import RunOperationsV1
+    from synaptic_tuner.api.v1.runs_facade import RunLogPage
+    from tuner.execution.observation_logs import encode_training_progress_log
+    plan, context, events = _setup(tmp_path, monkeypatch, capture=True)
+    original_descriptor = RunOperationsV1._descriptor
+    def descriptor(self, workflow):
+        original = original_descriptor(self, workflow)
+        return replace(original, capabilities=replace(original.capabilities, logs=True))
+    # Test-only qualified descriptor; production composition remains false.
+    monkeypatch.setattr(RunOperationsV1, '_descriptor', descriptor)
+    calls = []
+    def logs(self, request):
+        calls.append(request)
+        if read_failure:
+            raise ValueError("private telemetry failure")
+        record = metric_record(0, run=request.run)
+        entry = encode_training_progress_log(record, expected_run=request.run)
+        return RunLogPage(request, (entry,), entry.size_bytes)
+    monkeypatch.setattr(RunsAPI, 'logs', logs)
+    states = iter([ModalFunctionCallState.PENDING, ModalFunctionCallState.RETURNED])
+    def poll(*_a, **_k):
+        if not read_failure:
+            files = list((tmp_path/'state'/'synaptic-training').glob('progress-*.jsonl'))
+            assert len(files) == 1 and len(files[0].read_text().splitlines()) == 1
+        return next(states, ModalFunctionCallState.RETURNED), 'f'*64
+    monkeypatch.setattr(ModalPackagedCoordinatorReaderV1, '_poll_packaged_call', poll)
+    monkeypatch.setattr(runner.time, 'sleep', lambda *_a: None)
+    handler = ModalJobConfigHandler(Namespace(
+        modal_profile='explicit', modal_environment='main', json=True,
+    ), context)
+    assert handler._execute(plan) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(calls) == 2
+    progress = payload['data']['progress']
+    if read_failure:
+        assert progress == {'status': 'progress_read_unavailable', 'records_path': None, 'retained_records': 0}
+    else:
+        assert progress['status'] == 'progress_retained' and progress['retained_records'] == 1
+        assert len(Path(progress['records_path']).read_text().splitlines()) == 1
+    assert events == ['bootstrap', 'cpu', 'stage', 'spawn']

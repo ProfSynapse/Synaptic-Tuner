@@ -48,6 +48,7 @@ from tuner.training.input_preparation import (
 from tuner.training.modal_host_authority import HMACAuthenticator, UTCClock
 from tuner.training.modal_host_composition import compose_modal_packaged_reference_host
 from tuner.training.modal_host_download import download_verified_modal_artifact
+from tuner.training.run_progress_consumer import start_progress_consumer
 from tuner.training.modal_host_reader import ModalPackagedReadUnavailable
 from tuner.training.modal_host_requests import ModalPackagedResolutionUnavailable
 from tuner.training.modal_host_effects import ModalPackagedHostEffectsV1
@@ -281,6 +282,7 @@ class ModalStandaloneRunResultV1:
     maximum_cost_minor_units: int
     evaluation_path: Path | None = None
     evaluation_passed: bool | None = None
+    progress: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -593,18 +595,34 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             provider_job_ref = read_request.provider_run.reference.provider_job_ref
             deadline = time.monotonic() + recipe.timeout_seconds + 120
             phase = "RUN_CALL_OBSERVE"
-            while True:
+            progress = None
+            progress_result = None
+            if recipe.observation_capture is not None:
+                progress_result = {"status": "progress_capability_disabled", "records_path": None}
                 try:
+                    descriptor = host.composition.runs._descriptor(workflow)
+                    progress = start_progress_consumer(
+                        api.runs, started.run, root, capture_enabled=True,
+                        logs_enabled=descriptor.capabilities.logs,
+                    )
+                except Exception:
+                    progress_result["status"] = "progress_setup_unavailable"
+            try:
+                while True:
+                    if progress is not None:
+                        progress.poll()
                     state, _ = host.reader._poll_packaged_call(
                         binding, provider_job_ref, deadline=deadline,
                     )
-                except ModalPackagedReadUnavailable:
-                    raise
-                if state is ModalFunctionCallState.RETURNED:
-                    break
-                if state is not ModalFunctionCallState.PENDING or time.monotonic() >= deadline:
-                    raise ModalStandaloneRunUnavailable("modal_packaged_call_unavailable")
-                time.sleep(min(5, max(0, deadline - time.monotonic())))
+                    if state is ModalFunctionCallState.RETURNED:
+                        break
+                    if state is not ModalFunctionCallState.PENDING or time.monotonic() >= deadline:
+                        raise ModalStandaloneRunUnavailable("modal_packaged_call_unavailable")
+                    time.sleep(min(5, max(0, deadline - time.monotonic())))
+            finally:
+                if progress is not None:
+                    progress.close()
+                    progress_result = progress.result()
             phase = "RUN_OUTCOME"
             outcome = api.runs.outcome(started.run)
             if outcome.state.value != "succeeded":
@@ -656,6 +674,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 recipe.maximum_cost_minor_units,
                 evaluation_path,
                 evaluation_passed,
+                progress_result,
             )
     except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable):
         raise
