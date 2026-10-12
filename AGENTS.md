@@ -59,6 +59,19 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- Restricted metrics qualification is an explicit reviewed operation, not ordinary
+  log capability promotion. Bind the exact clean engine commit, compiled recipe,
+  synthetic prepared input, runtime profile/build intent, expected account/workspace,
+  provider scope, single one-shot attempt and finite step/time/cost bounds in a
+  canonical admission before credentials or effects. Generate the candidate from
+  the existing local planning CLI after the final integrated commit; do not check
+  in fake or circular source-SHA approvals. Keep ordinary logs disabled. A
+  `delivered_precompletion` verdict requires newly persisted numeric records
+  bracketed by the exact call's pending observations and final native artifact
+  verification; it does not qualify partial writes, completeness/freshness,
+  cancellation, recovery or a production log capability. Paid execution still
+  needs approval of the exact bounded admission; failures never authorize replay.
+
 - Packaged trainer `TORCH_OOM` diagnostics recognize Torch's shared OOM
   exception identity; the CUDA alias alone does not establish device, allocation
   size or batch capacity. Preserve trusted finite execution milestones for

@@ -1,0 +1,59 @@
+{
+  "schema_version": "synaptic-ingestion-cli/v2",
+  "project_ref": "public_metrics_fixture",
+  "admission_request_id": "public_metrics_fixture_admission_v1",
+  "request_id": "public_metrics_fixture_ingestion_v1",
+  "admission_limits": {
+    "max_member_bytes": 1024,
+    "max_total_bytes": 16384
+  },
+  "discovery": {
+    "include": [
+      "fixture/context-*.md",
+      "fixture/target-*.md"
+    ],
+    "exclude": [],
+    "include_hidden": false
+  },
+  "structure": {
+    "name": "MetricsFixtureText",
+    "version": "1",
+    "frontmatter_mode": "optional",
+    "fields": [
+      {
+        "name": "body",
+        "selector": {
+          "kind": "document_body",
+          "key": null
+        },
+        "value_kind": "string",
+        "required": true
+      },
+      {
+        "name": "path",
+        "selector": {
+          "kind": "logical_path",
+          "key": null
+        },
+        "value_kind": "string",
+        "required": true
+      }
+    ],
+    "text_projections": [
+      {
+        "name": "text",
+        "field_ref": "body"
+      }
+    ],
+    "metadata": [
+      {
+        "name": "path",
+        "field_ref": "path"
+      }
+    ]
+  },
+  "binding": {
+    "binding_id": "markdown",
+    "pattern": "fixture/*.md"
+  }
+}
