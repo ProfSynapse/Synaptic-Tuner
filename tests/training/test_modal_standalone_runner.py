@@ -17,7 +17,9 @@ import pytest
 
 from synaptic_tuner.api.v1.training_facade import TrainingAPI
 from synaptic_tuner.api.v1.runs_facade import RunsAPI
+from synaptic_tuner.api.v1.results import TrainingRunRef
 from tests.dataset_prep.test_context_messages_v2 import _config
+from tests.execution.test_observation_logs import metric_record
 from tests.execution.providers.test_modal_runtime_build import _candidate
 from tuner.dataset_prep import prepare_dataset_v2
 from tuner.execution.providers.modal.contracts import provider_entry_identity
@@ -34,11 +36,17 @@ from tuner.execution.providers.modal.packaged_binding import (
 from tuner.execution.providers.modal.packaged_reader import (
     ModalPackagedArtifactMember, ModalPackagedCompletionObservation, ModalPackagedReader,
 )
+from tuner.execution.providers.modal.packaged_progress import (
+    ZERO_DIGEST, make_progress_file, parse_progress_file,
+)
 from tuner.execution.providers.modal.packaged_staging import (
     ModalPackagedInputStager, ModalPackagedStageReceipt,
 )
 from tuner.execution.providers.modal.runtime_build import build_modal_runtime_release_v2
-from tuner.execution.providers.modal.runtime_release_qualification import ModalRuntimeReleaseQualificationReceiptV1
+from tuner.execution.providers.modal.runtime_release_qualification import (
+    ModalRuntimeQualificationHmacAuthenticator,
+    ModalRuntimeReleaseQualificationReceiptV1,
+)
 from tuner.project.context import ProjectContext
 from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV2
 from tuner.training.modal_host_reader import ModalPackagedCoordinatorReaderV1, ModalPackagedReadUnavailable
@@ -383,6 +391,45 @@ def test_cli_v2_fake_transcript_prepares_submits_verifies_and_downloads(tmp_path
         "vo-control", "vo-artifacts", "vo-cache",
     }
     assert all(len(value) == 32 for value in volume.published.values())
+
+
+def test_standalone_host_signer_verifies_remote_progress_without_widening_other_purposes(
+        tmp_path, monkeypatch):
+    plan, context, _ = _setup(tmp_path, monkeypatch)
+    real_authenticator = runner.HMACAuthenticator
+    captured = []
+
+    def capture_authenticator(keys, *, allowed_purposes):
+        authenticator = real_authenticator(keys, allowed_purposes=allowed_purposes)
+        captured.append((authenticator, next(iter(keys.values())), next(iter(keys))))
+        return authenticator
+
+    monkeypatch.setattr(runner, "HMACAuthenticator", capture_authenticator)
+    runner.run_modal_standalone_job(
+        plan=plan, context=context, modal_profile="explicit", modal_environment="main",
+    )
+    assert len(captured) == 1
+    host_verifier, key, key_ref = captured[0]
+    remote_signer = ModalRuntimeQualificationHmacAuthenticator(key)
+    run = TrainingRunRef("run-progress", "standalone-training")
+    record = metric_record(run=run)
+    identity = dict(
+        key_ref=key_ref, effect_id="effect-progress",
+        command_digest="a" * 64, provider_job_ref="fc-progress",
+        execution_binding_digest="b" * 64, run=run,
+    )
+    raw, digest = make_progress_file(
+        signer=remote_signer, **identity, max_records=3, index=0,
+        previous_digest=ZERO_DIGEST, record=record,
+    )
+    entry, observed_digest, declared_max, exhausted = parse_progress_file(
+        raw, verifier=host_verifier, **identity, max_records=None,
+        index=0, previous_digest=ZERO_DIGEST,
+    )
+    assert entry.sequence == 0 and observed_digest == digest
+    assert declared_max == 3 and exhausted is False
+    with pytest.raises(ValueError, match="host HMAC authorization invalid"):
+        host_verifier.sign("modal-packaged-unknown/v1", b"x", key_ref)
 
 
 def test_cli_v2_marker_readback_mismatch_keeps_submit_claim_without_spawning(

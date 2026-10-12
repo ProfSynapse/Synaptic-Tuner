@@ -26,6 +26,7 @@ from tuner.execution.providers.modal.packaged_composition import (
     ModalPackagedSourcePorts, compose_modal_packaged_adapter,
 )
 from tuner.execution.providers.modal.packaged_deployment import ModalPackagedDeploymentObserver
+from tuner.execution.providers.modal.packaged_progress import PROGRESS_PURPOSE
 from tuner.execution.providers.modal.packaged_reader import ModalPackagedReader
 from tuner.execution.providers.modal.packaged_staging import ModalPackagedInputStager
 from tuner.execution.providers.modal.coordinator_producer import MODAL_TRAINING_ARTIFACT_BOUNDS_V1
@@ -500,6 +501,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                     "modal-packaged-dispatch/v1", "modal-packaged-dispatch/v2",
                     "modal-packaged-completion/v1",
                     "modal-packaged-evaluation/v1",
+                    PROGRESS_PURPOSE,
                 }),
             )
             effects = ModalPackagedHostEffectsV1(
