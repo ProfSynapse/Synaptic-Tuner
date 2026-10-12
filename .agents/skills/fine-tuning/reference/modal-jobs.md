@@ -1513,6 +1513,73 @@ transport evidence and independent review. Neither standalone `train --qualify`
 CPU proof nor minimal native `--mode qualify-training` proves these metrics.
 
 
+## CPU progress-transport qualification
+
+The optional CPU transport probe reuses the existing self-check: select
+`observation_capture` in the reviewed recipe and use the normal supported
+bound-v2 standalone route or its CPU-only command:
+
+```bash
+python tuner.py train --job-config <reviewed-modal-recipe.yaml> --qualify --modal-profile <named-profile> --modal-environment <existing-environment> --json
+```
+
+There is no additional qualification flag, separate deployment lifecycle or
+GPU/retraining submission. Normal local preparation and exact launcher/source
+checks still apply; `--qualify` may build/deploy the reviewed runtime and invoke
+its one CPU self-check. The call remains 1 CPU, 512 MiB, 120 seconds, no GPU,
+blocked workload network access and zero retries. The shared host observation
+window is at most 180 seconds, including waiting; individual SDK reads are
+bounded by its remaining deadline. Operator authorization still binds the exact
+reviewed scope and finite effects; missing evidence never grants replay.
+
+Absent capture or an unsupported runtime preserves the original CPU lane and
+omits the optional `transport_qualification` result. For a selected supported
+probe, that result reports closed `status`, `capture_path`, `capture_sha256` and
+optional `verification`. These JSON fields are evidence summaries, not an
+execution grant or a replacement for typed proof. The original authenticated
+CPU receipt is mandatory and publishes before the optional probe. Invalid
+primary marker/root/runtime admission or an invalid core receipt rejects.
+After a valid core proof, finite optional probe/read/retention/verification
+failures leave logs disabled; they do not manufacture a successful transport
+proof or automatically replay the call.
+
+The host claims a fresh 32-byte marker before create-only upload and exact
+readback. Its name/hash and exact runtime/deployment enter the signed CPU
+dispatch. The worker admits the real bound control root and uses the same
+sealed-stage/no-replace primitive as production progress. It holds a completed,
+closed, fsynced stage before publication; manifests use that primitive too.
+Eight synthetic numeric fixtures plus one fixture-exhausted record are explicitly
+CPU transport evidence, not observations of a training run. The probe admits
+8 KiB per leaf, 64 KiB/100 entries per page, at most 180 polls, a 1 MiB host
+ledger and bounded signed terminal evidence. Stage hold and final observation
+hold are each 20 seconds and must fit the remaining original call budget. Retain failed
+claims and namespace collisions; never overwrite or silently repair them.
+
+Acceptance requires a sealed stage visible through the SDK while its final leaf
+is absent, followed by later complete canonical final observations; every
+accepted read has pending observations of the same exact call before and after
+it. A final already seen before the held-stage window is inconclusive. Local
+monotonic elapsed times describe host observation timing, not synchronized
+provider latency. The separately signed terminal receipt goes to the artifact
+Volume; its commit does not explicitly flush the control stream. Pending state
+alone does not distinguish periodic commits from automatic shutdown commits.
+No atomic server-transaction or consistently fresh/complete history is claimed.
+
+The reader returns sealed process-local capture and verification objects, checks
+immutable payload witnesses, reconstructs chronological ledger facts, and binds
+the core CPU receipt, release/deployment, exact call, probe, capture and signed
+terminal-receipt digests. Durability acknowledgment requires exact fsynced host
+retention/readback. Composition requires the exact matching sealed proof; a
+caller dictionary, Boolean, dataclass payload replacement or retained JSON cannot
+enable logs. There is no JSON rehydration or restart authority. Missing, invalid
+or inconclusive proof keeps the descriptor's logs capability false.
+
+This workflow is implemented for review; live CPU probe qualification and
+independent release review must be recorded before reporting capability
+promotion. Earlier GPU attempts 03/04 retain their narrower exact-source metric
+delivery/artifact evidence in `docs/plans/training-progress-streaming.md`; they
+do not retrospectively qualify this new CPU publication path.
+
 ## Standalone local preparation and cold cache
 
 The standalone `train --job-config` path automatically prepares the exact

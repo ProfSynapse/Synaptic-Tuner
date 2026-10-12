@@ -59,6 +59,31 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- CPU progress-transport qualification reuses the existing `train --qualify`
+  and normal captured-runtime self-check, selected by recipe `observation_capture`
+  for the supported bound-v2 runtime. Do not add a parallel CLI, deployment or
+  training attempt to obtain this proof. Preserve the mandatory original CPU
+  receipt and its absent-probe canonical bytes; the optional synthetic probe
+  runs in the same fixed 1-CPU/512-MiB/120-second call without GPU training.
+  Claim fresh marker authority before create-only staging; authenticate the
+  exact marker, release, deployment, provider scope and call. Primary root or
+  CPU admission failure rejects; an unavailable/inconclusive optional probe
+  leaves logs disabled and does not replace a valid core CPU proof.
+- The CPU probe must use the production sealed-stage/no-replace publication
+  primitive, including its manifests. Require committed sealed-stage presence
+  with the final leaf absent before later complete-final observations, each
+  bracketed by pending states of the same exact call. Persist and read back
+  the bounded host ledger before acknowledging durability; only exact sealed
+  process-local verification matching the core receipt, runtime/deployment,
+  call, probe and capture digest may pass the composition gate. Dictionaries,
+  JSON readback and replaced dataclass payloads cannot mint that authority.
+  Store the signed terminal probe receipt on the artifact Volume so its commit
+  cannot flush the control stream. Preserve finite CPU/host/read/byte bounds
+  and the original deadline. This proves the observed staged-to-final visibility
+  window, not periodic-final commit timing, atomic server transactions,
+  completeness/freshness, restart recovery or every future invocation.
+
+
 - For an explicitly authorized reliability cycle, finish the reusable fix rather
   than accumulating unrelated features: a cold checkout must automatically prepare
   the pinned bootstrap inventory on the normal path (an empty cache normally

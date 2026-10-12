@@ -475,3 +475,33 @@ it is not a guarantee against provider outages, external state changes, partial
 write behavior, incomplete tails or every future configuration. Keep external
 provider failures distinct from reproduced local defects, and avoid unrelated
 feature work during the cycle.
+
+## CPU transport qualification implementation
+
+The next transport qualification uses the existing `train --qualify`/normal
+captured-runtime self-check for a recipe with `observation_capture`, on the
+supported bound-v2 runtime. No separate CLI or GPU training attempt is required.
+The mandatory original CPU proof publishes before an optional synthetic probe
+in the same fixed 1-CPU/512-MiB/120-second call. Primary marker/root or CPU
+admission failure rejects. Finite optional probe failures preserve valid core
+proof but leave logs disabled. Default absent-probe canonical bytes are retained.
+
+The signed dispatch binds a fresh claimed marker and exact release/deployment;
+the experiment uses the production sealed-stage/no-replace publication primitive
+for leaves and manifests. The ledger must show committed complete-stage presence
+with the final absent before later complete-final SDK reads, bracketed by pending
+states of the same call. It records local monotonic timing, bounded reads/pages,
+canonical digests and exact capture retention. Its signed terminal receipt is
+stored and committed on the artifact Volume, keeping that explicit commit out
+of the control-stream observation path. Pending-call visibility does not identify
+periodic versus shutdown commits or prove atomic server snapshots.
+
+Only sealed process-local reader proof matching the core receipt, release,
+deployment, call, probe and durably retained capture can pass the composition
+gate. JSON summaries/readback cannot rehydrate proof or restart authority.
+The probe's eight synthetic numeric fixtures and one exhaustion fixture are
+transport evidence, not a manufactured training outcome. Live CPU evidence and
+independent review remain pending; the historical GPU pair above retains its
+exact tested source and narrower qualification. See the canonical
+[CPU workflow](../../.skills/fine-tuning/reference/modal-jobs.md#cpu-progress-transport-qualification)
+for the actual command, finite bounds and limitations.
