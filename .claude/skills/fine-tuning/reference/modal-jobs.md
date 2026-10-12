@@ -1474,7 +1474,7 @@ been replaced by `tuner/training/contracts.py`, with reviewed importer hashes.
 ## API v1 metric-consumer readiness (2026-10-12)
 
 Optional signed numeric progress and public readback are implemented; ordinary
-Modal composition still advertises `logs: false`. The standalone wait loop uses
+Modal composition enables logs only with an exact matching, durably retained reader-issued CPU transport proof; absent, invalid or inconclusive proof advertises `logs: false`. The standalone wait loop uses
 the public logs consumer only when capture is configured and the selected
 descriptor advertises logs.
 It retains the last non-null cursor, deduplicates run/sequence by canonical bytes,
@@ -1491,7 +1491,7 @@ bounded synthetic live qualification proposal, and
 `docs/plans/api-v1-integration-handoff.md` for the consumer journey assessment.
 Restricted `train --qualify-metrics <admission.json> --qualification-sha256 <digest>`
 uses a separate composition for one exact reviewed synthetic attempt; ordinary
-consumers still must not bypass the disabled descriptor. Generate the canonical
+consumers must honor the descriptor and its per-call CPU proof gate. Generate the canonical
 candidate through `train --plan --metrics-qualification-attempt` with expected
 account/workspace, named profile/environment and a private output outside the
 checkout, after the final clean integrated commit. Reuse the documented fixture
@@ -1508,9 +1508,10 @@ submission as replay or relax exact pins.
 The finite delivery ledger requires new numeric records bracketed by exact-call
 pending observations plus terminal native artifact verification. A
 `delivered_precompletion` result still reports transport and partial-write
-qualification false. Keep ordinary logs disabled pending the separate live
-transport evidence and independent review. Neither standalone `train --qualify`
-CPU proof nor minimal native `--mode qualify-training` proves these metrics.
+qualification false. The separate CPU SDK pair qualifies only bounded
+complete-byte transport, with logs conditional on exact per-call proof. Core-only
+`train --qualify` or minimal native `--mode qualify-training` does not prove
+these metrics.
 
 
 ## CPU progress-transport qualification
@@ -1584,9 +1585,12 @@ caller dictionary, Boolean, dataclass payload replacement or retained JSON canno
 enable logs. There is no JSON rehydration or restart authority. Missing, invalid
 or inconclusive proof keeps the descriptor's logs capability false.
 
-This workflow is implemented for review; live CPU probe qualification and
-independent release review must be recorded before reporting capability
-promotion. Earlier GPU attempts 03/04 retain their narrower exact-source metric
+CPU attempts 05/06 passed on unchanged source
+`9252e924985b7bf41430e57eb49429f4501b59bf`, each with nine complete fixtures,
+exact-call pending/terminal-absent observations, collision preservation and
+post-completion inventory verification. See the exact evidence in
+`docs/plans/training-progress-streaming.md`. Logs remain conditional on a fresh
+matching per-call proof; these historical results are not global authority. Earlier GPU attempts 03/04 retain their narrower exact-source metric
 delivery/artifact evidence in `docs/plans/training-progress-streaming.md`; they
 do not retrospectively qualify this new CPU publication path.
 
@@ -1630,7 +1634,7 @@ and do not authorize replay.
 Build claims bind each execution attempt, so separate normal executions do not
 share one source-wide consumed claim. This does not resume a failed attempt:
 retain its claims/resources and use only a separately reviewed admission for
-restricted metrics qualification. Ordinary logs remain disabled. The bounded
+restricted metrics qualification. Ordinary logs require the separate exact per-call CPU proof. The bounded
 two-run acceptance below was met by independently accepted
 `metrics-20261012-03` and `metrics-20261012-04` on unchanged source
 `01383fa81c8ed3847903095456e9b80350cd28a6`: each delivered 32 numeric records

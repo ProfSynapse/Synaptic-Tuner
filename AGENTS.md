@@ -108,7 +108,8 @@ This repository has a few cloud-training constraints that are easy to relearn th
   provider scope, single one-shot attempt and finite step/time/cost bounds in a
   canonical admission before credentials or effects. Generate the candidate from
   the existing local planning CLI after the final integrated commit; do not check
-  in fake or circular source-SHA approvals. Keep ordinary logs disabled. A
+  in fake or circular source-SHA approvals. Restricted metrics evidence alone
+  cannot enable ordinary logs; require the separate exact per-call CPU proof. A
   `delivered_precompletion` verdict requires newly persisted numeric records
   bracketed by the exact call's pending observations and final native artifact
   verification; it does not qualify partial writes, completeness/freshness,

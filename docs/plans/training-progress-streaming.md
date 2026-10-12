@@ -5,8 +5,9 @@ authenticated host readback are implemented. Restricted paid attempts 03 and 04
 completed independently accepted pre-completion delivery and native artifact
 verification on exact source `01383fa81c8ed3847903095456e9b80350cd28a6`;
 see [accepted evidence](#accepted-restricted-delivery-evidence-2026-10-12).
-Modal's ordinary logs capability remains disabled. General transport and live
-partial-write behavior remain unqualified. The earlier proposal and failed
+Modal's ordinary logs capability is conditional on exact matching per-call CPU
+transport proof; see the separately qualified CPU pair below. General transport
+and live partial-write behavior remain unqualified. The earlier proposal and failed
 attempt checkpoints below retain their historical scope.
 
 ## Contract and scope
@@ -505,8 +506,8 @@ Only sealed process-local reader proof matching the core receipt, release,
 deployment, call, probe and durably retained capture can pass the composition
 gate. JSON summaries/readback cannot rehydrate proof or restart authority.
 The probe's eight synthetic numeric fixtures and one exhaustion fixture are
-transport evidence, not a manufactured training outcome. Live CPU evidence and
-independent review remain pending; the historical GPU pair above retains its
+transport evidence, not a manufactured training outcome. The accepted CPU SDK
+pair below has separate exact-source scope; the historical GPU pair above retains its
 exact tested source and narrower qualification. See the canonical
 [CPU workflow](../../.skills/fine-tuning/reference/modal-jobs.md#cpu-progress-transport-qualification)
 for the actual command, finite bounds and limitations.
@@ -574,3 +575,52 @@ Attempt 04 stdout SHA-256:
 `0ece563047db637d25798a6e195dd35c6be2bc7330aabf5822507ef5fcb088cd`;
 capture SHA-256:
 `80883b010dc64d2e6fe917b3b8ddca6514c906af5f79521b6ec1c50e4ee4237c`.
+
+## Accepted CPU SDK transport evidence (2026-10-12)
+
+Two fresh CPU-only attempts passed on unchanged source
+`9252e924985b7bf41430e57eb49429f4501b59bf`. The later documentation-only
+commit does not change that exact tested source. Each retained eight synthetic
+numeric records plus one fixture status, complete and authenticated while the
+same call was pending and the terminal receipt absent before/after accepted
+pages. Each completed call verified one rejected SDK create-only collision,
+original-byte preservation and the exact nine-file inventory/hashes after the
+control-Volume terminal receipt commit, with durable capture acknowledgment.
+
+| Binding | CPU05 | CPU06 |
+| --- | --- | --- |
+| Exact call | `fc-01M4RX86FAK85FRP6X02VWRNHZ` | `fc-01M4RXQ2DZ2VPZ2CQW0B1J28WN` |
+| Runtime release | `6268fbcf13655367092aadd87d03de5d0c425fad8c93ad66ef24afa39d8a7556` | `a553458616a9ecbb4aefb747c9b9edcfe3fcf863270839607d90d8f91f0f3904` |
+| Deployment | `60dfa8bb189ee07ea0ff1dcec035a793d5709e93abab67d248839823a4e08b53` | `aa650143693d2913d946c445c740c19339cf27edf4db7a5edd8ea48011632cdc` |
+| Core receipt SHA-256 | `4f8d49e9049e253163ef4806e76e0bea72bdca3b19035dea131f7137835e278b` | `94e5b135cd981e0aa54164e61050e284f867b46ed6fe98e2970b2dc82706e2d2` |
+| Probe dispatch digest | `3f929c1c065765515f0a8882593ca8c8dd55fecb48992e93f2eafae022cba3a4` | `5a74e4586213385b67b468afba4ab5b41e5dcee87ea1bbea40a989a6c65dfd58` |
+| Terminal receipt SHA-256 | `6aa7585313745cdd0606600ec647f8cd2a5cec9c7b846d2634cc2046c5e495c5` | `259917ccc7bc65c8050ca9becd8bed0faed1534d6f582a3116a6061ba649ca70` |
+| Capture SHA-256 | `de34dca6fc71cc9f6deb4fbb57627e46cf9c8c9eee44f551c935c59d92c179c2` | `3de94a0ab0c9ec499dc965df2d9185981b21b7da17568302b71959ff4be6ef99` |
+| Stdout SHA-256 | `f9bc1351c46996abcc9e4b3cc7df68af2547f70ef181e9a938a0dcbe4babeec0` | `357608e154831c126bf632ad43a8a9058e570ed44297fba1cba79fd39ed2fafc` |
+| Records | 9 | 9 |
+| Total polls | 18 | 17 |
+| Accepted pending/receipt-absent pages | 18 | 16 |
+| Final local elapsed milliseconds | 54553 | 55982 |
+
+The strategy is explicit `modal_sdk_create_only/v1`, not a failed-rename
+fallback. CPU publication uses the exact authenticated v1 SDK handle/client;
+host readback verifies complete bytes and final preservation. Source, runtime,
+marker, deployment, core/probe receipts, call and capture remain bound per
+attempt, with distinct consumed claims and no replay. Earlier CPU01–04 remain
+failed candidates; the historical GPU pair retains its exact `01383fa8` source
+and native-artifact scope.
+
+Root and independent review accepted the pair. CPU06's remaining poll was
+`read_unavailable` with no admitted observations; total polls are not accepted
+pages. Capture payloads retain their pre-ack `durability_acknowledged: false`;
+the independently verified retention/proof acknowledgment is true.
+
+This supports conditional per-run logs only: the composition gate requires an
+exact matching reader-issued opaque proof and durable retained capture.
+Historical successes, Boolean/dictionary summaries or saved JSON cannot mint
+that authority. Missing/invalid/inconclusive optional proof keeps logs false;
+mandatory core admission is not relaxed. Both receipts still report
+`transport_qualified: false` and `partial_write_behavior_qualified: false` for
+broader guarantees. No rename atomicity, periodic/background-final commit,
+freshness/completeness, cancellation, restart/recovery or every-call success is
+claimed. No GPU training was executed or qualified by this CPU pair.
