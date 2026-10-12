@@ -1,9 +1,13 @@
 # Training progress chart feed
 
-Status: approved numeric child capture, signed remote progress storage and
-authenticated host readback are implemented. Provider-free verification does
-not qualify live delivery. Modal's logs capability remains disabled. The active
-training/evaluation attempt is unchanged; no paid qualification was launched.
+Status (2026-10-12): numeric child capture, signed remote progress storage and
+authenticated host readback are implemented. Restricted paid attempts 03 and 04
+completed independently accepted pre-completion delivery and native artifact
+verification on exact source `01383fa81c8ed3847903095456e9b80350cd28a6`;
+see [accepted evidence](#accepted-restricted-delivery-evidence-2026-10-12).
+Modal's ordinary logs capability remains disabled. General transport and live
+partial-write behavior remain unqualified. The earlier proposal and failed
+attempt checkpoints below retain their historical scope.
 
 ## Contract and scope
 
