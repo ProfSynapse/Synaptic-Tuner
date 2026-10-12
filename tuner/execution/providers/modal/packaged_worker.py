@@ -367,26 +367,25 @@ class ModalPackagedWorker:
         return PackagedSFTPaths(prepared, **paths)
 
     def _progress_publisher(self, dispatch, job_ref: str, max_records: int):
+        # Legacy unbound roots cannot attest atomic progress publication. This
+        # optional telemetry lane fails closed without changing training.
+        if self._bindings is None:
+            raise ValueError("modal_packaged_progress_binding_required")
         effect_id = dispatch.submit_command.operation.effect.effect_id
         preparation = dispatch.submit_command.preparation
         run = TrainingRunRef(preparation.run_id, preparation.project_ref)
-        if self._bindings is not None:
-            control = self._bindings["control"]
-            claim = control.claim_directory
-            write = lambda path, raw: control.write_exclusive(
-                path, raw, MAX_PROGRESS_FILE_BYTES,
-            )
-        else:
-            root = self._roots.control
-            claim = lambda path: claim_directory(root, root / path)
-            write = lambda path, raw: write_exclusive(root, root / path, raw)
+        control = self._bindings["control"]
+        claim = control.claim_directory
+        publish = lambda stage, path, raw: control.publish_exclusive(
+            stage, path, raw, MAX_PROGRESS_FILE_BYTES,
+        )
         return PackagedProgressPublisher(
             signer=self._signer, key_ref=dispatch.key_ref,
             effect_id=effect_id, command_digest=dispatch.submit_command.digest,
             provider_job_ref=safe_ref(job_ref, "provider_job_ref"),
             execution_binding_digest=dispatch.execution_binding.binding_digest,
             run=run, max_records=max_records,
-            claim_directory=claim, write_exclusive=write,
+            claim_directory=claim, publish_exclusive=publish,
         )
 
     def _publish_completion(self, dispatch, result, job_ref: str, paths: PackagedSFTPaths) -> bytes:

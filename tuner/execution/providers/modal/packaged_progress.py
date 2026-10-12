@@ -8,6 +8,7 @@ ordinary background Volume commits. A missing unseen tail proves no completion.
 from __future__ import annotations
 
 import hashlib
+import secrets
 from datetime import datetime, timezone
 from queue import Empty, Full, Queue
 from threading import Event, Thread
@@ -179,7 +180,7 @@ class PackagedProgressPublisher:
         self, *, signer, key_ref: str, effect_id: str,
         command_digest: str, provider_job_ref: str,
         execution_binding_digest: str, run: TrainingRunRef,
-        max_records: int, claim_directory, write_exclusive,
+        max_records: int, claim_directory, publish_exclusive,
     ) -> None:
         _content_identity(
             effect_id=effect_id, command_digest=command_digest,
@@ -193,8 +194,10 @@ class PackagedProgressPublisher:
             execution_binding_digest=execution_binding_digest,
             run=run, max_records=max_records,
         )
+        if not callable(claim_directory) or not callable(publish_exclusive):
+            raise TypeError("atomic progress publication callbacks required")
         self._claim = claim_directory
-        self._write = write_exclusive
+        self._publish = publish_exclusive
         self._queue: Queue[TrainingMetricObservedPayloadV1] = Queue(maxsize=256)
         self._closed = Event()
         self._exhausted = Event()
@@ -230,6 +233,7 @@ class PackagedProgressPublisher:
         try:
             self._claim(root)
             self._claim(root + "/shards")
+            self._claim(root + "/staging")
             while True:
                 try:
                     payload = self._queue.get(timeout=0.05)
@@ -260,7 +264,7 @@ class PackagedProgressPublisher:
                     **identity, index=index, previous_digest=previous,
                     record=record,
                 )
-                self._write(progress_path(identity["effect_id"], index), raw)
+                self._write_record(root, progress_path(identity["effect_id"], index), raw)
                 index += 1
                 if index >= identity["max_records"]:
                     self._exhausted.set()
@@ -283,11 +287,14 @@ class PackagedProgressPublisher:
                     **identity, index=index, previous_digest=previous,
                     record=status,
                 )
-                self._write(progress_path(identity["effect_id"], index), raw)
+                self._write_record(root, progress_path(identity["effect_id"], index), raw)
         except Exception:
             # Progress has no lifecycle authority. Earlier files remain a
             # useful prefix once the provider commits them in the background.
             self._failed.set()
+
+    def _write_record(self, root, path, raw):
+        self._publish(root + "/staging/" + secrets.token_hex(16), path, raw)
 
 
 __all__: list[str] = []

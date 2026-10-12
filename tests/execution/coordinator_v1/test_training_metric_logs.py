@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from types import SimpleNamespace
 from dataclasses import replace
 import pytest
 
@@ -10,7 +12,7 @@ from synaptic_tuner.api.v1.observations import (
     ObservationKind, TrainingPhaseObservedPayloadV1,
 )
 from synaptic_tuner.api.v1.results import TrainingRunRef
-from synaptic_tuner.api.v1.runs_facade import RunLogsRequest
+from synaptic_tuner.api.v1.runs_facade import RunLogsRequest, RunsAPI
 from tuner.execution.coordinator_v1.cursors import decode_cursor
 from tuner.execution.coordinator_v1.model import (
     AuthenticatedProviderLogPageV1,
@@ -31,6 +33,8 @@ from tuner.execution.providers.modal.coordinator_logs import (
 from ..test_observation_logs import metric_record
 from .test_operational_cas import _queued_store
 from .test_operations_service import Reader, operations
+from tuner.training.run_progress_consumer import RunProgressConsumer
+from tuner.training.modal_host_authority import HMACAuthenticator, ReaderEvidenceAuthority
 
 
 def _chunk(sequence, previous_digest, entries):
@@ -189,3 +193,52 @@ def test_authenticated_runs_api_exports_only_fixed_capture_exhaustion_status():
                                                   *replay.entries)}
     assert tuple(deduped) == (0, 1, 2, 3)
     assert reader.after_sequences == [None, 1, 1, 1]
+
+
+def test_real_public_consumer_recovers_delayed_and_transient_reads_then_rejects_signed_conflict(tmp_path):
+    authority = ReaderEvidenceAuthority("authority-a", "key-a", HMACAuthenticator(
+        {"key-a": b"t" * 32}, allowed_purposes=frozenset({"provider-log-page/v1"})))
+
+    class FaultReader(MetricReader):
+        mode = "empty"
+
+        def logs(self, request, query):
+            if self.mode == "transient":
+                raise RuntimeError("PRIVATE_PROVIDER_SENTINEL")
+            page = super().logs(request, query)
+            content = page.content
+            if self.mode == "empty":
+                content = replace(content, entries=(), total_bytes=0, truncated=False)
+            elif self.mode == "conflict":
+                changed = replace(metric_record(2, run=request.run), occurred_at="2026-10-08T10:15:30Z")
+                entry = encode_training_metric_log(changed, expected_run=request.run)
+                content = replace(content, entries=(entry,), total_bytes=entry.size_bytes, truncated=False)
+            return authority.log_page(content)
+
+    store, queued, foundation = _queued_store()
+    reader = FaultReader(tail_visible=False)
+    service, _ = operations(store, queued, foundation, reader=reader,
+        log_auth=SimpleNamespace(authenticate=authority.authenticate_log_page))
+    tmp_path.chmod(0o700)
+    consumer = RunProgressConsumer(RunsAPI(service), queued.run, tmp_path)
+    consumer.poll()
+    assert consumer.status == "progress_waiting" and not consumer.path.exists()
+    reader.mode = "ordinary"
+    consumer.poll()
+    retained_cursor = consumer.cursor
+    assert retained_cursor is not None and consumer.result()["retained_records"] == 2
+    consumer.poll()  # Delayed committed tail, authenticated empty page.
+    assert consumer.cursor == retained_cursor and not consumer.disabled
+    reader.mode = "transient"
+    consumer.poll()
+    assert consumer.status == "progress_read_unavailable" and consumer.cursor == retained_cursor
+    reader.mode, reader.tail_visible = "ordinary", True
+    consumer.poll()
+    consumer.poll()  # Identical signed replay must not duplicate retained rows.
+    assert consumer.result()["retained_records"] == 3
+    before = consumer.path.read_bytes()
+    assert [json.loads(row)["sequence"] for row in before.splitlines()] == [0, 1, 2]
+    reader.mode = "conflict"
+    consumer.poll()
+    assert consumer.disabled and consumer.status == "progress_sequence_conflict"
+    assert consumer.path.read_bytes() == before and consumer.cursor == retained_cursor

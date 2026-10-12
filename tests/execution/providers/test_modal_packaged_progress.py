@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import sys
 from dataclasses import replace
-from pathlib import Path
 from threading import Event
 
 import pytest
@@ -28,6 +27,12 @@ from tuner.execution.providers.modal.packaged_progress import (
     make_progress_file, parse_progress_file, progress_path,
 )
 from tests.execution.providers.test_modal_packaged_reader import _reader
+from tests import test_modal_volume_root_binding as root_tests
+
+
+@pytest.fixture
+def volume_layout(monkeypatch):
+    yield from root_tests.layout.__wrapped__(monkeypatch)
 
 
 class Auth:
@@ -202,17 +207,17 @@ def test_max_capture_status_is_pageable_at_sequence_10000():
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="mounted_io requires Linux descriptor semantics")
-def test_background_committed_prefix_pages_while_completion_is_absent(tmp_path):
+def test_background_committed_prefix_pages_while_completion_is_absent(volume_layout, request):
     binding, reader, _, control, _, _ = _reader()
     identity = _identity(binding)
     reader._verifier = Auth()
     effect = identity["effect_id"]
-    root = Path(tmp_path / "control")
-    root.mkdir(mode=0o700)
+    root = volume_layout[2]
+    bound = root_tests._bind(volume_layout)
+    request.addfinalizer(bound.close)
     publisher = PackagedProgressPublisher(
-        **identity,
-        claim_directory=lambda path: mounted_io.claim_directory(root, root / path),
-        write_exclusive=lambda path, raw: mounted_io.write_exclusive(root, root / path, raw),
+        **identity, claim_directory=bound.claim_directory,
+        publish_exclusive=lambda stage, path, raw: bound.publish_exclusive(stage, path, raw, 8192),
     )
     for step in range(1, 4):
         publisher.on_metric_frame(metric(step))
@@ -300,23 +305,23 @@ def test_background_committed_prefix_pages_while_completion_is_absent(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="mounted_io requires Linux descriptor semantics")
-def test_progress_write_failure_does_not_raise_into_metric_callback(tmp_path):
+def test_progress_write_failure_does_not_raise_into_metric_callback(volume_layout, request):
     binding, _, _, _, _, _ = _reader()
     identity = _identity(binding)
-    root = Path(tmp_path / "control")
-    root.mkdir(mode=0o700)
+    root = volume_layout[2]
+    bound = root_tests._bind(volume_layout)
+    request.addfinalizer(bound.close)
     calls = []
 
-    def fail_second(path, raw):
+    def fail_second(stage, path, raw):
         calls.append(path)
         if len(calls) == 2:
             raise OSError("private Volume failure")
-        mounted_io.write_exclusive(root, root / path, raw)
+        bound.publish_exclusive(stage, path, raw, 8192)
 
     publisher = PackagedProgressPublisher(
-        **identity,
-        claim_directory=lambda path: mounted_io.claim_directory(root, root / path),
-        write_exclusive=fail_second,
+        **identity, claim_directory=bound.claim_directory,
+        publish_exclusive=fail_second,
     )
     publisher.on_metric_frame(metric(1))
     publisher.on_metric_frame(metric(2))
@@ -334,13 +339,13 @@ def test_queue_overflow_does_not_claim_capture_budget_exhaustion():
     writing, release = Event(), Event()
     written = []
 
-    def slow_write(path, raw):
+    def slow_write(stage, path, raw):
         writing.set()
         assert release.wait(5)
         written.append(path)
 
     publisher = PackagedProgressPublisher(
-        **identity, claim_directory=lambda path: None, write_exclusive=slow_write,
+        **identity, claim_directory=lambda path: None, publish_exclusive=slow_write,
     )
     try:
         publisher.on_metric_frame(metric(1))
