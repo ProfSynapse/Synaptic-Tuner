@@ -527,3 +527,25 @@ capture SHA-256:
 `c754fcd0550466f63cce6c6901a82faad66976519cd1510ba759b32ad278ca11`.
 These CPU attempts do not alter the earlier GPU/native-artifact pair's exact
 `01383fa81c8ed3847903095456e9b80350cd28a6` source qualification.
+
+### CPU SDK candidate attempt 03 (historical, not qualification)
+
+Attempt 03 used source `807071c985430613faebdf190b3b471dc658a74b`.
+Its mandatory CPU proof passed, but the optional SDK probe returned signed
+`SDK_PUBLISH_IDENTITY`. The retained capture contains eight polls, seven accepted
+empty pages and zero records; logs remained disabled. Preserve its consumed
+claims and resources without replay.
+
+The closed live code locates an identity-check boundary; it does not identify
+which field failed. A separate no-network reproduction against pinned Modal
+1.5.4 established a representation defect: the public synchronized Volume has
+no `_metadata` attribute, while `_get_metadata().version` supplies the valid
+version. Hydration, object ID and exact client identity matched in that
+reproduction. The reviewed fix corrects metadata access while retaining those
+identity checks; it is not a relaxed admission or fallback strategy. This failed
+attempt is not delivery or final-inventory qualification.
+
+Attempt 03 stdout SHA-256:
+`52f702a957af502f20ede4dac92df8b5210e6ff76e26d0b710081bba7d0d133e`;
+capture SHA-256:
+`cddbb067b32219077f5765d587a73dfe9bf442b02eab783bfdad287c82d76990`.
