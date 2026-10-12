@@ -76,6 +76,9 @@ This repository has a few cloud-training constraints that are easy to relearn th
   preserve original bytes, complete record pages bracketed by pending states of
   the same exact call and terminal-receipt absence, then exact final inventory
   and hashes after call completion and the later control-Volume receipt commit.
+  The CPU publishes only; host pending reads and post-completion exact inventory
+  and hashes verify collision preservation. Do not add remote SDK HTTP readback,
+  relax blocked workload network access or bypass the pinned SDK with legacy RPC.
   Initial marker authentication and retained root identity remain mandatory.
   Persist and read back the bounded host ledger before acknowledging durability;
   only exact sealed process-local verification matching the core receipt,

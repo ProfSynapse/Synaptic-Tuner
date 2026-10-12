@@ -1558,7 +1558,11 @@ transport evidence, not a training outcome. Bounds remain 8 KiB per leaf,
 20 seconds of final observation hold within the original 120-second CPU call.
 Each SDK operation uses at most five seconds of the remaining deadline. Exactly
 one intentional differing-byte collision uses a fresh adapter instance; it must
-fail create-only and preserve the original bytes. Failed or uncertain attempts
+fail create-only. The CPU performs publication only: collision preservation is
+verified by the host's pending canonical reads and post-completion exact inventory
+and hashes, without a redundant remote SDK read. Pinned Modal 1.5.4 `read_file`
+uses `VolumeGetFile2` and HTTP download URLs even for small payloads; do not relax
+blocked workload network access or substitute legacy RPC calls. Failed or uncertain attempts
 consume their claims without retry, adoption or cleanup.
 
 Accepted complete record pages require the same exact call pending before and

@@ -497,6 +497,9 @@ The signed terminal receipt is then written and committed on the control Volume;
 after function completion the host verifies the exact nine-file inventory and
 all hashes again. This measures pending delivery and post-commit preservation,
 not rename atomicity, periodic commits, freshness or complete production history.
+The CPU publishes only; host reads verify the preserved original and final files.
+No redundant remote HTTP readback, network-policy relaxation or legacy SDK bypass
+is part of this workflow.
 
 Only sealed process-local reader proof matching the core receipt, release,
 deployment, call, probe and durably retained capture can pass the composition
@@ -549,3 +552,25 @@ Attempt 03 stdout SHA-256:
 `52f702a957af502f20ede4dac92df8b5210e6ff76e26d0b710081bba7d0d133e`;
 capture SHA-256:
 `cddbb067b32219077f5765d587a73dfe9bf442b02eab783bfdad287c82d76990`.
+
+### CPU SDK candidate attempt 04 (historical, not qualification)
+
+Attempt 04 used source `bfad73c99a72c1fe473078cc961b4a57a129f737`.
+The core CPU proof passed; the optional probe returned signed
+`SDK_PUBLISH_UNAVAILABLE`. Its retained capture contains eleven polls and one
+record: the first complete publication was delivered, but this is not a complete
+transport qualification. Logs stayed disabled; claims and resources remain intact.
+
+A separate controlled-RPC reproduction against real Modal 1.5.4 verified normal
+upload and `FileExistsError` collision mapping. Its `read_file` always uses
+`VolumeGetFile2` plus HTTP download URLs, including for tiny files. Remote HTTP
+readback is therefore a plausible attempt-04 boundary, not a cause established
+by the closed live code. The reviewed simplification removes the redundant
+CPU read after collision; host pending reads and post-completion exact inventory
+and hashes retain preservation verification. Workload network restrictions and
+permissions remain unchanged, without a legacy-RPC bypass.
+
+Attempt 04 stdout SHA-256:
+`0ece563047db637d25798a6e195dd35c6be2bc7330aabf5822507ef5fcb088cd`;
+capture SHA-256:
+`80883b010dc64d2e6fe917b3b8ddca6514c906af5f79521b6ec1c50e4ee4237c`.
