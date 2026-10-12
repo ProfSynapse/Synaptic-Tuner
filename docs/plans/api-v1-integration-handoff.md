@@ -39,12 +39,18 @@ The exact local cause was reproduced: all nine hash-pinned bootstrap wheel
 files under `Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c` were absent;
 the first required wheel read failed at that input boundary. Installing the
 37-package launcher closure does not provide these build wheel artifacts.
-The existing derived-image workflow checks/copies artifacts already present;
-no reusable checked-in bootstrap preparation surface was found.
+At that failed source, the derived-image workflow checked/copied artifacts already
+present; no reusable checked-in bootstrap preparation surface was available.
 
-Next work is a hash-pinned local preparation workflow and provider-free checks
-of actual bootstrap files plus private state-root requirements, before authority
-claims or provisioning. Retain the consumed claims and existing resources;
+The repair adds automatic exact hash-pinned bootstrap acquisition and local
+source-wheel/input validation on the normal standalone path before credentials,
+claims or provisioning. Optional
+`train --job-config <recipe> --prepare-local --json` runs the same local preparation without provider effects; see the
+[local preparation workflow](../../.skills/fine-tuning/reference/modal-jobs.md#standalone-local-preparation-and-cold-cache).
+`--plan` reports cache readiness without network access. Launcher pins remain
+POSIX CPython 3.11.14 and Modal SDK 1.5.4. This implementation description does
+not establish the two successful live runs required for reliability acceptance.
+Retain the consumed claims and existing resources;
 this failure grants no replay, deletion or adoption authority. The user subsequently authorized bounded fix/test/live iteration for this session;
 fresh attempts retain distinct reviewed source/admission and claims after the
 preparation/preflight gap is resolved. This authority does not replay the consumed
@@ -128,8 +134,8 @@ are provider-free evidence unless the row identifies retained live qualification
 | Lifecycle | Generic coordinator/Foundation and consumer-owned catalogs; public observe/outcome/verification composition. | Modal cancel/reconcile/cost-quote remain disabled. Standalone journals prevent replay but do not restore all in-memory workflow state. Multi-user service persistence, browser sessions and product lifecycle UX are host integration work. |
 
 Proceed with provider-free integration and independent review of metric retention.
-Resolve and review the local bootstrap preparation/pre-effect validation gap
-from the consumed qualification attempt, then continue within the user's explicit
+Review the integrated automatic preparation and pre-effect validation fix
+against the consumed qualification attempt, then continue within the user's explicit
 bounded iteration authority using distinct reviewed fresh admissions. Demonstrate
 at least two completed live runs on the same final code and the cold-checkout
 normal path; retain external provider limitations separately. A pre-completion

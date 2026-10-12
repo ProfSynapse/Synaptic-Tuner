@@ -1513,6 +1513,50 @@ transport evidence and independent review. Neither standalone `train --qualify`
 CPU proof nor minimal native `--mode qualify-training` proves these metrics.
 
 
+## Standalone local preparation and cold cache
+
+The standalone `train --job-config` path automatically prepares the exact
+profile-selected bootstrap inventory and current clean-source wheel before
+credentials, durable execution/build claims or Modal provisioning. An empty
+cache downloads only the declared exact wheel filenames and verifies their
+SHA-256 hashes. Bootstrap files live outside the checkout under
+`${XDG_STATE_HOME:-$HOME/.local/state}/synaptic-training/modal-bootstrap/`;
+installing the launcher closure does not populate that inventory. Existing
+corrupt or insecure cache files reject rather than being silently overwritten.
+
+An optional explicit local preparation uses the same implementation:
+
+```bash
+python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml --prepare-local --json
+```
+
+Run it with the locked POSIX CPython 3.11.14 launcher and Modal SDK 1.5.4.
+It may download public pinned artifacts and build/validate the source wheel;
+it does not obtain Modal credentials, consume attempt claims or provision
+provider resources. Its `local_inputs_ready` report binds source commit,
+build intent and source-wheel digest, reports the bootstrap wheel count, and
+sets `provider_effects` and `execution_authorized` false. Source-wheel staging
+is temporary and is removed when the command exits; normal execution prepares
+and revalidates its own retained inputs. Explicit preparation is optional,
+not an operator wheel-upload step or execution grant. Do not combine it with
+`--plan`, `--quote`, `--qualify`, `--qualify-metrics` or `--fresh-attempt`.
+
+`train --plan --json` remains read-only and network-free. Its `local_readiness`
+reports `bootstrap_cache_ready`, `unprepared` or `invalid`; source-wheel
+preflight occurs during execution or `--prepare-local`. Cache readiness does
+not prove launcher compatibility, source-wheel readiness or live authority.
+The effectful path rejects wrong launcher pins, dirty/mismatched source,
+unsafe private roots, corrupt bootstrap bytes and unresolved prepared inputs
+before provider effects. Local preparation failures use closed diagnostic codes
+and do not authorize replay.
+
+Build claims bind each execution attempt, so separate normal executions do not
+share one source-wide consumed claim. This does not resume a failed attempt:
+retain its claims/resources and use only a separately reviewed admission for
+restricted metrics qualification. Ordinary logs remain disabled. The two-run
+live reliability acceptance below remains pending until actual retained evidence
+establishes it.
+
 ## Authorized bounded reliability iteration (2026-10-12)
 
 The user authorized continuing the metrics fix/test/live cycle until the supported

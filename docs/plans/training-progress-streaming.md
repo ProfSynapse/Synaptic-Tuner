@@ -238,6 +238,21 @@ python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qual
 python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml --plan --metrics-qualification-attempt <reviewed-attempt> --qualification-account synaptic-labs --qualification-workspace synaptic-labs --qualification-output <private-directory>/admission.json --modal-profile synaptic-labs --modal-environment synaptic-smoke-v1 --json
 ```
 
+The normal standalone execution automatically prepares the pinned bootstrap
+wheel cache and exact current source wheel before claims or Modal effects.
+`--plan` only reports local cache readiness; it does not download inputs.
+For an optional provider-free preparation review, use the exact locked launcher:
+
+```bash
+python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml --prepare-local --json
+```
+
+This may acquire public exact-pinned wheels and validate/build local inputs.
+It is not a claim or execution grant, and temporary source-wheel staging is
+removed on exit. Empty caches are handled automatically on the normal path;
+corrupt/insecure inputs reject. See the canonical
+[local preparation guidance](../../.skills/fine-tuning/reference/modal-jobs.md#standalone-local-preparation-and-cold-cache).
+
 Review the complete canonical admission and returned digest. A later read-only
 rate observation uses the existing surface, separately from candidate generation:
 
@@ -338,13 +353,13 @@ not those wheel files. This is a local dependency-preparation failure, not an
 established image, trainer, GPU-capacity or metric-transport failure.
 
 The retained build claim prevents repeating this submission. No cloud retry was
-performed. Fix the reusable local workflow first: prepare only the declared
+performed. The repair implements the reusable local workflow: prepare only the declared
 bootstrap wheel inventory through hash-pinned acquisition, verify exact file
 bytes and private-state-root modes provider-free before consuming claims or
-provisioning, and retain source/runtime pins. Existing derived-image helpers
-validate/copy already-present artifacts; they do not supply the missing preparation
-capability. Implement and review the checked-in preparation surface before a new
-clean source/admission. The later bounded iteration authorization below supersedes
+provisioning, and retain source/runtime pins. The earlier derived-image helpers
+validated/copied already-present artifacts; the repair now acquires the declared
+exact inventory on the normal path. Review the integrated preparation surface
+and provider-free barrier before a new clean source/admission. The later bounded iteration authorization below supersedes
 the former requirement to request another approval for each reviewed fresh attempt. Do not
 remove claims, invent another state root or rotate attempt identifiers to replay
 this approved attempt, and do not delete or adopt its resources without authority.
@@ -359,15 +374,16 @@ admission and finite source/input/provider/step/time/cost binding. No uncertain
 submission is replayed. Ordinary logs remain disabled and earlier failed resources
 are not deleted or adopted by this authorization.
 
-The next implementation target is automatic hash-pinned bootstrap preparation on
+The implemented repair automatically prepares hash-pinned bootstrap inputs on
 the normal path, with private-root and actual local-input/source validation before
-claims/provisioning. A fresh clone must not depend on undocumented wheel files or
+claims/provisioning. The optional `--prepare-local` surface uses the same service. A fresh clone must not depend on undocumented wheel files or
 operator package installs. An empty cache normally acquires exact pinned artifacts; missing means inputs
 still unresolved after preparation, such as an unavailable offline cache.
 Verification must reject unresolved/corrupt inputs, unsafe
 private-root modes and dirty/mismatched source before provider effects while
-preserving exact launcher/runtime pins. This remains an acceptance target until
-its implemented workflow and evidence are recorded.
+preserving exact launcher/runtime pins. Provider-free tests and the optional local
+preparation report establish local behavior; the live acceptance evidence below
+remains required.
 
 Reliability acceptance requires at least two completed bounded live qualification
 runs on the same final code, each with a distinct retained admission/claim and
