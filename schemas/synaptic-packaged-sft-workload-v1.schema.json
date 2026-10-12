@@ -63,7 +63,17 @@
         "execution": {"const": {"mode": "packaged_runtime"}},
         "model": {"$ref": "#/$defs/model"}, "dataset": {"$ref": "#/$defs/prepared"},
         "sft": {"$ref": "#/$defs/hyperparameters"},
-        "post_training": {"$ref": "#/$defs/post_training"}
+        "post_training": {"$ref": "#/$defs/post_training"},
+        "observation_capture": {"$ref": "#/$defs/observation_capture"}
+      }
+    },
+    "observation_capture": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "every_n_steps", "max_records"],
+      "properties": {
+        "schema_version": {"const": "synaptic-training-observation-capture/v1"},
+        "every_n_steps": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "max_records": {"type": "integer", "minimum": 1, "maximum": 10000}
       }
     },
     "post_training": {

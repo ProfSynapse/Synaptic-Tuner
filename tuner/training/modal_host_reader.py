@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import Iterator
 
 from synaptic_tuner.api.v1.results import VerifiedArtifact
@@ -10,13 +11,16 @@ from tuner.execution.coordinator_v1.model import (
     ArtifactManifestV1, AuthenticatedProviderRunObservationV1,
     EffectIntentV1, FoundationDispositionV1, ProviderReadPurposeV1,
     ProviderRunObservationContentV1, ProviderRunPhaseV1, ProviderRunReadRequestV1,
+    ProviderLogPageContentV1, ProviderLogQueryV1,
 )
 from tuner.execution.coordinator_v1.state_machine import _derive_foundation
 from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest
 from tuner.execution.foundation_v2.commands import SubmitCommandV2, parse_exact_command
 from tuner.execution.providers.modal.facade import ModalFunctionCallState
 from tuner.execution.providers.modal.packaged_binding import ModalPackagedCommandBinding
-from tuner.execution.providers.modal.packaged_reader import ModalPackagedCompletionObservation
+from tuner.execution.providers.modal.packaged_reader import (
+    ModalPackagedCompletionObservation, ModalPackagedProgressPage,
+)
 from tuner.execution.providers.modal.runtime_build import _bounded
 
 
@@ -248,7 +252,46 @@ class ModalPackagedCoordinatorReaderV1:
         return self._authority.observation(content)
 
     def logs(self, request, query):
-        raise ModalPackagedReadUnavailable("modal_packaged_logs_unsupported")
+        """Authenticate a best-effort numeric prefix, independently of completion."""
+        if type(query) is not ProviderLogQueryV1:
+            raise ModalPackagedReadUnavailable("modal_packaged_log_query_invalid")
+        binding = self._binding(request, ProviderReadPurposeV1.LOGS)
+        ref = request.provider_run.reference
+        try:
+            page = _bounded(
+                lambda: self._reader.read_progress(
+                    binding, provider_job_ref=ref.provider_job_ref,
+                    expected_run=request.run, after_sequence=query.after_sequence,
+                    limit=query.limit, maximum_bytes=query.maximum_bytes,
+                ),
+                deadline=time.monotonic() + 60,
+                code="modal_packaged_progress_read_unavailable",
+            )
+            if type(page) is not ModalPackagedProgressPage:
+                raise ValueError
+            # Revalidate frozen values at the collaborator boundary as well.
+            page = replace(page)
+            if (page.run != request.run or page.command_digest != binding.command_digest
+                    or page.effect_id != binding.command.operation.effect.effect_id
+                    or page.provider_job_ref != ref.provider_job_ref
+                    or page.execution_binding_digest != binding.execution_binding.binding_digest
+                    or page.after_sequence != query.after_sequence
+                    or len(page.entries) > query.limit
+                    or sum(entry.size_bytes for entry in page.entries) > query.maximum_bytes):
+                raise ValueError
+            content = ProviderLogPageContentV1(
+                "synaptic-provider-log-page-content/v1", request.request_digest,
+                query.log_query_digest, request.source_workflow_record_digest,
+                request.source_revision, request.run, request.provider_run.binding_digest,
+                ref.provider_id, ref.profile_ref, ref.account_ref, ref.namespace_ref,
+                ref.provider_job_ref, query.after_sequence, page.entries,
+                sum(entry.size_bytes for entry in page.entries), page.truncated,
+                page.canonical_evidence, "modal-packaged-host-reader", "0.1.0",
+                self._clock.now(),
+            )
+            return self._authority.log_page(content)
+        except Exception:
+            raise ModalPackagedReadUnavailable("modal_packaged_progress_read_invalid") from None
 
     def _manifest(self, request: ProviderRunReadRequestV1):
         binding = self._binding(request, ProviderReadPurposeV1.ARTIFACTS)

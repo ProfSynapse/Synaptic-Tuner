@@ -1,11 +1,61 @@
 from pathlib import Path
 import importlib.util
+import os
 import sys
 
 import pytest
 
 from tuner.runtime import packaged_sft_child as child
 from tuner.runtime.packaged_sft_execution import _digest
+
+
+@pytest.mark.skipif(os.name != "posix", reason="packaged metric channel uses inherited POSIX descriptors")
+def test_numeric_metric_pipe_is_bounded_and_reports_exact_budget():
+    from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
+    from tuner.runtime.packaged_sft_execution import _document
+    read_fd, write_fd = os.pipe()
+    try:
+        sink = child._metric_sink_for_fd(write_fd, 1)
+        payload = TrainingMetricObservedPayloadV1(step=1, total_steps=None, loss=0.5,
+            learning_rate=None, epoch=None, train_elapsed_seconds=None,
+            job_elapsed_seconds=None, gpu_current_allocated_bytes=None,
+            gpu_current_reserved_bytes=None, gpu_peak_allocated_bytes=None,
+            gpu_peak_reserved_bytes=None, gpu_utilization_percent=None,
+            tokens_per_second=None, estimated_samples_per_second=None)
+        sink(payload)
+        sink(payload)
+        frames = [_document(raw, 4096) for raw in os.read(read_fd, 8192).splitlines()]
+        assert [frame["kind"] for frame in frames] == ["metric", "exhausted"]
+        assert frames[0]["payload"] == payload.to_dict()
+        assert all(len(str(frame)) < 4096 for frame in frames)
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="packaged metric channel uses inherited POSIX descriptors")
+def test_metric_pipe_rejects_wrong_descriptor_and_swallow_broken_optional_writer(tmp_path):
+    from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
+    with (tmp_path / "ordinary-file").open("wb") as regular:
+        with pytest.raises(ValueError, match="PACKAGED_METRIC_TRANSPORT_REJECTED"):
+            child._metric_sink_for_fd(regular.fileno(), 1)
+    read_fd, write_fd = os.pipe()
+    try:
+        sink = child._metric_sink_for_fd(write_fd, 1)
+        os.close(read_fd)
+        read_fd = None
+        payload = TrainingMetricObservedPayloadV1(step=1, total_steps=None,
+            loss=0.5, learning_rate=None, epoch=None, train_elapsed_seconds=None,
+            job_elapsed_seconds=None, gpu_current_allocated_bytes=None,
+            gpu_current_reserved_bytes=None, gpu_peak_allocated_bytes=None,
+            gpu_peak_reserved_bytes=None, gpu_utilization_percent=None,
+            tokens_per_second=None, estimated_samples_per_second=None)
+        sink(payload)
+        sink(payload)
+    finally:
+        if read_fd is not None:
+            os.close(read_fd)
+        os.close(write_fd)
 
 
 def test_zero_argument_child_fails_closed(capsys):

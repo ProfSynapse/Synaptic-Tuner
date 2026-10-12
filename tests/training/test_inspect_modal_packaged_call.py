@@ -1,4 +1,4 @@
-"""Provider-free tests for the claim-bound packaged-call diagnostic."""
+"""Claim-bound packaged-call diagnostics, including pinned SDK contracts."""
 
 from __future__ import annotations
 
@@ -198,6 +198,7 @@ def test_training_completion_metadata_fixture_projects_only_closed_fields():
 
 
 def test_completion_cli_authenticates_then_reads_control_only(monkeypatch, tmp_path, capsys):
+    pytest.importorskip("modal_proto.api_pb2")
     binding, document = _training_completion_fixture()
     client, session, requests = _evaluation_transport(canonical_bytes(document))
     events = []
@@ -564,7 +565,7 @@ def test_one_non_consuming_raw_poll(monkeypatch, response, expected):
     "UNKNOWN", "UNKNOWN_ZERO"])
 @pytest.mark.parametrize("include", [False, True])
 def test_provider_status_actual_protobuf_one_poll(monkeypatch, label, include):
-    from modal_proto import api_pb2
+    api_pb2 = pytest.importorskip("modal_proto.api_pb2")
     monkeypatch.setattr(diagnostic, "_pinned_python", lambda: False)
     status = (0 if label == "UNKNOWN_ZERO" else 987654 if label == "UNKNOWN" else
               getattr(api_pb2.GenericResult, "GENERIC_STATUS_" + label))
@@ -596,7 +597,7 @@ def test_provider_status_actual_protobuf_one_poll(monkeypatch, label, include):
     ("multiple", "INVALID_RESPONSE"), ("negative", "INVALID_RESPONSE"),
     ("wrong_type", "INVALID_RESPONSE"), ("unavailable", "POLL_UNAVAILABLE")])
 def test_provider_status_absent_for_unavailable_or_malformed_protobuf(kind, expected):
-    from modal_proto import api_pb2
+    api_pb2 = pytest.importorskip("modal_proto.api_pb2")
     response = api_pb2.FunctionGetOutputsResponse(num_unfinished_inputs=1 if kind == "pending" else 0)
     if kind in {"index", "multiple"}:
         response.outputs.add(idx=1 if kind == "index" else 0)
@@ -635,7 +636,7 @@ def test_provider_failure_projection_never_reads_hostile_payload_fields():
 
 @pytest.mark.parametrize("include", [False, True])
 def test_provider_status_cli_default_compatibility_and_authentication(monkeypatch, tmp_path, capsys, include):
-    from modal_proto import api_pb2
+    api_pb2 = pytest.importorskip("modal_proto.api_pb2")
     events = []
     def retained(*_args):
         events.append("authenticated")
@@ -1329,7 +1330,7 @@ def test_phase_cli_mutually_exclusive_before_authentication(monkeypatch, tmp_pat
 @pytest.mark.parametrize("fault", ["journal", "app", "function", None])
 @pytest.mark.parametrize("serving", [False, True])
 def test_phase_cli_authentication_and_filters_precede_credentials(monkeypatch, tmp_path, capsys, fault, serving):
-    proto = pytest.importorskip("modal_proto.api_pb2")
+    pytest.importorskip("modal_proto.api_pb2")
     events, requests = [], []
     binding = _case()[0]
     if fault in {"app", "function"}:

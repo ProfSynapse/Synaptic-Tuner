@@ -9,10 +9,12 @@ row formatting) without overriding `on_train_begin` / `on_train_end`.
 from __future__ import annotations
 
 import json
+import math
 import os
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 import torch
 from transformers import TrainerCallback, TrainerState, TrainerControl
@@ -34,6 +36,40 @@ except ImportError:
     RICH_AVAILABLE = False
 
 from .health_checks import HealthChecker, NoOpHealthChecker
+
+if TYPE_CHECKING:
+    from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
+
+
+def _observed_number(value: object, *, nonnegative: bool = True) -> float | None:
+    """Keep absent/invalid trainer measurements unknown, never synthesize zero."""
+    if type(value) not in (int, float):
+        return None
+    try:
+        number = float(value)
+    except (OverflowError, ValueError):
+        return None
+    if not math.isfinite(number) or (nonnegative and number < 0):
+        return None
+    return number
+
+
+def _observed_gpu_bytes() -> tuple[int | None, int | None, int | None, int | None]:
+    """Read exact Torch counters on the active CUDA device, not rounded GiB."""
+    unavailable = (None, None, None, None)
+    try:
+        if not torch.cuda.is_available():
+            return unavailable
+        device = torch.cuda.current_device()
+        if type(device) is not int or device < 0:
+            return unavailable
+        values = tuple(method(device) for method in (
+            torch.cuda.memory_allocated, torch.cuda.memory_reserved,
+            torch.cuda.max_memory_allocated, torch.cuda.max_memory_reserved,
+        ))
+    except Exception:
+        return unavailable
+    return tuple(value if type(value) is int and 0 <= value <= 2**63 - 1 else None for value in values)
 
 
 def resolve_cloud_provider(args: Any) -> Optional[str]:
@@ -144,7 +180,14 @@ class BaseMetricsCallback(TrainerCallback):
         log_every_n_steps: int = 5,
         output_dir: Optional[str] = None,
         previous_log_entries: Optional[List[Dict[str, Any]]] = None,
+        *,
+        metric_sink: Callable[["TrainingMetricObservedPayloadV1"], None] | None = None,
     ):
+        if metric_sink is not None and not callable(metric_sink):
+            raise TypeError("metric_sink must be callable")
+        self.metric_sink = metric_sink
+        self._metric_start_monotonic: float | None = None
+        self._metric_initial_step: int | None = None
         self.log_every_n_steps = max(1, int(log_every_n_steps))
         self.output_dir = Path(output_dir if output_dir is not None else self.default_output_dir)
         self.logs_dir = self.output_dir / "logs"
@@ -169,6 +212,13 @@ class BaseMetricsCallback(TrainerCallback):
         print(f"  Steps included: 0-{previous_entries[-1]['step'] if previous_entries else 0}\n")
 
     def on_train_begin(self, args, state, control, **kwargs):
+        if self.metric_sink is not None:
+            try:
+                self._metric_start_monotonic = time.monotonic()
+                initial = getattr(state, "global_step", None)
+                self._metric_initial_step = initial if type(initial) is int and initial >= 0 else None
+            except Exception:
+                self._disable_metric_sink()
         self.start_time = datetime.now()
         self.last_log_time = self.start_time
         self.header_printed = False
@@ -216,6 +266,9 @@ class BaseMetricsCallback(TrainerCallback):
                 current_time=current_time,
             )
 
+        if on_interval:
+            self._emit_metric(state=state, args=args, logs=logs)
+
         # SFT (override False) only runs health checks at interval multiples — matches
         # pre-refactor top-of-on_log early return. KTO/GRPO (default True) every call.
         if self.health_check_every_on_log or on_interval:
@@ -240,6 +293,73 @@ class BaseMetricsCallback(TrainerCallback):
             eta=eta,
             progress=progress,
         )
+
+    def _emit_metric(self, *, state, args, logs: Dict[str, Any]) -> None:
+        """Optional numeric-only observation; single-process sample estimate.
+
+        A log without direct optimizer loss or learning rate may be evaluation
+        or another heartbeat, not evidence of an optimizer measurement.
+        """
+        sink = self.metric_sink
+        if sink is None:
+            return
+        try:
+            if getattr(state, "is_world_process_zero", False) is not True:
+                return
+            step = getattr(state, "global_step", None)
+            if type(step) is not int or not 1 <= step <= 2**63 - 1:
+                return
+            loss = _observed_number(logs.get("loss"), nonnegative=False)
+            learning_rate = _observed_number(logs.get("learning_rate"))
+            if loss is None and learning_rate is None:
+                return
+        except Exception:
+            self._disable_metric_sink()
+            return
+        try:
+            from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
+
+            total = getattr(state, "max_steps", None)
+            if type(total) is not int or not step <= total <= 2**63 - 1:
+                total = None
+            start = self._metric_start_monotonic
+            now = time.monotonic()
+            elapsed = now - start if start is not None else None
+            elapsed = elapsed if elapsed is not None and math.isfinite(elapsed) and elapsed >= 0 else None
+            estimated_rate = None
+            initial = self._metric_initial_step
+            batch = getattr(args, "per_device_train_batch_size", None)
+            accumulation = getattr(args, "gradient_accumulation_steps", None)
+            world_size = getattr(args, "world_size", None)
+            if (elapsed is not None and elapsed > 0 and initial is not None and step >= initial
+                    and type(batch) is int and batch > 0
+                    and type(accumulation) is int and accumulation > 0
+                    and type(world_size) is int and world_size == 1):
+                estimated_rate = _observed_number(
+                    (step - initial) * batch * accumulation / elapsed,
+                )
+            current_allocated, current_reserved, peak_allocated, peak_reserved = _observed_gpu_bytes()
+            payload = TrainingMetricObservedPayloadV1(
+                step=step, total_steps=total,
+                loss=loss,
+                learning_rate=learning_rate,
+                epoch=_observed_number(logs.get("epoch")),
+                train_elapsed_seconds=elapsed, job_elapsed_seconds=None,
+                gpu_current_allocated_bytes=current_allocated,
+                gpu_current_reserved_bytes=current_reserved,
+                gpu_peak_allocated_bytes=peak_allocated,
+                gpu_peak_reserved_bytes=peak_reserved,
+                gpu_utilization_percent=None, tokens_per_second=None,
+                estimated_samples_per_second=estimated_rate,
+            )
+            sink(payload)
+        except Exception:
+            self._disable_metric_sink()
+
+    def _disable_metric_sink(self) -> None:
+        if self.metric_sink is not None:
+            self.metric_sink = None
+            print("[WARN] Optional training metric observation sink disabled")
 
     def _write_log_row(
         self,

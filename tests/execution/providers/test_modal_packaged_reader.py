@@ -119,7 +119,7 @@ def test_streams_bounded_artifact_then_rechecks_inventory() -> None:
     assert b"".join(chunks) == expected
 
 
-def test_packaged_stream_accepts_policy_limit_but_rejects_old_download_default() -> None:
+def test_packaged_stream_accepts_policy_limit_but_rejects_one_byte_over() -> None:
     binding, reader, _, _, artifacts, _ = _reader()
     observed = reader.observe_completion(binding, provider_job_ref="fc-1")
     member = observed.members[0]
@@ -128,10 +128,14 @@ def test_packaged_stream_accepts_policy_limit_but_rejects_old_download_default()
         binding, observed, role=member.role,
         maximum_bytes=MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes,
     )) == expected
+    assert b"".join(reader.iter_artifact(
+        binding, observed, role=member.role,
+        maximum_bytes=256 * 1024 * 1024,
+    )) == expected
     with pytest.raises(ValueError, match="bound"):
         list(reader.iter_artifact(
             binding, observed, role=member.role,
-            maximum_bytes=256 * 1024 * 1024,
+            maximum_bytes=MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes + 1,
         ))
 
 
@@ -174,7 +178,9 @@ def test_truncated_or_changed_artifact_fails_stream_completion() -> None:
         ))
 
 
-@pytest.mark.parametrize("maximum", (True, 0, 193 * 1024 * 1024))
+@pytest.mark.parametrize("maximum", (
+    True, 0, MODAL_TRAINING_ARTIFACT_BOUNDS_V1.max_artifact_bytes + 1,
+))
 def test_invalid_stream_bounds_fail_before_body_read(maximum) -> None:
     binding, reader, _, _, artifacts, _ = _reader()
     observed = reader.observe_completion(binding, provider_job_ref="fc-1")

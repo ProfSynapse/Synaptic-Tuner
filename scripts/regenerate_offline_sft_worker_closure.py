@@ -132,7 +132,7 @@ def _git_index_modes(root: Path, paths: list[str]) -> dict[str, str]:
     Git is the authority for a field named ``git_mode``, and a ``path.stat()``
     executable bit is the wrong oracle anywhere ``core.fileMode`` is false. On a
     Windows-backed DrvFs/9p mount every file reports ``0o777`` while the index
-    still records ``100644``, so a stat-based check would refuse all 66 members
+    still records ``100644``, so a stat-based check would refuse those members
     on a tree that is in fact correct (architecture ruling 15.13).
 
     ``safe.directory`` is passed per invocation with ``-c`` and names only this

@@ -869,6 +869,8 @@ def parse_args(argv=None):
 def run(args: argparse.Namespace):
     """Execute training with the provided CLI arguments."""
     _mark_packaged_runtime_phase("CONFIG")
+    observation_capture = globals().get("__packaged_observation_capture__")
+    metric_sink = globals().get("__packaged_metric_sink__")
     runtime_v1_requested = _runtime_v1_projection_requested(args)
     resolved_runtime_profile = runtime_profile_metadata(args)
     if runtime_v1_requested and (
@@ -962,6 +964,10 @@ def run(args: argparse.Namespace):
         config.seed = args.seed
     if args.num_epochs is not None:
         config.training.num_train_epochs = args.num_epochs
+    if observation_capture is not None and callable(metric_sink):
+        # This fixed, authenticated packaged setting controls the callback's
+        # training-log cadence; ordinary CLI/YAML runs retain their old bytes.
+        config.training.logging_steps = observation_capture["every_n_steps"]
     if args.max_steps is not None:
         config.training.max_steps = args.max_steps
     if args.max_seq_length is not None:
@@ -1522,7 +1528,8 @@ def run(args: argparse.Namespace):
             MetricsTableCallback(
                 log_every_n_steps=config.training.logging_steps,
                 output_dir=str(run_dir),  # Pass run_dir, callback adds /logs
-                previous_log_entries=previous_log_entries
+                previous_log_entries=previous_log_entries,
+                metric_sink=metric_sink if observation_capture is not None else None,
             ),
             CheckpointMonitorCallback()
         ]

@@ -13,11 +13,13 @@ from tests.execution.providers.test_modal_coordinator_producer import (
     _inventory, _invocation, _mounted_fakes,
 )
 from tuner.execution.coordinator_v1.model import ProviderLogQueryV1, ProviderRunPhaseV1
+from tuner.execution.foundation_v2.canonical import MAX_CANONICAL_BYTES
 from tuner.execution.foundation_v2.commands import parse_exact_command
-from tuner.execution.providers.modal.contracts import BoundsPolicyV1
+from tuner.execution.providers.modal.contracts import BoundsPolicyV1, provider_entry_identity
 from tuner.execution.providers.modal.contracts import canonical_json, sha
 from tuner.execution.providers.modal.coordinator_logs import ModalCoordinatorLogChunk
 from tuner.execution.providers.modal.coordinator_read_transport import ModalFoundationReadTransport
+from tuner.execution.providers.modal import coordinator_read_transport
 from tuner.execution.providers.modal.coordinator_producer import MountedModalCoordinatorProducer
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade, ModalFunctionCallState
 from tuner.execution.providers.modal.worker_ports import ModalProcessResult
@@ -151,6 +153,16 @@ def test_real_signed_evidence_observe_logs_inventory_then_stream(monkeypatch):
         binding, ProviderLogQueryV1(None, 10, 4096), provider_job_ref="job-a",
     )
     assert len(page.entries) == 1 and page.entries[0].timestamp == "2026-09-09T00:00:00Z"
+    assert page.high_watermark_sequence == 0
+    assert page.terminal_phase is ProviderRunPhaseV1.SUCCEEDED
+    assert page.terminal_generation == page.generation
+    empty = transport.logs(
+        binding, ProviderLogQueryV1(0, 10, 4096), provider_job_ref="job-a",
+    )
+    assert empty.entries == () and empty.truncated is False
+    assert empty.high_watermark_sequence == page.high_watermark_sequence
+    assert empty.terminal_phase is page.terminal_phase
+    assert empty.terminal_generation == page.terminal_generation
     inventory = transport.artifact_inventory(binding, provider_job_ref="job-a")
     assert len(inventory.manifest.members) == 5 and body_reads == []
     member = inventory.manifest.members[0]
@@ -262,6 +274,99 @@ def test_log_page_budget_counts_exact_utf8_messages_not_json_overhead(monkeypatc
         binding, ProviderLogQueryV1(None, 200, 4096), provider_job_ref="job-a",
     )
     assert len(page.entries) == 40 and sum(x.size_bytes for x in page.entries) == 3200
+
+
+def test_log_pages_fit_exact_canonical_evidence_with_escaped_messages(monkeypatch):
+    transport, binding, stored, _, signer, key_ref = _completed_transport(monkeypatch)
+    effect = parse_exact_command(binding.command_bytes).operation.effect.effect_id
+    first_path = f"operations/{effect}/logs/chunks/000.json"
+    original = ModalCoordinatorLogChunk.parse(stored[first_path])
+    message = ('"' + "\\" + "🙂") * 125
+    records = tuple(RunLogEntry(
+        index, "2026-09-09T00:00:00Z", RunLogLevel.INFO, "progress",
+        message, len(message.encode("utf-8")),
+    ) for index in range(60))
+    chunks = []
+    previous = "0" * 64
+    for index, part in enumerate((records[:30], records[30:])):
+        chunk = ModalCoordinatorLogChunk(
+            original.generation, index, previous,
+            sha(canonical_json([entry.to_dict() for entry in part])),
+            original.job_ref, original.effect_id, original.plan_digest,
+            original.invocation_nonce, part,
+        )
+        chunks.append(chunk)
+        previous = chunk.chunk_digest
+        stored[f"operations/{effect}/logs/chunks/{index:03d}.json"] = chunk.canonical_bytes
+
+    meta_path = f"operations/{effect}/logs/log-metadata.v1.json"
+    metadata = __import__("json").loads(stored[meta_path])
+    metadata["chain_digest"] = chunks[-1].chunk_digest
+    metadata["chunks"] = [
+        {
+            "path": f"operations/{effect}/logs/chunks/{index:03d}.json",
+            "size": len(chunk.canonical_bytes),
+            "sha256": sha(chunk.canonical_bytes),
+            "provider_entry_id": provider_entry_identity(
+                metadata["control_volume_id"],
+                f"operations/{effect}/logs/chunks/{index:03d}.json",
+                len(chunk.canonical_bytes),
+            ),
+        }
+        for index, chunk in enumerate(chunks)
+    ]
+    stored[meta_path] = canonical_json(metadata)
+    stored[meta_path.removesuffix(".json") + ".mac"] = signer.sign(
+        "modal-log-metadata/v1", stored[meta_path], key_ref,
+    )
+    for name in (
+        "terminal-evidence.v1.json", "terminal-evidence.v1.mac",
+        "completion-manifest.v1.json", "completion-manifest.v1.mac",
+    ):
+        del stored[f"operations/{effect}/evidence/{name}"]
+
+    # The public message budget admits every entry. Escaped quotes and
+    # backslashes expand the signed evidence while Unicode uses UTF-8 bytes.
+    after = None
+    pages = []
+    while True:
+        page = transport.logs(
+            binding, ProviderLogQueryV1(after, 200, 262144),
+            provider_job_ref="job-a",
+        )
+        assert len(page.canonical_evidence) <= MAX_CANONICAL_BYTES
+        assert page.high_watermark_sequence == 59
+        assert page.chain_digest == chunks[-1].chunk_digest
+        pages.append(page)
+        if not page.truncated:
+            break
+        assert page.entries
+        after = page.entries[-1].sequence
+    assert len(pages) > 1
+    assert tuple(entry for page in pages for entry in page.entries) == records
+
+
+def test_log_page_rejects_when_even_first_entry_cannot_fit_evidence(monkeypatch):
+    transport, binding, _, _, _, _ = _completed_transport(monkeypatch)
+    empty = transport.logs(
+        binding, ProviderLogQueryV1(0, 10, 4096), provider_job_ref="job-a",
+    )
+    monkeypatch.setattr(
+        coordinator_read_transport, "MAX_CANONICAL_BYTES",
+        len(empty.canonical_evidence) + 1,
+    )
+    with pytest.raises(ValueError, match="Modal log entry exceeds canonical evidence bound"):
+        transport.logs(
+            binding, ProviderLogQueryV1(None, 10, 4096), provider_job_ref="job-a",
+        )
+
+
+def test_public_log_message_rejects_control_character_before_transport():
+    with pytest.raises(ValueError, match="control characters"):
+        RunLogEntry(
+            0, "2026-09-09T00:00:00Z", RunLogLevel.INFO, "progress",
+            "invalid\nmessage", len("invalid\nmessage"),
+        )
 
 
 def test_absent_terminal_never_fabricates_queued_or_running(monkeypatch):

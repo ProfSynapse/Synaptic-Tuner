@@ -30,6 +30,7 @@ PACKAGED_SFT_CONFIG_SCHEMA = "synaptic-packaged-sft-config/v1"
 PACKAGED_SFT_WORKLOAD_SCHEMA = "synaptic-packaged-sft-workload/v1"
 PACKAGED_CONTEXT_SCHEMA = "synaptic-packaged-execution-context/v1"
 PACKAGED_ENTRYPOINT = "tuner.runtime.packaged_training_worker:main"
+OBSERVATION_CAPTURE_SCHEMA = "synaptic-training-observation-capture/v1"
 _REVISION = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _CONFIG_FIELDS = {"schema_version", "method", "execution", "model", "dataset", "sft"}
 _ARTIFACT_ROLES = (
@@ -52,6 +53,18 @@ def packaged_configuration_digest(config: CanonicalDocument) -> str:
     return _domain("synaptic-packaged-training-configuration/v1", config.to_dict())
 
 
+def validate_observation_capture_config(value: object) -> dict:
+    """Validate explicit bounded numeric capture; absence is handled by callers."""
+    fields = {"schema_version", "every_n_steps", "max_records"}
+    _fields(value, fields, "observation capture")
+    if value["schema_version"] != OBSERVATION_CAPTURE_SCHEMA:
+        raise ValueError("unsupported observation capture schema")
+    for key, maximum in (("every_n_steps", 1_000_000), ("max_records", 10_000)):
+        if type(value[key]) is not int or not 1 <= value[key] <= maximum:
+            raise ValueError("observation capture bounds must be exact positive integers")
+    return dict(value)
+
+
 def packaged_artifact_policy_digest(policy: ArtifactPolicy) -> str:
     if type(policy) is not ArtifactPolicy:
         raise TypeError("exact artifact policy required")
@@ -67,10 +80,11 @@ def _validated_config(config: CanonicalDocument):
     if type(config) is not CanonicalDocument:
         raise TypeError("exact resolved configuration required")
     value = config.to_dict()
-    if type(value) is not dict or set(value) not in (
-        _CONFIG_FIELDS, _CONFIG_FIELDS | {"post_training"},
-    ):
+    if (type(value) is not dict or not _CONFIG_FIELDS <= set(value)
+            or set(value) - _CONFIG_FIELDS - {"post_training", "observation_capture"}):
         raise ValueError("packaged configuration has missing or unknown fields")
+    if "observation_capture" in value:
+        validate_observation_capture_config(value["observation_capture"])
     if "post_training" in value:
         from .post_training import validate_post_training_config
 
@@ -147,4 +161,5 @@ __all__ = [
     "compile_packaged_sft_workload", "packaged_configuration_digest",
     "packaged_artifact_policy_digest", "PACKAGED_SFT_CONFIG_SCHEMA",
     "PACKAGED_SFT_WORKLOAD_SCHEMA", "PACKAGED_CONTEXT_SCHEMA", "PACKAGED_ENTRYPOINT",
+    "OBSERVATION_CAPTURE_SCHEMA", "validate_observation_capture_config",
 ]

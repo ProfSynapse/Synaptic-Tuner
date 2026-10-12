@@ -4,6 +4,9 @@ import ast
 import hashlib
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tomllib
 
 from tuner.runtime.offline_sft_worker import (
@@ -58,7 +61,9 @@ _MEMBERS = (
     "synaptic_tuner/api/__init__.py",
     "synaptic_tuner/api/v1/__init__.py",
     "synaptic_tuner/api/v1/_contract.py",
+    "synaptic_tuner/api/v1/_timestamps.py",
     "synaptic_tuner/api/v1/execution.py",
+    "synaptic_tuner/api/v1/observations.py",
     "synaptic_tuner/api/v1/sources.py",
     "tuner/__init__.py",
     "tuner/cloud/__init__.py",
@@ -102,7 +107,7 @@ def test_manifest_is_the_exact_authoritative_offline_sft_closure() -> None:
     assert document["owned_module_prefixes"] == list(OWNED_MODULE_PREFIXES)
     assert document["optional_features"] == []
     assert tuple(member["path"] for member in members) == _MEMBERS
-    assert document["member_count"] == len(_MEMBERS) == 66
+    assert document["member_count"] == len(_MEMBERS) == 68
     assert document["payload_bytes"] == sum(
         member["size_bytes"] for member in members
     )
@@ -129,6 +134,30 @@ def test_manifest_is_declared_as_tuner_runtime_package_data() -> None:
         "manifests/offline-sft-worker-v1.json",
         "manifests/packaged-training-worker-v1.json",
     ]
+
+
+def test_numeric_metric_contract_imports_from_only_declared_package_members(tmp_path) -> None:
+    # Exercise the exact optional import without this checkout or site packages
+    # on sys.path. A declaration alone would not prove transitive completeness.
+    for relative in _MEMBERS:
+        if relative.startswith("synaptic_tuner/"):
+            target = tmp_path / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(_ROOT / relative, target)
+    script = (
+        "import sys\n"
+        f"sys.path.insert(0, {str(tmp_path)!r})\n"
+        "from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1\n"
+        "point = TrainingMetricObservedPayloadV1(1, 2, 0.5, 0.0001, 0.25, 1.0, "
+        "None, None, None, None, None, None, None, None)\n"
+        "assert point.learning_rate == 0.0001\n"
+        "assert point.job_elapsed_seconds is None\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script], cwd=tmp_path,
+        check=False, capture_output=True, text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_training_contract_identity_import_stays_inside_fixed_closure() -> None:

@@ -31,6 +31,50 @@ _USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens")
 _MAX_TOKEN_COUNT = 2**53 - 1
 
 
+def _validate_startup_diagnostic(value):
+    """Validate closed readiness observations without importing the serving runtime."""
+    if type(value) is not dict or set(value) != {
+        "failure", "last_probe", "leader_alive", "elapsed_seconds", "probe_count",
+    }:
+        raise ValueError("evaluation startup diagnostic fields are invalid")
+    if type(value["failure"]) is not str or value["failure"] not in {
+        "deadline", "untimely", "unknown",
+    }:
+        raise ValueError("evaluation startup failure is invalid")
+    if type(value["last_probe"]) is not str or value["last_probe"] not in {
+        "ready", "no_connect", "http_non_200", "invalid_response", "names_mismatch", "unknown",
+    }:
+        raise ValueError("evaluation startup probe is invalid")
+    if value["leader_alive"] is not None and type(value["leader_alive"]) is not bool:
+        raise ValueError("evaluation startup liveness is invalid")
+    elapsed = value["elapsed_seconds"]
+    if elapsed is not None and (
+        type(elapsed) not in (int, float) or not math.isfinite(elapsed) or not 0 <= elapsed <= 86400
+    ):
+        raise ValueError("evaluation startup elapsed time is invalid")
+    count = value["probe_count"]
+    if count is not None and (type(count) is not int or not 0 <= count <= 1_000_000):
+        raise ValueError("evaluation startup probe count is invalid")
+    return value
+
+
+def _startup_diagnostic(error):
+    """Project only the exact serving diagnostic type, never exception text."""
+    try:
+        from tuner.inference.vllm_runtime import VLLMRuntimeError, VLLMStartupDiagnostic
+        if type(error) is not VLLMRuntimeError:
+            return None
+        diagnostic = error.startup_diagnostic
+        if type(diagnostic) is not VLLMStartupDiagnostic:
+            return None
+        value = {key: getattr(diagnostic, key) for key in (
+            "failure", "last_probe", "leader_alive", "elapsed_seconds", "probe_count",
+        )}
+        return _validate_startup_diagnostic(value)
+    except Exception:
+        return None
+
+
 class PostTrainingCleanupUnresolved(RuntimeError):
     """The vLLM process family may still own GPU resources."""
 
@@ -469,7 +513,13 @@ def execute_post_training_evaluation(
             _emit_phase(phase_callback, "EVALUATION_PREPARE", "ERROR")
         if getattr(error, "cleanup_lease", None) is not None:
             raise
-        record["failure_code"] = "runtime_failed" if runtime is not None else "startup_failed"
+        record["failure_code"] = (
+            "runtime_failed" if runtime is not None else "startup_failed"
+        )
+        if runtime is None:
+            diagnostic = _startup_diagnostic(error)
+            if diagnostic is not None:
+                record["startup_diagnostic"] = diagnostic
     finally:
         if sampler is not None:
             sampler.stop()
@@ -514,8 +564,13 @@ def validate_evaluation_record(
         "schema_version", "status", "gate_passed", "failure_code", "case_count",
         "passed_count", "pass_rate", "min_pass_rate", "cases", "bindings",
     }
-    if type(record) is not dict or set(record) != fields:
+    optional_fields = {"startup_diagnostic"}
+    if type(record) is not dict or not fields <= set(record) or set(record) - fields - optional_fields:
         raise ValueError("evaluation record fields are invalid")
+    if "startup_diagnostic" in record:
+        _validate_startup_diagnostic(record["startup_diagnostic"])
+        if record["status"] != "failed" or record["failure_code"] not in {"startup_failed", "identity_changed"}:
+            raise ValueError("evaluation startup diagnostic outcome is invalid")
     if record["schema_version"] != "synaptic-post-training-evaluation/v1":
         raise ValueError("evaluation record schema is invalid")
     if record["status"] not in ("completed", "failed") or type(record["gate_passed"]) is not bool:

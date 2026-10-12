@@ -5,6 +5,7 @@ import importlib.abc
 import importlib.machinery
 import importlib.metadata
 import os
+import stat
 from pathlib import Path
 import sys
 from io import BytesIO
@@ -24,6 +25,50 @@ _EXEC_RUNTIME_MILESTONES = (
     "BOOTSTRAP_ENV", "TORCH_IMPORT", "UNSLOTH_IMPORT", "TRAINER_IMPORT",
 )
 _FAILURE_EXIT_CODES = frozenset((*range(40, 75), 76, *range(80, 97), *range(100, 117), *range(120, 137)))
+_METRIC_FRAME_SCHEMA = "synaptic-training-metric-frame/v1"
+_MAX_METRIC_FRAME_BYTES = 4096
+
+
+def _metric_sink_for_fd(descriptor, maximum):
+    """Best-effort numeric-only, nonblocking child writer; never train authority."""
+    from synaptic_tuner.api.v1.observations import TrainingMetricObservedPayloadV1
+    from tuner.runtime.packaged_sft_execution import _canonical
+    if (type(descriptor) is not int or descriptor <= 2 or
+            type(maximum) is not int or maximum < 1 or
+            not stat.S_ISFIFO(os.fstat(descriptor).st_mode)):
+        raise ValueError("PACKAGED_METRIC_TRANSPORT_REJECTED")
+    os.set_blocking(descriptor, False)
+    count = 0
+    enabled = True
+
+    def write_frame(frame):
+        nonlocal enabled
+        if not enabled:
+            return
+        try:
+            raw = _canonical({"schema_version": _METRIC_FRAME_SCHEMA, **frame}) + b"\n"
+            if len(raw) > _MAX_METRIC_FRAME_BYTES or os.write(descriptor, raw) != len(raw):
+                enabled = False
+        except BaseException:
+            enabled = False
+
+    def sink(payload):
+        nonlocal count
+        if not enabled or count >= maximum:
+            return
+        try:
+            if type(payload) is not TrainingMetricObservedPayloadV1:
+                raise ValueError
+            validated = TrainingMetricObservedPayloadV1.from_dict(payload.to_dict())
+            write_frame({"kind": "metric", "payload": validated.to_dict()})
+            if enabled:
+                count += 1
+                if count == maximum:
+                    write_frame({"kind": "exhausted"})
+        except BaseException:
+            # Optional observation failure must not escape into the trainer.
+            return
+    return sink
 
 
 class _ChildFailure(Exception):
@@ -183,7 +228,8 @@ def _run_packaged_child(argv, phase):
     if _digest(raw) != args[3]:
         raise ValueError
     payload = _document(raw, _MAX_CHILD_BYTES)
-    if set(payload) != {"release", "release_digest", "arguments", "provider_binding", "execution_binding", "workload", "artifact_policy", "paths", "environment", "model_snapshot"} or payload["arguments"] != args[5:]:
+    base_fields = {"release", "release_digest", "arguments", "provider_binding", "execution_binding", "workload", "artifact_policy", "paths", "environment", "model_snapshot"}
+    if set(payload) not in (base_fields, base_fields | {"metric_fd"}) or payload["arguments"] != args[5:]:
         raise ValueError
     phase[0] = "RELEASE"
     release = parse_packaged_runtime_release(payload["release"])
@@ -197,6 +243,12 @@ def _run_packaged_child(argv, phase):
     policy = ArtifactPolicy(tuple(policy_document["required_kinds"]), policy_document["retain_checkpoints"])
     workload_bytes = _canonical(payload["workload"])
     compiled = _admit_contracts(release, provider, execution, workload_bytes, policy)
+    capture = compiled.document["configuration"]["document"].get("observation_capture")
+    if capture is not None:
+        from tuner.training.packaged_compilation import validate_observation_capture_config
+        capture = validate_observation_capture_config(capture)
+    if capture is None and "metric_fd" in payload:
+        raise ValueError
     phase[0] = "INPUT"
     paths = PackagedSFTPaths(**{key: Path(value) for key, value in payload["paths"].items()})
     projected = _runtime_projection(compiled)
@@ -220,7 +272,9 @@ def _run_packaged_child(argv, phase):
         raise ValueError
     model = compiled.document["configuration"]["document"]["model"]
     _, snapshot = _private_manifest(payload["model_snapshot"], paths, model)
-    expected_argv, expected_environment, child_path, expected_raw, _, _ = _invocation_spec(physical, projected, snapshot, PurePosixPath(dataset), payload["model_snapshot"])
+    expected_argv, expected_environment, child_path, expected_raw, _, _ = _invocation_spec(
+        physical, projected, snapshot, PurePosixPath(dataset), payload["model_snapshot"],
+        metric_fd=payload.get("metric_fd"))
     if expected_raw != raw or list(expected_argv[4:]) != args or dict(os.environ) != expected_environment:
         raise ValueError
     phase[0] = "IMPORT"
@@ -240,11 +294,27 @@ def _run_packaged_child(argv, phase):
     phase[0] = "IMPORT"
     code = _OwnedSourceLoader("__main__", str(trainer), guard.members[trainer]).get_code("__main__")
     phase[0] = "EXEC"
-    _run_private_trainer(code, trainer, payload["model_snapshot"], paths, model, classify=True)
+    metric_sink = None
+    if "metric_fd" in payload:
+        try:
+            metric_sink = _metric_sink_for_fd(payload["metric_fd"], capture["max_records"])
+        except OSError:
+            # A broken optional pipe cannot prevent the authenticated trainer.
+            pass
+    try:
+        _run_private_trainer(code, trainer, payload["model_snapshot"], paths, model,
+            classify=True, metric_sink=metric_sink, observation_capture=capture)
+    finally:
+        if "metric_fd" in payload:
+            try:
+                os.close(payload["metric_fd"])
+            except OSError:
+                pass
     return 0
 
 
-def _run_private_trainer(code, trainer, manifest, paths, model, *, classify=False):
+def _run_private_trainer(code, trainer, manifest, paths, model, *, classify=False,
+                         metric_sink=None, observation_capture=None):
     from tuner.runtime.packaged_sft_execution import _retain_private_snapshot
     runtime_milestone = [None]
     def mark_runtime_milestone(value):
@@ -266,6 +336,9 @@ def _run_private_trainer(code, trainer, manifest, paths, model, *, classify=Fals
             namespace = {"__name__": "__main__", "__file__": str(trainer), "__package__": None}
             if classify:
                 namespace["__packaged_runtime_phase__"] = mark_runtime_milestone
+            if metric_sink is not None:
+                namespace["__packaged_metric_sink__"] = metric_sink
+                namespace["__packaged_observation_capture__"] = observation_capture
             exec(code, namespace)
         except BaseException as error:
             if classify and not _zero_exit(error):

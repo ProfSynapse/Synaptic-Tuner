@@ -1,6 +1,7 @@
 """Provider-free tests for the standalone Modal chat Sandbox launcher."""
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import stat
@@ -65,6 +66,8 @@ def _sdk(
     poll_error=None,
     version="1.5.4",
     tokens=None,
+    image_id="im-reviewed123",
+    loaded_image_id=None,
 ):
     calls = []
     sandbox = FakeSandbox(
@@ -80,6 +83,14 @@ def _sdk(
     class Builder:
         def __init__(self, steps):
             self.steps = steps
+            self.object_id = image_id
+            self.is_hydrated = False
+
+        def build(self, app):
+            calls.append(("build", app.name))
+            self.object_id = image_id if loaded_image_id is None else loaded_image_id
+            self.is_hydrated = True
+            return self
 
         def entrypoint(self, commands):
             self.steps.append(("entrypoint", list(commands)))
@@ -97,6 +108,13 @@ def _sdk(
         @staticmethod
         def from_registry(reference):
             builder = Builder([("registry", reference)])
+            calls.append(("image", builder.steps))
+            return builder
+
+        @staticmethod
+        def from_id(selected_id, *, client):
+            calls.append(("image_from_id", selected_id, client))
+            builder = Builder([("from_id", selected_id)])
             calls.append(("image", builder.steps))
             return builder
 
@@ -163,6 +181,53 @@ def _provider_document():
         "cpu_millicores": 4000,
         "memory_mb": 16384,
         "startup_margin_seconds": 300,
+    }
+
+
+def _probe_document():
+    return {
+        "model": "organization/model", "revision": "a" * 40,
+        "expected_vllm_version": "0.26.0",
+        "python_executable": "/opt/unsloth-venv/bin/python3",
+        "startup": {
+            "served_model_name": "probe-model", "gpu_memory_utilization": 0.85,
+            "tensor_parallel_size": 1, "enforce_eager": True, "dtype": "bfloat16",
+            "max_model_len": 98304, "max_num_seqs": 3,
+            "max_num_batched_tokens": 4096, "language_model_only": True,
+            "max_lora_rank": 32, "startup_timeout_seconds": 300,
+        },
+        "lifetime_seconds": 1200,
+    }
+
+
+def _startup_inputs(inputs, *, local_source=None):
+    from scripts.probe_vllm_startup import configuration_digest
+    selected = _probe_document()
+    if local_source is not None:
+        selected["local_source"] = local_source
+    inputs.chat.write_text(json.dumps(selected))
+    provider = _provider_document()
+    provider["startup_runtime"] = {
+        "provider_image_id": "im-reviewed123",
+        "python_executable": selected["python_executable"],
+    }
+    inputs.provider.write_text(json.dumps(provider))
+    return configuration_digest(selected)
+
+
+def _startup_result(digest, *, log=b"", ready=True, cleanup=True):
+    return {
+        "schema_version": "synaptic-vllm-startup-probe-result/v1",
+        "configuration_sha256": digest,
+        "startup_ready": ready,
+        "cleanup_resolved": cleanup,
+        "preparation_seconds": 1.25,
+        "readiness_seconds": 2.5 if ready else None,
+        "startup_diagnostic": None,
+        "failure_stage": None if ready and cleanup else "startup",
+        "startup_log_size_bytes": len(log),
+        "startup_log_tail_bytes": len(log),
+        "startup_log_truncated": False,
     }
 
 
@@ -546,3 +611,125 @@ def test_stdout_logs_are_bounded_to_one_mebibyte(inputs):
     sdk, _, _ = _sdk(stdout="x" * (2 * 1024 * 1024) + "\n" + HAPPY_STDOUT)
     assert modal_launch.main(_argv(inputs), sdk=sdk, client=object()) == 1
     assert os.path.getsize(inputs.output / "sandbox-stdout.log") == 1024 * 1024
+
+
+def test_startup_check_is_provider_free_and_chat_mode_rejects_probe_runtime(inputs, monkeypatch, capsys):
+    _startup_inputs(inputs)
+    _forbid_import(monkeypatch)
+    assert modal_launch.main(_argv(inputs, "--startup-only", "--check")) == 0
+    assert _lines(capsys) == [{"status": "MODAL_CHAT_STARTUP_INPUTS_CHECKED"}]
+    assert list(inputs.output.iterdir()) == []
+    assert modal_launch.main(_argv(inputs, "--check")) == 1
+    assert _lines(capsys)[0]["reason"] == "modal_chat_startup_runtime_requires_mode"
+
+
+def test_startup_claim_precedes_effects_and_exact_image_hydration(inputs, capsys):
+    digest = _startup_inputs(inputs)
+    log = b"private vllm startup tail"
+    result = _startup_result(digest, log=log)
+    stdout = json.dumps({"status": "STARTUP_PROBE_SAVED", "result": result}) + "\n"
+    sdk, _, calls = _sdk(stdout=stdout, stderr=log)
+    original_from_id = sdk.Image.from_id
+
+    def claimed_from_id(*args, **kwargs):
+        claim = json.loads((inputs.output / "probe-claim.json").read_text())
+        assert claim["provider_image_id"] == "im-reviewed123"
+        assert claim["configuration_sha256"] == digest
+        assert claim["diagnostic_source_sha256"] == modal_launch._probe_source_hashes()
+        return original_from_id(*args, **kwargs)
+
+    sdk.Image.from_id = claimed_from_id
+    assert modal_launch.main(_argv(inputs, "--startup-only"), sdk=sdk, client=object()) == 0
+    assert [c[0] for c in calls if c[0] in {"image_from_id", "build", "create"}] == [
+        "image_from_id", "build", "build", "create",
+    ]
+    create = next(c for c in calls if c[0] == "create")
+    assert create[2]["timeout"] == 1500
+    assert create[2]["idle_timeout"] == 1500
+    assert "/opt/unsloth-venv/bin/python3 -B /engine/scripts/probe_vllm_startup.py" in create[1][2]
+    assert json.loads((inputs.output / "startup-probe-result.json").read_text()) == result
+    assert (inputs.output / "startup-vllm-stderr.log").read_bytes() == log
+    assert stat.S_IMODE((inputs.output / "startup-vllm-stderr.log").stat().st_mode) == 0o600
+    assert "private vllm startup tail" not in capsys.readouterr().out
+
+
+def test_startup_image_mismatch_consumes_claim_without_sandbox(inputs, capsys):
+    _startup_inputs(inputs)
+    sdk, _, calls = _sdk(loaded_image_id="im-wrong")
+    assert modal_launch.main(_argv(inputs, "--startup-only"), sdk=sdk, client=object()) == 1
+    assert _lines(capsys)[0]["reason"] == "modal_chat_startup_image_identity_invalid"
+    assert (inputs.output / "probe-claim.json").exists()
+    assert not any(c[0] == "create" for c in calls)
+    calls.clear()
+    assert modal_launch.main(_argv(inputs, "--startup-only"), sdk=sdk, client=object()) == 1
+    assert _lines(capsys)[0]["reason"] == "modal_chat_output_claimed"
+    assert calls == []
+
+
+def test_startup_result_requires_closed_validated_response_and_stop_proof(inputs, capsys):
+    digest = _startup_inputs(inputs)
+    bad = _startup_result(digest)
+    bad["private_error"] = "secret"
+    sdk, _, _ = _sdk(stdout=json.dumps({"status": "STARTUP_PROBE_SAVED", "result": bad}) + "\n")
+    assert modal_launch.main(_argv(inputs, "--startup-only"), sdk=sdk, client=object()) == 1
+    assert "secret" not in capsys.readouterr().out
+    assert not (inputs.output / "startup-probe-result.json").exists()
+    assert json.loads((inputs.output / "shutdown.json").read_text())["provider_shutdown_proof"] is True
+
+
+def test_startup_invalid_stdout_still_retains_only_bounded_private_log(inputs, capsys):
+    _startup_inputs(inputs)
+    log = b"private diagnostic"
+    sdk, _, _ = _sdk(stdout='{"status":"STARTUP_PROBE_SAVED","status":"duplicate"}\n', stderr=log)
+    assert modal_launch.main(_argv(inputs, "--startup-only"), sdk=sdk, client=object()) == 1
+    assert (inputs.output / "startup-vllm-stderr.log").read_bytes() == log
+    assert "private diagnostic" not in capsys.readouterr().out
+    assert not (inputs.output / "startup-probe-result.json").exists()
+
+
+def test_saved_source_mounts_only_declared_files_and_rechecks_identity(inputs, capsys):
+    adapter = inputs.root / "adapter.safetensors"
+    tokenizer = inputs.root / "tokenizer.json"
+    adapter.write_bytes(b"adapter")
+    tokenizer.write_bytes(b"tokenizer")
+    source = {
+        "adapter": [{"path": str(adapter), "name": adapter.name,
+                     "sha256": hashlib.sha256(adapter.read_bytes()).hexdigest(), "size_bytes": adapter.stat().st_size}],
+        "tokenizer": [{"path": str(tokenizer), "name": tokenizer.name,
+                       "sha256": hashlib.sha256(tokenizer.read_bytes()).hexdigest(), "size_bytes": tokenizer.stat().st_size}],
+    }
+    digest = _startup_inputs(inputs, local_source=source)
+    result = _startup_result(digest)
+    sdk, _, calls = _sdk(stdout=json.dumps({"status": "STARTUP_PROBE_SAVED", "result": result}) + "\n")
+    assert modal_launch.main(_argv(inputs, "--startup-only"), sdk=sdk, client=object()) == 0
+    image_steps = next(c[1] for c in calls if c[0] == "image")
+    mounts = [(c[1], c[2]) for c in image_steps if c[0] == "file"]
+    staged_adapter = inputs.output / "startup-inputs" / "adapter" / adapter.name
+    staged_tokenizer = inputs.output / "startup-inputs" / "tokenizer" / tokenizer.name
+    assert (staged_adapter, "/engine/startup-inputs/adapter/adapter.safetensors") in mounts
+    assert (staged_tokenizer, "/engine/startup-inputs/tokenizer/tokenizer.json") in mounts
+    assert staged_adapter.read_bytes() == adapter.read_bytes()
+    assert staged_tokenizer.read_bytes() == tokenizer.read_bytes()
+    assert stat.S_IMODE(staged_adapter.stat().st_mode) == 0o600
+    assert not any(c[0] == "dir" and c[1] == inputs.root for c in image_steps)
+    assert json.loads((inputs.output / "probe-claim.json").read_text())["local_source"] == source
+    capsys.readouterr()
+
+
+def test_saved_source_mismatch_rejected_before_provider_effects(inputs, capsys):
+    adapter = inputs.root / "adapter.safetensors"
+    tokenizer = inputs.root / "tokenizer.json"
+    adapter.write_bytes(b"changed")
+    tokenizer.write_bytes(b"tokenizer")
+    source = {
+        "adapter": [{"path": str(adapter), "name": adapter.name,
+                     "sha256": hashlib.sha256(b"original").hexdigest(), "size_bytes": adapter.stat().st_size}],
+        "tokenizer": [{"path": str(tokenizer), "name": tokenizer.name,
+                       "sha256": hashlib.sha256(tokenizer.read_bytes()).hexdigest(), "size_bytes": tokenizer.stat().st_size}],
+    }
+    _startup_inputs(inputs, local_source=source)
+    sdk, _, calls = _sdk()
+    assert modal_launch.main(_argv(inputs, "--startup-only"), sdk=sdk, client=object()) == 1
+    assert _lines(capsys)[0]["reason"] == "modal_chat_startup_source_invalid"
+    assert calls == []
+    assert list(inputs.output.iterdir()) == []

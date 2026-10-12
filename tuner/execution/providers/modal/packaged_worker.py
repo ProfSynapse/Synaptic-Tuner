@@ -11,6 +11,8 @@ import threading
 import time
 from typing import Protocol
 
+from synaptic_tuner.api.v1.results import TrainingRunRef
+
 from tuner.execution.foundation_v2.canonical import canonical_bytes, digest_text, safe_ref
 from tuner.runtime.packaged_sft_execution import (
     CHILD_FAILURE_STAGES,
@@ -35,6 +37,7 @@ from .packaged_dispatch import (
     ModalPackagedDispatchVerifier,
     parse_modal_packaged_dispatch,
 )
+from .packaged_progress import MAX_PROGRESS_FILE_BYTES, PackagedProgressPublisher
 
 
 PACKAGED_WORKER_FAILURE_STAGES = frozenset({
@@ -232,6 +235,8 @@ class PackagedTrainerExecutor(Protocol):
         paths: PackagedSFTPaths,
         environment: tuple[tuple[str, str], ...],
         on_training_complete=None,
+        on_metric_frame=None,
+        on_metric_exhausted=None,
     ): ...
 
 
@@ -260,6 +265,8 @@ class InstalledPackagedSFTTrainerExecutor:
         paths,
         environment,
         on_training_complete=None,
+        on_metric_frame=None,
+        on_metric_exhausted=None,
     ):
         admitted = admit_packaged_sft(
             runtime_release=runtime_release,
@@ -273,6 +280,9 @@ class InstalledPackagedSFTTrainerExecutor:
         return execute_admitted_packaged_sft(
             admitted, model_preparer=self._model_preparer, runner=self._runner,
             on_training_complete=on_training_complete,
+            **({"on_metric_frame": on_metric_frame,
+                "on_metric_exhausted": on_metric_exhausted}
+               if on_metric_frame is not None else {}),
         )
 
 
@@ -355,6 +365,29 @@ class ModalPackagedWorker:
             )
             claim_directory(root, path)
         return PackagedSFTPaths(prepared, **paths)
+
+    def _progress_publisher(self, dispatch, job_ref: str, max_records: int):
+        effect_id = dispatch.submit_command.operation.effect.effect_id
+        preparation = dispatch.submit_command.preparation
+        run = TrainingRunRef(preparation.run_id, preparation.project_ref)
+        if self._bindings is not None:
+            control = self._bindings["control"]
+            claim = control.claim_directory
+            write = lambda path, raw: control.write_exclusive(
+                path, raw, MAX_PROGRESS_FILE_BYTES,
+            )
+        else:
+            root = self._roots.control
+            claim = lambda path: claim_directory(root, root / path)
+            write = lambda path, raw: write_exclusive(root, root / path, raw)
+        return PackagedProgressPublisher(
+            signer=self._signer, key_ref=dispatch.key_ref,
+            effect_id=effect_id, command_digest=dispatch.submit_command.digest,
+            provider_job_ref=safe_ref(job_ref, "provider_job_ref"),
+            execution_binding_digest=dispatch.execution_binding.binding_digest,
+            run=run, max_records=max_records,
+            claim_directory=claim, write_exclusive=write,
+        )
 
     def _publish_completion(self, dispatch, result, job_ref: str, paths: PackagedSFTPaths) -> bytes:
         effect_id = dispatch.submit_command.operation.effect.effect_id
@@ -498,6 +531,7 @@ class ModalPackagedWorker:
     ) -> dict[str, object]:
         trace = _PackagedPhaseTrace()
         stage = "DISPATCH_AUTH"
+        publisher = None
         try:
             dispatch = parse_modal_packaged_dispatch(dispatch_bytes, self._verifier)
             if dispatch.provider_facts != self._facts:
@@ -530,11 +564,27 @@ class ModalPackagedWorker:
             stage = "PATH_CLAIM"
             paths = self._paths(dispatch)
             stage = "SFT_ADMISSION"
-            post_training = json.loads(dispatch.workload_bytes)["configuration"]["document"].get("post_training")
+            configuration = json.loads(dispatch.workload_bytes)["configuration"]["document"]
+            post_training = configuration.get("post_training")
+            capture = configuration.get("observation_capture")
+            if capture is not None:
+                from tuner.training.packaged_compilation import validate_observation_capture_config
+                capture = validate_observation_capture_config(capture)
+                try:
+                    publisher = self._progress_publisher(
+                        dispatch, provider_job_ref, capture["max_records"],
+                    )
+                except Exception:
+                    publisher = None
             retained_completion = []
             def complete_then_evaluate(result, context):
                 # Save the verified adapter before serving. Later evaluation
                 # failure cannot erase or require a replay of training.
+                if publisher is not None:
+                    try:
+                        publisher.close()
+                    except Exception:
+                        pass
                 completion = _phase_call(trace, "TRAINING_PUBLICATION", lambda:
                     self._publish_completion(dispatch, result, provider_job_ref, paths))
                 _phase_call(trace, "TRAINING_ARTIFACT_COMMIT", commit_artifacts)
@@ -567,7 +617,15 @@ class ModalPackagedWorker:
                 paths=paths,
                 environment=dispatch.environment,
                 **({"on_training_complete": complete_then_evaluate} if post_training is not None else {}),
+                **({"on_metric_frame": publisher.on_metric_frame,
+                    "on_metric_exhausted": publisher.on_metric_exhausted}
+                   if publisher is not None else {}),
             ))
+            if publisher is not None:
+                try:
+                    publisher.close()
+                except Exception:
+                    pass
             stage = "COMPLETION"
             if post_training is not None and len(retained_completion) != 1:
                 raise ValueError("packaged evaluation callback unavailable")
@@ -593,6 +651,12 @@ class ModalPackagedWorker:
                     and exc.stage in _SFT_FAILURE_STAGES else "SFT_UNKNOWN"
                 )
             return packaged_worker_failure(stage)
+        finally:
+            if publisher is not None:
+                try:
+                    publisher.close()
+                except Exception:
+                    pass
 
     def _publish_evaluation(self, dispatch, record, job_ref, completion, paths):
         """Separate signed phase output; the five training roles stay exact."""

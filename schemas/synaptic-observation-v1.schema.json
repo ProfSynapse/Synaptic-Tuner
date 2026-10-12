@@ -8,7 +8,10 @@
   "$defs": {
     "text": {"type": "string", "pattern": "^(?!\\s)(?!.*[\\u0000-\\u001f\\u007f]).*\\S$"},
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "count": {"type": "integer", "minimum": 0}
+    "count": {"type": "integer", "minimum": 0},
+    "nullable_training_count": {"type": ["integer", "null"], "minimum": 0, "maximum": 9223372036854775807},
+    "nullable_training_number": {"type": ["number", "null"], "minimum": -1.7976931348623157e308, "maximum": 1.7976931348623157e308},
+    "nullable_training_nonnegative": {"type": ["number", "null"], "minimum": 0, "maximum": 1.7976931348623157e308}
   },
   "properties": {
     "schema_version": {"const": "synaptic-observation/v1"},
@@ -26,6 +29,7 @@
     "kind": {
       "enum": [
         "training_phase_observed",
+        "training_metric_observed",
         "evaluation_case_started", "evaluation_case_scored", "evaluation_stage_completed",
         "chat_turn_started", "chat_turn_completed", "chat_token",
         "data_row_written", "data_stage_gate_evaluated", "data_scenario_completed",
@@ -43,6 +47,39 @@
           "payload": {
             "type": "object", "additionalProperties": false, "required": ["phase"],
             "properties": {"phase": {"$ref": "#/$defs/text"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "training_metric_observed"}}},
+      "then": {
+        "properties": {
+          "stream": {"properties": {"family": {"const": "training"}}},
+          "payload": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "step", "total_steps", "loss", "learning_rate", "epoch",
+              "train_elapsed_seconds", "job_elapsed_seconds", "gpu_current_allocated_bytes",
+              "gpu_current_reserved_bytes", "gpu_peak_allocated_bytes", "gpu_peak_reserved_bytes",
+              "gpu_utilization_percent", "tokens_per_second", "estimated_samples_per_second"
+            ],
+            "properties": {
+              "step": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+              "total_steps": {"type": ["integer", "null"], "minimum": 1, "maximum": 9223372036854775807},
+              "loss": {"$ref": "#/$defs/nullable_training_number"},
+              "learning_rate": {"$ref": "#/$defs/nullable_training_nonnegative"},
+              "epoch": {"$ref": "#/$defs/nullable_training_nonnegative"},
+              "train_elapsed_seconds": {"$ref": "#/$defs/nullable_training_nonnegative"},
+              "job_elapsed_seconds": {"$ref": "#/$defs/nullable_training_nonnegative"},
+              "gpu_current_allocated_bytes": {"$ref": "#/$defs/nullable_training_count"},
+              "gpu_current_reserved_bytes": {"$ref": "#/$defs/nullable_training_count"},
+              "gpu_peak_allocated_bytes": {"$ref": "#/$defs/nullable_training_count"},
+              "gpu_peak_reserved_bytes": {"$ref": "#/$defs/nullable_training_count"},
+              "gpu_utilization_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+              "tokens_per_second": {"$ref": "#/$defs/nullable_training_nonnegative"},
+              "estimated_samples_per_second": {"$ref": "#/$defs/nullable_training_nonnegative"}
+            }
           }
         }
       }
