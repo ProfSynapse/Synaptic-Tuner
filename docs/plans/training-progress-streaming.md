@@ -243,7 +243,13 @@ rate observation uses the existing surface, separately from candidate generation
 python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml --quote --modal-profile synaptic-labs --modal-environment synaptic-smoke-v1 --json
 ```
 
-No rate query or cloud execution was performed in this implementation. After
+A read-only rate observation on 2026-10-12 at 10:39:10 local used the
+`synaptic-labs` profile in `synaptic-smoke-v1`, with isolated CPython 3.11.14
+and the hash-locked 37-package launcher closure including Modal SDK 1.5.4.
+It returned USD 1.95000/hour for one L40S and USD 0.4875 for the 900-second
+GPU timeout. This excludes build, CPU, memory, storage and usage beyond timeout;
+it is neither an all-in billing cap nor execution approval. No job was submitted.
+Refresh the scoped quote if required when reviewing the final admission. After
 provider-free checks and independent review, request paid approval for the exact
 admission digest, source, selected scope, one integrated CPU/GPU attempt and budget.
 Only that later approval authorizes:
