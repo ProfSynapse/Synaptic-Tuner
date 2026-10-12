@@ -365,3 +365,19 @@ def test_primary_marker_admission_failure_never_publishes_core_proof(monkeypatch
         commit_artifacts=lambda: events.append("commit"), commit_control=lambda: events.append("commit"))
     assert result["status_code"] == "failed" and events == []
     assert not (roots.control / operation_path(dispatch.effect_id, "runtime-release-qualification", "receipt", "receipt.json")).exists()
+
+
+def test_verifier_rejects_negative_first_elapsed_from_faulty_internal_issuer(monkeypatch):
+    import tuner.execution.providers.modal.runtime_release_qualification_reader as reader_module
+    _, dispatch, _, _, _, reader = setup_probe(monkeypatch)
+    capture = reader.capture_transport_probe(dispatch, provider_call_id="fc-probe", monotonic=lambda: 10, host_deadline=9)
+    document = capture.to_dict()
+    document["polls"] = [{"poll": 0, "elapsed_ms": -1, "before": "pending", "after": "pending",
+                          "status": "empty", "accepted": True, "observations": []}]
+    raw = _transport_evidence_bytes(document)
+    digest = hashlib.sha256(raw).hexdigest()
+    # Explicit trusted-issuer fault fixture, not a public proof reconstruction route.
+    issued = ModalCPUTransportCaptureV1(raw, digest,
+        reader_module._TransportWitness(raw, digest, reader_module._CAPTURE_AUTHORITY))
+    with pytest.raises(ValueError, match="retained poll invalid"):
+        reader.verify_transport_probe(dispatch, provider_call_id="fc-probe", capture=issued)
