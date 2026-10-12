@@ -343,6 +343,14 @@ class ModalRuntimeReleaseQualificationReader:
             "manual_commit_used": False, "training_executed": False, "gpu_qualified": False}
         passed = (capture.get("verdict") == "observed_pending" and capture.get("staged_final_absent") is True
                   and len(capture.get("records", [])) == 9 and evidence == expected_evidence)
+        failure_code = None
+        if type(evidence) is dict and evidence.get("status") == "inconclusive":
+            from .volume_root_binding import ATOMIC_PUBLICATION_DIAGNOSTICS
+            if (set(evidence) != {"status", "failure_code"}
+                    or type(evidence["failure_code"]) is not str
+                    or evidence["failure_code"] not in ATOMIC_PUBLICATION_DIAGNOSTICS | {"TRANSPORT_PROBE_UNAVAILABLE"}):
+                raise ValueError("CPU transport failure diagnostic invalid")
+            failure_code = evidence["failure_code"]
         result = {"schema_version": TRANSPORT_PROBE_SCHEMA, "status": "passed" if passed else "inconclusive",
                 "dispatch_digest": dispatch.dispatch_digest, "provider_call_id": call,
                 "receipt_sha256": hashlib.sha256(raw).hexdigest(),
@@ -353,6 +361,8 @@ class ModalRuntimeReleaseQualificationReader:
                 "probe": dispatch.transport_probe.to_dict(), "transport_qualified": False,
                 "partial_write_behavior_qualified": False, "training_executed": False,
                 "gpu_qualified": False, "durability_acknowledged": durable}
+        if failure_code is not None:
+            result["failure_code"] = failure_code
         result_raw = canonical_bytes(result)
         return ModalCPUTransportVerificationV1(result_raw, hashlib.sha256(result_raw).hexdigest(), _TransportWitness(result_raw, hashlib.sha256(result_raw).hexdigest(), _CAPTURE_AUTHORITY))
 

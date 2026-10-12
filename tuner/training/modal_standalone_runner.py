@@ -302,6 +302,7 @@ class ModalStandaloneCPUQualificationV1:
     qualification_output_sha256: str
     training_executed: bool = False
     gpu_qualified: bool = False
+    transport_qualification: dict | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -312,6 +313,7 @@ class ModalStandaloneCPUQualificationV1:
             "training_executed": False,
             "gpu_qualified": False,
             "authorization": "CPU-only installed-worker check; not GPU training authority",
+            **({"transport_qualification": self.transport_qualification} if self.transport_qualification is not None else {}),
         }
 
 
@@ -363,6 +365,8 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
         sdk=modal, client=client, client_binding=client_binding,
         runtime=runtime, private_storage=storage,
         effect_id=effect_id, environment_name=modal_environment,
+        **({"capture_progress": True, "transport_root": _private_root()}
+           if plan.recipe.observation_capture is not None else {}),
     )
     if (type(qualification) is not ModalHostCPUQualificationV1
             or type(qualification.receipt) is not ModalRuntimeReleaseQualificationReceiptV1
@@ -413,6 +417,13 @@ def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             runtime.release.manifest_digest,
             runtime.deployment_facts.facts_digest,
             qualification.output_sha256,
+            transport_qualification=(
+                {"status": qualification.transport_status,
+                 "capture_path": qualification.transport_capture_path,
+                 "capture_sha256": qualification.transport_capture_sha256,
+                 "verification": qualification.transport_verification.to_dict()
+                    if qualification.transport_verification is not None else None}
+                if qualification.transport_probe is not None else None),
         )
     except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable, ModalLocalPreparationUnavailable):
         raise
@@ -605,6 +616,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 profile_digest=plan.profile_sha256.removeprefix("sha256:"),
                 quote_digest=runtime.quote_digest,
                 maximum_cost_minor_units=recipe.maximum_cost_minor_units,
+                cpu_qualification=qualification,
             )
             api = host.api
             phase = "RUN_PUBLIC_PREPARE"

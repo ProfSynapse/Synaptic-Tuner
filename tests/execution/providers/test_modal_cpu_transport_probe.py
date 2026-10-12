@@ -259,7 +259,7 @@ def test_marker_stage_is_create_only_exact_and_collision_preserving(monkeypatch)
         operator.stage_transport_marker(probe=dispatch.transport_probe, marker_bytes=b"z" * 32, deployment_facts=facts)
 
 
-@pytest.mark.parametrize("optional_failure", ["probe", "receipt"])
+@pytest.mark.parametrize("optional_failure", ["probe", "atomic", "receipt"])
 def test_original_cpu_proof_survives_optional_probe_failure(monkeypatch, tmp_path, optional_failure):
     from tuner.runtime.packaged_training_worker import LOCAL_CPU_DATA, local_cpu_result
     from tuner.execution.providers.modal.runtime_release_qualification import (
@@ -275,10 +275,16 @@ def test_original_cpu_proof_survives_optional_probe_failure(monkeypatch, tmp_pat
     monkeypatch.setattr("tuner.runtime.packaged_training_worker.qualify_installed_child",
         lambda _: local_cpu_result(dispatch.runtime_release, "a" * 64))
     monkeypatch.setattr(VolumeRootBinding, "bind", lambda **kwargs: SimpleNamespace(close=lambda: None))
-    def failure(*args, **kwargs): raise RuntimeError("private failure not projected")
-    if optional_failure == "probe":
+    def failure(*args, **kwargs):
+        if optional_failure == "atomic":
+            from tuner.execution.providers.modal.volume_root_binding import VolumeRootBindingError
+            raise VolumeRootBindingError("PUBLISH_RENAME_UNSUPPORTED")
+        raise RuntimeError("private failure not projected")
+    signed_evidence = []
+    if optional_failure in {"probe", "atomic"}:
         monkeypatch.setattr(qualification, "_run_transport_probe", failure)
-        monkeypatch.setattr(qualification, "_publish_transport_receipt", lambda *args, **kwargs: None)
+        monkeypatch.setattr(qualification, "_publish_transport_receipt",
+            lambda *args, **kwargs: signed_evidence.append(kwargs["evidence"]))
     else:
         monkeypatch.setattr(qualification, "_run_transport_probe", lambda *args, **kwargs: {})
         monkeypatch.setattr(qualification, "_publish_transport_receipt", failure)
@@ -290,6 +296,31 @@ def test_original_cpu_proof_survives_optional_probe_failure(monkeypatch, tmp_pat
     assert (roots.control / operation_path(dispatch.effect_id, "runtime-release-qualification", "receipt", "receipt.json")).is_file()
     assert (roots.artifacts / operation_path(dispatch.effect_id, "runtime-release-qualification", "output", "evidence.json")).is_file()
     assert "private failure" not in str(result)
+    if signed_evidence:
+        assert signed_evidence == [{"status": "inconclusive", "failure_code":
+            "PUBLISH_RENAME_UNSUPPORTED" if optional_failure == "atomic" else "TRANSPORT_PROBE_UNAVAILABLE"}]
+
+
+@pytest.mark.parametrize("code", ["PUBLISH_RENAME_UNSUPPORTED", "PUBLISH_RENAME_COLLISION",
+    "TRANSPORT_PROBE_UNAVAILABLE", "untrusted exception text"])
+def test_signed_optional_failure_keeps_only_closed_diagnostic(monkeypatch, code):
+    _, dispatch, _, auth, _, reader = setup_probe(monkeypatch)
+    staged, finals = snapshot(dispatch, auth)
+    FakeVolume.registry["control-name"].files.update({**staged, **finals})
+    capture = reader.capture_transport_probe(dispatch, provider_call_id="fc-probe", sleep=lambda _: None)
+    terminal(dispatch, auth, capture)
+    path = operation_path(dispatch.effect_id, "runtime-release-transport-evidence", "receipt.json")
+    volume = FakeVolume.registry["artifact-name"]
+    content = verify_transport_probe_envelope(volume.files[path], auth, dispatch.key_ref)
+    content["evidence"] = {"status": "inconclusive", "failure_code": code}
+    volume.files[path] = transport_probe_envelope(content, auth, dispatch.key_ref)
+    if code == "untrusted exception text":
+        with pytest.raises(ValueError):
+            reader.verify_transport_probe(dispatch, provider_call_id="fc-probe", capture=capture)
+    else:
+        proof = reader.verify_transport_probe(dispatch, provider_call_id="fc-probe", capture=capture)
+        assert proof.to_dict()["status"] == "inconclusive"
+        assert proof.to_dict()["failure_code"] == code
 
 
 def test_real_atomic_probe_uses_sealed_stage_and_distinct_receipt_volume(monkeypatch, binding_layout, tmp_path):

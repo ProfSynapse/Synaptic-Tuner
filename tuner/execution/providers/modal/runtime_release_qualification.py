@@ -824,8 +824,11 @@ class ModalRuntimeReleaseQualificationWorker:
                     try:
                         probe_evidence = _run_transport_probe(dispatch, binding=probe_binding,
                             signer=self._signer, call_id=call_id, deadline=deadline)
-                    except Exception:
-                        probe_evidence = {"status": "inconclusive"}
+                    except Exception as error:
+                        from .volume_root_binding import VolumeRootBindingError, ATOMIC_PUBLICATION_DIAGNOSTICS
+                        failure_code = (error.code if type(error) is VolumeRootBindingError
+                            and error.code in ATOMIC_PUBLICATION_DIAGNOSTICS else "TRANSPORT_PROBE_UNAVAILABLE")
+                        probe_evidence = {"status": "inconclusive", "failure_code": failure_code}
                     _publish_transport_receipt(dispatch, roots=self._roots,
                         signer=self._signer, call_id=call_id, evidence=probe_evidence)
                     commit_artifacts()
