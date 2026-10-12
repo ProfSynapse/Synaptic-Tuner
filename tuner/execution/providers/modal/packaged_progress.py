@@ -1,14 +1,16 @@
 """Create-only, non-authoritative packaged training progress envelopes.
 
 One signed file commits one metric or the closed capture-exhausted status. The
-files live outside the completion namespace and become visible through Modal's
-ordinary background Volume commits. A missing unseen tail proves no completion.
+files live outside the completion namespace. Publication uses the authenticated
+parent's explicit SDK create-only boundary. A missing tail proves no completion.
 """
 
 from __future__ import annotations
 
 import hashlib
-import secrets
+import io
+import math
+import time
 from datetime import datetime, timezone
 from queue import Empty, Full, Queue
 from threading import Event, Thread
@@ -33,6 +35,146 @@ PROGRESS_PURPOSE = "modal-packaged-progress/v1"
 PROGRESS_SCHEMA = "synaptic-modal-packaged-progress/v1"
 MAX_PROGRESS_FILE_BYTES = 8192
 PROGRESS_SHARD_SIZE = 256
+SDK_PUBLICATION_STRATEGY = "modal_sdk_create_only/v1"
+SDK_PUBLICATION_DIAGNOSTICS = frozenset({
+    "SDK_PUBLISH_INPUT", "SDK_PUBLISH_IDENTITY", "SDK_PUBLISH_REPLAY",
+    "SDK_PUBLISH_DEADLINE", "SDK_PUBLISH_COLLISION", "SDK_PUBLISH_UNAVAILABLE",
+    "SDK_PUBLISH_READBACK", "SDK_PUBLISH_INVENTORY", "SDK_PUBLISH_ROOT",
+})
+
+
+class SDKProgressPublicationError(ValueError):
+    def __init__(self, code):
+        self.code = code if code in SDK_PUBLICATION_DIAGNOSTICS else "SDK_PUBLISH_UNAVAILABLE"
+        super().__init__("modal_sdk_progress_publication_unavailable")
+
+
+class ModalSDKProgressPublication:
+    """One-use complete-byte publication through an already admitted v1 handle.
+
+    Mounted guards authenticate the original root, not the SDK-created final
+    inode. The exact server Volume and SDK readback own final-file authority.
+    """
+    def __init__(self, *, binding, volume, client, prefix: str, deadline: float | None):
+        from .volume_root_binding import VolumeRootBinding, _parts
+        if (type(binding) is not VolumeRootBinding or client is None
+                or (deadline is not None and (type(deadline) not in (int, float)
+                    or not math.isfinite(deadline) or deadline <= time.monotonic()))):
+            raise SDKProgressPublicationError("SDK_PUBLISH_INPUT")
+        try:
+            _parts(prefix, absolute=False)
+        except Exception:
+            raise SDKProgressPublicationError("SDK_PUBLISH_INPUT") from None
+        self._binding, self._volume, self._client = binding, volume, client
+        self._prefix, self._deadline = prefix, deadline
+        self._attempted: set[str] = set()
+        from threading import Lock
+        self._lock = Lock()
+        self._check()
+
+    def _check(self):
+        if (getattr(self._volume, "is_hydrated", False) is not True
+                or getattr(self._volume, "object_id", None) != self._binding.volume_id
+                or getattr(self._volume, "client", None) is not self._client
+                or getattr(getattr(self._volume, "_metadata", None), "version", None) not in (0, 1)):
+            raise SDKProgressPublicationError("SDK_PUBLISH_IDENTITY")
+        try:
+            self._binding._check_root()
+        except Exception:
+            raise SDKProgressPublicationError("SDK_PUBLISH_ROOT") from None
+
+    def _path(self, path):
+        from .volume_root_binding import _parts
+        try:
+            _parts(path, absolute=False)
+            if not path.startswith(self._prefix + "/"):
+                raise ValueError
+        except Exception:
+            raise SDKProgressPublicationError("SDK_PUBLISH_INPUT") from None
+        return "/" + path
+
+    def _bounded(self, operation):
+        remaining = 5.0 if self._deadline is None else min(5.0, self._deadline - time.monotonic())
+        if remaining <= 0:
+            raise SDKProgressPublicationError("SDK_PUBLISH_DEADLINE")
+        result = Queue(maxsize=1)
+        def invoke():
+            try:
+                self._check()
+                value = operation()
+                self._check()
+                result.put((None, value))
+            except FileExistsError:
+                result.put(("SDK_PUBLISH_COLLISION", None))
+            except SDKProgressPublicationError as error:
+                result.put((error.code, None))
+            except BaseException:
+                result.put(("SDK_PUBLISH_UNAVAILABLE", None))
+        Thread(target=invoke, name="modal-sdk-progress", daemon=True).start()
+        try:
+            code, value = result.get(timeout=remaining)
+        except Empty:
+            # A late SDK completion remains possible. Never replay or adopt it.
+            raise SDKProgressPublicationError("SDK_PUBLISH_DEADLINE") from None
+        if code is not None:
+            raise SDKProgressPublicationError(code)
+        return value
+
+    def publish_exclusive(self, path: str, content: bytes, maximum: int = MAX_PROGRESS_FILE_BYTES):
+        remote = self._path(path)
+        if (type(content) is not bytes or type(maximum) is not int
+                or not 0 < len(content) <= maximum <= MAX_PROGRESS_FILE_BYTES):
+            raise SDKProgressPublicationError("SDK_PUBLISH_INPUT")
+        try:
+            parse_canonical_object(content, name="SDK progress publication")
+        except Exception:
+            raise SDKProgressPublicationError("SDK_PUBLISH_INPUT") from None
+        with self._lock:
+            if path in self._attempted:
+                raise SDKProgressPublicationError("SDK_PUBLISH_REPLAY")
+            self._attempted.add(path)
+        digest = hashlib.sha256(content).hexdigest()
+        def publish():
+            if hashlib.sha256(content).hexdigest() != digest:
+                raise SDKProgressPublicationError("SDK_PUBLISH_INPUT")
+            with self._volume.batch_upload(force=False) as upload:
+                upload.put_file(io.BytesIO(content), remote, mode=0o600)
+        self._bounded(publish)
+
+    def read_final(self, path: str) -> bytes:
+        remote = self._path(path)
+        def read():
+            content = bytearray()
+            for block in self._volume.read_file(remote):
+                if type(block) is not bytes or len(content) + len(block) > MAX_PROGRESS_FILE_BYTES:
+                    raise SDKProgressPublicationError("SDK_PUBLISH_READBACK")
+                content.extend(block)
+            if not content:
+                raise SDKProgressPublicationError("SDK_PUBLISH_READBACK")
+            return bytes(content)
+        return self._bounded(read)
+
+    def final_inventory(self, directory: str, max_entries: int):
+        remote = self._path(directory)
+        if type(max_entries) is not int or not 1 <= max_entries <= 10001:
+            raise SDKProgressPublicationError("SDK_PUBLISH_INPUT")
+        def read():
+            entries = []
+            for item in self._volume.iterdir(remote, recursive=False):
+                path = getattr(item, "path", None)
+                size = getattr(item, "size", None)
+                if (type(path) is not str or type(size) is not int or not 0 < size <= MAX_PROGRESS_FILE_BYTES
+                        or getattr(item, "type", None) != 1 or len(entries) >= max_entries):
+                    raise SDKProgressPublicationError("SDK_PUBLISH_INVENTORY")
+                path = path.lstrip("/")
+                self._path(path)
+                if path.rsplit("/", 1)[0] != directory:
+                    raise SDKProgressPublicationError("SDK_PUBLISH_INVENTORY")
+                entries.append((path, size))
+            if len({path for path, _ in entries}) != len(entries):
+                raise SDKProgressPublicationError("SDK_PUBLISH_INVENTORY")
+            return tuple(sorted(entries))
+        return self._bounded(read)
 MAX_PROGRESS_RECORDS = 10_000
 ZERO_DIGEST = "0" * 64
 
@@ -180,7 +322,7 @@ class PackagedProgressPublisher:
         self, *, signer, key_ref: str, effect_id: str,
         command_digest: str, provider_job_ref: str,
         execution_binding_digest: str, run: TrainingRunRef,
-        max_records: int, claim_directory, publish_exclusive,
+        max_records: int, publish_exclusive,
     ) -> None:
         _content_identity(
             effect_id=effect_id, command_digest=command_digest,
@@ -194,9 +336,8 @@ class PackagedProgressPublisher:
             execution_binding_digest=execution_binding_digest,
             run=run, max_records=max_records,
         )
-        if not callable(claim_directory) or not callable(publish_exclusive):
-            raise TypeError("atomic progress publication callbacks required")
-        self._claim = claim_directory
+        if not callable(publish_exclusive):
+            raise TypeError("SDK progress publication callback required")
         self._publish = publish_exclusive
         self._queue: Queue[TrainingMetricObservedPayloadV1] = Queue(maxsize=256)
         self._closed = Event()
@@ -228,12 +369,8 @@ class PackagedProgressPublisher:
 
     def _run(self) -> None:
         identity = self._identity
-        root = progress_root(identity["effect_id"])
-        index, previous, shard = 0, ZERO_DIGEST, -1
+        index, previous = 0, ZERO_DIGEST
         try:
-            self._claim(root)
-            self._claim(root + "/shards")
-            self._claim(root + "/staging")
             while True:
                 try:
                     payload = self._queue.get(timeout=0.05)
@@ -256,22 +393,15 @@ class PackagedProgressPublisher:
                     index, timestamp, ObservationKind.TRAINING_METRIC_OBSERVED,
                     payload,
                 )
-                current_shard = index // PROGRESS_SHARD_SIZE
-                if current_shard != shard:
-                    self._claim(progress_shard(identity["effect_id"], index))
-                    shard = current_shard
                 raw, previous = make_progress_file(
                     **identity, index=index, previous_digest=previous,
                     record=record,
                 )
-                self._write_record(root, progress_path(identity["effect_id"], index), raw)
+                self._publish(progress_path(identity["effect_id"], index), raw)
                 index += 1
                 if index >= identity["max_records"]:
                     self._exhausted.set()
             if self._exhausted.is_set() and not self._failed.is_set():
-                current_shard = index // PROGRESS_SHARD_SIZE
-                if current_shard != shard:
-                    self._claim(progress_shard(identity["effect_id"], index))
                 timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 status = ObservationRecordV1(
                     OBSERVATION_SCHEMA_VERSION,
@@ -287,14 +417,11 @@ class PackagedProgressPublisher:
                     **identity, index=index, previous_digest=previous,
                     record=status,
                 )
-                self._write_record(root, progress_path(identity["effect_id"], index), raw)
+                self._publish(progress_path(identity["effect_id"], index), raw)
         except Exception:
             # Progress has no lifecycle authority. Earlier files remain a
-            # useful prefix once the provider commits them in the background.
+            # useful prefix. Unknown SDK completion never authorizes replay.
             self._failed.set()
-
-    def _write_record(self, root, path, raw):
-        self._publish(root + "/staging/" + secrets.token_hex(16), path, raw)
 
 
 __all__: list[str] = []

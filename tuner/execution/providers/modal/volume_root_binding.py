@@ -15,13 +15,10 @@ remain outside this module's trust model; the caller must exclude them.
 from __future__ import annotations
 
 import hashlib
-import ctypes
-import errno
 import os
 import re
 import stat
 import sys
-from threading import RLock
 from dataclasses import dataclass
 
 
@@ -52,21 +49,11 @@ PUBLICATION_DIAGNOSTICS = frozenset({
 })
 
 
-ATOMIC_PUBLICATION_DIAGNOSTICS = frozenset({
-    "PUBLISH_INPUT_INVALID", "PUBLISH_HANDLE_INVALID", "PUBLISH_ROOT", "PUBLISH_STAGE_PARENT",
-    "PUBLISH_STAGE_CREATE", "PUBLISH_STAGE_CREATE_EXISTS", "PUBLISH_STAGE_WRITE",
-    "PUBLISH_STAGE_FSYNC", "PUBLISH_STAGE_VERIFY", "PUBLISH_STAGE_DIR_FSYNC",
-    "PUBLISH_FINAL_PARENT", "PUBLISH_SOURCE_VERIFY", "PUBLISH_FINAL_VERIFY",
-    "PUBLISH_RENAME_COLLISION", "PUBLISH_RENAME_UNSUPPORTED", "PUBLISH_RENAME_INVALID",
-    "PUBLISH_RENAME_OS", "PUBLISH_DIRECTORY_FSYNC", "PUBLISH_RECHECK",
-})
-
-
 class VolumeRootBindingError(ValueError):
     """Closed error for an unavailable or changed bound root."""
 
     def __init__(self, code: str | None = None):
-        self.code = code if code in PUBLICATION_DIAGNOSTICS | ATOMIC_PUBLICATION_DIAGNOSTICS else None
+        self.code = code if code in PUBLICATION_DIAGNOSTICS else None
         super().__init__("volume root binding invalid")
 
 
@@ -312,80 +299,6 @@ def _remove_owned_leaf(parent: int, leaf: str, identity: tuple[int, int, int, in
             os.unlink(leaf, dir_fd=parent)
     except OSError:
         pass
-
-
-def _rename_no_replace(source_parent: int, source: str, destination_parent: int, destination: str) -> None:
-    """Linux exclusive rename; unsupported mounts fail without a fallback."""
-    libc = ctypes.CDLL(None, use_errno=True)
-    rename = getattr(libc, "renameat2", None)
-    if rename is None:
-        raise _invalid("PUBLISH_RENAME_UNSUPPORTED")
-    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-    rename.restype = ctypes.c_int
-    if rename(source_parent, os.fsencode(source), destination_parent, os.fsencode(destination), 1) != 0:
-        code = {errno.EEXIST: "PUBLISH_RENAME_COLLISION", errno.ENOSYS: "PUBLISH_RENAME_UNSUPPORTED",
-                errno.EOPNOTSUPP: "PUBLISH_RENAME_UNSUPPORTED", errno.EINVAL: "PUBLISH_RENAME_INVALID"}.get(
-                    ctypes.get_errno(), "PUBLISH_RENAME_OS")
-        raise _invalid(code)
-
-
-class _OwnedPublicationStage:
-    """Process-local sealed ownership; closing never deletes retained evidence."""
-
-    def __init__(self, owner, path, parent, leaf, parents, descriptor, content):
-        self._owner, self._path, self._parent, self._leaf = owner, path, parent, leaf
-        self._parents, self._descriptor, self._content = parents, descriptor, content
-        self._identity = _identity(os.fstat(descriptor))
-        self._closed = self._consumed = False
-        self._lock = RLock()
-
-    @property
-    def stage_path(self):
-        return self._path
-
-    @property
-    def size_bytes(self):
-        return len(self._content)
-
-    @property
-    def sha256(self):
-        return hashlib.sha256(self._content).hexdigest()
-
-    def close(self):
-        with self._lock:
-            if not self._closed:
-                self._closed = True
-                _close_all([*self._parents, self._descriptor])
-
-    def _check(self, parent, leaf):
-        if self._closed or _identity(os.fstat(self._descriptor)) != self._identity:
-            raise _invalid()
-        named = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
-        if (_identity(named) != self._identity or not stat.S_ISREG(named.st_mode)
-                or named.st_uid != os.geteuid() or stat.S_IMODE(named.st_mode) != 0o600
-                or named.st_nlink != 1 or named.st_size != self.size_bytes):
-            raise _invalid()
-        read_fd = os.open(leaf, _READ, dir_fd=parent)
-        try:
-            before = os.fstat(read_fd)
-            if _identity(before) != self._identity:
-                raise _invalid()
-            digest, count = hashlib.sha256(), 0
-            while True:
-                block = os.read(read_fd, min(65536, self.size_bytes + 1 - count))
-                if not block:
-                    break
-                count += len(block)
-                if count > self.size_bytes:
-                    raise _invalid()
-                digest.update(block)
-            after = os.fstat(read_fd)
-            if (_file_identity(before) != _file_identity(after) or count != self.size_bytes
-                    or digest.hexdigest() != self.sha256
-                    or _identity(os.stat(leaf, dir_fd=parent, follow_symlinks=False)) != self._identity):
-                raise _invalid()
-        finally:
-            os.close(read_fd)
 
 
 class VolumeRootBinding:
@@ -717,109 +630,6 @@ class VolumeRootBinding:
                 os.close(leaf_fd)
             for fd in reversed(parents):
                 os.close(fd)
-
-    def prepare_owned_stage(self, path: str, content: bytes, maximum: int) -> _OwnedPublicationStage:
-        """Write/fsync/close a private stage while retaining non-writing identity."""
-        if type(content) is not bytes or type(maximum) is not int or not 0 < len(content) <= maximum <= 1_073_741_824:
-            raise _invalid("PUBLISH_INPUT_INVALID")
-        phase = "PUBLISH_ROOT"
-        parents, writer, retained = [], None, None
-        try:
-            self._check_root()
-            phase = "PUBLISH_STAGE_PARENT"
-            parent, leaf, parents = self._member_parent(path)
-            phase = "PUBLISH_STAGE_CREATE"
-            try:
-                writer = os.open(leaf, _WRITE, 0o600, dir_fd=parent)
-            except FileExistsError:
-                raise _invalid("PUBLISH_STAGE_CREATE_EXISTS") from None
-            info = os.fstat(writer)
-            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                    or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600):
-                raise _invalid()
-            retained = os.open(leaf, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
-            if _identity(os.fstat(retained)) != _identity(info):
-                raise _invalid()
-            phase = "PUBLISH_STAGE_WRITE"
-            view = memoryview(content)
-            while view:
-                count = os.write(writer, view)
-                if count <= 0:
-                    raise _invalid()
-                view = view[count:]
-            phase = "PUBLISH_STAGE_FSYNC"
-            os.fsync(writer)
-            os.close(writer)
-            writer = None
-            stage = _OwnedPublicationStage(self, path, parent, leaf, parents, retained, content)
-            phase = "PUBLISH_STAGE_VERIFY"
-            stage._check(parent, leaf)
-            self._check_member_parents(path, parents)
-            self._check_root()
-            phase = "PUBLISH_STAGE_DIR_FSYNC"
-            os.fsync(parent)
-            retained, parents = None, []
-            return stage
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except BaseException as error:
-            raise _invalid(error.code if isinstance(error, VolumeRootBindingError) and error.code else phase) from None
-        finally:
-            if writer is not None:
-                os.close(writer)
-            if retained is not None:
-                os.close(retained)
-            _close_all(parents)
-
-    def publish_owned_stage(self, stage: _OwnedPublicationStage, path: str) -> None:
-        """Consume once and exclusively rename only the held, complete stage."""
-        if type(stage) is not _OwnedPublicationStage or stage._owner is not self:
-            raise _invalid("PUBLISH_HANDLE_INVALID")
-        with stage._lock:
-            self._publish_owned_stage(stage, path)
-
-    def _publish_owned_stage(self, stage: _OwnedPublicationStage, path: str) -> None:
-        if stage._consumed or stage._closed:
-            raise _invalid("PUBLISH_HANDLE_INVALID")
-        stage._consumed = True
-        parents = []
-        phase = "PUBLISH_ROOT"
-        try:
-            self._check_root()
-            phase = "PUBLISH_STAGE_PARENT"
-            self._check_member_parents(stage._path, stage._parents)
-            phase = "PUBLISH_FINAL_PARENT"
-            parent, leaf, parents = self._member_parent(path)
-            if _identity(os.fstat(parent)) == _identity(os.fstat(stage._parent)):
-                raise _invalid()
-            phase = "PUBLISH_SOURCE_VERIFY"
-            stage._check(stage._parent, stage._leaf)
-            self._check_member_parents(path, parents)
-            self._check_root()
-            _rename_no_replace(stage._parent, stage._leaf, parent, leaf)
-            phase = "PUBLISH_FINAL_VERIFY"
-            stage._check(parent, leaf)
-            self._check_member_parents(stage._path, stage._parents)
-            self._check_member_parents(path, parents)
-            self._check_root()
-            phase = "PUBLISH_DIRECTORY_FSYNC"
-            os.fsync(stage._parent)
-            os.fsync(parent)
-            phase = "PUBLISH_RECHECK"
-            stage._check(parent, leaf)
-            self._check_member_parents(path, parents)
-            self._check_root()
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except BaseException as error:
-            raise _invalid(error.code if isinstance(error, VolumeRootBindingError) and error.code else phase) from None
-        finally:
-            stage.close()
-            _close_all(parents)
-
-    def publish_exclusive(self, stage_path: str, path: str, content: bytes, maximum: int) -> None:
-        stage = self.prepare_owned_stage(stage_path, content, maximum)
-        self.publish_owned_stage(stage, path)
 
     def claim_directory(self, path: str) -> None:
         """Create one directory exclusively under the retained root."""
