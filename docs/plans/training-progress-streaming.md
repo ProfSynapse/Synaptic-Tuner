@@ -364,6 +364,45 @@ the former requirement to request another approval for each reviewed fresh attem
 remove claims, invent another state root or rotate attempt identifiers to replay
 this approved attempt, and do not delete or adopt its resources without authority.
 
+## Preparation and second-attempt evidence (2026-10-12)
+
+On source `840949aff3717859e84b3d63b0ad192e1430bd9f`, the optional local
+preparation completed from an absent bootstrap cache and again from the warm
+cache. Both returned `local_inputs_ready` with nine exact verified bootstrap
+wheels, no provider effects and no execution authority. The retained journal
+comparison showed unchanged attempt rows (two) and catalog rows (zero).
+Private evidence is retained under `local-preparation-proof-20261012` in the
+host training-state directory; these local checks do not prove live delivery.
+
+The distinct `metrics-20261012-02` attempt used that source and admission
+SHA-256 `654c4ec93995fb05d0691147770801f65b3f9a8beab6b620ff9bb6d0ad3d79c3`.
+It passed image build and integrated CPU qualification, and captured 32 numeric
+records plus one exhaustion record across nine growing pages in 69 polls.
+Every growing page was bracketed by pending observations of the exact provider
+call; all 33 record digests matched the retained progress JSONL. The run then
+failed at `RUN_WORKER_SFT_ARTIFACT`. Terminal native artifact verification did
+not pass. Its retained result is `inconclusive`, with
+`terminal_artifacts_verified: false` and `durability_acknowledged: false`.
+Visible numeric records alone do not make this a successful qualification run
+or a `delivered_precompletion` verdict. Preserve its consumed claims, evidence
+and resources; do not replay it. Ordinary logs and partial-write/transport
+qualification remain disabled or unqualified. This attempt counts toward neither
+of the two completed same-code runs required below.
+
+A targeted provider-free reproduction through the real captured execution and
+native verifier reproduced artifact rejection: the optional `metric_fd` was
+included in the committed child transport and execution digest, but omitted when
+the final verifier reconstructed that transport. The resulting digest mismatch
+is consistent with attempt 02's closed artifact-stage failure; it does not
+establish an introspected remote exception beyond that retained stage code.
+The repair reads the bounded canonical saved child document, validates the
+optional strict integer descriptor only for configured capture, reconstructs
+and compares the complete canonical child bytes, then retains full execution
+evidence equality. It preserves the fixed packaged-worker inventory and runtime
+pins while refreshing the affected source hashes. Tests and independent review
+must pass before admission 03 is generated from the next clean integrated source;
+the repaired code still needs a new pair of completed live runs.
+
 ## Authorized reliability cycle (2026-10-12)
 
 After the failed approved attempt, the user explicitly authorized repeated bounded

@@ -57,6 +57,32 @@ preparation/preflight gap is resolved. This authority does not replay the consum
 attempt or authorize resource cleanup. See the exact
 [attempt checkpoint](training-progress-streaming.md#approved-attempt-checkpoint-2026-10-12).
 
+## Local preparation and second attempt
+
+Cold and warm local preparation passed on source `840949af`, verifying all
+nine pinned bootstrap wheels with unchanged attempt journal/catalog and no
+provider effects. The retained `local-preparation-proof-20261012` evidence
+establishes this local behavior. See the
+[preparation and second-attempt record](training-progress-streaming.md#preparation-and-second-attempt-evidence-2026-10-12)
+for the exact source and admission.
+
+`metrics-20261012-02` passed build and integrated CPU qualification. Its final
+ledger retained 32 numeric records plus one exhaustion record across nine
+growing pages, each read bracketed by pending observations of the exact call.
+It subsequently failed at `RUN_WORKER_SFT_ARTIFACT`; native artifact verification
+was not completed. The result remains `inconclusive` without acknowledged
+durable qualification publication. It is not one of the two required successful
+same-code runs. Preserve the consumed claims/resources and use a reviewed distinct
+admission after a confirmed repair; ordinary logs remain disabled.
+
+The real captured-execution/native-verifier path reproduced a child-transport
+digest mismatch: final verification had omitted the optional metric descriptor.
+The repair authenticates complete saved canonical child bytes, reconstructs the
+strict optional descriptor and retains full evidence equality. This reproduced
+bug is consistent with the closed attempt-02 stage, without asserting a remote
+exception that was not retained. Review/test the fix and preserved runtime
+pins before the next clean source candidate; live reliability remains pending.
+
 ## Metrics: implemented is not live-qualified
 
 See [training-progress-streaming.md](training-progress-streaming.md) for the
@@ -71,8 +97,9 @@ existing numeric observation contract, signed transport and limitations.
   currently skips that consumer.
   The consumer retains the last non-null cursor, checks canonical bytes on
   duplicate run/sequence records and writes private per-run JSONL evidence.
-- A live proof of pre-completion visibility, including background Volume
-  commits and partial-record handling, remains outstanding.
+- Attempt 02 observed numeric records before completion, but failed terminal
+  native artifact verification. A completed qualification verdict and live
+  partial-record handling proof remain outstanding.
 - Optional telemetry is best-effort; a missing tail is not evidence of zero
   loss, job completion, or permission to replay training.
 
