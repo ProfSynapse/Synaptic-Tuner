@@ -120,7 +120,7 @@ def _facts(release):
     )
 
 
-def _setup(tmp_path, monkeypatch, *, failed=False, capture=False):
+def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualification=False):
     monkeypatch.setattr(runner.platform, "python_version", lambda: "3.11.14")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("HF_TOKEN", "fixture-token")
@@ -145,6 +145,8 @@ def _setup(tmp_path, monkeypatch, *, failed=False, capture=False):
         semantic.dataset_digest, semantic.dataset_sha256, semantic.dataset_bytes,
         "syntunia-sft-row/v2",
     )
+    if metrics_qualification:
+        recipe = replace(recipe, timeout_seconds=900)
     if capture:
         recipe = replace(recipe, observation_capture={
             "schema_version": "synaptic-training-observation-capture/v1",

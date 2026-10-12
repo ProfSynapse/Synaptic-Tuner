@@ -46,7 +46,8 @@ from tuner.training.input_preparation import (
     TrainingInputPreparationServiceV1, default_dataset_format_verifiers_v1,
 )
 from tuner.training.modal_host_authority import HMACAuthenticator, UTCClock
-from tuner.training.modal_host_composition import compose_modal_packaged_reference_host
+from tuner.training.modal_host_composition import compose_modal_packaged_reference_host, compose_modal_metrics_qualification_host
+from tuner.training.modal_metrics_qualification import MetricsQualificationAdmission, MetricsQualificationLedger
 from tuner.training.modal_host_download import download_verified_modal_artifact
 from tuner.training.run_progress_consumer import start_progress_consumer
 from tuner.training.modal_host_reader import ModalPackagedReadUnavailable
@@ -283,6 +284,7 @@ class ModalStandaloneRunResultV1:
     evaluation_path: Path | None = None
     evaluation_passed: bool | None = None
     progress: dict[str, object] | None = None
+    metrics_qualification: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,7 +311,7 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
                        context: object, resources: ResourceSpec,
                        storage: ModalHostStorageV1, effect_id: str,
                        modal_profile: str, modal_environment: str,
-                       builder_cache_root: Path):
+                       builder_cache_root: Path, metrics_admission=None):
     profiles_root = context.engine_root / "Trainers" / "runtime_profiles"
     admitted = load_runtime_profile(plan.recipe.runtime_profile, profiles_root).resolve(
         model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision,
@@ -331,6 +333,8 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
     client, client_binding = open_modal_host_scope(
         sdk=modal, profile=modal_profile, environment_name=modal_environment,
     )
+    if metrics_admission is not None:
+        metrics_admission.validate_scope(client_binding)
     runtime = prepare_modal_runtime_for_host(
         sdk=modal, client=client, client_binding=client_binding,
         profile_path=profile_path,
@@ -405,7 +409,8 @@ def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
 
 def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                              modal_profile: str, modal_environment: str,
-                             fresh_attempt: bool = False) -> ModalStandaloneRunResultV1:
+                             fresh_attempt: bool = False,
+                             metrics_admission: MetricsQualificationAdmission | None = None) -> ModalStandaloneRunResultV1:
     """Prepare, quote, build, submit, authenticate, verify, and save once.
 
     No user callback, manually built wheel or provider-specific public API is
@@ -419,7 +424,19 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             or plan.recipe.maximum_cost_minor_units is None):
         raise ModalStandaloneRunUnavailable("modal_host_configuration_invalid")
     phase: str | None = None
+    ledger = None
     try:
+        if metrics_admission is not None:
+            if type(metrics_admission) is not MetricsQualificationAdmission or fresh_attempt is not False:
+                raise ValueError
+            metrics_admission.validate_plan(plan, context=context, modal_profile=modal_profile,
+                                            modal_environment=modal_environment)
+            root = _private_root()
+            # The fixed admission guard lives in the global journal, before
+            # credentials or any build/CPU/GPU effects. Uncertainty consumes it.
+            with ModalHostStorageV1(root / "modal-host.sqlite3", "standalone-training") as claim_store:
+                claim_store.attempts.claim("metrics-qual-" + metrics_admission.document["attempt_ref"],
+                                           metrics_admission.canonical)
         import modal
         if modal.__version__ != "1.5.4":
             raise ValueError
@@ -471,6 +488,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 storage=storage, effect_id="cpu-qual-" + run_id,
                 modal_profile=modal_profile, modal_environment=modal_environment,
                 builder_cache_root=root / "modal-wheel-builder",
+                **({"metrics_admission": metrics_admission} if metrics_admission is not None else {}),
             )
             phase = "RUN_HOST_ASSEMBLY"
             release, facts = runtime.release, runtime.facts
@@ -551,7 +569,9 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 trainer=InstalledPackagedSFTTrainerExecutor(model_preparer=prepare_model_snapshot),
                 reader=reader,
             )
-            host = compose_modal_packaged_reference_host(
+            compose_host = compose_modal_packaged_reference_host if metrics_admission is None else compose_modal_metrics_qualification_host
+            host = compose_host(
+                **({"admission": metrics_admission} if metrics_admission is not None else {}),
                 adapter=adapter, effects=effects,
                 prepared_request=prepared.prepared.request, run=run,
                 components=components, context=context,
@@ -593,6 +613,8 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             )
             binding = host.reader._binding(read_request, ProviderReadPurposeV1.OBSERVE)
             provider_job_ref = read_request.provider_run.reference.provider_job_ref
+            if metrics_admission is not None:
+                ledger = MetricsQualificationLedger(metrics_admission, started.run, provider_job_ref, root)
             deadline = time.monotonic() + recipe.timeout_seconds + 120
             phase = "RUN_CALL_OBSERVE"
             progress = None
@@ -609,11 +631,21 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                     progress_result["status"] = "progress_setup_unavailable"
             try:
                 while True:
-                    if progress is not None:
+                    before_state = None
+                    requested_cursor = None
+                    if ledger is not None:
+                        before_state, _ = host.reader._poll_packaged_call(
+                            binding, provider_job_ref, deadline=deadline,
+                        )
+                    if progress is not None and (ledger is None or before_state is ModalFunctionCallState.PENDING):
+                        requested_cursor = progress.cursor
                         progress.poll()
                     state, _ = host.reader._poll_packaged_call(
                         binding, provider_job_ref, deadline=deadline,
                     )
+                    if ledger is not None:
+                        ledger.record(progress, before_state=before_state.value, after_state=state.value,
+                                      receipt_time=UTCClock().now(), requested_cursor=requested_cursor)
                     if state is ModalFunctionCallState.RETURNED:
                         break
                     if state is not ModalFunctionCallState.PENDING or time.monotonic() >= deadline:
@@ -623,6 +655,8 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 if progress is not None:
                     progress.close()
                     progress_result = progress.result()
+                    if ledger is not None:
+                        ledger.compare_retained(progress)
             phase = "RUN_OUTCOME"
             outcome = api.runs.outcome(started.run)
             if outcome.state.value != "succeeded":
@@ -675,6 +709,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 evaluation_path,
                 evaluation_passed,
                 progress_result,
+                ledger.finish(verified=True) if ledger is not None else None,
             )
     except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable):
         raise
@@ -712,3 +747,6 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                     pass  # Diagnostic failure cannot replace the original closed phase.
             raise ModalStandalonePhaseUnavailable(phase, start_causes=causes) from None
         raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable") from None
+    finally:
+        if ledger is not None and not ledger.finished:
+            ledger.finish(verified=False)

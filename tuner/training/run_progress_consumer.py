@@ -32,6 +32,7 @@ class RunProgressConsumer:
             canonical_bytes(run.to_dict())).hexdigest() + ".jsonl")
         self._fd = None
         self._created = False
+        self._file_identity = None
 
     def _open(self):
         directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -42,6 +43,8 @@ class RunProgressConsumer:
             self._fd = os.open(self.path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL
                                | os.O_NOFOLLOW, 0o600, dir_fd=directory)
             self._created = True
+            info = os.fstat(self._fd)
+            self._file_identity = (info.st_dev, info.st_ino)
             os.fsync(directory)
         finally:
             os.close(directory)
