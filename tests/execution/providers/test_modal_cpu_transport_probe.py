@@ -242,3 +242,20 @@ def test_negative_and_regressing_elapsed_reject(monkeypatch, elapsed):
     raw = _transport_evidence_bytes(document)
     with pytest.raises(ValueError):
         replace(capture, _raw=raw, _sha256=hashlib.sha256(raw).hexdigest())
+
+
+def test_reader_issued_regressing_elapsed_rejected_by_verifier(monkeypatch):
+    _, dispatch, _, auth, _, reader = setup_probe(monkeypatch)
+    finals, clock, sleeps = snapshot(dispatch, auth), [0], [0]
+    def sleep(_):
+        sleeps[0] += 1
+        clock[0] = 10 if sleeps[0] == 1 else 5
+        if sleeps[0] == 2:
+            FakeVolume.registry["control-name"].files.update(finals)
+    capture = reader.capture_transport_probe(dispatch, provider_call_id="fc-probe",
+        monotonic=lambda: clock[0], sleep=sleep)
+    assert [row["elapsed_ms"] for row in capture.to_dict()["polls"]] == [0, 10000, 5000]
+    terminal(dispatch, auth, finals)
+    with pytest.raises(ValueError):
+        reader.verify_transport_probe(dispatch, provider_call_id="fc-probe", capture=capture,
+            retained_capture_bytes=capture._raw)
