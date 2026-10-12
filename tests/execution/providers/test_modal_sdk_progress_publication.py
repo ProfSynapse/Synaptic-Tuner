@@ -23,6 +23,9 @@ class MemoryVolume:
         self.started, self.release = None, None
         self.error = None
 
+    def _get_metadata(self):
+        return self._metadata
+
     @contextmanager
     def batch_upload(self, force=False):
         assert force is False

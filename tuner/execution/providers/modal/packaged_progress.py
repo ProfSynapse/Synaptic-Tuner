@@ -73,7 +73,11 @@ class ModalSDKProgressPublication:
         self._check()
 
     def _check(self):
-        version = getattr(getattr(self._volume, "_metadata", None), "version", None)
+        # Synchronicity exposes the pinned getter, not private instance state.
+        getter = getattr(self._volume, "_get_metadata", None)
+        if not callable(getter):
+            raise SDKProgressPublicationError("SDK_PUBLISH_IDENTITY")
+        version = getattr(getter(), "version", None)
         # Pinned SDK1.5.4 normalizes legacy UNSPECIFIED(0) metadata to v1.
         if (getattr(self._volume, "is_hydrated", False) is not True
                 or getattr(self._volume, "object_id", None) != self._binding.volume_id

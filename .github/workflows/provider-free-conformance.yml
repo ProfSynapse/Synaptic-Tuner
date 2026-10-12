@@ -327,8 +327,8 @@ jobs:
           assert version("protobuf") == "6.33.6"
           PY
 
-      - name: Run mock-only packaged-call diagnostics with the pinned SDK
-        run: python -B -m pytest -q -p no:cacheprovider tests/training/test_inspect_modal_packaged_call.py
+      - name: Run packaged-call and progress contracts with the pinned SDK
+        run: python -B -m pytest -q -p no:cacheprovider tests/training/test_inspect_modal_packaged_call.py tests/execution/providers/test_modal_sdk_progress_handle.py
 
   conformance-gate:
     name: CPython 3.12 / pytest 8
