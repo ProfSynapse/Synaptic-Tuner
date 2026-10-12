@@ -12,6 +12,7 @@ import threading
 from typing import Callable, Protocol
 
 from tuner.execution.foundation_v2.canonical import digest_text, safe_ref
+from tuner.execution.providers.modal.contracts import provider_entry_identity
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
 from tuner.execution.providers.modal.runtime_release_qualification import (
     ModalRuntimeReleaseFixtureReceiptV1,
@@ -91,6 +92,37 @@ class ModalRuntimeQualificationOperator:
                 or listing != ((receipt.path, receipt.size_bytes, receipt.provider_entry_id),):
             raise ValueError("runtime qualification fixture readback differs")
         return receipt
+
+    def stage_transport_marker(self, *, probe, marker_bytes, deployment_facts):
+        """Caller must durably claim exact fresh marker authority before this effect."""
+        from tuner.execution.providers.modal.runtime_release_qualification import ModalCPUTransportProbeV1
+        if (type(probe) is not ModalCPUTransportProbeV1 or type(marker_bytes) is not bytes
+                or len(marker_bytes) != 32 or hashlib.sha256(marker_bytes).hexdigest() != probe.marker_sha256):
+            raise ValueError("CPU transport marker differs from claimed input")
+        _observe_current_layout(self._observer, deployment_facts)
+        volume = _volume_id(deployment_facts, "control")
+        handle = self._facade._volume(volume)
+        def inventory():
+            rows = []
+            try:
+                for entry in handle.iterdir(probe.marker_name, recursive=False):
+                    if (rows or entry.path != probe.marker_name or int(entry.type) != 1
+                            or type(entry.size) is not int or entry.size != 32):
+                        raise ValueError("CPU transport marker inventory invalid")
+                    rows.append((entry.path, entry.size, provider_entry_identity(volume, entry.path, entry.size)))
+            except self._facade.sdk.exception.NotFoundError:
+                if rows:
+                    raise ValueError("CPU transport marker changed") from None
+            return tuple(rows)
+        if inventory():
+            raise ValueError("CPU transport marker collides")
+        from io import BytesIO
+        with handle.batch_upload(force=False) as batch:
+            batch.put_file(BytesIO(marker_bytes), probe.marker_name)
+        expected = ((probe.marker_name, 32, provider_entry_identity(volume, probe.marker_name, 32)),)
+        if (inventory() != expected
+                or self._facade.read_complete(volume, probe.marker_name, max_bytes=32) != marker_bytes):
+            raise ValueError("CPU transport marker readback differs")
 
     def submit_once(self, dispatch_bytes: bytes, *, expected_facts,
                     provider_invoker: Callable[[Callable[[], object]], object] | None = None):

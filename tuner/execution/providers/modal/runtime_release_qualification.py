@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import base64
 import hashlib
+import secrets
+import time
 import hmac
 from pathlib import Path
 from typing import Protocol
@@ -318,6 +320,149 @@ class ModalRuntimeQualificationHmacAuthenticator:
         return hmac.compare_digest(expected, tag)
 
 
+TRANSPORT_PROBE_SCHEMA = "synaptic-modal-cpu-transport-probe/v1"
+TRANSPORT_PROBE_PURPOSE = "modal-runtime-release-transport-probe/v1"
+
+
+@dataclass(frozen=True, slots=True)
+class ModalCPUTransportProbeV1:
+    marker_name: str
+    marker_sha256: str
+    schema_version: str = TRANSPORT_PROBE_SCHEMA
+    metric_records: int = 8
+    max_leaf_bytes: int = 8192
+    max_page_bytes: int = 65536
+    max_page_entries: int = 100
+    max_polls: int = 180
+    max_host_seconds: int = 180
+    max_ledger_bytes: int = 1048576
+    hold_stage_seconds: int = 20
+    final_hold_seconds: int = 20
+
+    def __post_init__(self):
+        if self.schema_version != TRANSPORT_PROBE_SCHEMA:
+            raise ValueError("invalid CPU transport probe schema")
+        if (type(self.marker_name) is not str or not self.marker_name.startswith("probe-")
+                or not self.marker_name.endswith(".bin") or len(self.marker_name) != 42
+                or any(ch not in "0123456789abcdef" for ch in self.marker_name[6:-4])):
+            raise ValueError("invalid CPU transport marker name")
+        digest_text(self.marker_sha256, "transport_marker_sha256")
+        for name, expected in (("metric_records", 8), ("max_leaf_bytes", 8192),
+                ("max_page_bytes", 65536), ("max_page_entries", 100),
+                ("max_polls", 180), ("max_host_seconds", 180),
+                ("max_ledger_bytes", 1048576), ("hold_stage_seconds", 20),
+                ("final_hold_seconds", 20)):
+            if type(getattr(self, name)) is not int or getattr(self, name) != expected:
+                raise ValueError("CPU transport probe bound differs")
+
+    def to_dict(self):
+        return {name: getattr(self, name) for name in self.__dataclass_fields__}
+
+    @classmethod
+    def from_dict(cls, document):
+        if type(document) is not dict or set(document) != set(cls.__dataclass_fields__):
+            raise ValueError("CPU transport probe configuration is invalid")
+        return cls(**document)
+
+
+def transport_probe_root(dispatch):
+    return operation_path(dispatch.effect_id, "runtime-release-transport")
+
+
+def transport_probe_content(dispatch, call_id, index):
+    if type(index) is not int or not 0 <= index <= 8:
+        raise ValueError("CPU transport probe sequence invalid")
+    return {"schema_version": TRANSPORT_PROBE_SCHEMA, "scope": "synthetic_cpu_transport",
+            "dispatch_digest": dispatch.dispatch_digest, "effect_id": dispatch.effect_id,
+            "provider_call_id": safe_ref(call_id, "provider_call_id"), "sequence": index,
+            "kind": "numeric_fixture" if index < 8 else "fixture_exhausted",
+            "value": index if index < 8 else None,
+            "training_executed": False, "gpu_qualified": False}
+
+
+def transport_probe_envelope(content, signer, key_ref):
+    tag = signer.sign(TRANSPORT_PROBE_PURPOSE, canonical_bytes(content), key_ref)
+    if type(tag) is not bytes or not 0 < len(tag) <= 128:
+        raise ValueError("CPU transport probe authentication invalid")
+    return canonical_bytes({"content": content, "tag_hex": tag.hex()})
+
+
+def verify_transport_probe_envelope(raw, verifier, key_ref):
+    if type(raw) is not bytes or not 0 < len(raw) <= 8192:
+        raise ValueError("CPU transport probe leaf bound invalid")
+    document = parse_canonical_object(raw, name="CPU transport probe envelope")
+    if set(document) != {"content", "tag_hex"} or type(document["content"]) is not dict:
+        raise ValueError("CPU transport probe envelope invalid")
+    tag = document["tag_hex"]
+    if (type(tag) is not str or not 2 <= len(tag) <= 256 or len(tag) % 2
+            or any(ch not in "0123456789abcdef" for ch in tag)):
+        raise ValueError("CPU transport probe tag invalid")
+    if verifier.verify(TRANSPORT_PROBE_PURPOSE, canonical_bytes(document["content"]),
+                       bytes.fromhex(tag), key_ref) is not True:
+        raise ValueError("CPU transport probe authentication failed")
+    return document["content"]
+
+
+def _run_transport_probe(dispatch, *, binding, signer, call_id, deadline):
+    probe = dispatch.transport_probe
+    root = transport_probe_root(dispatch)
+    # Reserve the fixed experiment window without renewing the original call budget.
+    if time.monotonic() + 60 > deadline:
+        raise TimeoutError("CPU transport window unavailable")
+    for directory in (root, root + "/staging", root + "/manifests", root + "/final"):
+        binding.claim_directory(directory)
+    def pause(seconds):
+        if time.monotonic() + seconds >= deadline:
+            raise TimeoutError("CPU transport phase window unavailable")
+        time.sleep(seconds)
+        if time.monotonic() >= deadline:
+            raise TimeoutError("CPU transport phase window exhausted")
+    leaves = []
+    for index in range(9):
+        if time.monotonic() >= deadline:
+            raise TimeoutError("CPU transport window exhausted")
+        content = transport_probe_content(dispatch, call_id, index)
+        raw = transport_probe_envelope(content, signer, dispatch.key_ref)
+        stage_path = root + "/staging/" + secrets.token_hex(16) + ".json"
+        final_path = root + f"/final/{index:012d}.json"
+        stage = binding.prepare_owned_stage(stage_path, raw, probe.max_leaf_bytes)
+        try:
+            manifest = {**content, "stage_path": stage_path, "final_path": final_path,
+                        "size_bytes": stage.size_bytes, "sha256": stage.sha256}
+            manifest_raw = transport_probe_envelope(manifest, signer, dispatch.key_ref)
+            binding.publish_exclusive(root + "/staging/" + secrets.token_hex(16) + ".json",
+                    root + f"/manifests/{index:012d}.json", manifest_raw, 8192)
+            if index == 0:
+                # Same production primitive; hold only its completed, sealed stage.
+                # No explicit commit: observe ordinary background commits.
+                pause(probe.hold_stage_seconds)
+            binding.publish_owned_stage(stage, final_path)
+            leaves.append({"sequence": index, "sha256": hashlib.sha256(raw).hexdigest()})
+        finally:
+            stage.close()
+        pause(2)
+    pause(probe.final_hold_seconds)
+    return {"schema_version": TRANSPORT_PROBE_SCHEMA, "scope": "synthetic_cpu_transport",
+            "root": root, "records": leaves, "manual_commit_used": False,
+            "training_executed": False, "gpu_qualified": False}
+
+
+def _publish_transport_receipt(dispatch, *, roots, signer, call_id, evidence):
+    content = {"schema_version": TRANSPORT_PROBE_SCHEMA, "scope": "synthetic_cpu_transport",
+        "effect_id": dispatch.effect_id, "dispatch_digest": dispatch.dispatch_digest,
+        "runtime_release_digest": dispatch.runtime_release.manifest_digest,
+        "deployment_facts_digest": dispatch.deployment_facts.facts_digest,
+        "fixture_sha256": dispatch.fixture.sha256, "provider_call_id": call_id,
+        "probe": dispatch.transport_probe.to_dict(), "evidence": evidence,
+        "training_executed": False, "gpu_qualified": False}
+    raw = transport_probe_envelope(content, signer, dispatch.key_ref)
+    # Commit terminal proof on the other Volume: never flush the live control
+    # stream explicitly and misattribute end-of-probe visibility to background commits.
+    path = operation_path(dispatch.effect_id, "runtime-release-transport-evidence", "receipt.json")
+    write_exclusive(roots.artifacts, roots.artifacts / path, raw)
+
+
+
 @dataclass(frozen=True, slots=True)
 class ModalRuntimeReleaseQualificationDispatchV1:
     effect_id: str
@@ -327,6 +472,7 @@ class ModalRuntimeReleaseQualificationDispatchV1:
     fixture: ModalRuntimeReleaseFixtureReceiptV1
     policy: ModalRuntimeReleaseQualificationPolicyV1
     key_ref: str
+    transport_probe: ModalCPUTransportProbeV1 | None = None
 
     def __post_init__(self) -> None:
         facts_type = _qualification_facts_type()
@@ -336,6 +482,8 @@ class ModalRuntimeReleaseQualificationDispatchV1:
                 or type(self.fixture) is not ModalRuntimeReleaseFixtureReceiptV1 \
                 or type(self.policy) is not ModalRuntimeReleaseQualificationPolicyV1:
             raise TypeError("exact runtime qualification contracts required")
+        if self.transport_probe is not None and type(self.transport_probe) is not ModalCPUTransportProbeV1:
+            raise TypeError("exact CPU transport probe required")
         safe_ref(self.effect_id, "effect_id")
         if self.key_ref != QUALIFICATION_HMAC_KEY_REF:
             raise ValueError("runtime qualification key reference differs")
@@ -366,6 +514,8 @@ class ModalRuntimeReleaseQualificationDispatchV1:
             "key_ref": self.key_ref,
             "limitations": [CURRENT_LAYOUT_LIMITATION],
         }
+        if self.transport_probe is not None:
+            result["transport_probe"] = self.transport_probe.to_dict()
         _secret_free(result)
         return result
 
@@ -412,7 +562,7 @@ def parse_modal_runtime_release_qualification_dispatch(
             or set(envelope["authentication"]) != {"tag"}:
         raise ValueError("qualification dispatch envelope is invalid")
     document = envelope["dispatch"]
-    if set(document) != {
+    if set(document) - ({"transport_probe"} if "transport_probe" in document else set()) != {
         "schema_version", "effect_id", "runtime_release", "provider_binding",
         "deployment_facts", "deployment_facts_digest", "fixture", "policy",
         "key_ref", "limitations",
@@ -430,6 +580,7 @@ def parse_modal_runtime_release_qualification_dispatch(
         facts, ModalRuntimeReleaseFixtureReceiptV1.from_dict(document["fixture"]),
         ModalRuntimeReleaseQualificationPolicyV1.from_dict(document["policy"]),
         document["key_ref"],
+        ModalCPUTransportProbeV1.from_dict(document["transport_probe"]) if "transport_probe" in document else None,
     )
     try:
         tag = base64.b64decode(
@@ -534,6 +685,9 @@ class ModalRuntimeReleaseQualificationWorker:
         self._observer, self._call_id, self._roots = observer, call_id_provider, roots
 
     def __call__(self, dispatch_bytes: bytes, *, commit_artifacts, commit_control):
+        probe_binding = None
+        core_published = False
+        deadline = time.monotonic() + 110
         try:
             dispatch = parse_modal_runtime_release_qualification_dispatch(
                 dispatch_bytes, self._verifier,
@@ -551,6 +705,12 @@ class ModalRuntimeReleaseQualificationWorker:
                         self._roots.artifacts, staged, dispatch.fixture.size_bytes,
                     ) != LOCAL_CPU_DATA:
                 raise ValueError
+            if dispatch.transport_probe is not None:
+                from .volume_root_binding import VolumeRootBinding
+                probe_binding = VolumeRootBinding.bind(root_path=str(self._roots.control),
+                    volume_id=_volume_id(self._facts, "control"),
+                    marker_name=dispatch.transport_probe.marker_name,
+                    marker_sha256=dispatch.transport_probe.marker_sha256)
             from tuner.runtime.packaged_training_worker import (
                 PackagedLocalCPUStageError, inspect_reviewed_root_inventory,
                 qualify_installed_child,
@@ -611,7 +771,7 @@ class ModalRuntimeReleaseQualificationWorker:
                     "status_code": "failed",
                     "failure_stage": "INSTALLED_CHILD",
                 }
-            output = canonical_bytes({
+            output_document = {
                 "schema_version": QUALIFICATION_OUTPUT_SCHEMA,
                 "status": "passed", "effect_id": dispatch.effect_id,
                 "dispatch_digest": dispatch.dispatch_digest,
@@ -620,7 +780,8 @@ class ModalRuntimeReleaseQualificationWorker:
                 "fixture_sha256": dispatch.fixture.sha256,
                 "child": child, "limitations": [CURRENT_LAYOUT_LIMITATION],
                 "training_executed": False, "gpu_qualified": False,
-            })
+            }
+            output = canonical_bytes(output_document)
             if len(output) > MAX_EVIDENCE_BYTES:
                 raise ValueError
             output_path = operation_path(
@@ -655,6 +816,22 @@ class ModalRuntimeReleaseQualificationWorker:
             )
             write_exclusive(self._roots.control, evidence / "receipt.mac", tag)
             commit_control()
+            core_published = True
+            # Core CPU proof is mandatory and already published independently.
+            # Optional transport failures do not replace that original receipt.
+            if dispatch.transport_probe is not None:
+                try:
+                    try:
+                        probe_evidence = _run_transport_probe(dispatch, binding=probe_binding,
+                            signer=self._signer, call_id=call_id, deadline=deadline)
+                    except Exception:
+                        probe_evidence = {"status": "inconclusive"}
+                    _publish_transport_receipt(dispatch, roots=self._roots,
+                        signer=self._signer, call_id=call_id, evidence=probe_evidence)
+                    commit_artifacts()
+                except Exception:
+                    return {"schema_version": QUALIFICATION_RESULT_SCHEMA,
+                            "status_code": "completed", "transport_probe_status": "unavailable"}
             return {
                 "schema_version": QUALIFICATION_RESULT_SCHEMA,
                 "status_code": "completed",
@@ -664,6 +841,13 @@ class ModalRuntimeReleaseQualificationWorker:
                 "schema_version": QUALIFICATION_RESULT_SCHEMA,
                 "status_code": "failed",
             }
+        finally:
+            if probe_binding is not None:
+                try:
+                    probe_binding.close()
+                except Exception:
+                    if not core_published:
+                        raise
 
 
 __all__ = [
