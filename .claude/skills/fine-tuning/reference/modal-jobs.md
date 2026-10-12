@@ -1523,7 +1523,8 @@ create cleanup/replay authority. See the current restoration checkpoint and exac
 attempt evidence before choosing the next admitted source.
 
 Acceptance is a normal-path cold-checkout build with automatic pinned bootstrap
-preparation, provider-free rejection of missing/corrupt artifacts, unsafe local
+preparation (empty caches acquire exact pins), provider-free rejection of inputs
+still unresolved after preparation or corrupt artifacts, unsafe local
 private-root modes and dirty/mismatched source before provider effects, verified
 exact launcher/runtime pins, and at least two completed bounded live metrics
 qualification runs on the same final code. Each run must have a distinct retained

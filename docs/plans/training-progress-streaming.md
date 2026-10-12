@@ -251,10 +251,11 @@ and the hash-locked 37-package launcher closure including Modal SDK 1.5.4.
 It returned USD 1.95000/hour for one L40S; this gives a calculated GPU-only
 estimate of USD 0.4875 for the 900-second timeout. This excludes build, CPU, memory, storage and usage beyond timeout;
 it is neither an all-in billing cap nor execution approval. The rate query itself submitted no job.
-Refresh the scoped quote if required when reviewing the final admission. After
-provider-free checks and independent review, request paid approval for the exact
-admission digest, source, selected scope, one integrated CPU/GPU attempt and budget.
-Only that later approval authorizes:
+Refresh the scoped quote if required when reviewing each exact admission. After
+provider-free checks and independent review, retain the admission digest, source,
+selected scope, one integrated CPU/GPU attempt and budget. The user's subsequent
+explicit bounded iteration authorization covers reviewed distinct attempts within
+that scope; do not ask again for the same authority. Execution uses:
 
 ```bash
 python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml --qualify-metrics <private-directory>/admission.json --qualification-sha256 <reviewed-sha256> --modal-profile synaptic-labs --modal-environment synaptic-smoke-v1 --json
@@ -343,7 +344,8 @@ bytes and private-state-root modes provider-free before consuming claims or
 provisioning, and retain source/runtime pins. Existing derived-image helpers
 validate/copy already-present artifacts; they do not supply the missing preparation
 capability. Implement and review the checked-in preparation surface before a new
-clean source/admission or a request for separately scoped paid approval. Do not
+clean source/admission. The later bounded iteration authorization below supersedes
+the former requirement to request another approval for each reviewed fresh attempt. Do not
 remove claims, invent another state root or rotate attempt identifiers to replay
 this approved attempt, and do not delete or adopt its resources without authority.
 
@@ -360,7 +362,9 @@ are not deleted or adopted by this authorization.
 The next implementation target is automatic hash-pinned bootstrap preparation on
 the normal path, with private-root and actual local-input/source validation before
 claims/provisioning. A fresh clone must not depend on undocumented wheel files or
-operator package installs. Verification must reject missing/corrupt inputs, unsafe
+operator package installs. An empty cache normally acquires exact pinned artifacts; missing means inputs
+still unresolved after preparation, such as an unavailable offline cache.
+Verification must reject unresolved/corrupt inputs, unsafe
 private-root modes and dirty/mismatched source before provider effects while
 preserving exact launcher/runtime pins. This remains an acceptance target until
 its implemented workflow and evidence are recorded.

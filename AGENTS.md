@@ -61,7 +61,8 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 - For an explicitly authorized reliability cycle, finish the reusable fix rather
   than accumulating unrelated features: a cold checkout must automatically prepare
-  the pinned bootstrap inventory on the normal path; missing/corrupt inputs,
+  the pinned bootstrap inventory on the normal path (an empty cache normally
+  fetches exact pins); unresolved inputs after preparation or corrupt artifacts,
   unsafe private-root permissions and dirty/mismatched source must reject before
   provider effects. Verify exact local launcher/runtime pins. Acceptance requires
   at least two completed bounded live metrics qualification runs on the same final
