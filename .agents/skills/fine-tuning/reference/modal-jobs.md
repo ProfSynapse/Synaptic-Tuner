@@ -1489,8 +1489,21 @@ retention is not coordinator/Foundation restart recovery or submission authority
 See `docs/plans/training-progress-streaming.md` for exact protocol limits and the
 bounded synthetic live qualification proposal, and
 `docs/plans/api-v1-integration-handoff.md` for the consumer journey assessment.
-A restricted qualification composition is still an implementation/review gate:
-normal consumers must not bypass the disabled descriptor, and neither standalone
-`train --qualify` CPU proof nor minimal `--mode qualify-training` native
-training/artifact qualification proves public pre-completion metrics. Keep logs
-disabled until the new live transport evidence and independent review pass.
+Restricted `train --qualify-metrics <admission.json> --qualification-sha256 <digest>`
+uses a separate composition for one exact reviewed synthetic attempt; ordinary
+consumers still must not bypass the disabled descriptor. Generate the canonical
+candidate through `train --plan --metrics-qualification-attempt` with expected
+account/workspace, named profile/environment and a private output outside the
+checkout, after the final clean integrated commit. Reuse the documented fixture
+and exact parser flags in the streaming plan. Bind source/profile/build intent,
+compiled workload/configuration, prepared data, provider scope and step/time/cost
+limits before effect authority. No fake source SHA, fresh-attempt escape or
+automatic replay is allowed. Paid execution requires approval for that exact
+admission and scope; planning is non-authorizing.
+
+The finite delivery ledger requires new numeric records bracketed by exact-call
+pending observations plus terminal native artifact verification. A
+`delivered_precompletion` result still reports transport and partial-write
+qualification false. Keep ordinary logs disabled pending the separate live
+transport evidence and independent review. Neither standalone `train --qualify`
+CPU proof nor minimal native `--mode qualify-training` proves these metrics.

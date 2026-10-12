@@ -49,11 +49,12 @@ training. A failed local write/fsync can leave a valid prefix and a partial
 trailing line; there is no automatic repair or reopen. No manuscript
 text, credentials or arbitrary remote exception text belongs in this lane.
 
-The [bounded qualification proposal](training-progress-streaming.md#bounded-live-qualification-proposal-2026-10-12)
-identifies an implementation gate before paid approval: a restricted, reviewed
-qualification composition must exercise public logs without advertising that
-unqualified capability to ordinary consumers. Existing CPU and native-training
-qualification modes do not yet provide that operation.
+The [bounded qualification proposal](training-progress-streaming.md#restricted-live-qualification-workflow-2026-10-12)
+now describes the restricted `train --qualify-metrics` operation and its exact
+canonical admission. Ordinary composition remains disabled. Its synthetic fixture
+and provider-free checks establish local readiness for review, not live transport
+qualification or paid approval. Existing CPU and native-training modes retain
+their narrower purpose.
 
 The current standalone route creates nonce-unique apps and Volumes for each
 attempt. The fixed-name restrictions of the older minimal `examples/modal_chat`
@@ -97,7 +98,9 @@ are provider-free evidence unless the row identifies retained live qualification
 | Lifecycle | Generic coordinator/Foundation and consumer-owned catalogs; public observe/outcome/verification composition. | Modal cancel/reconcile/cost-quote remain disabled. Standalone journals prevent replay but do not restore all in-memory workflow state. Multi-user service persistence, browser sessions and product lifecycle UX are host integration work. |
 
 Proceed with provider-free integration and independent review of metric retention.
-Then implement/review the restricted qualification operation, prepare its exact
-synthetic recipe and current budget evidence, and obtain approval for that bounded
-attempt. Enable public logs only after the retained live evidence and review pass.
+Review the implemented restricted qualification operation and synthetic fixture,
+generate admission from the final clean integrated source, obtain current scoped
+budget evidence and approval for the exact bounded attempt. A pre-completion
+delivery result alone does not qualify partial writes or promote public logs;
+retain that separate live transport/review gate.
 Dataset transformation and four-model comparison remain paused.

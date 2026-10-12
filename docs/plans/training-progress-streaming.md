@@ -148,54 +148,65 @@ line; there is no automatic repair/reopen. `retained_records` counts the accepte
 in-memory prefix and can differ from crash-durable content after fsync failure.
 Once created, `records_path` remains reported even if no full record was retained.
 
-## Bounded live qualification proposal (2026-10-12)
+## Restricted live qualification workflow (2026-10-12)
 
-This is a reviewable proposal, not an executable approval or an already
-implemented qualification mode. The public Modal registration still advertises
+The checked-in restricted operation below is provider-free implemented and
+reviewable. Its fixture and limits remain candidates for separate paid approval;
+no live metrics qualification has been performed. The ordinary Modal registration advertises
 `logs: false`. Ordinary consumers must honor that descriptor. Turning it on to
 make a smoke run work would advertise an unqualified capability.
 
 ### Implementation and admission gate
 
-Extend the existing checked-in qualification workflow with a separately reviewed,
-restricted metrics qualification operation. Reuse its exact-source build, CPU
-receipt, retained deployment/call binding, host-owned authority and one-shot
-attempt journal. Do not introduce an alternate launcher, direct Volume probing,
-provider-specific public logs verb, or runtime secret channel. Existing
-`examples/modal_chat/launch.py --mode qualify-training` qualifies native training
-and artifacts; it does not supply this metrics operation. Standalone
-`train --qualify` is a CPU self-check and cannot qualify GPU metric delivery.
+`train --qualify-metrics` extends the existing standalone workflow with an exact
+canonical admission and reviewed SHA-256. It reuses the exact-source build,
+integrated CPU receipt, retained deployment/call binding, host-owned authority
+and one-shot attempt journal. The separate qualification composition verifies
+its admission and durable claim before exposing the existing public
+`RunsAPI.logs` within that attempt. Ordinary composition continues to reject
+qualification authority and advertises logs disabled. There is no new engine
+logs verb, direct Volume probe or private reader fallback in normal training.
 
-The proposed operation must admit only an exact reviewed source/configuration,
-synthetic fixture digest, selected provider/environment and bounded attempt.
-Its isolated qualification host may compose the existing public `RunsAPI.logs`
-reader under explicit qualification authority, while ordinary host descriptors
-remain disabled. Review this composition and its separation from production
-capability advertisement before implementation. All reads must retain the
-submitted assessment and current Foundation revalidation. No disabled-capability
-fallback to a private reader is permitted in normal training.
+The candidate binds the final clean engine commit, profile and build-intent
+hashes, compiled workload/configuration and prepared-data/content digests,
+expected account/workspace, selected profile/environment, exact one-shot attempt,
+GPU count and finite step/time/cost limits. The reviewed bytes are checked before
+credentials or build/CPU/GPU effects; expected live provider scope is checked
+before runtime preparation. A durable global claim consumes the attempt even
+when a later outcome is uncertain. `--fresh-attempt` is rejected for this mode.
+Do not change the attempt reference to reinterpret a failed submission as retry.
 
-The provider-free barrier and independent review must first cover this admission,
-absence of production activation, signed readback, delayed visibility, torn tails,
-canonical conflicts, telemetry failure isolation, bounded polling and consumed
-claims. If the operation cannot preserve those boundaries, stop at this gate.
-A later successful live receipt and review authorize a separate capability change;
-a smoke submission alone cannot turn on logs.
+Candidate generation is part of the provider-free `train --plan` surface. It
+writes create-only canonical bytes to an existing owner-private directory outside
+the engine checkout, reports their SHA-256 and `execution_authorized: false`, and
+makes no cloud calls. Generate after integrating and reviewing all source edits,
+not from a dirty worktree or a circular checked-in source-SHA manifest. There is
+no checked-in paid admission for the synthetic fixture.
+
+The provider-free barrier and independent review cover admission/scope binding,
+ordinary capability isolation, public authenticated readback, bounded persistence,
+delayed/torn-tail rejection, pending observations bracketing reads, finite ledger
+and consumed claims. Existing `train --qualify` remains CPU-only, and minimal
+`examples/modal_chat/launch.py --mode qualify-training` remains native
+training/artifact qualification; neither substitutes for this operation. All
+reads retain the submitted assessment and current Foundation revalidation.
 
 ### Fixture and bounded configuration
 
-Use newly authored harmless synthetic messages (for example short greetings and
-arithmetic explanations), with explicit disjoint train/validation rows, declared
-lineage and an immutable prepared-data digest. Use the existing
-`python tuner.py prepare-dataset --config <reviewed-config.json> --json` surface
-and review representative complete rows plus split counts. Public sanitized
+The concrete [synthetic fixture](../../examples/training_metrics_fixture/README.md)
+contains eight harmless question/answer pairs with declared context/target lineage,
+complete-document order and an explicit six-train/two-validation sequence-tail
+split. Its checked-in ingestion/preparation configs use the existing CLI; all
+eight complete prepared rows and the CPU-only pinned-tokenizer mask check were
+reviewed. Local evidence and exact bundle/dataset/content digests live beside the
+fixture. Rebuild using its README; generated publications remain under `.tracking/`. Public sanitized
 fixtures under `tests/fixtures/training_product/modal_live_v1/substitutes` are
 artifact placeholders, not training data or authenticated live evidence. Existing
 Qwen smoke recipes reference private prepared data and must not be launched as-is.
 
 Select an already qualified exact model/runtime profile and retain its model and
 tokenizer revisions, recipe/render choices, image inventory and source locks.
-A proposed dedicated recipe uses `observation_capture.every_n_steps: 1`,
+The dedicated `Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml` uses `observation_capture.every_n_steps: 1`,
 `observation_capture.max_records: 32`, `training.max_steps: 32`, one accelerator,
 and `job.timeout_seconds: 900`, with post-training evaluation omitted. These are
 experiment limits for review, not evidence that 32 steps last long enough for a
@@ -213,16 +224,36 @@ before choosing the exact minor-unit threshold. Do not quote historical prices
 or imply the ceiling is technically enforced. A cancel is a separately approved
 provider action; timeout or a failed watcher alone grants no cancel/replay authority.
 
-Existing local planning and read-only rate surfaces, after a concrete reviewed
-recipe exists, are:
+From the final clean integrated engine checkout, rebuild the fixture, review the
+plan and generate one admission outside the checkout. The selected names below
+were confirmed by read-only discovery for this machine: profile/account/workspace
+`synaptic-labs`, existing environment `synaptic-smoke-v1`. Revalidate actual scope
+before execution. Substitute an unused private output path and the reviewed
+attempt reference; placeholder values are not a runnable approval.
 
 ```bash
-python tuner.py train --job-config <reviewed-recipe.yaml> --plan --json
-python tuner.py train --job-config <reviewed-recipe.yaml> --quote --modal-profile <name> --modal-environment <name> --json
+python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml --plan --json
+python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml --plan --metrics-qualification-attempt <reviewed-attempt> --qualification-account synaptic-labs --qualification-workspace synaptic-labs --qualification-output <private-directory>/admission.json --modal-profile synaptic-labs --modal-environment synaptic-smoke-v1 --json
 ```
 
-Neither command proves live transport. The future qualification invocation must
-be documented from its implemented parser/help before paid approval is requested.
+Review the complete canonical admission and returned digest. A later read-only
+rate observation uses the existing surface, separately from candidate generation:
+
+```bash
+python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml --quote --modal-profile synaptic-labs --modal-environment synaptic-smoke-v1 --json
+```
+
+No rate query or cloud execution was performed in this implementation. After
+provider-free checks and independent review, request paid approval for the exact
+admission digest, source, selected scope, one integrated CPU/GPU attempt and budget.
+Only that later approval authorizes:
+
+```bash
+python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml --qualify-metrics <private-directory>/admission.json --qualification-sha256 <reviewed-sha256> --modal-profile synaptic-labs --modal-environment synaptic-smoke-v1 --json
+```
+
+The effectful launcher remains CPython 3.11.14 with Modal SDK 1.5.4 and its
+hash-pinned closure; a globally available newer discovery CLI is not a substitute.
 For the standalone packaged route, preserve the exact clean engine commit and
 reviewed source-wheel build; `prepare_current_source_wheel` explicitly builds
 without a customer repository. The clean pushed host superproject/exact engine
@@ -235,10 +266,24 @@ remain prerequisites. Preserve fresh attempt resources and any failures.
 
 Retain a bounded chronological ledger of public page requests, receipt times,
 cursors, canonical record digests and the exact provider call's pending/terminal
-observations, with source/configuration/profile and fixture digests. Acceptance
-requires at least two distinct authenticated numeric observations returned by
-`RunsAPI.logs` while that same call is independently observed pending. A final
+observations, with source/configuration/profile and fixture digests. The delivery verdict
+requires at least two distinct newly persisted authenticated numeric observations
+returned by `RunsAPI.logs`, bracketed by pending observations of that exact call
+before and after the read, and successful terminal native artifact verification. A final
 training_metrics artifact or points first read after completion does not pass.
+The finite private ledger binds the admission, run, exact provider call, receipt
+time, cursors, closed read status, new record digests and pending/terminal states.
+The JSON result reports `delivered_precompletion`, `inconclusive` or
+`evidence_invalid`; CLI success requires delivered plus acknowledged durable
+report publication. The ledger compares bounded retained JSONL bytes against its
+accepted canonical records before a delivery verdict. Saved report bytes are
+provisional (`durability_acknowledged: false`); only the returned digest-bound
+result acknowledges successful report write/fsync with
+`durability_acknowledged: true` and `report_sha256`. A saved report alone cannot
+establish that acknowledgment after interruption or fsync failure.
+`transport_qualified` and
+`partial_write_behavior_qualified` always remain false. A delayed first read,
+insufficient points or invalid local evidence cannot promote ordinary logs.
 Repeat the retained cursor across empty/end pages and show growing pages produce
 one locally retained record per run/sequence, with canonical-byte equality on
 replay. Compare the retained file and public projected records by digest.
