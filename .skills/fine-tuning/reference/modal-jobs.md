@@ -1474,7 +1474,7 @@ been replaced by `tuner/training/contracts.py`, with reviewed importer hashes.
 ## API v1 metric-consumer readiness (2026-10-12)
 
 Optional signed numeric progress and public readback are implemented; ordinary
-Modal composition still advertises `logs: false`. The standalone wait loop uses
+Modal composition enables logs only with an exact matching, durably retained reader-issued CPU transport proof; absent, invalid or inconclusive proof advertises `logs: false`. The standalone wait loop uses
 the public logs consumer only when capture is configured and the selected
 descriptor advertises logs.
 It retains the last non-null cursor, deduplicates run/sequence by canonical bytes,
@@ -1491,7 +1491,7 @@ bounded synthetic live qualification proposal, and
 `docs/plans/api-v1-integration-handoff.md` for the consumer journey assessment.
 Restricted `train --qualify-metrics <admission.json> --qualification-sha256 <digest>`
 uses a separate composition for one exact reviewed synthetic attempt; ordinary
-consumers still must not bypass the disabled descriptor. Generate the canonical
+consumers must honor the descriptor and its per-call CPU proof gate. Generate the canonical
 candidate through `train --plan --metrics-qualification-attempt` with expected
 account/workspace, named profile/environment and a private output outside the
 checkout, after the final clean integrated commit. Reuse the documented fixture
@@ -1508,10 +1508,91 @@ submission as replay or relax exact pins.
 The finite delivery ledger requires new numeric records bracketed by exact-call
 pending observations plus terminal native artifact verification. A
 `delivered_precompletion` result still reports transport and partial-write
-qualification false. Keep ordinary logs disabled pending the separate live
-transport evidence and independent review. Neither standalone `train --qualify`
-CPU proof nor minimal native `--mode qualify-training` proves these metrics.
+qualification false. The separate CPU SDK pair qualifies only bounded
+complete-byte transport, with logs conditional on exact per-call proof. Core-only
+`train --qualify` or minimal native `--mode qualify-training` does not prove
+these metrics.
 
+
+## CPU progress-transport qualification
+
+The optional CPU transport probe reuses the existing self-check: select
+`observation_capture` in the reviewed recipe and use the normal supported
+bound-v2 standalone route or its CPU-only command:
+
+```bash
+python tuner.py --env-file <authorized-env-file> train --job-config <reviewed-modal-recipe.yaml> --qualify --modal-profile <named-profile> --modal-environment <existing-environment> --json
+```
+
+There is no additional qualification flag, separate deployment lifecycle or
+GPU/retraining submission. Normal local preparation and exact launcher/source
+checks still apply; `--qualify` may build/deploy the reviewed runtime and invoke
+its one CPU self-check. The call remains 1 CPU, 512 MiB, 120 seconds, no GPU,
+blocked workload network access and zero retries. The shared host observation
+window is at most 180 seconds, including waiting; individual SDK reads are
+bounded by its remaining deadline. Operator authorization still binds the exact
+reviewed scope and finite effects; missing evidence never grants replay.
+
+Absent capture or an unsupported runtime preserves the original CPU lane and
+omits the optional `transport_qualification` result. For a selected supported
+probe, that result reports closed `status`, `capture_path`, `capture_sha256` and
+optional `verification`. These JSON fields are evidence summaries, not an
+execution grant or a replacement for typed proof. The original authenticated
+CPU receipt is mandatory and publishes before the optional probe. Invalid
+primary marker/root/runtime admission or an invalid core receipt rejects.
+After a valid core proof, finite optional probe/read/retention/verification
+failures leave logs disabled; they do not manufacture a successful transport
+proof or automatically replay the call.
+
+The host claims a fresh 32-byte marker before create-only upload and exact
+readback. Its name/hash and exact runtime/deployment enter the signed CPU
+dispatch. Initial marker authentication and retained bound-root identity remain
+mandatory. Probe schema v2 explicitly selects `modal_sdk_create_only/v1`:
+complete immutable canonical bytes use the production parent SDK adapter's
+exact existing v1 Volume/client, `batch_upload(force=False)` and mode 0600.
+There are no filesystem stages, manifests or rename fallback. The isolated
+trainer remains credential-free; this does not change the workload network policy.
+
+Eight synthetic numeric fixtures plus one fixture-exhausted record are CPU
+transport evidence, not a training outcome. Bounds remain 8 KiB per leaf,
+64 KiB/100 entries per page, 180 polls/180 host seconds, a 1 MiB ledger and
+20 seconds of final observation hold within the original 120-second CPU call.
+Each SDK operation uses at most five seconds of the remaining deadline. Exactly
+one intentional differing-byte collision uses a fresh adapter instance; it must
+fail create-only. The CPU performs publication only: collision preservation is
+verified by the host's pending canonical reads and post-completion exact inventory
+and hashes, without a redundant remote SDK read. Pinned Modal 1.5.4 `read_file`
+uses `VolumeGetFile2` and HTTP download URLs even for small payloads; do not relax
+blocked workload network access or substitute legacy RPC calls. Failed or uncertain attempts
+consume their claims without retry, adoption or cleanup.
+
+Accepted complete record pages require the same exact call pending before and
+after, with the terminal receipt absent on both sides. The signed terminal
+receipt is then published on the control Volume and explicitly committed. After
+actual function completion the host rechecks all nine final files, exact inventory,
+sizes, canonical signed contents and hashes, including collision preservation.
+Local monotonic times describe observations, not synchronized provider latency.
+Receipt absence does not establish remote commit-start timing. These facts do
+not prove rename atomicity, background commits, atomic server transactions,
+freshness or completeness of a production history.
+
+The reader returns sealed process-local capture and verification objects, checks
+immutable payload witnesses, reconstructs chronological ledger facts, and binds
+the core CPU receipt, release/deployment, exact call, probe, capture and signed
+terminal-receipt digests. Durability acknowledgment requires exact fsynced host
+retention/readback. Composition requires the exact matching sealed proof; a
+caller dictionary, Boolean, dataclass payload replacement or retained JSON cannot
+enable logs. There is no JSON rehydration or restart authority. Missing, invalid
+or inconclusive proof keeps the descriptor's logs capability false.
+
+CPU attempts 05/06 passed on unchanged source
+`9252e924985b7bf41430e57eb49429f4501b59bf`, each with nine complete fixtures,
+exact-call pending/terminal-absent observations, collision preservation and
+post-completion inventory verification. See the exact evidence in
+`docs/plans/training-progress-streaming.md`. Logs remain conditional on a fresh
+matching per-call proof; these historical results are not global authority. Earlier GPU attempts 03/04 retain their narrower exact-source metric
+delivery/artifact evidence in `docs/plans/training-progress-streaming.md`; they
+do not retrospectively qualify this new CPU publication path.
 
 ## Standalone local preparation and cold cache
 
@@ -1553,7 +1634,7 @@ and do not authorize replay.
 Build claims bind each execution attempt, so separate normal executions do not
 share one source-wide consumed claim. This does not resume a failed attempt:
 retain its claims/resources and use only a separately reviewed admission for
-restricted metrics qualification. Ordinary logs remain disabled. The bounded
+restricted metrics qualification. Ordinary logs require the separate exact per-call CPU proof. The bounded
 two-run acceptance below was met by independently accepted
 `metrics-20261012-03` and `metrics-20261012-04` on unchanged source
 `01383fa81c8ed3847903095456e9b80350cd28a6`: each delivered 32 numeric records

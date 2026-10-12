@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
-from dataclasses import fields
+from dataclasses import fields, replace
 import hashlib
 import json
 from pathlib import Path
@@ -141,6 +141,39 @@ def _worker(tmp_path: Path, *, executor=None):
         roots=roots,
     )
     return binding, dispatch, worker, executor, signer, roots
+
+
+def test_unbound_capture_disables_only_telemetry_and_preserves_training_completion(tmp_path, monkeypatch):
+    import tests.training.test_packaged_execution_material as fixtures
+    import tests.execution.providers.test_modal_packaged_binding as bindings
+    from tuner.training.contracts import CanonicalDocument
+    from tuner.training.packaged_compilation import compile_packaged_sft_workload
+    original = fixtures.packaged_fixture
+
+    def captured_fixture():
+        training, components = original()
+        config = components.resolved_config.to_dict()
+        config["observation_capture"] = {
+            "schema_version": "synaptic-training-observation-capture/v1",
+            "every_n_steps": 1, "max_records": 2,
+        }
+        document = CanonicalDocument.from_mapping(config)
+        compiled = compile_packaged_sft_workload(resolved_config=document)
+        execution = fixtures.rebound(components.execution_source,
+            workload_digest=compiled.fingerprint,
+            configuration_digest=compiled.document["configuration"]["digest"])
+        return training, replace(components, resolved_config=document, execution_source=execution)
+
+    monkeypatch.setattr(fixtures, "packaged_fixture", captured_fixture)
+    monkeypatch.setattr(bindings, "packaged_fixture", captured_fixture)
+    _, dispatch, worker, executor, signer, roots = _worker(tmp_path)
+    result = worker(dispatch, "fc-1", commit_artifacts=lambda: None, commit_control=lambda: None)
+    assert result["status_code"] == "completed"
+    assert len(executor.calls) == 1
+    assert "on_metric_frame" not in executor.calls[0]
+    assert "on_metric_exhausted" not in executor.calls[0]
+    assert not list(roots.control.glob("progress-v1-*"))
+    assert all(purpose != "modal-packaged-progress/v1" for purpose, _, _ in signer.calls)
 
 
 class _BoundVolume:

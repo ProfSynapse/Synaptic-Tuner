@@ -82,6 +82,7 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
             return details
     qualification = {
         "FIXTURE_STAGE": ("UNAVAILABLE", "modal_host_qualification.stage_fixture"),
+        "TRANSPORT_MARKER_STAGE": ("UNAVAILABLE", "modal_host_qualification.stage_transport_marker"),
         "DISPATCH_SUBMIT": ("INDETERMINATE", "modal_host_qualification.submit_once"),
         "DISPATCH_FUNCTION_IDENTITY": (
             "UNAVAILABLE", "modal_runtime_qualification_operator.function_identity"),

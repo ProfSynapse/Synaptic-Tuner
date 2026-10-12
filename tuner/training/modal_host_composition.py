@@ -46,6 +46,55 @@ class ModalPackagedReferenceHostV1:
         return self.composition.api()
 
 
+def _transport_logs_authorized(qualification, effects, components):
+    """Only an exact same-process, durably retained CPU transport proof grants logs."""
+    if qualification is None:
+        return False
+    from tuner.training.modal_host_qualification import ModalHostCPUQualificationV1
+    from tuner.training.modal_host_effects import ModalPackagedHostEffectsV1
+    if type(qualification) is not ModalHostCPUQualificationV1:
+        raise ValueError("exact CPU qualification required")
+    if qualification.transport_verification is None:
+        return False
+    from tuner.execution.providers.modal.runtime_release_qualification_reader import ModalCPUTransportVerificationV1
+    from tuner.execution.providers.modal.runtime_release_qualification import (
+        ModalCPUTransportProbeV1, ModalRuntimeReleaseQualificationReceiptV1,
+    )
+    from tuner.execution.providers.modal.runtime_release_deployment import ModalRuntimeReleaseDeploymentFactsV1
+    from tuner.execution.providers.modal.packaged_binding import ModalPackagedRuntimeFactsV1
+    proof = qualification.transport_verification
+    if type(proof) is not ModalCPUTransportVerificationV1:
+        raise ValueError("exact CPU transport verification required")
+    document = proof.to_dict()
+    if document.get("status") != "passed" or document.get("durability_acknowledged") is not True:
+        return False
+    if (type(effects) is not ModalPackagedHostEffectsV1
+            or type(qualification.receipt) is not ModalRuntimeReleaseQualificationReceiptV1
+            or type(qualification.deployment_facts) is not ModalRuntimeReleaseDeploymentFactsV1
+            or type(qualification.transport_probe) is not ModalCPUTransportProbeV1):
+        raise ValueError("CPU transport composition binding invalid")
+    receipt, deployment = qualification.receipt, qualification.deployment_facts
+    if (deployment.schema_version != "synaptic-modal-runtime-release-deployment-facts/v2"
+            or effects._facts != ModalPackagedRuntimeFactsV1.from_release_deployment(deployment)
+            or qualification.runtime_release_digest != effects._release.manifest_digest
+            or components.execution_source.runtime_release_digest != effects._release.manifest_digest
+            or qualification.deployment_facts_digest != deployment.facts_digest
+            or receipt.deployment_facts_digest != deployment.facts_digest
+            or qualification.provider_call_id != receipt.provider_call_id
+            or qualification.output_sha256 != receipt.output_sha256
+            or qualification.training_executed is not False or qualification.gpu_qualified is not False
+            or document.get("core_receipt_sha256") != hashlib.sha256(receipt.canonical_bytes).hexdigest()
+            or document.get("dispatch_digest") != receipt.dispatch_digest
+            or document.get("provider_call_id") != receipt.provider_call_id
+            or document.get("runtime_release_digest") != effects._release.manifest_digest
+            or document.get("deployment_facts_digest") != deployment.facts_digest
+            or document.get("probe") != qualification.transport_probe.to_dict()
+            or document.get("capture_sha256") != qualification.transport_capture_sha256
+            or document.get("training_executed") is not False or document.get("gpu_qualified") is not False):
+        raise ValueError("CPU transport composition binding invalid")
+    return True
+
+
 def _compose_modal_packaged_reference_host(
     *, adapter: ModalPackagedComposition, effects: object,
     prepared_request: object, run: object, components: object,
@@ -54,6 +103,7 @@ def _compose_modal_packaged_reference_host(
     profile_digest: str, quote_digest: str,
     maximum_cost_minor_units: int,
     qualification_admission=None,
+    cpu_qualification=None,
 ) -> ModalPackagedReferenceHostV1:
     """Compose only from already-captured and admitted packaged material.
 
@@ -117,7 +167,8 @@ def _compose_modal_packaged_reference_host(
             raise ValueError("metrics_qualification_binding_invalid")
     descriptor = ProviderDescriptor(
         "synaptic-provider-descriptor/v1", "modal", "Modal packaged training",
-        "0.1.0", ProviderCapabilities(True, qualification_admission is not None, False, False, True, False),
+        "0.1.0", ProviderCapabilities(True, qualification_admission is not None or
+            _transport_logs_authorized(cpu_qualification, effects, components), False, False, True, False),
     )
     executor = adapter.effect_executor
     reconciliation = adapter.reconciliation_adapter
@@ -192,7 +243,7 @@ def _compose_modal_packaged_reference_host(
 
 
 def compose_modal_packaged_reference_host(**kwargs):
-    """Ordinary training never accepts qualification authority or enables logs."""
+    """Ordinary logs require a matching, verified and durably retained CPU proof."""
     if "qualification_admission" in kwargs:
         raise TypeError("qualification authority requires the restricted composition")
     return _compose_modal_packaged_reference_host(**kwargs)

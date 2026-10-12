@@ -30,6 +30,7 @@ def run_runtime_release_self_check(dispatch_bytes: bytes) -> dict[str, object]:
         from tuner.execution.providers.modal.runtime_release_deployment import (
             ModalRuntimeReleaseDeploymentObservationV1,
         )
+        from tuner.execution.providers.modal.packaged_progress import ModalSDKProgressPublication
         from tuner.execution.providers.modal.runtime_release_qualification import (
             QUALIFICATION_HMAC_ENV_KEY,
             ModalRuntimeQualificationHmacAuthenticator,
@@ -107,6 +108,9 @@ def run_runtime_release_self_check(dispatch_bytes: bytes) -> dict[str, object]:
                 dispatch_bytes,
                 commit_artifacts=handles["artifacts"].commit,
                 commit_control=handles["control"].commit,
+                **({"publication_factory": lambda binding, prefix, deadline: ModalSDKProgressPublication(
+                    binding=binding, volume=handles["control"], client=client,
+                    prefix=prefix, deadline=deadline)} if dispatch.transport_probe is not None else {}),
             )
         except BaseException:
             return failed

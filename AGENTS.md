@@ -59,6 +59,37 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- CPU progress-transport qualification reuses the existing `train --qualify`
+  and normal captured-runtime self-check, selected by recipe `observation_capture`
+  for the supported bound-v2 runtime. Do not add a parallel CLI, deployment or
+  training attempt to obtain this proof. Preserve the mandatory original CPU
+  receipt and its absent-probe canonical bytes; the optional synthetic probe
+  runs in the same fixed 1-CPU/512-MiB/120-second call without GPU training.
+  Claim fresh marker authority before create-only staging; authenticate the
+  exact marker, release, deployment, provider scope and call. Primary root or
+  CPU admission failure rejects; an unavailable/inconclusive optional probe
+  leaves logs disabled and does not replace a valid core CPU proof.
+- The CPU probe explicitly selects the production Modal SDK create-only strategy:
+  complete canonical bytes through the exact authenticated v1 Volume/client,
+  `batch_upload(force=False)` and mode 0600. Do not switch strategies after a
+  failure or claim rename atomicity. Require one intentional SDK collision to
+  preserve original bytes, complete record pages bracketed by pending states of
+  the same exact call and terminal-receipt absence, then exact final inventory
+  and hashes after call completion and the later control-Volume receipt commit.
+  The CPU publishes only; host pending reads and post-completion exact inventory
+  and hashes verify collision preservation. Do not add remote SDK HTTP readback,
+  relax blocked workload network access or bypass the pinned SDK with legacy RPC.
+  Initial marker authentication and retained root identity remain mandatory.
+  Persist and read back the bounded host ledger before acknowledging durability;
+  only exact sealed process-local verification matching the core receipt,
+  runtime/deployment, call, probe and capture digest may pass the logs gate.
+  Dictionaries, JSON readback and replaced payloads cannot mint that authority.
+  Preserve finite bounds and the original deadline. This proves the observed
+  complete-byte delivery and post-commit preservation, not atomic server
+  transactions, background-commit timing, freshness/completeness, restart
+  recovery or success on every future invocation.
+
+
 - For an explicitly authorized reliability cycle, finish the reusable fix rather
   than accumulating unrelated features: a cold checkout must automatically prepare
   the pinned bootstrap inventory on the normal path (an empty cache normally
@@ -77,7 +108,8 @@ This repository has a few cloud-training constraints that are easy to relearn th
   provider scope, single one-shot attempt and finite step/time/cost bounds in a
   canonical admission before credentials or effects. Generate the candidate from
   the existing local planning CLI after the final integrated commit; do not check
-  in fake or circular source-SHA approvals. Keep ordinary logs disabled. A
+  in fake or circular source-SHA approvals. Restricted metrics evidence alone
+  cannot enable ordinary logs; require the separate exact per-call CPU proof. A
   `delivered_precompletion` verdict requires newly persisted numeric records
   bracketed by the exact call's pending observations and final native artifact
   verification; it does not qualify partial writes, completeness/freshness,

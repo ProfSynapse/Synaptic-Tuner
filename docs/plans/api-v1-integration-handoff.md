@@ -90,7 +90,7 @@ records before completion with acknowledged durable reports and five verified
 native artifacts. This meets the bounded fixture's two-run acceptance condition;
 this later documentation-only commit does not change the source that was tested.
 
-## Metrics: restricted delivery qualified, ordinary logs disabled
+## Metrics: restricted GPU evidence and conditional CPU-backed logs
 
 See [training-progress-streaming.md](training-progress-streaming.md) for the
 existing numeric observation contract, signed transport and limitations.
@@ -98,16 +98,15 @@ existing numeric observation contract, signed transport and limitations.
 - The standalone host now admits the shared `PROGRESS_PURPOSE` for verification
   of remote signed progress. Its regression test also rejects unknown signing
   purposes. This does not enable the provider logs capability.
-- Modal's public logs capability remains disabled.
+- Modal logs are enabled only by an exact matching, durably retained reader-issued CPU transport proof; missing, invalid or inconclusive proof keeps logs disabled.
 - The standalone launch loop consumes public log pages while pending only when
   capture is configured and the selected provider advertises logs. Modal
-  currently skips that consumer.
+  uses that consumer only when the per-call CPU proof passes the composition gate.
   The consumer retains the last non-null cursor, checks canonical bytes on
   duplicate run/sequence records and writes private per-run JSONL evidence.
 - Attempts 03 and 04 completed independently accepted restricted delivery proofs
   on the same source with acknowledged durable publication and native artifact
-  verification. Live partial-record handling and ordinary-log transport
-  qualification remain outstanding.
+  verification on historical source `01383fa8`. The CPU SDK pair below separately qualifies bounded complete-byte transport; live partial-record behavior remains unqualified.
 - Optional telemetry is best-effort; a missing tail is not evidence of zero
   loss, job completion, or permission to replay training.
 
@@ -163,7 +162,7 @@ are provider-free evidence unless the row identifies retained live qualification
 | Configuration | Public `TrainingAPI.load/resolve/plan`; closed Modal recipe/profile mapping and opt-in metric capture. `test_public_training_api_v1.py`, `test_modal_host_requests.py`, `test_modal_standalone_runner.py`, `test_observation_capture_config.py`. | Host supplies source/data/profile/credentials and immutable prepared input. A fresh checkout has no private live authority; candidate model profiles require their own qualification. |
 | Validation | Canonical contracts, source and exact runtime/image binding, prepared-data admission, preflight and unstartable-preflight rejection. | `--plan` is provider-free; `--quote` observes current scoped GPU rates; `--qualify` executes a CPU package proof. None proves GPU/model compatibility, all-in billing bounds or metric delivery. |
 | Submission | Public coordinator start, one-shot durable claim before effects, retained identity and uncertain-response rejection; `test_modal_host_effects.py` and standalone fake transcript. Native attempt H is retained live training evidence for its exact source/configuration. | New source changes require current release/CPU checks. No automatic replay or general restart restoration. The host owns durable grants and full coordinator/Foundation persistence. |
-| Progress | Signed numeric capture and bounded authenticated public projection; `test_modal_packaged_progress.py`, `test_modal_host_progress.py`. Capability-gated consumer retains local records while pending. | Modal `logs` remains false. Attempts 03/04 prove repeated bounded restricted pre-completion delivery with terminal verification on exact source `01383fa8`. Ordinary transport and partial-write behavior remain unqualified. Missing tails do not prove completion or freshness. Browser charts and subscriptions belong to the product host. |
+| Progress | Signed numeric capture and bounded authenticated public projection; `test_modal_packaged_progress.py`, `test_modal_host_progress.py`. Capability-gated consumer retains local records while pending. | Modal `logs` requires exact matching per-call CPU proof; absent/invalid/inconclusive proof is false. GPU attempts 03/04 qualify restricted delivery on `01383fa8`; CPU attempts 05/06 separately qualify bounded SDK complete-byte delivery on `9252e924`. General transport and partial-write behavior remain unqualified. Missing tails do not prove completion or freshness. Browser charts and subscriptions belong to the product host. |
 | Artifacts | `RunsAPI.verify/artifacts/stream`; exact five-artifact terminal inventory, bounded chunking, hash checks and create-only local publication; `test_modal_host_reader.py`, `test_modal_host_download.py`. Native H qualified observe/artifact streaming for its exact attempt. | New source/runtime combinations need revalidation. A local download failure never permits another training submission. Sanitized substitutes are test fixtures, not the observed artifact bytes. |
 | Errors | Closed phase/class/location projections and bounded known identities; hostile exception suppression and preserved consumed claims have regression coverage in `test_modal_host_diagnostic_projection.py` and standalone tests. | Phase evidence locates a boundary; it does not establish cause or grant retry. Product hosts must map these codes into actionable UI while preserving exact diagnostic evidence. |
 | Lifecycle | Generic coordinator/Foundation and consumer-owned catalogs; public observe/outcome/verification composition. | Modal cancel/reconcile/cost-quote remain disabled. Standalone journals prevent replay but do not restore all in-memory workflow state. Multi-user service persistence, browser sessions and product lifecycle UX are host integration work. |
@@ -177,3 +176,15 @@ external provider limitations and broader production requirements explicit. A pr
 delivery result alone does not qualify partial writes or promote public logs;
 retain that separate live transport/review gate.
 Dataset transformation and four-model comparison remain paused.
+
+## CPU SDK transport pair (2026-10-12)
+
+CPU attempts 05/06 passed on unchanged source
+`9252e924985b7bf41430e57eb49429f4501b59bf`: each delivered eight synthetic numeric
+records plus one fixture status while the exact call was pending and the
+terminal receipt absent, then verified the create-only collision and exact final
+inventory after completion/control commit. This CPU-only evidence does not
+requalify GPU training or native artifacts on that source. See the
+[exact CPU evidence](training-progress-streaming.md#accepted-cpu-sdk-transport-evidence-2026-10-12).
+Ordinary logs remain conditional on each run's matching opaque proof and durable
+capture; historical successes or retained JSON do not confer global authority.

@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import sys
 from dataclasses import replace
-from pathlib import Path
 from threading import Event
 
 import pytest
@@ -22,12 +21,18 @@ from tuner.execution.observation_logs import (
     decode_training_progress_log, encode_training_progress_log,
 )
 
-from tuner.execution.providers.modal import mounted_io
 from tuner.execution.providers.modal.packaged_progress import (
     PackagedProgressPublisher, PROGRESS_PURPOSE, ZERO_DIGEST,
-    make_progress_file, parse_progress_file, progress_path,
+    make_progress_file, parse_progress_file, progress_path, progress_root, ModalSDKProgressPublication,
 )
 from tests.execution.providers.test_modal_packaged_reader import _reader
+from tests import test_modal_volume_root_binding as root_tests
+from tests.execution.providers.test_modal_sdk_progress_publication import MemoryVolume
+
+
+@pytest.fixture
+def volume_layout(monkeypatch):
+    yield from root_tests.layout.__wrapped__(monkeypatch)
 
 
 class Auth:
@@ -202,17 +207,19 @@ def test_max_capture_status_is_pageable_at_sequence_10000():
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="mounted_io requires Linux descriptor semantics")
-def test_background_committed_prefix_pages_while_completion_is_absent(tmp_path):
+def test_sdk_published_prefix_pages_while_completion_is_absent(volume_layout, request):
     binding, reader, _, control, _, _ = _reader()
     identity = _identity(binding)
     reader._verifier = Auth()
     effect = identity["effect_id"]
-    root = Path(tmp_path / "control")
-    root.mkdir(mode=0o700)
+    bound = root_tests._bind(volume_layout)
+    request.addfinalizer(bound.close)
+    client = object()
+    volume = MemoryVolume(bound, client)
+    publication = ModalSDKProgressPublication(binding=bound, volume=volume, client=client,
+        prefix=progress_root(effect), deadline=None)
     publisher = PackagedProgressPublisher(
-        **identity,
-        claim_directory=lambda path: mounted_io.claim_directory(root, root / path),
-        write_exclusive=lambda path, raw: mounted_io.write_exclusive(root, root / path, raw),
+        **identity, publish_exclusive=lambda path, raw: publication.publish_exclusive(path, raw, 8192),
     )
     for step in range(1, 4):
         publisher.on_metric_frame(metric(step))
@@ -222,8 +229,8 @@ def test_background_committed_prefix_pages_while_completion_is_absent(tmp_path):
     assert not publisher._thread.is_alive()
     assert not publisher._failed.is_set()
 
-    # The reader sees no local mounted writes until a provider background
-    # commit exposes a stable snapshot through its SDK Volume read methods.
+    # SDK observations can be delayed; an empty read does not prove freshness.
+    # The mocked read snapshots then expose the complete published bytes.
     completion = f"operations/{effect}/evidence/packaged-completion.json"
     control.files.pop(completion)
     control.files.pop(completion.removesuffix(".json") + ".mac")
@@ -234,7 +241,7 @@ def test_background_committed_prefix_pages_while_completion_is_absent(tmp_path):
     assert absent.entries == () and absent.high_watermark_sequence == -1
 
     first_path = progress_path(effect, 0)
-    control.files[first_path] = mounted_io.read_regular(root, root / first_path, 8192)
+    control.files[first_path] = volume.files[first_path]
     partial = reader.read_progress(
         binding, provider_job_ref="fc-1", expected_run=identity["run"],
         after_sequence=None, limit=2, maximum_bytes=4096,
@@ -242,10 +249,9 @@ def test_background_committed_prefix_pages_while_completion_is_absent(tmp_path):
     assert [entry.sequence for entry in partial.entries] == [0]
     assert partial.truncated is False and partial.exhausted is False
 
-    # A background snapshot of a still-writing final leaf is not treated as
-    # an authenticated absent tail. It closes the read instead of exporting it.
+    # A hostile torn final leaf is rejected instead of exported as absent tail.
     torn_path = progress_path(effect, 1)
-    control.files[torn_path] = mounted_io.read_regular(root, root / torn_path, 8192)[:32]
+    control.files[torn_path] = volume.files[torn_path][:32]
     with pytest.raises(ValueError):
         reader.read_progress(
             binding, provider_job_ref="fc-1", expected_run=identity["run"],
@@ -255,7 +261,7 @@ def test_background_committed_prefix_pages_while_completion_is_absent(tmp_path):
 
     for index in range(1, 4):
         path = progress_path(effect, index)
-        control.files[path] = mounted_io.read_regular(root, root / path, 8192)
+        control.files[path] = volume.files[path]
     first = reader.read_progress(
         binding, provider_job_ref="fc-1", expected_run=identity["run"],
         after_sequence=None, limit=2, maximum_bytes=4096,
@@ -300,23 +306,25 @@ def test_background_committed_prefix_pages_while_completion_is_absent(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="mounted_io requires Linux descriptor semantics")
-def test_progress_write_failure_does_not_raise_into_metric_callback(tmp_path):
+def test_progress_write_failure_does_not_raise_into_metric_callback(volume_layout, request):
     binding, _, _, _, _, _ = _reader()
     identity = _identity(binding)
-    root = Path(tmp_path / "control")
-    root.mkdir(mode=0o700)
+    bound = root_tests._bind(volume_layout)
+    request.addfinalizer(bound.close)
+    client = object()
+    volume = MemoryVolume(bound, client)
+    publication = ModalSDKProgressPublication(binding=bound, volume=volume, client=client,
+        prefix=progress_root(identity["effect_id"]), deadline=None)
     calls = []
 
     def fail_second(path, raw):
         calls.append(path)
         if len(calls) == 2:
             raise OSError("private Volume failure")
-        mounted_io.write_exclusive(root, root / path, raw)
+        publication.publish_exclusive(path, raw, 8192)
 
     publisher = PackagedProgressPublisher(
-        **identity,
-        claim_directory=lambda path: mounted_io.claim_directory(root, root / path),
-        write_exclusive=fail_second,
+        **identity, publish_exclusive=fail_second,
     )
     publisher.on_metric_frame(metric(1))
     publisher.on_metric_frame(metric(2))
@@ -324,7 +332,7 @@ def test_progress_write_failure_does_not_raise_into_metric_callback(tmp_path):
     publisher._thread.join(timeout=3)
     assert publisher._failed.is_set()
     assert len(calls) == 2
-    assert mounted_io.read_regular(root, root / calls[0], 8192)
+    assert volume.files[calls[0]]
 
 
 def test_queue_overflow_does_not_claim_capture_budget_exhaustion():
@@ -340,7 +348,7 @@ def test_queue_overflow_does_not_claim_capture_budget_exhaustion():
         written.append(path)
 
     publisher = PackagedProgressPublisher(
-        **identity, claim_directory=lambda path: None, write_exclusive=slow_write,
+        **identity, publish_exclusive=slow_write,
     )
     try:
         publisher.on_metric_frame(metric(1))
