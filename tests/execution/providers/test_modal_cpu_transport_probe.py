@@ -215,6 +215,9 @@ def test_actual_shared_sdk_adapter_one_collision_and_original_preserved(monkeypa
         publisher = ModalSDKProgressPublication(binding=guard, volume=volume, client=client, prefix=prefix, deadline=deadline)
         factories.append(publisher)
         return publisher
+    def no_remote_read(*args, **kwargs):
+        raise AssertionError("CPU publication must not perform SDK readback")
+    monkeypatch.setattr(ModalSDKProgressPublication, "read_final", no_remote_read, raising=False)
     monkeypatch.setattr(qualification.time, "sleep", lambda _: None)
     result = qualification._run_transport_probe(dispatch, binding=binding, signer=auth,
         call_id="fc-probe", deadline=qualification.time.monotonic() + 100, publication_factory=factory)

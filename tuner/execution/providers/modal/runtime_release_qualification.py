@@ -441,8 +441,6 @@ def _run_transport_probe(dispatch, *, binding, signer, call_id, deadline, public
                     raise
             else:
                 raise ValueError("CPU transport collision was not rejected")
-            if publication.read_final(path) != raw:
-                raise ValueError("CPU transport collision changed original bytes")
             collision = {"attempts": 1, "rejected": True, "path": path,
                          "original_sha256": digest}
         leaves.append({"sequence": index, "path": path, "size_bytes": len(raw), "sha256": digest})
