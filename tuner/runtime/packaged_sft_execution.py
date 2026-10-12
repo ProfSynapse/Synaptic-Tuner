@@ -875,7 +875,7 @@ def _invocation_spec(admitted, workload, snapshot, dataset_path, model_snapshot=
         "paths": {name: str(getattr(paths, name)) for name in paths.__dataclass_fields__},
         "environment": list(admitted.environment), "model_snapshot": model_snapshot}
     if metric_fd is not None:
-        if type(metric_fd) is not int or metric_fd <= 2 or "observation_capture" not in config:
+        if type(metric_fd) is not int or not 2 < metric_fd <= 2147483647 or "observation_capture" not in config:
             raise ValueError("PACKAGED_METRIC_TRANSPORT_REJECTED")
         child["metric_fd"] = metric_fd
     child_raw = _canonical(child)
@@ -1414,7 +1414,19 @@ def verify_packaged_sft_artifacts(*, admitted, inventory_bytes, terminal_bytes):
         retained_copy.check()
     finally:
         retained_copy.close()
-    argv, env, _, _, _, final = _invocation_spec(admitted, projection_workload, snapshot, PurePosixPath(dataset_path), lineage["model_snapshot"])
+    # The optional pipe descriptor contributes to the committed child digest.
+    # Authenticate the complete retained transport before reconstructing argv;
+    # omitting the descriptor would reject successful captured executions.
+    child_raw = stable_read(admitted.paths.state / "packaged-child.json", _MAX_CHILD_BYTES)
+    child = _document(child_raw, _MAX_CHILD_BYTES)
+    metric_fd = child.get("metric_fd")
+    if "metric_fd" in child and (type(metric_fd) is not int or not 2 < metric_fd <= 2147483647
+            or "observation_capture" not in config):
+        raise ValueError("PACKAGED_ARTIFACT_REJECTED")
+    argv, env, _, expected_child, _, final = _invocation_spec(admitted, projection_workload, snapshot,
+        PurePosixPath(dataset_path), lineage["model_snapshot"], metric_fd=metric_fd)
+    if child_raw != expected_child:
+        raise ValueError("PACKAGED_ARTIFACT_REJECTED")
     expected_invocation = SimpleNamespace(argv=argv, environment=tuple(sorted(env.items())), cwd=admitted.paths.tmp,
         run_dir=run, final_model_dir=final, tokenizer_dir=final, lineage_path=run / "training_lineage.json")
     expected_evidence = core._build_execution_evidence(projection_workload, expected_invocation, SimpleNamespace(exit_code=0))

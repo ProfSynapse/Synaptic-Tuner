@@ -345,9 +345,84 @@ def test_fake_execution_emits_five_bound_roles_and_terminal(material, seal):
     assert lineage["schema_version"] == seam.LINEAGE_SCHEMA
     assert "execution_source" not in lineage
     assert lineage["trainer_projection"]["lora"]["dropout"] == 0.125
+    assert "metric_fd" not in seam._document((admitted.paths.state / "packaged-child.json").read_bytes())
     assert seam.verify_packaged_sft_artifacts(admitted=admitted, inventory_bytes=result.inventory_path.read_bytes(), terminal_bytes=result.terminal_path.read_bytes())
     with pytest.raises(seam.PackagedSFTExecutionError, match="REVALIDATION"):
         seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare)
+
+
+def test_unconfigured_metric_transport_cannot_be_injected_after_execution(material, seal):
+    admitted = seam.admit_packaged_sft(**material)
+    try:
+        result = seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare, runner=FakeRunner())
+        path = admitted.paths.state / "packaged-child.json"
+        child = seam._document(path.read_bytes())
+        child["metric_fd"] = 13
+        path.write_bytes(seam._canonical(child))
+        with pytest.raises(ValueError, match="PACKAGED_ARTIFACT_REJECTED"):
+            seam.verify_packaged_sft_artifacts(admitted=admitted,
+                inventory_bytes=result.inventory_path.read_bytes(), terminal_bytes=result.terminal_path.read_bytes())
+    finally:
+        admitted.close()
+
+
+@pytest.mark.parametrize("fault", [None, "fd-missing", "fd-null", "fd-bool", "fd-low", "fd-large", "fd-changed", "arguments", "unknown-field"])
+def test_captured_execution_verifies_exact_committed_child_transport(material, seal, monkeypatch, fault):
+    config = seam._document(material["workload_bytes"])["configuration"]["document"]
+    config["observation_capture"] = {
+        "schema_version": "synaptic-training-observation-capture/v1",
+        "every_n_steps": 1, "max_records": 2,
+    }
+    compiled = compile_packaged_sft_workload(resolved_config=CanonicalDocument.from_mapping(config))
+    prior = material["execution_binding"]
+    material["execution_binding"] = PackagedExecutionBindingV1.build(
+        run_ref=prior.run_ref, runtime_release=material["runtime_release"],
+        provider_runtime_binding=material["provider_binding"],
+        prepared_input_ref=prior.prepared_input_ref, prepared_input_revision=prior.prepared_input_revision,
+        prepared_input_content_digest=prior.prepared_input_content_digest,
+        prepared_input_size_bytes=prior.prepared_input_size_bytes, prepared_input_format=prior.prepared_input_format,
+        workload_digest=compiled.fingerprint, configuration_digest=compiled.document["configuration"]["digest"],
+        artifact_policy_digest=prior.artifact_policy_digest,
+    )
+    material["workload_bytes"] = compiled.canonical_bytes
+    seen = []
+
+    def run(invocation, read_fd, write_fd, **kwargs):
+        # The real capture path creates/passes its private pipe and commits the
+        # actual descriptor in child bytes and execution evidence.
+        payload = seam._document((material["paths"].state / "packaged-child.json").read_bytes())
+        assert payload["metric_fd"] == write_fd
+        assert invocation.argv[7] == seam._digest(seam._canonical(payload))
+        seen.append(write_fd)
+        os.close(read_fd)
+        os.close(write_fd)
+        return FakeRunner().run(invocation)
+
+    monkeypatch.setattr(seam, "_run_progress_trainer", run)
+    admitted = seam.admit_packaged_sft(**material)
+    try:
+        result = seam.execute_admitted_packaged_sft(admitted, model_preparer=prepare,
+            on_metric_frame=lambda payload: None, on_metric_exhausted=lambda: None)
+        assert seen and seam.verify_packaged_sft_artifacts(admitted=admitted,
+            inventory_bytes=result.inventory_path.read_bytes(), terminal_bytes=result.terminal_path.read_bytes())
+        if fault is not None:
+            path = admitted.paths.state / "packaged-child.json"
+            child = seam._document(path.read_bytes())
+            if fault == "fd-missing":
+                del child["metric_fd"]
+            elif fault == "arguments":
+                child["arguments"].append("--unowned-argument")
+            elif fault == "unknown-field":
+                child["extra"] = True
+            else:
+                child["metric_fd"] = {"fd-null": None, "fd-bool": True, "fd-low": 2,
+                    "fd-large": 2147483648, "fd-changed": child["metric_fd"] + 1}[fault]
+            path.write_bytes(seam._canonical(child))
+            with pytest.raises(ValueError, match="PACKAGED_ARTIFACT_REJECTED"):
+                seam.verify_packaged_sft_artifacts(admitted=admitted,
+                    inventory_bytes=result.inventory_path.read_bytes(), terminal_bytes=result.terminal_path.read_bytes())
+    finally:
+        admitted.close()
 
 
 def test_parent_release_checked_at_admission_and_both_revalidations(material, seal, monkeypatch):
