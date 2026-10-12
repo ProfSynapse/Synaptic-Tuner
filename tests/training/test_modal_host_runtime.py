@@ -20,6 +20,22 @@ from tuner.training import modal_host_runtime as host
 from tuner.training import modal_standalone_runner as runner
 
 
+_EXECUTION = "cpu-qual-fixture"
+
+def _build_ref():
+    from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest
+    return "build-" + domain_digest("synaptic-modal-bootstrap-attempt/v1", canonical_bytes({
+        "intent_digest": "a" * 64, "execution_attempt_ref": _EXECUTION,
+    }))
+
+
+def _prepare_runtime(**kwargs):
+    from tuner.training.modal_local_preparation import PreparedModalLocalInputs
+    kwargs.setdefault("local_inputs", object.__new__(PreparedModalLocalInputs))
+    kwargs.setdefault("execution_attempt_ref", _EXECUTION)
+    return host.prepare_modal_runtime_for_host(**kwargs)
+
+
 class _Hydrated:
     is_hydrated = True
 
@@ -138,6 +154,8 @@ class _Resolver:
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
+    from tuner.training.modal_local_preparation import PreparedModalLocalInputs
+    monkeypatch.setattr(PreparedModalLocalInputs, "revalidate", lambda *args: None)
     if os.name == "nt":
         monkeypatch.setattr(host, "require_bounded_modal_deployment_host", lambda: None)
     _Workspace.rates = {"gpu_hour_cost_a100_80gb_fixture": Decimal("2.50")}
@@ -257,7 +275,7 @@ def test_unverified_rate_key_fails_closed_before_effect(monkeypatch):
     monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
     storage = _Storage(_Attempts([]))
     with pytest.raises(ValueError, match="not independently verified"):
-        host.prepare_modal_runtime_for_host(
+        _prepare_runtime(
             sdk=_SDK, client=object(), client_binding=_binding(), profile_path=Path("profile.json"),
             runtime_material_intent_digest="a" * 64, recipe_resource=ResourceSpec("A100-80GB"),
             maximum_cost_minor_units=1000, private_storage=storage, secret_resolver=_Resolver(),
@@ -284,7 +302,7 @@ def test_runner_default_resource_names_pass_real_preclaim_validator(monkeypatch)
     storage.attempts.claim = claim
 
     def prepare(qualification_name):
-        return host.prepare_modal_runtime_for_host(
+        return _prepare_runtime(
             sdk=_SDK, client=object(), client_binding=_binding(), profile_path=Path("profile.json"),
             runtime_material_intent_digest="a" * 64,
             recipe_resource=ResourceSpec("A100-80GB", 1, 1800),
@@ -385,7 +403,7 @@ def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkey
         original_claim(ref, evidence)
 
     storage.attempts.claim = claim
-    result = host.prepare_modal_runtime_for_host(
+    result = _prepare_runtime(
         sdk=_SDK, client=object(), client_binding=_binding(), profile_path=Path("profile.json"),
         runtime_material_intent_digest="a" * 64, recipe_resource=ResourceSpec(accelerator),
         maximum_cost_minor_units=1000, private_storage=storage, secret_resolver=_Resolver(),
@@ -393,7 +411,7 @@ def test_preparation_claims_before_provision_and_uses_exact_three_volumes(monkey
         hf_token_secret_name="hf", app_name="training", environment_name="production",
     )
     assert events == ["claim", "volume", "volume", "volume", "claim", "deploy"]
-    assert storage.attempts.refs == ["build-" + "a" * 64, "deploy-" + "c" * 64]
+    assert storage.attempts.refs == [_build_ref(), "deploy-" + "c" * 64]
     assert len(result.volume_names_by_id) == 3 and len(result.qualification_key) == 32
     assert len(result.deployment_facts.secrets) == 2
     assert len(_Secret.created) == 2 and len(_App.created) == 1
@@ -559,7 +577,7 @@ def test_failed_image_identity_is_claim_bound_and_retained_on_owner_thread(
             error.retry_authorized) == (
         "IMAGE_BUILD", "OPERATION_FAILED", "ap-Build123", expected_image_id, False,
     )
-    ref = "build-" + "a" * 64
+    ref = _build_ref()
     record = json.loads(storage.build_catalog.entries[ref])
     assert record == {
         "schema_version": "synaptic-modal-host-build-diagnostic/v1",
@@ -600,7 +618,7 @@ def test_unretained_image_identity_does_not_project_from_failed_catalog(monkeypa
         _paid_factory_probe(storage)
     assert caught.value.build_app_id is None and caught.value.image_id is None
     assert caught.value.failure_class == "OPERATION_FAILED"
-    assert tuple(storage.attempts.refs) == ("build-" + "a" * 64,)
+    assert tuple(storage.attempts.refs) == (_build_ref(),)
 
 
 def test_inflight_image_timeout_cannot_publish_late_image_identity(monkeypatch):
@@ -662,7 +680,7 @@ def test_inflight_image_timeout_cannot_publish_late_image_identity(monkeypatch):
         release.set()
     assert finished.wait(2)
     assert storage.catalog_calls == 0
-    assert storage.attempts.refs == ["build-" + "a" * 64]
+    assert storage.attempts.refs == [_build_ref()]
 
 
 @pytest.mark.parametrize("boundary,code,phase,failure_class", [
@@ -717,7 +735,7 @@ def test_release_failure_after_claim_is_closed_without_second_deploy(
     assert str(error) == "modal_host_bootstrap_unavailable"
     assert error.__cause__ is None
     assert "HF_TOKEN" not in str(error)
-    assert storage.attempts.refs == ["build-" + "a" * 64, "deploy-" + "c" * 64]
+    assert storage.attempts.refs == [_build_ref(), "deploy-" + "c" * 64]
     assert calls == (["observe"] if boundary == "observe" else ["observe", "deploy"])
 
 
@@ -812,7 +830,7 @@ def test_current_reader_rechecks_layout_and_cache_identity(monkeypatch):
 
 
 def _paid_factory_probe(storage):
-    return host.prepare_modal_runtime_for_host(
+    return _prepare_runtime(
         sdk=_SDK, client=object(), client_binding=_binding(), profile_path=Path("profile.json"),
         runtime_material_intent_digest="a" * 64,
         recipe_resource=ResourceSpec("A100-80GB", 1, 1800),
@@ -820,6 +838,82 @@ def _paid_factory_probe(storage):
         hf_token_ref=SecretRef("env", "HF_TOKEN"), qualification_secret_name="qualify",
         hf_token_secret_name="hf", app_name="training", environment_name="production",
     )
+
+
+def test_local_inputs_invalidated_during_quote_reject_before_claim_and_provision(monkeypatch):
+    from tuner.training.modal_local_preparation import PreparedModalLocalInputs, ModalLocalPreparationUnavailable
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+    valid = True
+
+    def revalidate(*args):
+        if not valid:
+            raise ModalLocalPreparationUnavailable("LOCAL_INPUTS_CHANGED")
+
+    def quote(**kwargs):
+        nonlocal valid
+        valid = False
+        return SimpleNamespace(quote_digest="d" * 64)
+
+    monkeypatch.setattr(PreparedModalLocalInputs, "revalidate", revalidate)
+    monkeypatch.setattr(host, "quote_modal_runtime_for_host", quote)
+    storage = _Storage(_Attempts([]))
+    with pytest.raises(ModalLocalPreparationUnavailable):
+        _paid_factory_probe(storage)
+    assert storage.attempts.refs == []
+    assert not _Volume.created and not _Secret.created and not _App.created
+
+
+def test_host_requires_exact_preparation_before_any_quote_or_claim(monkeypatch):
+    monkeypatch.setattr(host, "quote_modal_runtime_for_host", lambda **kw: pytest.fail("quote accessed"))
+    storage = _Storage(_Attempts([]))
+    with pytest.raises(ValueError, match="exact local preparation"):
+        _prepare_runtime(
+            sdk=_SDK, client=object(), client_binding=_binding(), profile_path=Path("profile.json"),
+            runtime_material_intent_digest="a" * 64, recipe_resource=ResourceSpec("A100-80GB"),
+            maximum_cost_minor_units=1000, private_storage=storage, secret_resolver=_Resolver(),
+            hf_token_ref=SecretRef("env", "HF_TOKEN"), qualification_secret_name="qualify",
+            hf_token_secret_name="hf", app_name="training", environment_name="production",
+            local_inputs=SimpleNamespace(revalidate=lambda *a: None),
+        )
+    assert storage.attempts.refs == []
+    assert not _Volume.created and not _Secret.created and not _App.created
+
+
+def test_new_execution_can_build_same_intent_but_consumed_execution_cannot_replay(monkeypatch):
+    from tuner.execution.providers.modal.runtime_build import SourceArchiveInvalid
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+    monkeypatch.setattr(host, "capture_modal_build_candidate", lambda **kw: (_ for _ in ()).throw(SourceArchiveInvalid()))
+    storage = _Storage(_Attempts([]))
+    seen = set()
+
+    def claim(ref, evidence):
+        if ref in seen:
+            raise ValueError("consumed")
+        seen.add(ref)
+
+    storage.attempts.claim = claim
+
+    def execute(attempt):
+        return _prepare_runtime(
+            sdk=_SDK, client=object(), client_binding=_binding(), profile_path=Path("profile.json"),
+            runtime_material_intent_digest="a" * 64, recipe_resource=ResourceSpec("A100-80GB"),
+            maximum_cost_minor_units=1000, private_storage=storage, secret_resolver=_Resolver(),
+            hf_token_ref=SecretRef("env", "HF_TOKEN"), qualification_secret_name="qualify",
+            hf_token_secret_name="hf", app_name="training", environment_name="production",
+            execution_attempt_ref=attempt,
+        )
+
+    for attempt in ("cpu-qual-one", "cpu-qual-two"):
+        with pytest.raises(host.ModalHostBootstrapUnavailable):
+            execute(attempt)
+    assert len(seen) == 2 and len(_Volume.created) == 6
+    resource_count = len(_Volume.created)
+    with pytest.raises(ValueError, match="consumed"):
+        execute("cpu-qual-one")
+    assert len(_Volume.created) == resource_count
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Linux signal precondition")

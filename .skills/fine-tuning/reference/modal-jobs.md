@@ -1469,3 +1469,122 @@ legacy remote/producer files are not part of the new declaration. This audit is
 not arbitrary dynamic-import discovery or a live-runtime proof. The separate
 trainer closure still has 66 members: its old public rich-training module has
 been replaced by `tuner/training/contracts.py`, with reviewed importer hashes.
+
+
+## API v1 metric-consumer readiness (2026-10-12)
+
+Optional signed numeric progress and public readback are implemented; ordinary
+Modal composition still advertises `logs: false`. The standalone wait loop uses
+the public logs consumer only when capture is configured and the selected
+descriptor advertises logs.
+It retains the last non-null cursor, deduplicates run/sequence by canonical bytes,
+and saves private per-run JSONL evidence. Transient read failures retain the
+cursor and retry; permanent validation/conflict/storage/local-budget failures
+disable the consumer independently of training. Failed local writes/fsync may
+leave a partial trailing line; no automatic repair/reopen is provided. The
+accepted in-memory record count is not a crash-durable count after fsync failure.
+Its cursor/dedup state is process-local;
+retention is not coordinator/Foundation restart recovery or submission authority.
+
+See `docs/plans/training-progress-streaming.md` for exact protocol limits and the
+bounded synthetic live qualification proposal, and
+`docs/plans/api-v1-integration-handoff.md` for the consumer journey assessment.
+Restricted `train --qualify-metrics <admission.json> --qualification-sha256 <digest>`
+uses a separate composition for one exact reviewed synthetic attempt; ordinary
+consumers still must not bypass the disabled descriptor. Generate the canonical
+candidate through `train --plan --metrics-qualification-attempt` with expected
+account/workspace, named profile/environment and a private output outside the
+checkout, after the final clean integrated commit. Reuse the documented fixture
+and exact parser flags in the streaming plan. Bind source/profile/build intent,
+compiled workload/configuration, prepared data, provider scope and step/time/cost
+limits before effect authority. No fake source SHA, fresh-attempt escape or
+automatic replay is allowed. Paid execution requires user authority covering the
+bounded admission and scope; planning is non-authorizing. Explicit session
+authorization for bounded reliability iteration persists across fixes and fresh
+attempts, so do not ask the same confirmation again within that scope. Preserve
+all prior claims and retain each new admission; never reinterpret an uncertain
+submission as replay or relax exact pins.
+
+The finite delivery ledger requires new numeric records bracketed by exact-call
+pending observations plus terminal native artifact verification. A
+`delivered_precompletion` result still reports transport and partial-write
+qualification false. Keep ordinary logs disabled pending the separate live
+transport evidence and independent review. Neither standalone `train --qualify`
+CPU proof nor minimal native `--mode qualify-training` proves these metrics.
+
+
+## Standalone local preparation and cold cache
+
+The standalone `train --job-config` path automatically prepares the exact
+profile-selected bootstrap inventory and current clean-source wheel before
+credentials, durable execution/build claims or Modal provisioning. An empty
+cache downloads only the declared exact wheel filenames and verifies their
+SHA-256 hashes. Bootstrap files live outside the checkout under
+`${XDG_STATE_HOME:-$HOME/.local/state}/synaptic-training/modal-bootstrap/`;
+installing the launcher closure does not populate that inventory. Existing
+corrupt or insecure cache files reject rather than being silently overwritten.
+
+An optional explicit local preparation uses the same implementation:
+
+```bash
+python tuner.py train --job-config Trainers/recipes/qwen35_4b_modal_metrics_qualification.yaml --prepare-local --json
+```
+
+Run it with the locked POSIX CPython 3.11.14 launcher and Modal SDK 1.5.4.
+It may download public pinned artifacts and build/validate the source wheel;
+it does not obtain Modal credentials, consume attempt claims or provision
+provider resources. Its `local_inputs_ready` report binds source commit,
+build intent and source-wheel digest, reports the bootstrap wheel count, and
+sets `provider_effects` and `execution_authorized` false. Source-wheel staging
+is temporary and is removed when the command exits; normal execution prepares
+and revalidates its own retained inputs. Explicit preparation is optional,
+not an operator wheel-upload step or execution grant. Do not combine it with
+`--plan`, `--quote`, `--qualify`, `--qualify-metrics` or `--fresh-attempt`.
+
+`train --plan --json` remains read-only and network-free. Its `local_readiness`
+reports `bootstrap_cache_ready`, `unprepared` or `invalid`; source-wheel
+preflight occurs during execution or `--prepare-local`. Cache readiness does
+not prove launcher compatibility, source-wheel readiness or live authority.
+The effectful path rejects wrong launcher pins, dirty/mismatched source,
+unsafe private roots, corrupt bootstrap bytes and unresolved prepared inputs
+before provider effects. Local preparation failures use closed diagnostic codes
+and do not authorize replay.
+
+Build claims bind each execution attempt, so separate normal executions do not
+share one source-wide consumed claim. This does not resume a failed attempt:
+retain its claims/resources and use only a separately reviewed admission for
+restricted metrics qualification. Ordinary logs remain disabled. The bounded
+two-run acceptance below was met by independently accepted
+`metrics-20261012-03` and `metrics-20261012-04` on unchanged source
+`01383fa81c8ed3847903095456e9b80350cd28a6`: each delivered 32 numeric records
+before completion, acknowledged durable report publication and verified five
+native artifacts. Cold/warm local preparation verified all nine exact bootstrap
+wheels without provider effects or journal changes. The captured-child verifier
+repair preserves complete canonical transport and execution-evidence equality.
+See `docs/plans/training-progress-streaming.md` for exact admission/report/progress
+digests and retained failed attempts. This later docs-only update does not alter
+the live-qualified source. Ordinary transport, live partial-write behavior,
+freshness/completeness, recovery and broader production readiness remain
+unqualified; repeated bounded success does not guarantee every cloud call.
+
+## Authorized bounded reliability iteration (2026-10-12)
+
+The user authorized continuing the metrics fix/test/live cycle until the supported
+workflow is reliable, superseding the earlier one-attempt approval boundary for
+this session. This covers reviewed fresh attempts within the established synthetic
+fixture, provider scope and finite limits; it does not promote ordinary logs or
+create cleanup/replay authority. See the current restoration checkpoint and exact
+attempt evidence before choosing the next admitted source.
+
+Acceptance is a normal-path cold-checkout build with automatic pinned bootstrap
+preparation (empty caches acquire exact pins), provider-free rejection of inputs
+still unresolved after preparation or corrupt artifacts, unsafe local
+private-root modes and dirty/mismatched source before provider effects, verified
+exact launcher/runtime pins, and at least two completed bounded live metrics
+qualification runs on the same final code. Each run must have a distinct retained
+admission/claim, successful durable pre-completion delivery evidence and native
+artifact verification. Changes to code reset the two-run comparison. Do not add
+unrelated features to satisfy this proof. External provider failures remain possible;
+record them separately from reproduced workflow defects and never promise that
+every invocation must succeed. Implementation and live results must be described
+from retained evidence rather than this acceptance target.

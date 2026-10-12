@@ -149,7 +149,7 @@ def test_pending_call_does_not_manufacture_queued_or_running_state():
     reader, request, _ = _reader(ModalFunctionCallState.PENDING)
     with pytest.raises(ModalPackagedReadUnavailable, match="pending"):
         reader.observe(request)
-    with pytest.raises(ModalPackagedReadUnavailable, match="logs_unsupported"):
+    with pytest.raises(ModalPackagedReadUnavailable, match="log_query_invalid"):
         reader.logs(request, None)
 
 

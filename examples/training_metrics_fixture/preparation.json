@@ -1,0 +1,233 @@
+{
+  "schema_version": "syntunia-dataset-prep/v2",
+  "source": {
+    "bundle_path": ".tracking/ingestion/bundles/bundle-32694ea215a88c4f9404e2e04470834d595f30efbe1aaf82c55d9a0d238835b0",
+    "expected_bundle_digest": "32694ea215a88c4f9404e2e04470834d595f30efbe1aaf82c55d9a0d238835b0"
+  },
+  "format": "messages",
+  "target_projection": {
+    "structure_ref": {
+      "digest": "1a71fc891c09300ea950f49cbbe1692e50cafdccc5283c0819d7958e38b6083f",
+      "name": "MetricsFixtureText",
+      "version": "1"
+    },
+    "name": "text"
+  },
+  "context_package": {
+    "ordering": {
+      "kind": "configured_whole_documents"
+    },
+    "lineage": [
+      {
+        "item_id": "item-4e8f16c3d89f6d3d4ddaa8f1b972a2e4afcb8a3348b179d5da41289284b3dd13",
+        "revision_family": "context-01",
+        "sequence": 0,
+        "derived_from": [],
+        "group_id": "context-01"
+      },
+      {
+        "item_id": "item-55f51ba8b0e43e6b798858b6fde25f6375b21bfcedcc484bc899bfe635deca2d",
+        "revision_family": "target-01",
+        "sequence": 1,
+        "derived_from": [
+          "item-4e8f16c3d89f6d3d4ddaa8f1b972a2e4afcb8a3348b179d5da41289284b3dd13"
+        ],
+        "group_id": "synthetic-metrics"
+      },
+      {
+        "item_id": "item-b1149cfb3a576da7a10a4773ab3ae379fd64d23eeb1ada5eac4eb348b14eebbc",
+        "revision_family": "context-02",
+        "sequence": 0,
+        "derived_from": [],
+        "group_id": "context-02"
+      },
+      {
+        "item_id": "item-360b17ea3524d7c3fc97de04280c49acaa7d52631a27f4b2700cfee8bf5d6a70",
+        "revision_family": "target-02",
+        "sequence": 2,
+        "derived_from": [
+          "item-b1149cfb3a576da7a10a4773ab3ae379fd64d23eeb1ada5eac4eb348b14eebbc"
+        ],
+        "group_id": "synthetic-metrics"
+      },
+      {
+        "item_id": "item-1125998d5ee5f02637c382aaf6e8c09f0ea81342162d2edbeaa3a95bc94f4d58",
+        "revision_family": "context-03",
+        "sequence": 0,
+        "derived_from": [],
+        "group_id": "context-03"
+      },
+      {
+        "item_id": "item-28d2d6141969281b20d99a366f8852fbb024a4f04009cbbb1f1090f6a05c97d5",
+        "revision_family": "target-03",
+        "sequence": 3,
+        "derived_from": [
+          "item-1125998d5ee5f02637c382aaf6e8c09f0ea81342162d2edbeaa3a95bc94f4d58"
+        ],
+        "group_id": "synthetic-metrics"
+      },
+      {
+        "item_id": "item-27fa7cced8f40cdb125ee24c4744e032df79b5bf56dfb7bf60dd37a1fc97582e",
+        "revision_family": "context-04",
+        "sequence": 0,
+        "derived_from": [],
+        "group_id": "context-04"
+      },
+      {
+        "item_id": "item-16474b76375377133c0b1155990bac3e4c07f64238435ff270234c734d8c2a58",
+        "revision_family": "target-04",
+        "sequence": 4,
+        "derived_from": [
+          "item-27fa7cced8f40cdb125ee24c4744e032df79b5bf56dfb7bf60dd37a1fc97582e"
+        ],
+        "group_id": "synthetic-metrics"
+      },
+      {
+        "item_id": "item-e7ef1c0c4e93a7c6b12efd96cf571bc0a67f1afc3017618e3b62f1644064f9f5",
+        "revision_family": "context-05",
+        "sequence": 0,
+        "derived_from": [],
+        "group_id": "context-05"
+      },
+      {
+        "item_id": "item-8f4d423b02cfac317f42fec084808cf9519eec8b1d77bf5bffcfcb35885726c1",
+        "revision_family": "target-05",
+        "sequence": 5,
+        "derived_from": [
+          "item-e7ef1c0c4e93a7c6b12efd96cf571bc0a67f1afc3017618e3b62f1644064f9f5"
+        ],
+        "group_id": "synthetic-metrics"
+      },
+      {
+        "item_id": "item-704cfc0e9dd2e2f6f49307f5eb23bbd080fab53ce5c7794118a613dbb4968f78",
+        "revision_family": "context-06",
+        "sequence": 0,
+        "derived_from": [],
+        "group_id": "context-06"
+      },
+      {
+        "item_id": "item-19cb2493fb27d0958745bf0fc024930b8a4cebb325b7bab874179197f27b6574",
+        "revision_family": "target-06",
+        "sequence": 6,
+        "derived_from": [
+          "item-704cfc0e9dd2e2f6f49307f5eb23bbd080fab53ce5c7794118a613dbb4968f78"
+        ],
+        "group_id": "synthetic-metrics"
+      },
+      {
+        "item_id": "item-12625efcff942d7463ec0e3200bf56207e3a6d647cd0940549cddcaf8760a1a8",
+        "revision_family": "context-07",
+        "sequence": 0,
+        "derived_from": [],
+        "group_id": "context-07"
+      },
+      {
+        "item_id": "item-421c8f84c13f54417982b1637ca8e4e5e220a2c026209bfe90bcb489a28042c4",
+        "revision_family": "target-07",
+        "sequence": 7,
+        "derived_from": [
+          "item-12625efcff942d7463ec0e3200bf56207e3a6d647cd0940549cddcaf8760a1a8"
+        ],
+        "group_id": "synthetic-metrics"
+      },
+      {
+        "item_id": "item-95c6819078c7abb85c6110154e2e706e98c0680692c68dc8cd92fb3ca320735f",
+        "revision_family": "context-08",
+        "sequence": 0,
+        "derived_from": [],
+        "group_id": "context-08"
+      },
+      {
+        "item_id": "item-da57edf2e5917ed12591f199f9054c28fdf05d08be815820b2e5f277ab9490f3",
+        "revision_family": "target-08",
+        "sequence": 8,
+        "derived_from": [
+          "item-95c6819078c7abb85c6110154e2e706e98c0680692c68dc8cd92fb3ca320735f"
+        ],
+        "group_id": "synthetic-metrics"
+      }
+    ],
+    "packages": [
+      {
+        "target_item_id": "item-55f51ba8b0e43e6b798858b6fde25f6375b21bfcedcc484bc899bfe635deca2d",
+        "context_item_ids": [
+          "item-4e8f16c3d89f6d3d4ddaa8f1b972a2e4afcb8a3348b179d5da41289284b3dd13"
+        ],
+        "prompt_variant": "practice"
+      },
+      {
+        "target_item_id": "item-360b17ea3524d7c3fc97de04280c49acaa7d52631a27f4b2700cfee8bf5d6a70",
+        "context_item_ids": [
+          "item-b1149cfb3a576da7a10a4773ab3ae379fd64d23eeb1ada5eac4eb348b14eebbc"
+        ],
+        "prompt_variant": "practice"
+      },
+      {
+        "target_item_id": "item-28d2d6141969281b20d99a366f8852fbb024a4f04009cbbb1f1090f6a05c97d5",
+        "context_item_ids": [
+          "item-1125998d5ee5f02637c382aaf6e8c09f0ea81342162d2edbeaa3a95bc94f4d58"
+        ],
+        "prompt_variant": "practice"
+      },
+      {
+        "target_item_id": "item-16474b76375377133c0b1155990bac3e4c07f64238435ff270234c734d8c2a58",
+        "context_item_ids": [
+          "item-27fa7cced8f40cdb125ee24c4744e032df79b5bf56dfb7bf60dd37a1fc97582e"
+        ],
+        "prompt_variant": "practice"
+      },
+      {
+        "target_item_id": "item-8f4d423b02cfac317f42fec084808cf9519eec8b1d77bf5bffcfcb35885726c1",
+        "context_item_ids": [
+          "item-e7ef1c0c4e93a7c6b12efd96cf571bc0a67f1afc3017618e3b62f1644064f9f5"
+        ],
+        "prompt_variant": "practice"
+      },
+      {
+        "target_item_id": "item-19cb2493fb27d0958745bf0fc024930b8a4cebb325b7bab874179197f27b6574",
+        "context_item_ids": [
+          "item-704cfc0e9dd2e2f6f49307f5eb23bbd080fab53ce5c7794118a613dbb4968f78"
+        ],
+        "prompt_variant": "practice"
+      },
+      {
+        "target_item_id": "item-421c8f84c13f54417982b1637ca8e4e5e220a2c026209bfe90bcb489a28042c4",
+        "context_item_ids": [
+          "item-12625efcff942d7463ec0e3200bf56207e3a6d647cd0940549cddcaf8760a1a8"
+        ],
+        "prompt_variant": "practice"
+      },
+      {
+        "target_item_id": "item-da57edf2e5917ed12591f199f9054c28fdf05d08be815820b2e5f277ab9490f3",
+        "context_item_ids": [
+          "item-95c6819078c7abb85c6110154e2e706e98c0680692c68dc8cd92fb3ca320735f"
+        ],
+        "prompt_variant": "practice"
+      }
+    ],
+    "prompt_variants": [
+      {
+        "name": "practice",
+        "prompt": "Answer the following harmless practice question.",
+        "separator": "\n\n"
+      }
+    ],
+    "target_transforms": {
+      "drop_fenced_block_info_strings": [],
+      "drop_standalone_line_prefixes": []
+    }
+  },
+  "split": {
+    "kind": "group_sequence_tail",
+    "allocations": [
+      {
+        "name": "train",
+        "weight": 3
+      },
+      {
+        "name": "validation",
+        "weight": 1
+      }
+    ]
+  }
+}

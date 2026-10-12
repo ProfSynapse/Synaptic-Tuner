@@ -146,6 +146,27 @@ class _SynapticArgumentParser(argparse.ArgumentParser):
         parsed = super().parse_args(args=arguments, namespace=namespace)
         command = getattr(parsed, "command", None)
         capability_id = getattr(parsed, "capability_id", None)
+        if getattr(parsed, "prepare_local", False):
+            if (command != "train" or not getattr(parsed, "job_config", None)
+                    or getattr(parsed, "fresh_attempt", False)
+                    or any(getattr(parsed, name, False) for name in ("plan", "quote", "qualify", "qualify_metrics"))):
+                self.error("--prepare-local requires only train --job-config, without execution modes or --fresh-attempt")
+        qualification_flags = (
+            "qualify_metrics", "qualification_sha256", "metrics_qualification_attempt",
+            "qualification_account", "qualification_workspace", "qualification_output",
+        )
+        if any(getattr(parsed, name, None) is not None for name in qualification_flags):
+            attempt = parsed.metrics_qualification_attempt
+            admission = parsed.qualify_metrics
+            if (command != "train" or not getattr(parsed, "job_config", None)
+                    or (attempt is not None and not parsed.plan)
+                    or (any(getattr(parsed, name, None) is not None for name in qualification_flags[3:]) and attempt is None)
+                    or (parsed.qualification_sha256 is not None and admission is None)
+                    or (admission is not None and not parsed.qualification_sha256)
+                    or ((attempt is not None or admission is not None) and parsed.fresh_attempt)
+                    or sum(bool(getattr(parsed, name, False)) for name in
+                           ("plan", "quote", "qualify", "qualify_metrics", "prepare_local")) > 1):
+                self.error("metrics qualification flags require one bound train --job-config planning or qualification mode")
 
         if command == "hf-training-smoke":
             action = getattr(parsed, "subcommand", None)
@@ -721,6 +742,13 @@ Examples:
     parser.add_argument("--plan", action="store_true", help="Resolve a train --job-config plan without provider effects.")
     parser.add_argument("--quote", action="store_true", help="Read scoped Modal GPU rates for a train --job-config without starting a job.")
     parser.add_argument("--qualify", action="store_true", help="Build and run the packaged Modal CPU self-check without starting training.")
+    parser.add_argument("--prepare-local", action="store_true", help="Prepare pinned bootstrap artifacts and the exact source wheel locally; public downloads allowed, no Modal provider effects or claims.")
+    parser.add_argument("--qualify-metrics", help="Run one restricted metrics qualification from an exact reviewed admission JSON file.")
+    parser.add_argument("--qualification-sha256", help="Reviewed SHA-256 of the exact --qualify-metrics admission bytes.")
+    parser.add_argument("--metrics-qualification-attempt", help="With train --plan, generate a bounded metrics admission for this one-shot attempt reference.")
+    parser.add_argument("--qualification-account", help="Expected Modal account reference for metrics admission planning.")
+    parser.add_argument("--qualification-workspace", help="Expected Modal workspace reference for metrics admission planning.")
+    parser.add_argument("--qualification-output", help="With metrics admission planning, create canonical admission bytes in an existing private directory outside the engine checkout.")
     parser.add_argument("--fresh-attempt", action="store_true", help="Explicitly start a separate one-shot Modal attempt with a new private journal.")
     parser.add_argument("--modal-profile", help="Named local Modal credential profile for train --quote or execution.")
     parser.add_argument("--modal-environment", help="Existing Modal environment for train --quote or execution.")

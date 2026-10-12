@@ -1,0 +1,73 @@
+# CPU tokenizer-only doctor config; not a training launcher recipe.
+model:
+  model_name: Qwen/Qwen3.5-4B
+  max_seq_length: 32768
+  dtype: null
+  load_in_4bit: false
+  model_revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  anonymous: false
+  trust_remote_code: null
+  use_safetensors: null
+  cache_dir: null
+lora:
+  r: 64
+  lora_alpha: 128
+  lora_dropout: 0
+  bias: none
+  target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - out_proj
+  - in_proj
+  - w1
+  - w2
+  - w3
+  use_gradient_checkpointing: unsloth
+  random_state: 3407
+  use_rslora: false
+  use_dora: false
+training:
+  output_dir: ./sft_output
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 2e-4
+  max_grad_norm: 1.0
+  lr_scheduler_type: linear
+  max_seq_length: 32768
+  packing: false
+  completion_only_loss: true
+  assistant_only_loss: false
+  gradient_checkpointing: true
+  optim: adamw_8bit
+  fp16: false
+  bf16: true
+  num_train_epochs: 1
+  warmup_ratio: 0.02
+  logging_steps: 5
+  save_steps: 50
+  save_total_limit: 3
+  dataloader_num_workers: 0
+  dataloader_pin_memory: true
+  group_by_length: false
+  eval_strategy: 'no'
+  eval_steps: 50
+  prompt_render: prompt_completion
+  chat_template_kwargs:
+    enable_thinking: false
+dataset:
+  dataset_name: null
+  dataset_file: nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3.jsonl
+  local_file: null
+  num_proc: 1
+  test_size: 0.1
+  split_dataset: false
+  validation_group_key: null
+  filter_desirable: false
+  use_preassigned_splits: true
+wandb:
+  enabled: false
+  project: null
+  run_name: null
+  entity: null
+seed: 42

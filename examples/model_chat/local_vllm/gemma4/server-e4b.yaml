@@ -1,0 +1,16 @@
+model: /model
+tokenizer: /model
+served-model-name: gemma4-e4b-raw
+host: 0.0.0.0
+port: 8000
+dtype: bfloat16
+tensor-parallel-size: 1
+language-model-only: true
+enforce-eager: true
+gpu-memory-utilization: 0.92
+max-model-len: 98304
+max-num-seqs: 1
+max-num-batched-tokens: 1024
+generation-config: auto
+reasoning-parser: gemma4
+seed: 20261008

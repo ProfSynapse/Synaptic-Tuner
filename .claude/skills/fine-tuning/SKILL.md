@@ -29,6 +29,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Staggered experiment batch | `python3 scripts/launch_experiment_batch.py Trainers/cloud/experiments/<spec1>.yaml Trainers/cloud/experiments/<spec2>.yaml --yes` |
 | One-shot RunPod wrapper job | `python3 scripts/runpod_run_job.py --run-tag <tag> --repo-url <git-url> --commit <full-sha> --wrapper <repo-relative.sh> --dry-run` |
 | Modal training | Public `TrainingAPI` with a host-owned durable grant; no manual `modal run` path |
+| Modal local input preparation | `python tuner.py train --job-config <modal-recipe.yaml> --prepare-local --json` — optional pinned public downloads/source-wheel preflight; normal execution performs the same preparation before claims/effects; see `reference/modal-jobs.md` |
 | Modal release-lookup diagnosis | `python scripts/inspect_modal_release_lookup.py --journal <exact-private-journal> --claim-ref deploy-<digest> --environment <name> --modal-profile <profile>` — read-only, non-authorizing; see `reference/modal-jobs.md` |
 | Modal rate observation | `python -B examples/modal_chat/launch.py --project-root <consumer> --configuration <config> --mode quote-training --modal-profile <name>` — read-only; see `reference/modal-jobs.md` |
 | Chat with a verified SFT run | Embedded `open_run_chat` with a consumer-owned `RunsAPI` and runtime adapter; see `docs/architecture/verified-run-chat.md` (repo root) |
@@ -118,8 +119,8 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - Modal packaged training has a shared generic artifact policy of 512 MiB per file and 768 MiB for the complete artifact set. Use the shared per-file bound for downloads and the aggregate bound for inventory admission; keep both checks and end-to-end hashes when sizing a larger adapter. The limit change does not qualify a candidate model or GPU.
 - Retain bounded optional generation finish reason and token usage for diagnosing why an evaluation response stopped. Neither field is a writing-quality score; review completed text separately.
 
-- Never cancel a job, delete bucket artifacts, remove files, or relaunch a cost-incurring cloud run unless the user has explicitly approved that exact action in the current conversation.
-- Treat cancel/delete/relaunch as irreversible or materially destructive operator actions. Do not infer permission from surrounding context or from a user's broader goal.
+- Honor explicit session authorization for bounded fix/test/live iteration. When the user has authorized that scope, continue with reviewed distinct attempts without requesting the same permission again; retain every consumed claim and never replay an uncertain submission. Cancel/delete and broader actions require authority covering them.
+- Preserve attempt/resource ownership and source/runtime pins across iterations. Broad execution authority does not erase failure evidence, authorize uncertain replay, or imply cleanup authority. For Modal reliability acceptance, see `reference/modal-jobs.md` and the API metrics streaming plan.
 - Do not guess command names or flags from memory.
 - Diagnose from the exact attempt's retained records and logs, pinned SDK source, and provider documentation. Search relevant issue/forum reports for hypotheses and test them with a narrowly scoped experiment; do not promote a phase label or timing coincidence into a root-cause claim.
 - Simplify redundant orchestration when evidence shows it adds no useful guarantee for the supported workflow. Keep source/model pins, credential isolation, verified artifacts, and no replay of uncertain submissions; make provider fakes reflect documented SDK behavior.

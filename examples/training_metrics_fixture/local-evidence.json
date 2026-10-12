@@ -1,0 +1,62 @@
+{
+  "schema_version": "synaptic-synthetic-metrics-fixture-evidence/v1",
+  "purpose": "provider-free-fixture-and-tokenizer-review-not-live-transport-qualification",
+  "bundle_digest": "32694ea215a88c4f9404e2e04470834d595f30efbe1aaf82c55d9a0d238835b0",
+  "dataset_digest": "58f367d391782375b2fb04c31c5b7c50fec804b35e4a7a54c668433d9018971d",
+  "dataset_content_digest": "e5c179112af8db4ef95a32d7126023564e4d231544456560b7ec41bc86a234be",
+  "source_count": 16,
+  "row_count": 8,
+  "split_counts": {
+    "train": 6,
+    "validation": 2
+  },
+  "row_review": "all eight complete rows reviewed against paired synthetic source files and declared target/context lineage",
+  "tokenizer": {
+    "model": "Qwen/Qwen3.5-4B",
+    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "transformers": "5.17.0",
+    "tokenizers": "0.23.2",
+    "datasets": "4.3.0",
+    "jinja2": "3.1.6",
+    "torch_installed": false,
+    "credentials_used": false,
+    "final_check_offline": true,
+    "eos_token_id": 248046,
+    "end_of_turn": {
+      "token_ids": [
+        248046
+      ],
+      "tokens": [
+        "<|im_end|>"
+      ],
+      "source": "chat_template",
+      "detail": "special tokens after assistant content: '<|im_end|>\\n'"
+    },
+    "summary": {
+      "dataset_rows": 8,
+      "rows_analyzed": 8,
+      "rows_with_hard_failures": 0,
+      "trained_tokens_total": 83
+    },
+    "lengths": {
+      "max_seq_length": 32768,
+      "p50": 36,
+      "p95": 44,
+      "max": 44,
+      "truncated_rows": 0
+    },
+    "check_statuses": {
+      "dataset_contract": "ok",
+      "row_error": "ok",
+      "zero_trained_tokens": "ok",
+      "mask_prefix_mismatch": "ok",
+      "dropped_rows": "ok",
+      "full_sequence_fallback": "ok",
+      "missing_end_of_turn": "ok",
+      "doubled_bos": "ok",
+      "truncation": "ok",
+      "terminator_lost_to_truncation": "ok",
+      "earlier_assistant_turns_untrained": "ok"
+    }
+  }
+}

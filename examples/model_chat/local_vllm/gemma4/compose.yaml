@@ -1,0 +1,52 @@
+name: gemma4-local-vllm
+services:
+  e4b:
+    image: vllm/vllm-openai@sha256:770fe65b2c73ee74a5c42165cf3433de4048cc2cd9c57a937ca4e35aba5aa87b
+    pull_policy: never
+    entrypoint: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+    command: ["--config", "/config/server.yaml"]
+    gpus: all
+    shm_size: 4gb
+    ports: ["127.0.0.1:8012:8000"]
+    environment:
+      VLLM_USE_V2_MODEL_RUNNER: "0"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      DO_NOT_TRACK: "1"
+      VLLM_NO_USAGE_STATS: "1"
+    volumes:
+      - type: bind
+        source: ${GEMMA4_E4B_MODEL_DIR:?Set GEMMA4_E4B_MODEL_DIR to an absolute model directory}
+        target: /model
+        read_only: true
+      - type: bind
+        source: ./server-e4b.yaml
+        target: /config/server.yaml
+        read_only: true
+    restart: "no"
+  12b:
+    image: vllm/vllm-openai@sha256:770fe65b2c73ee74a5c42165cf3433de4048cc2cd9c57a937ca4e35aba5aa87b
+    pull_policy: never
+    entrypoint: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+    command: ["--config", "/config/server.yaml"]
+    gpus: all
+    shm_size: 4gb
+    ports: ["127.0.0.1:8012:8000"]
+    environment:
+      VLLM_USE_V2_MODEL_RUNNER: "0"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      DO_NOT_TRACK: "1"
+      VLLM_NO_USAGE_STATS: "1"
+    volumes:
+      - type: bind
+        source: ${GEMMA4_12B_MODEL_DIR:?Set GEMMA4_12B_MODEL_DIR to an absolute model directory}
+        target: /model
+        read_only: true
+      - type: bind
+        source: ./server-12b.yaml
+        target: /config/server.yaml
+        read_only: true
+    restart: "no"

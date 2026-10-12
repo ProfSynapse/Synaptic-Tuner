@@ -59,6 +59,34 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Modal v1
 
+- For an explicitly authorized reliability cycle, finish the reusable fix rather
+  than accumulating unrelated features: a cold checkout must automatically prepare
+  the pinned bootstrap inventory on the normal path (an empty cache normally
+  fetches exact pins); unresolved inputs after preparation or corrupt artifacts,
+  unsafe private-root permissions and dirty/mismatched source must reject before
+  provider effects. Verify exact local launcher/runtime pins. Acceptance requires
+  at least two completed bounded live metrics qualification runs on the same final
+  code, each with its own admitted source and reviewed fresh-attempt semantics,
+  durable delivery evidence and native artifact verification. Preserve failed
+  claims and diagnose external provider failures separately. This demonstrates
+  the supported workflow's repeatability; it cannot promise success every time.
+
+- Restricted metrics qualification is an explicit reviewed operation, not ordinary
+  log capability promotion. Bind the exact clean engine commit, compiled recipe,
+  synthetic prepared input, runtime profile/build intent, expected account/workspace,
+  provider scope, single one-shot attempt and finite step/time/cost bounds in a
+  canonical admission before credentials or effects. Generate the candidate from
+  the existing local planning CLI after the final integrated commit; do not check
+  in fake or circular source-SHA approvals. Keep ordinary logs disabled. A
+  `delivered_precompletion` verdict requires newly persisted numeric records
+  bracketed by the exact call's pending observations and final native artifact
+  verification; it does not qualify partial writes, completeness/freshness,
+  cancellation, recovery or a production log capability. Honor explicit session
+  authorization for bounded fix/test/live iteration without asking again for each
+  fresh attempt. Each attempt still binds its exact reviewed admission, retains
+  its own consumed claims and records, and never replays an uncertain submission.
+  Broader authorization does not delete earlier state or relax runtime/source pins.
+
 - Packaged trainer `TORCH_OOM` diagnostics recognize Torch's shared OOM
   exception identity; the CUDA alias alone does not establish device, allocation
   size or batch capacity. Preserve trusted finite execution milestones for

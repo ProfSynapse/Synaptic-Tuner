@@ -46,13 +46,14 @@ class ModalPackagedReferenceHostV1:
         return self.composition.api()
 
 
-def compose_modal_packaged_reference_host(
+def _compose_modal_packaged_reference_host(
     *, adapter: ModalPackagedComposition, effects: object,
     prepared_request: object, run: object, components: object,
     context: object, input_preparation: object, clock: object,
     secrets: object, authority_secret: SecretRef, reader_secret: SecretRef,
     profile_digest: str, quote_digest: str,
     maximum_cost_minor_units: int,
+    qualification_admission=None,
 ) -> ModalPackagedReferenceHostV1:
     """Compose only from already-captured and admitted packaged material.
 
@@ -80,9 +81,43 @@ def compose_modal_packaged_reference_host(
             }),
         ),
     )
+    if qualification_admission is not None:
+        from tuner.training.modal_metrics_qualification import MetricsQualificationAdmission, current_clean_commit
+        from tuner.training.modal_host_effects import ModalPackagedHostEffectsV1
+        from tuner.training.packaged_compilation import compile_packaged_sft_workload, packaged_configuration_digest
+        from tuner.runtime_profiles import load_runtime_profile
+        from tuner.training.modal_recipe import resolve_modal_sft_build
+        if (type(qualification_admission) is not MetricsQualificationAdmission
+                or type(effects) is not ModalPackagedHostEffectsV1):
+            raise ValueError("metrics_qualification_binding_invalid")
+        admitted = qualification_admission.document
+        execution = components.execution_source
+        model = components.resolved_config.to_dict()["model"]
+        profiles_root = context.engine_root / "Trainers" / "runtime_profiles"
+        selected = load_runtime_profile(adapter.effect_executor.profile_ref, profiles_root).resolve(
+            model=model["ref"], model_revision=model["revision"], method="sft",
+        )
+        _, current_intent = resolve_modal_sft_build(selected, profiles_root, model["ref"], model["revision"])
+        qualification_admission.validate_scope(effects._facts)
+        if (current_clean_commit(context.engine_root) != admitted["engine_commit"]
+                or current_intent["intent_digest"] != admitted["runtime_material_intent_digest"]
+                or selected.profile_sha256.removeprefix("sha256:") != admitted["profile_sha256"]
+                or effects._storage.attempts.resolve("metrics-qual-" + admitted["attempt_ref"]) != qualification_admission.canonical
+                or effects._execution != execution or effects._execution.run_ref != run.run_id
+                or effects._workload != compile_packaged_sft_workload(resolved_config=components.resolved_config).canonical_bytes
+                or execution.workload_digest.removeprefix("sha256:") != admitted["workload_digest"]
+                or packaged_configuration_digest(components.resolved_config).removeprefix("sha256:") != admitted["configuration_digest"]
+                or execution.prepared_input_revision.removeprefix("sha256:") != admitted["dataset_digest"]
+                or execution.prepared_input_content_digest.removeprefix("sha256:") != admitted["dataset_content_digest"]
+                or profile_digest != admitted["profile_sha256"]
+                or components.resources.accelerator != admitted["accelerator"]
+                or components.resources.accelerator_count != admitted["accelerator_count"]
+                or components.resources.timeout_seconds != admitted["timeout_seconds"]
+                or maximum_cost_minor_units != admitted["maximum_cost_minor_units"]):
+            raise ValueError("metrics_qualification_binding_invalid")
     descriptor = ProviderDescriptor(
         "synaptic-provider-descriptor/v1", "modal", "Modal packaged training",
-        "0.1.0", ProviderCapabilities(True, False, False, False, True, False),
+        "0.1.0", ProviderCapabilities(True, qualification_admission is not None, False, False, True, False),
     )
     executor = adapter.effect_executor
     reconciliation = adapter.reconciliation_adapter
@@ -154,3 +189,17 @@ def compose_modal_packaged_reference_host(
     reader.bind_foundation(composed.foundation)
     verifier.bind_foundation(composed.foundation)
     return ModalPackagedReferenceHostV1(composed, adapter, effects, reader, verifier)
+
+
+def compose_modal_packaged_reference_host(**kwargs):
+    """Ordinary training never accepts qualification authority or enables logs."""
+    if "qualification_admission" in kwargs:
+        raise TypeError("qualification authority requires the restricted composition")
+    return _compose_modal_packaged_reference_host(**kwargs)
+
+
+def compose_modal_metrics_qualification_host(*, admission, **kwargs):
+    """One admitted, journal-claimed source/run/scope; no ordinary capability change."""
+    if admission is None or "qualification_admission" in kwargs:
+        raise TypeError("exact metrics qualification admission required")
+    return _compose_modal_packaged_reference_host(qualification_admission=admission, **kwargs)

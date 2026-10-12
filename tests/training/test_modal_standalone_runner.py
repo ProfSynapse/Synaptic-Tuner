@@ -17,7 +17,9 @@ import pytest
 
 from synaptic_tuner.api.v1.training_facade import TrainingAPI
 from synaptic_tuner.api.v1.runs_facade import RunsAPI
+from synaptic_tuner.api.v1.results import TrainingRunRef
 from tests.dataset_prep.test_context_messages_v2 import _config
+from tests.execution.test_observation_logs import metric_record
 from tests.execution.providers.test_modal_runtime_build import _candidate
 from tuner.dataset_prep import prepare_dataset_v2
 from tuner.execution.providers.modal.contracts import provider_entry_identity
@@ -34,11 +36,17 @@ from tuner.execution.providers.modal.packaged_binding import (
 from tuner.execution.providers.modal.packaged_reader import (
     ModalPackagedArtifactMember, ModalPackagedCompletionObservation, ModalPackagedReader,
 )
+from tuner.execution.providers.modal.packaged_progress import (
+    ZERO_DIGEST, make_progress_file, parse_progress_file,
+)
 from tuner.execution.providers.modal.packaged_staging import (
     ModalPackagedInputStager, ModalPackagedStageReceipt,
 )
 from tuner.execution.providers.modal.runtime_build import build_modal_runtime_release_v2
-from tuner.execution.providers.modal.runtime_release_qualification import ModalRuntimeReleaseQualificationReceiptV1
+from tuner.execution.providers.modal.runtime_release_qualification import (
+    ModalRuntimeQualificationHmacAuthenticator,
+    ModalRuntimeReleaseQualificationReceiptV1,
+)
 from tuner.project.context import ProjectContext
 from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV2
 from tuner.training.modal_host_reader import ModalPackagedCoordinatorReaderV1, ModalPackagedReadUnavailable
@@ -112,8 +120,12 @@ def _facts(release):
     )
 
 
-def _setup(tmp_path, monkeypatch, *, failed=False):
+def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualification=False):
     monkeypatch.setattr(runner.platform, "python_version", lambda: "3.11.14")
+    # Source/bootstrap preparation is independently exercised through its real service.
+    monkeypatch.setattr(runner, "prepare_modal_standalone_local", lambda **kw: SimpleNamespace(
+        profile_path=Path("fixture-profile"), revalidate=lambda *args: None, close=lambda: None,
+    ))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("HF_TOKEN", "fixture-token")
     _, _, _, dataset_config = _config(tmp_path / "source")
@@ -137,6 +149,13 @@ def _setup(tmp_path, monkeypatch, *, failed=False):
         semantic.dataset_digest, semantic.dataset_sha256, semantic.dataset_bytes,
         "syntunia-sft-row/v2",
     )
+    if metrics_qualification:
+        recipe = replace(recipe, timeout_seconds=900)
+    if capture:
+        recipe = replace(recipe, observation_capture={
+            "schema_version": "synaptic-training-observation-capture/v1",
+            "every_n_steps": 1, "max_records": 10,
+        })
     config = recipe.packaged_config(identity)
     profile_root = tmp_path / "Trainers/runtime_profiles"
     image_root = tmp_path / "Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c"
@@ -383,6 +402,45 @@ def test_cli_v2_fake_transcript_prepares_submits_verifies_and_downloads(tmp_path
         "vo-control", "vo-artifacts", "vo-cache",
     }
     assert all(len(value) == 32 for value in volume.published.values())
+
+
+def test_standalone_host_signer_verifies_remote_progress_without_widening_other_purposes(
+        tmp_path, monkeypatch):
+    plan, context, _ = _setup(tmp_path, monkeypatch)
+    real_authenticator = runner.HMACAuthenticator
+    captured = []
+
+    def capture_authenticator(keys, *, allowed_purposes):
+        authenticator = real_authenticator(keys, allowed_purposes=allowed_purposes)
+        captured.append((authenticator, next(iter(keys.values())), next(iter(keys))))
+        return authenticator
+
+    monkeypatch.setattr(runner, "HMACAuthenticator", capture_authenticator)
+    runner.run_modal_standalone_job(
+        plan=plan, context=context, modal_profile="explicit", modal_environment="main",
+    )
+    assert len(captured) == 1
+    host_verifier, key, key_ref = captured[0]
+    remote_signer = ModalRuntimeQualificationHmacAuthenticator(key)
+    run = TrainingRunRef("run-progress", "standalone-training")
+    record = metric_record(run=run)
+    identity = dict(
+        key_ref=key_ref, effect_id="effect-progress",
+        command_digest="a" * 64, provider_job_ref="fc-progress",
+        execution_binding_digest="b" * 64, run=run,
+    )
+    raw, digest = make_progress_file(
+        signer=remote_signer, **identity, max_records=3, index=0,
+        previous_digest=ZERO_DIGEST, record=record,
+    )
+    entry, observed_digest, declared_max, exhausted = parse_progress_file(
+        raw, verifier=host_verifier, **identity, max_records=None,
+        index=0, previous_digest=ZERO_DIGEST,
+    )
+    assert entry.sequence == 0 and observed_digest == digest
+    assert declared_max == 3 and exhausted is False
+    with pytest.raises(ValueError, match="host HMAC authorization invalid"):
+        host_verifier.sign("modal-packaged-unknown/v1", b"x", key_ref)
 
 
 def test_cli_v2_marker_readback_mismatch_keeps_submit_claim_without_spawning(
@@ -947,3 +1005,61 @@ def test_post_cpu_start_rejection_remains_indeterminate(tmp_path, monkeypatch):
     assert caught.value.phase == "RUN_START_INDETERMINATE"
     assert caught.value.retry_authorized is False
     assert events == ["bootstrap", "cpu"]
+
+
+def test_capture_with_disabled_logs_retains_no_local_feed(tmp_path, monkeypatch, capsys):
+    plan, context, events = _setup(tmp_path, monkeypatch, capture=True)
+    def forbidden(*args, **kwargs):
+        pytest.fail('disabled logs must not be called')
+    monkeypatch.setattr(RunsAPI, 'logs', forbidden)
+    handler = ModalJobConfigHandler(Namespace(
+        modal_profile='explicit', modal_environment='main', json=True,
+    ), context)
+    assert handler._execute(plan) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['data']['progress'] == {'status': 'progress_capability_disabled', 'records_path': None}
+    assert not list((tmp_path/'state'/'synaptic-training').glob('progress-*.jsonl'))
+
+
+@pytest.mark.parametrize('read_failure', [False, True])
+def test_pending_wait_polls_public_progress_and_closes_retention(tmp_path, monkeypatch, capsys, read_failure):
+    from tuner.execution.coordinator_v1.operations import RunOperationsV1
+    from synaptic_tuner.api.v1.runs_facade import RunLogPage
+    from tuner.execution.observation_logs import encode_training_progress_log
+    plan, context, events = _setup(tmp_path, monkeypatch, capture=True)
+    original_descriptor = RunOperationsV1._descriptor
+    def descriptor(self, workflow):
+        original = original_descriptor(self, workflow)
+        return replace(original, capabilities=replace(original.capabilities, logs=True))
+    # Test-only qualified descriptor; production composition remains false.
+    monkeypatch.setattr(RunOperationsV1, '_descriptor', descriptor)
+    calls = []
+    def logs(self, request):
+        calls.append(request)
+        if read_failure:
+            raise ValueError("private telemetry failure")
+        record = metric_record(0, run=request.run)
+        entry = encode_training_progress_log(record, expected_run=request.run)
+        return RunLogPage(request, (entry,), entry.size_bytes)
+    monkeypatch.setattr(RunsAPI, 'logs', logs)
+    states = iter([ModalFunctionCallState.PENDING, ModalFunctionCallState.RETURNED])
+    def poll(*_a, **_k):
+        if not read_failure:
+            files = list((tmp_path/'state'/'synaptic-training').glob('progress-*.jsonl'))
+            assert len(files) == 1 and len(files[0].read_text().splitlines()) == 1
+        return next(states, ModalFunctionCallState.RETURNED), 'f'*64
+    monkeypatch.setattr(ModalPackagedCoordinatorReaderV1, '_poll_packaged_call', poll)
+    monkeypatch.setattr(runner.time, 'sleep', lambda *_a: None)
+    handler = ModalJobConfigHandler(Namespace(
+        modal_profile='explicit', modal_environment='main', json=True,
+    ), context)
+    assert handler._execute(plan) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(calls) == 2
+    progress = payload['data']['progress']
+    if read_failure:
+        assert progress == {'status': 'progress_read_unavailable', 'records_path': None, 'retained_records': 0}
+    else:
+        assert progress['status'] == 'progress_retained' and progress['retained_records'] == 1
+        assert len(Path(progress['records_path']).read_text().splitlines()) == 1
+    assert events == ['bootstrap', 'cpu', 'stage', 'spawn']

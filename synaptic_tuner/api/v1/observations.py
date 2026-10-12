@@ -79,6 +79,7 @@ class ObservationKind(str, Enum):
     """Closed per-family vocabulary; each member selects one payload type."""
 
     TRAINING_PHASE_OBSERVED = "training_phase_observed"
+    TRAINING_METRIC_OBSERVED = "training_metric_observed"
     EVALUATION_CASE_STARTED = "evaluation_case_started"
     EVALUATION_CASE_SCORED = "evaluation_case_scored"
     EVALUATION_STAGE_COMPLETED = "evaluation_stage_completed"
@@ -151,6 +152,91 @@ class TrainingPhaseObservedPayloadV1:
     def from_dict(cls, value: dict[str, object]) -> "TrainingPhaseObservedPayloadV1":
         value = exact_fields(value, frozenset({"phase"}), "training_phase_observed")
         return cls(value["phase"])  # type: ignore[arg-type]
+
+
+_TRAINING_METRIC_FIELDS = frozenset({
+    "step", "total_steps", "loss", "learning_rate", "epoch",
+    "train_elapsed_seconds", "job_elapsed_seconds", "gpu_current_allocated_bytes",
+    "gpu_current_reserved_bytes", "gpu_peak_allocated_bytes", "gpu_peak_reserved_bytes",
+    "gpu_utilization_percent", "tokens_per_second", "estimated_samples_per_second",
+})
+
+
+def _optional_training_float(value: object, name: str, *, maximum: float | None = None) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = _finite_float(value, name)
+    except OverflowError:
+        raise ValueError(f"{name} must be finite") from None
+    if name != "loss" and number < 0:
+        raise ValueError(f"{name} must be nonnegative")
+    if maximum is not None and number > maximum:
+        raise ValueError(f"{name} must be at most {maximum}")
+    return number
+
+
+def _optional_training_integer(value: object, name: str) -> int | None:
+    if value is None:
+        return None
+    return _bounded_integer(value, name, minimum=0, maximum=_MAX_SEQUENCE)
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingMetricObservedPayloadV1:
+    """One numeric optimizer snapshot, not a lifecycle or availability promise.
+
+    ``step`` is the global optimizer step; ``total_steps`` is unknown when null.
+    Train elapsed time excludes setup, while job elapsed time includes it. GPU
+    byte counts distinguish current from peak allocation/reservation. Utilization
+    and tokens-per-second are measured values only; samples-per-second is
+    explicitly estimated. A null means unknown, never zero. Validation bounds
+    values but cannot attest their measurement source or semantic truth.
+    """
+
+    step: int
+    total_steps: int | None
+    loss: float | None
+    learning_rate: float | None
+    epoch: float | None
+    train_elapsed_seconds: float | None
+    job_elapsed_seconds: float | None
+    gpu_current_allocated_bytes: int | None
+    gpu_current_reserved_bytes: int | None
+    gpu_peak_allocated_bytes: int | None
+    gpu_peak_reserved_bytes: int | None
+    gpu_utilization_percent: float | None
+    tokens_per_second: float | None
+    estimated_samples_per_second: float | None
+
+    def __post_init__(self) -> None:
+        _bounded_integer(self.step, "step", minimum=1, maximum=_MAX_SEQUENCE)
+        if self.total_steps is not None:
+            _bounded_integer(self.total_steps, "total_steps", minimum=self.step, maximum=_MAX_SEQUENCE)
+        for name in (
+            "loss", "learning_rate", "epoch", "train_elapsed_seconds", "job_elapsed_seconds",
+            "gpu_utilization_percent", "tokens_per_second", "estimated_samples_per_second",
+        ):
+            maximum = 100.0 if name == "gpu_utilization_percent" else None
+            object.__setattr__(self, name, _optional_training_float(getattr(self, name), name, maximum=maximum))
+        for name in (
+            "gpu_current_allocated_bytes", "gpu_current_reserved_bytes", "gpu_peak_allocated_bytes",
+            "gpu_peak_reserved_bytes",
+        ):
+            object.__setattr__(self, name, _optional_training_integer(getattr(self, name), name))
+
+    def to_dict(self) -> dict[str, object]:
+        return {name: getattr(self, name) for name in (
+            "step", "total_steps", "loss", "learning_rate", "epoch", "train_elapsed_seconds",
+            "job_elapsed_seconds", "gpu_current_allocated_bytes", "gpu_current_reserved_bytes",
+            "gpu_peak_allocated_bytes", "gpu_peak_reserved_bytes", "gpu_utilization_percent",
+            "tokens_per_second", "estimated_samples_per_second",
+        )}
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "TrainingMetricObservedPayloadV1":
+        value = exact_fields(value, _TRAINING_METRIC_FIELDS, "training_metric_observed")
+        return cls(**value)  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True, slots=True)
@@ -382,6 +468,7 @@ class PipelineStageCompletedPayloadV1:
 
 _KIND_FAMILIES: dict[ObservationKind, ObservationFamily] = {
     ObservationKind.TRAINING_PHASE_OBSERVED: ObservationFamily.TRAINING,
+    ObservationKind.TRAINING_METRIC_OBSERVED: ObservationFamily.TRAINING,
     ObservationKind.EVALUATION_CASE_STARTED: ObservationFamily.EVALUATION,
     ObservationKind.EVALUATION_CASE_SCORED: ObservationFamily.EVALUATION,
     ObservationKind.EVALUATION_STAGE_COMPLETED: ObservationFamily.EVALUATION,
@@ -397,6 +484,7 @@ _KIND_FAMILIES: dict[ObservationKind, ObservationFamily] = {
 
 OBSERVATION_PAYLOAD_TYPES: dict[ObservationKind, type] = {
     ObservationKind.TRAINING_PHASE_OBSERVED: TrainingPhaseObservedPayloadV1,
+    ObservationKind.TRAINING_METRIC_OBSERVED: TrainingMetricObservedPayloadV1,
     ObservationKind.EVALUATION_CASE_STARTED: EvaluationCaseStartedPayloadV1,
     ObservationKind.EVALUATION_CASE_SCORED: EvaluationCaseScoredPayloadV1,
     ObservationKind.EVALUATION_STAGE_COMPLETED: EvaluationStageCompletedPayloadV1,
@@ -533,4 +621,5 @@ __all__ = [
     "ObservationFamily", "ObservationKind", "ObservationPage", "ObservationRecordV1",
     "ObservationStreamRef", "ObservationsRequest", "PipelineStageCompletedPayloadV1",
     "PipelineStageStartedPayloadV1", "TrainingPhaseObservedPayloadV1",
+    "TrainingMetricObservedPayloadV1",
 ]
