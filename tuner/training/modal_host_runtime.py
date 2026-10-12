@@ -14,7 +14,7 @@ from typing import Callable, Mapping, TypeVar
 
 from synaptic_tuner.api.v1.ports import SecretResolverPort
 from synaptic_tuner.api.v1.secrets import SecretRef
-from tuner.execution.foundation_v2.canonical import canonical_bytes
+from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest, safe_ref
 from tuner.execution.providers.modal.binding import ModalClientBinding
 from tuner.execution.providers.modal.facade import MODAL_VOLUME_V1
 from tuner.execution.providers.modal.packaged_binding import ModalPackagedRuntimeFactsV1
@@ -391,9 +391,14 @@ def prepare_modal_runtime_for_host(
     private_storage: object, secret_resolver: SecretResolverPort,
     hf_token_ref: SecretRef, qualification_secret_name: str,
     hf_token_secret_name: str, app_name: str, environment_name: str,
+    local_inputs, execution_attempt_ref: str,
     builder_cache_root: Path | None = None,
+    metrics_admission=None,
 ) -> ModalHostRuntimeV1:
     """Prepare one named runtime; all mutations follow a durable attempt claim."""
+    from tuner.training.modal_local_preparation import PreparedModalLocalInputs
+    if type(local_inputs) is not PreparedModalLocalInputs or type(execution_attempt_ref) is not str:
+        raise ValueError("exact local preparation and execution attempt required")
     require_bounded_modal_deployment_host()
     if (type(hf_token_ref) is not SecretRef or not callable(getattr(secret_resolver, "resolve", None))
             or not callable(getattr(getattr(private_storage, "attempts", None), "claim", None))
@@ -401,6 +406,20 @@ def prepare_modal_runtime_for_host(
             or plan_modal_build_material(profile_path)["intent_digest"] != runtime_material_intent_digest
             or environment_name != client_binding.environment_ref):
         raise ValueError("Modal host runtime authority differs")
+    local_inputs.revalidate(profile_path, runtime_material_intent_digest)
+    safe_ref(execution_attempt_ref, "execution_attempt_ref")
+    attempt_binding = {"intent_digest": runtime_material_intent_digest,
+                       "execution_attempt_ref": execution_attempt_ref}
+    if metrics_admission is not None:
+        from tuner.training.modal_metrics_qualification import MetricsQualificationAdmission
+        if type(metrics_admission) is not MetricsQualificationAdmission:
+            raise ValueError("exact qualification admission required")
+        metrics_admission.validate_scope(client_binding)
+        admitted = metrics_admission.document
+        if (admitted["runtime_material_intent_digest"] != runtime_material_intent_digest
+                or private_storage.attempts.resolve("metrics-qual-" + admitted["attempt_ref"]) != metrics_admission.canonical):
+            raise ValueError("qualification claim differs")
+        attempt_binding["admission_sha256"] = metrics_admission.sha256
     quote = quote_modal_runtime_for_host(
         sdk=sdk, client=client, client_binding=client_binding,
         recipe_resource=recipe_resource,
@@ -429,8 +448,10 @@ def prepare_modal_runtime_for_host(
         "deployment_name": deployment_name,
         "volumes": names,
         "secrets": [qualification_name, token_name],
+        "execution_attempt": attempt_binding,
     })
-    build_claim_ref = "build-" + runtime_material_intent_digest
+    build_claim_ref = "build-" + domain_digest("synaptic-modal-bootstrap-attempt/v1", canonical_bytes(attempt_binding))
+    local_inputs.revalidate(profile_path, runtime_material_intent_digest)
     private_storage.attempts.claim(build_claim_ref, claim)
 
     # No credential value enters the recipe, durable claim, report, or logs.
@@ -502,6 +523,7 @@ def prepare_modal_runtime_for_host(
                 expected_intent_digest=runtime_material_intent_digest,
                 build_app=entered,
                 builder_cache_root=builder_cache_root,
+                local_inputs=local_inputs,
             )
         except SourceArchiveInvalid:
             raise ModalHostBootstrapUnavailable() from None

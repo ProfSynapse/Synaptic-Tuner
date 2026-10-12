@@ -48,6 +48,10 @@ from tuner.training.input_preparation import (
 from tuner.training.modal_host_authority import HMACAuthenticator, UTCClock
 from tuner.training.modal_host_composition import compose_modal_packaged_reference_host, compose_modal_metrics_qualification_host
 from tuner.training.modal_metrics_qualification import MetricsQualificationAdmission, MetricsQualificationLedger
+from tuner.training.modal_local_preparation import (
+    training_state_root, prepare_local_inputs, validate_local_launcher,
+    ModalLocalPreparationUnavailable,
+)
 from tuner.training.modal_host_download import download_verified_modal_artifact
 from tuner.training.run_progress_consumer import start_progress_consumer
 from tuner.training.modal_host_reader import ModalPackagedReadUnavailable
@@ -240,21 +244,25 @@ class _HostSecrets:
 
 
 def _private_root() -> Path:
-    base = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state")))
-    if not base.is_absolute():
-        raise ModalStandaloneRunUnavailable("modal_host_state_root_invalid")
-    root = base / "synaptic-training"
-    try:
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        info = root.lstat()
-        if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
-                or info.st_uid != os.geteuid()
-                or stat.S_IMODE(info.st_mode) & 0o077
-                or root.resolve(strict=True) != root):
-            raise ValueError
-        return root
-    except Exception:
-        raise ModalStandaloneRunUnavailable("modal_host_state_root_invalid") from None
+    return training_state_root()
+
+
+def prepare_modal_standalone_local(*, plan, context):
+    """The same mandatory local-only preparation used by normal execution."""
+    validate_local_launcher()
+    from tuner.training.modal_metrics_qualification import current_clean_commit
+    current_clean_commit(context.engine_root)
+    profiles_root = context.engine_root / "Trainers" / "runtime_profiles"
+    admitted = load_runtime_profile(plan.recipe.runtime_profile, profiles_root).resolve(
+        model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision, method="sft",
+    )
+    profile_path, intent = resolve_modal_sft_build(
+        admitted, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision,
+    )
+    if (admitted.profile_sha256 != plan.profile_sha256 or admitted.image != plan.profile_base_image
+            or intent["intent_digest"] != plan.runtime_material_intent_digest):
+        raise ModalLocalPreparationUnavailable("PROFILE_BINDING")
+    return prepare_local_inputs(profile_path, root=_private_root(), expected_intent=plan.runtime_material_intent_digest)
 
 
 def _attempt_journal(root: Path, attempt_ref: str, *, fresh_attempt: bool) -> Path:
@@ -311,7 +319,7 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
                        context: object, resources: ResourceSpec,
                        storage: ModalHostStorageV1, effect_id: str,
                        modal_profile: str, modal_environment: str,
-                       builder_cache_root: Path, metrics_admission=None):
+                       builder_cache_root: Path, metrics_admission=None, local_inputs=None):
     profiles_root = context.engine_root / "Trainers" / "runtime_profiles"
     admitted = load_runtime_profile(plan.recipe.runtime_profile, profiles_root).resolve(
         model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision,
@@ -324,6 +332,8 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
             or admitted.image != plan.profile_base_image
             or build_intent["intent_digest"] != plan.runtime_material_intent_digest):
         raise ModalStandaloneRunUnavailable("modal_runtime_profile_changed")
+    if local_inputs is not None:
+        local_inputs.revalidate(profile_path, plan.runtime_material_intent_digest)
     secrets_port = _HostSecrets({
         "SYNAPTIC_TRAIN_AUTHORITY_KEY": secrets.token_hex(32),
         "SYNAPTIC_TRAIN_READER_KEY": secrets.token_hex(32),
@@ -347,6 +357,7 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
         hf_token_secret_name=_HF_TOKEN_SECRET_NAME,
         app_name=_APP_NAME, environment_name=modal_environment,
         builder_cache_root=builder_cache_root,
+        execution_attempt_ref=effect_id, local_inputs=local_inputs, metrics_admission=metrics_admission,
     )
     qualification = qualify_modal_runtime_for_host(
         sdk=modal, client=client, client_binding=client_binding,
@@ -376,7 +387,9 @@ def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             or type(plan) is not ModalSFTRecipePlanV1
             or plan.recipe.maximum_cost_minor_units is None):
         raise ModalStandaloneRunUnavailable("modal_host_qualification_unavailable")
+    local_inputs = None
     try:
+        local_inputs = prepare_modal_standalone_local(plan=plan, context=context)
         import modal
         if modal.__version__ != "1.5.4":
             raise ValueError
@@ -394,17 +407,22 @@ def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 modal=modal, plan=plan, context=context, resources=resources,
                 storage=storage, effect_id=effect_id,
                 modal_profile=modal_profile, modal_environment=modal_environment,
-                builder_cache_root=root / "modal-wheel-builder",
+                builder_cache_root=root / "modal-wheel-builder", local_inputs=local_inputs,
             )
         return ModalStandaloneCPUQualificationV1(
             runtime.release.manifest_digest,
             runtime.deployment_facts.facts_digest,
             qualification.output_sha256,
         )
-    except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable):
+    except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable, ModalLocalPreparationUnavailable):
         raise
     except Exception:
         raise ModalStandaloneRunUnavailable("modal_host_qualification_unavailable") from None
+
+
+    finally:
+        if local_inputs is not None:
+            local_inputs.close()
 
 
 def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
@@ -417,7 +435,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
     part of this command.  The public TrainingAPI and RunsAPI own the run.
     """
     if (os.name != "posix" or platform.python_version() != "3.11.14"):
-        raise ModalStandaloneRunUnavailable("modal_host_python_31114_posix_required")
+        raise ModalLocalPreparationUnavailable("LAUNCHER_PYTHON")
     if (type(plan) is not ModalSFTRecipePlanV1
             or type(modal_profile) is not str or not modal_profile
             or type(modal_environment) is not str or not modal_environment
@@ -425,18 +443,14 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
         raise ModalStandaloneRunUnavailable("modal_host_configuration_invalid")
     phase: str | None = None
     ledger = None
+    local_inputs = None
     try:
         if metrics_admission is not None:
             if type(metrics_admission) is not MetricsQualificationAdmission or fresh_attempt is not False:
                 raise ValueError
             metrics_admission.validate_plan(plan, context=context, modal_profile=modal_profile,
                                             modal_environment=modal_environment)
-            root = _private_root()
-            # The fixed admission guard lives in the global journal, before
-            # credentials or any build/CPU/GPU effects. Uncertainty consumes it.
-            with ModalHostStorageV1(root / "modal-host.sqlite3", "standalone-training") as claim_store:
-                claim_store.attempts.claim("metrics-qual-" + metrics_admission.document["attempt_ref"],
-                                           metrics_admission.canonical)
+        local_inputs = prepare_modal_standalone_local(plan=plan, context=context)
         import modal
         if modal.__version__ != "1.5.4":
             raise ValueError
@@ -479,6 +493,15 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             raise ValueError
         resources = ResourceSpec(recipe.accelerator, recipe.accelerator_count,
                                  recipe.timeout_seconds)
+        local_inputs.revalidate(local_inputs.profile_path, plan.runtime_material_intent_digest)
+        # Presence is a local-only check; the named secret value remains private.
+        _HostSecrets({}).resolve(SecretRef("env", "HF_TOKEN"))
+        if metrics_admission is not None:
+            # The fixed admission guard lives in the global journal, before
+            # provider credentials or any build/CPU/GPU effects. Uncertainty consumes it.
+            with ModalHostStorageV1(root / "modal-host.sqlite3", "standalone-training") as claim_store:
+                claim_store.attempts.claim("metrics-qual-" + metrics_admission.document["attempt_ref"],
+                                           metrics_admission.canonical)
         with ModalHostStorageV1(
             _attempt_journal(root, run_id, fresh_attempt=fresh_attempt),
             project_ref,
@@ -487,7 +510,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 modal=modal, plan=plan, context=context, resources=resources,
                 storage=storage, effect_id="cpu-qual-" + run_id,
                 modal_profile=modal_profile, modal_environment=modal_environment,
-                builder_cache_root=root / "modal-wheel-builder",
+                builder_cache_root=root / "modal-wheel-builder", local_inputs=local_inputs,
                 **({"metrics_admission": metrics_admission} if metrics_admission is not None else {}),
             )
             phase = "RUN_HOST_ASSEMBLY"
@@ -711,7 +734,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 progress_result,
                 ledger.finish(verified=True) if ledger is not None else None,
             )
-    except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable):
+    except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable, ModalLocalPreparationUnavailable):
         raise
     except ModalStandalonePhaseUnavailable:
         raise
@@ -750,3 +773,5 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
     finally:
         if ledger is not None and not ledger.finished:
             ledger.finish(verified=False)
+        if local_inputs is not None:
+            local_inputs.close()

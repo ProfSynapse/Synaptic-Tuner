@@ -109,8 +109,8 @@ def _read_verified(path: Path, *, size: int, digest: str) -> bytes:
         os.close(fd)
 
 
-def _download_exact(url: str, size: int) -> bytes:
-    opener = build_opener(_NoRedirect)
+def _download_exact(url: str, size: int, *, opener=None) -> bytes:
+    opener = opener or build_opener(_NoRedirect)
     request = Request(url, headers={"User-Agent": "synaptic-modal-wheel-builder/1"})
     with opener.open(request, timeout=20) as response:
         if response.status != 200 or response.url != url:

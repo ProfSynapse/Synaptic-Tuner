@@ -122,6 +122,10 @@ def _facts(release):
 
 def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualification=False):
     monkeypatch.setattr(runner.platform, "python_version", lambda: "3.11.14")
+    # Source/bootstrap preparation is independently exercised through its real service.
+    monkeypatch.setattr(runner, "prepare_modal_standalone_local", lambda **kw: SimpleNamespace(
+        profile_path=Path("fixture-profile"), revalidate=lambda *args: None, close=lambda: None,
+    ))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("HF_TOKEN", "fixture-token")
     _, _, _, dataset_config = _config(tmp_path / "source")

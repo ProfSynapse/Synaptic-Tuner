@@ -7,6 +7,7 @@ candidate is deliberately not a runtime release or training authority.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from contextlib import nullcontext
 import hashlib
 import io
 import json
@@ -396,11 +397,61 @@ def _cleanup_sandbox(sandbox: object) -> None:
     raise ModalBoundedOperationFailure("modal_training_capture_cleanup_unresolved", "TIMEOUT")
 
 
+def prepare_capture_build_inputs(profile, staged: Path, wheel: Path, digest: str, *, bootstrap_paths=None):
+    """Build the same exact local material before any provider authority claim."""
+    try:
+        packaged = json.loads(json.dumps(profile.packaged_runtime))
+        packaged["wheel"]["filename"] = wheel.name
+        packaged["wheel"]["sha256"] = digest
+        inputs_raw = (json.dumps(packaged, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
+        staged_inputs = staged / "build-inputs.json"
+        staged_inputs.write_bytes(inputs_raw)
+        requirements = []
+        all_wheels = [packaged["wheel"], *packaged["bootstrap"]]
+        for item in all_wheels:
+            path = wheel if item is packaged["wheel"] else (bootstrap_paths or {}).get(item["filename"], profile.artifact_root / item["filename"])
+            raw = stable_read(path, 256 * 1024 * 1024)
+            if hashlib.sha256(raw).hexdigest() != item["sha256"]:
+                raise ValueError("pinned Modal wheel differs")
+            if path != wheel:
+                target = staged / item["filename"]
+                target.write_bytes(raw)
+            requirements.append(f"/opt/synaptic-runtime/{item['filename']} --hash=sha256:{item['sha256']}")
+        staged_requirements = staged / "requirements.txt"
+        staged_requirements.write_text("\n".join(requirements) + "\n", encoding="ascii")
+        python = profile.python_executable
+        command = (
+            "set -eu; before=\"$(" + python + " -I -m pip check 2>&1)\" || test \"$?\" -eq 1; "
+            + python + " -I -m pip install --no-index --no-deps --require-hashes --no-cache-dir -r /opt/synaptic-runtime/requirements.txt; "
+            + "after=\"$(" + python + " -I -m pip check 2>&1)\" || test \"$?\" -eq 1; "
+            + "test \"$before\" = \"$after\""
+        )
+        recipe = {
+            "sdk_version": "1.5.4", "python_executable": python,
+            "commands": [command],
+            "installer_flags": ["--no-index", "--no-deps", "--require-hashes", "--no-cache-dir"],
+            "wheels": [{"filename": item["filename"], "sha256": item["sha256"]} for item in all_wheels],
+            "builder_policy": "synaptic-modal-wheel-build/v2",
+            "builder_lock_sha256": hashlib.sha256(builder_lock_bytes()).hexdigest(),
+        }
+        material = {
+            "kind": "modal_build", "base_image": {
+                "reference": profile.base_image, "digest": profile.base_image.split("@sha256:", 1)[1],
+            },
+            "build_inputs": recipe,
+            "build_inputs_digest": hashlib.sha256(canonical_bytes(recipe)).hexdigest(),
+        }
+        return packaged, staged_inputs, staged_requirements, command, recipe, material
+    except Exception:
+        raise ModalBuildStageFailure("BUILD_INPUTS", "INVALID") from None
+
+
 def capture_modal_build_candidate(
     *, sdk: object, client: object, profile_path: Path, build_claim: Callable[[], None],
     app_name: str, environment_name: str, expected_intent_digest: str,
     build_app: object | None = None,
     builder_cache_root: Path | None = None,
+    local_inputs=None,
 ) -> ModalBuildCandidateV1:
     """Build the fixed pinned image, then measure it before release construction.
 
@@ -423,65 +474,36 @@ def capture_modal_build_candidate(
     inspector_raw = stable_read(inspector, 128 * 1024)
     inspector_digest = hashlib.sha256(inspector_raw).hexdigest()
     deadline = time.monotonic() + 3600
-    with tempfile.TemporaryDirectory(prefix="synaptic-modal-build-") as scratch:
+    if local_inputs is not None:
+        from tuner.training.modal_local_preparation import PreparedModalLocalInputs
+        if type(local_inputs) is not PreparedModalLocalInputs:
+            raise ModalBuildStageFailure("BUILD_INPUTS", "INVALID")
+        local_inputs.revalidate(profile_path, expected_intent_digest)
+    scratch_context = (nullcontext(str(local_inputs.staged)) if local_inputs is not None
+                       else tempfile.TemporaryDirectory(prefix="synaptic-modal-build-"))
+    with scratch_context as scratch:
         staged = Path(scratch)
-        try:
-            wheel, digest = prepare_current_source_wheel(
-                root, staged, expected_source_commit=str(intent["engine_source_commit"]),
-                builder_cache_root=builder_cache_root,
+        if local_inputs is not None:
+            wheel, digest = local_inputs.wheel, local_inputs.wheel_sha256
+            packaged, staged_inputs, staged_requirements, command, recipe, material = local_inputs.layout
+        else:
+            try:
+                wheel, digest = prepare_current_source_wheel(
+                    root, staged, expected_source_commit=str(intent["engine_source_commit"]),
+                    builder_cache_root=builder_cache_root,
+                )
+            except SourceArchiveInvalid:
+                raise
+            except SourceWheelFailure as error:
+                raise ModalBuildStageFailure("SOURCE_WHEEL", error.reason) from None
+            except Exception:
+                raise ModalBuildStageFailure("SOURCE_WHEEL", "LOCAL_BUILD_FAILED") from None
+            packaged, staged_inputs, staged_requirements, command, recipe, material = prepare_capture_build_inputs(
+                profile, staged, wheel, digest,
             )
-        except SourceArchiveInvalid:
-            raise
-        except SourceWheelFailure as error:
-            raise ModalBuildStageFailure("SOURCE_WHEEL", error.reason) from None
-        except Exception:
-            raise ModalBuildStageFailure("SOURCE_WHEEL", "LOCAL_BUILD_FAILED") from None
-        try:
-            packaged = json.loads(json.dumps(profile.packaged_runtime))
-            packaged["wheel"]["filename"] = wheel.name
-            packaged["wheel"]["sha256"] = digest
-            inputs_raw = (json.dumps(packaged, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
-            staged_inputs = staged / "build-inputs.json"
-            staged_inputs.write_bytes(inputs_raw)
-            requirements = []
-            all_wheels = [packaged["wheel"], *packaged["bootstrap"]]
-            for item in all_wheels:
-                path = wheel if item is packaged["wheel"] else profile.artifact_root / item["filename"]
-                raw = stable_read(path, 256 * 1024 * 1024)
-                if hashlib.sha256(raw).hexdigest() != item["sha256"]:
-                    raise ValueError("pinned Modal wheel differs")
-                if path != wheel:
-                    target = staged / item["filename"]
-                    target.write_bytes(raw)
-                requirements.append(f"/opt/synaptic-runtime/{item['filename']} --hash=sha256:{item['sha256']}")
-            staged_requirements = staged / "requirements.txt"
-            staged_requirements.write_text("\n".join(requirements) + "\n", encoding="ascii")
-            python = profile.python_executable
-            command = (
-                "set -eu; before=\"$(" + python + " -I -m pip check 2>&1)\" || test \"$?\" -eq 1; "
-                + python + " -I -m pip install --no-index --no-deps --require-hashes --no-cache-dir -r /opt/synaptic-runtime/requirements.txt; "
-                + "after=\"$(" + python + " -I -m pip check 2>&1)\" || test \"$?\" -eq 1; "
-                + "test \"$before\" = \"$after\""
-            )
-            recipe = {
-                "sdk_version": "1.5.4", "python_executable": python,
-                "commands": [command],
-                "installer_flags": ["--no-index", "--no-deps", "--require-hashes", "--no-cache-dir"],
-                "wheels": [{"filename": item["filename"], "sha256": item["sha256"]} for item in all_wheels],
-                "builder_policy": "synaptic-modal-wheel-build/v2",
-                "builder_lock_sha256": hashlib.sha256(builder_lock_bytes()).hexdigest(),
-            }
-            material = {
-                "kind": "modal_build", "base_image": {
-                    "reference": profile.base_image, "digest": profile.base_image.split("@sha256:", 1)[1],
-                },
-                "build_inputs": recipe,
-                "build_inputs_digest": hashlib.sha256(canonical_bytes(recipe)).hexdigest(),
-            }
-            if plan_modal_build_material(profile_path)["intent_digest"] != expected_intent_digest:
-                raise ValueError("Modal build intent changed before claim")
-        except Exception:
-            raise ModalBuildStageFailure("BUILD_INPUTS", "INVALID") from None
+        all_wheels = [packaged["wheel"], *packaged["bootstrap"]]
+        if plan_modal_build_material(profile_path)["intent_digest"] != expected_intent_digest:
+            raise ModalBuildStageFailure("BUILD_INPUTS", "INVALID")
         build_claim()
         app = (build_app if build_app is not None else _bounded(
             lambda: sdk.App.lookup(app_name, create_if_missing=False, client=client,
@@ -513,7 +535,7 @@ def capture_modal_build_candidate(
         try:
             sandbox = _bounded(
                 lambda: sdk.Sandbox.create(
-                    python, "-I", "-m", "tuner.runtime.modal_build_inspector",
+                    profile.python_executable, "-I", "-m", "tuner.runtime.modal_build_inspector",
                     app=app, image=image, cpu=1.0, memory=2048, timeout=300, idle_timeout=300,
                     block_network=True, client=client,
                 ), deadline=deadline, code="modal_training_capture_create_ambiguous", late_cleanup=_terminate_sandbox,
@@ -545,7 +567,7 @@ def capture_modal_build_candidate(
             candidate = ModalBuildCandidateV1.from_capture(
                 material=material, raw=raw, expected_image_id=image_id,
                 expected_inspector_sha256=inspector_digest,
-                expected_build_inputs_digest=hashlib.sha256(inputs_raw).hexdigest(),
+                expected_build_inputs_digest=hashlib.sha256(stable_read(staged_inputs, 128 * 1024)).hexdigest(),
             )
             candidate._attest_build(_BUILDER_ATTESTATION)
         except Exception:

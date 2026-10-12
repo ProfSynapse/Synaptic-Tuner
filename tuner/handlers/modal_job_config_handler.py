@@ -15,6 +15,11 @@ from tuner.training.modal_metrics_qualification import MetricsQualificationUnava
 def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
     """Expose only reviewed, non-authorizing bootstrap diagnostics."""
     try:
+        from tuner.training.modal_local_preparation import ModalLocalPreparationUnavailable
+        if type(error) is ModalLocalPreparationUnavailable and error.code in error.CODES:
+            return {"phase": "LOCAL_" + error.code,
+                    "failure_class": "UNAVAILABLE" if error.code.endswith("UNAVAILABLE") else "INVALID",
+                    "location": "modal_local_preparation.prepare_local_inputs", "retry_authorized": False}
         from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
         from tuner.training.modal_host_qualification import ModalHostQualificationUnavailable
         from tuner.execution.providers.modal.runtime_release_qualification import PARENT_RUNTIME_FAILURE_STAGES
@@ -182,7 +187,7 @@ class ModalJobConfigHandler(BaseHandler):
             recipe_path = candidate.resolve(strict=True)
             profiles_root = self.engine_root / "Trainers" / "runtime_profiles"
             if sum(bool(getattr(self.args, name, False)) for name in (
-                    "plan", "quote", "qualify", "qualify_metrics")) > 1:
+                    "plan", "quote", "qualify", "qualify_metrics", "prepare_local")) > 1:
                 self.output_error("Select one Modal recipe mode", code="MODAL_RECIPE_MODE_INVALID")
                 return 2
             attempt = getattr(self.args, "metrics_qualification_attempt", None)
@@ -194,6 +199,7 @@ class ModalJobConfigHandler(BaseHandler):
                 or (getattr(self.args, "qualification_sha256", None) is not None and execute_admission is None)
                 or (execute_admission is not None and not getattr(self.args, "qualification_sha256", None))
                 or ((attempt is not None or execute_admission is not None) and getattr(self.args, "fresh_attempt", False))
+                or (getattr(self.args, "prepare_local", False) and getattr(self.args, "fresh_attempt", False))
             )
             if invalid_flags:
                 self.output_error("Invalid metrics qualification mode", code="MODAL_RECIPE_MODE_INVALID")
@@ -213,6 +219,14 @@ class ModalJobConfigHandler(BaseHandler):
             )
             if getattr(self.args, "plan", False):
                 document = plan.to_dict()
+                from tuner.training.modal_local_preparation import local_readiness
+                from tuner.training.modal_recipe import resolve_modal_sft_build
+                from tuner.runtime_profiles import load_runtime_profile
+                selected = load_runtime_profile(
+                    plan.recipe.runtime_profile, profiles_root,
+                ).resolve(model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision, method="sft")
+                profile_path, _ = resolve_modal_sft_build(selected, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision)
+                document["local_readiness"] = local_readiness(profile_path)
                 if attempt is not None:
                     from tuner.training.modal_metrics_qualification import candidate_admission, current_clean_commit, write_candidate
                     import hashlib
@@ -237,6 +251,19 @@ class ModalJobConfigHandler(BaseHandler):
                 return 0
             if getattr(self.args, "qualify", False):
                 return self._qualify(plan)
+            if getattr(self.args, "prepare_local", False):
+                try:
+                    from tuner.training.modal_standalone_runner import prepare_modal_standalone_local
+                    prepared = prepare_modal_standalone_local(plan=plan, context=self.context)
+                    try:
+                        self.output(prepared.report())
+                    finally:
+                        prepared.close()
+                    return 0
+                except Exception as error:
+                    self.output_error("Local Modal inputs could not be prepared", code="MODAL_LOCAL_PREPARATION_UNAVAILABLE",
+                                      details=_closed_bootstrap_details(error))
+                    return 2
             return self._execute(plan)
         except (OSError, TypeError, ValueError, yaml.YAMLError, MetricsQualificationUnavailable):
             self.output_error("Modal recipe or prepared dataset is invalid", code="MODAL_RECIPE_INVALID")
