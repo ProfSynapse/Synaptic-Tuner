@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from tuner.execution.foundation_v2.canonical import canonical_bytes
+from tuner.execution.providers.modal.contracts import operation_path
 from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade, ModalFunctionCallState
 from tuner.execution.providers.modal.runtime_release_qualification import (
     ModalCPUTransportProbeV1, ModalRuntimeQualificationHmacAuthenticator,
@@ -26,7 +27,7 @@ from tuner.training.modal_local_preparation import ModalLocalPreparationUnavaila
 from tuner.training.modal_host_composition import _transport_logs_authorized
 from tuner.training.modal_host_effects import ModalPackagedHostEffectsV1
 from tuner.training.modal_host_qualification import ModalHostCPUQualificationV1, _retain_transport_capture
-from tests.execution.providers.test_modal_sdk154_adapter import FakeVolume, SDK
+from tests.execution.providers.test_modal_sdk154_adapter import FakeVolume, FakeCall, FakeFunctionCall, SDK
 from tests.training.test_modal_host_effects import _Storage
 from tests.training.test_modal_host_transport_qualification import bound_runtime
 
@@ -49,22 +50,25 @@ def genuine_proof(monkeypatch, tmp_path):
     root = transport_probe_root(dispatch)
     finals = {root + f"/final/{i:012d}.json": transport_probe_envelope(
         transport_probe_content(dispatch, "fc-probe", i), auth, dispatch.key_ref) for i in range(9)}
-    first = finals[root + "/final/000000000000.json"]
-    stage = root + "/staging/" + "b" * 32 + ".json"
-    manifest = {**transport_probe_content(dispatch, "fc-probe", 0), "stage_path": stage,
-        "final_path": root + "/final/000000000000.json", "size_bytes": len(first),
-        "sha256": hashlib.sha256(first).hexdigest()}
-    staged = {stage: first, root + "/manifests/000000000000.json": transport_probe_envelope(manifest, auth, dispatch.key_ref)}
     evidence = {"schema_version": TRANSPORT_PROBE_SCHEMA, "scope": "synthetic_cpu_transport",
-        "root": root, "records": [{"sequence": i, "sha256": hashlib.sha256(raw).hexdigest()}
-            for i, raw in enumerate(finals.values())], "manual_commit_used": False,
+        "publication_strategy": probe.publication_strategy, "root": root,
+        "records": [{"sequence": i, "path": path, "size_bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+            for i, (path, raw) in enumerate(finals.items())],
+        "collision": {"attempts": 1, "rejected": True, "path": root + "/final/000000000000.json",
+            "original_sha256": hashlib.sha256(next(iter(finals.values()))).hexdigest()},
         "training_executed": False, "gpu_qualified": False}
     # ML/runtime admission and the transport primitive have their own tests.
     # These provider-free collaborators let the real worker produce its two signed receipts.
     monkeypatch.setattr("tuner.runtime.packaged_sft_execution._inspect_parent_release", lambda _: None)
     monkeypatch.setattr("tuner.runtime.packaged_training_worker.qualify_installed_child",
         lambda _: local_cpu_result(release, "a" * 64))
-    monkeypatch.setattr(VolumeRootBinding, "bind", lambda **kwargs: SimpleNamespace(close=lambda: None))
+    class Guard:
+        def close(self): pass
+        def claim_directory(self, path): (roots.control / path).mkdir(mode=0o700)
+        def write_exclusive(self, path, raw, maximum):
+            assert len(raw) <= maximum
+            with (roots.control / path).open("xb") as stream: stream.write(raw)
+    monkeypatch.setattr(VolumeRootBinding, "bind", lambda **kwargs: Guard())
     monkeypatch.setattr("tuner.execution.providers.modal.runtime_release_qualification._run_transport_probe",
         lambda *args, **kwargs: evidence)
     roots = ModalRuntimeReleaseQualificationRoots(tmp_path / "control", tmp_path / "artifacts")
@@ -73,8 +77,16 @@ def genuine_proof(monkeypatch, tmp_path):
     source.parent.mkdir(parents=True); source.write_bytes(LOCAL_CPU_DATA)
     worker = ModalRuntimeReleaseQualificationWorker(expected_facts=facts, verifier=auth, signer=auth,
         observer=observer, call_id_provider=lambda: "fc-probe", roots=roots)
+    commits = []
+    def commit_control():
+        commits.append(tuple(path.relative_to(roots.control).as_posix()
+            for path in roots.control.rglob("*") if path.is_file()))
     assert worker(build_modal_runtime_release_qualification_dispatch(dispatch, auth),
-        commit_artifacts=lambda: None, commit_control=lambda: None)["status_code"] == "completed"
+        commit_artifacts=lambda: None, commit_control=commit_control)["status_code"] == "completed"
+    terminal_name = operation_path(dispatch.effect_id, "runtime-release-transport-evidence", "receipt.json")
+    assert len(commits) == 2
+    assert terminal_name not in commits[0] and terminal_name in commits[1]
+    assert not tuple(roots.artifacts.rglob("*transport*"))
     FakeVolume.registry = {item.spec.name: FakeVolume(item.volume_id) for item in facts.volumes}
     for role, local_root in (("control", roots.control), ("artifacts", roots.artifacts)):
         for file in local_root.rglob("*"):
@@ -87,12 +99,18 @@ def genuine_proof(monkeypatch, tmp_path):
     monkeypatch.setattr(type(facade), "observe_known_call_pending", lambda self, _: ModalFunctionCallState.PENDING)
     reader = ModalRuntimeReleaseQualificationReader(facade=facade, deployment_observer=observer, verifier=auth)
     control = FakeVolume.registry[volumes["control"].spec.name]
-    control.files.update(staged)
+    terminal_path = operation_path(dispatch.effect_id, "runtime-release-transport-evidence", "receipt.json")
+    terminal_raw = control.files.pop(terminal_path)
+    from tuner.execution.providers.modal.runtime_release_qualification import QUALIFICATION_RESULT_SCHEMA
+    monkeypatch.setattr(FakeCall, "result", {"schema_version": QUALIFICATION_RESULT_SCHEMA, "status_code": "completed"})
+    for name, value in (("hydrate_error", None), ("hydrated_id", None), ("hydrate_result_other", False), ("remain_unhydrated", False)):
+        monkeypatch.setattr(FakeFunctionCall, name, value)
     clock = [0]
     def sleep(_):
         clock[0] += 1
         control.files.update(finals)
     capture = reader.capture_transport_probe(dispatch, provider_call_id="fc-probe", monotonic=lambda: clock[0], sleep=sleep)
+    control.files[terminal_path] = terminal_raw
     path, digest, raw = _retain_transport_capture(tmp_path / "good-retention", dispatch.effect_id, "fc-probe", capture)
     proof = reader.verify_transport_probe(dispatch, provider_call_id="fc-probe", capture=capture, retained_capture_bytes=raw)
     core = reader.observe(dispatch, provider_call_id="fc-probe")
@@ -176,8 +194,8 @@ def test_retention_fault_never_returns_durable_capture(genuine_proof, monkeypatc
 
 def test_genuine_inconclusive_visibility_proof_cannot_enable_logs(genuine_proof, tmp_path):
     qualification, effects, components, reader, dispatch, _ = genuine_proof
-    # The producer's complete final0 already exists; a late stage view cannot
-    # establish stage-before-publication even with a valid signed terminal receipt.
+    # A signed terminal receipt already exists; complete final bytes read afterward
+    # cannot establish the admitted pre-terminal pending-delivery window.
     capture = reader.capture_transport_probe(dispatch, provider_call_id="fc-probe", sleep=lambda _: None)
     assert capture.to_dict()["verdict"] == "inconclusive"
     path, digest, raw = _retain_transport_capture(tmp_path / "inconclusive-retention", dispatch.effect_id, "fc-probe", capture)

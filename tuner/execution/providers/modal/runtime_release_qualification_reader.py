@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import time
-import re
 import json
 import math
 
@@ -114,214 +113,171 @@ class ModalRuntimeReleaseQualificationReader:
 
     def capture_transport_probe(self, dispatch, *, provider_call_id, monotonic=time.monotonic,
                                 sleep=time.sleep, host_deadline=None):
-        """CPU-only SDK observations; no training or completion evidence is fabricated."""
+        """Observe complete SDK-published CPU fixtures before their terminal receipt."""
         from .facade import ModalFunctionCallState
+        from .runtime_build import _bounded
         if type(dispatch) is not ModalRuntimeReleaseQualificationDispatchV1 or dispatch.transport_probe is None:
             raise ValueError("CPU transport probe is not admitted")
-        call = safe_ref(provider_call_id, "provider_call_id")
-        probe = dispatch.transport_probe
+        call, probe = safe_ref(provider_call_id, "provider_call_id"), dispatch.transport_probe
         root, volume = transport_probe_root(dispatch), _volume_id(dispatch.deployment_facts, "control")
+        terminal = operation_path(dispatch.effect_id, "runtime-release-transport-evidence")
         started = monotonic()
         deadline = started + probe.max_host_seconds
         if host_deadline is not None:
             if type(host_deadline) not in (int, float) or not math.isfinite(host_deadline):
                 raise ValueError("CPU host deadline invalid")
             deadline = min(deadline, host_deadline)
-        from .runtime_build import _bounded
         def provider_read(operation):
-            # Bound the actual SDK closure, not only the outer polling loop.
             remaining = max(0, deadline - monotonic())
             return _bounded(operation, deadline=time.monotonic() + min(5, remaining),
                             code="cpu_transport_read_unavailable")
-        rows, seen, staged = [], {}, False
-        invalid = False
+        rows, seen, invalid = [], {}, False
         for poll in range(probe.max_polls):
             if monotonic() >= deadline:
                 break
             before = provider_read(lambda: self._facade.observe_known_call_pending(call))
             if before is not ModalFunctionCallState.PENDING:
                 break
-            observations = []
-            page_bytes = 0
-            status = "empty"
+            observations, page_bytes = [], 0
+            absent_before, absent_after, status = False, False, "empty"
             try:
                 provider_read(lambda: _observe_current_layout(self._observer, dispatch.deployment_facts))
-                manifests = provider_read(lambda: self._facade.list_prefix(volume, root + "/manifests", max_entries=10))
-                finals = provider_read(lambda: self._facade.list_prefix(volume, root + "/final", max_entries=10))
-                if len(manifests) > 9 or len(finals) > 9:
-                    raise ValueError("CPU transport inventory exceeds bound")
-                expected_manifests = {root + f"/manifests/{i:012d}.json": i for i in range(9)}
-                expected_finals = {root + f"/final/{i:012d}.json": i for i in range(9)}
-                if (len({row[0] for row in manifests}) != len(manifests)
-                        or len({row[0] for row in finals}) != len(finals)
-                        or any(row[0] not in expected_manifests for row in manifests)
-                        or any(row[0] not in expected_finals for row in finals)):
-                    raise ValueError("CPU transport inventory rows invalid")
-                for path, size, entry in (*manifests, *finals):
-                    if path not in {*expected_manifests, *expected_finals} or not 0 < size <= probe.max_leaf_bytes:
+                absent_before = not provider_read(lambda: self._facade.list_prefix(volume, terminal, max_entries=2))
+                if absent_before:
+                    finals = provider_read(lambda: self._facade.list_prefix(volume, root + "/final", max_entries=10))
+                    expected = {root + f"/final/{i:012d}.json": i for i in range(9)}
+                    if (len(finals) > 9 or len({row[0] for row in finals}) != len(finals)
+                            or any(row[0] not in expected for row in finals)):
                         raise ValueError("CPU transport inventory invalid")
-                    if entry != provider_entry_identity(volume, path, size):
-                        raise ValueError("CPU transport entry identity invalid")
-                final_names = {path for path, _, _ in finals}
-                # One signed manifest names the sealed stage held by the real primitive.
-                for path, size, _ in manifests:
-                    if expected_manifests[path] != 0 or staged:
-                        continue
-                    raw = provider_read(lambda: self._facade.read_complete(volume, path, max_bytes=size))
-                    page_bytes += len(raw)
-                    if len(raw) != size or page_bytes > probe.max_page_bytes:
-                        raise ValueError("CPU transport page bound exceeded")
-                    manifest = verify_transport_probe_envelope(raw, self._verifier, dispatch.key_ref)
-                    base = transport_probe_content(dispatch, call, 0)
-                    if set(manifest) != {*base, "stage_path", "final_path", "size_bytes", "sha256"} \
-                            or any(manifest[key] != value for key, value in base.items()):
-                        raise ValueError("CPU transport manifest binding invalid")
-                    stage = manifest["stage_path"]
-                    if (type(stage) is not str or re.fullmatch(re.escape(root) + r"/staging/[0-9a-f]{32}\.json", stage) is None
-                            or manifest["final_path"] != root + "/final/000000000000.json"
-                            or type(manifest["size_bytes"]) is not int or not 0 < manifest["size_bytes"] <= 8192):
-                        raise ValueError("CPU transport manifest path invalid")
-                    digest_text(manifest["sha256"], "CPU stage digest")
-                    listed = provider_read(lambda: self._facade.list_prefix(volume, root + "/staging", max_entries=19))
-                    listed = tuple(row for row in listed if row[0] == stage)
-                    if listed and manifest["final_path"] not in final_names:
-                        body = provider_read(lambda: self._facade.read_complete(volume, stage, max_bytes=8192))
-                        page_bytes += len(body)
-                        if page_bytes > probe.max_page_bytes:
-                            raise ValueError("CPU transport page bound exceeded")
-                        if (listed != ((stage, len(body), provider_entry_identity(volume, stage, len(body))),)
-                                or len(body) != manifest["size_bytes"]
-                                or hashlib.sha256(body).hexdigest() != manifest["sha256"]
-                                or verify_transport_probe_envelope(body, self._verifier, dispatch.key_ref) != base):
-                            raise ValueError("CPU sealed stage changed")
-                        if not any(row[0] == manifest["final_path"] for row in provider_read(
-                                lambda: self._facade.list_prefix(volume, root + "/final", max_entries=10))):
-                            observations.append({"kind": "sealed_stage_final_absent", "sequence": 0,
-                                                 "sha256": manifest["sha256"]})
-                for path, size, _ in finals:
-                    index = expected_finals[path]
-                    raw = provider_read(lambda: self._facade.read_complete(volume, path, max_bytes=size))
-                    page_bytes += len(raw)
-                    if page_bytes > probe.max_page_bytes:
-                        raise ValueError("CPU transport page bound exceeded")
-                    if len(raw) != size or verify_transport_probe_envelope(raw, self._verifier, dispatch.key_ref) != transport_probe_content(dispatch, call, index):
-                        raise ValueError("CPU transport final binding invalid")
-                    observations.append({"kind": "complete_final", "sequence": index,
-                                         "sha256": hashlib.sha256(raw).hexdigest()})
-                status = "observed" if observations else "empty"
+                    for path, size, entry in finals:
+                        if (type(size) is not int or not 0 < size <= probe.max_leaf_bytes
+                                or entry != provider_entry_identity(volume, path, size)):
+                            raise ValueError("CPU transport entry identity invalid")
+                        index = expected[path]
+                        raw = provider_read(lambda: self._facade.read_complete(volume, path, max_bytes=size))
+                        page_bytes += len(raw)
+                        if (page_bytes > probe.max_page_bytes or len(raw) != size
+                                or verify_transport_probe_envelope(raw, self._verifier, dispatch.key_ref)
+                                != transport_probe_content(dispatch, call, index)):
+                            raise ValueError("CPU transport complete publication invalid")
+                        observations.append({"kind": "complete_final", "sequence": index,
+                                             "sha256": hashlib.sha256(raw).hexdigest()})
+                    absent_after = not provider_read(lambda: self._facade.list_prefix(volume, terminal, max_entries=2))
+                    status = "observed" if observations else "empty"
+                if not absent_before or not absent_after:
+                    status = "terminal_visible"
             except ValueError:
-                status = "invalid"
-                observations = []
-                invalid = True
+                status, observations, invalid = "invalid", [], True
             except Exception:
-                status = "read_unavailable"
-                observations = []
+                status, observations = "read_unavailable", []
             after = provider_read(lambda: self._facade.observe_known_call_pending(call))
             elapsed_ms = max(0, int((monotonic() - started) * 1000))
             if monotonic() >= deadline or elapsed_ms > probe.max_host_seconds * 1000:
                 status = "deadline"
             elapsed_ms = min(elapsed_ms, probe.max_host_seconds * 1000)
-            accepted = before is after is ModalFunctionCallState.PENDING and status in {"empty", "observed"}
+            accepted = (before is after is ModalFunctionCallState.PENDING
+                        and status in {"empty", "observed"} and absent_before and absent_after)
             if accepted:
                 for item in observations:
-                    if item["kind"] == "sealed_stage_final_absent":
-                        if 0 not in seen:
-                            staged = True
-                    else:
-                        index = item["sequence"]
-                        if index in seen and seen[index] != item["sha256"]:
-                            invalid = True
-                        seen[index] = item["sha256"]
-            row = {"poll": poll, "elapsed_ms": elapsed_ms, "before": before.value, "after": after.value,
-                   "status": status, "accepted": accepted, "observations": observations}
-            rows.append(row)
+                    index = item["sequence"]
+                    if index in seen and seen[index] != item["sha256"]:
+                        invalid = True
+                    seen[index] = item["sha256"]
+            rows.append({"poll": poll, "elapsed_ms": elapsed_ms, "before": before.value,
+                "after": after.value, "terminal_absent_before": absent_before,
+                "terminal_absent_after": absent_after, "status": status,
+                "accepted": accepted, "observations": observations})
             if len(_transport_evidence_bytes(rows)) > probe.max_ledger_bytes - 8192:
                 raise ValueError("CPU transport ledger bound exceeded")
-            if (invalid or (staged and len(seen) == 9) or (0 in seen and not staged)
-                    or after is not ModalFunctionCallState.PENDING or status == "deadline"):
+            if (invalid or len(seen) == 9 or after is not ModalFunctionCallState.PENDING
+                    or status in {"deadline", "terminal_visible"}):
                 break
             sleep(1)
-        document = {"schema_version": TRANSPORT_PROBE_SCHEMA, "dispatch_digest": dispatch.dispatch_digest,
-                "provider_call_id": call,
-                "runtime_release_digest": dispatch.runtime_release.manifest_digest,
-                "deployment_facts_digest": dispatch.deployment_facts.facts_digest,
-                "staged_final_absent": staged,
-                "records": [{"sequence": i, "sha256": seen[i]} for i in sorted(seen)],
-                "polls": rows, "verdict": "evidence_invalid" if invalid else
-                    "observed_pending" if staged and len(seen) == 9 else "inconclusive",
-                "training_executed": False, "gpu_qualified": False,
-                "transport_qualified": False, "durability_acknowledged": False}
+        document = {"schema_version": TRANSPORT_PROBE_SCHEMA,
+            "publication_strategy": probe.publication_strategy,
+            "dispatch_digest": dispatch.dispatch_digest, "provider_call_id": call,
+            "runtime_release_digest": dispatch.runtime_release.manifest_digest,
+            "deployment_facts_digest": dispatch.deployment_facts.facts_digest,
+            "records": [{"sequence": i, "sha256": seen[i]} for i in sorted(seen)],
+            "polls": rows, "verdict": "evidence_invalid" if invalid else
+                "observed_pending" if len(seen) == 9 else "inconclusive",
+            "training_executed": False, "gpu_qualified": False,
+            "transport_qualified": False, "durability_acknowledged": False}
         raw = _transport_evidence_bytes(document)
-        return ModalCPUTransportCaptureV1(raw, hashlib.sha256(raw).hexdigest(), _TransportWitness(raw, hashlib.sha256(raw).hexdigest(), _CAPTURE_AUTHORITY))
+        return ModalCPUTransportCaptureV1(raw, hashlib.sha256(raw).hexdigest(),
+            _TransportWitness(raw, hashlib.sha256(raw).hexdigest(), _CAPTURE_AUTHORITY))
+
+    def _cpu_call_completed(self, call):
+        # Existing ordinary Function-call projection is for training, not CPU
+        # receipts. Authenticate the pinned SDK handle and this lane's closed result.
+        from .runtime_release_qualification import QUALIFICATION_RESULT_SCHEMA
+        handle = self._facade.sdk.FunctionCall.from_id(call, client=self._facade.client)
+        if (handle.hydrate(self._facade.client) is not handle
+                or getattr(handle, "is_hydrated", False) is not True
+                or getattr(handle, "object_id", None) != call):
+            raise ValueError("CPU transport terminal call identity invalid")
+        result = handle.get(timeout=0)
+        if (type(result) is not dict or set(result) != {"schema_version", "status_code"}
+                or result.get("schema_version") != QUALIFICATION_RESULT_SCHEMA
+                or result.get("status_code") != "completed"):
+            raise ValueError("CPU transport call has not completed successfully")
 
     def verify_transport_probe(self, dispatch, *, provider_call_id, capture, retained_capture_bytes=None):
-        """Mandatory core receipt is checked separately before optional transport proof."""
+        """Core proof, completed call, collision and postcommit remote inventory agree."""
+        from .packaged_progress import SDK_PUBLICATION_DIAGNOSTICS
         if dispatch.transport_probe is None or type(capture) is not ModalCPUTransportCaptureV1:
             raise ValueError("CPU transport evidence is not admitted")
-        capture_raw = capture._raw
-        capture_sha256 = capture._sha256
+        capture_raw, capture_sha256 = capture._raw, capture._sha256
         durable = retained_capture_bytes is not None
         if durable and (type(retained_capture_bytes) is not bytes or retained_capture_bytes != capture_raw):
             raise ValueError("CPU transport retained capture differs")
         capture = capture.to_dict()
-        call = safe_ref(provider_call_id, "provider_call_id")
-        if (capture.get("dispatch_digest") != dispatch.dispatch_digest
-                or capture.get("provider_call_id") != call
+        call, probe = safe_ref(provider_call_id, "provider_call_id"), dispatch.transport_probe
+        if (capture.get("dispatch_digest") != dispatch.dispatch_digest or capture.get("provider_call_id") != call
+                or capture.get("publication_strategy") != probe.publication_strategy
                 or capture.get("runtime_release_digest") != dispatch.runtime_release.manifest_digest
                 or capture.get("deployment_facts_digest") != dispatch.deployment_facts.facts_digest):
             raise ValueError("CPU transport capture binding differs")
-        # Reconstruct the accepted facts from the bounded retained ledger rather
-        # than trusting a caller-supplied summary or verdict.
         polls = capture.get("polls")
         if type(polls) is not list or len(polls) > 180 or len(_transport_evidence_bytes(capture)) > 1048576:
             raise ValueError("CPU transport retained ledger invalid")
-        derived, held, invalid = {}, None, False
-        held_poll, final_zero_poll, previous_elapsed = None, None, -1
+        derived, invalid, previous_elapsed = {}, False, -1
         for index, row in enumerate(polls):
-            if (type(row) is not dict or set(row) != {"poll", "elapsed_ms", "before", "after", "status", "accepted", "observations"}
+            if (type(row) is not dict or set(row) != {"poll", "elapsed_ms", "before", "after", "status",
+                    "terminal_absent_before", "terminal_absent_after", "accepted", "observations"}
                     or type(row["poll"]) is not int or row["poll"] != index
                     or type(row["elapsed_ms"]) is not int or not max(0, previous_elapsed) <= row["elapsed_ms"] <= 180000
                     or row["before"] not in {"pending", "unknown"} or row["after"] not in {"pending", "unknown"}
-                    or row["status"] not in {"empty", "observed", "read_unavailable", "invalid", "deadline"}
-                    or type(row["accepted"]) is not bool or type(row["observations"]) is not list
-                    or len(row["observations"]) > 10):
+                    or row["status"] not in {"empty", "observed", "read_unavailable", "invalid", "deadline", "terminal_visible"}
+                    or any(type(row[key]) is not bool for key in ("accepted", "terminal_absent_before", "terminal_absent_after"))
+                    or type(row["observations"]) is not list or len(row["observations"]) > 9):
                 raise ValueError("CPU transport retained poll invalid")
             previous_elapsed = row["elapsed_ms"]
-            accepted = row["before"] == row["after"] == "pending" and row["status"] in {"empty", "observed"}
+            accepted = (row["before"] == row["after"] == "pending" and row["status"] in {"empty", "observed"}
+                        and row["terminal_absent_before"] and row["terminal_absent_after"])
             if accepted != row["accepted"]:
                 raise ValueError("CPU transport pending bracket invalid")
             invalid = invalid or row["status"] == "invalid"
             for item in row["observations"]:
                 if (type(item) is not dict or set(item) != {"kind", "sequence", "sha256"}
-                        or item["kind"] not in {"sealed_stage_final_absent", "complete_final"}
-                        or type(item["sequence"]) is not int or not 0 <= item["sequence"] <= 8):
+                        or item["kind"] != "complete_final" or type(item["sequence"]) is not int
+                        or not 0 <= item["sequence"] <= 8):
                     raise ValueError("CPU transport retained record invalid")
                 digest_text(item["sha256"], "CPU transport retained digest")
-                if not accepted:
-                    continue
-                if item["kind"] == "sealed_stage_final_absent":
-                    if item["sequence"] != 0 or (held is not None and held != item["sha256"]):
-                        raise ValueError("CPU transport stage evidence conflict")
-                    if final_zero_poll is None:
-                        held, held_poll = item["sha256"], index
-                else:
+                if accepted:
                     sequence = item["sequence"]
                     if sequence in derived and derived[sequence] != item["sha256"]:
                         raise ValueError("CPU transport final evidence conflict")
                     derived[sequence] = item["sha256"]
-                    if sequence == 0 and final_zero_poll is None:
-                        final_zero_poll = index
         records = [{"sequence": i, "sha256": derived[i]} for i in sorted(derived)]
-        complete = (held is not None and len(derived) == 9 and held == derived.get(0)
-                    and final_zero_poll is not None and held_poll < final_zero_poll and not invalid)
-        verdict = "evidence_invalid" if invalid else "observed_pending" if complete else "inconclusive"
-        if (capture.get("records") != records or capture.get("staged_final_absent") is not (held is not None)
-                or capture.get("verdict") != verdict):
+        verdict = "evidence_invalid" if invalid else "observed_pending" if len(derived) == 9 else "inconclusive"
+        if capture.get("records") != records or capture.get("verdict") != verdict:
             raise ValueError("CPU transport retained summary differs")
         core = self.observe(dispatch, provider_call_id=call)
-        path = operation_path(dispatch.effect_id, "runtime-release-transport-evidence", "receipt.json")
-        volume = _volume_id(dispatch.deployment_facts, "artifacts")
-        prefix = path.rsplit("/", 1)[0]
+        self._cpu_call_completed(call)
+        root, volume = transport_probe_root(dispatch), _volume_id(dispatch.deployment_facts, "control")
+        prefix = operation_path(dispatch.effect_id, "runtime-release-transport-evidence")
+        path = prefix + "/receipt.json"
         listed = self._facade.list_prefix(volume, prefix, max_entries=2)
         raw = self._facade.read_complete(volume, path, max_bytes=8192)
         expected_entry = ((path, len(raw), provider_entry_identity(volume, path, len(raw))),)
@@ -333,38 +289,68 @@ class ModalRuntimeReleaseQualificationReader:
             "runtime_release_digest": dispatch.runtime_release.manifest_digest,
             "deployment_facts_digest": dispatch.deployment_facts.facts_digest,
             "fixture_sha256": dispatch.fixture.sha256, "provider_call_id": call,
-            "probe": dispatch.transport_probe.to_dict(), "evidence": content.get("evidence"),
+            "probe": probe.to_dict(), "evidence": content.get("evidence"),
             "training_executed": False, "gpu_qualified": False}
         if content != expected:
             raise ValueError("CPU transport receipt binding differs")
-        evidence = content["evidence"]
-        expected_evidence = {"schema_version": TRANSPORT_PROBE_SCHEMA, "scope": "synthetic_cpu_transport",
-            "root": transport_probe_root(dispatch), "records": capture.get("records"),
-            "manual_commit_used": False, "training_executed": False, "gpu_qualified": False}
-        passed = (capture.get("verdict") == "observed_pending" and capture.get("staged_final_absent") is True
-                  and len(capture.get("records", [])) == 9 and evidence == expected_evidence)
-        failure_code = None
+        evidence, failure_code = content["evidence"], None
         if type(evidence) is dict and evidence.get("status") == "inconclusive":
-            from .volume_root_binding import ATOMIC_PUBLICATION_DIAGNOSTICS
             if (set(evidence) != {"status", "failure_code"}
-                    or type(evidence["failure_code"]) is not str
-                    or evidence["failure_code"] not in ATOMIC_PUBLICATION_DIAGNOSTICS | {"TRANSPORT_PROBE_UNAVAILABLE"}):
-                raise ValueError("CPU transport failure diagnostic invalid")
+                    or evidence.get("failure_code") not in {*SDK_PUBLICATION_DIAGNOSTICS, "TRANSPORT_PROBE_UNAVAILABLE"}):
+                raise ValueError("CPU transport diagnostic invalid")
             failure_code = evidence["failure_code"]
-        result = {"schema_version": TRANSPORT_PROBE_SCHEMA, "status": "passed" if passed else "inconclusive",
-                "dispatch_digest": dispatch.dispatch_digest, "provider_call_id": call,
-                "receipt_sha256": hashlib.sha256(raw).hexdigest(),
-                "capture_sha256": capture_sha256,
-                "core_receipt_sha256": hashlib.sha256(core.receipt.canonical_bytes).hexdigest(),
-                "runtime_release_digest": dispatch.runtime_release.manifest_digest,
-                "deployment_facts_digest": dispatch.deployment_facts.facts_digest,
-                "probe": dispatch.transport_probe.to_dict(), "transport_qualified": False,
-                "partial_write_behavior_qualified": False, "training_executed": False,
-                "gpu_qualified": False, "durability_acknowledged": durable}
+        inventory_verified, collision_verified = False, False
+        if failure_code is None:
+            leaves = evidence.get("records") if type(evidence) is dict else None
+            if type(leaves) is not list or len(leaves) != 9:
+                raise ValueError("CPU transport producer inventory invalid")
+            collision = {"attempts": 1, "rejected": True, "path": root + "/final/000000000000.json",
+                         "original_sha256": leaves[0].get("sha256") if type(leaves[0]) is dict else None}
+            expected_evidence = {"schema_version": TRANSPORT_PROBE_SCHEMA, "scope": "synthetic_cpu_transport",
+                "publication_strategy": probe.publication_strategy, "root": root, "records": leaves,
+                "collision": collision, "training_executed": False, "gpu_qualified": False}
+            if evidence != expected_evidence:
+                raise ValueError("CPU transport collision or strategy evidence invalid")
+            expected_final = []
+            for i, leaf in enumerate(leaves):
+                expected_path = root + f"/final/{i:012d}.json"
+                if (type(leaf) is not dict or set(leaf) != {"sequence", "path", "size_bytes", "sha256"}
+                        or type(leaf["sequence"]) is not int or leaf["sequence"] != i or leaf["path"] != expected_path
+                        or type(leaf["size_bytes"]) is not int or not 0 < leaf["size_bytes"] <= 8192):
+                    raise ValueError("CPU transport signed final member invalid")
+                digest_text(leaf["sha256"], "CPU transport signed member digest")
+                expected_final.append((expected_path, leaf["size_bytes"], provider_entry_identity(volume, expected_path, leaf["size_bytes"])))
+            actual = self._facade.list_prefix(volume, root + "/final", max_entries=10)
+            if tuple(sorted(actual)) != tuple(expected_final):
+                raise ValueError("CPU transport postcommit inventory differs")
+            page_bytes = 0
+            for i, leaf in enumerate(leaves):
+                body = self._facade.read_complete(volume, leaf["path"], max_bytes=leaf["size_bytes"])
+                page_bytes += len(body)
+                if (page_bytes > probe.max_page_bytes or len(body) != leaf["size_bytes"]
+                        or hashlib.sha256(body).hexdigest() != leaf["sha256"]
+                        or verify_transport_probe_envelope(body, self._verifier, dispatch.key_ref) != transport_probe_content(dispatch, call, i)):
+                    raise ValueError("CPU transport postcommit member differs")
+            if tuple(sorted(self._facade.list_prefix(volume, root + "/final", max_entries=10))) != tuple(expected_final):
+                raise ValueError("CPU transport postcommit inventory changed during read")
+            inventory_verified, collision_verified = True, True
+        signed_records = [{"sequence": leaf["sequence"], "sha256": leaf["sha256"]}
+                          for leaf in evidence["records"]] if inventory_verified else []
+        passed = verdict == "observed_pending" and records == signed_records and inventory_verified and collision_verified
+        result = {"schema_version": TRANSPORT_PROBE_SCHEMA, "publication_strategy": probe.publication_strategy,
+            "status": "passed" if passed else "inconclusive", "dispatch_digest": dispatch.dispatch_digest,
+            "provider_call_id": call, "receipt_sha256": hashlib.sha256(raw).hexdigest(),
+            "capture_sha256": capture_sha256, "core_receipt_sha256": hashlib.sha256(core.receipt.canonical_bytes).hexdigest(),
+            "runtime_release_digest": dispatch.runtime_release.manifest_digest,
+            "deployment_facts_digest": dispatch.deployment_facts.facts_digest, "probe": probe.to_dict(),
+            "call_completed": True, "final_inventory_verified": inventory_verified, "collision_verified": collision_verified,
+            "transport_qualified": False, "partial_write_behavior_qualified": False,
+            "training_executed": False, "gpu_qualified": False, "durability_acknowledged": durable}
         if failure_code is not None:
             result["failure_code"] = failure_code
         result_raw = canonical_bytes(result)
-        return ModalCPUTransportVerificationV1(result_raw, hashlib.sha256(result_raw).hexdigest(), _TransportWitness(result_raw, hashlib.sha256(result_raw).hexdigest(), _CAPTURE_AUTHORITY))
+        return ModalCPUTransportVerificationV1(result_raw, hashlib.sha256(result_raw).hexdigest(),
+            _TransportWitness(result_raw, hashlib.sha256(result_raw).hexdigest(), _CAPTURE_AUTHORITY))
 
     def observe(self, dispatch: ModalRuntimeReleaseQualificationDispatchV1,
                 *, provider_call_id: str) -> ModalRuntimeReleaseQualificationObservation:

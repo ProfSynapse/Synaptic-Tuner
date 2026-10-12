@@ -11,7 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import base64
 import hashlib
-import secrets
 import time
 import hmac
 from pathlib import Path
@@ -320,8 +319,8 @@ class ModalRuntimeQualificationHmacAuthenticator:
         return hmac.compare_digest(expected, tag)
 
 
-TRANSPORT_PROBE_SCHEMA = "synaptic-modal-cpu-transport-probe/v1"
-TRANSPORT_PROBE_PURPOSE = "modal-runtime-release-transport-probe/v1"
+TRANSPORT_PROBE_SCHEMA = "synaptic-modal-cpu-transport-probe/v2"
+TRANSPORT_PROBE_PURPOSE = "modal-runtime-release-transport-probe/v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,11 +335,15 @@ class ModalCPUTransportProbeV1:
     max_polls: int = 180
     max_host_seconds: int = 180
     max_ledger_bytes: int = 1048576
-    hold_stage_seconds: int = 20
     final_hold_seconds: int = 20
+    publication_strategy: str = "modal_sdk_create_only/v1"
+    collision_attempts: int = 1
+    terminal_receipt_volume_role: str = "control"
 
     def __post_init__(self):
-        if self.schema_version != TRANSPORT_PROBE_SCHEMA:
+        if (self.schema_version != TRANSPORT_PROBE_SCHEMA
+                or self.publication_strategy != "modal_sdk_create_only/v1"
+                or self.terminal_receipt_volume_role != "control"):
             raise ValueError("invalid CPU transport probe schema")
         if (type(self.marker_name) is not str or not self.marker_name.startswith("probe-")
                 or not self.marker_name.endswith(".bin") or len(self.marker_name) != 42
@@ -350,7 +353,7 @@ class ModalCPUTransportProbeV1:
         for name, expected in (("metric_records", 8), ("max_leaf_bytes", 8192),
                 ("max_page_bytes", 65536), ("max_page_entries", 100),
                 ("max_polls", 180), ("max_host_seconds", 180),
-                ("max_ledger_bytes", 1048576), ("hold_stage_seconds", 20),
+                ("max_ledger_bytes", 1048576), ("collision_attempts", 1),
                 ("final_hold_seconds", 20)):
             if type(getattr(self, name)) is not int or getattr(self, name) != expected:
                 raise ValueError("CPU transport probe bound differs")
@@ -403,51 +406,55 @@ def verify_transport_probe_envelope(raw, verifier, key_ref):
     return document["content"]
 
 
-def _run_transport_probe(dispatch, *, binding, signer, call_id, deadline):
-    probe = dispatch.transport_probe
-    root = transport_probe_root(dispatch)
-    # Reserve the fixed experiment window without renewing the original call budget.
-    if time.monotonic() + 60 > deadline:
+def _run_transport_probe(dispatch, *, binding, signer, call_id, deadline, publication_factory):
+    from .packaged_progress import SDKProgressPublicationError
+    if not callable(publication_factory):
+        raise ValueError("CPU transport SDK publication unavailable")
+    probe, root = dispatch.transport_probe, transport_probe_root(dispatch)
+    if time.monotonic() + 40 > deadline:
         raise TimeoutError("CPU transport window unavailable")
-    for directory in (root, root + "/staging", root + "/manifests", root + "/final"):
-        binding.claim_directory(directory)
+    publication = publication_factory(binding, root, deadline)
     def pause(seconds):
         if time.monotonic() + seconds >= deadline:
             raise TimeoutError("CPU transport phase window unavailable")
         time.sleep(seconds)
         if time.monotonic() >= deadline:
             raise TimeoutError("CPU transport phase window exhausted")
-    leaves = []
+    leaves, collision = [], None
     for index in range(9):
         if time.monotonic() >= deadline:
             raise TimeoutError("CPU transport window exhausted")
         content = transport_probe_content(dispatch, call_id, index)
         raw = transport_probe_envelope(content, signer, dispatch.key_ref)
-        stage_path = root + "/staging/" + secrets.token_hex(16) + ".json"
-        final_path = root + f"/final/{index:012d}.json"
-        stage = binding.prepare_owned_stage(stage_path, raw, probe.max_leaf_bytes)
-        try:
-            manifest = {**content, "stage_path": stage_path, "final_path": final_path,
-                        "size_bytes": stage.size_bytes, "sha256": stage.sha256}
-            manifest_raw = transport_probe_envelope(manifest, signer, dispatch.key_ref)
-            binding.publish_exclusive(root + "/staging/" + secrets.token_hex(16) + ".json",
-                    root + f"/manifests/{index:012d}.json", manifest_raw, 8192)
-            if index == 0:
-                # Same production primitive; hold only its completed, sealed stage.
-                # No explicit commit: observe ordinary background commits.
-                pause(probe.hold_stage_seconds)
-            binding.publish_owned_stage(stage, final_path)
-            leaves.append({"sequence": index, "sha256": hashlib.sha256(raw).hexdigest()})
-        finally:
-            stage.close()
+        path = root + f"/final/{index:012d}.json"
+        publication.publish_exclusive(path, raw, probe.max_leaf_bytes)
+        digest = hashlib.sha256(raw).hexdigest()
+        if index == 0:
+            # Exactly one separately admitted server collision, never replay the
+            # original publisher's consumed uncertain/successful path claim.
+            other = publication_factory(binding, root, deadline)
+            candidate = transport_probe_envelope({**content, "value": 99}, signer, dispatch.key_ref)
+            try:
+                other.publish_exclusive(path, candidate, probe.max_leaf_bytes)
+            except SDKProgressPublicationError as error:
+                if type(error) is not SDKProgressPublicationError or error.code != "SDK_PUBLISH_COLLISION":
+                    raise
+            else:
+                raise ValueError("CPU transport collision was not rejected")
+            if publication.read_final(path) != raw:
+                raise ValueError("CPU transport collision changed original bytes")
+            collision = {"attempts": 1, "rejected": True, "path": path,
+                         "original_sha256": digest}
+        leaves.append({"sequence": index, "path": path, "size_bytes": len(raw), "sha256": digest})
         pause(2)
     pause(probe.final_hold_seconds)
     return {"schema_version": TRANSPORT_PROBE_SCHEMA, "scope": "synthetic_cpu_transport",
-            "root": root, "records": leaves, "manual_commit_used": False,
+            "publication_strategy": probe.publication_strategy, "root": root,
+            "records": leaves, "collision": collision,
             "training_executed": False, "gpu_qualified": False}
 
 
-def _publish_transport_receipt(dispatch, *, roots, signer, call_id, evidence):
+def _publish_transport_receipt(dispatch, *, binding, signer, call_id, evidence):
     content = {"schema_version": TRANSPORT_PROBE_SCHEMA, "scope": "synthetic_cpu_transport",
         "effect_id": dispatch.effect_id, "dispatch_digest": dispatch.dispatch_digest,
         "runtime_release_digest": dispatch.runtime_release.manifest_digest,
@@ -456,10 +463,9 @@ def _publish_transport_receipt(dispatch, *, roots, signer, call_id, evidence):
         "probe": dispatch.transport_probe.to_dict(), "evidence": evidence,
         "training_executed": False, "gpu_qualified": False}
     raw = transport_probe_envelope(content, signer, dispatch.key_ref)
-    # Commit terminal proof on the other Volume: never flush the live control
-    # stream explicitly and misattribute end-of-probe visibility to background commits.
-    path = operation_path(dispatch.effect_id, "runtime-release-transport-evidence", "receipt.json")
-    write_exclusive(roots.artifacts, roots.artifacts / path, raw)
+    prefix = operation_path(dispatch.effect_id, "runtime-release-transport-evidence")
+    binding.claim_directory(prefix)
+    binding.write_exclusive(prefix + "/receipt.json", raw, 8192)
 
 
 
@@ -684,7 +690,7 @@ class ModalRuntimeReleaseQualificationWorker:
         self._facts, self._verifier, self._signer = expected_facts, verifier, signer
         self._observer, self._call_id, self._roots = observer, call_id_provider, roots
 
-    def __call__(self, dispatch_bytes: bytes, *, commit_artifacts, commit_control):
+    def __call__(self, dispatch_bytes: bytes, *, commit_artifacts, commit_control, publication_factory=None):
         probe_binding = None
         core_published = False
         deadline = time.monotonic() + 110
@@ -823,15 +829,16 @@ class ModalRuntimeReleaseQualificationWorker:
                 try:
                     try:
                         probe_evidence = _run_transport_probe(dispatch, binding=probe_binding,
-                            signer=self._signer, call_id=call_id, deadline=deadline)
+                            signer=self._signer, call_id=call_id, deadline=deadline,
+                            publication_factory=publication_factory)
                     except Exception as error:
-                        from .volume_root_binding import VolumeRootBindingError, ATOMIC_PUBLICATION_DIAGNOSTICS
-                        failure_code = (error.code if type(error) is VolumeRootBindingError
-                            and error.code in ATOMIC_PUBLICATION_DIAGNOSTICS else "TRANSPORT_PROBE_UNAVAILABLE")
+                        from .packaged_progress import SDKProgressPublicationError, SDK_PUBLICATION_DIAGNOSTICS
+                        failure_code = (error.code if type(error) is SDKProgressPublicationError
+                            and error.code in SDK_PUBLICATION_DIAGNOSTICS else "TRANSPORT_PROBE_UNAVAILABLE")
                         probe_evidence = {"status": "inconclusive", "failure_code": failure_code}
-                    _publish_transport_receipt(dispatch, roots=self._roots,
+                    _publish_transport_receipt(dispatch, binding=probe_binding,
                         signer=self._signer, call_id=call_id, evidence=probe_evidence)
-                    commit_artifacts()
+                    commit_control()
                 except Exception:
                     return {"schema_version": QUALIFICATION_RESULT_SCHEMA,
                             "status_code": "completed", "transport_probe_status": "unavailable"}
