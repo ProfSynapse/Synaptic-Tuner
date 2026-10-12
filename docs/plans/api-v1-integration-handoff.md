@@ -45,9 +45,10 @@ no reusable checked-in bootstrap preparation surface was found.
 Next work is a hash-pinned local preparation workflow and provider-free checks
 of actual bootstrap files plus private state-root requirements, before authority
 claims or provisioning. Retain the consumed claims and existing resources;
-this failure grants no replay, deletion or adoption authority. A later new clean
-source/admission and separately approved fresh attempt can be considered only
-after that preparation/preflight gap is resolved and reviewed. See the exact
+this failure grants no replay, deletion or adoption authority. The user subsequently authorized bounded fix/test/live iteration for this session;
+fresh attempts retain distinct reviewed source/admission and claims after the
+preparation/preflight gap is resolved. This authority does not replay the consumed
+attempt or authorize resource cleanup. See the exact
 [attempt checkpoint](training-progress-streaming.md#approved-attempt-checkpoint-2026-10-12).
 
 ## Metrics: implemented is not live-qualified
@@ -128,8 +129,10 @@ are provider-free evidence unless the row identifies retained live qualification
 
 Proceed with provider-free integration and independent review of metric retention.
 Resolve and review the local bootstrap preparation/pre-effect validation gap
-from the consumed qualification attempt before generating another admission or
-requesting another paid approval. A pre-completion
+from the consumed qualification attempt, then continue within the user's explicit
+bounded iteration authority using distinct reviewed fresh admissions. Demonstrate
+at least two completed live runs on the same final code and the cold-checkout
+normal path; retain external provider limitations separately. A pre-completion
 delivery result alone does not qualify partial writes or promote public logs;
 retain that separate live transport/review gate.
 Dataset transformation and four-model comparison remain paused.

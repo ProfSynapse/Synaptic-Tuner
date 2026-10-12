@@ -346,3 +346,31 @@ capability. Implement and review the checked-in preparation surface before a new
 clean source/admission or a request for separately scoped paid approval. Do not
 remove claims, invent another state root or rotate attempt identifiers to replay
 this approved attempt, and do not delete or adopt its resources without authority.
+
+## Authorized reliability cycle (2026-10-12)
+
+After the failed approved attempt, the user explicitly authorized repeated bounded
+fix/test/live cycles until the supported path is reliable. That session authority
+supersedes the earlier requirement to ask again for every fresh attempt. Preserve
+the exact failed admission and claims; each new attempt must have its own reviewed
+admission and finite source/input/provider/step/time/cost binding. No uncertain
+submission is replayed. Ordinary logs remain disabled and earlier failed resources
+are not deleted or adopted by this authorization.
+
+The next implementation target is automatic hash-pinned bootstrap preparation on
+the normal path, with private-root and actual local-input/source validation before
+claims/provisioning. A fresh clone must not depend on undocumented wheel files or
+operator package installs. Verification must reject missing/corrupt inputs, unsafe
+private-root modes and dirty/mismatched source before provider effects while
+preserving exact launcher/runtime pins. This remains an acceptance target until
+its implemented workflow and evidence are recorded.
+
+Reliability acceptance requires at least two completed bounded live qualification
+runs on the same final code, each with a distinct retained admission/claim and
+reviewed fresh-attempt semantics, acknowledged durable pre-completion metric
+delivery and native artifact verification. A subsequent code change requires a
+new same-code pair. This demonstrates repeatability for the supported fixture;
+it is not a guarantee against provider outages, external state changes, partial
+write behavior, incomplete tails or every future configuration. Keep external
+provider failures distinct from reproduced local defects, and avoid unrelated
+feature work during the cycle.

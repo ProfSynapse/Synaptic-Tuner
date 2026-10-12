@@ -1498,8 +1498,12 @@ checkout, after the final clean integrated commit. Reuse the documented fixture
 and exact parser flags in the streaming plan. Bind source/profile/build intent,
 compiled workload/configuration, prepared data, provider scope and step/time/cost
 limits before effect authority. No fake source SHA, fresh-attempt escape or
-automatic replay is allowed. Paid execution requires approval for that exact
-admission and scope; planning is non-authorizing.
+automatic replay is allowed. Paid execution requires user authority covering the
+bounded admission and scope; planning is non-authorizing. Explicit session
+authorization for bounded reliability iteration persists across fixes and fresh
+attempts, so do not ask the same confirmation again within that scope. Preserve
+all prior claims and retain each new admission; never reinterpret an uncertain
+submission as replay or relax exact pins.
 
 The finite delivery ledger requires new numeric records bracketed by exact-call
 pending observations plus terminal native artifact verification. A
@@ -1507,3 +1511,25 @@ pending observations plus terminal native artifact verification. A
 qualification false. Keep ordinary logs disabled pending the separate live
 transport evidence and independent review. Neither standalone `train --qualify`
 CPU proof nor minimal native `--mode qualify-training` proves these metrics.
+
+
+## Authorized bounded reliability iteration (2026-10-12)
+
+The user authorized continuing the metrics fix/test/live cycle until the supported
+workflow is reliable, superseding the earlier one-attempt approval boundary for
+this session. This covers reviewed fresh attempts within the established synthetic
+fixture, provider scope and finite limits; it does not promote ordinary logs or
+create cleanup/replay authority. See the current restoration checkpoint and exact
+attempt evidence before choosing the next admitted source.
+
+Acceptance is a normal-path cold-checkout build with automatic pinned bootstrap
+preparation, provider-free rejection of missing/corrupt artifacts, unsafe local
+private-root modes and dirty/mismatched source before provider effects, verified
+exact launcher/runtime pins, and at least two completed bounded live metrics
+qualification runs on the same final code. Each run must have a distinct retained
+admission/claim, successful durable pre-completion delivery evidence and native
+artifact verification. Changes to code reset the two-run comparison. Do not add
+unrelated features to satisfy this proof. External provider failures remain possible;
+record them separately from reproduced workflow defects and never promise that
+every invocation must succeed. Implementation and live results must be described
+from retained evidence rather than this acceptance target.
