@@ -47,17 +47,6 @@ class MemoryVolume:
             for path, raw, mode in pending:
                 self.files[path], self.modes[path] = raw, mode
 
-    def read_file(self, path):
-        raw = self.files[path.lstrip("/")]
-        yield raw[:1]
-        yield raw[1:]
-
-    def iterdir(self, prefix, recursive=False):
-        assert recursive is False
-        for path, raw in self.files.items():
-            if path.rsplit("/", 1)[0] == prefix.lstrip("/"):
-                yield SimpleNamespace(path=path, size=len(raw), type=1)
-
 
 @pytest.fixture
 def bound(monkeypatch):
@@ -71,16 +60,15 @@ def publisher(binding, volume, client, *, deadline=None):
         prefix="operations/probe/progress", deadline=deadline)
 
 
-def test_create_only_complete_bytes_collision_and_remote_inventory(bound):
+def test_create_only_complete_bytes_collision_preserves_server_bytes(bound):
     binding, layout = bound
     client = object()
     volume = MemoryVolume(binding, client)
     first = publisher(binding, volume, client)
     path = "operations/probe/progress/final/000.json"
     first.publish_exclusive(path, b'{"value":1}')
-    assert first.read_final(path) == b'{"value":1}'
+    assert volume.files[path] == b'{"value":1}'
     assert volume.modes[path] == 0o600
-    assert first.final_inventory("operations/probe/progress/final", 2) == ((path, 11),)
     # The mounted namespace is allowed to be stale; it is not final authority.
     assert not (layout[2] / path).exists()
     with pytest.raises(SDKProgressPublicationError) as replay:
@@ -90,7 +78,7 @@ def test_create_only_complete_bytes_collision_and_remote_inventory(bound):
     with pytest.raises(SDKProgressPublicationError) as collision:
         publisher(binding, volume, client).publish_exclusive(path, b'{"value":2}')
     assert collision.value.code == "SDK_PUBLISH_COLLISION"
-    assert first.read_final(path) == b'{"value":1}'
+    assert volume.files[path] == b'{"value":1}'
 
 
 def test_timeout_retains_uncertain_attempt_and_never_replays(bound):

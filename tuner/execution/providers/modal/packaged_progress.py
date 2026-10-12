@@ -39,7 +39,7 @@ SDK_PUBLICATION_STRATEGY = "modal_sdk_create_only/v1"
 SDK_PUBLICATION_DIAGNOSTICS = frozenset({
     "SDK_PUBLISH_INPUT", "SDK_PUBLISH_IDENTITY", "SDK_PUBLISH_REPLAY",
     "SDK_PUBLISH_DEADLINE", "SDK_PUBLISH_COLLISION", "SDK_PUBLISH_UNAVAILABLE",
-    "SDK_PUBLISH_READBACK", "SDK_PUBLISH_INVENTORY", "SDK_PUBLISH_ROOT",
+    "SDK_PUBLISH_ROOT",
 })
 
 
@@ -153,40 +153,6 @@ class ModalSDKProgressPublication:
                 upload.put_file(io.BytesIO(content), remote, mode=0o600)
         self._bounded(publish)
 
-    def read_final(self, path: str) -> bytes:
-        remote = self._path(path)
-        def read():
-            content = bytearray()
-            for block in self._volume.read_file(remote):
-                if type(block) is not bytes or len(content) + len(block) > MAX_PROGRESS_FILE_BYTES:
-                    raise SDKProgressPublicationError("SDK_PUBLISH_READBACK")
-                content.extend(block)
-            if not content:
-                raise SDKProgressPublicationError("SDK_PUBLISH_READBACK")
-            return bytes(content)
-        return self._bounded(read)
-
-    def final_inventory(self, directory: str, max_entries: int):
-        remote = self._path(directory)
-        if type(max_entries) is not int or not 1 <= max_entries <= 10001:
-            raise SDKProgressPublicationError("SDK_PUBLISH_INPUT")
-        def read():
-            entries = []
-            for item in self._volume.iterdir(remote, recursive=False):
-                path = getattr(item, "path", None)
-                size = getattr(item, "size", None)
-                if (type(path) is not str or type(size) is not int or not 0 < size <= MAX_PROGRESS_FILE_BYTES
-                        or getattr(item, "type", None) != 1 or len(entries) >= max_entries):
-                    raise SDKProgressPublicationError("SDK_PUBLISH_INVENTORY")
-                path = path[1:] if path.startswith("/") else path
-                self._path(path)
-                if path.rsplit("/", 1)[0] != directory:
-                    raise SDKProgressPublicationError("SDK_PUBLISH_INVENTORY")
-                entries.append((path, size))
-            if len({path for path, _ in entries}) != len(entries):
-                raise SDKProgressPublicationError("SDK_PUBLISH_INVENTORY")
-            return tuple(sorted(entries))
-        return self._bounded(read)
 MAX_PROGRESS_RECORDS = 10_000
 ZERO_DIGEST = "0" * 64
 
