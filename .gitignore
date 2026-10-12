@@ -135,6 +135,8 @@ Datasets/decision/
 # Local training outputs
 webllm_output/
 decision_output/
+# image_lora runs: downloaded LoRAs, samples, run_state.json (datasets live outside the repo)
+image_lora_output/
 sft_output_mac/
 grpo_output_rtx3090/.worktrees/
 

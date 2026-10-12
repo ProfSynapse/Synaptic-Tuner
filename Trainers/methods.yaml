@@ -21,4 +21,5 @@ method_labels:
   dpo: "DPO - Direct Preference Optimization"
   embedding: "Embedding - Bi-Encoder Training"
   ace_step: "ACE-STEP - Music Generation (LoRA/LoKr)"
+  image_lora: "Image LoRA - Diffusion LoRA via ai-toolkit on Modal (Qwen-Image)"
   decision: "Decision - Typed Choice/Yes-No/Score Model (Jev-style)"

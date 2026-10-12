@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from tuner.project.context import ProjectContext
 
 
-TRAINING_METHODS = ("sft", "kto", "grpo", "dpo", "embedding", "ace_step", "decision")
+TRAINING_METHODS = ("sft", "kto", "grpo", "dpo", "embedding", "ace_step", "decision", "image_lora")
 
 CANONICAL_TRAINER_DIRS = {method: method for method in TRAINING_METHODS}
 LEGACY_TRAINER_DIRS = {method: f"rtx3090_{method}" for method in TRAINING_METHODS}

@@ -1,0 +1,30 @@
+# Trainers/image_lora/configs/model_registry.yaml
+#
+# Base models the image_lora method can train on, keyed by registry_name
+# (selected by configs/config.yaml -> model.registry_name). Each entry maps to an
+# ai-toolkit architecture and a pinned Hugging Face repo revision. The remote
+# worker downloads the pinned snapshot once into the shared base-weights cache
+# Volume and points ai-toolkit at that local path, so every run trains on the
+# exact same bytes and no run keeps its own copy of the weights.
+#
+# The ai-toolkit commit and torch pins live in src/modal_app.py (they define the
+# remote image, which must be importable inside the container without this file).
+
+models:
+  qwen-image-2512:
+    # Qwen-Image-2512 (Apache 2.0). ai-toolkit lists it as "qwen_image:2512": the
+    # qwen_image architecture with this repo as name_or_path. Its LoRAs load in
+    # ComfyUI's Qwen-Image-2512 workflow (ai-toolkit saves comfy-prefixed keys).
+    arch: qwen_image
+    repo: Qwen/Qwen-Image-2512
+    revision: main            # resolved to a commit SHA at launch and recorded in run_state.json
+    license: apache-2.0
+    bucket_divisibility: 32
+    native_resolution: 1328
+  qwen-image:
+    arch: qwen_image
+    repo: Qwen/Qwen-Image
+    revision: main
+    license: apache-2.0
+    bucket_divisibility: 32
+    native_resolution: 1328

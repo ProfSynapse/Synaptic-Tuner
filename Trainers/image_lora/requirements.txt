@@ -1,0 +1,8 @@
+# Host-side requirements for the image_lora method (train_image_lora.py).
+# Training itself runs in the Modal image defined in src/modal_app.py
+# (pinned ai-toolkit commit + torch 2.13/cu130), never on the host.
+modal>=1.5,<2          # launch/status/fetch/cleanup; the image build pins its own client
+huggingface_hub        # pins the base-model revision to a commit SHA at launch
+PyYAML>=6,<7
+Pillow>=10             # build-dataset: decode, perceptual hash, downscale, grayscale
+numpy>=1.24
