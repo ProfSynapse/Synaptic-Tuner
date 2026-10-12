@@ -1553,9 +1553,19 @@ and do not authorize replay.
 Build claims bind each execution attempt, so separate normal executions do not
 share one source-wide consumed claim. This does not resume a failed attempt:
 retain its claims/resources and use only a separately reviewed admission for
-restricted metrics qualification. Ordinary logs remain disabled. The two-run
-live reliability acceptance below remains pending until actual retained evidence
-establishes it.
+restricted metrics qualification. Ordinary logs remain disabled. The bounded
+two-run acceptance below was met by independently accepted
+`metrics-20261012-03` and `metrics-20261012-04` on unchanged source
+`01383fa81c8ed3847903095456e9b80350cd28a6`: each delivered 32 numeric records
+before completion, acknowledged durable report publication and verified five
+native artifacts. Cold/warm local preparation verified all nine exact bootstrap
+wheels without provider effects or journal changes. The captured-child verifier
+repair preserves complete canonical transport and execution-evidence equality.
+See `docs/plans/training-progress-streaming.md` for exact admission/report/progress
+digests and retained failed attempts. This later docs-only update does not alter
+the live-qualified source. Ordinary transport, live partial-write behavior,
+freshness/completeness, recovery and broader production readiness remain
+unqualified; repeated bounded success does not guarantee every cloud call.
 
 ## Authorized bounded reliability iteration (2026-10-12)
 

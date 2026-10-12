@@ -400,8 +400,46 @@ optional strict integer descriptor only for configured capture, reconstructs
 and compares the complete canonical child bytes, then retains full execution
 evidence equality. It preserves the fixed packaged-worker inventory and runtime
 pins while refreshing the affected source hashes. Tests and independent review
-must pass before admission 03 is generated from the next clean integrated source;
-the repaired code still needs a new pair of completed live runs.
+passed before admission 03 was generated from the clean integrated source below;
+that source subsequently completed both bounded live proofs.
+
+## Accepted restricted delivery evidence (2026-10-12)
+
+The repaired integrated source is
+`01383fa81c8ed3847903095456e9b80350cd28a6`.
+`metrics-20261012-03` used admission SHA-256
+`24a1de6af9127a70e2f052badafd8226365766e34c48eca2ce443c00d211d8e0`.
+Independent review accepted its first completed restricted proof: 71 polls,
+seven growing pages and 32 numeric records plus one exhaustion record. Every
+growing page was bracketed by pending observations of the exact provider call.
+The five native artifacts and their exact hashes were independently verified.
+The returned result acknowledged durable report publication and reported
+`delivered_precompletion`; retained progress SHA-256 is
+`7bd4be7ac9b2b4d340130568d3b8144377cbe3837684887e68ce4b43692093a3`
+and report SHA-256 is
+`8afb797725b4241610fa6c74c3820e5b7d133cd418d2c5750b240ff498f517a3`.
+The saved report's provisional `durability_acknowledged: false` is expected;
+the digest-bound returned acknowledgment establishes durable publication.
+
+The fresh `metrics-20261012-04` admission SHA-256 is
+`808ffa9f369567212c8caaa4417c220690b71f3cb16fb6f7f5e0cd3f0831542d`.
+It binds the same unchanged source; only the reviewed attempt reference differs.
+Attempt 04 completed 77 polls and nine growing pages with 32 numeric records
+plus one exhaustion record, all growing reads bracketed by exact-call pending
+observations. Its run is `modal-3234bf404adf0e4d95dee9f5` and exact provider call
+is `fc-01M4RFNT6Q9P5STJ2ETR50KZ7N`. It returned acknowledged durable
+`delivered_precompletion` with five verified native artifacts. Retained progress
+SHA-256 is
+`e34d9b75e7f28e75784c3a67c255edf5a801d872fff8d59ec4afea97902bf231`
+and report SHA-256 is
+`33fb155934ad6fddd35101b2336f1db87b7cc2ab7995a4e02d7636cd46a7a684`.
+Independent audit accepted both completed attempts on the unchanged source:
+the bounded two-run acceptance condition is met. This documentation update is
+a later docs-only descendant; the live evidence binds the exact `01383fa8`
+source above, not a retroactive qualification of another commit.
+Ordinary logs remain disabled; transport and live partial-write qualification
+remain false. These bounded results do not prove complete/fresh history, restart
+recovery, cancellation, general production readiness or success on every call.
 
 ## Authorized reliability cycle (2026-10-12)
 
@@ -421,8 +459,8 @@ still unresolved after preparation, such as an unavailable offline cache.
 Verification must reject unresolved/corrupt inputs, unsafe
 private-root modes and dirty/mismatched source before provider effects while
 preserving exact launcher/runtime pins. Provider-free tests and the optional local
-preparation report establish local behavior; the live acceptance evidence below
-remains required.
+preparation report establish local behavior; the accepted live pair above
+provides the bounded same-code delivery and artifact evidence.
 
 Reliability acceptance requires at least two completed bounded live qualification
 runs on the same final code, each with a distinct retained admission/claim and
