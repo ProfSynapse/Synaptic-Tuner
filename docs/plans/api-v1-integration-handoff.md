@@ -21,6 +21,35 @@ training runs as part of this handoff. Paid cloud qualification needs an
 explicit scope and approval. No live training was started for the publication
 of this handoff.
 
+## Approved qualification attempt: blocked by local build inputs
+
+The separately approved `metrics-20261012-01` attempt on source `9c7392f2`
+failed before image build, integrated CPU qualification or GPU training. The
+first invocation rejected local state-root mode 0775 before consuming authority;
+after correction to 0700, the next invocation consumed the metrics and build
+claims and failed with closed `BUILD_INPUTS / INVALID` at
+`runtime_build.prepare_build_inputs`. Three Volumes, two Secrets and the build
+App had already been provisioned. This was a failed approved attempt with
+provider effects, not a provider-free preflight. No numeric delivery evidence
+or transport/capability promotion resulted. Read-only exact-name lookup later
+observed the retained build App stopped with zero tasks; no cleanup mutation
+was performed.
+
+The exact local cause was reproduced: all nine hash-pinned bootstrap wheel
+files under `Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c` were absent;
+the first required wheel read failed at that input boundary. Installing the
+37-package launcher closure does not provide these build wheel artifacts.
+The existing derived-image workflow checks/copies artifacts already present;
+no reusable checked-in bootstrap preparation surface was found.
+
+Next work is a hash-pinned local preparation workflow and provider-free checks
+of actual bootstrap files plus private state-root requirements, before authority
+claims or provisioning. Retain the consumed claims and existing resources;
+this failure grants no replay, deletion or adoption authority. A later new clean
+source/admission and separately approved fresh attempt can be considered only
+after that preparation/preflight gap is resolved and reviewed. See the exact
+[attempt checkpoint](training-progress-streaming.md#approved-attempt-checkpoint-2026-10-12).
+
 ## Metrics: implemented is not live-qualified
 
 See [training-progress-streaming.md](training-progress-streaming.md) for the
@@ -98,9 +127,9 @@ are provider-free evidence unless the row identifies retained live qualification
 | Lifecycle | Generic coordinator/Foundation and consumer-owned catalogs; public observe/outcome/verification composition. | Modal cancel/reconcile/cost-quote remain disabled. Standalone journals prevent replay but do not restore all in-memory workflow state. Multi-user service persistence, browser sessions and product lifecycle UX are host integration work. |
 
 Proceed with provider-free integration and independent review of metric retention.
-Review the implemented restricted qualification operation and synthetic fixture,
-generate admission from the final clean integrated source, obtain current scoped
-budget evidence and approval for the exact bounded attempt. A pre-completion
+Resolve and review the local bootstrap preparation/pre-effect validation gap
+from the consumed qualification attempt before generating another admission or
+requesting another paid approval. A pre-completion
 delivery result alone does not qualify partial writes or promote public logs;
 retain that separate live transport/review gate.
 Dataset transformation and four-model comparison remain paused.

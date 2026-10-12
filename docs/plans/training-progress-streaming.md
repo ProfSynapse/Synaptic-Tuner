@@ -151,8 +151,10 @@ Once created, `records_path` remains reported even if no full record was retaine
 ## Restricted live qualification workflow (2026-10-12)
 
 The checked-in restricted operation below is provider-free implemented and
-reviewable. Its fixture and limits remain candidates for separate paid approval;
-no live metrics qualification has been performed. The ordinary Modal registration advertises
+reviewable. One separately approved attempt failed at local build-input admission
+after provisioning; it never reached image build, CPU qualification or training.
+The checkpoint below records the consumed claims and next preparation work.
+The ordinary Modal registration advertises
 `logs: false`. Ordinary consumers must honor that descriptor. Turning it on to
 make a smoke run work would advertise an unqualified capability.
 
@@ -248,7 +250,7 @@ A read-only rate observation on 2026-10-12 at 10:39:10 local used the
 and the hash-locked 37-package launcher closure including Modal SDK 1.5.4.
 It returned USD 1.95000/hour for one L40S; this gives a calculated GPU-only
 estimate of USD 0.4875 for the 900-second timeout. This excludes build, CPU, memory, storage and usage beyond timeout;
-it is neither an all-in billing cap nor execution approval. No job was submitted.
+it is neither an all-in billing cap nor execution approval. The rate query itself submitted no job.
 Refresh the scoped quote if required when reviewing the final admission. After
 provider-free checks and independent review, request paid approval for the exact
 admission digest, source, selected scope, one integrated CPU/GPU attempt and budget.
@@ -309,3 +311,38 @@ closed failures and consumed claims, and record resource/time/cost observations.
 No failed/inconclusive watcher, missing metric tail or download failure authorizes
 training replay. General freshness, complete history, restart recovery, browser
 charts and SSE/WebSocket behavior are outside this qualification.
+
+## Approved attempt checkpoint (2026-10-12)
+
+Source `9c7392f2780077bab967b55adbec08c9eb6b107d`, attempt
+`metrics-20261012-01`, used reviewed admission SHA-256
+`a81af6d58b6c10cc37d9bd6689d6b036ed16b15dd604cf4782ca1c476f2730d0`. Initial local state-root mode 0775 was rejected before the
+metrics claim; correcting it to 0700 did not consume or replay a cloud attempt.
+The next invocation consumed the fixed metrics claim and build claim, provisioned
+three Volumes, two Secrets and a build App, then stopped at the closed
+`BUILD_INPUTS / INVALID` diagnostic at `runtime_build.prepare_build_inputs`.
+No remote image build, CPU qualification or GPU training ran. No public metric
+was delivered and neither transport qualification nor ordinary logs promotion
+occurred. No delivery report acknowledgment was produced. A later read-only
+lookup of the exact retained build-App name matched one App: stopped, zero
+tasks, with a stop timestamp. No cleanup mutation was performed; this observation
+is not deletion, reuse or adoption authority for its Volumes/Secrets. Preserve
+the exact attempt's retained evidence and resources.
+
+The failure cause was independently reproduced locally: the profile artifact
+directory contained `profile.yaml` but none of its nine pinned bootstrap wheels.
+The first required `grpclib` wheel read raised `FileNotFoundError` in the exact
+build-input preparation path. The launcher environment's installed packages are
+not those wheel files. This is a local dependency-preparation failure, not an
+established image, trainer, GPU-capacity or metric-transport failure.
+
+The retained build claim prevents repeating this submission. No cloud retry was
+performed. Fix the reusable local workflow first: prepare only the declared
+bootstrap wheel inventory through hash-pinned acquisition, verify exact file
+bytes and private-state-root modes provider-free before consuming claims or
+provisioning, and retain source/runtime pins. Existing derived-image helpers
+validate/copy already-present artifacts; they do not supply the missing preparation
+capability. Implement and review the checked-in preparation surface before a new
+clean source/admission or a request for separately scoped paid approval. Do not
+remove claims, invent another state root or rotate attempt identifiers to replay
+this approved attempt, and do not delete or adopt its resources without authority.
