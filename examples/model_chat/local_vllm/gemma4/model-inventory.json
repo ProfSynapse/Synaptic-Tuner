@@ -1,0 +1,120 @@
+{
+  "schema_version": "synaptic-local-vllm-gemma4-inventory/v1",
+  "qualification_status": "candidate",
+  "installed_package_inventory": "serving-packages.json",
+  "runtime": {
+    "image": "vllm/vllm-openai@sha256:770fe65b2c73ee74a5c42165cf3433de4048cc2cd9c57a937ca4e35aba5aa87b",
+    "image_platform": "linux/amd64",
+    "observed_packages": {
+      "vllm": "0.26.0",
+      "transformers": "5.14.1",
+      "torch": "2.11.0+cu130",
+      "compressed-tensors": "0.17.0"
+    },
+    "observed_host": {
+      "gpu": "NVIDIA GeForce RTX 3090 24 GB (SM 86)",
+      "environment": "Windows with Docker Desktop WSL2 backend",
+      "nvidia_driver_version": "610.88",
+      "docker_engine_version": "29.3.1"
+    }
+  },
+  "models": [
+    {
+      "service": "e4b",
+      "status": "long_context_generation_observed",
+      "repository": "google/gemma-4-E4B-it-qat-w4a16-ct",
+      "revision": "6cd26aaa2357fb2bad8c51699a7558a4d1a965bb",
+      "architecture": "Gemma4ForConditionalGeneration",
+      "artifact_kind": "official-qat-w4a16-compressed-tensors",
+      "weight_file": "model.safetensors",
+      "weight_size_bytes": 11513861828,
+      "weight_sha256": "19d89d2a4b3e401a3eae75ec08ab112810421a036c91d8c8226b686be7fe0c5d",
+      "local_observation": {
+        "ready": true,
+        "completed_requests": 3,
+        "requests": [
+          {
+            "case_label": "chapter_26",
+            "prompt_tokens": 58632,
+            "completion_tokens": 3618,
+            "total_tokens": 62250,
+            "finish_reason": "stop",
+            "completion_words": 2646,
+            "reasoning_observed": false
+          },
+          {
+            "case_label": "chapter_18",
+            "prompt_tokens": 55303,
+            "completion_tokens": 2136,
+            "total_tokens": 57439,
+            "finish_reason": "stop",
+            "completion_words": 1494
+          },
+          {
+            "case_label": "chapter_20",
+            "prompt_tokens": 56907,
+            "completion_tokens": 2890,
+            "total_tokens": 59797,
+            "finish_reason": "stop",
+            "completion_words": 1958
+          }
+        ]
+      }
+    },
+    {
+      "service": "12b",
+      "status": "long_context_generation_observed",
+      "repository": "google/gemma-4-12B-it-qat-w4a16-ct",
+      "revision": "1d2c2d7f2466070e69d6fb3fd5ce9a7d75f2f6ee",
+      "architecture": "Gemma4UnifiedForConditionalGeneration",
+      "artifact_kind": "official-qat-w4a16-compressed-tensors",
+      "weight_file": "model.safetensors",
+      "weight_size_bytes": 10264229896,
+      "weight_sha256": "60b6e3989502969d8ae04185d72ecbbc7db63978d5af747a493d53895aa6bfa3",
+      "local_observation": {
+        "ready": true,
+        "completed_requests": 3,
+        "reasoning_observed": false,
+        "requests": [
+          {
+            "case_label": "chapter_26",
+            "prompt_tokens": 58636,
+            "completion_tokens": 1042,
+            "total_tokens": 59678,
+            "finish_reason": "stop",
+            "completion_words": 793
+          },
+          {
+            "case_label": "chapter_18",
+            "prompt_tokens": 55307,
+            "completion_tokens": 2490,
+            "total_tokens": 57797,
+            "finish_reason": "stop",
+            "completion_words": 1793
+          },
+          {
+            "case_label": "chapter_20",
+            "prompt_tokens": 56911,
+            "completion_tokens": 1822,
+            "total_tokens": 58733,
+            "finish_reason": "stop",
+            "completion_words": 1275
+          }
+        ]
+      }
+    }
+  ],
+  "tested_request_settings": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 64,
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "seed": 20261008,
+    "chat_template_kwargs": {"enable_thinking": false},
+    "stream": true,
+    "stream_options": {"include_usage": true},
+    "max_tokens_policy": "omitted from request"
+  }
+}

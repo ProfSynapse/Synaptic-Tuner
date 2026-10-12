@@ -35,6 +35,30 @@ python -m Evaluator.cli \
 
 Use this for dedicated eval containers and fine-tuned model serving. The evaluator reads backend responses, builds a generic response view, and applies YAML `correct` assertions.
 
+### Reproducible local Gemma 4 QAT serving
+
+Use the config-only example at `examples/model_chat/local_vllm/gemma4/`
+(repository root) for the official E4B and 12B W4A16 compressed-tensors
+checkpoints. Its inventory pins model revisions, weight hashes and an immutable
+serving image; Compose parameterizes operator-owned model directories. Read its
+current qualification status before treating startup or writing quality as proven.
+These are quantized instruction-tuned baselines, not BF16 models or user adapters.
+
+Retained startup experiments established two distinct compatibility boundaries:
+vLLM 0.26 with Transformers 5.17 fails on Gemma's heterogeneous configuration;
+the matched official image (observed Transformers 5.14.1) clears that boundary.
+On this WSL host, V2 runner initialization then fails with `UVA is not available`;
+setting `VLLM_USE_V2_MODEL_RUNNER=0` before process startup reaches model loading
+and E4B HTTP readiness. Keep these choices in the serving profile, not model
+weights or launcher branches. Do not infer 12B readiness, full-length generation,
+cross-platform support, or prose quality from E4B startup alone.
+
+Preserve model-specific templates, EOS and generation defaults. Long-context
+comparisons must retain complete prompts, generation finish reason and usage,
+and distinguish an absent output-token cap from finite context/deadline limits.
+Check that streamed text actually reaches disk; requesting SSE alone is not
+proof of partial-response retention.
+
 ---
 
 ## LM Studio
