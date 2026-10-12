@@ -1469,3 +1469,23 @@ legacy remote/producer files are not part of the new declaration. This audit is
 not arbitrary dynamic-import discovery or a live-runtime proof. The separate
 trainer closure still has 66 members: its old public rich-training module has
 been replaced by `tuner/training/contracts.py`, with reviewed importer hashes.
+
+
+## API v1 metric-consumer readiness (2026-10-12)
+
+Optional signed numeric progress and public readback are implemented; ordinary
+Modal composition still advertises `logs: false`. The standalone wait loop uses
+the public logs consumer only when the selected descriptor advertises logs.
+It retains the last non-null cursor, deduplicates run/sequence by canonical bytes,
+and saves private per-run JSONL evidence. Telemetry errors disable that optional
+consumer independently of training. Its cursor/dedup state is process-local;
+retention is not coordinator/Foundation restart recovery or submission authority.
+
+See `docs/plans/training-progress-streaming.md` for exact protocol limits and the
+bounded synthetic live qualification proposal, and
+`docs/plans/api-v1-integration-handoff.md` for the consumer journey assessment.
+A restricted qualification composition is still an implementation/review gate:
+normal consumers must not bypass the disabled descriptor, and neither standalone
+`train --qualify` CPU proof nor minimal `--mode qualify-training` native
+training/artifact qualification proves public pre-completion metrics. Keep logs
+disabled until the new live transport evidence and independent review pass.

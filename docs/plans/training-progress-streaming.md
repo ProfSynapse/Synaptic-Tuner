@@ -123,3 +123,134 @@ Checkpoint continuation, evaluation-only recovery, releases, MLX, GGUF, richer
 GPU sampling and cost charts are separate work. Never replay or alter an active
 attempt to add observability. The old coordinator's immutable terminal chain
 and 256-record cap are not this packaged progress protocol.
+
+## Standalone consumer retention
+
+With capture configured and the selected public descriptor advertising logs,
+the standalone wait loop reads one page per wait tick (at most 100 entries and
+64 KiB), including the completion tick. It performs no final drain. Transient
+read failures retry on the next tick with the same cursor and retained prefix;
+invalid/conflicting records, storage failures or exhausted local bounds disable
+polling. Training continues independently of telemetry.
+
+Canonical typed records are written create-only at mode 0600 under the private
+owner-only state root, using `progress-<sha256>.jsonl`, where the digest binds the
+canonical `TrainingRunRef` dictionary. Replayed run/sequence pairs must have
+identical canonical bytes. The optional result `progress` reports only closed
+status, `records_path` and `retained_records`; it emits no arbitrary exception
+text or extra stdout stream. Omitted capture omits this result field. With
+capture requested and Modal logs disabled, `status` is
+`progress_capability_disabled` and `records_path` is null; no public log call or
+retained progress file is created. Process-local cursor/dedup state is not
+restored from JSONL and does not recover coordinator/Foundation state.
+
+## Bounded live qualification proposal (2026-10-12)
+
+This is a reviewable proposal, not an executable approval or an already
+implemented qualification mode. The public Modal registration still advertises
+`logs: false`. Ordinary consumers must honor that descriptor. Turning it on to
+make a smoke run work would advertise an unqualified capability.
+
+### Implementation and admission gate
+
+Extend the existing checked-in qualification workflow with a separately reviewed,
+restricted metrics qualification operation. Reuse its exact-source build, CPU
+receipt, retained deployment/call binding, host-owned authority and one-shot
+attempt journal. Do not introduce an alternate launcher, direct Volume probing,
+provider-specific public logs verb, or runtime secret channel. Existing
+`examples/modal_chat/launch.py --mode qualify-training` qualifies native training
+and artifacts; it does not supply this metrics operation. Standalone
+`train --qualify` is a CPU self-check and cannot qualify GPU metric delivery.
+
+The proposed operation must admit only an exact reviewed source/configuration,
+synthetic fixture digest, selected provider/environment and bounded attempt.
+Its isolated qualification host may compose the existing public `RunsAPI.logs`
+reader under explicit qualification authority, while ordinary host descriptors
+remain disabled. Review this composition and its separation from production
+capability advertisement before implementation. All reads must retain the
+submitted assessment and current Foundation revalidation. No disabled-capability
+fallback to a private reader is permitted in normal training.
+
+The provider-free barrier and independent review must first cover this admission,
+absence of production activation, signed readback, delayed visibility, torn tails,
+canonical conflicts, telemetry failure isolation, bounded polling and consumed
+claims. If the operation cannot preserve those boundaries, stop at this gate.
+A later successful live receipt and review authorize a separate capability change;
+a smoke submission alone cannot turn on logs.
+
+### Fixture and bounded configuration
+
+Use newly authored harmless synthetic messages (for example short greetings and
+arithmetic explanations), with explicit disjoint train/validation rows, declared
+lineage and an immutable prepared-data digest. Use the existing
+`python tuner.py prepare-dataset --config <reviewed-config.json> --json` surface
+and review representative complete rows plus split counts. Public sanitized
+fixtures under `tests/fixtures/training_product/modal_live_v1/substitutes` are
+artifact placeholders, not training data or authenticated live evidence. Existing
+Qwen smoke recipes reference private prepared data and must not be launched as-is.
+
+Select an already qualified exact model/runtime profile and retain its model and
+tokenizer revisions, recipe/render choices, image inventory and source locks.
+A proposed dedicated recipe uses `observation_capture.every_n_steps: 1`,
+`observation_capture.max_records: 32`, `training.max_steps: 32`, one accelerator,
+and `job.timeout_seconds: 900`, with post-training evaluation omitted. These are
+experiment limits for review, not evidence that 32 steps last long enough for a
+background commit. If training finishes before any public metric is observed,
+record an inconclusive transport result; never extend or replay that attempt.
+
+Proposal: one integrated attempt with one CPU qualification submission and
+one GPU training submission (the standalone run already performs its CPU check;
+do not add a separate `train --qualify` submission),
+zero automatic retries, and an operator-approved all-in budget ceiling of USD 5.
+The existing recipe `maximum_cost_minor_units` and quoted GPU timeout estimate
+are admission checks, not an all-in provider billing cap; builds, CPU, memory and
+storage may be excluded. Obtain current scoped rates and review those exclusions
+before choosing the exact minor-unit threshold. Do not quote historical prices
+or imply the ceiling is technically enforced. A cancel is a separately approved
+provider action; timeout or a failed watcher alone grants no cancel/replay authority.
+
+Existing local planning and read-only rate surfaces, after a concrete reviewed
+recipe exists, are:
+
+```bash
+python tuner.py train --job-config <reviewed-recipe.yaml> --plan --json
+python tuner.py train --job-config <reviewed-recipe.yaml> --quote --modal-profile <name> --modal-environment <name> --json
+```
+
+Neither command proves live transport. The future qualification invocation must
+be documented from its implemented parser/help before paid approval is requested.
+For the standalone packaged route, preserve the exact clean engine commit and
+reviewed source-wheel build; `prepare_current_source_wheel` explicitly builds
+without a customer repository. The clean pushed host superproject/exact engine
+gitlink requirement belongs to the older minimal consumer route and must not be
+imported into standalone admission. CPython 3.11.14 POSIX, hash-pinned launcher
+dependencies, the integrated current CPU qualification and exact effect authority
+remain prerequisites. Preserve fresh attempt resources and any failures.
+
+### Acceptance evidence
+
+Retain a bounded chronological ledger of public page requests, receipt times,
+cursors, canonical record digests and the exact provider call's pending/terminal
+observations, with source/configuration/profile and fixture digests. Acceptance
+requires at least two distinct authenticated numeric observations returned by
+`RunsAPI.logs` while that same call is independently observed pending. A final
+training_metrics artifact or points first read after completion does not pass.
+Repeat the retained cursor across empty/end pages and show growing pages produce
+one locally retained record per run/sequence, with canonical-byte equality on
+replay. Compare the retained file and public projected records by digest.
+
+Capture the actual background-commit latency and whether overlapping writes
+cause temporary page rejection. The current protocol fails closed on a committed
+short/torn envelope, potentially hiding a valid prefix. Demonstrate delayed
+empty-to-growing readback and at least one overlapping publication window; report
+what was actually observed. If no partial write is encountered, live partial-write
+behavior remains unqualified: provider-free torn-tail tests are supporting evidence,
+not a live experiment. Do not inject corruption into another attempt. A separate
+bounded synthetic transport fixture or reviewed atomic-leaf publication is needed
+if natural overlap cannot establish the required behavior.
+
+Finally authenticate the unchanged outcome and five-artifact inventory, retain
+closed failures and consumed claims, and record resource/time/cost observations.
+No failed/inconclusive watcher, missing metric tail or download failure authorizes
+training replay. General freshness, complete history, restart recovery, browser
+charts and SSE/WebSocket behavior are outside this qualification.
