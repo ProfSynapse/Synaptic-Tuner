@@ -280,7 +280,7 @@ class ModalRuntimeReleaseQualificationReader:
         for index, row in enumerate(polls):
             if (type(row) is not dict or set(row) != {"poll", "elapsed_ms", "before", "after", "status", "accepted", "observations"}
                     or type(row["poll"]) is not int or row["poll"] != index
-                    or type(row["elapsed_ms"]) is not int or not previous_elapsed <= row["elapsed_ms"] <= 180000
+                    or type(row["elapsed_ms"]) is not int or not max(0, previous_elapsed) <= row["elapsed_ms"] <= 180000
                     or row["before"] not in {"pending", "unknown"} or row["after"] not in {"pending", "unknown"}
                     or row["status"] not in {"empty", "observed", "read_unavailable", "invalid", "deadline"}
                     or type(row["accepted"]) is not bool or type(row["observations"]) is not list
