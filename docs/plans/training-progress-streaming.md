@@ -142,7 +142,11 @@ text or extra stdout stream. Omitted capture omits this result field. With
 capture requested and Modal logs disabled, `status` is
 `progress_capability_disabled` and `records_path` is null; no public log call or
 retained progress file is created. Process-local cursor/dedup state is not
-restored from JSONL and does not recover coordinator/Foundation state.
+restored from JSONL and does not recover coordinator/Foundation state. Failed
+local writes/fsync can preserve the accepted prefix alongside a partial trailing
+line; there is no automatic repair/reopen. `retained_records` counts the accepted
+in-memory prefix and can differ from crash-durable content after fsync failure.
+Once created, `records_path` remains reported even if no full record was retained.
 
 ## Bounded live qualification proposal (2026-10-12)
 

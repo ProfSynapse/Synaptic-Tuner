@@ -31,7 +31,8 @@ existing numeric observation contract, signed transport and limitations.
   purposes. This does not enable the provider logs capability.
 - Modal's public logs capability remains disabled.
 - The standalone launch loop consumes public log pages while pending only when
-  the selected provider advertises logs. Modal currently skips that consumer.
+  capture is configured and the selected provider advertises logs. Modal
+  currently skips that consumer.
   The consumer retains the last non-null cursor, checks canonical bytes on
   duplicate run/sequence records and writes private per-run JSONL evidence.
 - A live proof of pre-completion visibility, including background Volume
@@ -42,7 +43,10 @@ existing numeric observation contract, signed transport and limitations.
 The polling consumer uses existing typed observations and public logs. Its
 retained cursor and deduplication state are process-local; JSONL retention does
 not restore the coordinator/Foundation workflow or authorize a reconnect/replay.
-Telemetry failures disable polling independently of training. No manuscript
+Transient read failures retain the cursor and retry; permanent validation,
+conflict, storage or local-budget failures disable polling independently of
+training. A failed local write/fsync can leave a valid prefix and a partial
+trailing line; there is no automatic repair or reopen. No manuscript
 text, credentials or arbitrary remote exception text belongs in this lane.
 
 The [bounded qualification proposal](training-progress-streaming.md#bounded-live-qualification-proposal-2026-10-12)

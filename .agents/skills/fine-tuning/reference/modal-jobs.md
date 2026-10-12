@@ -1475,10 +1475,15 @@ been replaced by `tuner/training/contracts.py`, with reviewed importer hashes.
 
 Optional signed numeric progress and public readback are implemented; ordinary
 Modal composition still advertises `logs: false`. The standalone wait loop uses
-the public logs consumer only when the selected descriptor advertises logs.
+the public logs consumer only when capture is configured and the selected
+descriptor advertises logs.
 It retains the last non-null cursor, deduplicates run/sequence by canonical bytes,
-and saves private per-run JSONL evidence. Telemetry errors disable that optional
-consumer independently of training. Its cursor/dedup state is process-local;
+and saves private per-run JSONL evidence. Transient read failures retain the
+cursor and retry; permanent validation/conflict/storage/local-budget failures
+disable the consumer independently of training. Failed local writes/fsync may
+leave a partial trailing line; no automatic repair/reopen is provided. The
+accepted in-memory record count is not a crash-durable count after fsync failure.
+Its cursor/dedup state is process-local;
 retention is not coordinator/Foundation restart recovery or submission authority.
 
 See `docs/plans/training-progress-streaming.md` for exact protocol limits and the
