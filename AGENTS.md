@@ -69,19 +69,22 @@ This repository has a few cloud-training constraints that are easy to relearn th
   exact marker, release, deployment, provider scope and call. Primary root or
   CPU admission failure rejects; an unavailable/inconclusive optional probe
   leaves logs disabled and does not replace a valid core CPU proof.
-- The CPU probe must use the production sealed-stage/no-replace publication
-  primitive, including its manifests. Require committed sealed-stage presence
-  with the final leaf absent before later complete-final observations, each
-  bracketed by pending states of the same exact call. Persist and read back
-  the bounded host ledger before acknowledging durability; only exact sealed
-  process-local verification matching the core receipt, runtime/deployment,
-  call, probe and capture digest may pass the composition gate. Dictionaries,
-  JSON readback and replaced dataclass payloads cannot mint that authority.
-  Store the signed terminal probe receipt on the artifact Volume so its commit
-  cannot flush the control stream. Preserve finite CPU/host/read/byte bounds
-  and the original deadline. This proves the observed staged-to-final visibility
-  window, not periodic-final commit timing, atomic server transactions,
-  completeness/freshness, restart recovery or every future invocation.
+- The CPU probe explicitly selects the production Modal SDK create-only strategy:
+  complete canonical bytes through the exact authenticated v1 Volume/client,
+  `batch_upload(force=False)` and mode 0600. Do not switch strategies after a
+  failure or claim rename atomicity. Require one intentional SDK collision to
+  preserve original bytes, complete record pages bracketed by pending states of
+  the same exact call and terminal-receipt absence, then exact final inventory
+  and hashes after call completion and the later control-Volume receipt commit.
+  Initial marker authentication and retained root identity remain mandatory.
+  Persist and read back the bounded host ledger before acknowledging durability;
+  only exact sealed process-local verification matching the core receipt,
+  runtime/deployment, call, probe and capture digest may pass the logs gate.
+  Dictionaries, JSON readback and replaced payloads cannot mint that authority.
+  Preserve finite bounds and the original deadline. This proves the observed
+  complete-byte delivery and post-commit preservation, not atomic server
+  transactions, background-commit timing, freshness/completeness, restart
+  recovery or success on every future invocation.
 
 
 - For an explicitly authorized reliability cycle, finish the reusable fix rather

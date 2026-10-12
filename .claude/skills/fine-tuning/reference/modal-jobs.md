@@ -1520,7 +1520,7 @@ The optional CPU transport probe reuses the existing self-check: select
 bound-v2 standalone route or its CPU-only command:
 
 ```bash
-python tuner.py train --job-config <reviewed-modal-recipe.yaml> --qualify --modal-profile <named-profile> --modal-environment <existing-environment> --json
+python tuner.py --env-file <authorized-env-file> train --job-config <reviewed-modal-recipe.yaml> --qualify --modal-profile <named-profile> --modal-environment <existing-environment> --json
 ```
 
 There is no additional qualification flag, separate deployment lifecycle or
@@ -1545,25 +1545,31 @@ proof or automatically replay the call.
 
 The host claims a fresh 32-byte marker before create-only upload and exact
 readback. Its name/hash and exact runtime/deployment enter the signed CPU
-dispatch. The worker admits the real bound control root and uses the same
-sealed-stage/no-replace primitive as production progress. It holds a completed,
-closed, fsynced stage before publication; manifests use that primitive too.
-Eight synthetic numeric fixtures plus one fixture-exhausted record are explicitly
-CPU transport evidence, not observations of a training run. The probe admits
-8 KiB per leaf, 64 KiB/100 entries per page, at most 180 polls, a 1 MiB host
-ledger and bounded signed terminal evidence. Stage hold and final observation
-hold are each 20 seconds and must fit the remaining original call budget. Retain failed
-claims and namespace collisions; never overwrite or silently repair them.
+dispatch. Initial marker authentication and retained bound-root identity remain
+mandatory. Probe schema v2 explicitly selects `modal_sdk_create_only/v1`:
+complete immutable canonical bytes use the production parent SDK adapter's
+exact existing v1 Volume/client, `batch_upload(force=False)` and mode 0600.
+There are no filesystem stages, manifests or rename fallback. The isolated
+trainer remains credential-free; this does not change the workload network policy.
 
-Acceptance requires a sealed stage visible through the SDK while its final leaf
-is absent, followed by later complete canonical final observations; every
-accepted read has pending observations of the same exact call before and after
-it. A final already seen before the held-stage window is inconclusive. Local
-monotonic elapsed times describe host observation timing, not synchronized
-provider latency. The separately signed terminal receipt goes to the artifact
-Volume; its commit does not explicitly flush the control stream. Pending state
-alone does not distinguish periodic commits from automatic shutdown commits.
-No atomic server-transaction or consistently fresh/complete history is claimed.
+Eight synthetic numeric fixtures plus one fixture-exhausted record are CPU
+transport evidence, not a training outcome. Bounds remain 8 KiB per leaf,
+64 KiB/100 entries per page, 180 polls/180 host seconds, a 1 MiB ledger and
+20 seconds of final observation hold within the original 120-second CPU call.
+Each SDK operation uses at most five seconds of the remaining deadline. Exactly
+one intentional differing-byte collision uses a fresh adapter instance; it must
+fail create-only and preserve the original bytes. Failed or uncertain attempts
+consume their claims without retry, adoption or cleanup.
+
+Accepted complete record pages require the same exact call pending before and
+after, with the terminal receipt absent on both sides. The signed terminal
+receipt is then published on the control Volume and explicitly committed. After
+actual function completion the host rechecks all nine final files, exact inventory,
+sizes, canonical signed contents and hashes, including collision preservation.
+Local monotonic times describe observations, not synchronized provider latency.
+Receipt absence does not establish remote commit-start timing. These facts do
+not prove rename atomicity, background commits, atomic server transactions,
+freshness or completeness of a production history.
 
 The reader returns sealed process-local capture and verification objects, checks
 immutable payload witnesses, reconstructs chronological ledger facts, and binds

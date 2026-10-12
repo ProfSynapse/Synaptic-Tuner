@@ -486,15 +486,17 @@ in the same fixed 1-CPU/512-MiB/120-second call. Primary marker/root or CPU
 admission failure rejects. Finite optional probe failures preserve valid core
 proof but leave logs disabled. Default absent-probe canonical bytes are retained.
 
-The signed dispatch binds a fresh claimed marker and exact release/deployment;
-the experiment uses the production sealed-stage/no-replace publication primitive
-for leaves and manifests. The ledger must show committed complete-stage presence
-with the final absent before later complete-final SDK reads, bracketed by pending
-states of the same call. It records local monotonic timing, bounded reads/pages,
-canonical digests and exact capture retention. Its signed terminal receipt is
-stored and committed on the artifact Volume, keeping that explicit commit out
-of the control-stream observation path. Pending-call visibility does not identify
-periodic versus shutdown commits or prove atomic server snapshots.
+The signed v2 dispatch binds a fresh claimed marker, exact release/deployment
+and the explicit `modal_sdk_create_only/v1` production strategy. Complete
+canonical bytes use the existing authenticated v1 Volume/client with
+`batch_upload(force=False)` and mode 0600. There are no held stages, manifests,
+setup commits or rename fallback. One intentional SDK collision must preserve
+the original bytes. Accepted complete record pages require pending observations
+of the same exact call and terminal-receipt absence before and after the page.
+The signed terminal receipt is then written and committed on the control Volume;
+after function completion the host verifies the exact nine-file inventory and
+all hashes again. This measures pending delivery and post-commit preservation,
+not rename atomicity, periodic commits, freshness or complete production history.
 
 Only sealed process-local reader proof matching the core receipt, release,
 deployment, call, probe and durably retained capture can pass the composition
@@ -505,3 +507,23 @@ independent review remain pending; the historical GPU pair above retains its
 exact tested source and narrower qualification. See the canonical
 [CPU workflow](../../.skills/fine-tuning/reference/modal-jobs.md#cpu-progress-transport-qualification)
 for the actual command, finite bounds and limitations.
+
+### CPU candidate attempts 01/02 (historical, not qualification)
+
+Both used source `2f31010005d10da5934a1ac2ac1a34d20cd0d9d9`.
+Attempt 01 did not select the authorized dotenv input and retained no provider
+claim or journal rows; the normal global `--env-file` selection corrected that
+operator boundary. Attempt 02 passed the mandatory CPU proof but its optional
+rename candidate returned signed `PUBLISH_RENAME_INVALID`. Its durably retained
+capture had 13 empty polls and no delivery; logs stayed disabled. EINVAL does
+not establish a broader backend cause. Preserve both attempts and consumed state.
+The new SDK strategy is an explicitly reviewed selection, not a failure fallback.
+
+Attempt 01 stdout SHA-256:
+`75e664c661c74faba04e3aa87cc66aca4ec60f1e5c5aa87616e7a5b39fd219be`.
+Attempt 02 stdout SHA-256:
+`7b2e9e768edd23761ee8e350b020266a24d77dcb67d4efc9749bf0dbc2427a03`;
+capture SHA-256:
+`c754fcd0550466f63cce6c6901a82faad66976519cd1510ba759b32ad278ca11`.
+These CPU attempts do not alter the earlier GPU/native-artifact pair's exact
+`01383fa81c8ed3847903095456e9b80350cd28a6` source qualification.
