@@ -57,7 +57,12 @@ def test_legacy_members_have_no_static_packaged_boundary_edges():
 
 def test_fixed_offline_inventory_gains_no_static_packaged_edges():
     manifest = json.loads((ROOT / "tuner/runtime/manifests/offline-sft-worker-v1.json").read_text())
-    assert manifest["member_count"] == len(manifest["members"]) == 66
+    assert manifest["member_count"] == len(manifest["members"]) == 68
+    paths = {member["path"] for member in manifest["members"]}
+    assert {
+        "synaptic_tuner/api/v1/_timestamps.py",
+        "synaptic_tuner/api/v1/observations.py",
+    } <= paths
     for member in manifest["members"]:
         path = member["path"]
         if path.endswith(".py"):

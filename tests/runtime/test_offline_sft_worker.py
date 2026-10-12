@@ -47,7 +47,11 @@ def test_exact_selective_closure_loads(tmp_path: Path) -> None:
         engine_root=engine,
     )
 
-    assert len(closure.members) == 66
+    assert len(closure.members) == document["member_count"] == 68
+    assert {
+        "synaptic_tuner/api/v1/_timestamps.py",
+        "synaptic_tuner/api/v1/observations.py",
+    } <= {member.path.as_posix() for member in closure.members}
     assert closure.payload_bytes == document["payload_bytes"]
     assert closure.closure_digest == closure_digest(document)
 
@@ -229,7 +233,7 @@ def test_closure_authenticates_members_carrying_a_synthesized_execute_bit(
 
     DrvFs with ``metadata`` stores a real POSIX mode only for Linux-written
     files and synthesizes 0744 for every Windows-written one, so on the
-    mandated bind all 66 members carry the owner-execute bit while every one
+    mandated bind all 68 members carry the owner-execute bit while every one
     of them records 100644. Modes are set explicitly rather than inherited
     from the source tree so the fixture is deterministic on ext4.
     """
