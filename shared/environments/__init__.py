@@ -14,7 +14,6 @@ from .types import (
     EnvironmentValidationResult,
     ExecutedToolCall,
 )
-from .validator import EnvironmentSession, EnvironmentValidator
 
 __all__ = [
     "EnvironmentEpisodeTrace",
@@ -25,3 +24,13 @@ __all__ = [
     "EnvironmentValidationResult",
     "EnvironmentValidator",
 ]
+
+
+def __getattr__(name):
+    """Keep optional provider dependencies out of independent runtime imports."""
+    if name in {"EnvironmentSession", "EnvironmentValidator"}:
+        from . import validator
+        value = getattr(validator, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(name)
