@@ -54,7 +54,8 @@ def test_expired_budget_has_no_child_or_output(tmp_path):
 
 def test_stalled_owned_child_is_killed_and_reaped(tmp_path, monkeypatch):
     pid_file = tmp_path / "pid"
-    code = "import os,time; open('pid','w').write(str(os.getpid())); time.sleep(60)"
+    code = ("import os,time\nwith open('pid.tmp','w') as stream:\n"
+            " stream.write(str(os.getpid()))\nos.rename('pid.tmp','pid')\ntime.sleep(60)")
     invocation, read_fd, write_fd = _invoke(tmp_path, code)
     deadline = _expire_when_ready(monkeypatch, pid_file)
     with pytest.raises((TimeoutError, subprocess.TimeoutExpired)):
@@ -72,8 +73,9 @@ def test_success_preserves_raw_exit_without_sft_evidence(tmp_path):
 
 
 def test_descendant_holding_pipe_is_terminated_at_budget(tmp_path, monkeypatch):
-    code = ("import os,time; pid=os.fork(); "
-            "open('descendant','w').write(str(pid)) if pid else time.sleep(60)")
+    code = ("import os,time\npid=os.fork()\nif pid:\n"
+            " with open('descendant.tmp','w') as stream:\n  stream.write(str(pid))\n"
+            " os.rename('descendant.tmp','descendant')\nelse:\n time.sleep(60)")
     invocation, read_fd, write_fd = _invoke(tmp_path, code)
     deadline = _expire_when_ready(monkeypatch, tmp_path / "descendant")
     with pytest.raises((TimeoutError, subprocess.TimeoutExpired)):
