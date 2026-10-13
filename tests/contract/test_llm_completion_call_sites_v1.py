@@ -46,6 +46,7 @@ BASE_CLIENT_CONSUMERS = frozenset({
     "shared/llm/providers/unsloth.py",
     "shared/prompt_optimization/service.py",
     "shared/stage_judges.py",
+    "synaptic_tuner/api/v1/reference/data.py",
     "tuner/handlers/generate_handler.py",
 })
 OTHER_PROTOCOL_CALLERS = frozenset({

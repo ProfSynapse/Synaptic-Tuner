@@ -1,29 +1,30 @@
 # Public environment execution through DataAPI
 
-Status: effect-free contract/admission and a generic candidate-feedback seam
-implemented and reviewed at `846f754b`, 2026-10-13. Actual environment execution
-and backend qualification remain open. This is node
-C of the [stable release plan](stable-v1-release.md); installation assets and
-lightweight imports are parallel prerequisites for its installed acceptance.
-Root owns release task `97d0f9df-6701-4887-a7a3-2993a117f90f`; design task
-`27f8f9ac-04b8-4d73-b62c-a37d6c15d3f8` owns this proposal.
+Status: admission, immutable input consumption, bounded filesystem and fixed
+child supervisor are implemented and reviewed. Optional host session-factory
+integration implements generation/improvement through the normal DataAPI, with
+installed local workflow and bounded worker cancellation verified, 2026-10-13.
+Complete durable recovery remains open. This is node C of the
+[stable release plan](stable-v1-release.md), not a full stable-release verdict.
+Root owns release task `97d0f9df-6701-4887-a7a3-2993a117f90f`.
 
 ## Existing boundary and reason for a reusable change
 
 At merged source `321a085f61c9ac031f89daddde0bf95633e58133`,
 [`ReferenceDataPortsV1`](../../synaptic_tuner/api/v1/reference/data.py) supplies
 configuration, scenario and rubric directories and an LLM factory. Its generator
-construction explicitly passes `environment_validator=None`. Configuration alone
-cannot enable environment execution through this public composition.
+construction explicitly passed `environment_validator=None`. This historical
+boundary motivated the optional host session-factory integration below;
+configuration alone still cannot select or authorize an operational backend.
 
 [`SynthChatGenerator`](../../SynthChat/generator.py) already carries environment
 failures into response judging and improvement and then re-executes the revised
-response. DataAPI improve mode constructs
-[`ImprovementEngine`](../../SynthChat/engine.py) without environment feedback;
-that engine accepts a static `prompt_context`, which cannot establish that a
-revised candidate was executed. These are the two reusable seams to connect.
+response. The optional integration also supplies
+[`ImprovementEngine`](../../SynthChat/engine.py) with its generic per-candidate
+evaluation callback. Both paths consume the admitted inputs and evaluate actual
+changed candidates; a static prompt context alone cannot establish execution.
 
-The existing DataPlan binds parsed scenarios for generation, and dataset bytes
+The legacy DataPlan binds parsed scenarios for generation, and dataset bytes
 plus rubric names for improvement. It does not bind all execution policy,
 tool-schema or rubric bytes. Existing
 [`EnvironmentValidator`](../../shared/environments/validator.py) also defaults
@@ -36,19 +37,21 @@ authority.
 
 Use the existing DataAPI lifecycle. Add contract types in an explicit,
 provider-neutral `synaptic_tuner.api.v1.environment_execution` submodule. Do not
-change root exports merely for convenience. Names below are proposed interfaces,
-not existing exports.
+change root exports merely for convenience. The effect-free selection/binding types exist; session execution is supplied
+by host composition rather than a new public facade or command family.
 
 - `EnvironmentSelectionV1`: a logical host profile reference and explicit
   `execute` or `simulate` mode. Add an optional selection to DataRequest.
 - `EnvironmentBindingV1`: the resolved immutable execution identity, policy,
   dependency digests, scope and finite bounds persisted with an opt-in DataPlan.
-- `EnvironmentExecutionPort`: resolve a selection without effects, report its
-  authorization requirement, and open a bounded session after authorization and
-  a durable attempt claim. Supply this optional port through ReferenceDataPortsV1.
-- A session supports the existing validator's response/session use cases through
-  a concrete bridge, plus bounded finalization and close. Generic interfaces must
-  not import a provider SDK, `tuner.*`, or a current tool wrapper.
+- `EnvironmentExecutionPort`: resolve a selection and dependency bytes without effects. It does not open
+  sessions or mint permission. The optional `ReferenceDataPortsV1.environment_sessions`
+  factory supplies the operational runtime after normal run claiming.
+- `CapturedEnvironmentSessionFactory` prepares a validator from retained inputs
+  and configured projections without opening a runtime/client. Its host-injected
+  `runtime_factory(limits, boundary)` constructs the existing `EnvironmentRuntime`;
+  setup and close occur only in the actual session. No provider credentials or
+  current tool-wrapper constants are implicit in this seam.
 
 No environment selection means the existing canonical request and plan bytes
 remain unchanged: omit optional fields rather than serialize null/default fields.
@@ -99,40 +102,55 @@ C1 rejects external JSON Schema references and the legacy
 It checks catalog ambiguity but commits only selected file bytes. Execution of
 immutable admitted snapshots and validation of the effective fixture merge are
 C2 requirements: nested fixture schema validity is not permission to override
-host policy. Both execute and simulate starts remain unavailable, and their
-preflight remains not ready, until a qualified adapter is connected.
+host policy. Selected runs require the optional session factory; absent or
+unsupported composition still refuses before client/session effects. The implemented
+factory path has installed local workflow evidence; remote qualification and
+durable restart recovery remain separate gates.
 
 ## Session custody, usage and lifecycle
 
-Open each episode with exact run, row, attempt, input and binding identities,
-deadline and cancellation callback. The host owns private scratch and provider
-handles. Limit fixture contents, files, snapshots and retained output. Contain
-filesystem actions; retain descriptors where hostile path substitution matters.
-Do not expose arbitrary host paths, shell execution or inherited network access
-through the local fixture adapter.
+The simplified composition uses normal DataAPI plan/preflight/start/show/cancel/
+list and the existing host record/stream stores. Pure preparation validates the
+retained workflow, host policy, tool schema/catalog and configured feedback
+projection before runtime or LLM client creation. Start creates the normal
+create-only run record before client/session effects, then uses existing CAS
+transitions and observations. Recomposition finds that claimed run rather than
+executing it again. Missing factories, invalid inputs and conflicting claims
+remain refusals; no automatic child respawn or uncertain workflow replay occurs.
+The proposed separate per-effect grant/episode DTO and parallel v2 lifecycle,
+result and list framework were cancelled after user review. They are not required
+for this composition.
 
-Always close in `finally`. A partial creation failure must either clean up its
-owned resources or retain an exact handle and uncertain outcome. A thread wait
-timeout is not proof that an operation stopped; an advertised time bound needs
-interruptible operations or a bounded execution process with demonstrated
-termination. Avoid new effects after deadline or cancellation.
+The host supplies the private scratch parent, runtime factory and parent-only
+boundary callback. The fixed worker retains directory descriptors and its actual
+`Popen` handle, transports only bounded whitelisted fixture operations, and
+checks the original deadline/cancellation while polling IPC on the owning thread.
+It terminates, escalates when necessary and waits for the exact child before
+parent cleanup. Lost replies, unknown startup, exit or cleanup preserve consumed
+ownership/uncertainty instead of permitting execution again. Infrastructure
+`WorkerLifecycleError` is fatal and must not become model-quality feedback.
 
-Persist the row attempt before creation through existing host record/stream
-ports. Retain binding/input identity, exact effect identity and the later result
-or uncertainty. Cancellation stops new episodes/tools/LLM calls, closes current
-resources and preserves completed rows/traces. Recomposition can observe and
-cancel retained state. Interrupted execution must not silently replay, renew
-authority or infer absence. Resume requires exact termination/reconciliation
-evidence; otherwise the attempt remains indeterminate. Full resumable data
-workflow acceptance remains an open lifecycle gate.
+Session closure occurs in `finally`. Cancellation prevents subsequent model/tool/
+row work and requests owned-child termination, while preserving completed rows.
+Unknown active attempts retain RUNNING or CANCEL_REQUESTED with safe diagnostics;
+they are not falsely terminalized. Private controller/descriptors are process-local:
+a cold composition cannot recreate kill authority from a stored PID or declare
+cleanup merely because a receipt is absent. Durable termination/cleanup recovery
+and resumable row checkpoints remain broader stable-release gates. No resume or
+continuation is claimed here.
 
-LLM calls retain the existing MeteredLLMClient and Data spend ledger. Environment
-usage is not token usage. A paid environment needs an explicit host grant and
-existing effect/usage authority with measured resource receipts; reject an
-unmetered paid backend before creation. Local/simulated modes declare no paid
-environment effect. E2B will require explicit SecretRef resolution, pinned SDK,
-retained handles, cancellation/reconciliation and its own bounded qualification.
-Do not activate the legacy ambient `E2B_API_KEY` fallback through this port.
+Worker IPC and termination waits are finite. `Popen` construction and parent
+filesystem setup/cleanup remain synchronous OS calls; this is not a universal
+wall-clock guarantee or a security sandbox. Killing the fixture child cannot
+cancel an in-flight parent LLM/provider request or establish its measured spend.
+Boundary cancellation and host-client transport deadlines remain distinct.
+
+LLM calls retain the injected metered client and existing Data spend ledger.
+Local/simulated environments declare no paid environment effect; explicit
+simulation cannot satisfy execution acceptance. No paid remote environment or
+ambient E2B credential fallback is enabled by this local composition. Remote
+backends and measured environment usage need their own supported host adapters
+and bounded qualification.
 
 ## Results and per-candidate feedback
 
@@ -144,9 +162,9 @@ failure feedback for the judge and improver. Public diagnostics must not carry
 credentials, host paths or raw provider exception text.
 
 Generation reuses its existing environment-result feedback loop. Improvement
-needs an optional generic per-candidate evaluation callback, absent by default.
+uses the optional generic per-candidate evaluation callback, absent by default.
 Evaluate each changed response against the exact fresh fixture, update
-`environment_result` context before judging/rejudging, and bind the final result
+the configured feedback context before judging/rejudging, and bind the final result
 to the final candidate digest. Never reuse an earlier trace after a response
 changes. The callback must not hardcode the dataset shape or current wrapper;
 configured projections determine the response and fixture inputs.
@@ -164,10 +182,15 @@ database. A generic factory's existence does not qualify local execution or E2B.
 
 C1 and the independent generic improvement callback passed 153 combined focused
 tests at `846f754b`, plus the source-archive-built wheel resource/consumer gate.
-The callback is not yet wired to a local environment adapter or generator.
-Selected environment starts still reject before clients and claims. C2 must
-enforce host authorization and prove bounded local execution and cleanup before
-C3 can qualify the workflow.
+These are historical prerequisite checks. The current optional factory connects
+local execution and per-candidate feedback through DataAPI. Runtime `8de9e430`
+passed 916 combined tests with one intentional skip. Independent review and a
+fresh sdist-built installed wheel each passed all 51 session/public cases, with
+only the non-worker SIGSTOP variant skipped. The installed check uses isolated
+Python, neutral CWD and installed fixture assets, and now runs in CI. Tests cover
+actual repair, stopped-child termination/cleanup, cancellation races, retained
+uncertainty and no replay after a failed final CAS. They do not qualify durable
+process restoration, resumable continuation or multi-host transition recovery.
 
 The first C2 prerequisite retains private input captures from the same bounded
 reads that establish dependency identity. Fresh re-admission must match the full
@@ -186,12 +209,12 @@ registry lookup; optional parser/catalog injection preserves legacy defaults
 when omitted. Pure validation rejects missing selections, unsupported client
 overrides and malformed parser configuration before client creation. Snapshot
 consumers preserve the injected metered client and select only admitted targets.
-The executor catalog seam is available but is not yet an admitted execution
-dependency. Host authorization, process termination, durable attempts and
-execution remain separate C2 gates; execute and simulate starts remain disabled.
+The session integration now consumes retained tool schema/catalog and configured
+execution inputs. Existing run claims and fixed-worker process supervision supply
+the selected local path, including installed public acceptance. Complete durable
+recovery remains a separate gate. Missing optional factories still refuse selected execution.
 
 ### Accepted local filesystem primitive
-
 
 [`BoundedLocalEnvironmentRuntime`](../../shared/environments/bounded_local_runtime.py)
 implements the existing runtime interface without selecting it as a default or
@@ -225,13 +248,25 @@ re-setup. This process-local retained state is not durable restart recovery.
 Cooperative checks cannot interrupt blocked filesystem calls or establish process
 termination, cancellation or an enforceable wall-clock resource limit.
 
-The next gate is a host-authorized execution/session boundary with persisted
-attempt authority, bounded process lifecycle and demonstrated cancellation,
-termination, cleanup and uncertain-outcome handling. It must explicitly map
-admitted public bounds to these independent filesystem limits and consume retained
-inputs. The primitive alone supplies no host grant, policy allowlist, worker,
-public execution enablement or provider qualification. Both selected execute and
-simulate starts remain disabled until that separate gate is accepted.
+### Fixed worker and public integration acceptance
+
+[`WorkerEnvironmentRuntime`](../../shared/environments/local_worker.py) adds the
+accepted fixed-child supervisor at `27dde56e`. Real-child tests cover stalled
+termination, cancellation on the parent thread, backpressure, lost replies and
+retained cleanup uncertainty. Its fixed `-I` entrypoint works from checkout and
+an sdist-built installed wheel without CWD/PYTHONPATH lookup or inherited
+credentials. The existing neutral-wheel CI smoke verifies fixture writes/reads,
+default snapshot, confirmed child exit and empty owned scratch. This establishes
+the primitive and packaging; it does not alone qualify the composed public path.
+
+The optional session integration maps the admitted bounds into independent
+`FilesystemLimits`, uses configured action/projection data and carries structured
+assertion failures into judging/improvement. Changed candidates use fresh fixtures;
+supervisor/cancellation/cleanup failures do not masquerade as assertion success
+or ordinary model quality. Installed public tests exercise these facts through
+normal DataAPI, including retained claims, final CAS failures and cancellation
+of a stalled owned worker. Restart no-replay evidence is distinct
+from restored process ownership, safe continuation or complete durable recovery.
 
 The shared fixture starts with bounded files and a declared action/assertion
 policy. A deterministic LLM reply first triggers a missing-file failure. That
@@ -264,5 +299,5 @@ locked code must not remove it from its authenticated boundary.
 
 Asset packaging proves installed bytes. Lightweight dependency fixes prove
 imports. Contract tests prove the generic port. Actual local execution proves
-the fixture path. None alone closes the stable release's provider parity,
+the fixture path. No primitive alone closes the stable release's provider parity,
 cancellation, restart/recovery, publication or model-quality gates.

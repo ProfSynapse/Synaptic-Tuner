@@ -111,6 +111,7 @@ class EnvironmentValidationResult:
     assertions_run: int = 0
     snapshot: Dict[str, Any] = field(default_factory=dict)
     episode_trace: Optional[EnvironmentEpisodeTrace] = None
+    mode: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         payload = {
@@ -122,4 +123,6 @@ class EnvironmentValidationResult:
         }
         if self.episode_trace is not None:
             payload["episode_trace"] = self.episode_trace.to_dict()
+        if self.mode is not None:
+            payload["mode"] = self.mode
         return payload

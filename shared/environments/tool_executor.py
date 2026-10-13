@@ -60,12 +60,17 @@ def execute_response_tool_calls(
     *,
     wrapper_specs=None,
     catalog=None,
+    allowed_actions=None,
+    simulate_only=False,
+    max_tool_calls=None,
+    safe_errors=False,
 ) -> Tuple[List[ExecutedToolCall], List[EnvironmentIssue]]:
     """Parse a model response and execute supported tool calls."""
     wrapper_specs = None if wrapper_specs is None else tuple(deepcopy(tuple(wrapper_specs)))
     catalog = None if catalog is None else deepcopy(dict(catalog))
     parsed = parse_response(response, wrapper_specs=wrapper_specs)
     allowed = set(allowed_tools or [])
+    action_allowlist = None if allowed_actions is None else frozenset(allowed_actions)
     enforce_allowlist = bool(allowed)
     schema_index = _build_tool_index(tool_schema)
     hints = _normalize_action_hints(action_hints or {})
@@ -77,6 +82,11 @@ def execute_response_tool_calls(
     issues: List[EnvironmentIssue] = []
 
     expanded_calls = _expand_wrapper_calls(parsed.tool_calls, wrapper_specs=wrapper_specs, catalog=catalog)
+    if max_tool_calls is not None:
+        if type(max_tool_calls) is not int or max_tool_calls < 0:
+            raise ValueError("max_tool_calls must be a nonnegative integer")
+        if len(expanded_calls) > max_tool_calls:
+            return [], [EnvironmentIssue("error", "Tool-call limit exceeded", code="tool_limit_exceeded", recoverable=False)]
 
     for call in expanded_calls:
         name = call.name
@@ -104,7 +114,7 @@ def execute_response_tool_calls(
             executions.append(record)
             continue
 
-        if strict_schema and schema_index and schema_entry is None:
+        if strict_schema and (schema_index or safe_errors) and schema_entry is None:
             record.status = "error"
             record.error = "Tool not present in schema"
             record.recoverable = True
@@ -160,6 +170,10 @@ def execute_response_tool_calls(
                 key_hints=normalized_key_hints,
                 default_action=normalized_default_action,
             )
+            if simulate_only:
+                action = "simulate"
+            elif action_allowlist is not None and (action not in action_allowlist or (safe_errors and action == "simulate")):
+                raise PermissionError("action denied")
             output = _execute_action(
                 runtime,
                 action,
@@ -171,14 +185,21 @@ def execute_response_tool_calls(
             record.status = "ok"
             record.recoverable = False
         except Exception as exc:
+            if safe_errors and (isinstance(exc, TimeoutError) or not isinstance(exc, (OSError, ValueError, TypeError))):
+                raise
             record.status = "error"
-            record.error = str(exc)
+            error_code = "tool_execution_failed"
+            if safe_errors:
+                error_code, message = _safe_execution_error(exc)
+            else:
+                message = str(exc)
+            record.error = message
             record.recoverable = True
             issues.append(
                 EnvironmentIssue(
                     "error",
-                    f"Tool '{name}' failed: {exc}",
-                    code="tool_execution_failed",
+                    message if safe_errors else f"Tool '{name}' failed: {exc}",
+                    code=error_code,
                     recoverable=True,
                 )
             )
@@ -186,6 +207,18 @@ def execute_response_tool_calls(
         executions.append(record)
 
     return executions, issues
+
+
+def _safe_execution_error(error):
+    if isinstance(error, FileNotFoundError):
+        return "missing_path", "A requested fixture path does not exist"
+    if isinstance(error, FileExistsError):
+        return "path_conflict", "A requested fixture path already exists"
+    if isinstance(error, PermissionError):
+        return "action_denied", "The requested action is not permitted"
+    if isinstance(error, TimeoutError):
+        return "execution_timeout", "Environment execution timed out"
+    return "tool_execution_failed", "Environment execution failed"
 
 
 def format_tool_results_message(

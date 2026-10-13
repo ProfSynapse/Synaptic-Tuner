@@ -8,7 +8,9 @@ updated: 2026-10-13
 
 This matrix inventories the selected stable-v1 scope at `df166a75`; it is not a
 release certification. Subsequent work must update individual rows only after
-implementation and exact-source acceptance. The [stable release plan](stable-v1-release.md)
+implementation and exact-source acceptance. Environment rows include later
+admission/snapshot, fixed-worker and installed public local workflow evidence
+through runtime `8de9e430`. Complete durable recovery remains open. The [stable release plan](stable-v1-release.md)
 is the acceptance authority. SFT requires Docker, Modal and HF Jobs parity;
 GRPO selects Modal as the first candidate, still unqualified. DPO/KTO, RunPod,
 Syntunia and broader GRPO provider parity are deferred.
@@ -30,9 +32,9 @@ Status vocabulary:
 | --- | --- | --- |
 | Scenarios: author/edit/version | Existing config-first YAML/CLI authoring; complete public authoring operation unavailable | Scenario/rubric schemas and loaders exist. `DataAPI` consumes scenario refs; it is not a scenario CRUD/version authority. Define immutable public authoring/validation references and installed resources. |
 | Scenarios: validate/select | Implemented/provider-free loaders and validation | Config/scenario validation does not establish semantic input coverage or permission for environment effects. Qualify actual installed assets and representative full scenarios. |
-| Environments: config/create/validate | Legacy configurable runtime paths implemented; public reference data integration unavailable | `ReferenceDataPortsV1` has config/scenario/rubric/client ports only; generation passes `environment_validator=None`. Config alone cannot add executor/authority. Proposed C1 is future work until reviewed and integrated. |
-| Environments: execute/tools/feedback | Existing local/runtime execution and provider-free tests; included public workflow unqualified | Require reusable bound executor/authority port, tool allowlists, custody, finite deadlines, structured errors and judge/improver feedback. Configured simulation must remain distinguishable from actual execution. |
-| SynthChat: plan/preflight/generate | Implemented/provider-free public `DataAPI` + optional reference backend | Host supplies exact `ReferenceDataPortsV1` and LLM clients. Public generation is not automatically environment-backed; installed and real backend acceptance remain open. |
+| Environments: config/create/validate | Reviewed admission, retained inputs and installed local host session composition | Optional `ReferenceDataPortsV1.environment_sessions` connects a host-configured factory to existing runtime methods. Public planning/preflight remain effect-free; selected execution requires that factory. No new environment facade or grant framework is required. |
+| Environments: execute/tools/feedback | Installed public local generation/improvement and bounded worker cancellation verified | Runtime `8de9e430` exercises configured tools, fresh fixtures and candidate feedback through DataAPI. Actual stalled-worker cancellation verifies exit/cleanup; uncertainty stays nonterminal and repeated starts do not replay. Complete durable restart/reconciliation remains open. Simulation is explicit; no sandbox or universal wall-clock claim. |
+| SynthChat: plan/preflight/generate | Implemented/provider-free public `DataAPI` + optional reference backend | Host supplies exact `ReferenceDataPortsV1` and LLM clients. Installed local environment workflows use deterministic injected clients; actual model/backend qualification remains open. |
 | SynthChat: improve/judge | Improve mode implemented/provider-free; judge is configured workflow behavior, not a standalone `DataAPI` mode | `DataMode` exposes generate/improve. Judge/rubric client, usage and input lineage need bounded backend qualification; CLI availability is not a public judging-service guarantee. |
 | SynthChat: export/datasets/validation | Implemented/provider-free result/dataset operations and validators | Bind immutable export, format, source coverage and split lineage; no manual relabeling. Installed source assets and exact downstream training identities must be checked. |
 | SynthChat: usage/progress/cancel | Implemented/provider-free reference accounting/observations and cancellation state | Paid clients require authenticated spend scope; unmetered paid backends refuse. Cancellation state is not proof of interrupted in-flight work. Restart and real usage settlement remain open. |
@@ -84,8 +86,13 @@ passed checkout and sdist-built wheel asset checks plus a fresh base consumer in
 a neutral working directory. Catalog resolution and evaluator startup are tested
 without optional ML dependencies. Snapshot workflow source `f7d2df31` passed 793
 combined checks, including retained-input generation and improvement after source
-deletion. These do not qualify public environment execution or lifecycle recovery;
-those starts remain disabled. Selected ML/GPU operations still require their real
+deletion. Fixed-worker source `27dde56e` adds accepted process/fixture primitives
+and the permanent neutral installed smoke. Public local runtime `8de9e430` passed
+916 combined tests with one intentional skip; its sdist-built wheel passed 51
+session/public cases with the non-worker SIGSTOP variant skipped. Permanent CI
+runs those tests with installed production modules and no checkout imports.
+Durable worker restoration and resumable continuation remain unqualified.
+Selected ML/GPU operations still require their real
 dependencies. Source checkout success alone is not installed workflow acceptance.
 
 HTTP/SSE/browser transport, auth service, credentials, durable grants/stores and
@@ -103,3 +110,13 @@ explicitly host supplied and outside any automatic universal stability claim.
 - [Data modes/operations](../../synaptic_tuner/api/v1/data_facade.py), [reference data ports/execution](../../synaptic_tuner/api/v1/reference/data.py).
 - [Reference evaluation backends/cancellation](../../synaptic_tuner/api/v1/reference/evaluation.py), [reporting](../../Evaluator/reporting.py), [comparison CLI](../../Evaluator/compare.py).
 - [Reference artifact defaults](../../synaptic_tuner/api/v1/reference/artifacts.py), [public publication](../../synaptic_tuner/api/v1/artifacts_facade.py), [SFT method compiler](../../tuner/training/methods/__init__.py).
+
+## Environment lifecycle scope
+
+The selected implementation preserves normal DataAPI operations and existing host
+record/stream stores. The proposed additional grant/episode contract framework and
+parallel v2 outcome/result/list family were cancelled; they are not acceptance
+requirements. Host-supplied policy and a session factory do not automatically
+qualify restart, cancellation or safe continuation. Unknown active attempts retain
+their uncertainty and cannot be replayed or falsely terminalized. Fixed-worker
+process descriptors are local custody, not a restored durable controller.
