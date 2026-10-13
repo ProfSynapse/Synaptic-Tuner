@@ -6,7 +6,7 @@ import pytest
 
 from synaptic_tuner.api.v1.data_facade import DatasetValidateRequest, DataOperationError, DataOperationCode
 from synaptic_tuner.api.v1.reference import data
-from tests.contract.test_reference_data_v1 import Harness, FakeLocalClient, PROJECT
+from test_reference_data_v1 import Harness, FakeLocalClient, PROJECT
 
 
 def row(content="x"):

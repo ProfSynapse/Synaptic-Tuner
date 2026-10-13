@@ -310,6 +310,13 @@ Existing row-count pagination and LF/CRLF/bare-CR/UTF-8 replacement behavior are
 preserved. These finite read limits do not qualify OS-call timing, immutable
 exports, provenance, split correctness or a complete dataset-to-training handoff.
 
+The focused, reference and public Data API suites passed 97 cases. A fresh
+source-archive-built wheel passed the neutral base consumer and 145 installed
+Data/environment/durable-store cases, with one intentional non-worker SIGSTOP
+skip. Installed checks inspect the loaded package files and include the full
+reference Data suite and byte-bound controls; no production source is copied
+into their test directory.
+
 ## 3. Ship durable host composition and migrations
 
 - [x] Provide an opt-in host-owned SQLite implementation of the existing
