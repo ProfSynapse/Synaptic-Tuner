@@ -388,6 +388,24 @@ The combined artifact/cancellation suite passed all 114 cases from a fresh
 source-archive-built wheel. The neutral base consumer and byte comparison of all
 three Docker transport modules passed; runtime inventories and pins are unchanged.
 
+Docker source staging now publishes the existing factory-built worker bundle,
+locked source members and one retained prepared-input stream into fresh private
+paths. It verifies input size/hash/EOF before publication, retains directory and
+file descriptors, and rejects changed bytes, permissions or path identities at
+submit and immediately before container creation. Source identity remains the
+original execution-source fingerprint; the staged inventory has separate evidence.
+
+The source mount is read-only to the container; prepared input in writable state
+is checked separately. Partial publication and uncertain results remain consumed,
+with no adoption or automatic retry. This is process-local source custody: model
+preparation, durable host composition and live Docker SFT qualification remain
+open. Legacy compositions without the explicit checks gain no source guarantee.
+
+All 162 installed source/artifact/cancellation cases passed from a fresh
+source-archive-built wheel, including the signed executor path and changes made
+after image inspection. The neutral base consumer passed and five production
+modules matched source bytes. Runtime inventories and pins are unchanged.
+
 The packaged Modal cancellation machinery now supports an explicit host opt-in
 for a current cancellation grant after the original start grant expires. It
 authenticates the recorded cancellation intent, original successful submit,
