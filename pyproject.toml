@@ -65,7 +65,7 @@ namespaces = true
   "config/settings.yaml", "config/tool_call_formats.yaml", "config/validation.yaml",
   "config/workspace_formats.yaml", "rubrics/*.yaml", "rubrics/*.example", "scenarios/*.yaml",
 ]
-"Trainers.runtime_profiles" = ["qwen35-sft-v1.yaml", "qwen35-sft-v1.inventory.json"]
+"Trainers.runtime_profiles" = ["qwen35-sft-v1.yaml", "qwen35-sft-v1.inventory.json", "qwen35-conversation-sft-candidate-v1.yaml", "qwen35-conversation-sft-candidate-v1.compatibility.json"]
 "Trainers.grpo" = ["configs/*.yaml", "configs/rewards/*.yaml"]
 "tuner.execution.providers.modal" = [
   "modal-runtime-v1.lock.json",
