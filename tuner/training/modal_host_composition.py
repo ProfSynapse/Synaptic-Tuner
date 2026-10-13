@@ -15,7 +15,7 @@ from synaptic_tuner.api.v1.providers import (
 from synaptic_tuner.api.v1.reference.authority import compose_reference_authority
 from synaptic_tuner.api.v1.reference.composition import compose_reference_host
 from synaptic_tuner.api.v1.reference.provider_family import (
-    ProviderFamilyV1, ReferenceHostPortsV1,
+    ProviderFamilyV1, ReferenceHostPortsV1, require_methods,
 )
 from synaptic_tuner.api.v1.reference.stores import (
     InMemoryDurableRecordStoreV1, InMemoryDurableStreamStoreV1,
@@ -104,14 +104,23 @@ def _compose_modal_packaged_reference_host(
     maximum_cost_minor_units: int,
     qualification_admission=None,
     cpu_qualification=None,
+    records=None, streams=None,
 ) -> ModalPackagedReferenceHostV1:
     """Compose only from already-captured and admitted packaged material.
 
     Build/deploy/quote are separate explicit host effects before this call.
-    No provider calls or catalog reads occur during this assembly.
+    No provider calls or catalog reads occur during this assembly. Optional
+    paired stores remain host-owned; absent stores preserve in-memory defaults.
     """
     if type(adapter) is not ModalPackagedComposition:
         raise TypeError("exact packaged Modal adapter required")
+    if (records is None) != (streams is None):
+        raise TypeError("record and stream stores must be supplied together")
+    if records is not None:
+        require_methods(records, "create", "read", "compare_and_swap", "put_if_absent", "list_page")
+        require_methods(streams, "append", "read_page")
+    else:
+        records, streams = InMemoryDurableRecordStoreV1(), InMemoryDurableStreamStoreV1()
     if not all(callable(getattr(effects, name, None)) for name in (
         "authorize", "bind", "authenticate",
     )):
@@ -202,8 +211,7 @@ def _compose_modal_packaged_reference_host(
         components=components, context=context,
     )
     ports = ReferenceHostPortsV1(
-        InMemoryDurableRecordStoreV1(), InMemoryDurableStreamStoreV1(),
-        clock, effects, secrets,
+        records, streams, clock, effects, secrets,
     )
     authority = compose_reference_authority(
         clock=clock, secrets=secrets, authority_secret=authority_secret,
