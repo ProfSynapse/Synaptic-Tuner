@@ -285,6 +285,41 @@ jobs:
           catalogs = importlib.resources.files("synaptic_tuner").joinpath("runtime")
           assert json.loads(catalogs.joinpath("cli-first-tool-schemas.json").read_text())
           assert json.loads(catalogs.joinpath("Tools/tool_schemas.json").read_text())
+          from shared.environments.tool_executor import cli_command_catalog
+          from shared.validation.parsing.cli_commands import load_cli_command_catalog
+          from shared.validation.dataset_validator import load_tool_schemas
+          from SynthChat.scripts.embed_tool_schemas import load_tool_schemas as load_embed_catalog
+          with importlib.resources.as_file(catalogs.joinpath("cli-first-tool-schemas.json")) as path:
+              assert cli_command_catalog() == load_cli_command_catalog(path)
+          assert cli_command_catalog()
+          assert load_tool_schemas() == json.loads(catalogs.joinpath("Tools/tool_schemas.json").read_text())
+          assert load_embed_catalog() == json.loads(catalogs.joinpath("cli-first-tool-schemas.json").read_text())
+
+          # Spawn first; prohibit process/network effects inside the fresh child.
+          import textwrap
+          child = textwrap.dedent("""
+              import importlib.util, runpy, socket, subprocess, sys
+              for name in ("pandas", "numpy", "torch", "sklearn"):
+                  assert importlib.util.find_spec(name) is None, name
+              def forbidden(*args, **kwargs):
+                  raise AssertionError("installed help attempted process or network effects")
+              subprocess.Popen = forbidden
+              socket.socket.connect = forbidden
+              socket.create_connection = forbidden
+              from synaptic_tuner.api.v1 import EvaluationAPI, TrainingAPI
+              sys.argv = ["Evaluator.cli", "--help"]
+              try:
+                  runpy.run_module("Evaluator.cli", run_name="__main__")
+              except SystemExit as error:
+                  assert error.code == 0
+              else:
+                  raise AssertionError("help did not exit")
+              assert "shared.ui" not in sys.modules
+              assert not any(name in sys.modules for name in ("pandas", "numpy", "torch", "sklearn"))
+          """)
+          help_result = subprocess.run([sys.executable, "-I", "-B", "-c", child],
+              check=True, capture_output=True, text=True, timeout=30)
+          assert "usage:" in help_result.stdout
           with tempfile.TemporaryDirectory() as directory:
               manifest = Path(directory) / "synaptic.yaml"
               manifest.write_text(
