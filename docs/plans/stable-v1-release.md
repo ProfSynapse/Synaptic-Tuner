@@ -415,14 +415,43 @@ original execution-source fingerprint; the staged inventory has separate evidenc
 
 The source mount is read-only to the container; prepared input in writable state
 is checked separately. Partial publication and uncertain results remain consumed,
-with no adoption or automatic retry. This is process-local source custody: model
-preparation, durable host composition and live Docker SFT qualification remain
-open. Legacy compositions without the explicit checks gain no source guarantee.
+with no adoption or automatic retry. This primitive provides process-local
+source custody. Model preparation and live Docker SFT qualification remain open;
+the composed host evidence below extends the persistence coverage. Legacy
+compositions without the explicit checks gain no source guarantee.
 
 All 162 installed source/artifact/cancellation cases passed from a fresh
 source-archive-built wheel, including the signed executor path and changes made
 after image inspection. The neutral base consumer passed and five production
 modules matched source bytes. Runtime inventories and pins are unchanged.
+
+The explicit Docker host assembly composes those existing ports with the public
+Training API, caller-owned durable stores and named original signing keys. Source
+publication occurs inside the claimed stage; both submit checks remain active.
+Its public plan commits the complete original material, including runtime and
+artifact-policy fields that the Docker profile does not otherwise represent.
+Staging, container mounts and artifact reads must select the same host paths.
+
+Scripted Docker CLI tests use real SQLite close/reopen and the public lifecycle:
+native verification and direct artifact downloads, cancellation after the start
+grant expires, natural completion races and refusal to replay uncertain submits.
+Verification requires successful exact-container exit evidence and the existing
+native SFT workload, lineage, model and tokenizer checks. Matching file hashes
+alone cannot produce a verified run.
+
+A fresh source-archive-built wheel passed the neutral base consumer and all
+50 installed host cases, including changed cold-host keys and container identity.
+All four changed production modules matched the wheel bytes. The affected source
+suites passed 180 cases, followed by six additional cold-host negative controls;
+independent review also ran the original 44 host cases. Runtime inventories and
+pins remain unchanged.
+
+Cold callers must retain the original rich material, profile and named keys;
+the assembly neither discovers these nor resumes an incomplete stage. It keeps
+existing capability flags, with logs unavailable. These tests use synthetic
+trainer outputs and scripted CLI replies. Image/model-cache provisioning, real
+Docker/GPU execution, actual process-loss recovery and live cancellation remain
+separate qualification gates.
 
 The packaged Modal cancellation machinery now supports an explicit host opt-in
 for a current cancellation grant after the original start grant expires. It
