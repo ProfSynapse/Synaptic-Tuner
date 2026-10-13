@@ -530,6 +530,30 @@ jobs:
           ]))
           PYCODE
 
+      - name: Exercise installed Docker CLI transport with scripted replies
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import tuner.execution.providers.docker_provider_v1.cli_transport as transport
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          location = Path(transport.__file__).resolve()
+          assert not location.is_relative_to(checkout), location
+          assert location.is_relative_to(Path(sys.prefix)), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-docker-transport-tests"
+          for name in ("conftest.py", "test_cli_transport.py", "test_model.py"):
+              target = root / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / "tests/execution/providers/docker_provider_v1" / name, target)
+          import pytest
+          os.chdir(root)
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider", str(root)]))
+          PYCODE
+
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
         run: |
           python -B scripts/regenerate_offline_sft_worker_closure.py

@@ -339,6 +339,23 @@ new submission grant or renewing a deadline.
 
 ## 4. Prove crash, uncertainty, cancellation and reconciliation
 
+Docker now has a concrete bounded CLI transport for present-image checks,
+create/start and scoped lookup. It binds the explicit local daemon identity,
+full existing labels, deterministic container name and immutable image content
+ID. Entrypoint, environment values and mount mappings are supplied by the host;
+create never pulls an image or adopts an existing container. Selected mount and
+ancestor identities are rechecked immediately before create, but this is not
+atomic custody of the daemon's path resolution.
+
+Scripted process-reply tests exercise these ports and preserve uncertain
+per-session attempts without replay. This transport does not yet supply durable
+host composition, source sealing, artifact streaming, cancellation or container
+lifetime supervision. No live daemon or SFT parity is qualified by these tests.
+
+The source-archive-built wheel passed the neutral base consumer and 187 installed
+transport/model cases. The installed transport matched the reviewed source bytes;
+runtime inventories and pins remain unchanged.
+
 The packaged Modal cancellation machinery now supports an explicit host opt-in
 for a current cancellation grant after the original start grant expires. It
 authenticates the recorded cancellation intent, original successful submit,
