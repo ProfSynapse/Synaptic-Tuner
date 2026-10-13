@@ -362,6 +362,39 @@ jobs:
               assert not list(private.iterdir())
           PY
 
+      - name: Exercise installed environment workflows without checkout imports
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -m pip install 'pytest>=8,<9'
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+          import SynthChat
+          import synaptic_tuner.api.v1.reference.environment_sessions as sessions
+          import shared.environments.local_worker as worker
+
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          for module in (SynthChat, sessions, worker):
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-environment-tests"
+          tests = root / "tests" / "contract"
+          tests.mkdir(parents=True)
+          for name in ("test_environment_sessions_v1.py", "test_environment_admission_v1.py",
+                       "test_reference_data_v1.py"):
+              shutil.copy2(checkout / "tests" / "contract" / name, tests / name)
+          for name in ("config", "rubrics"):
+              shutil.copytree(Path(SynthChat.__file__).parent / name, root / "SynthChat" / name,
+                              ignore=shutil.ignore_patterns("*.py", "__pycache__"))
+          subprocess.run([sys.executable, "-I", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                          str(tests / "test_environment_sessions_v1.py")], cwd=root, check=True)
+          PY
+
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
         run: |
           python -B scripts/regenerate_offline_sft_worker_closure.py
