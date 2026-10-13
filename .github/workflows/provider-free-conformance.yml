@@ -72,6 +72,7 @@ on:
       - "scripts/regenerate_offline_sft_worker_closure.py"
       - "scripts/capture_modal_inference_runtime.py"
       - "scripts/inspect_modal_inference_runtime.py"
+      - "scripts/ci_pytest_shard.sh"
       - ".gitattributes"
       - "pyproject.toml"
       - ".github/workflows/provider-free-conformance.yml"
@@ -94,7 +95,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [core, modal-inference]
+        suite: [core, modal-inference-a-l, modal-inference-m-z]
     env:
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
       MODAL_IS_REMOTE: "1"
@@ -622,8 +623,8 @@ jobs:
             echo "Modal provider test selection is empty" >&2
             exit 1
           fi
-          if [[ "$CONFORMANCE_SUITE" == "modal-inference" ]]; then
-            python -B -m pytest -q -p no:cacheprovider "${inference_tests[@]}"
+          if [[ "$CONFORMANCE_SUITE" == "modal-inference-a-l" || "$CONFORMANCE_SUITE" == "modal-inference-m-z" ]]; then
+            bash scripts/ci_pytest_shard.sh "$CONFORMANCE_SUITE"
             exit
           fi
           if [[ "$CONFORMANCE_SUITE" != "core" ]]; then
