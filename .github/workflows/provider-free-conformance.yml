@@ -67,6 +67,8 @@ on:
       - "requirements/modal-launcher-v1.lock"
       - "tuner/runtime/manifests/offline-sft-worker-v1.json"
       - "Trainers/sft/**"
+      - "Trainers/grpo/**"
+      - "tests/trainers/grpo/**"
       - "Trainers/shared/**"
       - "shared/**"
       - "tuner/cloud/**"
@@ -664,6 +666,35 @@ jobs:
           os.chdir(root)
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
               str(root / "tests/training/test_docker_host_composition.py")]))
+          PYCODE
+
+      - name: Exercise installed GRPO retained-input core
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -m pip install datasets==5.1.0
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import datasets
+          import Trainers.grpo.runtime_v1 as runtime
+          import Trainers.grpo.src.data_loader as loader
+          import Trainers.grpo.src.rewards as rewards
+          assert datasets.__version__ == "5.1.0"
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          for module in (runtime, loader, rewards):
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-grpo-core-tests"
+          root.mkdir()
+          for name in ("test_runtime_v1.py", "test_grpo_config_keys.py"):
+              shutil.copy2(checkout / "tests/trainers/grpo" / name, root / name)
+          import pytest
+          os.chdir(root)
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider", str(root)]))
           PYCODE
 
       - name: Exercise installed conversation preparation and immutable sources

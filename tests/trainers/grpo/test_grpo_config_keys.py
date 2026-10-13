@@ -22,7 +22,9 @@ from shared.training_utils import (
     reject_unknown_config_keys,
 )
 
-ROOT = Path(__file__).resolve().parents[3]
+from Trainers.grpo import runtime_v1
+
+ROOT = Path(runtime_v1.__file__).resolve().parents[2]
 GRPO = ROOT / "Trainers" / "grpo"
 TRAIN_GRPO = GRPO / "train_grpo.py"
 TRAIN_ENV_GRPO = GRPO / "train_env_grpo.py"

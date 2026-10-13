@@ -223,6 +223,21 @@ def test_actual_model_helper_preserves_legacy_or_explicit_offline_kwargs(tmp_pat
 def test_lazy_runtime_import_no_ml_in_fresh_process(tmp_path):
     import subprocess
     import sys
-    script = "import sys; from Trainers.grpo import runtime_v1; assert not {'torch','trl','unsloth','datasets'} & set(sys.modules)"
-    subprocess.run([sys.executable, '-B', '-c', script], check=True, timeout=15,
-                   cwd=Path(runtime.__file__).parents[2])
+    script = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from Trainers.grpo import runtime_v1; assert Path(runtime_v1.__file__).resolve() == Path(sys.argv[2]); assert not {'torch','trl','unsloth','datasets'} & set(sys.modules)"
+    subprocess.run([sys.executable, '-I', '-B', '-c', script,
+                    str(Path(runtime.__file__).resolve().parents[2]),
+                    str(Path(runtime.__file__).resolve())], check=True, timeout=15, cwd=tmp_path)
+
+
+def test_retained_runtime_with_real_dataset(tmp_path):
+    datasets = pytest.importorskip("datasets")
+    events = []
+    factory = dependencies(events)
+    def actual_dataset():
+        deps = factory()
+        deps["dataset_class"] = datasets.Dataset
+        return deps
+    result = runtime.run_grpo(**inputs(tmp_path), _dependency_factory=actual_dataset)
+    assert isinstance(events[1][1]["train_dataset"], datasets.Dataset)
+    assert events[1][1]["train_dataset"][0]["prompt"] == "say OK"
+    assert json.loads(result["training_metrics"].read_bytes())["global_step"] == 3
