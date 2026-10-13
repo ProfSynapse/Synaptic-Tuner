@@ -153,7 +153,7 @@ defines contract/admission → local adapter/feedback → installed lifecycle
 acceptance. Contract work does not enable execution before adapter review. No
 version, tag or provider resource was changed by this preparation.
 
-### Durable terminal readback preparation
+### Durable retained run readback preparation
 
 The generic SQLite host store now commits workflow heads and event history in
 one transaction, including training transitions. Modal composition accepts the
@@ -161,8 +161,8 @@ same caller-owned record/stream ports. Newly launched standalone runs retain
 original host signing material, typed composition inputs and workflow state
 privately before training starts.
 
-The next layer exposes `synaptic runs show|verify|download` for an exact retained
-terminal run. It reconstructs the existing public read ports and authenticated
+The readback layer exposes `synaptic runs show|observe|verify|download` for an
+exact retained run. It reconstructs the existing public read ports and authenticated
 workflow; it does not prepare, stage or submit another job. Provider-free CLI
 integration removes the original local recipe/configuration/dataset, reopens
 stores and performs actual public verification/download against the same fake
@@ -175,12 +175,34 @@ imports and runtime inventory checks passed. The local proof uses copied package
 files, matching CI's pip installation, because shared hard links are rejected by
 the existing runtime source checks.
 
+The subsequent known-call reader wheel passed 87 installed cases, the neutral
+base consumer and nine asset checks. All five changed production modules matched
+the wheel bytes. Seven pinned Modal SDK tests include actual synchronized call
+result decoding: an exact builtin polling timeout preserves pending state, while
+remote execution timeout and a malformed successful `None` result are refused.
+These checks use controlled RPC responses and perform no provider actions.
+
 The reader checks original plan/material/resource/cost bindings and opens only
-existing databases. Only `SUCCEEDED_UNVERIFIED`, `VERIFIED` and
-`VERIFICATION_FAILED` are eligible. Already verified runs support show/download;
+existing databases. Known calls in `QUEUED`, `RUNNING` or `CANCEL_REQUESTED` can
+be observed once through the original call binding. A pending observation
+preserves the stored phase and revision; it does not claim current GPU activity.
+Unknown or failed provider reads leave that checkpoint unchanged. Signed
+completion advances through the existing workflow reducer. Terminal
+`SUCCEEDED_UNVERIFIED`, `VERIFIED` and `VERIFICATION_FAILED` reads remain
+supported. Already verified runs support show/download;
 re-verification, logs, cancellation, reconciliation and in-flight continuation
 remain unavailable. Historical runs without retained signing keys cannot be
-recovered. See the [operational commands](../../.skills/fine-tuning/reference/modal-jobs.md#read-a-retained-terminal-run).
+recovered. See the [operational commands](../../.skills/fine-tuning/reference/modal-jobs.md#read-a-retained-run).
+
+### Installed base compatibility evidence
+
+The separate base-package matrix on PR #191 (`6f010cac`) passed on Linux with
+Python 3.10, 3.11, 3.12, 3.13 and 3.14, and on Windows/macOS with Python 3.12.
+Each job builds an sdist and then a wheel, installs only base dependencies, and
+checks exports, resource bytes, real configuration/catalog loaders, help and the
+console/project-manifest path from outside the checkout. This qualifies those
+base-package paths; provider launchers, POSIX stores, environment workers and GPU
+execution retain their separate platform and runtime requirements.
 
 ## 1. Freeze the public support contract
 
@@ -271,7 +293,8 @@ all supported providers using only declared assets/dependencies.
   payloads and live restart/continuation remain open.
 - [x] Persist new standalone Modal workflow records and original private signing
   inputs before training starts. Partial retention prevents stage/submit;
-  standalone readback, typed reconstruction and live recovery remain open.
+  typed reconstruction and known-call standalone readback are implemented. Live
+  recovery and uncertain-submission reconciliation remain open.
 - [ ] Compose the existing generic persistence/authority ports into a supported
   durable host boundary. The host owns credentials, configuration, grants,
   coordinator/Foundation records, prepared-input catalogs and product state.
