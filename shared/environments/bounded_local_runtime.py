@@ -100,6 +100,10 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
     def _check(self, *, cleanup=False):
         if self._root_fd is None:
             raise RuntimeError("runtime not initialized")
+        for fd in (self._anchors[-1][2], self._root_fd):
+            private_info = os.fstat(fd)
+            if private_info.st_uid != os.getuid() or stat.S_IMODE(private_info.st_mode) != 0o700:
+                raise RuntimeError('private directory permissions changed')
         for parent, name, fd in self._anchors:
             if parent is not None and self._identity(os.stat(name, dir_fd=parent,
                     follow_symlinks=False)) != self._identity(os.fstat(fd)):
@@ -251,8 +255,11 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
             self._created_identity = self._identity(os.stat(self._name, dir_fd=fd, follow_symlinks=False))
             opened_root = os.open(self._name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             try:
-                if self._identity(os.fstat(opened_root)) != self._created_identity:
+                opened_info = os.fstat(opened_root)
+                if self._identity(opened_info) != self._created_identity:
                     raise RuntimeError('created scratch identity changed before opening')
+                if opened_info.st_uid != os.getuid() or stat.S_IMODE(opened_info.st_mode) != 0o700:
+                    raise RuntimeError('created scratch permissions changed before opening')
             except BaseException:
                 os.close(opened_root)
                 raise

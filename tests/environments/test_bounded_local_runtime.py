@@ -374,3 +374,42 @@ def test_opened_root_identity_must_match_created(parent, limits, monkeypatch):
         runtime.setup(EnvironmentFixture())
     assert runtime._root_fd is None
     assert list(parent.iterdir()) == []
+
+
+@pytest.mark.parametrize('target', ['parent', 'root'])
+def test_private_permission_mutation_rejects_operations_and_cleanup(runtime, parent, target):
+    path = parent if target == 'parent' else owned(runtime, parent)
+    path.chmod(0o755)
+    with pytest.raises(RuntimeError, match='permissions'):
+        runtime.read_text('nested/source.txt')
+    with pytest.raises(RuntimeError, match='permissions'):
+        runtime.teardown()
+    path.chmod(0o700)
+
+
+def test_replaced_root_between_stat_and_open_is_not_adopted(parent, limits, monkeypatch):
+    original_open = os.open
+    retained = parent / 'retained-created'
+    def substitute(path, flags, *args, **kwargs):
+        if str(path).startswith('fixture-'):
+            target = parent / path
+            target.rename(retained)
+            target.mkdir(mode=0o700)
+            (target / 'foreign').write_text('untouched')
+        return original_open(path, flags, *args, **kwargs)
+    runtime = BoundedLocalEnvironmentRuntime(parent, limits)
+    monkeypatch.setattr(runtime, '_platform', lambda: None)
+    monkeypatch.setattr(os, 'open', substitute)
+    with pytest.raises(RuntimeError, match='cleanup uncertain'):
+        runtime.setup(EnvironmentFixture([], {'input': 'never written'}))
+    target = parent / runtime._name
+    assert (target / 'foreign').read_text() == 'untouched'
+    assert not (target / 'input').exists()
+    assert runtime._root_fd is None and runtime._anchors
+    with pytest.raises(RuntimeError, match='uncertain'):
+        runtime.teardown()
+    monkeypatch.setattr(os, 'open', original_open)
+    (target / 'foreign').unlink()
+    target.rmdir()
+    retained.rename(target)
+    runtime.teardown()
