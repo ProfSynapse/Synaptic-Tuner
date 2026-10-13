@@ -18,7 +18,8 @@ names below resolve lazily (PEP 562) from the modules that own them.
 Modules:
 - ``stores.py``: in-memory ``DurableRecordStorePort`` and ``DurableStreamStorePort``.
 - ``sqlite_store.py``: explicitly imported host-owned SQLite storage for both
-  ports, with atomic head/history writes for Data, Evaluation and Pipelines.
+  ports, with atomic head/history writes for Data, Evaluation, Pipelines and
+  training workflows.
 - ``provider_family.py``: ``ProviderFamilyV1`` and the provider-neutral
   ``compose_family_coordinator`` extracted from the Modal composition.
 - ``repositories.py``: the five coordinator store ports over the host record

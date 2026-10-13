@@ -68,6 +68,7 @@ from synaptic_tuner.api.v1.ports import (
     StoredStreamPageV1,
 )
 from synaptic_tuner.api.v1.results import TrainingRunRef
+from synaptic_tuner.api.v1.reference.atomic_storage import atomic_commit_method
 from tuner.execution.coordinator_v1.coordinator import (
     ApplyArtifactVerificationTransitionV1,
     ApplyCancelEffectTransitionV1,
@@ -823,6 +824,10 @@ class DurableWorkflowStoreV1:
         plan_key = self._plan_key(candidate.run.project_ref, candidate.plan_fingerprint)
         with self._lock:
             try:
+                atomic = atomic_commit_method(self._records, self._streams)
+            except Exception:
+                raise _integrity() from None
+            try:
                 indexed = self._records.put_if_absent(
                     partition=_WORKFLOW, key=plan_key, canonical=self._index_document(candidate.run)
                 )
@@ -852,22 +857,30 @@ class DurableWorkflowStoreV1:
                 chain_digest=chain,
                 genesis=candidate,
             )
-            try:
-                appended = self._streams.append(
-                    partition=_WORKFLOW, stream_key=key, sequence=0, canonical=genesis
-                )
-            except Exception:
-                raise _integrity() from None
-            if appended is not True:
-                first = self._read_page(key, None).entries
-                if not first or first[0].sequence != 0:
-                    raise _integrity()
-                if first[0].canonical != genesis:
-                    raise _closed(CoordinatorStoreCode.CONFLICT)
+            if atomic is None:
+                try:
+                    appended = self._streams.append(
+                        partition=_WORKFLOW, stream_key=key, sequence=0, canonical=genesis
+                    )
+                except Exception:
+                    raise _integrity() from None
+                if appended is not True:
+                    first = self._read_page(key, None).entries
+                    if not first or first[0].sequence != 0:
+                        raise _integrity()
+                    if first[0].canonical != genesis:
+                        raise _closed(CoordinatorStoreCode.CONFLICT)
             state = _ValidatedRun(0, chain, candidate, (candidate.record_digest,), b"")
             head = self._head_document(state)
             try:
-                created = self._records.create(partition=_WORKFLOW, key=key, canonical=head)
+                if atomic is not None:
+                    created = atomic(
+                        record_partition=_WORKFLOW, key=key, expected_revision=None,
+                        record_canonical=head, stream_partition=_WORKFLOW, stream_key=key,
+                        expected_tail=None, sequence=0, stream_canonical=genesis,
+                    )
+                else:
+                    created = self._records.create(partition=_WORKFLOW, key=key, canonical=head)
             except Exception:
                 raise _integrity() from None
             if created is True:
@@ -1004,17 +1017,31 @@ class DurableWorkflowStoreV1:
                 chain_digest=chain,
                 genesis=None,
             )
-            sequence = self._append(key, after_sequence=state.sequence, canonical=entry)
-            if sequence is None:
-                return False
+            try:
+                atomic = atomic_commit_method(self._records, self._streams)
+            except Exception:
+                raise _integrity() from None
+            if atomic is None:
+                sequence = self._append(key, after_sequence=state.sequence, canonical=entry)
+                if sequence is None:
+                    return False
+            else:
+                sequence = state.sequence + 1
             advanced = _ValidatedRun(
                 sequence, chain, replacement, state.record_digests + (replacement.record_digest,), b""
             )
             head = self._head_document(advanced)
             try:
-                swapped = self._records.compare_and_swap(
-                    partition=_WORKFLOW, key=key, expected_revision=stored.revision, canonical=head
-                )
+                if atomic is not None:
+                    swapped = atomic(
+                        record_partition=_WORKFLOW, key=key, expected_revision=stored.revision,
+                        record_canonical=head, stream_partition=_WORKFLOW, stream_key=key,
+                        expected_tail=state.sequence, sequence=sequence, stream_canonical=entry,
+                    )
+                else:
+                    swapped = self._records.compare_and_swap(
+                        partition=_WORKFLOW, key=key, expected_revision=stored.revision, canonical=head
+                    )
             except Exception:
                 raise _integrity() from None
             if type(swapped) is not bool:

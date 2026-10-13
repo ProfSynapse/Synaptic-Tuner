@@ -11,7 +11,8 @@ with mode `0700`. The database must be a regular, singly linked file with mode
 local POSIX filesystem. Its path checks do not provide a filesystem sandbox.
 
 Pass the **same store instance** to both ports to enable atomic run-state and
-history updates in the reference Data, Evaluation and Pipelines families:
+history updates in the reference Data, Evaluation, Pipelines and training
+workflow stores:
 
 ```python
 from pathlib import Path
@@ -66,8 +67,23 @@ The Data plan index is written separately from genesis. Its deterministic run
 identity must prevent a missing index from authorizing another execution.
 Existing ambiguous records are retained rather than silently repaired.
 
+The training workflow store writes its plan index before atomic genesis.
+If the host stops between those writes, ordinary plan lookup rejects the
+index without a head. Atomic head/history storage does not close that third
+write boundary. The existing direct-store creation contract still permits
+identical creators to converge on one authenticated genesis; this does not
+authorize a coordinator to replay a submission.
+
+Training tests close the SQLite connection and compose new host operations
+over the reopened database. They verify retained plans, preparations,
+authorization commitments, effect records and workflow history, including
+reconciliation and repeated cancellation without another submit or cancel
+effect. These tests retain the same scripted fake provider as the external
+provider and the same configured test secret. They establish host-storage
+behavior, not fresh remote-provider qualification.
+
 This store also accepts the other public storage partitions, but the atomic
-head/history integration is scoped to Data, Evaluation and Pipelines.
+head/history integration is scoped to the four stores named above.
 Complete training recovery, provider call catalogs, durable artifact
 publication and end-to-end host migrations remain separate release gates.
 See the [stable release plan](../plans/stable-v1-release.md).
