@@ -160,7 +160,7 @@ class _OwnedImportGuard(importlib.abc.MetaPathFinder):
         return spec
 
 
-def _installed_import_guard(release, trainer):
+def _installed_import_guard(release, trainer, *, method="sft"):
     import json
     from tuner.runtime.packaged_sft_execution import _digest, _require_trainer_assets
     distribution = importlib.metadata.distribution(release.package_name)
@@ -170,7 +170,7 @@ def _installed_import_guard(release, trainer):
     if _digest(wheel) != release.package_digest:
         raise ValueError("PACKAGED_CHILD_IMPORT_REJECTED")
     with ZipFile(BytesIO(wheel)) as archive:
-        if _require_trainer_assets(distribution, archive) != trainer:
+        if _require_trainer_assets(distribution, archive, method=method) != trainer:
             raise ValueError("PACKAGED_CHILD_IMPORT_REJECTED")
         for member in archive.infolist():
             if member.filename.endswith(".py"):

@@ -12,6 +12,8 @@ import json
 import os
 import platform
 import select
+import signal
+import math
 import secrets
 import stat
 import subprocess
@@ -367,7 +369,7 @@ def _executable_mismatch_stage(release) -> str:
 
 
 def _inspect_release(release, *, allow_equivalent_executable: bool = False,
-                     inventory_scope: str = "ambient"):
+                     inventory_scope: str = "ambient", method="sft"):
     """Measure the installed wheel graph, never a source checkout or Git tree."""
     from tuner.runtime.packaged_training_worker import (
         PackagedInstalledRuntimeInspectionError,
@@ -426,23 +428,30 @@ def _inspect_release(release, *, allow_equivalent_executable: bool = False,
             raise ValueError
         stage = "TRAINER_ASSETS"
         with ZipFile(BytesIO(wheel_raw)) as wheel:
-            return _require_trainer_assets(distribution, wheel)
+            return _require_trainer_assets(distribution, wheel, method=method)
     except PackagedReleaseInspectionError:
         raise
     except BaseException:
         raise PackagedReleaseInspectionError(stage) from None
 
 
-def _inspect_parent_release(release):
+def _inspect_parent_release(release, *, method="sft"):
     """Inspect the authenticated image roots in the invoking parent process."""
     return _inspect_release(release, allow_equivalent_executable=True,
-                            inventory_scope="reviewed_roots")
+                            inventory_scope="reviewed_roots", method=method)
 
 
-def _require_trainer_assets(distribution, wheel):
+def _require_trainer_assets(distribution, wheel, *, method="sft"):
     """These two entry assets must belong to both the wheel and installation."""
-    trainer = Path(distribution.locate_file("Trainers/sft/train_sft.py"))
-    required = {"Trainers/sft/train_sft.py", "Trainers/sft/configs/config.yaml"}
+    if method == "sft":
+        entry = "Trainers/sft/train_sft.py"
+        required = {entry, "Trainers/sft/configs/config.yaml"}
+    elif method == "grpo":
+        entry = "Trainers/grpo/runtime_v1.py"
+        required = {entry, "Trainers/grpo/configs/config.yaml"}
+    else:
+        raise ValueError("PACKAGED_METHOD_REJECTED")
+    trainer = Path(distribution.locate_file(entry))
     if (not required <= {str(item).replace("\\", "/") for item in distribution.files or ()}
             or not required <= set(wheel.namelist())):
         raise ValueError
@@ -848,6 +857,96 @@ def _copy_private_snapshot(snapshot, source_directories, inventory, paths, model
             raise PackagedSFTExecutionError("REVALIDATION") from None
 
 
+@dataclass
+class _PreparedExecutionInputs:
+    """Process-local retained inputs; never a public execution authority."""
+    paths: object
+    execution: object
+    directories: tuple
+    release: object
+    method: str
+    dataset_bytes: bytes
+    snapshot: Path
+    snapshots: tuple
+    inventory: object
+    private_copy: object
+
+    def check(self):
+        for directory in (*self.directories, *self.snapshots):
+            directory.check()
+        self.private_copy.check()
+        if _input(self.paths, self.execution) != self.dataset_bytes:
+            raise ValueError("PACKAGED_INPUT_REJECTED")
+        held, current = _snapshot_inventory(self.snapshot, self.paths.cache)
+        try:
+            if current != self.inventory:
+                raise ValueError("PACKAGED_MODEL_COPY_REJECTED")
+        finally:
+            _close_resources(held)
+
+    def close(self):
+        if _close_resources((*self.snapshots, self.private_copy)):
+            raise PackagedSFTExecutionError("REVALIDATION")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+def _prepared_execution_inputs(*, paths, execution, directories, release,
+                               model, model_preparer, method="sft"):
+    """Retain the exact prepared/model bytes for either fixed training method."""
+    from Trainers.sft import runtime_v1 as core
+    stage = "REVALIDATION"
+    snapshots = ()
+    private_copy = None
+    try:
+        if method == "sft":
+            _inspect_parent_release(release)
+        else:
+            _inspect_parent_release(release, method=method)
+        for directory in directories:
+            directory.check()
+        _input(paths, execution)
+        stage = "PREPARATION_MODEL_UNAVAILABLE"
+        try:
+            snapshot = model_preparer(dict(model), paths.cache)
+        except PackagedPreparationError as error:
+            if type(error) is PackagedPreparationError and error.stage in PREPARATION_FAILURE_STAGES:
+                stage = "PREPARATION_" + error.stage
+            raise
+        stage = "PREPARATION_PATH"
+        if snapshot != core._model_snapshot_path(model, paths.cache):
+            raise ValueError
+        stage = "PREPARATION_SNAPSHOT_INVENTORY"
+        snapshots, inventory = _snapshot_inventory(snapshot, paths.cache)
+        stage = "REVALIDATION"
+        for directory in (*directories, *snapshots):
+            directory.check()
+        dataset_bytes = _input(paths, execution)
+        if method == "sft":
+            _inspect_parent_release(release)
+        else:
+            _inspect_parent_release(release, method=method)
+        confirm, second = _snapshot_inventory(snapshot, paths.cache)
+        try:
+            if second != inventory:
+                raise ValueError
+        finally:
+            _close_resources(confirm)
+        if any(any(path.iterdir()) for path in
+               (paths.artifacts, paths.state, paths.tracking, paths.tmp)):
+            raise ValueError
+        private_copy = _copy_private_snapshot(snapshot, snapshots, inventory, paths, model)
+        return _PreparedExecutionInputs(paths, execution, tuple(directories), release,
+            method, dataset_bytes, snapshot, snapshots, inventory, private_copy)
+    except BaseException:
+        _close_resources((*snapshots, *((private_copy,) if private_copy is not None else ())))
+        raise PackagedSFTExecutionError(stage) from None
+
+
 def _invocation_spec(admitted, workload, snapshot, dataset_path, model_snapshot=None, *, metric_fd=None):
     from Trainers.sft import runtime_v1 as core
     paths = admitted.paths
@@ -953,10 +1052,14 @@ def _deliver_metric_frame(raw, *, on_metric_frame, on_metric_exhausted, state):
         state["disabled"] = True
 
 
-def _run_progress_trainer(invocation, read_fd, write_fd, *, maximum, every_n_steps,
-                          on_metric_frame, on_metric_exhausted):
+def _run_child_process(invocation, read_fd, write_fd, *, maximum, every_n_steps,
+                       on_metric_frame, on_metric_exhausted, deadline=None):
     """Drain a private nonblocking pipe while the normal trainer subprocess runs."""
-    from Trainers.sft import runtime_v1 as core
+    if deadline is not None and (type(deadline) not in (int, float)
+            or not math.isfinite(deadline) or time.monotonic() >= deadline):
+        for descriptor in (read_fd, write_fd):
+            os.close(descriptor)
+        raise TimeoutError("PACKAGED_CHILD_DEADLINE")
     invocation.stdout_path.parent.mkdir(parents=True, exist_ok=True)
     state = {"count": 0, "maximum": maximum, "every_n_steps": every_n_steps,
              "last_step": None, "exhausted": False, "disabled": False}
@@ -964,16 +1067,21 @@ def _run_progress_trainer(invocation, read_fd, write_fd, *, maximum, every_n_ste
     process = None
     try:
         with invocation.stdout_path.open("xb") as stdout, invocation.stderr_path.open("xb") as stderr:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError("PACKAGED_CHILD_DEADLINE")
             process = subprocess.Popen(invocation.argv, cwd=invocation.cwd,
                 env=dict(invocation.environment), stdin=subprocess.DEVNULL,
                 stdout=stdout, stderr=stderr,
-                pass_fds=(*invocation.retained_fds, write_fd))
+                pass_fds=(*invocation.retained_fds, write_fd),
+                **({"start_new_session": True} if deadline is not None else {}))
             os.close(write_fd)
             write_fd = None
             # The pipe is drained even after telemetry is disabled, so the child
             # never waits on an optional observation consumer.
             exit_at = None
             while True:
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError("PACKAGED_CHILD_DEADLINE")
                 try:
                     ready, _, _ = select.select([read_fd], [], [], 0.1)
                 except (OSError, ValueError):
@@ -1004,7 +1112,9 @@ def _run_progress_trainer(invocation, read_fd, write_fd, *, maximum, every_n_ste
                         exit_at = time.monotonic()
                     elif time.monotonic() - exit_at >= 1.0:
                         break
-            exit_code = process.wait()
+            exit_code = process.wait(timeout=None if deadline is None else max(0, deadline - time.monotonic()))
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError("PACKAGED_CHILD_DEADLINE")
     finally:
         try:
             os.close(read_fd)
@@ -1015,8 +1125,26 @@ def _run_progress_trainer(invocation, read_fd, write_fd, *, maximum, every_n_ste
                 os.close(write_fd)
             except OSError:
                 pass
-        if process is not None and process.poll() is None:
-            process.wait()
+        if process is not None:
+            if deadline is not None:
+                # The bounded branch owns a fresh process group. Kill surviving
+                # descendants too; a pipe holder must not outlive this execution.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if process.poll() is None:
+                process.wait()
+    return exit_code
+
+
+
+def _run_progress_trainer(invocation, read_fd, write_fd, *, maximum, every_n_steps,
+                          on_metric_frame, on_metric_exhausted):
+    from Trainers.sft import runtime_v1 as core
+    exit_code = _run_child_process(invocation, read_fd, write_fd, maximum=maximum,
+        every_n_steps=every_n_steps, on_metric_frame=on_metric_frame,
+        on_metric_exhausted=on_metric_exhausted)
     if exit_code != 0:
         return core.TrainerEvidence(exit_code, invocation.final_model_dir, invocation.tokenizer_dir, {}, {}, {})
     lineage = core._read_json_file(invocation.lineage_path, maximum=core.MAX_LINEAGE_BYTES)
@@ -1159,38 +1287,12 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
         if post_training is not None and not callable(on_training_complete):
             stage = "POST_TRAINING"
             raise ValueError
-        _inspect_parent_release(admitted.release)
-        for directory in admitted._directories:
-            directory.check()
-        _input(admitted.paths, admitted.execution)
-        stage = "PREPARATION_MODEL_UNAVAILABLE"
         model = compiled.document["configuration"]["document"]["model"]
-        try:
-            snapshot = model_preparer(dict(model), admitted.paths.cache)
-        except PackagedPreparationError as error:
-            if type(error) is PackagedPreparationError and error.stage in PREPARATION_FAILURE_STAGES:
-                stage = "PREPARATION_" + error.stage
-            raise
-        stage = "PREPARATION_PATH"
-        if snapshot != core._model_snapshot_path(model, admitted.paths.cache):
-            raise ValueError
-        stage = "PREPARATION_SNAPSHOT_INVENTORY"
-        snapshots, inventory = _snapshot_inventory(snapshot, admitted.paths.cache)
-        stage = "REVALIDATION"
-        for directory in (*admitted._directories, *snapshots):
-            directory.check()
-        dataset_bytes = _input(admitted.paths, admitted.execution)
-        _inspect_parent_release(admitted.release)
-        confirm, second = _snapshot_inventory(snapshot, admitted.paths.cache)
-        try:
-            if second != inventory:
-                raise ValueError
-        finally:
-            for directory in reversed(confirm):
-                directory.close()
-        if any(admitted.paths.artifacts.iterdir()) or any(admitted.paths.state.iterdir()) or any(admitted.paths.tracking.iterdir()) or any(admitted.paths.tmp.iterdir()):
-            raise ValueError
-        private_copy = _copy_private_snapshot(snapshot, snapshots, inventory, admitted.paths, model)
+        custody = _prepared_execution_inputs(paths=admitted.paths, execution=admitted.execution,
+            directories=admitted._directories, release=admitted.release,
+            model=model, model_preparer=model_preparer)
+        snapshot, snapshots, inventory = custody.snapshot, custody.snapshots, custody.inventory
+        dataset_bytes, private_copy = custody.dataset_bytes, custody.private_copy
         projection = _runtime_projection(compiled)
         capture = compiled.document["configuration"]["document"].get("observation_capture")
         progress_pipe = [None]
@@ -1326,6 +1428,8 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
         return final_result
     except BaseException as error:
         try:
+            if type(error) is PackagedSFTExecutionError:
+                stage = error.stage
             if core is not None and isinstance(error, core.RuntimeV1Error):
                 code = getattr(error, "diagnostic_code", "")
                 stage = {"runtime_trainer_failed": child_failure_stage or "TRAINER", "runtime_evidence_rejected": "EVIDENCE",
@@ -1345,9 +1449,13 @@ def execute_admitted_packaged_sft(admitted: AdmittedPackagedSFT, *, model_prepar
                     os.close(descriptor)
                 except OSError:
                     pass
-        resources = [*snapshots, *artifact_directories, *artifact_files]
-        if private_copy is not None:
-            resources.append(private_copy)
+        resources = [*artifact_directories, *artifact_files]
+        if "custody" in locals():
+            resources.append(custody)
+        else:
+            resources.extend(snapshots)
+            if private_copy is not None:
+                resources.append(private_copy)
         if type(admitted) is AdmittedPackagedSFT:
             resources.append(admitted)
         if _close_resources(resources):
