@@ -11,6 +11,29 @@ import pytest
 from synaptic_tuner.api.v1.reference.sqlite_store import SQLiteDurableStoreV1
 
 
+_STORE_MODULE_FILE = Path(sys.modules[SQLiteDurableStoreV1.__module__].__file__).resolve()
+
+
+def _start_children_from_loaded_package(children):
+    """Spawn from the parent's actual package, including an installed wheel.
+
+    Spawn reimports this module before its target runs. Later collection paths
+    can shadow already-cached parent imports, so pin only spawn preparation to
+    the package that supplied the tested store, then restore the exact path.
+    """
+    before = sys.path[:]
+    try:
+        sys.path.insert(0, str(_STORE_MODULE_FILE.parents[4]))
+        for child in children:
+            child.start()
+    finally:
+        sys.path[:] = before
+
+
+def _assert_store_origin(expected):
+    assert Path(sys.modules[SQLiteDurableStoreV1.__module__].__file__).resolve() == Path(expected)
+
+
 @pytest.fixture
 def database(tmp_path):
     private = tmp_path / 'private'
@@ -86,21 +109,36 @@ def test_atomic_stream_failure_rolls_back_record(database):
         assert store.read_page(partition='data', stream_key='history', after_sequence=None, limit=10).entries == ()
 
 
-def _claim_process(path, barrier, results):
+def _claim_process(path, barrier, results, expected_origin):
+    _assert_store_origin(expected_origin)
     with SQLiteDurableStoreV1(path) as store:
         barrier.wait(timeout=5)
         results.put(pair(store))
 
 
-def test_cross_process_exactly_one_claim_winner(database):
+@pytest.fixture(params=['normal', 'shadow_after_parent_import'])
+def spawn_import_order(request, tmp_path, monkeypatch):
+    if request.param == 'shadow_after_parent_import':
+        # The production import above is cached in the parent. Spawn resolves
+        # fresh imports against the later path order instead of that cache.
+        shadow = tmp_path / 'shadow'
+        for relative in ('synaptic_tuner', 'synaptic_tuner/api', 'synaptic_tuner/api/v1'):
+            directory = shadow / relative
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / '__init__.py').write_text('')
+        monkeypatch.syspath_prepend(str(shadow))
+
+
+def test_cross_process_exactly_one_claim_winner(database, spawn_import_order):
     with SQLiteDurableStoreV1(database):
         pass
     ctx = multiprocessing.get_context('spawn')
     barrier, results = ctx.Barrier(2), ctx.Queue()
-    children = [ctx.Process(target=_claim_process, args=(database, barrier, results)) for _ in range(2)]
+    children = [ctx.Process(target=_claim_process, args=(database, barrier, results, str(_STORE_MODULE_FILE))) for _ in range(2)]
     try:
-        for child in children:
-            child.start()
+        before = sys.path[:]
+        _start_children_from_loaded_package(children)
+        assert sys.path == before
         for child in children:
             child.join(timeout=10)
             assert child.exitcode == 0
@@ -288,20 +326,22 @@ def test_append_sequence_maximum_and_partition_isolation(database):
         assert store.read_page(partition='evaluation', stream_key='same', after_sequence=None, limit=1).entries[0].sequence == 0
 
 
-def _first_open_process(path, barrier, results):
+def _first_open_process(path, barrier, results, expected_origin):
+    _assert_store_origin(expected_origin)
     barrier.wait(timeout=5)
     with SQLiteDurableStoreV1(path) as store:
         results.put(pair(store))
 
 
-def test_simultaneous_first_open_initialization(database):
+def test_simultaneous_first_open_initialization(database, spawn_import_order):
     assert not database.exists()
     ctx = multiprocessing.get_context('spawn')
     barrier, results = ctx.Barrier(2), ctx.Queue()
-    children = [ctx.Process(target=_first_open_process, args=(database, barrier, results)) for _ in range(2)]
+    children = [ctx.Process(target=_first_open_process, args=(database, barrier, results, str(_STORE_MODULE_FILE))) for _ in range(2)]
     try:
-        for child in children:
-            child.start()
+        before = sys.path[:]
+        _start_children_from_loaded_package(children)
+        assert sys.path == before
         for child in children:
             child.join(timeout=10)
             assert child.exitcode == 0
