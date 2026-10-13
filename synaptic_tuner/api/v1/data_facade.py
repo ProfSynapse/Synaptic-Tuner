@@ -41,6 +41,9 @@ from enum import Enum
 from typing import Protocol
 
 from ._contract import contract_digest, digest_text, exact_fields, required_text
+from .environment_execution import (
+    ENVIRONMENT_DATA_PLAN_SCHEMA, EnvironmentSelectionV1, EnvironmentBindingV1,
+)
 from ._timestamps import require_rfc3339
 from .observations import (
     ObservationFamily,
@@ -230,6 +233,9 @@ class DataOperationCode(str, Enum):
     DATASET_MISSING = "dataset_missing"
     STATE_CONFLICT = "state_conflict"
     INTEGRITY_ERROR = "integrity_error"
+    ENVIRONMENT_REQUIRED = "environment_required"
+    ENVIRONMENT_INVALID = "environment_invalid"
+    ENVIRONMENT_UNAVAILABLE = "environment_unavailable"
 
 
 class DataOperationError(ValueError):
@@ -366,6 +372,7 @@ class DataRequest:
     rubric_refs: tuple[str, ...] = ()
     max_iterations: int = 1
     tags: tuple[str, ...] = ()
+    environment_selection: EnvironmentSelectionV1 | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "request_id", _text(self.request_id, "request_id"))
@@ -380,6 +387,8 @@ class DataRequest:
         object.__setattr__(self, "rubric_refs", _text_set(self.rubric_refs, "rubric_refs"))
         _count(self.max_iterations, "max_iterations", minimum=1)
         object.__setattr__(self, "tags", _text_set(self.tags, "tags"))
+        if self.environment_selection is not None and type(self.environment_selection) is not EnvironmentSelectionV1:
+            raise TypeError("environment_selection must be exact EnvironmentSelectionV1")
         if self.mode is DataMode.GENERATE:
             if not self.scenarios:
                 raise ValueError("generate requires at least 1 scenario target")
@@ -394,7 +403,7 @@ class DataRequest:
                 raise ValueError("improve requires at least 1 rubric ref")
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        result = {
             "request_id": self.request_id,
             "project_ref": self.project_ref,
             "mode": self.mode.value,
@@ -407,10 +416,14 @@ class DataRequest:
             "max_iterations": self.max_iterations,
             "tags": list(self.tags),
         }
+        if self.environment_selection is not None:
+            result["environment_selection"] = self.environment_selection.to_dict()
+        return result
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> "DataRequest":
-        value = exact_fields(value, _REQUEST_FIELDS, "data_request")
+        extra = frozenset({"environment_selection"}) if type(value) is dict and "environment_selection" in value else frozenset()
+        value = exact_fields(value, _REQUEST_FIELDS | extra, "data_request")
         return cls(
             value["request_id"],  # type: ignore[arg-type]
             value["project_ref"],  # type: ignore[arg-type]
@@ -423,6 +436,7 @@ class DataRequest:
             _exact_list(value["rubric_refs"], "rubric_refs"),  # type: ignore[arg-type]
             value["max_iterations"],  # type: ignore[arg-type]
             _exact_list(value["tags"], "tags"),  # type: ignore[arg-type]
+            EnvironmentSelectionV1.from_dict(value["environment_selection"]) if extra else None,
         )
 
 
@@ -441,13 +455,22 @@ class DataPlan:
     scenarios: tuple[DataScenarioTarget, ...]
     rows_requested: int
     source_digest: str
+    environment_binding: EnvironmentBindingV1 | None = None
 
     def __post_init__(self) -> None:
-        if type(self.schema_version) is not str or self.schema_version != DATA_PLAN_SCHEMA_VERSION:
+        expected_schema = ENVIRONMENT_DATA_PLAN_SCHEMA if self.environment_binding is not None else DATA_PLAN_SCHEMA_VERSION
+        if type(self.schema_version) is not str or self.schema_version != expected_schema:
             raise ValueError("unsupported dataset plan schema version")
         if type(self.request) is not DataRequest:
             raise TypeError("request must be exact DataRequest")
         object.__setattr__(self, "request", DataRequest.from_dict(self.request.to_dict()))
+        if self.environment_binding is None:
+            if self.request.environment_selection is not None:
+                raise ValueError("environment selection requires a resolved binding")
+        elif type(self.environment_binding) is not EnvironmentBindingV1:
+            raise TypeError("environment_binding must be exact EnvironmentBindingV1")
+        elif self.environment_binding.selection != self.request.environment_selection:
+            raise ValueError("environment binding must match selected profile and mode")
         scenarios = _scenario_targets(self.scenarios, "scenarios")
         if not scenarios:
             raise ValueError("scenarios requires at least 1 entry")
@@ -457,26 +480,32 @@ class DataPlan:
             raise ValueError("scenario rows must sum to rows_requested")
         if self.request.mode is DataMode.GENERATE and scenarios != self.request.scenarios:
             raise ValueError("generate plan scenarios must equal the request targets")
+        if self.environment_binding is not None and self.rows_requested > self.environment_binding.bounds.max_rows:
+            raise ValueError("rows exceed admitted environment bound")
         object.__setattr__(self, "source_digest", digest_text(_text(self.source_digest, "source_digest"), "source_digest"))
 
     @property
     def plan_fingerprint(self) -> str:
-        return contract_digest(DATA_PLAN_SCHEMA_VERSION, self.to_dict())
+        return contract_digest(self.schema_version, self.to_dict())
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "request": self.request.to_dict(),
             "scenarios": [item.to_dict() for item in self.scenarios],
             "rows_requested": self.rows_requested,
             "source_digest": self.source_digest,
         }
+        if self.environment_binding is not None:
+            result["environment_binding"] = self.environment_binding.to_dict()
+        return result
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> "DataPlan":
+        extra = frozenset({"environment_binding"}) if type(value) is dict and "environment_binding" in value else frozenset()
         value = exact_fields(
             value,
-            frozenset({"schema_version", "request", "scenarios", "rows_requested", "source_digest"}),
+            frozenset({"schema_version", "request", "scenarios", "rows_requested", "source_digest"}) | extra,
             "dataset_plan",
         )
         return cls(
@@ -485,6 +514,7 @@ class DataPlan:
             _parse_targets(value["scenarios"], "scenarios"),
             value["rows_requested"],  # type: ignore[arg-type]
             value["source_digest"],  # type: ignore[arg-type]
+            EnvironmentBindingV1.from_dict(value["environment_binding"]) if extra else None,
         )
 
 
