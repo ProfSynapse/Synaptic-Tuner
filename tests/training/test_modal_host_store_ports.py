@@ -1,7 +1,6 @@
 """Optional generic host-store injection rejects before named secrets/effects."""
 import pytest
 
-from examples.modal_chat.authority import UTCClock
 from synaptic_tuner.api.v1.reference.stores import InMemoryDurableRecordStoreV1, InMemoryDurableStreamStoreV1
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from synaptic_tuner.api.v1.secrets import SecretRef
@@ -10,8 +9,34 @@ from tuner.execution.providers.modal.packaged_composition import compose_modal_p
 from tuner.project.context import ProjectContext
 from tuner.training.modal_host_composition import compose_modal_packaged_reference_host
 from tests.execution.providers.test_modal_packaged_composition import _components
-from tests.training.test_modal_host_composition import _Effects, _Secrets
 from tests.training.test_packaged_execution_material import packaged_fixture
+
+
+class UTCClock:
+    def now(self):
+        return '2026-10-13T12:00:00Z'
+
+    def now_epoch(self):
+        from datetime import datetime, timezone
+        return int(datetime(2026, 10, 13, 12, tzinfo=timezone.utc).timestamp())
+
+
+class _Secrets:
+    def resolve(self, ref):
+        return 'host-only-test-authority-value-' + 'x' * 40
+
+
+class _Effects:
+    bindings = object()
+
+    def authorize(self, requirements):
+        pytest.fail('composition must not authorize paid effects')
+
+    def bind(self, grant, *, operation, requirements):
+        pytest.fail('composition must not bind paid effects')
+
+    def authenticate(self, binding):
+        pytest.fail('composition must not read retained bindings')
 
 
 def arguments(tmp_path):
