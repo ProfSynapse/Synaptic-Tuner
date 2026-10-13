@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path
 import re
+import stat
 import time
 from types import MappingProxyType
 
@@ -54,6 +55,10 @@ class DockerCLISessionV1:
         self._images = MappingProxyType(images)
         self._sources = self._mounts(source_roots)
         self._artifacts = self._mounts(artifact_roots)
+        self._mount_identities = MappingProxyType({
+            host: self._directory_chain(host)
+            for host, _ in (*self._sources.values(), *self._artifacts.values())
+        })
         values = dict(environment)
         if len(values) > 64:
             raise ValueError("docker_cli_configuration_invalid")
@@ -87,6 +92,23 @@ class DockerCLISessionV1:
             result[ref] = (str(Path(host).resolve(strict=True)), str(Path(destination)))
         return MappingProxyType(result)
 
+    @staticmethod
+    def _directory_chain(host):
+        """Observe directory identities; this is not atomic daemon path custody."""
+        path = Path(host)
+        identities = []
+        for parent in (path, *path.parents):
+            observed = parent.lstat()
+            if not stat.S_ISDIR(observed.st_mode):
+                raise ValueError("docker_cli_configuration_invalid")
+            identities.append((str(parent), observed.st_dev, observed.st_ino))
+        return tuple(identities)
+
+    def _recheck_mounts(self, source, artifact):
+        for host in (source, artifact):
+            if self._directory_chain(host) != self._mount_identities[host]:
+                raise ValueError("docker_cli_configuration_invalid")
+
     def _invoke(self, args):
         remaining = math.floor(self._deadline - time.monotonic())
         if remaining < 1:
@@ -105,9 +127,11 @@ class DockerCLISessionV1:
         if self._invoke(['info', '--format', '{{.ID}}']).strip() != self._daemon:
             raise ValueError("docker_cli_identity_changed")
 
-    def _checked(self, args):
+    def _checked(self, args, *, before=None):
         self._identity()
         try:
+            if before is not None:
+                before()
             return self._invoke(args)
         finally:
             self._identity()
@@ -176,6 +200,7 @@ class DockerCLISessionV1:
                 raise ValueError("docker_cli_configuration_invalid")
             source, source_dest = self._sources[source_ref]
             artifact, artifact_dest = self._artifacts[artifact_ref]
+            self._recheck_mounts(source, artifact)
             if (Path(source) in (Path(artifact), *Path(artifact).parents) or
                 Path(artifact) in Path(source).parents or
                 Path(source_dest) in (Path(artifact_dest), *Path(artifact_dest).parents) or
@@ -196,7 +221,10 @@ class DockerCLISessionV1:
             if self._ids(labels):
                 return DockerCreateResultV1(Create.COLLISION)
             image_id = self._image(image)
-            identifier = self._checked([*args, image_id, *workload.arguments[1:]]).strip()
+            identifier = self._checked(
+                [*args, image_id, *workload.arguments[1:]],
+                before=lambda: self._recheck_mounts(source, artifact),
+            ).strip()
             status, _ = self._inspect(identifier, labels, image_id)
             if status != 'created':
                 raise ValueError("docker_cli_reply_invalid")

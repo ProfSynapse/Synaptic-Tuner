@@ -324,3 +324,43 @@ def test_mount_configuration_rejects_ambiguous_paths(setup, tmp_path, path_kind)
             source_roots={'source': (source, dest)}, artifact_roots=session._artifacts,
             environment={}, deadline=time.monotonic() + 120, runner=session._runner)
     assert commands == []
+
+
+@pytest.mark.parametrize('replacement', ['symlink', 'directory', 'ancestor'])
+def test_admitted_mount_substitution_rejects_before_create(setup, tmp_path, replacement):
+    from pathlib import Path
+    session, kwargs, commands, _, _ = setup
+    source = Path(session._sources['source'][0])
+    artifact = Path(session._artifacts['artifacts'][0])
+    if replacement == 'ancestor':
+        parent = source.parent
+        moved = parent.with_name(parent.name + '-retained')
+        parent.rename(moved)
+        parent.mkdir()
+        source.mkdir()
+    else:
+        source.rename(tmp_path / 'original-source')
+        if replacement == 'symlink':
+            source.symlink_to(artifact, target_is_directory=True)
+        else:
+            source.mkdir()
+    assert session.create_once(**kwargs).disposition.value == 'indeterminate'
+    assert not any('create' in spec.argv for spec in commands)
+
+
+def test_substitution_after_image_check_rejected_before_create(setup, tmp_path):
+    from pathlib import Path
+    session, kwargs, commands, _, _ = setup
+    original = session._runner
+    source = Path(session._sources['source'][0])
+    artifact = Path(session._artifacts['artifacts'][0])
+    def mutate(spec):
+        result = original(spec)
+        if 'image' in spec.argv:
+            source.rename(tmp_path / 'original-source')
+            source.symlink_to(artifact, target_is_directory=True)
+        return result
+    session._runner = mutate
+    assert session.create_once(**kwargs).disposition.value == 'indeterminate'
+    assert session.create_once(**kwargs).disposition.value == 'collision'
+    assert not any('create' in spec.argv for spec in commands)
