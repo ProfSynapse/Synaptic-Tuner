@@ -720,7 +720,7 @@ A fresh source-archive-built wheel passed the neutral base-only consumer and
 bytes. Tests include cold retained-report reads, public callback isolation,
 bounded strict payload validation and existing Markdown/console rendering.
 The permanent CI lane copies only tests and installed non-Python assets into a
-neutral directory. Comparison limits reports to 64 MiB, results to 4 MiB and
+neutral directory. Comparison limits reports to 64 MiB, comparison output to 4 MiB and
 10,000 cases, retaining full counts when displayed IDs are capped. These limits
 do not bound upstream HTTP acquisition; transport bounds, in-flight recovery
 and live backend/judge qualification remain separate stable gates.
