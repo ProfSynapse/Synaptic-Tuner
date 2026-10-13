@@ -14,7 +14,8 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Sequence
+from copy import deepcopy
 
 from .configured_formats import (
     extract_lenient_wrapper_arguments,
@@ -25,7 +26,7 @@ from .enums import ResponseType, ToolCallFormat
 from .tool_call_parser import _extract_object_field, _extract_string_field
 from .utilities import fix_json_newlines, repair_truncated_json
 
-def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None) -> Dict[str, Any]:
+def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None, *, wrapper_specs=None) -> Dict[str, Any]:
     """Unwrap common nested wrapper shapes and return the effective args dict."""
     args = args_raw
 
@@ -33,7 +34,7 @@ def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
-            lenient = extract_lenient_wrapper_arguments(args)
+            lenient = extract_lenient_wrapper_arguments(args, specs=wrapper_specs)
             if lenient:
                 return lenient
             try:
@@ -70,7 +71,7 @@ def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None
         break
 
     if isinstance(args, dict):
-        args = sanitize_wrapper_string_fields(args, function_name=function_name)
+        args = sanitize_wrapper_string_fields(args, function_name=function_name, specs=wrapper_specs)
         return args
 
     return {}
@@ -112,6 +113,7 @@ class ParsedResponse:
     format_detected: ToolCallFormat = ToolCallFormat.NONE
     response_type: ResponseType = ResponseType.EMPTY
     raw_response: Union[str, Dict[str, Any], None] = None
+    _wrapper_specs: Optional[Sequence[Dict[str, Any]]] = field(default=None, repr=False, compare=False)
 
     @property
     def has_tool_calls(self) -> bool:
@@ -147,6 +149,7 @@ class ParsedResponse:
             wrapper_spec = match_configured_wrapper(
                 self.first_tool_call.arguments,
                 function_name=self.first_tool_call.name,
+                specs=self._wrapper_specs,
             )
             if wrapper_spec is not None:
                 for key in wrapper_spec.get("field_names", []):
@@ -156,7 +159,9 @@ class ParsedResponse:
                     if val is not None:
                         context_data[key] = val
 
-        return context_data if context_data else None
+        if not context_data:
+            return None
+        return context_data if self._wrapper_specs is None else deepcopy(context_data)
 
     def get_argument(self, key: str) -> Optional[Any]:
         """Get an argument value from the first tool call."""
@@ -165,11 +170,15 @@ class ParsedResponse:
         return None
 
 
-def parse_response(response: Union[str, Dict[str, Any]]) -> ParsedResponse:
+def parse_response(response: Union[str, Dict[str, Any]], *, wrapper_specs=None) -> ParsedResponse:
     """Parse a model response into normalized components.
 
     This is the main entry point for response parsing. It automatically
     detects the format and extracts tool calls and text content.
+
+    ``wrapper_specs=None`` preserves the configured default registry. An
+    explicit sequence, including empty, is retained independently of the
+    caller and reused when extracting this response's context.
 
     Args:
         response: The raw model response (string or dict)
@@ -183,7 +192,10 @@ def parse_response(response: Union[str, Dict[str, Any]]) -> ParsedResponse:
             tool_name = parsed.first_tool_call.name
             context = parsed.context
     """
-    result = ParsedResponse(raw_response=response)
+    retained_specs = None if wrapper_specs is None else tuple(deepcopy(tuple(wrapper_specs)))
+    if retained_specs is not None:
+        response = deepcopy(response)
+    result = ParsedResponse(raw_response=response, _wrapper_specs=retained_specs)
 
     if isinstance(response, dict):
         _parse_openai_format(response, result)
@@ -233,8 +245,8 @@ def _parse_openai_format(response: Dict[str, Any], result: ParsedResponse) -> No
             args_raw = function_data.get("arguments", "{}")
 
             # Parse arguments JSON
-            args = _normalize_tool_arguments(args_raw, function_name=name)
-            wrapper_spec = match_configured_wrapper(args, function_name=name)
+            args = _normalize_tool_arguments(args_raw, function_name=name, wrapper_specs=result._wrapper_specs)
+            wrapper_spec = match_configured_wrapper(args, function_name=name, specs=result._wrapper_specs)
             if wrapper_spec is not None:
                 name = wrapper_spec["wrapper_name"]
 
@@ -318,8 +330,8 @@ def _parse_qwen_format(response: str, result: ParsedResponse) -> None:
                 except json.JSONDecodeError:
                     args = {}
             if isinstance(args, dict):
-                args = sanitize_wrapper_string_fields(args, function_name=name)
-                wrapper_spec = match_configured_wrapper(args, function_name=name)
+                args = sanitize_wrapper_string_fields(args, function_name=name, specs=result._wrapper_specs)
+                wrapper_spec = match_configured_wrapper(args, function_name=name, specs=result._wrapper_specs)
                 if wrapper_spec is not None:
                     name = wrapper_spec["wrapper_name"]
 
@@ -347,8 +359,8 @@ def _parse_qwen_format(response: str, result: ParsedResponse) -> None:
                         except json.JSONDecodeError:
                             pass
                 if isinstance(args, dict):
-                    args = sanitize_wrapper_string_fields(args, function_name=name)
-                    wrapper_spec = match_configured_wrapper(args, function_name=name)
+                    args = sanitize_wrapper_string_fields(args, function_name=name, specs=result._wrapper_specs)
+                    wrapper_spec = match_configured_wrapper(args, function_name=name, specs=result._wrapper_specs)
                     if wrapper_spec is not None:
                         name = wrapper_spec["wrapper_name"]
 
@@ -504,7 +516,7 @@ def _classify_response_type(parsed: ParsedResponse) -> ResponseType:
 # Convenience Functions (for backwards compatibility)
 # ---------------------------------------------------------------------------
 
-def detect_response_type(response: Union[str, Dict[str, Any]]) -> str:
+def detect_response_type(response: Union[str, Dict[str, Any]], *, wrapper_specs=None) -> str:
     """Detect the response type from model output.
 
     This is a convenience wrapper that returns the string value
@@ -516,12 +528,12 @@ def detect_response_type(response: Union[str, Dict[str, Any]]) -> str:
     Returns:
         String response type: "tool_only", "text_only", "tool_text", or "empty"
     """
-    parsed = parse_response(response)
+    parsed = parse_response(response, wrapper_specs=wrapper_specs)
     return str(parsed.response_type)
 
 
 def extract_arguments_from_response(
-    response: Union[str, Dict[str, Any]]
+    response: Union[str, Dict[str, Any]], *, wrapper_specs=None
 ) -> Optional[Dict[str, Any]]:
     """Extract full arguments dict from first tool call.
 
@@ -531,14 +543,14 @@ def extract_arguments_from_response(
     Returns:
         Arguments dict or None if no tool call found
     """
-    parsed = parse_response(response)
+    parsed = parse_response(response, wrapper_specs=wrapper_specs)
     if parsed.first_tool_call:
         return parsed.first_tool_call.arguments
     return None
 
 
 def extract_context_from_response(
-    response: Union[str, Dict[str, Any]]
+    response: Union[str, Dict[str, Any]], *, wrapper_specs=None
 ) -> Optional[Dict[str, Any]]:
     """Extract context object from first tool call's arguments.
 
@@ -548,12 +560,12 @@ def extract_context_from_response(
     Returns:
         Context dict or None if not found
     """
-    parsed = parse_response(response)
+    parsed = parse_response(response, wrapper_specs=wrapper_specs)
     return parsed.context
 
 
 def extract_tool_name_from_response(
-    response: Union[str, Dict[str, Any]]
+    response: Union[str, Dict[str, Any]], *, wrapper_specs=None
 ) -> Optional[str]:
     """Extract the tool name from first tool call.
 
@@ -563,14 +575,14 @@ def extract_tool_name_from_response(
     Returns:
         Tool name or None if no tool call found
     """
-    parsed = parse_response(response)
+    parsed = parse_response(response, wrapper_specs=wrapper_specs)
     if parsed.first_tool_call:
         return parsed.first_tool_call.name
     return None
 
 
 def extract_limit_from_response(
-    response: Union[str, Dict[str, Any]]
+    response: Union[str, Dict[str, Any]], *, wrapper_specs=None
 ) -> Optional[int]:
     """Extract the 'limit' parameter from tool call arguments.
 
@@ -580,7 +592,7 @@ def extract_limit_from_response(
     Returns:
         Limit value as int, or None if not found
     """
-    parsed = parse_response(response)
+    parsed = parse_response(response, wrapper_specs=wrapper_specs)
     limit = parsed.get_argument("limit")
     if limit is not None:
         try:
@@ -590,7 +602,7 @@ def extract_limit_from_response(
     return None
 
 
-def get_text_content(response: Union[str, Dict[str, Any]]) -> str:
+def get_text_content(response: Union[str, Dict[str, Any]], *, wrapper_specs=None) -> str:
     """Extract text content from response (excluding tool call markers).
 
     Args:
@@ -599,11 +611,11 @@ def get_text_content(response: Union[str, Dict[str, Any]]) -> str:
     Returns:
         Text content string
     """
-    parsed = parse_response(response)
+    parsed = parse_response(response, wrapper_specs=wrapper_specs)
     return parsed.text_content
 
 
-def get_text_length(response: Union[str, Dict[str, Any]]) -> int:
+def get_text_length(response: Union[str, Dict[str, Any]], *, wrapper_specs=None) -> int:
     """Get length of text content in response.
 
     Args:
@@ -612,4 +624,4 @@ def get_text_length(response: Union[str, Dict[str, Any]]) -> int:
     Returns:
         Length of text content
     """
-    return len(get_text_content(response))
+    return len(get_text_content(response, wrapper_specs=wrapper_specs))

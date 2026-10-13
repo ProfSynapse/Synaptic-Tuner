@@ -62,7 +62,7 @@ def _repair_truncated_json(json_str: str) -> str:
     return "".join(result)
 
 
-def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None) -> Any:
+def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None, *, wrapper_specs=None) -> Any:
     """Unwrap common nested argument wrapper shapes into the actual args object."""
     args = args_raw
 
@@ -70,7 +70,7 @@ def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
-            lenient = extract_lenient_wrapper_arguments(args)
+            lenient = extract_lenient_wrapper_arguments(args, specs=wrapper_specs)
             if lenient:
                 return lenient
             try:
@@ -109,7 +109,7 @@ def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None
         break
 
     if isinstance(args, dict):
-        args = sanitize_wrapper_string_fields(args, function_name=function_name)
+        args = sanitize_wrapper_string_fields(args, function_name=function_name, specs=wrapper_specs)
 
     return args
 
@@ -130,7 +130,7 @@ def stringify_assistant_message(response: Any) -> str:
     return str(response)
 
 
-def parse_assistant_response(content: str, scenario: Dict) -> Dict:
+def parse_assistant_response(content: str, scenario: Dict, *, wrapper_specs=None) -> Dict:
     """Parse assistant response for tool calls and thinking.
 
     Handles four cases:
@@ -142,6 +142,7 @@ def parse_assistant_response(content: str, scenario: Dict) -> Dict:
     Returns:
         Assistant message dict with role, content, and optional tool_calls
     """
+    wrapper_specs = None if wrapper_specs is None else tuple(deepcopy(tuple(wrapper_specs)))
     if content is None:
         content = ""
 
@@ -181,9 +182,9 @@ def parse_assistant_response(content: str, scenario: Dict) -> Dict:
                     normalized_tc["function"]["name"] = fn.get("name", "")
 
                     args = fn.get("arguments", "{}")
-                    normalized_args = _normalize_tool_arguments(args, function_name=fn.get("name", ""))
+                    normalized_args = _normalize_tool_arguments(args, function_name=fn.get("name", ""), wrapper_specs=wrapper_specs)
                     normalized_name = fn.get("name", "")
-                    wrapper_spec = match_configured_wrapper(normalized_args, function_name=normalized_name)
+                    wrapper_spec = match_configured_wrapper(normalized_args, function_name=normalized_name, specs=wrapper_specs)
                     if wrapper_spec is not None:
                         normalized_name = wrapper_spec["wrapper_name"]
 
@@ -204,7 +205,7 @@ def parse_assistant_response(content: str, scenario: Dict) -> Dict:
             }
 
     parsed_object = parse_json_object(content_stripped)
-    wrapper_spec = match_configured_wrapper(parsed_object)
+    wrapper_spec = match_configured_wrapper(parsed_object, specs=wrapper_specs)
     if wrapper_spec is not None:
         return {
             "role": "assistant",
@@ -265,7 +266,7 @@ def parse_assistant_response(content: str, scenario: Dict) -> Dict:
             json_match = re.search(r'\{[^}]+\}', content_without_thinking)
             arguments_str = json_match.group(0) if json_match else "{}"
             parsed_args = parse_json_object(arguments_str) if arguments_str else None
-            wrapper_spec = match_configured_wrapper(parsed_args, function_name=tool_name)
+            wrapper_spec = match_configured_wrapper(parsed_args, function_name=tool_name, specs=wrapper_specs)
             if wrapper_spec is not None:
                 tool_name = wrapper_spec["wrapper_name"]
                 arguments_str = json.dumps(parsed_args)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from functools import lru_cache
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
@@ -58,7 +59,7 @@ def build_wrapper_specs(formats: Mapping[str, Any]) -> List[Dict[str, Any]]:
     """
     specs: List[Dict[str, Any]] = []
 
-    for _, fmt in (formats or {}).items():
+    for _, fmt in deepcopy(dict(formats or {})).items():
         if not isinstance(fmt, dict):
             continue
         wrapper_name = str(fmt.get("wrapper_name") or "").strip()
