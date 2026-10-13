@@ -1,7 +1,9 @@
 from dataclasses import replace
 import os
 import signal
+import select
 import subprocess
+import sys
 import threading
 import time
 
@@ -210,18 +212,32 @@ def test_malformed_reply_cannot_masquerade_as_success(runtime, operation, value,
 def test_partial_reply_eof_is_uncertain_no_replay(runtime, monkeypatch):
     process = runtime._process
     original_reply = runtime._reply
+    scanners = []
+    # Keep the fixed child from resetting its inherited directory position
+    # before the parent observes our deliberately truncated response.
+    process.send_signal(signal.SIGSTOP)
     def partial_reply():
         read_fd, write_fd = os.pipe()
         os.write(write_fd, b'\x00\x00')
         os.close(write_fd)
         process.stdout.close()
         process.stdout = os.fdopen(read_fd, 'rb', buffering=0)
+        scanner = os.scandir(runtime._storage._root_fd)
+        scanners.append(scanner)
+        next(scanner)
         return original_reply()
     monkeypatch.setattr(runtime, '_reply', partial_reply)
-    with pytest.raises(WorkerLifecycleError, match='protocol'):
-        runtime.read_text('a/file')
-    assert process.returncode is not None
-    assert runtime._failed
+    try:
+        with pytest.raises(WorkerLifecycleError, match='protocol'):
+            runtime.read_text('a/file')
+        assert process.returncode == -signal.SIGKILL
+        assert runtime._failed
+        assert runtime._storage._root_fd is None
+        with pytest.raises(WorkerLifecycleError, match='unavailable'):
+            runtime.read_text('a/file')
+    finally:
+        for scanner in scanners:
+            scanner.close()
 
 
 def test_request_backpressure_cancellation_terminates(parent, limits):
@@ -272,3 +288,53 @@ def test_operation_whitelist_no_arbitrary_execution(runtime):
     with pytest.raises(ValueError, match='protocol'):
         runtime._request('exec', ['anything'])
     assert runtime.read_text('a/file') == 'hello'
+
+
+def test_inherited_directory_cursor_does_not_hide_entries_or_cleanup(runtime, parent):
+    fd = runtime._storage._root_fd
+    with os.scandir(fd) as iterator:
+        next(iterator)
+        end = os.lseek(fd, 0, os.SEEK_CUR)
+    os.lseek(fd, end, os.SEEK_SET)
+    # Root enumeration must not consume or reset the inherited description.
+    assert runtime._storage.list_dir() == ['a']
+    assert os.lseek(fd, 0, os.SEEK_CUR) == end
+    assert runtime._storage.exists('a/file')
+    runtime.teardown()
+    assert runtime._process.returncode is not None
+    assert runtime._storage._root_fd is None
+    assert list(parent.iterdir()) == []
+
+
+def test_sigkill_during_inherited_scandir_cannot_hide_cleanup(runtime, parent):
+    read_fd, write_fd = os.pipe()
+    child = None
+    try:
+        child = subprocess.Popen(
+            [sys.executable, '-I', '-B', '-c',
+             "import os,signal,sys; scan=os.scandir(int(sys.argv[1])); "
+             "next(scan); os.write(int(sys.argv[2]), b'x'); signal.pause()",
+             str(runtime._storage._root_fd), str(write_fd)],
+            pass_fds=(runtime._storage._root_fd, write_fd),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env={'PATH': os.environ.get('PATH', '')},
+        )
+        os.close(write_fd)
+        write_fd = None
+        assert select.select([read_fd], [], [], 10)[0], 'owned scanner did not become ready'
+        assert os.read(read_fd, 1) == b'x'
+        child.kill()
+        assert child.wait(timeout=5) == -signal.SIGKILL
+        # Cleanup is the first enumeration after abrupt iterator death.
+        runtime.teardown()
+        assert runtime._process.returncode is not None
+        assert runtime._storage._root_fd is None
+        assert list(parent.iterdir()) == []
+    finally:
+        if child is not None:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+        os.close(read_fd)
+        if write_fd is not None:
+            os.close(write_fd)

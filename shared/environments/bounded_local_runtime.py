@@ -166,6 +166,21 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
             for _, _, fd in reversed(opened):
                 os.close(fd)
 
+    @contextmanager
+    def _scandir(self, fd):
+        # Inherited descriptors share their directory position across processes.
+        # A killed iterator can leave that position at EOF. Open "." rather
+        # than dup(fd) so enumeration owns an independent open-file-description.
+        independent = os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                              dir_fd=fd)
+        try:
+            if self._identity(os.fstat(independent)) != self._identity(os.fstat(fd)):
+                raise RuntimeError('directory identity changed')
+            with os.scandir(independent) as iterator:
+                yield iterator
+        finally:
+            os.close(independent)
+
     def _inventory(self, *, cleanup=False):
         """Complete bounded inventory, rejecting hostile leaves before using them."""
         rows = []
@@ -175,7 +190,7 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
             nonlocal total
             self._check(cleanup=cleanup)
             names = []
-            with os.scandir(fd) as iterator:
+            with self._scandir(fd) as iterator:
                 for entry in iterator:
                     names.append(entry.name)
                     if len(names) + len(rows) > self.limits.max_entries:
@@ -428,7 +443,7 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
         with self._directory(parts) as fd:
             names = []
             output_bytes = 2
-            with os.scandir(fd) as iterator:
+            with self._scandir(fd) as iterator:
                 for entry in iterator:
                     output_bytes += len(json.dumps(entry.name, ensure_ascii=False).encode('utf-8')) + bool(names)
                     if output_bytes > self.limits.max_output_bytes:

@@ -425,6 +425,19 @@ source-archive-built wheel, including the signed executor path and changes made
 after image inspection. The neutral base consumer passed and five production
 modules matched source bytes. Runtime inventories and pins are unchanged.
 
+A separate worker cleanup regression now opens an independent directory cursor
+for every bounded scan. A child killed during enumeration could leave the
+inherited directory description at EOF, causing parent cleanup to miss owned
+files. Deterministic controls failed against the previous implementation and
+pass with independent cursors; timeout and uncertainty behavior are unchanged.
+The related worker/runtime suite passed 74 cases. A fresh source-archive-built
+wheel passed the neutral base consumer and 219 installed environment, Data,
+storage and worker cases with one intentional non-worker SIGSTOP skip. Five
+production files, including the unchanged Docker host files, matched that wheel
+byte-for-byte. The triggering CI trace suppressed the underlying cleanup error;
+the controlled reproduction establishes the defect rather than retrospectively
+proving that trace's cause.
+
 The explicit Docker host assembly composes those existing ports with the public
 Training API, caller-owned durable stores and named original signing keys. Source
 publication occurs inside the claimed stage; both submit checks remain active.
