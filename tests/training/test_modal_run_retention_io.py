@@ -1,5 +1,9 @@
 """Private retention custody failures cannot silently mint a readable bundle."""
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -119,3 +123,29 @@ def test_invalid_key_inventory_rejects_before_writing(bundle):
     with pytest.raises(retention.ModalRunRetentionUnavailable):
         retention.retain_modal_run(**bundle)
     assert not list(bundle["root"].iterdir())
+
+@pytest.mark.parametrize("name", [retention.KEYS_FILE, retention.INPUTS_FILE])
+def test_fifo_leaf_refuses_in_bounded_isolated_process(bundle, name):
+    retention.retain_modal_run(**bundle)
+    leaf = bundle["root"] / name
+    leaf.unlink()
+    os.mkfifo(leaf, 0o600)
+    # A timeout kills the isolated child if a regression blocks in open().
+    script = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from pathlib import Path
+from synaptic_tuner.api.v1.results import TrainingRunRef
+from tuner.training.modal_run_retention import load_retained_modal_run, ModalRunRetentionUnavailable
+try:
+    load_retained_modal_run(Path(sys.argv[2]), expected_run=TrainingRunRef("modal-test", "project"))
+except ModalRunRetentionUnavailable:
+    print("rejected")
+else:
+    raise AssertionError("FIFO was accepted")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script, str(Path(retention.__file__).resolve().parents[2]), str(bundle["root"])],
+        capture_output=True, text=True, timeout=5, check=True,
+    )
+    assert result.stdout.strip() == "rejected"

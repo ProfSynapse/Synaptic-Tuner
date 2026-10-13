@@ -184,7 +184,7 @@ def _read(root, name, maximum):
     parent, parent_info = _parent(root)
     descriptor = None
     try:
-        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
         before = os.fstat(descriptor)
         named = os.stat(name, dir_fd=parent, follow_symlinks=False)
         if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
