@@ -550,7 +550,7 @@ jobs:
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider", str(root)]))
           PYCODE
 
-      - name: Exercise installed Docker artifact streams through the authenticated reader
+      - name: Exercise installed Docker artifact and cancellation ports
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}
         run: |
@@ -560,15 +560,17 @@ jobs:
           import shutil
           import sys
           import tuner.execution.providers.docker_provider_v1.local_artifacts as artifacts
+          import tuner.execution.providers.docker_provider_v1.cancellation_transport as cancellation
           import tuner.execution.providers.docker_provider_v1.reader as reader
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (artifacts, reader):
+          for module in (artifacts, reader, cancellation):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
           root = Path(os.environ["RUNNER_TEMP"]) / "installed-docker-artifact-tests"
           for name in (
               "execution/providers/docker_provider_v1/test_local_artifacts.py",
+              "execution/providers/docker_provider_v1/test_cancellation_transport.py",
               "execution/providers/docker_provider_v1/conftest.py",
               "execution/providers/docker_provider_v1/test_effects.py",
               "execution/providers/docker_provider_v1/test_reader.py",
@@ -587,7 +589,8 @@ jobs:
           sys.path.insert(0, str(root))
           os.chdir(root)
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
-              str(root / "tests/execution/providers/docker_provider_v1/test_local_artifacts.py")]))
+              str(root / "tests/execution/providers/docker_provider_v1/test_local_artifacts.py"),
+              str(root / "tests/execution/providers/docker_provider_v1/test_cancellation_transport.py")]))
           PYCODE
 
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
