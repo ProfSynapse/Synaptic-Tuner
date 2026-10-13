@@ -230,7 +230,7 @@ def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk
             clock=selected_clock, secrets=signing,
             authority_secret=SecretRef("env", "SYNAPTIC_TRAIN_AUTHORITY_KEY"),
         )
-        with ModalHostStorageV1(journal, run.project_ref) as storage, SQLiteDurableStoreV1(root / WORKFLOW_FILE) as records:
+        with ModalHostStorageV1(journal, run.project_ref, create=False) as storage, SQLiteDurableStoreV1(root / WORKFLOW_FILE, create=False) as records:
             signer_ref = "modal-runtime-release-qualification-hmac-v1"
             signer = HMACAuthenticator({signer_ref: retained.qualification_key}, allowed_purposes=frozenset({
                 "modal-packaged-dispatch/v1", "modal-packaged-dispatch/v2",
