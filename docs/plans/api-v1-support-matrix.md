@@ -79,13 +79,14 @@ Modal launching requires exact POSIX CPython 3.11.14 / Modal 1.5.4 and its pinne
 closure. Do not equate these with a universal library install requirement.
 
 Public schemas and workflow asset/catalog packaging are release preparation
-work. Base `df166a75` includes A's asset inventory and its individual packaging checks
-as well as lightweight evaluator import fixes. D's catalog resolution and the
-combined installed-consumer gate G are later; combined installed workflow
-acceptance must be recorded separately before broader operational claims. Base
-help does not require optional ML dependencies; selected ML/GPU operations still
-require their real dependencies. Source checkout success is not wheel/sdist
-acceptance or safe runtime asset resolution.
+work. PR #178 merged the public schema inventory; preparation source `268fc534`
+passed checkout and sdist-built wheel asset checks plus a fresh base consumer in
+a neutral working directory. Catalog resolution and evaluator startup are tested
+without optional ML dependencies. Snapshot workflow source `f7d2df31` passed 793
+combined checks, including retained-input generation and improvement after source
+deletion. These do not qualify public environment execution or lifecycle recovery;
+those starts remain disabled. Selected ML/GPU operations still require their real
+dependencies. Source checkout success alone is not installed workflow acceptance.
 
 HTTP/SSE/browser transport, auth service, credentials, durable grants/stores and
 product state belong to a consuming host; API v1 exports do not supply a

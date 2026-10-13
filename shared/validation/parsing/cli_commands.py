@@ -17,6 +17,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
+from copy import deepcopy
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 
@@ -47,6 +48,14 @@ class ParsedCliCommand:
 def load_cli_command_catalog(schema_path: Path) -> Dict[str, CliCommandSpec]:
     """Load a CLI schema JSON file (``{"tools": [{agent, tool, command, arguments}]}``)."""
     payload = json.loads(Path(schema_path).read_text(encoding="utf-8"))
+    return build_cli_command_catalog(payload)
+
+
+def build_cli_command_catalog(payload: Mapping[str, Any]) -> Dict[str, CliCommandSpec]:
+    """Parse explicit catalog data without resolving a path or default catalog."""
+    if not isinstance(payload, Mapping):
+        raise TypeError("CLI catalog must be a mapping")
+    payload = deepcopy(dict(payload))
     catalog: Dict[str, CliCommandSpec] = {}
     for item in payload.get("tools", []):
         if not isinstance(item, dict):

@@ -166,8 +166,8 @@ C1 and the independent generic improvement callback passed 153 combined focused
 tests at `846f754b`, plus the source-archive-built wheel resource/consumer gate.
 The callback is not yet wired to a local environment adapter or generator.
 Selected environment starts still reject before clients and claims. C2 must
-retain admitted bytes and consume those snapshots, enforce host authorization,
-and prove bounded local execution and cleanup before C3 can qualify the workflow.
+enforce host authorization and prove bounded local execution and cleanup before
+C3 can qualify the workflow.
 
 The first C2 prerequisite retains private input captures from the same bounded
 reads that establish dependency identity. Fresh re-admission must match the full
@@ -177,9 +177,18 @@ host policy, tool schemas, fixtures and dataset bytes remain reference-owned.
 This process-local capture is not persisted recovery authority. Admission and
 future workflow consumption share a bounded YAML parser that checks expanded
 alias graphs before constructing mappings. The integrated capture/parser slice
-passed 193 focused checks at `028fab5f`. Actual snapshot consumption, explicit
-parser/catalog injection, authorization and execution remain separate C2 gates;
-both execute and simulate starts remain disabled.
+passed 193 focused checks at `028fab5f`.
+
+The snapshot workflow slice at `f7d2df31` passed 793 combined checks. Real
+generation and improvement consume retained configuration, scenario, rubric and
+dataset bytes after source deletion. Explicit wrapper parsing avoids ambient
+registry lookup; optional parser/catalog injection preserves legacy defaults
+when omitted. Pure validation rejects missing selections, unsupported client
+overrides and malformed parser configuration before client creation. Snapshot
+consumers preserve the injected metered client and select only admitted targets.
+The executor catalog seam is available but is not yet an admitted execution
+dependency. Host authorization, process termination, durable attempts and
+execution remain separate C2 gates; execute and simulate starts remain disabled.
 
 The shared fixture starts with bounded files and a declared action/assertion
 policy. A deterministic LLM reply first triggers a missing-file failure. That

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from copy import deepcopy
 
 from shared.validation.parsing.response_parser import parse_response
 from shared.validation.parsing.cli_commands import (
@@ -56,9 +57,14 @@ def execute_response_tool_calls(
     key_hints: Optional[Dict[str, List[str]]] = None,
     default_action: str = "simulate",
     read_output: Optional[Dict[str, Any]] = None,
+    *,
+    wrapper_specs=None,
+    catalog=None,
 ) -> Tuple[List[ExecutedToolCall], List[EnvironmentIssue]]:
     """Parse a model response and execute supported tool calls."""
-    parsed = parse_response(response)
+    wrapper_specs = None if wrapper_specs is None else tuple(deepcopy(tuple(wrapper_specs)))
+    catalog = None if catalog is None else deepcopy(dict(catalog))
+    parsed = parse_response(response, wrapper_specs=wrapper_specs)
     allowed = set(allowed_tools or [])
     enforce_allowlist = bool(allowed)
     schema_index = _build_tool_index(tool_schema)
@@ -70,7 +76,7 @@ def execute_response_tool_calls(
     executions: List[ExecutedToolCall] = []
     issues: List[EnvironmentIssue] = []
 
-    expanded_calls = _expand_wrapper_calls(parsed.tool_calls)
+    expanded_calls = _expand_wrapper_calls(parsed.tool_calls, wrapper_specs=wrapper_specs, catalog=catalog)
 
     for call in expanded_calls:
         name = call.name
@@ -231,22 +237,28 @@ def cli_command_catalog() -> Dict[str, CliCommandSpec]:
     return catalog
 
 
-def expand_cli_wrapper_commands(name: Optional[str], arguments: Any) -> Optional[List[ParsedCliCommand]]:
+def expand_cli_wrapper_commands(name: Optional[str], arguments: Any, *, wrapper_specs=None, catalog=None) -> Optional[List[ParsedCliCommand]]:
     """Expand a configured CLI wrapper call into its catalog commands.
 
     Returns ``None`` when the call is not a configured wrapper carrying a
     command string, or when that string does not parse fully into catalog
     commands; execution then treats the call as an ordinary tool call.
+
+    ``None`` uses the legacy defaults. An explicit empty catalog disables
+    expansion and never reads a default; it is not an execution deny policy.
+    Tool allowlists/action policy remain the caller's separate responsibility.
     """
     args = arguments if isinstance(arguments, dict) else {}
-    wrapper_spec = match_configured_wrapper(args, function_name=name)
+    wrapper_specs = None if wrapper_specs is None else tuple(deepcopy(tuple(wrapper_specs)))
+    supplied_catalog = None if catalog is None else deepcopy(dict(catalog))
+    wrapper_spec = match_configured_wrapper(args, function_name=name, specs=wrapper_specs)
     if wrapper_spec is None:
         return None
     command_field = wrapper_spec.get("command_field")
     command_value = args.get(command_field) if command_field else None
     if not isinstance(command_value, str) or not command_value.strip():
         return None
-    catalog = cli_command_catalog()
+    catalog = cli_command_catalog() if supplied_catalog is None else supplied_catalog
     if not catalog:
         return None
     try:
@@ -258,11 +270,12 @@ def expand_cli_wrapper_commands(name: Optional[str], arguments: Any) -> Optional
     return commands
 
 
-def _expand_wrapper_calls(parsed_calls) -> List:
+def _expand_wrapper_calls(parsed_calls, *, wrapper_specs=None, catalog=None) -> List:
     """Expand delegated wrapper calls into concrete tool calls."""
     expanded = []
     for call in parsed_calls:
-        commands = expand_cli_wrapper_commands(getattr(call, "name", None), call.arguments)
+        commands = expand_cli_wrapper_commands(getattr(call, "name", None), call.arguments,
+                                              wrapper_specs=wrapper_specs, catalog=catalog)
         if commands is None:
             expanded.append(call)
             continue

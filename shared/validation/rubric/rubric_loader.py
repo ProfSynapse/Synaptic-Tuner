@@ -4,6 +4,7 @@ Single Responsibility: Load rubric YAML files from disk.
 """
 
 import logging
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -51,10 +52,17 @@ class RubricLoader:
         try:
             rubric = load_yaml(yaml_file)
             # Inject the key into the rubric dict so downstream services can access it
-            rubric['key'] = rubric_key
-            return rubric
+            return self.parse_document(rubric, rubric_key)
         except Exception as e:
             raise ValueError(f"Failed to load rubric {rubric_key}: {e}")
+
+    @staticmethod
+    def parse_document(document, rubric_key, *, require_complete=False):
+        if require_complete and (type(document) is not dict or not document):
+            raise ValueError("Rubric document must be a nonempty object")
+        rubric = deepcopy(document)
+        rubric["key"] = rubric_key
+        return rubric
 
     def exists(self, rubric_key: str) -> bool:
         """

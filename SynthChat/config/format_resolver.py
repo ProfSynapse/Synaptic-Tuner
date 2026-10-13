@@ -76,50 +76,59 @@ _DEFAULT_LABEL_MAPPINGS: Dict[str, Any] = {
 # Loaders
 # ---------------------------------------------------------------------------
 
-def load_tool_call_formats(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """Load named tool-call format definitions.
-
-    Returns dict mapping format names to their config dicts.
-    Falls back to built-in defaults if file not found.
-    """
-    path = Path(config_path) if config_path else _CONFIG_DIR / "tool_call_formats.yaml"
-    if path.is_file():
-        data = load_yaml(path)
-        if isinstance(data, dict) and "formats" in data:
-            return data["formats"]
+def parse_tool_call_formats(data, *, require_complete=False):
+    if isinstance(data, dict) and "formats" in data:
+        formats = data["formats"]
+        if require_complete and (type(formats) is not dict or not isinstance(formats.get("default"), dict)
+                or not formats["default"] or any(type(value) is not dict for value in formats.values())):
+            raise ValueError("Snapshot tool formats require complete named definitions")
+        return deepcopy(formats)
+    if require_complete:
+        raise ValueError("Snapshot tool format registry is missing formats")
     return {"default": deepcopy(_DEFAULT_TOOL_CALL_FORMAT)}
 
 
-def load_workspace_formats(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """Load named workspace prompt format definitions.
+def load_tool_call_formats(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load path-mode registry, retaining its legacy missing-file fallback."""
+    path = Path(config_path) if config_path else _CONFIG_DIR / "tool_call_formats.yaml"
+    return parse_tool_call_formats(load_yaml(path) if path.is_file() else None)
 
-    Returns dict mapping format names to their config dicts.
-    Falls back to built-in defaults if file not found.
-    """
-    path = Path(config_path) if config_path else _CONFIG_DIR / "workspace_formats.yaml"
-    if path.is_file():
-        data = load_yaml(path)
-        if isinstance(data, dict) and "formats" in data:
-            return data["formats"]
+
+def parse_workspace_formats(data, *, require_complete=False):
+    if isinstance(data, dict) and "formats" in data:
+        formats = data["formats"]
+        if require_complete and (type(formats) is not dict or not isinstance(formats.get("default"), dict)
+                or not formats["default"] or any(type(value) is not dict for value in formats.values())):
+            raise ValueError("Snapshot workspace formats require complete named definitions")
+        return deepcopy(formats)
+    if require_complete:
+        raise ValueError("Snapshot workspace registry is missing formats")
     return {"default": _default_workspace_format()}
 
 
-def load_label_mappings(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """Load label mapping config.
+def load_workspace_formats(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load path-mode registry, retaining its legacy missing-file fallback."""
+    path = Path(config_path) if config_path else _CONFIG_DIR / "workspace_formats.yaml"
+    return parse_workspace_formats(load_yaml(path) if path.is_file() else None)
 
-    Returns dict with keys: issue_classifiers, behavior_rollups, failure_type_rollups.
-    Falls back to built-in defaults if file not found.
-    """
-    path = Path(config_path) if config_path else _CONFIG_DIR / "label_mappings.yaml"
-    if path.is_file():
-        data = load_yaml(path)
-        if isinstance(data, dict):
-            return {
-                "issue_classifiers": data.get("issue_classifiers", _DEFAULT_LABEL_MAPPINGS["issue_classifiers"]),
-                "behavior_rollups": data.get("behavior_rollups", _DEFAULT_LABEL_MAPPINGS["behavior_rollups"]),
-                "failure_type_rollups": data.get("failure_type_rollups", _DEFAULT_LABEL_MAPPINGS["failure_type_rollups"]),
-            }
+
+def parse_label_mappings(data, *, require_complete=False):
+    if isinstance(data, dict):
+        if require_complete and (type(data.get("issue_classifiers")) is not list
+                or type(data.get("behavior_rollups")) is not dict
+                or type(data.get("failure_type_rollups")) is not dict):
+            raise ValueError("Snapshot label registry requires all declared mapping groups")
+        return {name: deepcopy(data.get(name, _DEFAULT_LABEL_MAPPINGS[name]))
+                for name in ("issue_classifiers", "behavior_rollups", "failure_type_rollups")}
+    if require_complete:
+        raise ValueError("Snapshot label registry must be an object")
     return deepcopy(_DEFAULT_LABEL_MAPPINGS)
+
+
+def load_label_mappings(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load path-mode registry, retaining its legacy missing-file fallback."""
+    path = Path(config_path) if config_path else _CONFIG_DIR / "label_mappings.yaml"
+    return parse_label_mappings(load_yaml(path) if path.is_file() else None)
 
 
 # ---------------------------------------------------------------------------

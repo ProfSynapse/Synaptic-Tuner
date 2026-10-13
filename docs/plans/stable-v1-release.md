@@ -100,8 +100,8 @@ a new gate. Retain failed attempts, consumed claims and uncertain submissions.
 
 ## Current preparation progress (2026-10-13)
 
-PR #178 packages the 51 public schemas and defines these release gates; its main
-merge is still pending. The next integrated preparation source, `268fc534`, adds
+PR #178 merged as `79f45ae2` with all required checks passing, packaging the
+51 public schemas and defining these release gates. The next integrated preparation source, `268fc534`, adds
 the reviewed evaluator/SynthChat/GRPO configuration inventory and two canonical
 tool catalogs, explicit installed catalog resolution, and lightweight evaluator
 startup. Missing or corrupt selected catalogs reject instead of becoming empty

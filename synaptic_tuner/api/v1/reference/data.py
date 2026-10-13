@@ -486,7 +486,35 @@ class ReferenceDataOperationsV1:
             raise _closed(DataOperationCode.MANIFEST_INVALID)
         if binding != plan.environment_binding:
             raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
+        if admitted is not None:
+            self._workflow_snapshot(plan, admitted)
         return admitted
+
+    @staticmethod
+    def _workflow_snapshot(plan: DataPlan, admitted: AdmittedEnvironmentInputs):
+        """Validate the effective captured workload without constructing a client."""
+        from SynthChat.input_snapshot import WorkflowInputSnapshot
+        from .environment import AdmittedEnvironmentInputs
+
+        try:
+            if type(admitted) is not AdmittedEnvironmentInputs or (
+                admitted.binding != plan.environment_binding
+                or admitted.targets != plan.scenarios
+                or admitted.rows_requested != plan.rows_requested
+                or admitted.source_digest != plan.source_digest
+            ):
+                raise ValueError("Captured inputs differ from plan")
+            snapshot = WorkflowInputSnapshot(admitted.workflow_documents())
+            if plan.request.mode is DataMode.GENERATE:
+                snapshot.validate_generation(
+                    tuple(target.scenario_ref for target in plan.scenarios),
+                    max_iterations=plan.request.max_iterations,
+                )
+            else:
+                snapshot.validate_improvement(plan.request.rubric_refs)
+            return snapshot
+        except Exception:
+            raise _closed(DataOperationCode.ENVIRONMENT_INVALID) from None
 
     def preflight(self, plan: DataPlan) -> DataPreflight:
         self._verify_plan(plan)
@@ -844,12 +872,15 @@ class ReferenceDataOperationsV1:
         with self._lock:
             self._cancel_flags.discard(run.run_id)
 
-    def _generate(self, plan: DataPlan, client, writer, on_row, boundary, observe) -> None:
+    def _generate(self, plan: DataPlan, client, writer, on_row, boundary, observe, *, admitted_inputs=None) -> None:
         from SynthChat.engine import ImprovementEngine
         from SynthChat.generator import SynthChatGenerator
 
         request = plan.request
         ports = self._ports
+        if plan.environment_binding is not None and admitted_inputs is None:
+            raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
+        snapshot = None if admitted_inputs is None else self._workflow_snapshot(plan, admitted_inputs)
         stage_validation = request.max_iterations > 1
         engine = None
         if stage_validation:
@@ -859,6 +890,7 @@ class ReferenceDataOperationsV1:
                 config_path=ports.config_dir / "validation.yaml",
                 logger=_LOGGER,
                 enable_interactions=False,
+                input_snapshot=snapshot,
             )
         generator = SynthChatGenerator(
             config_dir=ports.config_dir,
@@ -869,6 +901,8 @@ class ReferenceDataOperationsV1:
             environment_validator=None,
             enable_stage_validation=stage_validation,
             logger=_LOGGER,
+            input_snapshot=snapshot,
+            scenario_refs=None if snapshot is None else tuple(target.scenario_ref for target in plan.scenarios),
         )
         for target in plan.scenarios:
             boundary()
@@ -887,20 +921,28 @@ class ReferenceDataOperationsV1:
                 produced += 1
             observe(ObservationKind.DATA_SCENARIO_COMPLETED, DataScenarioCompletedPayloadV1(target.scenario_ref, produced))
 
-    def _improve(self, plan: DataPlan, client, writer, on_row, boundary, observe) -> None:
+    def _improve(self, plan: DataPlan, client, writer, on_row, boundary, observe, *, admitted_inputs=None) -> None:
         from SynthChat.engine import ImprovementEngine
 
         request = plan.request
         ports = self._ports
+        if plan.environment_binding is not None and admitted_inputs is None:
+            raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
+        snapshot = None if admitted_inputs is None else self._workflow_snapshot(plan, admitted_inputs)
         engine = ImprovementEngine(
             llm_client=client,
             rubrics_dir=ports.rubrics_dir,
             config_path=ports.config_dir / "validation.yaml",
             logger=_LOGGER,
             enable_interactions=False,
+            input_snapshot=snapshot,
         )
         (target,) = plan.scenarios
-        rows = _read_dataset_rows(_absolute_path(request.input_dataset_ref or ""))
+        if admitted_inputs is None:
+            rows = _read_dataset_rows(_absolute_path(request.input_dataset_ref or ""))
+        else:
+            raw = admitted_inputs.document_bytes("dataset", "input:dataset")
+            rows = [json.loads(line) for line in raw.decode("utf-8").splitlines() if line.strip()]
         boundary()
         produced = 0
         for example in rows:

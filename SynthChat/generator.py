@@ -17,10 +17,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Mapping, Sequence
 from dataclasses import dataclass
 from copy import deepcopy
+from shared.validation.parsing.configured_formats import build_wrapper_specs
 
 from .utils.yaml_loader import load_yaml
 from .utils.docs_loader import DocFile
 from .engine import ImprovementEngine
+from .input_snapshot import WorkflowInputSnapshot, reject_snapshot_client_override
 from .task_derivation import derive_task_spec
 from .template_utils import (
     _deep_merge_dicts,
@@ -52,10 +54,13 @@ from .config.format_resolver import (
     load_tool_call_formats,
     load_workspace_formats,
     load_label_mappings,
+    parse_tool_call_formats,
+    parse_workspace_formats,
+    parse_label_mappings,
     resolve_tool_call_format,
     resolve_workspace_format,
 )
-from .config.privacy import load_privacy_profiles, resolve_privacy_settings
+from .config.privacy import load_privacy_profiles, parse_privacy_profiles, resolve_privacy_settings
 from .parsing import (
     stringify_assistant_message,
     parse_assistant_response,
@@ -108,16 +113,37 @@ class GenerationResult:
 class ScenarioLoader:
     """Loads and manages scenario configurations."""
 
-    def __init__(self, scenarios_dir: Path):
+    def __init__(self, scenarios_dir: Path, *, documents=None, scenario_refs=None):
         """
         Initialize scenario loader.
 
         Args:
             scenarios_dir: Directory containing scenario YAML files
         """
-        self.scenarios_dir = Path(scenarios_dir)
+        self.scenarios_dir = Path(scenarios_dir) if documents is None else None
         self.scenarios: Dict[str, Dict] = {}
-        self._load_all_scenarios()
+        self._snapshot_mode = documents is not None
+        if documents is None:
+            self._load_all_scenarios()
+        else:
+            if (type(scenario_refs) is not tuple or not scenario_refs
+                    or any(type(ref) is not str for ref in scenario_refs)
+                    or len(set(scenario_refs)) != len(scenario_refs)):
+                raise ValueError("Snapshot requires unique selected scenario references")
+            definitions = {}
+            for document in documents.values():
+                items = document.get("scenarios")
+                if type(items) is not dict:
+                    raise ValueError("Snapshot scenario definitions are missing")
+                for ref in scenario_refs:
+                    if ref not in items:
+                        continue
+                    if ref in definitions:
+                        raise ValueError("Selected snapshot scenario definition is ambiguous")
+                    definitions[ref] = deepcopy(items[ref])
+            if any(ref not in definitions for ref in scenario_refs):
+                raise ValueError("Selected scenario is absent from snapshot")
+            self.scenarios = {ref: definitions[ref] for ref in scenario_refs}
 
     def _load_all_scenarios(self):
         """Load all scenario files from scenarios directory."""
@@ -128,7 +154,8 @@ class ScenarioLoader:
 
     def get_scenario(self, key: str) -> Optional[Dict]:
         """Get scenario by key."""
-        return self.scenarios.get(key)
+        value = self.scenarios.get(key)
+        return deepcopy(value) if self._snapshot_mode else value
 
     def list_scenarios(self) -> List[str]:
         """List all available scenario keys."""
@@ -163,6 +190,9 @@ class SynthChatGenerator:
         logger=None,
         privacy_settings: Optional[Dict[str, Any]] = None,
         privacy_preprocessor_factory=None,
+        *,
+        input_snapshot: Optional[WorkflowInputSnapshot] = None,
+        scenario_refs: Optional[Tuple[str, ...]] = None,
     ):
         """
         Initialize generator.
@@ -179,7 +209,22 @@ class SynthChatGenerator:
             logger: Logger instance (optional)
             privacy_settings: Optional privacy preprocess settings from settings.yaml / CLI.
             privacy_preprocessor_factory: Optional factory for test injection.
+            input_snapshot: Optional admitted workflow inputs, without path fallback.
+            scenario_refs: Exact requested definition IDs in snapshot mode; unrelated
+                sibling definitions do not grant selection or execution authority.
         """
+        if input_snapshot is not None:
+            if type(input_snapshot) is not WorkflowInputSnapshot:
+                raise TypeError("input_snapshot must be an exact WorkflowInputSnapshot")
+            input_snapshot.validate_generation(scenario_refs, max_iterations=2 if enable_stage_validation else 1,
+                privacy_settings=privacy_settings)
+            if enable_stage_validation:
+                input_snapshot.validate_improvement()
+            if engine is not None and (getattr(engine, "input_snapshot", None) is not input_snapshot
+                                       or getattr(engine, "llm_client", None) is not llm_client):
+                raise ValueError("Generator and engine must consume the same snapshot and injected client")
+        self.input_snapshot = input_snapshot
+        self._snapshot_scenario_refs = scenario_refs if input_snapshot is not None else None
         self.config_dir = Path(config_dir)
         self.llm_client = llm_client
         self.logger = logger
@@ -189,15 +234,32 @@ class SynthChatGenerator:
         self._llm_client_cache = self.client_pool._cache
 
         # Load scenario configurations
-        self.scenario_loader = ScenarioLoader(scenarios_dir)
+        self.scenario_loader = ScenarioLoader(scenarios_dir) if input_snapshot is None else ScenarioLoader(
+            scenarios_dir, documents=input_snapshot.role_documents("scenario"), scenario_refs=scenario_refs)
 
         # Load config-driven format registries (tool calls, workspace, labels)
-        self._tool_call_formats = load_tool_call_formats()
-        self._workspace_formats = load_workspace_formats()
-        self._label_mappings = load_label_mappings()
         self._privacy_settings = resolve_privacy_settings({"privacy_preprocess": privacy_settings or {}})
-        self._privacy_profiles = load_privacy_profiles(self.config_dir / "privacy_profiles.yaml")
+        if input_snapshot is None:
+            self._tool_call_formats = load_tool_call_formats()
+            self._workspace_formats = load_workspace_formats()
+            self._label_mappings = load_label_mappings()
+            self._privacy_profiles = load_privacy_profiles(self.config_dir / "privacy_profiles.yaml")
+        else:
+            self._tool_call_formats = parse_tool_call_formats(
+                input_snapshot.document("registry", "registry:tool_call_formats"), require_complete=True)
+            self._workspace_formats = parse_workspace_formats(
+                input_snapshot.document("registry", "registry:workspace_formats"), require_complete=True)
+            self._label_mappings = parse_label_mappings(
+                input_snapshot.document("registry", "registry:label_mappings"), require_complete=True)
+            self._privacy_profiles = parse_privacy_profiles(
+                input_snapshot.document("privacy", "config:privacy_profiles"), require_complete=True
+            ) if input_snapshot.has("privacy", "config:privacy_profiles") else {"profiles": {}}
+            if self._privacy_settings.get("enabled") and not self._privacy_profiles["profiles"]:
+                raise ValueError("Selected privacy processing requires snapshot profiles")
         self._privacy_preprocessor_factory = privacy_preprocessor_factory or PrivacyPreprocessor.from_registry
+        self._wrapper_specs = (
+            None if input_snapshot is None else build_wrapper_specs(self._tool_call_formats)
+        )
         self._privacy_preprocessor_cache: Dict[str, PrivacyPreprocessor] = {}
         self._privacy_doc_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
@@ -211,7 +273,8 @@ class SynthChatGenerator:
                 rubrics_dir=rubrics_dir,
                 config_path=validation_config,
                 logger=logger,
-                enable_interactions=True
+                enable_interactions=True,
+                input_snapshot=input_snapshot,
             )
         else:
             self.engine = engine
@@ -422,6 +485,7 @@ class SynthChatGenerator:
         doc_context: Optional[DocFile] = None,
     ) -> Dict[str, Any]:
         """Prepare a reusable environment/system-context seed for one or more rollouts."""
+        self._validate_snapshot_selection(scenario_key, scenario)
         prompts = scenario.get("prompts", {})
         template_vars = {}
         doc_seed = self._resolve_doc_seed(scenario, doc_context)
@@ -547,6 +611,7 @@ class SynthChatGenerator:
         Returns:
             GenerationResult with final example and metrics
         """
+        self._validate_snapshot_selection(scenario_key, scenario, max_iterations=max_iterations)
         prompts = scenario.get("prompts", {})
         # Get all rubrics from scenario config - fully config-driven
         scenario_rubrics = scenario.get("rubrics", {})
@@ -1272,13 +1337,29 @@ class SynthChatGenerator:
             seed_id=seed_id,
         )
 
+    def _validate_snapshot_selection(self, scenario_key, scenario, *, max_iterations=1):
+        if self.input_snapshot is not None:
+            if scenario_key not in self._snapshot_scenario_refs:
+                raise ValueError("Scenario is outside the selected snapshot targets")
+            selected = self.input_snapshot.validate_generation((scenario_key,), max_iterations=max_iterations,
+                privacy_settings=self._privacy_settings)
+            if selected[scenario_key] != scenario:
+                raise ValueError("Generation scenario differs from selected snapshot input")
+
+
     def _get_stage_llm_clients(self, stage_config: Optional[Dict[str, Any]]) -> List[Any]:
+        if self.input_snapshot is not None:
+            reject_snapshot_client_override(stage_config)
+            return [self.llm_client]
         return self.client_pool.get_stage_clients(stage_config)
 
     def _normalize_stage_llm_spec(self, value: Any) -> Optional[Dict[str, Any]]:
         return LLMClientPool.normalize_stage_spec(value)
 
     def _get_or_create_llm_client(self, spec: Dict[str, Any]):
+        if self.input_snapshot is not None:
+            reject_snapshot_client_override(spec)
+            return self.llm_client
         return self.client_pool.get_or_create(spec)
 
     def _run_configured_stage_judge(
@@ -1589,6 +1670,8 @@ class SynthChatGenerator:
         return None
 
     def _get_privacy_preprocessor(self, profile_name: str) -> PrivacyPreprocessor:
+        if self.input_snapshot is not None and not self._privacy_profiles["profiles"].get(profile_name):
+            raise ValueError("Selected privacy profile is absent from snapshot")
         if profile_name not in self._privacy_preprocessor_cache:
             self._privacy_preprocessor_cache[profile_name] = self._privacy_preprocessor_factory(
                 profile_name=profile_name,
@@ -1755,6 +1838,8 @@ class SynthChatGenerator:
             )
             return result.improved_example, result.iterations, result.passed
         except Exception as e:
+            if self.input_snapshot is not None:
+                raise
             if self.logger:
                 self.logger.error(f"Stage improvement failed: {e}")
             return example, 0, False
@@ -1893,7 +1978,7 @@ class SynthChatGenerator:
 
     def _parse_assistant_response(self, content: str, scenario: Dict) -> Dict:
         """Parse assistant response for tool calls and thinking."""
-        return parse_assistant_response(content, scenario)
+        return parse_assistant_response(content, scenario, wrapper_specs=self._wrapper_specs)
 
     def _parse_json_object(self, content: str) -> Optional[Dict[str, Any]]:
         """Parse a JSON object from model output, tolerating code fences."""
