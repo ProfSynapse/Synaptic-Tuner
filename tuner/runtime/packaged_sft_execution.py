@@ -882,7 +882,8 @@ class _PreparedExecutionInputs:
             if current != self.inventory:
                 raise ValueError("PACKAGED_MODEL_COPY_REJECTED")
         finally:
-            _close_resources(held)
+            if _close_resources(held):
+                raise PackagedSFTExecutionError("REVALIDATION")
 
     def close(self):
         if _close_resources((*self.snapshots, self.private_copy)):
@@ -935,7 +936,8 @@ def _prepared_execution_inputs(*, paths, execution, directories, release,
             if second != inventory:
                 raise ValueError
         finally:
-            _close_resources(confirm)
+            if _close_resources(confirm):
+                raise PackagedSFTExecutionError("REVALIDATION")
         if any(any(path.iterdir()) for path in
                (paths.artifacts, paths.state, paths.tracking, paths.tmp)):
             raise ValueError
@@ -1060,12 +1062,12 @@ def _run_child_process(invocation, read_fd, write_fd, *, maximum, every_n_steps,
         for descriptor in (read_fd, write_fd):
             os.close(descriptor)
         raise TimeoutError("PACKAGED_CHILD_DEADLINE")
-    invocation.stdout_path.parent.mkdir(parents=True, exist_ok=True)
     state = {"count": 0, "maximum": maximum, "every_n_steps": every_n_steps,
              "last_step": None, "exhausted": False, "disabled": False}
     pending = bytearray()
     process = None
     try:
+        invocation.stdout_path.parent.mkdir(parents=True, exist_ok=True)
         with invocation.stdout_path.open("xb") as stdout, invocation.stderr_path.open("xb") as stderr:
             if deadline is not None and time.monotonic() >= deadline:
                 raise TimeoutError("PACKAGED_CHILD_DEADLINE")
@@ -1129,11 +1131,20 @@ def _run_child_process(invocation, read_fd, write_fd, *, maximum, every_n_steps,
             if deadline is not None:
                 # The bounded branch owns a fresh process group. Kill surviving
                 # descendants too; a pipe holder must not outlive this execution.
+                uncertain = False
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-            if process.poll() is None:
+                except OSError:
+                    uncertain = True
+                try:
+                    process.wait(timeout=5.0)
+                except (subprocess.TimeoutExpired, OSError):
+                    uncertain = True
+                if uncertain:
+                    raise RuntimeError("PACKAGED_CHILD_CLEANUP_UNCERTAIN") from None
+            elif process.poll() is None:
                 process.wait()
     return exit_code
 

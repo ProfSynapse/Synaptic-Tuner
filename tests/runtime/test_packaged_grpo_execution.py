@@ -31,6 +31,17 @@ def _run(invocation, read_fd, write_fd, deadline):
     )
 
 
+def _expire_when_ready(monkeypatch, marker):
+    from tuner.runtime import packaged_sft_execution as seam
+    original = time.monotonic
+    deadline = original() + 30
+    # Startup gets the same finite original budget; only after the real child
+    # arms its marker do we advance this module-local observation clock.
+    monkeypatch.setattr(seam, "time", SimpleNamespace(
+        monotonic=lambda: deadline + 1 if marker.exists() else original()))
+    return deadline
+
+
 def test_expired_budget_has_no_child_or_output(tmp_path):
     invocation, read_fd, write_fd = _invoke(tmp_path, "raise AssertionError")
     with pytest.raises(TimeoutError):
@@ -41,12 +52,13 @@ def test_expired_budget_has_no_child_or_output(tmp_path):
             os.fstat(descriptor)
 
 
-def test_stalled_owned_child_is_killed_and_reaped(tmp_path):
+def test_stalled_owned_child_is_killed_and_reaped(tmp_path, monkeypatch):
     pid_file = tmp_path / "pid"
     code = "import os,time; open('pid','w').write(str(os.getpid())); time.sleep(60)"
     invocation, read_fd, write_fd = _invoke(tmp_path, code)
+    deadline = _expire_when_ready(monkeypatch, pid_file)
     with pytest.raises((TimeoutError, subprocess.TimeoutExpired)):
-        _run(invocation, read_fd, write_fd, time.monotonic() + 1)
+        _run(invocation, read_fd, write_fd, deadline)
     pid = int(pid_file.read_text())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
@@ -59,12 +71,13 @@ def test_success_preserves_raw_exit_without_sft_evidence(tmp_path):
     assert _run(invocation, read_fd, write_fd, time.monotonic() + 5) == 7
 
 
-def test_descendant_holding_pipe_is_terminated_at_budget(tmp_path):
+def test_descendant_holding_pipe_is_terminated_at_budget(tmp_path, monkeypatch):
     code = ("import os,time; pid=os.fork(); "
             "open('descendant','w').write(str(pid)) if pid else time.sleep(60)")
     invocation, read_fd, write_fd = _invoke(tmp_path, code)
+    deadline = _expire_when_ready(monkeypatch, tmp_path / "descendant")
     with pytest.raises((TimeoutError, subprocess.TimeoutExpired)):
-        _run(invocation, read_fd, write_fd, time.monotonic() + 0.5)
+        _run(invocation, read_fd, write_fd, deadline)
     pid = int((tmp_path / "descendant").read_text())
     # A grandchild is not ours to waitpid; verified dead/zombie is termination,
     # not a promise to reap processes owned by the machine's init process.
@@ -80,7 +93,9 @@ def test_descendant_holding_pipe_is_terminated_at_budget(tmp_path):
     pytest.fail("owned process-group descendant remained live")
 
 
-def test_retained_custody_rejects_model_mutation_and_closes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("confirmation_close_failure", (False, True))
+def test_retained_custody_rejects_model_mutation_and_closes(
+        tmp_path, monkeypatch, confirmation_close_failure):
     from Trainers.sft import runtime_v1 as core
     from tuner.runtime import packaged_sft_execution as seam
     import hashlib
@@ -103,6 +118,21 @@ def test_retained_custody_rejects_model_mutation_and_closes(tmp_path, monkeypatc
     directories = seam._hold_paths(paths)
     retained = None
     try:
+        if confirmation_close_failure:
+            original = seam._close_resources
+            calls = []
+            def reject_first_close(resources):
+                result = original(resources)
+                calls.append(tuple(resources))
+                return True if len(calls) == 1 else result
+            monkeypatch.setattr(seam, "_close_resources", reject_first_close)
+            with pytest.raises(seam.PackagedSFTExecutionError) as caught:
+                seam._prepared_execution_inputs(paths=paths, execution=execution,
+                    directories=directories, release=None, model=model,
+                    model_preparer=lambda *_: snapshot)
+            assert caught.value.stage == "REVALIDATION"
+            assert calls[0] and all(directory.fd is None for directory in calls[0])
+            return
         with seam._prepared_execution_inputs(paths=paths, execution=execution,
                 directories=directories, release=None, model=model,
                 model_preparer=lambda *_: snapshot) as retained:
@@ -117,3 +147,51 @@ def test_retained_custody_rejects_model_mutation_and_closes(tmp_path, monkeypatc
     finally:
         seam._close_resources(directories)
 
+
+
+def test_output_parent_failure_closes_pipe_descriptors(tmp_path):
+    invocation, read_fd, write_fd = _invoke(tmp_path, "raise AssertionError")
+    blocked = tmp_path / "blocked"
+    blocked.write_bytes(b"file")
+    invocation.stdout_path = blocked / "stdout"
+    with pytest.raises(FileExistsError):
+        _run(invocation, read_fd, write_fd, time.monotonic() + 10)
+    for descriptor in (read_fd, write_fd):
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+
+
+def test_unconfirmed_reap_is_finite_closed_uncertainty(tmp_path, monkeypatch):
+    from tuner.runtime import packaged_sft_execution as seam
+    invocation, read_fd, write_fd = _invoke(tmp_path, "unused")
+    waits = []
+    class Process:
+        pid = 123
+        def poll(self):
+            return None
+        def wait(self, *, timeout):
+            waits.append(timeout)
+            raise subprocess.TimeoutExpired("private", timeout)
+    monkeypatch.setattr(seam.subprocess, "Popen", lambda *args, **kwargs: Process())
+    monkeypatch.setattr(seam.os, "killpg", lambda *args: None)
+    ticks = iter([0, 0, 2])
+    monkeypatch.setattr(seam.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(RuntimeError, match="^PACKAGED_CHILD_CLEANUP_UNCERTAIN$"):
+        _run(invocation, read_fd, write_fd, 1)
+    assert waits == [5.0]
+
+
+def test_retained_check_refuses_inventory_close_failure(monkeypatch):
+    from tuner.runtime import packaged_sft_execution as seam
+    class Held:
+        def close(self):
+            raise OSError("private")
+    retained = seam._PreparedExecutionInputs(
+        SimpleNamespace(cache=Path("/cache")), object(), (), None, "sft",
+        b"original", Path("/snapshot"), (), {}, SimpleNamespace(check=lambda: None),
+    )
+    monkeypatch.setattr(seam, "_input", lambda *args: b"original")
+    monkeypatch.setattr(seam, "_snapshot_inventory", lambda *args: ((Held(),), {}))
+    with pytest.raises(seam.PackagedSFTExecutionError) as caught:
+        retained.check()
+    assert caught.value.stage == "REVALIDATION"
