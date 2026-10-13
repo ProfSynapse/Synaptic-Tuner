@@ -52,7 +52,7 @@ def setup(tmp_path):
             state['status'] = 'running'
             output = CID
         elif args[:2] == ('container', 'inspect'):
-            output = '\n'.join(map(json.dumps, [CID, '/synaptic-' + labels.digest,
+            output = '\n'.join(map(json.dumps, [CID, '/' + labels.container_name,
                                IMAGE, DockerCLISessionV1._labels(labels), state['status'], 0]))
         else:
             raise AssertionError(args)
@@ -193,7 +193,7 @@ def test_unknown_start_consumed(setup):
 @pytest.mark.parametrize('kind', ['oversized', 'wrong_labels', 'invalid_json', 'multiple'])
 def test_malformed_or_ambiguous_lookup_closed(setup, kind):
     session, kwargs, _, state, _ = setup
-    state['exists'] = True
+    assert session.create_once(**kwargs).disposition.value == 'created'
     original = session._runner
     def malformed(spec):
         if 'ls' in spec.argv and kind == 'multiple':
@@ -237,3 +237,90 @@ def test_no_start_ack_when_state_still_created(setup):
     session._runner = no_start
     assert session.start_once(CID, kwargs['labels']).disposition.value == 'indeterminate'
     assert session.start_once(CID, kwargs['labels']).disposition.value == 'collision'
+
+
+def test_cold_lookup_cannot_adopt_matching_labels_without_image_binding(setup):
+    session, kwargs, _, state, _ = setup
+    state['exists'] = True
+    assert session.lookup(DockerLookupRequestV1(kwargs['labels'], DockerLookupPurposeV1.OBSERVE, 1)).disposition.value == 'indeterminate'
+
+
+def test_lookup_wrong_image_rejects(setup):
+    session, kwargs, _, _, _ = setup
+    assert session.create_once(**kwargs).disposition.value == 'created'
+    original = session._runner
+    def changed(spec):
+        result = original(spec)
+        if 'inspect' in spec.argv:
+            return CommandResult(result.stdout.replace(IMAGE.encode(), ('sha256:' + 'b' * 64).encode()))
+        return result
+    session._runner = changed
+    assert session.lookup(DockerLookupRequestV1(kwargs['labels'], DockerLookupPurposeV1.OBSERVE, 1)).disposition.value == 'indeterminate'
+
+
+@pytest.mark.parametrize('overlap', ['host_same', 'host_nested', 'destination_same', 'destination_nested'])
+def test_mount_overlaps_reject_before_process(setup, overlap):
+    session, kwargs, commands, _, _ = setup
+    source, dest = session._sources['source']
+    artifact, artifact_dest = session._artifacts['artifacts']
+    if overlap == 'host_same':
+        artifact = source
+    elif overlap == 'host_nested':
+        from pathlib import Path
+        nested = Path(source) / 'nested'
+        nested.mkdir()
+        artifact = str(nested)
+    elif overlap == 'destination_same':
+        artifact_dest = dest
+    else:
+        artifact_dest = dest + '/nested'
+    session._artifacts = {'artifacts': (artifact, artifact_dest)}
+    assert session.create_once(**kwargs).disposition.value == 'indeterminate'
+    assert commands == []
+
+
+@pytest.mark.parametrize('scope_field', [None, 'provider_id', 'profile_ref', 'account_ref', 'namespace_ref', 'wrong_image'])
+def test_cold_lookup_explicit_profile_exact_scope(setup, profile, scope_field):
+    from dataclasses import replace
+    session, kwargs, commands, state, _ = setup
+    labels = replace(kwargs['labels'], provider_id=profile.provider.provider_id,
+                     profile_ref=profile.provider.profile_ref)
+    original = session._runner
+    def retained(spec):
+        if 'inspect' in spec.argv and 'container' in spec.argv:
+            return CommandResult('\n'.join(map(json.dumps, [CID, '/' + labels.container_name,
+                ('sha256:' + 'b' * 64 if scope_field == 'wrong_image' else IMAGE), DockerCLISessionV1._labels(labels), 'exited', 0])).encode())
+        return original(spec)
+    cold = DockerCLISessionV1(authority=session._authority, endpoint='unix:///fixture.sock',
+        daemon_id='daemon-exact', image_refs={'fixture-image': IMAGE},
+        source_roots=session._sources, artifact_roots=session._artifacts,
+        environment={}, deadline=time.monotonic() + 120, runner=retained, profile=profile)
+    assert cold._profile is not profile
+    state['exists'] = True
+    request_labels = labels if scope_field in (None, 'wrong_image') else replace(labels, **{scope_field: 'other'})
+    result = cold.lookup(DockerLookupRequestV1(request_labels, DockerLookupPurposeV1.OBSERVE, 1))
+    assert result.disposition.value == ('found' if scope_field is None else 'indeterminate')
+    if scope_field not in (None, 'wrong_image'):
+        assert commands == []
+    assert not any('create' in c.argv or 'start' in c.argv for c in commands)
+
+
+@pytest.mark.parametrize('path_kind', ['traversal', 'symlink', 'destination_traversal'])
+def test_mount_configuration_rejects_ambiguous_paths(setup, tmp_path, path_kind):
+    from pathlib import Path
+    session, _, commands, _, _ = setup
+    source, dest = session._sources['source']
+    if path_kind == 'traversal':
+        source = str(Path(source) / '..' / 'source')
+    elif path_kind == 'symlink':
+        link = tmp_path / 'link'
+        link.symlink_to(source, target_is_directory=True)
+        source = str(link)
+    else:
+        dest = '/input/../output'
+    with pytest.raises(ValueError, match='docker_cli_configuration_invalid'):
+        DockerCLISessionV1(authority=session._authority, endpoint='unix:///fixture.sock',
+            daemon_id='daemon-exact', image_refs={'image': IMAGE},
+            source_roots={'source': (source, dest)}, artifact_roots=session._artifacts,
+            environment={}, deadline=time.monotonic() + 120, runner=session._runner)
+    assert commands == []

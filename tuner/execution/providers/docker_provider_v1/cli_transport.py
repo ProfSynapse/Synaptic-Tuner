@@ -18,7 +18,7 @@ from .model import (
     DockerCreateDispositionV1 as Create, DockerCreateResultV1,
     DockerStartDispositionV1 as Start, DockerStartResultV1,
     DockerLookupDispositionV1 as Lookup, DockerLookupResultV1,
-    DockerRunPhaseV1 as Phase,
+    DockerRunPhaseV1 as Phase, validated_profile_snapshot,
 )
 
 _ID = re.compile(r"[0-9a-f]{64}\Z")
@@ -36,7 +36,7 @@ class DockerCLISessionV1:
 
     def __init__(self, *, authority: DockerLaunchAuthority, endpoint: str,
                  daemon_id: str, image_refs, source_roots, artifact_roots,
-                 environment, deadline: float, runner=subprocess_runner):
+                 environment, deadline: float, runner=subprocess_runner, profile=None):
         if type(authority) is not DockerLaunchAuthority:
             raise ValueError("docker_cli_configuration_invalid")
         if type(endpoint) is not str or not endpoint.startswith("unix:///") or len(endpoint) > 4096 or any(c in endpoint for c in "\n\r\0"):
@@ -63,6 +63,7 @@ class DockerCLISessionV1:
         if sum(len(k.encode()) + len(v.encode()) for k, v in values.items()) > 32768:
             raise ValueError("docker_cli_configuration_invalid")
         self._environment = MappingProxyType(values)
+        self._profile = None if profile is None else validated_profile_snapshot(profile)
         self._created, self._started, self._owned = set(), set(), {}
 
     @staticmethod
@@ -77,9 +78,13 @@ class DockerCLISessionV1:
                 raise ValueError("docker_cli_configuration_invalid")
             if any(c in host + destination for c in ',\n\r\0') or not Path(host).is_absolute() or not Path(destination).is_absolute():
                 raise ValueError("docker_cli_configuration_invalid")
+            if '..' in Path(host).parts or '..' in Path(destination).parts:
+                raise ValueError("docker_cli_configuration_invalid")
+            if any(parent.is_symlink() for parent in (Path(host), *Path(host).parents)):
+                raise ValueError("docker_cli_configuration_invalid")
             if not Path(host).is_dir() or Path(host).is_symlink():
                 raise ValueError("docker_cli_configuration_invalid")
-            result[ref] = (host, destination)
+            result[ref] = (str(Path(host).resolve(strict=True)), str(Path(destination)))
         return MappingProxyType(result)
 
     def _invoke(self, args):
@@ -109,7 +114,7 @@ class DockerCLISessionV1:
 
     @staticmethod
     def _name(labels):
-        return 'synaptic-' + labels.digest
+        return labels.container_name
 
     @staticmethod
     def _labels(labels):
@@ -171,7 +176,10 @@ class DockerCLISessionV1:
                 raise ValueError("docker_cli_configuration_invalid")
             source, source_dest = self._sources[source_ref]
             artifact, artifact_dest = self._artifacts[artifact_ref]
-            if source_dest == artifact_dest or source == artifact:
+            if (Path(source) in (Path(artifact), *Path(artifact).parents) or
+                Path(artifact) in Path(source).parents or
+                Path(source_dest) in (Path(artifact_dest), *Path(artifact_dest).parents) or
+                Path(artifact_dest) in Path(source_dest).parents):
                 raise ValueError("docker_cli_configuration_invalid")
             args = ['container', 'create', '--pull=never', '--name', self._name(labels),
                     '--network=none', '--cpus', str(runtime.cpu_count), '--memory', str(runtime.memory_bytes),
@@ -217,12 +225,27 @@ class DockerCLISessionV1:
 
     def lookup(self, request):
         try:
+            profile_image = None
+            if self._profile is not None:
+                profile, labels = self._profile, request.labels
+                if (labels.provider_id != profile.provider.provider_id or
+                    labels.profile_ref != profile.provider.profile_ref or
+                    labels.account_ref != profile.scope.account_ref or
+                    labels.namespace_ref != profile.scope.namespace_ref):
+                    return DockerLookupResultV1(Lookup.INDETERMINATE)
+                profile_image = self._image(profile.image)
             ids = self._ids(request.labels)
             if len(ids) > 1:
                 return DockerLookupResultV1(Lookup.MULTIPLE)
             if not ids:
                 return DockerLookupResultV1(Lookup.INDETERMINATE)
-            status, code = self._inspect(ids[0], request.labels)
+            expected = self._owned.get(ids[0])
+            if expected is not None and expected[0] != request.labels.digest:
+                return DockerLookupResultV1(Lookup.INDETERMINATE)
+            image_id = expected[1] if expected is not None else profile_image
+            if image_id is None or (profile_image is not None and image_id != profile_image):
+                return DockerLookupResultV1(Lookup.INDETERMINATE)
+            status, code = self._inspect(ids[0], request.labels, image_id)
             phase = {'created': Phase.CREATED, 'running': Phase.RUNNING,
                      'dead': Phase.FAILED}.get(status)
             if status == 'exited':
