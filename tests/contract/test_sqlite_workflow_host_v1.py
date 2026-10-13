@@ -9,7 +9,7 @@ from synaptic_tuner.api.v1.ports import StoragePartition
 from synaptic_tuner.api.v1.reference.sqlite_store import SQLiteDurableStoreV1
 from synaptic_tuner.api.v1.runs_facade import RunListRequest, RunOperationCode, RunOperationError
 from tuner.execution.coordinator_v1.coordinator import CoordinatorErrorV1
-from tests.contract.test_reference_composition_v1 import (
+from test_reference_composition_v1 import (
     RUN, _fixture, _forge, _head, _start, _stores,
 )
 
