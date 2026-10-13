@@ -223,6 +223,7 @@ class SynthChatGenerator:
                                        or getattr(engine, "llm_client", None) is not llm_client):
                 raise ValueError("Generator and engine must consume the same snapshot and injected client")
         self.input_snapshot = input_snapshot
+        self._snapshot_scenario_refs = scenario_refs if input_snapshot is not None else None
         self.config_dir = Path(config_dir)
         self.llm_client = llm_client
         self.logger = logger
@@ -1334,6 +1335,8 @@ class SynthChatGenerator:
 
     def _validate_snapshot_selection(self, scenario_key, scenario, *, max_iterations=1):
         if self.input_snapshot is not None:
+            if scenario_key not in self._snapshot_scenario_refs:
+                raise ValueError("Scenario is outside the selected snapshot targets")
             selected = self.input_snapshot.validate_generation((scenario_key,), max_iterations=max_iterations,
                 privacy_settings=self._privacy_settings)
             if selected[scenario_key] != scenario:
@@ -1663,7 +1666,7 @@ class SynthChatGenerator:
         return None
 
     def _get_privacy_preprocessor(self, profile_name: str) -> PrivacyPreprocessor:
-        if self.input_snapshot is not None and profile_name not in self._privacy_profiles["profiles"]:
+        if self.input_snapshot is not None and not self._privacy_profiles["profiles"].get(profile_name):
             raise ValueError("Selected privacy profile is absent from snapshot")
         if profile_name not in self._privacy_preprocessor_cache:
             self._privacy_preprocessor_cache[profile_name] = self._privacy_preprocessor_factory(

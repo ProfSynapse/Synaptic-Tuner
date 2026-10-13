@@ -82,7 +82,7 @@ class WorkflowInputSnapshot:
         privacy = resolve_privacy_settings({"privacy_preprocess": privacy_settings or {}})
         if privacy.get("enabled"):
             profiles = parse_privacy_profiles(self.document("privacy", "config:privacy_profiles"), require_complete=True)
-            if privacy.get("profile") not in profiles["profiles"]:
+            if not profiles["profiles"].get(privacy.get("profile")):
                 raise ValueError("Selected privacy profile is absent from snapshot")
         registries = {}
         for name, parser in (("tool_call_formats", parse_tool_call_formats),
@@ -125,7 +125,7 @@ class WorkflowInputSnapshot:
             for selector, registry in (("tool_call_format", registries["tool_call_formats"]),
                                     ("workspace_format", registries["workspace_formats"])):
                 named = scenario.get(selector)
-                if isinstance(named, str) and named not in registry:
+                if isinstance(named, str) and not registry.get(named):
                     raise ValueError("Selected named format is absent from snapshot registry")
             if max_iterations > 1:
                 rubric_groups = scenario.get("rubrics") or {}
@@ -141,7 +141,7 @@ class WorkflowInputSnapshot:
             seed = scenario.get("seed_data") or {}
             if isinstance(seed, dict) and seed.get("preprocess_profile"):
                 profiles = parse_privacy_profiles(self.document("privacy", "config:privacy_profiles"), require_complete=True)
-                if seed["preprocess_profile"] not in profiles["profiles"]:
+                if not profiles["profiles"].get(seed["preprocess_profile"]):
                     raise ValueError("Selected privacy profile is absent from snapshot")
         return {ref: all_definitions[ref] for ref in scenario_refs}
 

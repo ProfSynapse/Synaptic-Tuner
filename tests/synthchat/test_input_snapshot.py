@@ -253,3 +253,40 @@ def test_missing_requested_rubric_rejects_before_client_factory(monkeypatch):
         engine.run({'value': 'candidate'}, ['selected', 'missing'])
     client.assert_not_called()
     factory.assert_not_called()
+
+
+@pytest.mark.parametrize('path', ['generate_single', 'prepare_seed_bundle'])
+def test_admitted_unselected_sibling_cannot_expand_constructor_selection(path):
+    sibling = {'prompts': {'assistant_system': 'unselected'}, 'assistant_generation': {}}
+    client = Mock(provider_name='host')
+    current = generator(snapshot(extra_scenario=sibling), validation=False, client=client)
+    with pytest.raises(ValueError, match='outside the selected'):
+        if path == 'generate_single':
+            current.generate_single('unselected', sibling, max_iterations=1, randomize_params=False)
+        else:
+            current.prepare_seed_bundle(scenario_key='unselected', scenario=sibling, randomize_params=False)
+    client.assert_not_called()
+
+
+@pytest.mark.parametrize(('field', 'registry'), [('tool_call_format', 'tool_call_formats'),
+                                               ('workspace_format', 'workspace_formats')])
+def test_selected_empty_named_format_cannot_fallback_to_default(field, registry, monkeypatch):
+    factory = Mock(side_effect=AssertionError('raw factory called'))
+    monkeypatch.setattr('SynthChat.generator.create_client', factory)
+    inputs = snapshot(selected={**SELECTED, field: 'empty'})
+    data = inputs.document('registry', 'registry:' + registry)
+    data['formats']['empty'] = {}
+    inputs = replace(inputs, documents=tuple((role, ref, yaml.safe_dump(data).encode()
+        if ref == 'registry:' + registry else raw) for role, ref, raw in inputs.documents))
+    with pytest.raises(ValueError, match='format'): inputs.validate_generation(('selected',))
+    with pytest.raises(ValueError, match='format'): generator(inputs)
+    factory.assert_not_called()
+
+
+def test_selected_empty_privacy_profile_cannot_fallback():
+    inputs = snapshot()
+    profile = yaml.safe_dump({'profiles': {'empty': {}}}).encode()
+    inputs = replace(inputs, documents=tuple((role, ref, profile if role == 'privacy' else raw)
+        for role, ref, raw in inputs.documents))
+    with pytest.raises(ValueError, match='privacy'):
+        inputs.validate_generation(('selected',), privacy_settings={'enabled': True, 'profile': 'empty'})
