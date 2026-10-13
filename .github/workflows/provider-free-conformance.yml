@@ -12,6 +12,11 @@ on:
       - "tests/execution/providers/test_hf_jobs_public_family.py"
       - "tests/execution/providers/test_hf_pinned_model_snapshot.py"
       - "Trainers/runtime_profiles/**"
+      - "Trainers/image_profiles/qwen35_4b_conversation_sft_candidate_v1/**"
+      - "tests/contract/test_data_conversation_sft_handoff_v1.py"
+      - "tests/contract/test_environment_admission_v1.py"
+      - "tests/contract/test_environment_sessions_v1.py"
+      - "tests/contract/test_public_training_input_v1.py"
       - "tuner/training/**"
       - "tuner/dataset_prep/**"
       - "tests/dataset_prep/**"
@@ -695,6 +700,60 @@ jobs:
           import pytest
           os.chdir(root)
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider", str(root)]))
+          PYCODE
+
+      - name: Exercise installed Data conversation SFT candidate handoff
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PYCODE'
+          import importlib
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import zipfile
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          temporary = Path(os.environ["RUNNER_TEMP"])
+          resources = (
+              "Trainers/runtime_profiles/qwen35-conversation-sft-candidate-v1.yaml",
+              "Trainers/runtime_profiles/qwen35-conversation-sft-candidate-v1.compatibility.json",
+          )
+          host_profile = "Trainers/image_profiles/qwen35_4b_conversation_sft_candidate_v1/profile.yaml"
+          for directory in ("wheelhouse", "sdist-wheelhouse"):
+              wheels = list((temporary / directory).glob("synaptic_tuner-*.whl"))
+              assert len(wheels) == 1
+              with zipfile.ZipFile(wheels[0]) as archive:
+                  assert host_profile not in archive.namelist()
+                  for resource in resources:
+                      assert archive.read(resource) == (checkout / resource).read_bytes()
+          for name in ("synaptic_tuner.api.v1.reference.data", "tuner.training.conversation_preparation",
+                       "tuner.training.packaged_boundary", "tuner.training.modal_host_requests",
+                       "shared.environments.bounded_local_runtime", "SynthChat.generator"):
+              module = importlib.import_module(name)
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          import tuner
+          package_root = Path(tuner.__file__).resolve().parent.parent
+          for resource in resources:
+              installed = package_root / resource
+              assert installed.is_file() and installed.is_relative_to(Path(sys.prefix))
+              assert installed.read_bytes() == (checkout / resource).read_bytes()
+          root = temporary / "installed-data-conversation-sft-handoff-tests"
+          root.mkdir(mode=0o700)
+          for name in ("test_data_conversation_sft_handoff_v1.py", "test_environment_admission_v1.py",
+                       "test_environment_sessions_v1.py", "test_reference_data_v1.py",
+                       "test_public_training_input_v1.py"):
+              shutil.copy2(checkout / "tests/contract" / name, root / name)
+          owned_profile = root / "host-candidate-build.yaml"
+          shutil.copy2(checkout / host_profile, owned_profile)
+          owned_profile.chmod(0o600)
+          os.environ["SYNAPTIC_TEST_CONVERSATION_BUILD_PROFILE"] = str(owned_profile)
+          import pytest
+          os.chdir(root)
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
+              str(root / "test_data_conversation_sft_handoff_v1.py")]))
           PYCODE
 
       - name: Exercise installed conversation preparation and immutable sources
