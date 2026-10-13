@@ -137,6 +137,7 @@ def compose_reference_host(
     requests: ReferenceRequestPortsV1,
     authority: ReferenceAuthorityV1,
     maximum_grant_seconds: int = 900,
+    allow_current_cancel_authorization: bool = False,
     evaluation: object | None = None,
     data: ReferenceDataPortsV1 | None = None,
     pipelines: object | None = None,
@@ -206,6 +207,7 @@ def compose_reference_host(
         authority=authority.grant_authority,
         clock=authority.clock,
         maximum_grant_seconds=maximum_grant_seconds,
+        allow_current_cancel_authorization=allow_current_cancel_authorization,
     )
     composed = compose_family_coordinator(
         family=family,

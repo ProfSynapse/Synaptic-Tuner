@@ -854,25 +854,49 @@ def test_unbounded_output_denied_and_cleanup_requested():
 def test_late_create_is_retained_and_terminated_without_retry(monkeypatch):
     sdk, sandbox, calls = _sdk()
     original = sdk.Sandbox.create
+    entered = threading.Event()
+    release = threading.Event()
+    bounded_call = capture._bounded_call
 
     def delayed(*args, **kwargs):
-        time.sleep(0.05)
+        entered.set()
+        assert release.wait(5)
         return original(*args, **kwargs)
 
+    def stage_timeout(operation, **kwargs):
+        if kwargs["timeout_code"] != "sandbox_create_ambiguous":
+            return bounded_call(operation, **kwargs)
+
+        def expired_wait(self, *args, **kwargs):
+            # Expire only the create wait after its real worker has started.
+            # A short global deadline can instead expire during image build.
+            assert entered.wait(5)
+            raise capture.queue.Empty
+
+        with monkeypatch.context() as patch:
+            patch.setattr(capture.queue.Queue, "get", expired_wait)
+            return bounded_call(operation, **kwargs)
+
     sdk.Sandbox.create = delayed
-    monkeypatch.setattr(capture, "_HOST_TIMEOUT_SECONDS", 0.01)
-    with pytest.raises(capture.ModalInferenceRuntimeCaptureError) as caught:
-        capture.capture_modal_inference_runtime(
-            sdk=sdk,
-            client=object(),
-            app_name="existing-app",
-            environment_name="production",
-            image=IMAGE,
-            source_commit=COMMIT,
-        )
-    assert caught.value.reason_code == "sandbox_create_ambiguous"
-    assert type(caught.value.cleanup_lease).__name__ == "_PendingOperation"
-    time.sleep(0.1)
+    monkeypatch.setattr(capture, "_bounded_call", stage_timeout)
+    try:
+        with pytest.raises(capture.ModalInferenceRuntimeCaptureError) as caught:
+            capture.capture_modal_inference_runtime(
+                sdk=sdk,
+                client=object(),
+                app_name="existing-app",
+                environment_name="production",
+                image=IMAGE,
+                source_commit=COMMIT,
+            )
+        assert caught.value.reason_code == "sandbox_create_ambiguous"
+        assert type(caught.value.cleanup_lease).__name__ == "_PendingOperation"
+        assert entered.is_set()
+        assert sandbox.terminate_calls == []
+    finally:
+        release.set()
+    caught.value.cleanup_lease.worker.join(5)
+    assert not caught.value.cleanup_lease.worker.is_alive()
     assert sandbox.terminate_calls == [False]
     assert sum(call[0] == "create" for call in calls) == 1
 

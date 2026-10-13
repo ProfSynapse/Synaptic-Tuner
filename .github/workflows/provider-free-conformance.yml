@@ -487,6 +487,8 @@ jobs:
               "training/test_modal_run_retention_integration.py",
               "training/test_modal_retained_reader.py",
               "training/test_modal_active_readback.py",
+              "training/test_modal_cancel_machinery.py",
+              "training/test_modal_process_restart.py",
               "training/test_retained_storage_open.py",
               "training/test_modal_retained_run_diagnostics.py",
               "training/test_retained_runs_cli_integration.py",
@@ -519,6 +521,8 @@ jobs:
               str(root / "tests/training/test_modal_run_retention_integration.py"),
               str(root / "tests/training/test_modal_retained_reader.py"),
               str(root / "tests/training/test_modal_active_readback.py"),
+              str(root / "tests/training/test_modal_cancel_machinery.py"),
+              str(root / "tests/training/test_modal_process_restart.py"),
               str(root / "tests/training/test_retained_storage_open.py"),
               str(root / "tests/training/test_modal_retained_run_diagnostics.py"),
               str(root / "tests/training/test_retained_runs_cli_integration.py"),
@@ -708,7 +712,7 @@ jobs:
           PY
 
       - name: Run packaged-call and progress contracts with the pinned SDK
-        run: python -B -m pytest -q -p no:cacheprovider tests/training/test_inspect_modal_packaged_call.py tests/execution/providers/test_modal_sdk_progress_handle.py
+        run: python -B -m pytest -q -p no:cacheprovider tests/training/test_inspect_modal_packaged_call.py tests/execution/providers/test_modal_sdk_progress_handle.py tests/execution/providers/test_modal_sdk_cancel_handle.py
 
   conformance-gate:
     name: CPython 3.12 / pytest 8

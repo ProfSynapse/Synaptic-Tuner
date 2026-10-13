@@ -313,12 +313,15 @@ class ModalPackagedHostTransport:
                 "provider_job_ref",
             )
             try:
-                call = self._sdk.FunctionCall.from_id(target, client=self._client)
-                call.hydrate(self._client)
-                if getattr(call, "is_hydrated", False) is not True \
-                        or getattr(call, "object_id", None) != target:
-                    raise ValueError
-                call.cancel(terminate_containers=True)
+                def cancel_call():
+                    call = self._sdk.FunctionCall.from_id(target, client=self._client)
+                    hydrated = call.hydrate(self._client)
+                    if (hydrated is not call or getattr(call, "is_hydrated", False) is not True
+                            or getattr(call, "object_id", None) != target
+                            or getattr(call, "client", None) is not self._client):
+                        raise ValueError
+                    call.cancel(terminate_containers=True)
+                _bounded_provider_call(cancel_call)
             except Exception:
                 return ModalEffectOutcome(ObservationDisposition.INDETERMINATE)
             return ModalEffectOutcome(ObservationDisposition.FOUND, target)
