@@ -10,7 +10,7 @@ from SynthChat.utils.yaml_loader import parse_workflow_yaml
 @pytest.mark.parametrize('raw', [
     b'a: 1\na: 2', b'1: value', b'a: .nan', b'a: .inf',
     b'a: 2026-10-13', b'a: &cycle [*cycle]', b'a: [', b'- item',
-    b'a: !!python/object:builtins.object {}', b'', b'root: ' + b'[' * 33 + b'0' + b']' * 33,
+    b'a: !!python/object:builtins.object {}', b'', b'   \n# comment only', b'root: ' + b'[' * 33 + b'0' + b']' * 33,
     b'root: [' + b'0,' * 20001 + b'0]', b'root: ' + b'x' * (4 * 1024 * 1024),
 ])
 def test_invalid_or_unbounded_documents_reject(raw):

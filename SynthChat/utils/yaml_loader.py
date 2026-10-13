@@ -108,6 +108,8 @@ def parse_workflow_yaml(raw: bytes) -> Dict[str, Any]:
         loader = _WorkflowLoader(raw)
         try:
             node = loader.get_single_node()
+            if node is None:
+                raise ValueError("Workflow YAML document is empty")
             node_budget, node_active = [20000], set()
 
             def expanded(candidate, depth=0):
