@@ -356,6 +356,20 @@ The source-archive-built wheel passed the neutral base consumer and 187 installe
 transport/model cases. The installed transport matched the reviewed source bytes;
 runtime inventories and pins remain unchanged.
 
+The host-local artifact port now supplies the existing Docker reader with signed
+inventories and bounded chunk/EOF streams for explicitly configured artifact
+roles. It checks the exact terminal container and retained directory/file
+identities, enforces profile byte limits and a cooperative deadline, and verifies
+the final byte count and hash. Tests pass through the authenticated coordinator
+reader, including multi-megabyte output, changed files and invalid EOF signatures.
+This does not freeze the host filesystem or make daemon and file observations
+atomic. Source sealing, durable host composition, cancellation and live SFT
+qualification remain separate.
+
+All 44 focused artifact cases passed from a fresh source-archive-built wheel,
+including the authenticated reader chains. The neutral base consumer passed,
+and the installed artifact and transport modules matched the reviewed source.
+
 The packaged Modal cancellation machinery now supports an explicit host opt-in
 for a current cancellation grant after the original start grant expires. It
 authenticates the recorded cancellation intent, original successful submit,

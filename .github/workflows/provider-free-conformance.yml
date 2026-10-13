@@ -554,6 +554,46 @@ jobs:
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider", str(root)]))
           PYCODE
 
+      - name: Exercise installed Docker artifact streams through the authenticated reader
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import tuner.execution.providers.docker_provider_v1.local_artifacts as artifacts
+          import tuner.execution.providers.docker_provider_v1.reader as reader
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          for module in (artifacts, reader):
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-docker-artifact-tests"
+          for name in (
+              "execution/providers/docker_provider_v1/test_local_artifacts.py",
+              "execution/providers/docker_provider_v1/conftest.py",
+              "execution/providers/docker_provider_v1/test_effects.py",
+              "execution/providers/docker_provider_v1/test_reader.py",
+              "execution/coordinator_v1/test_start_reconcile_service.py",
+              "execution/coordinator_v1/test_state_machine.py",
+              "execution/foundation_v2/helpers.py",
+          ):
+              target = root / "tests" / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / "tests" / name, target)
+              for parent in target.parents:
+                  if parent == root:
+                      break
+                  (parent / "__init__.py").touch()
+          import pytest
+          sys.path.insert(0, str(root))
+          os.chdir(root)
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
+              str(root / "tests/execution/providers/docker_provider_v1/test_local_artifacts.py")]))
+          PYCODE
+
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
         run: |
           python -B scripts/regenerate_offline_sft_worker_closure.py
