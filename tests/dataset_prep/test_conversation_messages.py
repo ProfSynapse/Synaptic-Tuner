@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+import tuner
 
 from synaptic_tuner.api.v1.data_facade import DataOutcome, DataRunRef, DataRunState, DataScenarioOutcome
 from synaptic_tuner.api.v1.results import VerifiedArtifact
@@ -277,7 +278,7 @@ def test_bounded_closed_config_and_json(case):
 def test_schema_assets_match_actual_configuration_rows_and_manifest():
     import jsonschema
     prepared = build()
-    root = Path(__file__).resolve().parents[2] / "schemas"
+    root = Path(tuner.__file__).resolve().parent.parent / "schemas"
     values = {
         "conversation-preparation": json.loads(prepared.manifest_raw)["configuration"],
         "conversation-prepared-dataset": json.loads(prepared.manifest_raw),
