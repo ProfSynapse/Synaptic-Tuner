@@ -31,3 +31,14 @@ def test_fractional_unicode_and_fresh_copies():
 def test_checked_in_documents_match_existing_yaml_semantics(name):
     raw = (Path(__file__).resolve().parents[2] / 'SynthChat/config' / (name + '.yaml')).read_bytes()
     assert parse_workflow_yaml(raw) == yaml.safe_load(raw)
+
+
+def test_nonconflicting_yaml_merge_matches_legacy_parser():
+    raw = b'base: &base {first: 1}\nmerged: {<<: *base, second: 0.125}\n'
+    assert parse_workflow_yaml(raw) == yaml.safe_load(raw)
+
+
+def test_conflicting_merge_cannot_hide_duplicate_keys():
+    raw = b'base: &base {first: 1}\nmerged: {<<: *base, first: 2}\n'
+    with pytest.raises(ValueError, match='unique'):
+        parse_workflow_yaml(raw)
