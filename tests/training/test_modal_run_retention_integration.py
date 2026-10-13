@@ -181,3 +181,21 @@ def test_late_retention_failure_never_starts_training(tmp_path, monkeypatch, fai
     assert any(
         (root / retention.WORKFLOW_FILE).exists() for root in roots if root.is_dir()
     )
+
+
+def test_fixture_source_identity_is_explicit_and_other_process_calls_forward(tmp_path, monkeypatch):
+    from tuner.execution.providers.modal import runtime_build
+    forwarded = []
+    sentinel = object()
+    def original(command, *args, **kwargs):
+        forwarded.append((command, args, kwargs))
+        return sentinel
+    monkeypatch.setattr(runtime_build.subprocess, "run", original)
+    _setup(tmp_path, monkeypatch)
+    engine_root = runtime_build.Path(runtime_build.__file__).resolve().parents[4]
+    query = ["git", "-C", str(engine_root), "rev-parse", "HEAD"]
+    assert runtime_build.subprocess.run(query).stdout == ("1" * 40 + "\n").encode()
+    assert runtime_build.subprocess.run(["other"], timeout=7) is sentinel
+    assert forwarded == [(["other"], (), {"timeout": 7})]
+    with pytest.raises(pytest.fail.Exception, match="unexpected fixture source identity"):
+        runtime_build.subprocess.run(["git", "-C", "/unselected", "rev-parse", "HEAD"])

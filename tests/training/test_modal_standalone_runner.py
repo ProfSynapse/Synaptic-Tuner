@@ -121,6 +121,21 @@ def _facts(release):
 
 
 def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualification=False):
+    # This provider-free fixture models an admitted source identity, not a live
+    # checkout. Installed consumers deliberately have no engine .git directory.
+    from tuner.execution.providers.modal import runtime_build
+    real_run = runtime_build.subprocess.run
+    engine_root = Path(runtime_build.__file__).resolve().parents[4]
+    head_command = ["git", "-C", str(engine_root), "rev-parse", "HEAD"]
+    def fixture_source_head(command, *args, **kwargs):
+        if command == head_command:
+            return runtime_build.subprocess.CompletedProcess(
+                command, 0, stdout=("1" * 40 + "\n").encode("ascii"), stderr=b"")
+        if (type(command) is list and command and command[0] == "git"
+                and command[-2:] == ["rev-parse", "HEAD"]):
+            pytest.fail("unexpected fixture source identity query")
+        return real_run(command, *args, **kwargs)
+    monkeypatch.setattr(runtime_build.subprocess, "run", fixture_source_head)
     monkeypatch.setattr(runner.platform, "python_version", lambda: "3.11.14")
     # Source/bootstrap preparation is independently exercised through its real service.
     monkeypatch.setattr(runner, "prepare_modal_standalone_local", lambda **kw: SimpleNamespace(
