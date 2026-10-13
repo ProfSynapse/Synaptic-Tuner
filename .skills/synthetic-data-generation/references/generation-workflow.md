@@ -406,3 +406,13 @@ expressed in config. Optional keys on a wrapper format:
 - Prefer checked-in `SynthChat/config/targets_*.json` manifests over ad hoc inline JSON when running smoke tests or repeatable generation slices
 - For privacy smoke tests, prefer the checked-in fixtures under `tests/fixtures/privacy/`, the [privacy target manifest](../../../SynthChat/config/targets_privacy_docs_smoke.json), and the [privacy smoke runbook](../../../docs/plans/synthchat-privacy-smoke-runbook.md).
 - **Embedding (retrieval) triplet generation is a Phase-2 forward ref.** Embedding training consumes `{query, positive, negatives}` triplets; generating those synthetically (mining hard negatives, query paraphrasis) is not yet wired into SynthChat. For now author triplets by hand against the `embedding-training` skill's data shapes (`Datasets/embedding/examples/triplets_smoke.jsonl` is the canonical fixture). A synthetic triplet scenario type lands in a later phase.
+
+## Immutable public Data handoff
+
+For preparation of actual generated/improved conversation artifacts through
+`TrainingAPI.prepare`, use the [conversation preparation extension](../../fine-tuning/reference/conversation-preparation.md).
+Bind the actual DataOutcome dataset/metadata hashes and counts, configure role/field
+projection and explicit group splits, and retain the returned source. This is
+preparation only; current compiled SFT releases do not admit the new conversation
+format. Never substitute an unrelated ingestion bundle or invent chronological
+lineage to make a handoff test pass.

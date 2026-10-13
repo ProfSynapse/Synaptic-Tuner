@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-conversation-sft-row-v1.schema.json",
+  "title": "conversation-sft-row v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "format",
+    "row_id",
+    "source_row_number",
+    "target_message_index",
+    "group_id",
+    "split",
+    "messages"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "synaptic-conversation-sft-row/v1"
+    },
+    "format": {
+      "const": "messages"
+    },
+    "row_id": {
+      "type": "string",
+      "pattern": "^row-[0-9a-f]{64}$"
+    },
+    "source_row_number": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "target_message_index": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 127
+    },
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "split": {
+      "enum": [
+        "train",
+        "validation"
+      ]
+    },
+    "messages": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

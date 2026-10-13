@@ -1656,7 +1656,8 @@ def _relative_inventory(stage: _OwnedStageAuthority) -> dict[str, tuple[int, int
     return result
 
 
-def _verify_owned_stage(stage: _OwnedStageAuthority) -> VerifiedPreparedDatasetV1:
+def _verify_owned_stage(stage: _OwnedStageAuthority, *, verify_bytes=None) -> VerifiedPreparedDatasetV1:
+    verify_bytes = _verify_bytes if verify_bytes is None else verify_bytes
     if stage.descriptor is None:
         return _verify(stage.path, require_content_addressed_name=False)
     inventory = _relative_inventory(stage)
@@ -1672,7 +1673,7 @@ def _verify_owned_stage(stage: _OwnedStageAuthority) -> VerifiedPreparedDatasetV
             stage.descriptor, "dataset.jsonl", MAX_DATASET_BYTES, inventory["dataset.jsonl"]
         )
         retained.append(dataset)
-        verified = _verify_bytes(
+        verified = verify_bytes(
             stage.path,
             manifest.read(),
             dataset.read(),
@@ -1925,7 +1926,8 @@ def retry_dataset_root_durability_v1(output_root: Path) -> None:
         raise DatasetPrepDurabilityError() from None
 
 
-def _publish(output_root: Path, prepared) -> VerifiedPreparedDatasetV1:
+def _publish(output_root: Path, prepared, *, verify=None, verify_bytes=None) -> VerifiedPreparedDatasetV1:
+    verify = _verify if verify is None else verify
     if type(output_root) is not _PATH_TYPE:
         raise TypeError("output_root must be a Path")
     root: _OutputRootAuthority | None = None
@@ -1942,7 +1944,7 @@ def _publish(output_root: Path, prepared) -> VerifiedPreparedDatasetV1:
             pass
         else:
             try:
-                existing = _verify(destination, require_content_addressed_name=True)
+                existing = verify(destination, require_content_addressed_name=True)
             except DatasetPrepValidationError:
                 raise DatasetPrepCollisionError("prepared dataset destination collision") from None
             if existing.semantic_identity != prepared.identity:
@@ -1980,7 +1982,10 @@ def _publish(output_root: Path, prepared) -> VerifiedPreparedDatasetV1:
             _sync_directory_authority(stage.descriptor, stage.path)
         except BaseException:
             directory_durability_unproven = True
-        staged = _verify_owned_stage(stage)
+        staged = (
+            _verify_owned_stage(stage) if verify_bytes is None
+            else _verify_owned_stage(stage, verify_bytes=verify_bytes)
+        )
         if staged.semantic_identity != prepared.identity:
             _invalid("staged dataset identity is inconsistent")
         post_rename_phase: DatasetPublicationUncertaintyPhaseV1 | None = None
@@ -2003,7 +2008,7 @@ def _publish(output_root: Path, prepared) -> VerifiedPreparedDatasetV1:
         if commit_collision:
             winner: VerifiedPreparedDatasetV1 | None = None
             try:
-                candidate = _verify(destination, require_content_addressed_name=True)
+                candidate = verify(destination, require_content_addressed_name=True)
                 if candidate.semantic_identity == prepared.identity:
                     winner = candidate
             except BaseException:
@@ -2024,7 +2029,7 @@ def _publish(output_root: Path, prepared) -> VerifiedPreparedDatasetV1:
         verified = None
         final_uncertain = False
         try:
-            verified = _verify(destination, require_content_addressed_name=True)
+            verified = verify(destination, require_content_addressed_name=True)
         except BaseException:
             final_uncertain = True
         if final_uncertain:
