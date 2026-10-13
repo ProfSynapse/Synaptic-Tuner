@@ -251,6 +251,30 @@ class DockerCLISessionV1:
         except Exception:
             return DockerStartResultV1(Start.INDETERMINATE)
 
+    def _stop_exact(self, container_ref, labels, image, *, grace_seconds):
+        """One owned stop request plus observed nonrunning state, not causal exit."""
+        if type(grace_seconds) is not int or not 1 <= grace_seconds <= 10:
+            raise ValueError("docker_cli_configuration_invalid")
+        image_id = self._image(image)
+        before, _ = self._inspect(container_ref, labels, image_id)
+        if before != 'running':
+            raise ValueError("docker_cli_stop_ineligible")
+        def sufficient_budget():
+            if math.floor(self._deadline - time.monotonic()) <= grace_seconds:
+                raise ValueError("docker_cli_deadline")
+        output = self._checked(
+            ['container', 'stop', '--timeout', str(grace_seconds), container_ref],
+            before=sufficient_budget,
+        ).strip()
+        if output != container_ref:
+            raise ValueError("docker_cli_reply_invalid")
+        after, exit_code = self._inspect(container_ref, labels, image_id)
+        if after not in ('exited', 'dead'):
+            raise ValueError("docker_cli_stop_unconfirmed")
+        return {'container_ref': container_ref, 'labels_digest': labels.digest,
+                'daemon_id': self._daemon, 'image_id': image_id, 'before': before,
+                'after': after, 'exit_code': exit_code, 'grace_seconds': grace_seconds}
+
     def lookup(self, request):
         try:
             profile_image = None
