@@ -681,8 +681,9 @@ same wheel. All five changed production files matched reviewed source bytes.
 The installed CI lane uses Dataset 5.1.0 and pytest 8; trainer/model effects remain
 explicit CPU substitutes. This is not validation of the GPU image's ML stack.
 
-The public GRPO compiler, separate offline inventory, provider dispatch, native
-verification and live candidate qualification remain open. This entry alone
+The additive public compiler and preparation evidence are recorded below.
+Separate offline inventory, provider dispatch, native verification and live
+candidate qualification remain open. This trainer entry alone
 does not authenticate a public plan, verify model member custody or advertise
 GRPO through the public API.
 
@@ -765,3 +766,29 @@ planning fixtures; they are not source admission, image capture or deployment
 evidence. Existing profiles remain unchanged. Candidate image qualification
 and training remain open, and the ordinary Modal recipe CLI retains its
 existing v2 path. This is a Python API planning handoff.
+
+### Installed public GRPO compilation and preparation
+
+The existing training input now accepts explicit GRPO hyperparameters and
+retained declarative reward documents. Its separately registered recipe compiles
+through the existing generic registry; default SFT registration and canonical
+documents remain unchanged. Immutable prompt preparation preserves original
+UTF-8 JSONL and reward columns without inventing SFT targets or splits. Dataset
+identity binds bytes, format and prompt column, so legitimate model, reward or
+learning-rate changes can reuse verified data. Each preparation request checks
+actual retained-core admission before returning its verified input lease.
+
+Source-archive-built wheel
+`1233f4739d40893cd51717eb7c75293049ea0477a4fb22899be27ee72d320af8`
+passed a fresh base-only neutral consumer and 233 installed tests. Six production
+modules, three schemas and four refreshed source inventories matched the
+reviewed checkout and installation byte for byte. Another 253 source and closure
+checks passed. Existing 98/119/68-member inventories and runtime pins remain
+unchanged; only reviewed source hashes and derived closure values were refreshed.
+
+This is CPU preparation and pure developer compilation. It does not enable
+packaged GRPO execution, qualify a model/runtime image, or establish reward
+dispersion and parameter updates. Separate isolated execution, native artifact
+verification, ordinary host integration and bounded live qualification remain
+release requirements. See [the declaration contract](public-grpo-compilation.md)
+and the canonical fine-tuning skill's GRPO reference for the exact scope.
