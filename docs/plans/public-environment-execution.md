@@ -190,6 +190,49 @@ The executor catalog seam is available but is not yet an admitted execution
 dependency. Host authorization, process termination, durable attempts and
 execution remain separate C2 gates; execute and simulate starts remain disabled.
 
+### Accepted local filesystem primitive
+
+
+[`BoundedLocalEnvironmentRuntime`](../../shared/environments/bounded_local_runtime.py)
+implements the existing runtime interface without selecting it as a default or
+connecting it to DataAPI. The reviewed chain is `e41f764f`, `a7246526`,
+`6e4c1db5`: 43 dedicated tests and 130 combined filesystem/validator/executor
+checks passed. Lazy package exports preserve class identity while allowing this
+primitive to import without attempting a provider SDK import.
+
+The caller supplies an existing owner-private directory at mode 0700 and an
+exact frozen `FilesystemLimits`. Unsupported Linux descriptor facilities reject
+before scratch creation. Relative paths traverse retained directory descriptors;
+absolute/traversal paths, symlinks, hardlinks and special entries reject. Parent,
+scratch and traversed directory identities are checked, with owner/private-mode
+checks on retained parent and scratch. This is filesystem custody, not a security
+sandbox against arbitrary code or a hostile process running as the same user.
+
+Limits separately bound source fixture entries, total files/directories, aggregate
+UTF-8 file content, each returned result, snapshot JSON, path bytes/depth and
+cooperative lifetime. Fixture validation precedes directory effects. Full bounded
+inventory checks also cover recursive copy, search and snapshot work. A positive
+snapshot entry request, including the interface default, is capped at the configured
+entry bound; full inventory and snapshot byte limits still apply. Snapshots omit the absolute scratch path. Copy/move use bounded copy/delete, require capacity
+for the temporary copy alongside its source, and are nontransactional: failure
+may leave owned partial mutations; no atomicity or crash recovery is promised.
+
+Cleanup has dedicated bounded descriptor traversal even after the cooperative
+lifetime expires. Failed setup cleans only verified owned resources; unknown
+creation identity, substituted names or changed private permissions preserve
+ownership/uncertainty rather than deleting an unverified namespace or permitting
+re-setup. This process-local retained state is not durable restart recovery.
+Cooperative checks cannot interrupt blocked filesystem calls or establish process
+termination, cancellation or an enforceable wall-clock resource limit.
+
+The next gate is a host-authorized execution/session boundary with persisted
+attempt authority, bounded process lifecycle and demonstrated cancellation,
+termination, cleanup and uncertain-outcome handling. It must explicitly map
+admitted public bounds to these independent filesystem limits and consume retained
+inputs. The primitive alone supplies no host grant, policy allowlist, worker,
+public execution enablement or provider qualification. Both selected execute and
+simulate starts remain disabled until that separate gate is accepted.
+
 The shared fixture starts with bounded files and a declared action/assertion
 policy. A deterministic LLM reply first triggers a missing-file failure. That
 structured result reaches the judge and improver; the revised reply performs the
