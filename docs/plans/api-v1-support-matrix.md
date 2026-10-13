@@ -9,8 +9,8 @@ updated: 2026-10-13
 This matrix inventories the selected stable-v1 scope at `df166a75`; it is not a
 release certification. Subsequent work must update individual rows only after
 implementation and exact-source acceptance. Environment rows include later
-admission/snapshot and fixed-worker evidence through `27dde56e`; optional session
-integration remains pending public acceptance. The [stable release plan](stable-v1-release.md)
+admission/snapshot, fixed-worker and installed public local workflow evidence
+through runtime `8de9e430`. Complete durable recovery remains open. The [stable release plan](stable-v1-release.md)
 is the acceptance authority. SFT requires Docker, Modal and HF Jobs parity;
 GRPO selects Modal as the first candidate, still unqualified. DPO/KTO, RunPod,
 Syntunia and broader GRPO provider parity are deferred.
@@ -32,9 +32,9 @@ Status vocabulary:
 | --- | --- | --- |
 | Scenarios: author/edit/version | Existing config-first YAML/CLI authoring; complete public authoring operation unavailable | Scenario/rubric schemas and loaders exist. `DataAPI` consumes scenario refs; it is not a scenario CRUD/version authority. Define immutable public authoring/validation references and installed resources. |
 | Scenarios: validate/select | Implemented/provider-free loaders and validation | Config/scenario validation does not establish semantic input coverage or permission for environment effects. Qualify actual installed assets and representative full scenarios. |
-| Environments: config/create/validate | Reviewed admission/snapshot inputs and fixed worker; optional host session integration pending public acceptance | C1 admission, retained bytes and explicit parsing are reviewed. Current integration adds optional `ReferenceDataPortsV1.environment_sessions` and a host-configured session factory over existing runtime methods; it must pass actual public/installed acceptance before support is claimed. No new public environment facade or grant framework is required. |
-| Environments: execute/tools/feedback | Accepted bounded filesystem/fixed supervisor primitives; public generation/improvement execution acceptance pending | Worker `27dde56e` has real-child tests and permanent installed smoke. Host policy/fixture inputs and callback feedback must be exercised through normal DataAPI. Supervisor failures and uncertain cleanup are infrastructure facts, not model-quality failures; simulation remains explicit. No sandbox, universal wall-clock or restart-controller claim. |
-| SynthChat: plan/preflight/generate | Implemented/provider-free public `DataAPI` + optional reference backend | Host supplies exact `ReferenceDataPortsV1` and LLM clients. Public generation is not automatically environment-backed; installed and real backend acceptance remain open. |
+| Environments: config/create/validate | Reviewed admission, retained inputs and installed local host session composition | Optional `ReferenceDataPortsV1.environment_sessions` connects a host-configured factory to existing runtime methods. Public planning/preflight remain effect-free; selected execution requires that factory. No new environment facade or grant framework is required. |
+| Environments: execute/tools/feedback | Installed public local generation/improvement and bounded worker cancellation verified | Runtime `8de9e430` exercises configured tools, fresh fixtures and candidate feedback through DataAPI. Actual stalled-worker cancellation verifies exit/cleanup; uncertainty stays nonterminal and repeated starts do not replay. Complete durable restart/reconciliation remains open. Simulation is explicit; no sandbox or universal wall-clock claim. |
+| SynthChat: plan/preflight/generate | Implemented/provider-free public `DataAPI` + optional reference backend | Host supplies exact `ReferenceDataPortsV1` and LLM clients. Installed local environment workflows use deterministic injected clients; actual model/backend qualification remains open. |
 | SynthChat: improve/judge | Improve mode implemented/provider-free; judge is configured workflow behavior, not a standalone `DataAPI` mode | `DataMode` exposes generate/improve. Judge/rubric client, usage and input lineage need bounded backend qualification; CLI availability is not a public judging-service guarantee. |
 | SynthChat: export/datasets/validation | Implemented/provider-free result/dataset operations and validators | Bind immutable export, format, source coverage and split lineage; no manual relabeling. Installed source assets and exact downstream training identities must be checked. |
 | SynthChat: usage/progress/cancel | Implemented/provider-free reference accounting/observations and cancellation state | Paid clients require authenticated spend scope; unmetered paid backends refuse. Cancellation state is not proof of interrupted in-flight work. Restart and real usage settlement remain open. |
@@ -87,9 +87,12 @@ a neutral working directory. Catalog resolution and evaluator startup are tested
 without optional ML dependencies. Snapshot workflow source `f7d2df31` passed 793
 combined checks, including retained-input generation and improvement after source
 deletion. Fixed-worker source `27dde56e` adds accepted process/fixture primitives
-and the permanent neutral installed smoke. Optional session-factory integration
-is not yet public execution or lifecycle recovery acceptance; selected starts
-remain disabled until that integration is accepted. Selected ML/GPU operations still require their real
+and the permanent neutral installed smoke. Public local runtime `8de9e430` passed
+916 combined tests with one intentional skip; its sdist-built wheel passed 51
+session/public cases with the non-worker SIGSTOP variant skipped. Permanent CI
+runs those tests with installed production modules and no checkout imports.
+Durable worker restoration and resumable continuation remain unqualified.
+Selected ML/GPU operations still require their real
 dependencies. Source checkout success alone is not installed workflow acceptance.
 
 HTTP/SSE/browser transport, auth service, credentials, durable grants/stores and

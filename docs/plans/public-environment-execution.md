@@ -2,8 +2,9 @@
 
 Status: admission, immutable input consumption, bounded filesystem and fixed
 child supervisor are implemented and reviewed. Optional host session-factory
-integration now implements generation/improvement through the normal DataAPI;
-final public installed acceptance is pending, 2026-10-13. This is node C of the
+integration implements generation/improvement through the normal DataAPI, with
+installed local workflow and bounded worker cancellation verified, 2026-10-13.
+Complete durable recovery remains open. This is node C of the
 [stable release plan](stable-v1-release.md), not a full stable-release verdict.
 Root owns release task `97d0f9df-6701-4887-a7a3-2993a117f90f`.
 
@@ -23,7 +24,7 @@ response. The optional integration also supplies
 evaluation callback. Both paths consume the admitted inputs and evaluate actual
 changed candidates; a static prompt context alone cannot establish execution.
 
-The existing DataPlan binds parsed scenarios for generation, and dataset bytes
+The legacy DataPlan binds parsed scenarios for generation, and dataset bytes
 plus rubric names for improvement. It does not bind all execution policy,
 tool-schema or rubric bytes. Existing
 [`EnvironmentValidator`](../../shared/environments/validator.py) also defaults
@@ -103,7 +104,8 @@ immutable admitted snapshots and validation of the effective fixture merge are
 C2 requirements: nested fixture schema validity is not permission to override
 host policy. Selected runs require the optional session factory; absent or
 unsupported composition still refuses before client/session effects. The implemented
-factory path is pending final public installed acceptance, not globally unavailable.
+factory path has installed local workflow evidence; remote qualification and
+durable restart recovery remain separate gates.
 
 ## Session custody, usage and lifecycle
 
@@ -181,10 +183,14 @@ database. A generic factory's existence does not qualify local execution or E2B.
 C1 and the independent generic improvement callback passed 153 combined focused
 tests at `846f754b`, plus the source-archive-built wheel resource/consumer gate.
 These are historical prerequisite checks. The current optional factory connects
-local execution and per-candidate feedback through DataAPI. Ten initial public
-cases passed with local and fixed-worker runtimes; final stalled-worker/CAS and
-installed public acceptance are still being completed. This is implemented code
-pending final acceptance, not a full lifecycle/recovery qualification.
+local execution and per-candidate feedback through DataAPI. Runtime `8de9e430`
+passed 916 combined tests with one intentional skip. Independent review and a
+fresh sdist-built installed wheel each passed all 51 session/public cases, with
+only the non-worker SIGSTOP variant skipped. The installed check uses isolated
+Python, neutral CWD and installed fixture assets, and now runs in CI. Tests cover
+actual repair, stopped-child termination/cleanup, cancellation races, retained
+uncertainty and no replay after a failed final CAS. They do not qualify durable
+process restoration, resumable continuation or multi-host transition recovery.
 
 The first C2 prerequisite retains private input captures from the same bounded
 reads that establish dependency identity. Fresh re-admission must match the full
@@ -205,8 +211,8 @@ overrides and malformed parser configuration before client creation. Snapshot
 consumers preserve the injected metered client and select only admitted targets.
 The session integration now consumes retained tool schema/catalog and configured
 execution inputs. Existing run claims and fixed-worker process supervision supply
-the selected local path; public installed acceptance and durable recovery remain
-separate gates. Missing optional factories still refuse selected execution.
+the selected local path, including installed public acceptance. Complete durable
+recovery remains a separate gate. Missing optional factories still refuse selected execution.
 
 ### Accepted local filesystem primitive
 
@@ -257,9 +263,9 @@ The optional session integration maps the admitted bounds into independent
 `FilesystemLimits`, uses configured action/projection data and carries structured
 assertion failures into judging/improvement. Changed candidates use fresh fixtures;
 supervisor/cancellation/cleanup failures do not masquerade as assertion success
-or ordinary model quality. Final public installed acceptance must exercise these
-facts through normal DataAPI, plus duplicate claims, final CAS failures and
-cancellation of a stalled owned worker. Restart no-replay evidence is distinct
+or ordinary model quality. Installed public tests exercise these facts through
+normal DataAPI, including retained claims, final CAS failures and cancellation
+of a stalled owned worker. Restart no-replay evidence is distinct
 from restored process ownership, safe continuation or complete durable recovery.
 
 The shared fixture starts with bounded files and a declared action/assertion

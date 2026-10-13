@@ -51,7 +51,7 @@ are not current release verdicts. The
 | Family | Current evidence category | Required stable acceptance |
 | --- | --- | --- |
 | Scenarios | Checked-in CLI/config/schema workflows; not proof of a complete public authoring API. | Safe author/validate/version workflow with immutable scenario/rubric refs, installed templates/schemas and explicit public contracts. |
-| Environments | Reviewed admission and immutable workflow inputs, bounded fixture filesystem and fixed child supervisor; optional host session-factory integration is pending public acceptance. | Config-first create/validate/execute through normal DataAPI and a host-supplied session factory, with bounded tools, cleanup, structured feedback and public cancellation/recovery evidence. No security-sandbox claim. |
+| Environments | Reviewed configured local DataAPI generation/improvement, immutable inputs, fixed worker, installed workflow and stalled-child cancellation. | Complete durable restart/reconciliation and supported backend qualification beyond the local fixture workflow. No security-sandbox claim. |
 | SynthChat | Existing generate/judge/improve/export CLI and public data facade/backend composition. | Real installed public backend supports every advertised operation, usage, progress, cancellation and recovery; facade existence is insufficient. |
 | Datasets | Existing validators and prepared training identities. | Bounded validation, provenance/splits/format contracts and immutable validated exports consumed unchanged by training. |
 | SFT | Modal exact-source evidence; other provider/live parity gates remain open. | Docker/Modal/HF public API parity and qualified recipes, full lifecycle and native artifacts. |
@@ -122,12 +122,18 @@ runtime interface. Its provider-free tests demonstrate real child fixture I/O,
 cancellation/deadline interruption, confirmed termination and identity-safe
 cleanup; the existing neutral installed-consumer CI step now exercises the fixed
 `-I` child, read/write, default snapshot, exit and empty scratch. This qualifies
-the primitive and its packaging, not yet the complete public DataAPI workflow.
+the primitive and its packaging; composed public evidence follows below.
 
 Environment admission and immutable scenario/rubric/configuration/dataset
 consumption are already reviewed. Optional host session-factory integration
-connects those inputs to configured execution and per-candidate feedback; its
-public end-to-end acceptance remains pending. The selected direction keeps the
+connects those inputs to configured execution and per-candidate feedback. Runtime
+`8de9e430` passed 916 combined tests with one intentional skip. Its fresh
+sdist-built wheel passed nine asset checks and 51 session/public workflow tests
+with the same intentional non-worker SIGSTOP skip, from a neutral directory under
+isolated Python. Actual stalled-worker cancellation confirms exit and cleanup;
+cold-host reads/cancellation and repeated starts preserve the existing claim.
+Durable worker restoration, resumable rows and multi-host transition recovery
+remain open. The selected direction keeps the
 normal DataAPI lifecycle and host record/stream stores. The proposed additional
 per-effect grant/episode DTO and parallel versioned lifecycle/result/list family
 were cancelled after user review; they are not stable-release prerequisites.
@@ -202,11 +208,10 @@ capabilities, package metadata and each advertised provider.
   Reviewed admission, retained input snapshots and parser/catalog injection now
   supply the input seams. Optional `ReferenceDataPortsV1.environment_sessions`
   and the host-configured `CapturedEnvironmentSessionFactory` are the current
-  integration work, using the fixed worker through `runtime_factory(limits,
-  boundary)`. Public execution acceptance remains pending; configuration or a
-  factory alone cannot establish it. Preserve absent-option behavior and verify
-  actual generation/improvement, failure feedback, cancellation and cleanup
-  through the installed public workflow before claiming support.
+  integrated path, using the fixed worker through `runtime_factory(limits,
+  boundary)`. The installed local workflow now demonstrates generation/improvement,
+  failure feedback, cancellation and cleanup with deterministic injected clients.
+  Paid model/backend acceptance and complete durable recovery remain open.
 - The paid evaluation judge path rejects with `backend_unmetered`. Select and
   qualify the intended judge backend, usage/accounting contract and bounded
   evaluation benchmark before a stable judging claim. Do not bypass metering or
@@ -214,7 +219,7 @@ capabilities, package metadata and each advertised provider.
 
 The reviewed package inventory, catalog resolution and lightweight help fixes
 above address those specific preparation defects. Complete installed execution,
-effective environment execution, public lifecycle acceptance, paid judging and
+broader environment/backend qualification, complete public lifecycle recovery, paid judging and
 the broader asset inventory remain open release gates.
 
 Exit: clean installed consumer can perform provider-free planning and compose
