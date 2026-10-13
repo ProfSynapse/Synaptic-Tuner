@@ -19,7 +19,8 @@ Docker/HF GRPO parity is deferred. The baseline is main
 No version bump, tag, package publication or provider execution is authorized by
 this document. Live qualifications require reviewed finite scope and authority.
 
-RunPod, DPO/KTO and other additional training methods, Syntunia integration, browser transport,
+RunPod, DPO/KTO and other additional training methods, Syntunia integration,
+browser transport,
 managed multi-tenant serving and training-quality claims are deferred. Evaluation, scenarios, environments and SynthChat are included release families,
 not optional scope merely because they have CLI entrypoints. Ingestion, chat and
 pipeline compositions retain truthful backend status; no facade or CLI alone
@@ -97,6 +98,15 @@ All milestones below are **open**. Record terminal evidence against the exact
 candidate source and artifact digest; no historical result automatically closes
 a new gate. Retain failed attempts, consumed claims and uncertain submissions.
 
+## Current preparation progress (2026-10-13)
+
+The preparation branch now packages an explicit inventory of 51 public schemas.
+Its 26 focused tests and source-archive → wheel clean-install host-manifest and
+capability checks passed. Main CI and merge remain pending. This closes neither
+the broader installed-asset inventory nor the stable release gate: evaluator,
+SynthChat, GRPO, environment and other supported workflow assets/backends still
+need their own installed-consumer acceptance. No version or tag was changed.
+
 ## 1. Freeze the public support contract
 
 - [ ] Publish the provider/method/operation matrix for plan/preflight/start,
@@ -110,7 +120,8 @@ a new gate. Retain failed attempts, consumed claims and uncertain submissions.
   image and trainer pins. The measured Modal launcher is POSIX CPython 3.11.14
   with Modal 1.5.4; Python 3.12 contract CI does not prove Python 3.10 or arbitrary
   launcher compatibility. Do not relax image pins to accommodate the operator.
-- [ ] Select and qualify explicit stable SFT and selected GRPO recipes, model/tokenizer revisions,
+- [ ] Select and qualify explicit stable SFT and selected GRPO recipes,
+  model/tokenizer revisions,
   runtime profiles, native artifact contracts and hardware/platform combinations
   for each provider. Model/hardware success is not universal recipe support.
 - [ ] Rewrite README quickstart and install guidance to the supported release
@@ -146,6 +157,16 @@ capabilities, package metadata and each advertised provider.
   `shared.ml` imports of undeclared pandas. Resolve import boundaries and declared
   optional dependencies; do not prescribe an indiscriminate ML-stack installation
   to make a lightweight help/contract path work.
+
+- The public reference data composition lacks an environment executor/authority
+  port in `ReferenceDataPorts`, and `reference/data.py` supplies
+  `environment_validator=None`. Configuration alone cannot enable faithful
+  environment execution. Add a reusable public port with bound configuration
+  and authority, then qualify the installed backend before claiming support.
+- The paid evaluation judge path rejects with `backend_unmetered`. Select and
+  qualify the intended judge backend, usage/accounting contract and bounded
+  evaluation benchmark before a stable judging claim. Do not bypass metering or
+  treat a facade/mock response as paid backend qualification.
 
 These are open release blockers, not repaired or accepted behavior.
 
@@ -258,14 +279,17 @@ are reviewed before execution; failed runs remain evidence, not replay authority
 
 ## 7. Audit included families and optional backend status
 
-- [ ] Inventory every exported family and optional backend. Separate included stable workflow
+- [ ] Inventory every exported family and optional backend. Separate included
+  stable workflow
   integration needs from experimental reference implementations and deferred
   features; absence of a backend yields explicit unavailability.
 - [ ] Pipelines, evaluation and chat cannot infer authority from a completed
   training run. Data and ingestion retain their own input/custody contracts.
 - [ ] Examples and capability negotiation omit unsupported cancel/recovery,
   inference, model conversion or publication operations rather than advertising
-  them and failing later. DPO/KTO and additional methods plus RunPod stay outside this tag. GRPO is included on one qualified provider first (Modal selected candidate); Docker/HF GRPO breadth is deferred.
+  them and failing later. DPO/KTO and additional methods plus RunPod stay outside
+  this tag. GRPO is included on one qualified provider first (Modal selected
+  candidate); Docker/HF GRPO breadth is deferred.
 
 Exit: the public package and docs have no ambiguous universal-provider promise.
 
