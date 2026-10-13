@@ -206,8 +206,7 @@ def test_entry_depth_and_snapshot_limits(parent, limits):
         runtime.mkdir('x/y')
     with pytest.raises(ValueError):
         runtime.write_text('x/y/z', 'z')
-    with pytest.raises(ValueError):
-        runtime.snapshot(limit=3)
+    assert runtime.snapshot(limit=3)['truncated'] is False
     runtime.write_text('b', 'b')
     assert runtime.snapshot(limit=1)['truncated'] is True
     runtime.teardown()
@@ -413,3 +412,15 @@ def test_replaced_root_between_stat_and_open_is_not_adopted(parent, limits, monk
     target.rmdir()
     retained.rename(target)
     runtime.teardown()
+
+
+def test_snapshot_default_and_huge_request_cap_to_configured_entries(runtime):
+    default = runtime.snapshot()
+    assert default == runtime.snapshot(limit=10 ** 1000)
+    assert len(default['files']) + len(default['directories']) <= runtime.limits.max_entries
+
+
+@pytest.mark.parametrize('limit', [True, False, 0, -1, 1.5])
+def test_invalid_snapshot_requested_limits(runtime, limit):
+    with pytest.raises(ValueError, match='snapshot'):
+        runtime.snapshot(limit=limit)

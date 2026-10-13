@@ -211,8 +211,9 @@ sandbox against arbitrary code or a hostile process running as the same user.
 Limits separately bound source fixture entries, total files/directories, aggregate
 UTF-8 file content, each returned result, snapshot JSON, path bytes/depth and
 cooperative lifetime. Fixture validation precedes directory effects. Full bounded
-inventory checks also cover recursive copy, search and snapshot work. Snapshots
-omit the absolute scratch path. Copy/move use bounded copy/delete, require capacity
+inventory checks also cover recursive copy, search and snapshot work. A positive
+snapshot entry request, including the interface default, is capped at the configured
+entry bound; full inventory and snapshot byte limits still apply. Snapshots omit the absolute scratch path. Copy/move use bounded copy/delete, require capacity
 for the temporary copy alongside its source, and are nontransactional: failure
 may leave owned partial mutations; no atomicity or crash recovery is promised.
 

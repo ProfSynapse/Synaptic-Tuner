@@ -491,11 +491,12 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
         return self._output(result)
 
     def snapshot(self, limit=200):
-        if type(limit) is not int or limit <= 0 or limit > self.limits.max_entries:
+        if type(limit) is not int or limit <= 0:
             raise ValueError("invalid snapshot entry limit")
         rows = self._inventory()
-        selected = rows[:limit]
+        returned_limit = min(limit, self.limits.max_entries)
+        selected = rows[:returned_limit]
         return self._output({'runtime': 'bounded_local',
             'directories': [p for p, kind, _ in selected if kind == 'directory'],
             'files': [{'path': p, 'size': size} for p, kind, size in selected if kind == 'file'],
-            'truncated': len(rows) > limit}, snapshot=True)
+            'truncated': len(rows) > returned_limit}, snapshot=True)
