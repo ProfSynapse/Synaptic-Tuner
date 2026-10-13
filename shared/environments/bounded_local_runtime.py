@@ -70,6 +70,7 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
         self._name = None
         self._deadline = None
         self._created_identity = None
+        self._created = False
 
     @staticmethod
     def _platform():
@@ -246,8 +247,16 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
                 raise ValueError("private parent must be owned mode 0700")
             self._name = 'fixture-' + secrets.token_hex(16)
             os.mkdir(self._name, 0o700, dir_fd=fd)
+            self._created = True
             self._created_identity = self._identity(os.stat(self._name, dir_fd=fd, follow_symlinks=False))
-            self._root_fd = os.open(self._name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            opened_root = os.open(self._name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            try:
+                if self._identity(os.fstat(opened_root)) != self._created_identity:
+                    raise RuntimeError('created scratch identity changed before opening')
+            except BaseException:
+                os.close(opened_root)
+                raise
+            self._root_fd = opened_root
             self._deadline = time.monotonic() + self.limits.max_seconds
             for path in sorted(directories, key=lambda p: (p.count('/'), p)):
                 self.mkdir(path)
@@ -264,6 +273,8 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
                     raise RuntimeError('unopened scratch identity changed; cleanup uncertain')
                 os.rmdir(self._name, dir_fd=parent_fd)
                 self._close()
+            elif self._created:
+                raise RuntimeError('created scratch identity unestablished; cleanup uncertain') from None
             else:
                 self._close()
             raise
@@ -278,9 +289,12 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
         self._name = None
         self._deadline = None
         self._created_identity = None
+        self._created = False
 
     def teardown(self):
         if self._root_fd is None:
+            if self._created and self._created_identity is None:
+                raise RuntimeError('created scratch identity unestablished; cleanup uncertain')
             if self._created_identity is not None:
                 parent_fd = self._anchors[-1][2]
                 if self._identity(os.stat(self._name, dir_fd=parent_fd, follow_symlinks=False)) != self._created_identity:

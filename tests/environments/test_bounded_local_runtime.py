@@ -335,3 +335,42 @@ def test_lazy_exports_preserve_actual_class_identity():
     assert public.EnvironmentValidator is EnvironmentValidator
     assert 'EnvironmentSession' in public.__all__
     assert 'EnvironmentValidator' in public.__all__
+
+
+def test_first_stat_failure_retains_unestablished_creation(parent, limits, monkeypatch):
+    original_stat = os.stat
+    def refuse(path, *args, **kwargs):
+        if str(path).startswith('fixture-'):
+            raise OSError('injected first stat failure')
+        return original_stat(path, *args, **kwargs)
+    runtime = BoundedLocalEnvironmentRuntime(parent, limits)
+    monkeypatch.setattr(runtime, '_platform', lambda: None)
+    monkeypatch.setattr(os, 'stat', refuse)
+    with pytest.raises(RuntimeError, match='unestablished'):
+        runtime.setup(EnvironmentFixture())
+    assert runtime._created and runtime._created_identity is None
+    assert runtime._anchors and runtime._name
+    assert len(list(parent.iterdir())) == 1
+    with pytest.raises(RuntimeError, match='already initialized'):
+        runtime.setup(EnvironmentFixture())
+    with pytest.raises(RuntimeError, match='unestablished'):
+        runtime.teardown()
+    # Test-only host reconciliation, not runtime's deletion authority.
+    monkeypatch.setattr(os, 'stat', original_stat)
+    (parent / runtime._name).rmdir()
+    runtime._close()
+
+
+def test_opened_root_identity_must_match_created(parent, limits, monkeypatch):
+    original_open = os.open
+    def substitute(path, flags, *args, **kwargs):
+        if str(path).startswith('fixture-'):
+            return os.dup(kwargs['dir_fd'])
+        return original_open(path, flags, *args, **kwargs)
+    runtime = BoundedLocalEnvironmentRuntime(parent, limits)
+    monkeypatch.setattr(runtime, '_platform', lambda: None)
+    monkeypatch.setattr(os, 'open', substitute)
+    with pytest.raises(RuntimeError, match='before opening'):
+        runtime.setup(EnvironmentFixture())
+    assert runtime._root_fd is None
+    assert list(parent.iterdir()) == []
