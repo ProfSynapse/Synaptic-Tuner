@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,9 +17,21 @@ def main():
     path = ROOT / MANIFEST
     original = path.read_bytes()
     document = json.loads(original)
-    if (set(document) != {"schema_version", "members", "member_count", "payload_bytes"}
+    if (type(document) is not dict
+            or set(document) != {"schema_version", "members", "member_count", "payload_bytes"}
             or document["schema_version"] != "synaptic-hf-parent-closure/v1"
-            or tuple(row["path"] for row in document["members"]) != MEMBERS):
+            or type(document["member_count"]) is not int
+            or document["member_count"] != len(MEMBERS)
+            or type(document["payload_bytes"]) is not int
+            or type(document["members"]) is not list
+            or len(document["members"]) != len(MEMBERS)
+            or any(type(row) is not dict or set(row) != {"path", "size_bytes", "sha256"}
+                   or type(row["size_bytes"]) is not int or row["size_bytes"] < 0
+                   or type(row["sha256"]) is not str
+                   or re.fullmatch(r"[0-9a-f]{64}", row["sha256"]) is None
+                   for row in document["members"])
+            or tuple(row["path"] for row in document["members"]) != MEMBERS
+            or document["payload_bytes"] != sum(row["size_bytes"] for row in document["members"])):
         raise SystemExit("HF parent inventory mismatch; explicit inventory review required")
     members = []
     for name in MEMBERS:
