@@ -122,6 +122,7 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
         "RUN_RESOLVE_REPARSE": ("UNAVAILABLE", "modal_standalone_runner.resolve_reparse"),
         "RUN_PUBLIC_PLAN": ("UNAVAILABLE", "modal_standalone_runner.public_plan"),
         "RUN_PUBLIC_PREFLIGHT": ("UNAVAILABLE", "modal_standalone_runner.public_preflight"),
+        "RUN_RETAIN_READ_INPUTS": ("UNAVAILABLE", "modal_standalone_runner.retain_read_inputs"),
         "RUN_START_INDETERMINATE": ("INDETERMINATE", "modal_standalone_runner.training_start"),
         "RUN_STAGE_RECONCILE_REQUIRED": ("INDETERMINATE", "modal_standalone_runner.stage_reconcile"),
         "RUN_SUBMIT_RECONCILE_REQUIRED": ("INDETERMINATE", "modal_standalone_runner.submit_reconcile"),

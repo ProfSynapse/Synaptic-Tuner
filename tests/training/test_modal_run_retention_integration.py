@@ -126,7 +126,10 @@ def test_normal_runner_retains_original_inputs_before_start_and_reopens_store(
 
 
 @pytest.mark.parametrize("failure", ["write", "fsync", "readback"])
-def test_late_retention_failure_never_starts_training(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize("through_cli", [False, True])
+def test_late_retention_failure_never_starts_training(
+    tmp_path, monkeypatch, capsys, failure, through_cli
+):
     plan, context, events = _setup(tmp_path, monkeypatch)
     original_write, original_read = retention._write, retention._read
     stores = []
@@ -164,15 +167,30 @@ def test_late_retention_failure_never_starts_training(tmp_path, monkeypatch, fai
         pytest.fail("retention failure reached training.start")
 
     monkeypatch.setattr(TrainingAPI, "start", forbidden)
-    with pytest.raises(runner.ModalStandalonePhaseUnavailable) as error:
-        runner.run_modal_standalone_job(
-            plan=plan,
-            context=context,
-            modal_profile="explicit",
-            modal_environment="main",
-        )
-    assert error.value.phase == "RUN_RETAIN_READ_INPUTS"
-    assert "private-fixture-secret" not in str(error.value)
+    if through_cli:
+        from tuner.handlers.modal_job_config_handler import ModalJobConfigHandler
+        handler = ModalJobConfigHandler(Namespace(
+            modal_profile="explicit", modal_environment="main", json=True,
+        ), context)
+        assert handler._execute(plan) == 2
+        output = capsys.readouterr()
+        assert json.loads(output.out)["error"]["details"] == {
+            "phase": "RUN_RETAIN_READ_INPUTS",
+            "failure_class": "UNAVAILABLE",
+            "location": "modal_standalone_runner.retain_read_inputs",
+            "retry_authorized": False,
+        }
+        assert "private-fixture-secret" not in output.out + output.err
+    else:
+        with pytest.raises(runner.ModalStandalonePhaseUnavailable) as error:
+            runner.run_modal_standalone_job(
+                plan=plan,
+                context=context,
+                modal_profile="explicit",
+                modal_environment="main",
+            )
+        assert error.value.phase == "RUN_RETAIN_READ_INPUTS"
+        assert "private-fixture-secret" not in str(error.value)
     assert events == ["bootstrap", "cpu"]
     assert len(stores) == 1
     with pytest.raises(RuntimeError, match="closed"):
