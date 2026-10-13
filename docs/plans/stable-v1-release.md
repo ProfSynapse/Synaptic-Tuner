@@ -660,8 +660,9 @@ resources from that installation. Existing v1/v2 publisher behavior is preserved
 The new `synaptic-conversation-sft-row/v1` format now has CPU-tested SFT
 compiler, loader, preprocessing and native verification support. Existing
 packaged runtime release allowlists remain unchanged and reject this format;
-an additive candidate selection, the Data-to-training installed workflow and
-provider qualification remain separate follow-up gates.
+an additive candidate selection and installed Data-to-training planning join
+are recorded below. Candidate image capture, execution and provider
+qualification remain separate follow-up gates.
 
 ### GRPO trainer core preparation
 
@@ -743,3 +744,24 @@ and complete text in verified public report readback. Both changed production
 files matched the wheel. These limits do not provide an aggregate wall-clock
 deadline, cancellation or recovery; HTTP timeouts bound inactivity. No network
 provider or model-quality qualification was performed.
+
+### Installed Data-to-conversation-SFT planning handoff
+
+Two installed joined cases now exercise actual public Data generation, judging,
+improvement and bounded validation, real configured filesystem assertions,
+conversation normalization and immutable preparation, then public SFT resolve
+and plan. Both explicit Data outcome binding and optional generic provenance
+are covered. A generated outcome cannot replace the selected improved outcome;
+a historical v2-only release cannot admit the new conversation format. Prepared
+bytes, identity and plan remain unchanged after the source datasets, metadata,
+scenario and configuration are deleted, without another generation call.
+
+The separate unqualified conversation runtime profile and compatibility assets
+match the checkout-built wheel, source-archive-built wheel and installed files.
+The host-owned build profile binds the previously accepted Stage2 wheel and is
+excluded from both wheels to avoid a circular hash. A fresh base-only consumer
+also passed. Synthetic provider/release and Git observations are explicit CPU
+planning fixtures; they are not source admission, image capture or deployment
+evidence. Existing profiles remain unchanged. Candidate image qualification
+and training remain open, and the ordinary Modal recipe CLI retains its
+existing v2 path. This is a Python API planning handoff.
