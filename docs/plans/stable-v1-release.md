@@ -641,3 +641,23 @@ Exit: the public package and docs have no ambiguous universal-provider promise.
 Stable acceptance requires all selected gates above to be closed. If a provider
 or lifecycle gate cannot be met, change the proposed release scope explicitly;
 do not silently relabel a narrower preview as this broad stable release.
+
+### Immutable text-conversation preparation
+
+An explicitly registered normalizer now prepares ordered text conversations
+through the existing training-input ports. Declarative field/role mapping, an
+explicit assistant target and group-disjoint train/validation selection preserve
+the selected prefix and target without invented ingestion lineage. The private
+publication commits source, configuration, optional Data outcome and exact row
+bytes; independent verification and retained source reads reject changed
+identities. Historical provenance remains the preparer's committed assertion.
+
+A fresh source-archive-built wheel passed the neutral base consumer and all 49
+installed preparation/source tests. Three production modules and three packaged
+schemas matched the reviewed source bytes; the permanent CI lane resolves schema
+resources from that installation. Existing v1/v2 publisher behavior is preserved.
+
+This is preparation support only. The new
+`synaptic-conversation-sft-row/v1` format is not yet admitted by SFT compilation,
+loaders or packaged runtime releases. The Data-to-training installed workflow
+and provider qualification remain separate follow-up gates.

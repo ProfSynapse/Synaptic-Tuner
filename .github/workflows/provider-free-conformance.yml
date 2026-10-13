@@ -13,6 +13,8 @@ on:
       - "tests/execution/providers/test_hf_pinned_model_snapshot.py"
       - "Trainers/runtime_profiles/**"
       - "tuner/training/**"
+      - "tuner/dataset_prep/**"
+      - "tests/dataset_prep/**"
       - "tuner/project/**"
       - "tuner/runtime/**"
       - "tuner/inference/**"
@@ -662,6 +664,44 @@ jobs:
           os.chdir(root)
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
               str(root / "tests/training/test_docker_host_composition.py")]))
+          PYCODE
+
+      - name: Exercise installed conversation preparation and immutable sources
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import tuner.dataset_prep.conversation_messages as messages
+          import tuner.dataset_prep.publication as publication
+          import tuner.training.conversation_preparation as preparation
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          for module in (messages, publication, preparation):
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-conversation-tests"
+          for name in (
+              "dataset_prep/test_conversation_messages.py",
+              "training/test_conversation_input_preparation.py",
+              "contract/test_public_training_input_v1.py",
+          ):
+              target = root / "tests" / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / "tests" / name, target)
+              for parent in target.parents:
+                  if parent == root:
+                      break
+                  (parent / "__init__.py").touch()
+          import pytest
+          sys.path.insert(0, str(root))
+          os.chdir(root)
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
+              str(root / "tests/dataset_prep/test_conversation_messages.py"),
+              str(root / "tests/training/test_conversation_input_preparation.py")]))
           PYCODE
 
       - name: Exercise installed ordinary HF Jobs host with pinned SDK
