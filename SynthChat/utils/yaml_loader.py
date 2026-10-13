@@ -103,7 +103,36 @@ def parse_workflow_yaml(raw: bytes) -> Dict[str, Any]:
                     raise ValueError("Workflow YAML nesting exceeds its bound")
             elif isinstance(event, (yaml.events.MappingEndEvent, yaml.events.SequenceEndEvent)):
                 depth -= 1
-        document = yaml.load(raw, Loader=_WorkflowLoader)
+        # Compose only the bounded source graph, then count every alias use
+        # before constructors can flatten/extend merge mappings.
+        loader = _WorkflowLoader(raw)
+        try:
+            node = loader.get_single_node()
+            node_budget, node_active = [20000], set()
+
+            def expanded(candidate, depth=0):
+                node_budget[0] -= 1
+                if node_budget[0] < 0 or depth > 32:
+                    raise ValueError("Workflow YAML expansion exceeds its bound")
+                identity = id(candidate)
+                if identity in node_active:
+                    raise ValueError("Workflow YAML graph contains a cycle")
+                node_active.add(identity)
+                try:
+                    if isinstance(candidate, yaml.nodes.MappingNode):
+                        for key, value in candidate.value:
+                            expanded(key, depth + 1)
+                            expanded(value, depth + 1)
+                    elif isinstance(candidate, yaml.nodes.SequenceNode):
+                        for child in candidate.value:
+                            expanded(child, depth + 1)
+                finally:
+                    node_active.remove(identity)
+
+            expanded(node)
+            document = loader.construct_document(node)
+        finally:
+            loader.dispose()
         tree(document)
         if type(document) is not dict:
             raise ValueError("Workflow YAML must contain an object")

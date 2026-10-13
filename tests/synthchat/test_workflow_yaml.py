@@ -42,3 +42,29 @@ def test_conflicting_merge_cannot_hide_duplicate_keys():
     raw = b'base: &base {first: 1}\nmerged: {<<: *base, first: 2}\n'
     with pytest.raises(ValueError, match='unique'):
         parse_workflow_yaml(raw)
+
+
+def test_merge_alias_expansion_rejects_before_mapping_construction(monkeypatch):
+    from SynthChat.utils import yaml_loader
+    constructed = []
+    def forbidden(self, node):
+        constructed.append(node)
+        raise AssertionError('expanded graph reached mapping construction')
+    monkeypatch.setattr(yaml_loader._WorkflowLoader, 'construct_document', forbidden)
+    lines = ['level0: &a0 {value: 1}']
+    for level in range(1, 14):
+        lines.append(f'level{level}: &a{level} {{<<: [*a{level - 1}, *a{level - 1}]}}')
+    raw = ('\n'.join(lines)).encode()
+    assert len(raw) < 1000
+    with pytest.raises(ValueError, match='expansion'):
+        parse_workflow_yaml(raw)
+    assert constructed == []
+
+
+def test_recursive_merge_rejects_before_mapping_construction(monkeypatch):
+    from SynthChat.utils import yaml_loader
+    def forbidden(self, node):
+        raise AssertionError('cyclic graph reached mapping construction')
+    monkeypatch.setattr(yaml_loader._WorkflowLoader, 'construct_document', forbidden)
+    with pytest.raises(ValueError, match='cycle'):
+        parse_workflow_yaml(b'root: &root {<<: *root}')
