@@ -457,6 +457,61 @@ jobs:
           ]))
           PYCODE
 
+      - name: Exercise installed standalone Modal run retention
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import tuner.training.modal_run_retention as retention
+          import tuner.training.modal_standalone_runner as runner
+          import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
+
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          for module in (retention, runner, sqlite_store):
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-modal-retention-tests"
+          for name in (
+              "dataset_prep/test_context_messages_v2.py",
+              "execution/providers/test_modal_runtime_build.py",
+              "execution/test_observation_logs.py",
+              "training/test_modal_standalone_runner.py",
+              "training/test_modal_run_retention_io.py",
+              "training/test_modal_run_retention_integration.py",
+          ):
+              target = root / "tests" / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / "tests" / name, target)
+              for parent in target.parents:
+                  if parent == root:
+                      break
+                  (parent / "__init__.py").touch()
+          # Explicit host configuration fixtures, not proof of a bundled catalog.
+          # No production Python or example code is copied into this test root.
+          for name in (
+              "Trainers/recipes/qwen35_4b_32k_modal_prompt_completion.yaml",
+              "Trainers/runtime_profiles/qwen35-sft-v1.yaml",
+              "Trainers/runtime_profiles/qwen35-sft-v1.inventory.json",
+              "Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c/profile.yaml",
+          ):
+              target = root / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / name, target)
+          import pytest
+          sys.path.insert(0, str(root))
+          os.chdir(root)
+          raise SystemExit(pytest.main([
+              "-q", "-p", "no:cacheprovider",
+              str(root / "tests/training/test_modal_run_retention_io.py"),
+              str(root / "tests/training/test_modal_run_retention_integration.py"),
+          ]))
+          PYCODE
+
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
         run: |
           python -B scripts/regenerate_offline_sft_worker_closure.py

@@ -121,6 +121,18 @@ def _facts(release):
 
 
 def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualification=False):
+    # This provider-free fixture models an admitted source identity, not a live
+    # checkout. Installed consumers deliberately have no engine .git directory.
+    from tuner.execution.providers.modal import runtime_build
+    real_run = runtime_build.subprocess.run
+    engine_root = Path(runtime_build.__file__).resolve().parents[4]
+    head_command = ["git", "-C", str(engine_root), "rev-parse", "HEAD"]
+    def fixture_source_head(command, *args, **kwargs):
+        if command == head_command:
+            return runtime_build.subprocess.CompletedProcess(
+                command, 0, stdout=("1" * 40 + "\n").encode("ascii"), stderr=b"")
+        return real_run(command, *args, **kwargs)
+    monkeypatch.setattr(runtime_build.subprocess, "run", fixture_source_head)
     monkeypatch.setattr(runner.platform, "python_version", lambda: "3.11.14")
     # Source/bootstrap preparation is independently exercised through its real service.
     monkeypatch.setattr(runner, "prepare_modal_standalone_local", lambda **kw: SimpleNamespace(
@@ -279,7 +291,54 @@ def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualif
     monkeypatch.setattr(runner, "observe_modal_host_scope", lambda **kw: (
         facts.account_ref, facts.workspace_ref, facts.environment_ref, facts.client_ref,
     ))
-    deployment_facts = SimpleNamespace(facts_digest="a" * 64)
+    from tuner.execution.providers.modal.runtime_release_deployment import (
+        ModalRuntimeReleaseDeploymentFactsV1, ModalRuntimeReleaseFunctionFactV1,
+        ModalRuntimeReleaseVolumeFactV1, ModalRuntimeReleaseVolumeSpecV1,
+        ModalRuntimeReleaseFunctionSpecV1, ModalRuntimeReleaseSecretFactV1,
+        ModalRuntimeReleaseSecretSpecV1, EXACT_QUALIFICATION_SECRET_REQUIRED_KEYS,
+        EXACT_PACKAGED_TRAINING_MODULE,
+        EXACT_PACKAGED_TRAINING_QUALNAME, EXACT_SELF_CHECK_MODULE, EXACT_SELF_CHECK_QUALNAME,
+        MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_V2_SCHEMA,
+    )
+    function_specs = (
+        ModalRuntimeReleaseFunctionSpecV1(
+            "training", "packaged-training", EXACT_PACKAGED_TRAINING_MODULE,
+            EXACT_PACKAGED_TRAINING_QUALNAME, ("control", "artifacts", "model_cache"),
+            ("qualification", "hf-token"), 1000, 4096, recipe.timeout_seconds, recipe.accelerator, False,
+            restrict_modal_access=False),
+        ModalRuntimeReleaseFunctionSpecV1(
+            "self_check", "packaged-self-check", EXACT_SELF_CHECK_MODULE,
+            EXACT_SELF_CHECK_QUALNAME, ("control", "artifacts"),
+            ("qualification",), 1000, 512, 120, None, True, restrict_modal_access=False),
+    )
+    deployment_facts = ModalRuntimeReleaseDeploymentFactsV1(
+        deployment_spec_digest=facts.deployment_spec_digest,
+        runtime_release_digest=release.manifest_digest, client_binding=facts.client_binding,
+        app_name=facts.app_name, app_id=facts.app_id, generation=facts.deployment_generation,
+        image_reference=None, image_digest=None, image_id=facts.image_id,
+        functions=tuple(ModalRuntimeReleaseFunctionFactV1(spec, identifier)
+                        for spec, identifier in zip(function_specs,
+                            (facts.function_id, facts.self_check_function_id), strict=True)),
+        volumes=tuple(ModalRuntimeReleaseVolumeFactV1(
+            ModalRuntimeReleaseVolumeSpecV1(role, name, mount), identifier)
+            for role, name, mount, identifier in (
+                ("control", "control", "/mnt/control", facts.control_volume_id),
+                ("artifacts", "artifacts", "/mnt/artifacts", facts.artifact_volume_id),
+                ("model_cache", "cache", "/mnt/model-cache", facts.model_cache_volume_id))),
+        secrets=(
+            ModalRuntimeReleaseSecretFactV1(ModalRuntimeReleaseSecretSpecV1(
+                "qualification", EXACT_QUALIFICATION_SECRET_REQUIRED_KEYS), "st-qualification"),
+            ModalRuntimeReleaseSecretFactV1(ModalRuntimeReleaseSecretSpecV1(
+                "hf-token", ("HF_TOKEN",)), "st-hftoken"),
+        ), python_implementation=release.python_implementation,
+        python_version=release.python_version, python_executable=release.python_executable,
+        python_executable_digest=release.python_executable_digest,
+        package_digest=release.package_digest,
+        installed_distributions_digest=release.installed_distributions_digest,
+        worker_entrypoint=release.worker_entrypoint, worker_closure_digest=release.worker_closure_digest,
+        material_digest=release.material_digest,
+        schema_version=MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_V2_SCHEMA,
+    )
     runtime = ModalHostRuntimeV1(
         release, deployment_facts, facts,
         SimpleNamespace(gpu_only_timeout_estimate_minor_units=125, quote_digest="e" * 64),

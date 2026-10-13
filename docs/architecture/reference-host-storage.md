@@ -48,7 +48,8 @@ secrets or using provider catalogs.
 Recomposition still requires the original admitted prepared material, provider
 configuration, signing keys and retained Modal call/binding catalogs. These
 inputs are explicit constructor arguments; a workflow database does not replace
-them. The standalone consumer does not yet select this durable store itself.
+them. New standalone Modal training runs select one SQLite instance for both
+ports under their existing private run directory.
 
 Provider-free tests close and reopen both the generic workflow database and the
 existing Modal catalog storage, then construct fresh effects, adapter and host
@@ -57,6 +58,35 @@ without another training submission. They do not restore process-local source
 payloads or stage effects, enable cancellation/reconciliation, or recreate the
 sealed qualification object needed for restricted logs. Live provider restart
 and safe continuation remain separate release gates.
+
+## Standalone run retention
+
+Before a new standalone Modal run calls `TrainingAPI.start`, it saves the
+original host signing keys separately from the exact composition inputs in its
+private run directory. `authority-keys.json` and `readback-inputs.json` are
+create-only files with mode `0600`; the directory has mode `0700`.
+`workflow.sqlite3` holds the generic workflow records and history. The existing
+attempt journal continues to hold one-shot claims and Modal transport catalogs.
+The runner closes both stores when it returns or fails.
+
+The key file contains the generated host authority/reader keys and runtime
+qualification signing key. It does not contain Hugging Face or Modal API
+credentials. The input file retains the original request, canonical workload and
+configuration bytes, deployment layout, scope, runtime identities and planning
+records. It excludes SDK handles, input source leases and the sealed log proof.
+These files are private implementation state, not an export format.
+
+Retention must finish and read back successfully before training starts. A
+write failure preserves partial files for diagnosis and prevents stage/submit;
+provider build and CPU qualification may already have occurred. Existing files
+are never overwritten to retry the write. The loader checks private file
+custody, byte integrity and run/scope associations. It does not replace typed
+runtime validation or grant new execution authority.
+
+This supplies the original inputs needed for a future standalone reader.
+There is no standalone readback command yet, and it cannot recover signing keys
+that older runs never retained. In-flight recovery, continuation and disabled
+provider capabilities remain open release requirements.
 
 ## Transactions and compatibility
 
