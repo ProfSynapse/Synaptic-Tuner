@@ -404,6 +404,59 @@ jobs:
                           str(tests / "test_sqlite_workflow_host_v1.py")], cwd=root, check=True)
           PY
 
+      - name: Exercise installed Modal durable host composition
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import tuner.training.modal_host_composition as composition
+          import tuner.training.modal_host_storage as storage
+          import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
+
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          for module in (composition, storage, sqlite_store):
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-modal-host-tests"
+          helpers = (
+              "execution/fakes.py", "execution/test_mutation_broker.py",
+              "execution/providers/test_modal_packaged_binding.py",
+              "execution/providers/test_modal_packaged_composition.py",
+              "execution/providers/test_modal_packaged_deployment.py",
+              "execution/providers/test_modal_packaged_dispatch.py",
+              "execution/providers/test_modal_sdk154_adapter.py",
+              "execution/providers/test_modal_source_resolution.py",
+              "runtime/test_packaged_runtime_releases.py",
+              "training/test_modal_post_training_compilation.py",
+              "training/test_packaged_execution_material.py",
+              "training/test_training_compiler.py",
+              "training/test_modal_host_store_ports.py",
+              "training/test_modal_durable_host_composition.py",
+          )
+          for name in helpers:
+              target = root / "tests" / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / "tests" / name, target)
+              for parent in target.parents:
+                  if parent == root:
+                      break
+                  (parent / "__init__.py").touch()
+          # Only test fixtures are copied. Engine code and assets stay installed.
+          import pytest
+          sys.path.insert(0, str(root))
+          os.chdir(root)
+          raise SystemExit(pytest.main([
+              "-q", "-p", "no:cacheprovider",
+              str(root / "tests/training/test_modal_host_store_ports.py"),
+              str(root / "tests/training/test_modal_durable_host_composition.py"),
+          ]))
+          PYCODE
+
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
         run: |
           python -B scripts/regenerate_offline_sft_worker_closure.py

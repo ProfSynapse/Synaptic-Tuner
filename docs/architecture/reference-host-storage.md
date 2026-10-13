@@ -36,6 +36,28 @@ supply its own configured clients, clock and other composition inputs.
 The default SQLite lock timeout is five seconds and can be configured up to
 60 seconds. It bounds lock contention, not arbitrary filesystem latency.
 
+## Modal composition
+
+`compose_modal_packaged_reference_host` and its qualification variant accept
+optional `records` and `streams` arguments. Supply both; passing neither keeps
+the existing in-memory defaults. Passing the same SQLite instance selects the
+atomic workflow updates described below. The caller owns opening, closing and
+reopening that connection. Store methods are checked before resolving named
+secrets or using provider catalogs.
+
+Recomposition still requires the original admitted prepared material, provider
+configuration, signing keys and retained Modal call/binding catalogs. These
+inputs are explicit constructor arguments; a workflow database does not replace
+them. The standalone consumer does not yet select this durable store itself.
+
+Provider-free tests close and reopen both the generic workflow database and the
+existing Modal catalog storage, then construct fresh effects, adapter and host
+objects against the same mocked provider. They exercise retained public reads
+without another training submission. They do not restore process-local source
+payloads or stage effects, enable cancellation/reconciliation, or recreate the
+sealed qualification object needed for restricted logs. Live provider restart
+and safe continuation remain separate release gates.
+
 ## Transactions and compatibility
 
 The optional `commit_record_and_append` operation checks both the expected

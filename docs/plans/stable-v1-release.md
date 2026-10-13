@@ -236,6 +236,10 @@ all supported providers using only declared assets/dependencies.
   scripted fake provider, preserving plans, grants, effects and authenticated
   history without duplicate submit/cancel effects. This verifies host storage;
   live provider restart and the separate plan-index crash boundary remain open.
+- [x] Let the packaged Modal composer accept paired host-owned stores. Verify
+  reopened workflow and call catalogs with fresh host objects against a mocked
+  provider, retaining the original inputs and keys. The standalone runner,
+  process-local source payloads and live restart/continuation remain open.
 - [ ] Compose the existing generic persistence/authority ports into a supported
   durable host boundary. The host owns credentials, configuration, grants,
   coordinator/Foundation records, prepared-input catalogs and product state.
