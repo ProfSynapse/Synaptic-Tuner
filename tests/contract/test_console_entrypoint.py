@@ -28,10 +28,18 @@ def _declared_console_target() -> str:
 
 def _stage_editable_source(destination: Path) -> None:
     shutil.copy2(REPO_ROOT / "pyproject.toml", destination / "pyproject.toml")
-    for filename in ("README.md", "LICENSE", "tuner.py"):
+    # This reduced checkout must include the declared build hook and its exact
+    # catalog inputs, just as the source archive does. Missing production build
+    # inputs remain errors rather than selecting a test-only backend fallback.
+    for filename in (
+        "README.md", "LICENSE", "tuner.py", "MANIFEST.in", "_build_support.py",
+        "cli-first-tool-schemas.json", "Tools/tool_schemas.json",
+    ):
         source = REPO_ROOT / filename
         if source.is_file():
-            shutil.copy2(source, destination / filename)
+            target = destination / filename
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
     for package_name in ("tuner", "synaptic_tuner", "shared"):
         source = REPO_ROOT / package_name
         if source.is_dir():
