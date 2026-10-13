@@ -370,6 +370,24 @@ All 44 focused artifact cases passed from a fresh source-archive-built wheel,
 including the authenticated reader chains. The neutral base consumer passed,
 and the installed artifact and transport modules matched the reviewed source.
 
+The Docker cancellation port now authenticates the exact container, labels and
+image, makes one bounded stop request, and retains its signed receipt in the
+caller's existing durable record store. An uncertain response or receipt write
+keeps the consumed claim; reopening storage cannot replay the stop. Historical
+receipts remain readable after the CLI deadline, which bounds provider commands
+rather than host-owned synchronous signing/storage callbacks.
+
+A receipt records the successful stop request and observed nonrunning state.
+Natural completion can race the request, so the public reader continues to
+report the observed success/failure outcome; it does not infer `cancelled`.
+Scripted tests include actual SQLite reopen, concurrent requests, failed writes,
+lost responses, changed provider identity and the existing executor/reader path.
+Full host composition and live provider qualification remain open.
+
+The combined artifact/cancellation suite passed all 114 cases from a fresh
+source-archive-built wheel. The neutral base consumer and byte comparison of all
+three Docker transport modules passed; runtime inventories and pins are unchanged.
+
 The packaged Modal cancellation machinery now supports an explicit host opt-in
 for a current cancellation grant after the original start grant expires. It
 authenticates the recorded cancellation intent, original successful submit,
