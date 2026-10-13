@@ -229,9 +229,13 @@ all supported providers using only declared assets/dependencies.
 
 - [x] Provide an opt-in host-owned SQLite implementation of the existing
   record/stream ports, with transactional schema initialization and atomic
-  Data/Evaluation/Pipeline head/history updates. Cold-open and killed-process
+  Data/Evaluation/Pipeline/training-workflow head/history updates. Cold-open and killed-process
   regressions cover storage commit boundaries; see
   [reference host storage](../architecture/reference-host-storage.md).
+- [x] Reopen SQLite and reconstruct a reference training host against the same
+  scripted fake provider, preserving plans, grants, effects and authenticated
+  history without duplicate submit/cancel effects. This verifies host storage;
+  live provider restart and the separate plan-index crash boundary remain open.
 - [ ] Compose the existing generic persistence/authority ports into a supported
   durable host boundary. The host owns credentials, configuration, grants,
   coordinator/Foundation records, prepared-input catalogs and product state.
