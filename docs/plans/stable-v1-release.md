@@ -160,7 +160,7 @@ capabilities, package metadata and each advertised provider.
 
 ### Baseline blockers and preparation status
 
-- Current wheel inventory omits Evaluator's 16 configuration YAML files and one
+- The baseline wheel inventory omitted Evaluator's 16 configuration YAML files and one
   recipe, SynthChat's seven configuration YAML files, 19 rubrics and 11 scenarios,
   12 GRPO configuration YAML files, four flywheel YAML files and Tools JSON.
   Explicitly review required members rather than packaging all repository files.
