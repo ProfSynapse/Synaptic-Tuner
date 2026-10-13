@@ -339,6 +339,27 @@ new submission grant or renewing a deadline.
 
 ## 4. Prove crash, uncertainty, cancellation and reconciliation
 
+The packaged Modal cancellation machinery now supports an explicit host opt-in
+for a current cancellation grant after the original start grant expires. It
+authenticates the recorded cancellation intent, original successful submit,
+retained binding and exact call before consuming the existing attempt claim.
+The original commitment and staging/submission expiry remain unchanged.
+
+Scripted public-API tests cover repeated requests, lost replies, a late
+acknowledgment after a bounded wait, reopened workflow/journal state and a race
+with successful completion. Actual Modal 1.5.4 SDK controls verify hydration,
+client/call identity and cancellation acknowledgment without network requests.
+An acknowledgment produces `cancel_requested`, not proof of stopped compute;
+uncertain results retain the consumed claim and never repeat the provider call.
+Ordinary Modal cancel/reconcile capabilities remain disabled, including the
+retained reader and CLI. Live terminal evidence and full restart composition
+are separate acceptance gates.
+
+The fresh source-archive-built wheel passed the neutral base consumer and all
+102 installed retention/readback/cancellation tests. Its five changed production
+modules matched the reviewed source bytes. Both actual pinned-SDK controls also
+passed; the packaged runtime inventories and pins remain unchanged.
+
 - [ ] Fault-inject before/after claim, provider submission, call-ID retention,
   terminal observation and artifact acknowledgment; kill/restart the host at
   each boundary and verify exact source/run ownership.
