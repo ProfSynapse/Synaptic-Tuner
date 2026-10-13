@@ -72,6 +72,33 @@ class BoundedLocalEnvironmentRuntime(EnvironmentRuntime):
         self._created_identity = None
         self._created = False
 
+    @classmethod
+    def _from_inherited_descriptors(cls, limits, anchors, root_fd, name, identity, deadline):
+        """Private fixed-child attachment; inherited FDs are not restart authority.
+
+        The owning supervisor passes retained descriptors, never reopened paths.
+        This constructor is not an authorization boundary for arbitrary callers.
+        """
+        cls._platform()
+        if type(anchors) is not tuple or not anchors or type(root_fd) is not int:
+            raise ValueError("invalid inherited descriptor set")
+        if type(deadline) is not float or not math.isfinite(deadline):
+            raise ValueError("invalid inherited deadline")
+        runtime = cls("/", limits)
+        for parent, entry_name, fd in anchors:
+            if type(fd) is not int or fd < 0 or (parent is not None and type(parent) is not int):
+                raise ValueError("invalid inherited descriptor")
+        runtime._anchors = list(anchors)
+        runtime._root_fd = root_fd
+        runtime._name = name
+        runtime._deadline = deadline
+        runtime._created = True
+        runtime._created_identity = tuple(identity)
+        if runtime._identity(os.fstat(root_fd)) != runtime._created_identity:
+            raise RuntimeError("inherited scratch identity mismatch")
+        runtime._check()
+        return runtime
+
     @staticmethod
     def _platform():
         required = (os.open, os.mkdir, os.stat, os.unlink, os.rmdir, os.rename, os.link)
