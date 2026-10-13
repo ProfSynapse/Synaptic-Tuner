@@ -50,10 +50,12 @@ include = [
   "Evaluator*",
   "MechInterp*",
   "Trainers*",
+  "schemas",
 ]
 namespaces = true
 
 [tool.setuptools.package-data]
+"schemas" = ["synaptic-*.schema.json"]
 "tuner.execution.providers.modal" = [
   "modal-runtime-v1.lock.json",
   "modal-wheel-builder.lock.json",
