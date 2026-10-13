@@ -212,8 +212,17 @@ class EnvironmentSession:
                 verb_rules=self.verb_rules,
                 default_action=self.default_action,
                 read_output=self.read_output,
+                wrapper_specs=getattr(self.validator, "wrapper_specs", None),
+                catalog=getattr(self.validator, "catalog", None),
+                allowed_actions=getattr(self.validator, "allowed_actions", None),
+                simulate_only=getattr(self.validator, "simulate_only", False),
+                safe_errors=getattr(self.validator, "safe_errors", False),
+                max_tool_calls=(None if not getattr(self.validator, "bounded_execution", False)
+                    else max(0, self.max_steps - len(self.executed_tools))),
             )
         except Exception as exc:
+            if getattr(self.validator, "safe_errors", False):
+                raise
             executions = []
             exec_issues = [EnvironmentIssue("error", f"Environment validation failed: {exc}")]
 

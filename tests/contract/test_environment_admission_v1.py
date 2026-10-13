@@ -333,7 +333,7 @@ def test_improvement_binds_actual_dataset_validation_and_rubric_bytes(harness, t
                       rubric_refs=("response_quality",))
     plan = operations.plan(request)
     roles = {item.role for item in plan.environment_binding.dependencies}
-    assert roles == {"execution_policy", "fixture_schema", "tool_schema", "validation", "rubric", "dataset"}
+    assert roles == {"execution_policy", "fixture_schema", "tool_schema", "validation", "rubric", "dataset", "registry"}
     rubric = rubrics / "response_quality.yaml"
     rubric.write_bytes(rubric.read_bytes() + b"\n# changed input bytes\n")
     with pytest.raises(DataOperationError, match="environment_invalid"):
@@ -524,7 +524,7 @@ def test_improvement_input_bytes_stay_reference_owned(harness, tmp_path):
     capture = operations._verify_plan(plan)
     dataset.unlink()
     assert capture.document_bytes("dataset", "input:dataset") == raw
-    assert {entry[0] for entry in capture.workflow_documents()} == {"validation", "rubric"}
+    assert {entry[0] for entry in capture.workflow_documents()} == {"validation", "rubric", "registry"}
     assert "documents" not in plan.to_dict()
     with pytest.raises(DataOperationError):
         operations.start(plan)

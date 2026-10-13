@@ -189,8 +189,11 @@ class ReferenceDataPortsV1:
     rubrics_dir: Path
     llm_clients: LLMClientFactoryPort
     environments: EnvironmentExecutionPort | None = None
+    environment_sessions: object | None = None
 
     def __post_init__(self) -> None:
+        if self.environment_sessions is not None and not callable(getattr(self.environment_sessions, "prepare", None)):
+            raise TypeError("environment_sessions must expose prepare")
         for name in ("config_dir", "scenarios_dir", "rubrics_dir"):
             value = getattr(self, name)
             if type(value) is not Path and not isinstance(value, Path):
@@ -881,6 +884,8 @@ class ReferenceDataOperationsV1:
         if plan.environment_binding is not None and admitted_inputs is None:
             raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
         snapshot = None if admitted_inputs is None else self._workflow_snapshot(plan, admitted_inputs)
+        validator = None if snapshot is None or ports.environment_sessions is None else ports.environment_sessions.prepare(
+            plan, admitted_inputs, boundary)
         stage_validation = request.max_iterations > 1
         engine = None
         if stage_validation:
@@ -898,7 +903,7 @@ class ReferenceDataOperationsV1:
             rubrics_dir=ports.rubrics_dir,
             llm_client=client,
             engine=engine,
-            environment_validator=None,
+            environment_validator=validator,
             enable_stage_validation=stage_validation,
             logger=_LOGGER,
             input_snapshot=snapshot,
@@ -929,6 +934,8 @@ class ReferenceDataOperationsV1:
         if plan.environment_binding is not None and admitted_inputs is None:
             raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
         snapshot = None if admitted_inputs is None else self._workflow_snapshot(plan, admitted_inputs)
+        validator = None if snapshot is None or ports.environment_sessions is None else ports.environment_sessions.prepare(
+            plan, admitted_inputs, boundary)
         engine = ImprovementEngine(
             llm_client=client,
             rubrics_dir=ports.rubrics_dir,
@@ -948,8 +955,10 @@ class ReferenceDataOperationsV1:
         for example in rows:
             result = engine.run(
                 example=example, rubric_keys=list(request.rubric_refs), max_iterations=request.max_iterations,
+                **({} if validator is None else {"candidate_evaluator": validator.candidate_evaluator()}),
             )
-            on_row(target.scenario_ref, result.improved_example, bool(result.passed), writer)
+            passed = bool(result.passed) and (validator is None or bool(validator.last_evaluation["passed"]))
+            on_row(target.scenario_ref, result.improved_example, passed, writer)
             produced += 1
         observe(ObservationKind.DATA_SCENARIO_COMPLETED, DataScenarioCompletedPayloadV1(target.scenario_ref, produced))
 

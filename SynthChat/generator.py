@@ -1108,7 +1108,8 @@ class SynthChatGenerator:
                 example,
                 stage="response",
                 rubrics=response_rubrics,
-                max_iterations=max_iterations
+                max_iterations=max_iterations,
+                environment_config=resolved_environment_config,
             )
             example = improved
             total_iterations += iterations
@@ -1119,6 +1120,10 @@ class SynthChatGenerator:
         environment_trace = locals().get("environment_trace")
         if self.environment_validator is not None and environment_trace is None:
             try:
+                assistant_msg = next(
+                    (msg for msg in reversed(example["conversations"]) if msg.get("role") == "assistant"),
+                    assistant_msg,
+                )
                 system_prompt_text = ""
                 for msg in example["conversations"]:
                     if msg.get("role") == "system":
@@ -1137,6 +1142,8 @@ class SynthChatGenerator:
                 if not env_result.passed:
                     stage_failures.append("environment")
             except Exception as exc:
+                if self.input_snapshot is not None:
+                    raise
                 stage_failures.append("environment")
                 environment_trace = {
                     "passed": False,
@@ -1171,6 +1178,7 @@ class SynthChatGenerator:
                     rubrics=response_rubrics,
                     max_iterations=1,
                     prompt_context=prompt_context,
+                    environment_config=resolved_environment_config,
                 )
                 example = improved
                 total_iterations += iterations
@@ -1199,6 +1207,8 @@ class SynthChatGenerator:
                         response_retry_passed = True
                         break
                 except Exception as exc:
+                    if self.input_snapshot is not None:
+                        raise
                     environment_trace = {
                         "passed": False,
                         "issues": [{"level": "error", "message": f"Environment validation failed after improvement: {exc}"}],
@@ -1813,6 +1823,7 @@ class SynthChatGenerator:
         rubrics: List[str],
         max_iterations: int,
         prompt_context: Optional[Dict[str, Any]] = None,
+        environment_config: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict, int, bool]:
         """
         Improve a single stage using the improvement engine.
@@ -1830,11 +1841,15 @@ class SynthChatGenerator:
             return example, 0, True
 
         try:
+            evaluator = None
+            if stage == "response" and callable(getattr(self.environment_validator, "candidate_evaluator", None)):
+                evaluator = self.environment_validator.candidate_evaluator(environment_config)
             result = self.engine.run(
                 example=example,
                 rubric_keys=rubrics,
                 max_iterations=max_iterations,
                 prompt_context=prompt_context,
+                **({} if evaluator is None else {"candidate_evaluator": evaluator}),
             )
             return result.improved_example, result.iterations, result.passed
         except Exception as e:

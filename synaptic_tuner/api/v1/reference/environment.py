@@ -280,8 +280,13 @@ def admit_environment(request, ports):
             "scope_ref": binding.scope_ref, "mode": binding.selection.mode.value,
             "bounds": binding.bounds.to_dict(), "allowed_actions": list(binding.allowed_actions),
         }
-        if host["execution_policy"] != policy:
+        supplied_policy = host["execution_policy"]
+        if {key: value for key, value in supplied_policy.items()
+                if key not in {"execution", "cli_catalog"}} != policy:
             raise _invalid()
+        for optional in ("execution", "cli_catalog"):
+            if optional in supplied_policy and type(supplied_policy[optional]) is not dict:
+                raise _invalid()
         fixture_validator = _schema(host["fixture_schema"])
         for definition in definitions.values():
             system = definition.get("system")
@@ -338,6 +343,10 @@ def admit_environment(request, ports):
             _no_external_refs(_yaml(raw))
             capture("privacy", "config:privacy_profiles", raw)
         else:
+            from SynthChat.config.format_resolver import _CONFIG_DIR
+            raw = _read(_CONFIG_DIR / "tool_call_formats.yaml")
+            _no_external_refs(_yaml(raw))
+            capture("registry", "registry:tool_call_formats", raw)
             raw = _read(Path(request.input_dataset_ref))
             capture("dataset", "input:dataset", raw)
             dataset_rows = []
