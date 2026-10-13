@@ -227,6 +227,11 @@ all supported providers using only declared assets/dependencies.
 
 ## 3. Ship durable host composition and migrations
 
+- [x] Provide an opt-in host-owned SQLite implementation of the existing
+  record/stream ports, with transactional schema initialization and atomic
+  Data/Evaluation/Pipeline head/history updates. Cold-open and killed-process
+  regressions cover storage commit boundaries; see
+  [reference host storage](../architecture/reference-host-storage.md).
 - [ ] Compose the existing generic persistence/authority ports into a supported
   durable host boundary. The host owns credentials, configuration, grants,
   coordinator/Foundation records, prepared-input catalogs and product state.
