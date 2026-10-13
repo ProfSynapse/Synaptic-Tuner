@@ -282,7 +282,9 @@ def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualif
     from tuner.execution.providers.modal.runtime_release_deployment import (
         ModalRuntimeReleaseDeploymentFactsV1, ModalRuntimeReleaseFunctionFactV1,
         ModalRuntimeReleaseVolumeFactV1, ModalRuntimeReleaseVolumeSpecV1,
-        ModalRuntimeReleaseFunctionSpecV1, EXACT_PACKAGED_TRAINING_MODULE,
+        ModalRuntimeReleaseFunctionSpecV1, ModalRuntimeReleaseSecretFactV1,
+        ModalRuntimeReleaseSecretSpecV1, EXACT_QUALIFICATION_SECRET_REQUIRED_KEYS,
+        EXACT_PACKAGED_TRAINING_MODULE,
         EXACT_PACKAGED_TRAINING_QUALNAME, EXACT_SELF_CHECK_MODULE, EXACT_SELF_CHECK_QUALNAME,
         MODAL_RUNTIME_RELEASE_DEPLOYMENT_FACTS_V2_SCHEMA,
     )
@@ -290,12 +292,12 @@ def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualif
         ModalRuntimeReleaseFunctionSpecV1(
             "training", "packaged-training", EXACT_PACKAGED_TRAINING_MODULE,
             EXACT_PACKAGED_TRAINING_QUALNAME, ("control", "artifacts", "model_cache"),
-            (), 1000, 4096, recipe.timeout_seconds, recipe.accelerator, False,
+            ("qualification", "hf-token"), 1000, 4096, recipe.timeout_seconds, recipe.accelerator, False,
             restrict_modal_access=False),
         ModalRuntimeReleaseFunctionSpecV1(
             "self_check", "packaged-self-check", EXACT_SELF_CHECK_MODULE,
             EXACT_SELF_CHECK_QUALNAME, ("control", "artifacts"),
-            (), 1000, 512, 120, None, True, restrict_modal_access=False),
+            ("qualification",), 1000, 512, 120, None, True, restrict_modal_access=False),
     )
     deployment_facts = ModalRuntimeReleaseDeploymentFactsV1(
         deployment_spec_digest=facts.deployment_spec_digest,
@@ -311,7 +313,12 @@ def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualif
                 ("control", "control", "/mnt/control", facts.control_volume_id),
                 ("artifacts", "artifacts", "/mnt/artifacts", facts.artifact_volume_id),
                 ("model_cache", "cache", "/mnt/model-cache", facts.model_cache_volume_id))),
-        secrets=(), python_implementation=release.python_implementation,
+        secrets=(
+            ModalRuntimeReleaseSecretFactV1(ModalRuntimeReleaseSecretSpecV1(
+                "qualification", EXACT_QUALIFICATION_SECRET_REQUIRED_KEYS), "st-qualification"),
+            ModalRuntimeReleaseSecretFactV1(ModalRuntimeReleaseSecretSpecV1(
+                "hf-token", ("HF_TOKEN",)), "st-hf-token"),
+        ), python_implementation=release.python_implementation,
         python_version=release.python_version, python_executable=release.python_executable,
         python_executable_digest=release.python_executable_digest,
         package_digest=release.package_digest,
