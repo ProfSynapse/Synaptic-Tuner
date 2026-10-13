@@ -1,6 +1,5 @@
 """Private retention custody failures cannot silently mint a readable bundle."""
 import json
-from pathlib import Path
 
 import pytest
 
@@ -93,17 +92,24 @@ def test_fsync_failure_retains_partial_attempt_without_secret_exception_context(
     assert not (bundle["root"] / retention.INPUTS_FILE).exists()
 
 
-def test_named_root_replacement_during_read_is_rejected(bundle, monkeypatch):
+@pytest.mark.parametrize("attack", ["root_replacement", "file_permission"])
+def test_read_mutation_is_rejected_through_same_owned_descriptor(bundle, monkeypatch, attack):
     retention.retain_modal_run(**bundle)
-    original = retention.stable_read
+    original = retention.os.read
     root = bundle["root"]
-    def replace_root(path, maximum):
-        raw = original(path, maximum)
-        if Path(path).name == retention.KEYS_FILE:
-            root.rename(root.with_name("retained-old"))
-            root.mkdir(mode=0o700)
+    attacked = False
+    def mutate_during_read(descriptor, maximum):
+        nonlocal attacked
+        raw = original(descriptor, maximum)
+        if not attacked:
+            attacked = True
+            if attack == "root_replacement":
+                root.rename(root.with_name("retained-old"))
+                root.mkdir(mode=0o700)
+            else:
+                (root / retention.KEYS_FILE).chmod(0o644)
         return raw
-    monkeypatch.setattr(retention, "stable_read", replace_root)
+    monkeypatch.setattr(retention.os, "read", mutate_during_read)
     with pytest.raises(retention.ModalRunRetentionUnavailable):
         retention.load_retained_modal_run(root, expected_run=bundle["run"])
 

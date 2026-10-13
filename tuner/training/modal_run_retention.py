@@ -18,7 +18,6 @@ import stat
 from types import MappingProxyType
 
 from synaptic_tuner.api.v1.results import TrainingRunRef
-from tuner.runtime.packaged_worker_closure import stable_read
 from tuner.training.modal_local_preparation import private_directory
 
 KEY_NAMES = frozenset({"SYNAPTIC_TRAIN_AUTHORITY_KEY", "SYNAPTIC_TRAIN_READER_KEY"})
@@ -183,19 +182,34 @@ def _write(root, name, raw):
 
 def _read(root, name, maximum):
     parent, parent_info = _parent(root)
+    descriptor = None
     try:
-        before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
+        before = os.fstat(descriptor)
+        named = os.stat(name, dir_fd=parent, follow_symlinks=False)
         if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
-                or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1):
+                or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1
+                or not 0 < before.st_size <= maximum
+                or (named.st_dev, named.st_ino) != (before.st_dev, before.st_ino)):
             raise ValueError
-        raw = stable_read(root / name, maximum)
-        after = os.stat(name, dir_fd=parent, follow_symlinks=False)
-        if (before.st_dev, before.st_ino, before.st_size, before.st_mode, before.st_uid, before.st_nlink) != (
-                after.st_dev, after.st_ino, after.st_size, after.st_mode, after.st_uid, after.st_nlink):
+        retained = bytearray()
+        while len(retained) <= maximum:
+            block = os.read(descriptor, min(65536, maximum + 1 - len(retained)))
+            if not block:
+                break
+            retained.extend(block)
+        after = os.fstat(descriptor)
+        named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        fields = ("st_dev", "st_ino", "st_size", "st_mode", "st_uid", "st_nlink", "st_mtime_ns", "st_ctime_ns")
+        if (len(retained) != before.st_size or len(retained) > maximum
+                or any(getattr(before, key) != getattr(after, key) for key in fields)
+                or any(getattr(after, key) != getattr(named, key) for key in fields)):
             raise ValueError
         _check_root(root, parent, parent_info)
-        return raw
+        return bytes(retained)
     finally:
+        if descriptor is not None:
+            os.close(descriptor)
         os.close(parent)
 
 
