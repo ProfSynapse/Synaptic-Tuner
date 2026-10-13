@@ -6,9 +6,12 @@ Cloud training uses the existing SFT and KTO trainers plus the env-backed GRPO p
 
 The new product path is the submodule-first public training API documented in
 `docs/architecture/submodule-first-training-v1.md`. Modal SFT and host-selected
-local publication are live-proven. Hugging Face publication is implemented and
-fake-tested only. Local Docker, HF Jobs, and RunPod are not yet execution
-providers through that API.
+local publication have bounded historical live evidence. Docker and ordinary
+HF Jobs now have explicit public host compositions with provider-free tests;
+their live SFT, cancellation and recovery qualification remains open. The HF
+candidate supports final native SFT artifacts, prepared v1 inputs up to 2 MiB
+and no checkpoint retention. Hugging Face model publication is implemented and
+fake-tested only. RunPod is not an execution provider through this API.
 
 The protected HF source/bootstrap lane and the older `cloud-run`,
 `cloud-pipeline`, and experiment commands documented below are legacy or

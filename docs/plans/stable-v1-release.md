@@ -227,6 +227,38 @@ console/project-manifest path from outside the checkout. This qualifies those
 base-package paths; provider launchers, POSIX stores, environment workers and GPU
 execution retain their separate platform and runtime requirements.
 
+### Ordinary HF Jobs SFT preparation
+
+The explicit HF host assembly now uses the same public training/run APIs and
+caller-owned records, grants and signing keys. It binds a named runtime profile,
+exact source/input bytes, declared resources, account/namespace, existing bucket
+and fresh prefixes before one-shot staging and submission. Partial uploads and
+unknown submission replies remain consumed. The protected HF smoke and legacy
+CLI lanes are unchanged.
+
+The candidate uses isolated hash-pinned Hub 1.33 host dependencies and the
+unchanged Qwen runtime profile's Hub 1.32 model helper. Public-model preparation
+is anonymous; the explicitly named job secret stays in the privileged parent
+and the trainer receives its reset environment. Parent source is a separate
+fixed 16-member inventory, maintained by `scripts/regenerate_hf_parent_closure.py`;
+the offline trainer retains its existing 68-member closure.
+
+A fresh source-archive-built wheel passed the neutral base consumer, 30 installed
+public lifecycle/bootstrap/native verification/fault/cold-store cases with the
+real Hub 1.33 SDK, and two controlled HTTP model-preparation cases with Hub 1.32.
+These include copied-parent imports in a fresh isolated process, actual bootstrap
+and worker filesystem operations with injected ML effects, multi-MiB artifact
+streaming, and refusal to replay uncertain effects. Both installed dependency
+lanes assert their exact SDK version before collecting tests.
+
+Initial native acceptance is limited to prepared `syntunia-sft-row/v1` inputs up
+to 2 MiB, exactly five final native artifact roles and no checkpoint retention.
+Logs, cancellation and reconciliation are unavailable. Cold reads retain the
+original admitted material and keys; they do not restore an uncertain remote
+submission. Shared-bucket readback is not an atomic-ownership or remote-fsync
+guarantee. CPU tests on Python 3.12.15 do not qualify the candidate image's locked
+Python 3.12.3, GPU execution or live HF behavior. Those release gates remain open.
+
 ## 1. Freeze the public support contract
 
 - [ ] Publish the provider/method/operation matrix for plan/preflight/start,
