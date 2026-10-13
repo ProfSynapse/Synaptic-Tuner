@@ -725,3 +725,23 @@ def test_compare_revalidates_both_inputs_even_when_output_validation_raises(monk
     monkeypatch.setattr(EvaluationAPI, "_comparison_document", staticmethod(invalid_output))
     with pytest.raises(ValueError, match="input changed"):
         EvaluationAPI(Operations()).compare(*requests)
+
+
+@pytest.mark.parametrize("damage", ["negative_total", "fractional_total", "tag_passed", "tag_rate"])
+def test_renderer_reference_statistics_have_same_exact_count_and_rate_contract(damage):
+    requests = (EvaluationResultRequest(RUN), EvaluationResultRequest(RUN))
+    report = _comparison_for(*requests)
+    stats = report["reference"]["stats"]
+    if damage == "negative_total":
+        stats["total"] = -1
+    elif damage == "fractional_total":
+        stats["total"] = 0.5
+    elif damage == "tag_passed":
+        stats["by_tag"]["__untagged__"]["passed"] = 2
+    else:
+        stats["by_tag"]["__untagged__"]["pass_rate"] = 2.0
+    class Operations:
+        def compare(self, *args):
+            return report
+    with pytest.raises((ValueError, TypeError)):
+        EvaluationAPI(Operations()).compare(*requests)

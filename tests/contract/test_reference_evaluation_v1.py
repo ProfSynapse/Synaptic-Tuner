@@ -886,3 +886,17 @@ def test_bound_reader_rejects_substituted_artifact_before_comparison(tmp_path, s
     with pytest.raises(EvaluationOperationError) as caught:
         api.evaluation.compare(EvaluationResultRequest(started.run), EvaluationResultRequest(started.run))
     assert caught.value.code is EvaluationOperationCode.INTEGRITY_ERROR
+
+
+def test_public_comparison_uses_existing_renderers_and_explicit_clock(tmp_path):
+    from Evaluator.compare import render_markdown, render_console
+    sink = DirectoryEvaluationArtifactSinkV1(tmp_path / "sink")
+    _, api, _, _, _, _ = _host(tmp_path, backends={"local": ComparisonScriptedBackend()}, artifact_reader=sink)
+    _, _, started = _run(api)
+    report = api.evaluation.compare(EvaluationResultRequest(started.run), EvaluationResultRequest(started.run))
+    assert report["generated_at"] == NOW
+    assert report["thresholds"]["active"] is False
+    assert report["reference"]["path"] == "reference" and report["reference"]["stats"]["total"] == 2
+    assert "Evaluation Comparison" in render_markdown(report)
+    assert "Reference: reference" in render_console(report)
+    assert SECRET_VALUE not in render_markdown(report) and "Say hello" not in render_console(report)

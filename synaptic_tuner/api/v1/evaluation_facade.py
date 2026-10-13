@@ -967,13 +967,13 @@ class EvaluationAPI:
     def _comparison_document(value):
         """Validate and detach the existing finite JSON report, no runtime imports."""
         keys = {"schema_version", "intended_variable", "reference", "candidates", "passed",
-                "reference_run", "candidate_run"}
+                "reference_run", "candidate_run", "generated_at", "warnings", "thresholds"}
         value = exact_fields(value, frozenset(keys), "evaluation_comparison")
         if (value["schema_version"] != "synaptic-evaluation-comparison/v1"
                 or type(value["passed"]) is not bool
                 or type(value["candidates"]) is not list or len(value["candidates"]) != 1):
             raise ValueError("invalid evaluation comparison report")
-        value["reference"] = exact_fields(value["reference"], frozenset({"label", "model", "model_revision", "backend"}),
+        value["reference"] = exact_fields(value["reference"], frozenset({"label", "path", "model", "model_revision", "backend", "model_artifact", "stats"}),
                                           "evaluation_comparison_reference")
         expected_candidate = {"label", "path", "model", "model_revision", "backend", "model_artifact",
             "comparable", "mismatches", "warnings", "case_counts", "only_reference_case_ids",
@@ -998,6 +998,18 @@ class EvaluationAPI:
                 text = identity[name]
                 if text is not None and (type(text) is not str or not 1 <= len(text) <= 512):
                     raise ValueError("invalid evaluation comparison identity")
+        if value["generated_at"] is not None:
+            _timestamp(value["generated_at"], "generated_at")
+        thresholds = exact_fields(value["thresholds"], frozenset({"max_pass_rate_drop_pp", "max_correctness_drop_pp",
+            "max_tag_drop_pp", "max_regressions", "min_tag_cases", "alpha", "allow_mismatch", "active"}), "comparison_thresholds")
+        _bool(thresholds["active"], "active")
+        _bool(thresholds["allow_mismatch"], "allow_mismatch")
+        _count(thresholds["min_tag_cases"], "min_tag_cases", minimum=1)
+        if (thresholds != {"max_pass_rate_drop_pp": None, "max_correctness_drop_pp": None,
+                "max_tag_drop_pp": None, "max_regressions": None, "min_tag_cases": 1,
+                "alpha": None, "allow_mismatch": False, "active": False} or value["warnings"] != []
+                or value["reference"]["path"] != "reference" or value["reference"]["model_artifact"] is not None):
+            raise ValueError("invalid report-only comparison metadata")
         if value["reference"]["label"] != "reference" or row["label"] != "candidate":
             raise ValueError("invalid evaluation comparison labels")
         _count(row["excluded_pair_count"], "excluded_pair_count")
@@ -1007,6 +1019,14 @@ class EvaluationAPI:
                 raise ValueError("invalid evaluation comparison statistics")
         stats = {"total", "passed", "pass_rate", "correctness_tested", "correctness_passed",
                  "correctness_pass_rate", "request_errors", "mean_latency_s"}
+        ref_stats = exact_fields(value["reference"]["stats"], frozenset(stats | {"by_tag"}), "comparison_reference_stats")
+        numeric_mapping({key: ref_stats[key] for key in stats}, stats)
+        if type(ref_stats["by_tag"]) is not dict or len(ref_stats["by_tag"]) > 100:
+            raise ValueError("invalid comparison reference tags")
+        for tag, bucket in ref_stats["by_tag"].items():
+            if type(tag) is not str or len(tag) > 256:
+                raise ValueError("invalid comparison reference tag")
+            numeric_mapping(bucket, {"total", "passed", "pass_rate"})
         for key in ("reference", "candidate"):
             numeric_mapping(row[key], stats)
         for key, fields in (("case_counts", {"shared", "only_reference", "only_candidate"}),
@@ -1038,15 +1058,21 @@ class EvaluationAPI:
         def rate(number):
             if number is not None and not 0 <= _finite_float(number, "rate") <= 1:
                 raise ValueError("invalid evaluation comparison rate")
-        for key in ("reference", "candidate"):
-            bucket = row[key]
+        for bucket in (row["reference"], row["candidate"], ref_stats):
             count_fields(bucket, ("total", "passed", "correctness_tested", "correctness_passed", "request_errors"))
             if not (bucket["passed"] <= bucket["total"] and bucket["correctness_passed"] <= bucket["correctness_tested"] <= bucket["total"]
                     and bucket["request_errors"] <= bucket["total"]):
                 raise ValueError("invalid evaluation comparison counts")
             rate(bucket["pass_rate"])
             rate(bucket["correctness_pass_rate"])
+        for bucket in ref_stats["by_tag"].values():
+            count_fields(bucket, ("total", "passed"))
+            if bucket["passed"] > bucket["total"] or bucket["total"] > ref_stats["total"]:
+                raise ValueError("invalid reference tag counts")
+            rate(bucket["pass_rate"])
         count_fields(row["case_counts"], ("shared", "only_reference", "only_candidate"))
+        if ref_stats["total"] != row["case_counts"]["shared"] + row["case_counts"]["only_reference"]:
+            raise ValueError("invalid reference comparison total")
         if row["reference"]["total"] != row["case_counts"]["shared"] or row["candidate"]["total"] != row["case_counts"]["shared"]:
             raise ValueError("invalid paired comparison counts")
         count_fields(row["flips"], ("regression_count", "improvement_count", "discordant"))

@@ -235,7 +235,7 @@ def from_payload(payload: Mapping[str, Any], *, label: str) -> ResultsFile:
 
 
 def compare_payloads(reference: Mapping[str, Any], candidate: Mapping[str, Any], *,
-                     intended_variable: str = "model") -> Dict[str, Any]:
+                     intended_variable: str = "model", generated_at: str | None = None) -> Dict[str, Any]:
     """Strict provenance-aware mechanical comparison of two existing reports.
 
     Model/checkpoint is the default variable. Backend variation must be named
@@ -244,6 +244,9 @@ def compare_payloads(reference: Mapping[str, Any], candidate: Mapping[str, Any],
     """
     import re
     from .comparison_basis import BASIS_SCHEMA, bounded_json, MAX_COMPARISON_BYTES
+    if generated_at is not None:
+        from synaptic_tuner.api.v1._timestamps import require_rfc3339
+        require_rfc3339(generated_at, "generated_at")
     if intended_variable not in {"model", "backend"}:
         raise CompareInputError("unsupported comparison variable")
     left = from_payload(reference, label="reference")
@@ -329,8 +332,10 @@ def compare_payloads(reference: Mapping[str, Any], candidate: Mapping[str, Any],
         result["flips"][key] = result["flips"][key][:100]
     result["omitted_case_id_counts"] = omitted
     report = {"schema_version": COMPARISON_SCHEMA_VERSION, "intended_variable": intended_variable,
-              "reference": {"label": "reference", "model": left.metadata.get("model"),
-                            "model_revision": left.metadata.get("model_revision"), "backend": left.metadata.get("backend")},
+              "generated_at": generated_at, "warnings": [], "thresholds": GateThresholds().to_dict(),
+              "reference": {"label": "reference", "path": "reference", "model": left.metadata.get("model"),
+                            "model_revision": left.metadata.get("model_revision"), "backend": left.metadata.get("backend"),
+                            "model_artifact": None, "stats": side_stats(left, list(left.cases))},
               "candidates": [result], "passed": result["comparable"]}
     bounded_json(report, MAX_COMPARISON_BYTES)
     return report

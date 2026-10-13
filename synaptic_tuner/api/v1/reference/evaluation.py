@@ -1622,7 +1622,7 @@ class ReferenceEvaluationOperationsV1:
         try:
             from Evaluator.compare import compare_payloads
             report = compare_payloads(self._comparison_report(reference), self._comparison_report(candidate),
-                                      intended_variable=intended_variable)
+                                      intended_variable=intended_variable, generated_at=self._clock.now())
             return {**report, "reference_run": reference.run.to_dict(), "candidate_run": candidate.run.to_dict()}
         except EvaluationOperationError:
             raise

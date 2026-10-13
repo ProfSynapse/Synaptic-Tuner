@@ -570,3 +570,11 @@ def test_listed_flip_ids_truncate_but_all_paired_math_is_preserved():
     assert result["flips"]["regression_count"] == 150 and len(result["flips"]["regressions"]) == 100
     assert result["omitted_case_id_counts"]["regressions"] == 50
     assert result["reference"]["total"] == result["candidate"]["total"] == 150
+
+
+def test_pure_report_timestamp_is_explicit_and_deterministic():
+    first = compare.compare_payloads(_basis_payload(), _basis_payload(), generated_at="2026-10-13T12:00:00Z")
+    second = compare.compare_payloads(_basis_payload(), _basis_payload(), generated_at="2026-10-13T12:00:00Z")
+    assert first == second and first["generated_at"] == "2026-10-13T12:00:00Z"
+    assert "Evaluation Comparison" in compare.render_markdown(first)
+    assert "Reference: reference" in compare.render_console(first)
