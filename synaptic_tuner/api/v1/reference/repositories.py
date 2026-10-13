@@ -827,13 +827,6 @@ class DurableWorkflowStoreV1:
                 atomic = atomic_commit_method(self._records, self._streams)
             except Exception:
                 raise _integrity() from None
-            if atomic is not None:
-                # An index without its head is retained admission, not retry authority.
-                prior_index = _read(self._records, _WORKFLOW, plan_key)
-                if prior_index is not None:
-                    owner = self._decode_index(prior_index.canonical)
-                    if _read(self._records, _WORKFLOW, self._head_key(owner)) is None:
-                        raise _integrity()
             try:
                 indexed = self._records.put_if_absent(
                     partition=_WORKFLOW, key=plan_key, canonical=self._index_document(candidate.run)

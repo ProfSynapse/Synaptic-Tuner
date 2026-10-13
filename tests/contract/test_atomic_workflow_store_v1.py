@@ -27,7 +27,7 @@ def open_store(tmp_path):
     return private / 'host.sqlite3'
 
 
-def test_genesis_fault_retains_index_without_head_and_cannot_retry(tmp_path, authenticated_transition):
+def test_genesis_fault_retains_index_and_ordinary_lookup_refuses_missing_head(tmp_path, authenticated_transition):
     (expected, _, _), family = authenticated_transition
     path = open_store(tmp_path)
     with SQLiteDurableStoreV1(path) as store:
@@ -42,7 +42,7 @@ def test_genesis_fault_retains_index_without_head_and_cannot_retry(tmp_path, aut
     with SQLiteDurableStoreV1(path) as store:
         cold, _, _, _, _, _ = _fixture(records=store, streams=store, family=family)
         with pytest.raises(CoordinatorStoreError):
-            cold.stores.workflow_store.create(expected)
+            cold.stores.workflow_store.get_by_plan(expected.run.project_ref, expected.plan_fingerprint)
         assert cold.stores.workflow_store.get(expected.run) is None
 
 
@@ -110,3 +110,40 @@ def test_identical_genesis_is_idempotent_but_same_plan_other_run_conflicts(tmp_p
             workflow.create(other)
         assert workflow.get(other.run) is None
         assert workflow.get(expected.run) == expected
+
+
+def test_fresh_identical_creators_interleaved_after_index_have_one_winner(tmp_path, authenticated_transition):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    (expected, _, _), family = authenticated_transition
+    path = open_store(tmp_path)
+    indexed, release = Event(), Event()
+    def first_creator():
+        with SQLiteDurableStoreV1(path) as store:
+            host, _, _, _, _, _ = _fixture(records=store, streams=store, family=family)
+            original = store.put_if_absent
+            def pause_after_index(**kwargs):
+                result = original(**kwargs)
+                if kwargs['partition'] == 'workflow':
+                    indexed.set()
+                    assert release.wait(timeout=5)
+                return result
+            store.put_if_absent = pause_after_index
+            return host.stores.workflow_store.create(expected)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(first_creator)
+        try:
+            assert indexed.wait(timeout=5)
+            with SQLiteDurableStoreV1(path) as store:
+                second, _, _, _, _, _ = _fixture(records=store, streams=store, family=family)
+                assert second.stores.workflow_store.create(expected) is True
+        finally:
+            release.set()
+        assert future.result(timeout=10) is False
+    with SQLiteDurableStoreV1(path) as store:
+        cold, _, _, _, _, _ = _fixture(records=store, streams=store, family=family)
+        workflow = cold.stores.workflow_store
+        assert workflow.get(expected.run) == expected
+        entries = store.read_page(partition='workflow', stream_key=workflow._head_key(expected.run),
+                                   after_sequence=None, limit=10).entries
+        assert [entry.sequence for entry in entries] == [0]
