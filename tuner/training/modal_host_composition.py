@@ -95,6 +95,50 @@ def _transport_logs_authorized(qualification, effects, components):
     return True
 
 
+def _modal_packaged_descriptor(*, logs: bool):
+    """The two existing descriptor identities; this is not a log proof."""
+    if type(logs) is not bool:
+        raise TypeError("exact descriptor capability required")
+    return ProviderDescriptor(
+        "synaptic-provider-descriptor/v1", "modal", "Modal packaged training",
+        "0.1.0", ProviderCapabilities(True, logs, False, False, True, False),
+    )
+
+
+def _modal_read_authorities(*, key, clock, bindings, binding_authority,
+                            foundation_authenticator, assessment_authenticator,
+                            packaged_reader, facade):
+    reader_key_ref = "modal-packaged-reader-key-v1"
+    evidence = ReaderEvidenceAuthority(
+        "modal-packaged-reader", reader_key_ref,
+        HMACAuthenticator(
+            {reader_key_ref: key},
+            allowed_purposes=frozenset({
+                "provider-run-observation/v1", "provider-log-page/v1",
+            }),
+        ),
+    )
+    reader = ModalPackagedCoordinatorReaderV1(
+        bindings=bindings, binding_authority=binding_authority,
+        foundation_repository=None,
+        foundation_authenticator=foundation_authenticator,
+        assessment_authenticator=assessment_authenticator,
+        packaged_reader=packaged_reader,
+        facade=facade,
+        evidence_authority=evidence, clock=clock,
+    )
+    verifier = ModalPackagedArtifactVerifierV1(
+        reader=reader,
+        foundation_authenticator=foundation_authenticator,
+        assessment_authenticator=assessment_authenticator,
+        authority_ref="modal-packaged-artifact-verifier",
+        key_ref="modal-packaged-artifact-key-v1",
+        key=hashlib.sha256(b"modal-packaged-artifact-key/v1\0" + key).digest(),
+        clock=clock,
+    )
+    return evidence, reader, verifier
+
+
 def _compose_modal_packaged_reference_host(
     *, adapter: ModalPackagedComposition, effects: object,
     prepared_request: object, run: object, components: object,
@@ -130,16 +174,6 @@ def _compose_modal_packaged_reference_host(
         raise ValueError("named reader authority secret is unavailable")
     key = raw_reader_key.encode("utf-8")
     del raw_reader_key
-    reader_key_ref = "modal-packaged-reader-key-v1"
-    evidence = ReaderEvidenceAuthority(
-        "modal-packaged-reader", reader_key_ref,
-        HMACAuthenticator(
-            {reader_key_ref: key},
-            allowed_purposes=frozenset({
-                "provider-run-observation/v1", "provider-log-page/v1",
-            }),
-        ),
-    )
     if qualification_admission is not None:
         from tuner.training.modal_metrics_qualification import MetricsQualificationAdmission, current_clean_commit
         from tuner.training.modal_host_effects import ModalPackagedHostEffectsV1
@@ -174,11 +208,8 @@ def _compose_modal_packaged_reference_host(
                 or components.resources.timeout_seconds != admitted["timeout_seconds"]
                 or maximum_cost_minor_units != admitted["maximum_cost_minor_units"]):
             raise ValueError("metrics_qualification_binding_invalid")
-    descriptor = ProviderDescriptor(
-        "synaptic-provider-descriptor/v1", "modal", "Modal packaged training",
-        "0.1.0", ProviderCapabilities(True, qualification_admission is not None or
-            _transport_logs_authorized(cpu_qualification, effects, components), False, False, True, False),
-    )
+    descriptor = _modal_packaged_descriptor(logs=qualification_admission is not None or
+        _transport_logs_authorized(cpu_qualification, effects, components))
     executor = adapter.effect_executor
     reconciliation = adapter.reconciliation_adapter
     provider = ProviderRef("modal", executor.profile_ref)
@@ -216,23 +247,11 @@ def _compose_modal_packaged_reference_host(
     authority = compose_reference_authority(
         clock=clock, secrets=secrets, authority_secret=authority_secret,
     )
-    reader = ModalPackagedCoordinatorReaderV1(
-        bindings=effects.bindings, binding_authority=effects,
-        foundation_repository=None,
+    evidence, reader, verifier = _modal_read_authorities(
+        key=key, clock=authority.clock, bindings=effects.bindings, binding_authority=effects,
         foundation_authenticator=authority.foundation_authenticator,
         assessment_authenticator=authority.assessment_authority,
-        packaged_reader=adapter.reader,
-        facade=adapter.reader._facade,
-        evidence_authority=evidence, clock=authority.clock,
-    )
-    verifier = ModalPackagedArtifactVerifierV1(
-        reader=reader,
-        foundation_authenticator=authority.foundation_authenticator,
-        assessment_authenticator=authority.assessment_authority,
-        authority_ref="modal-packaged-artifact-verifier",
-        key_ref="modal-packaged-artifact-key-v1",
-        key=hashlib.sha256(b"modal-packaged-artifact-key/v1\0" + key).digest(),
-        clock=authority.clock,
+        packaged_reader=adapter.reader, facade=adapter.reader._facade,
     )
     family = ProviderFamilyV1(
         descriptor, planning, planning, reader,

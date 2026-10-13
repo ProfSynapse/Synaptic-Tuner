@@ -137,9 +137,16 @@ class _Catalog:
 
 
 class ModalHostStorageV1:
-    """Exclusive owner-only POSIX SQLite journal, one process at a time."""
+    """Exclusive owner-only POSIX SQLite journal, one process at a time.
 
-    def __init__(self, database_path: Path, namespace_ref: str) -> None:
+    ``create=False`` opens only an existing journal with its original table
+    schema, without creating a missing database or initializing an empty file.
+    Existing journals remain writable for authenticated retained observations.
+    """
+
+    def __init__(self, database_path: Path, namespace_ref: str, *, create: bool = True) -> None:
+        if type(create) is not bool:
+            raise TypeError('create must be an exact bool')
         if os.name != "posix" or type(database_path) is not type(Path()) or not database_path.is_absolute():
             raise ModalHostStorageUnavailable("modal_host_storage_posix_required")
         path, self.namespace_ref = database_path, _ref(namespace_ref)
@@ -152,6 +159,8 @@ class ModalHostStorageV1:
                     or info.st_uid != os.geteuid()
                     or stat.S_IMODE(info.st_mode) & 0o077):
                 raise ValueError
+            if not create and not _private_file(path.lstat()):
+                raise ValueError
             import fcntl
 
             lock_path = path.with_name(path.name + ".lock")
@@ -159,19 +168,32 @@ class ModalHostStorageV1:
             if not _private_file(os.fstat(lock_fd)):
                 raise ValueError
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            if not path.exists():
+            if create and not path.exists():
                 created = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
                 os.close(created)
             if not _private_file(path.lstat()) or path.is_symlink():
                 raise ValueError
-            connection = sqlite3.connect(path, timeout=5.0, isolation_level=None)
+            original = path.lstat()
+            target = path if create else path.as_uri() + '?mode=rw'
+            connection = sqlite3.connect(target, timeout=5.0, isolation_level=None, uri=not create)
+            if not create:
+                expected = [
+                    ('attempts', 'table', 'CREATE TABLE attempts(namespace_ref TEXT NOT NULL,attempt_ref TEXT NOT NULL,digest TEXT NOT NULL,evidence BLOB NOT NULL,PRIMARY KEY(namespace_ref,attempt_ref))'),
+                    ('catalogs', 'table', 'CREATE TABLE catalogs(namespace_ref TEXT NOT NULL,catalog_ref TEXT NOT NULL,item_ref TEXT NOT NULL,payload BLOB NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(namespace_ref,catalog_ref,item_ref))'),
+                ]
+                schema = connection.execute("SELECT name,type,sql FROM sqlite_master WHERE substr(name,1,7) <> 'sqlite_' ORDER BY name").fetchall()
+                current = path.lstat()
+                if (schema != expected or not _private_file(current)
+                        or (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino)):
+                    raise ValueError
             connection.execute("PRAGMA journal_mode=DELETE")
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA trusted_schema=OFF")
-            connection.executescript(
-                "CREATE TABLE IF NOT EXISTS attempts(namespace_ref TEXT NOT NULL,attempt_ref TEXT NOT NULL,digest TEXT NOT NULL,evidence BLOB NOT NULL,PRIMARY KEY(namespace_ref,attempt_ref));"
-                "CREATE TABLE IF NOT EXISTS catalogs(namespace_ref TEXT NOT NULL,catalog_ref TEXT NOT NULL,item_ref TEXT NOT NULL,payload BLOB NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(namespace_ref,catalog_ref,item_ref));"
-            )
+            if create:
+                connection.executescript(
+                    "CREATE TABLE IF NOT EXISTS attempts(namespace_ref TEXT NOT NULL,attempt_ref TEXT NOT NULL,digest TEXT NOT NULL,evidence BLOB NOT NULL,PRIMARY KEY(namespace_ref,attempt_ref));"
+                    "CREATE TABLE IF NOT EXISTS catalogs(namespace_ref TEXT NOT NULL,catalog_ref TEXT NOT NULL,item_ref TEXT NOT NULL,payload BLOB NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(namespace_ref,catalog_ref,item_ref));"
+                )
         except Exception:
             if connection is not None:
                 connection.close()

@@ -523,6 +523,17 @@ def test_cli_v2_marker_readback_mismatch_keeps_submit_claim_without_spawning(
     assert len(volume.published) == 1
 
 
+
+def _retained_diagnostic_fields(tmp_path):
+    from tuner.training.modal_run_retention import KEYS_FILE, load_retained_modal_run
+    roots = [path for path in (tmp_path / "state" / "synaptic-training").glob("modal-*")
+             if (path / KEYS_FILE).is_file()]
+    assert len(roots) == 1
+    run = TrainingRunRef(roots[0].name, "standalone-training")
+    assert load_retained_modal_run(roots[0], expected_run=run).run == run
+    return {"run_ref": run.to_dict(), "retention_ready": True}
+
+
 def test_cli_v2_failed_returned_job_is_closed_without_artifact_publication(tmp_path, monkeypatch, capsys):
     plan, context, events = _setup(tmp_path, monkeypatch, failed=True)
     handler = ModalJobConfigHandler(Namespace(
@@ -536,6 +547,7 @@ def test_cli_v2_failed_returned_job_is_closed_without_artifact_publication(tmp_p
         "failure_class": "UNAVAILABLE",
         "location": "modal_standalone_runner.worker_result",
         "retry_authorized": False,
+        **_retained_diagnostic_fields(tmp_path),
     }
     assert events == ["bootstrap", "cpu", "stage", "spawn"]
     assert not list((tmp_path / "state" / "synaptic-training").glob("*-artifacts"))
@@ -574,6 +586,7 @@ def test_exact_worker_failure_stage_projects_closed_public_code(
         "failure_class": "UNAVAILABLE",
         "location": "modal_standalone_runner.worker_result",
         "retry_authorized": False,
+        **_retained_diagnostic_fields(tmp_path),
     }
     assert events == ["bootstrap", "cpu", "stage", "spawn"]
     assert not list((tmp_path / "state" / "synaptic-training").glob("*-artifacts"))
@@ -987,6 +1000,7 @@ def test_stage_failure_is_closed_and_never_submits(
             else "modal_standalone_runner.stage_reconcile"
         ),
         "retry_authorized": False,
+        **_retained_diagnostic_fields(tmp_path),
     }
     assert secret not in json.dumps(payload)
     assert events == ["bootstrap", "cpu", "stage"]

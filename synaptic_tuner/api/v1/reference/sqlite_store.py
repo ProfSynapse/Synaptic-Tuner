@@ -38,8 +38,12 @@ class SQLiteDurableStoreV1:
     only an empty unversioned database can be initialized, atomically. Unknown
     versions/schema layouts refuse before application writes. Use close/context
     management on the creating thread. Failure never triggers split-write fallback.
+    ``create=False`` requires the existing versioned schema and opens with
+    SQLite's read/write existing-only mode; it does not initialize empty files.
     """
-    def __init__(self, database_path: str | Path, *, timeout: float = 5.0):
+    def __init__(self, database_path: str | Path, *, timeout: float = 5.0, create: bool = True):
+        if type(create) is not bool:
+            raise TypeError('create must be an exact bool')
         if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 60:
             raise ValueError('finite SQLite timeout required')
         if os.name != 'posix' or not hasattr(os, 'O_NOFOLLOW') or not hasattr(os, 'O_DIRECTORY'):
@@ -57,17 +61,22 @@ class SQLiteDurableStoreV1:
             info = os.fstat(self._parent_fd)
             if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
                 raise ValueError('private database parent must be owned mode 0700')
-            try:
-                self._file_fd = os.open(path.name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                                        0o600, dir_fd=self._parent_fd)
-            except FileExistsError:
+            if create:
+                try:
+                    self._file_fd = os.open(path.name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                            0o600, dir_fd=self._parent_fd)
+                except FileExistsError:
+                    self._file_fd = os.open(path.name, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                            dir_fd=self._parent_fd)
+            else:
                 self._file_fd = os.open(path.name, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
                                         dir_fd=self._parent_fd)
             self._check_path()
-            self._connection = sqlite3.connect(path, timeout=float(timeout), isolation_level=None)
+            target = path if create else path.as_uri() + '?mode=rw'
+            self._connection = sqlite3.connect(target, timeout=float(timeout), isolation_level=None, uri=not create)
             self._connection.execute('PRAGMA trusted_schema=OFF')
             self._connection.execute('PRAGMA synchronous=FULL')
-            self._initialize()
+            self._initialize(create=create)
             self._check_path()
         except BaseException:
             self.close()
@@ -103,12 +112,14 @@ class SQLiteDurableStoreV1:
         if version != _VERSION or application != _APPLICATION_ID or objects != [(name, 'table', _TABLES[name]) for name in sorted(_TABLES)]:
             raise ValueError('unsupported SQLite store schema')
 
-    def _initialize(self):
+    def _initialize(self, *, create=True):
         # One snapshot/lock: concurrent first-open cannot mix schema generations.
         self._connection.execute('BEGIN IMMEDIATE')
         try:
             current = self._schema()
             if current == (0, 0, []):
+                if not create:
+                    raise ValueError('existing SQLite store schema required')
                 for statement in _TABLES.values():
                     self._connection.execute(statement)
                 self._connection.execute(f'PRAGMA application_id={_APPLICATION_ID}')
