@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-import torch
+if TYPE_CHECKING:
+    import torch
+
 
 
 def cuda_headroom_bytes(device: str | torch.device | None = None) -> int | None:
+    import torch
+
     if not torch.cuda.is_available():
         return None
     if device is None:
