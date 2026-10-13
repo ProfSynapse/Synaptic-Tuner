@@ -84,7 +84,9 @@ generation of environment data without executing it; the existing
 `environment: {enabled: false}` declaration is also explicit nonexecution.
 `required` needs an environment selection, and a simulate selection cannot
 satisfy that execution requirement. Unknown values, explicit null and nonstring
-values reject. Without either nonexecuting declaration, a scenario that requests
+values reject. Either nonexecuting declaration requires no environment selection;
+both execute and simulate selections conflict with it. `required` combined with
+`enabled: false` is contradictory and rejects. Without either nonexecuting declaration, a scenario that requests
 environment data needs an explicit selection. Scenarios without environment data
 and requests without a selection retain the legacy request and plan documents.
 There is no existing closed scenario-document JSON schema; C1 validates this

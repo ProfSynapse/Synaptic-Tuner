@@ -303,6 +303,27 @@ def test_required_execution_rejects_missing_or_simulated_selection(harness):
     assert clients.calls == 0
 
 
+@pytest.mark.parametrize("declaration", ["environment_execution: disabled", "environment: {enabled: false}"])
+@pytest.mark.parametrize("mode", list(EnvironmentMode))
+def test_disabled_scenario_rejects_any_environment_selection(harness, declaration, mode):
+    operations, request, ports, _, clients, scenario = harness
+    scenario.write_text("scenarios:\n  selected:\n    " + declaration + "\n")
+    selection = replace(SELECTION, mode=mode)
+    operations._ports = replace(ports, environments=HostEnvironment(selection))
+    with pytest.raises(DataOperationError, match="environment_invalid"):
+        operations.plan(replace(request, environment_selection=selection))
+    assert clients.calls == 0
+
+
+def test_required_and_disabled_declarations_are_contradictory(harness):
+    operations, request, _, _, clients, scenario = harness
+    scenario.write_text("scenarios:\n  selected:\n    environment_execution: required\n    environment: {enabled: false}\n")
+    for selected in (request, replace(request, environment_selection=None)):
+        with pytest.raises(DataOperationError, match="environment_invalid"):
+            operations.plan(selected)
+    assert clients.calls == 0
+
+
 def test_explicit_contract_submodule_imports_no_engine_or_provider():
     subprocess.run([sys.executable, "-I", "-c", f"import sys;sys.path.insert(0,{str(ROOT)!r});"
         "import synaptic_tuner.api.v1.environment_execution;"

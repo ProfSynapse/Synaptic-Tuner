@@ -190,6 +190,14 @@ def admit_environment(request, ports):
                 definition["environment_execution"] not in ("disabled", "required")
             ):
                 raise _invalid()
+            environment = definition.get("environment", {})
+            disabled = definition.get("environment_execution") == "disabled" or (
+                type(environment) is dict and environment.get("enabled") is False
+            )
+            if disabled and (
+                request.environment_selection is not None or definition.get("environment_execution") == "required"
+            ):
+                raise _invalid()
         if request.environment_selection is None:
             for definition in definitions.values():
                 environment = definition.get("environment", {})
@@ -246,10 +254,6 @@ def admit_environment(request, ports):
                 raise _invalid()
             configuration = definition.get("environment", {})
             if type(configuration) is not dict:
-                raise _invalid()
-            if binding.selection.mode.value == "execute" and (
-                definition.get("environment_execution") == "disabled" or configuration.get("enabled") is False
-            ):
                 raise _invalid()
             # These are host policy, never fixture or scenario data.
             if set(configuration) & set(policy):
