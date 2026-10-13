@@ -126,3 +126,11 @@ def test_oversized_first_line_never_reaches_json_parser(tmp_path, monkeypatch):
     with pytest.raises(DataOperationError) as error:
         api(tmp_path).validate(DatasetValidateRequest(PROJECT, str(path)))
     assert error.value.code is DataOperationCode.MANIFEST_INVALID
+
+
+def test_deep_json_returns_closed_structural_finding(tmp_path):
+    path = tmp_path / "data.jsonl"
+    path.write_bytes(b"[" * 10000 + b"0" + b"]" * 10000 + b"\n")
+    result = api(tmp_path).validate(DatasetValidateRequest(PROJECT, str(path)))
+    assert (result.rows_checked, result.rows_valid) == (1, 0)
+    assert [(finding.line_number, finding.code.value) for finding in result.findings] == [(1, "malformed_json")]

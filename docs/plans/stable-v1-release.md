@@ -299,6 +299,17 @@ the broader asset inventory remain open release gates.
 Exit: clean installed consumer can perform provider-free planning and compose
 all supported providers using only declared assets/dependencies.
 
+### Bounded public dataset validation
+
+The reference validator bounds each physical line at 4 MiB and each invocation
+at 64 MiB and one million physical lines. The line limit includes terminator
+bytes; invocation limits include rescanned cursor prefixes,
+blank lines and lookahead. Exceeding a read/work bound refuses the page with
+`manifest_invalid`; oversized or malformed cursors refuse with `cursor_invalid`.
+Existing row-count pagination and LF/CRLF/bare-CR/UTF-8 replacement behavior are
+preserved. These finite read limits do not qualify OS-call timing, immutable
+exports, provenance, split correctness or a complete dataset-to-training handoff.
+
 ## 3. Ship durable host composition and migrations
 
 - [x] Provide an opt-in host-owned SQLite implementation of the existing
@@ -549,13 +560,3 @@ Exit: the public package and docs have no ambiguous universal-provider promise.
 Stable acceptance requires all selected gates above to be closed. If a provider
 or lifecycle gate cannot be met, change the proposed release scope explicitly;
 do not silently relabel a narrower preview as this broad stable release.
-
-### Bounded public dataset validation
-
-The reference validator bounds each physical line at 4 MiB and each invocation
-at 64 MiB and one million physical lines, including rescanned cursor prefixes,
-blank lines and lookahead. Exceeding a read/work bound refuses the page with
-`manifest_invalid`; oversized or malformed cursors refuse with `cursor_invalid`.
-Existing row-count pagination and LF/CRLF/bare-CR/UTF-8 replacement behavior are
-preserved. These finite read limits do not qualify OS-call timing, immutable
-exports, provenance, split correctness or a complete dataset-to-training handoff.

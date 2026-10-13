@@ -59,7 +59,8 @@ schemas, mappings, and quality policy in caller configuration.
 ## Public dataset validation limits
 
 The reference `DataAPI.validate` scans at most 4 MiB per physical line, 64 MiB
-per invocation and one million physical lines before parsing rows. The byte
+per invocation and one million physical lines before parsing rows. The line
+ceiling includes terminator bytes. The byte
 and line budgets include blank lines, the rescanned cursor prefix and page
 lookahead. Later pages beyond these bounds reject with `manifest_invalid`;
 oversized or invalid line-number cursors reject with `cursor_invalid`. These
