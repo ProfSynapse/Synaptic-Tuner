@@ -141,3 +141,63 @@ def test_max_iterations_retains_final_failed_candidate_feedback():
     assert not result.passed and result.improved_example == final
     assert [row[0] for row in calls] == [initial, first, final]
     assert prompts[-1][1]['candidate_digest'] == digest(final)
+
+
+class CustomDict(dict):
+    pass
+
+
+class CustomList(list):
+    pass
+
+
+@pytest.mark.parametrize('candidate', [
+    {1: 'coerced key'}, {'value': (1, 2)}, CustomDict(value='custom'),
+    {'value': CustomList([1])}, {'value': float('nan')}, {'value': float('inf')},
+])
+def test_non_json_candidates_reject_before_callback_or_judgment(candidate):
+    instance, prompts, _ = engine()
+    callback = Mock(return_value={})
+    with pytest.raises((TypeError, ValueError)):
+        instance.run(candidate, ['quality'], candidate_evaluator=callback)
+    callback.assert_not_called()
+    assert prompts == []
+
+
+def test_cycle_rejects_before_callback():
+    candidate = {'value': []}
+    candidate['value'].append(candidate)
+    instance, _, _ = engine()
+    callback = Mock(return_value={})
+    with pytest.raises(ValueError, match='cycle'):
+        instance.run(candidate, ['quality'], candidate_evaluator=callback)
+    callback.assert_not_called()
+
+
+def test_fractional_json_candidate_remains_supported():
+    candidate, calls = {'value': .125}, []
+    instance, _, _ = engine()
+    result = instance.run(candidate, ['quality'], candidate_evaluator=evaluator(calls))
+    assert result.passed and calls[0][1] == digest(candidate)
+
+
+def test_non_json_legacy_candidate_is_not_newly_rejected():
+    candidate = {'value': ('legacy',)}
+    instance, _, _ = engine()
+    assert instance.run(candidate, ['quality']).improved_example is candidate
+
+
+def test_multiple_scopes_reuse_current_feedback_and_refresh_changed_candidate():
+    initial, changed, calls = {'value': 'initial'}, {'value': 'changed'}, []
+    instance, prompts, _ = engine([changed])
+    scopes = ['first', 'second', 'third']
+    instance.scope_config.scope_processing_order = scopes
+    instance.rubric_repo = SimpleNamespace(get_rubric=lambda key: {
+        'key': key, 'name': key, 'scope': key, 'pass_threshold': .8})
+    instance.judge_service.judge.side_effect = [
+        {'first_score': 1}, {'second_score': 0}, {'second_score': 1}, {'third_score': 1}]
+    result = instance.run(initial, scopes, max_iterations=1, candidate_evaluator=evaluator(calls))
+    assert result.passed and result.improved_example == changed
+    assert [entry[0] for entry in calls] == [initial, changed]
+    assert [context['feedback'] for _, context in prompts] == ['initial', 'initial', 'changed', 'changed']
+    assert prompts[-1][1]['candidate_digest'] == digest(result.improved_example)

@@ -11,6 +11,7 @@ Delegates all actual work to focused services.
 
 import json
 import hashlib
+import math
 from copy import deepcopy
 import time
 from dataclasses import dataclass
@@ -40,6 +41,47 @@ BACKOFF_MULTIPLIER = 2.0
 # try these providers in order. Each entry is a provider name recognized by
 # shared.llm.create_client(). The current provider is automatically skipped.
 FALLBACK_PROVIDERS = ["lmstudio", "ollama"]
+
+
+def _candidate_digest(candidate: Dict[str, Any]) -> str:
+    """Hash exact JSON values without encoder key/container coercion."""
+    active = set()
+
+    def validate(value):
+        kind = type(value)
+        if value is None or kind in (str, bool, int):
+            return
+        if kind is float:
+            if not math.isfinite(value):
+                raise ValueError("candidate numbers must be finite")
+            return
+        if kind not in (dict, list):
+            raise TypeError("candidate must contain exact JSON containers and scalars")
+        identity = id(value)
+        if identity in active:
+            raise ValueError("candidate JSON tree contains a cycle")
+        active.add(identity)
+        try:
+            if kind is dict:
+                if any(type(key) is not str for key in value):
+                    raise TypeError("candidate object keys must be exact strings")
+                for child in value.values():
+                    validate(child)
+            else:
+                for child in value:
+                    validate(child)
+        finally:
+            active.remove(identity)
+
+    if type(candidate) is not dict:
+        raise TypeError("candidate must be an exact JSON object")
+    try:
+        validate(candidate)
+        raw = json.dumps(candidate, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode("utf-8")
+    except (RecursionError, UnicodeError):
+        raise ValueError("candidate cannot be encoded as a JSON tree") from None
+    return hashlib.sha256(raw).hexdigest()
 
 
 @dataclass
@@ -193,9 +235,7 @@ class ImprovementEngine:
             nonlocal evaluated_digest, evaluated_context
             if candidate_evaluator is None:
                 return prompt_context
-            raw = json.dumps(candidate, sort_keys=True, separators=(",", ":"),
-                             ensure_ascii=False, allow_nan=False).encode("utf-8")
-            digest = hashlib.sha256(raw).hexdigest()
+            digest = _candidate_digest(candidate)
             if digest != evaluated_digest:
                 feedback = candidate_evaluator(deepcopy(candidate), digest, deepcopy(base_context))
                 if type(feedback) is not dict:
