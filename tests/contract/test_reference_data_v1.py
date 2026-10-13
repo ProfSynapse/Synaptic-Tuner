@@ -506,8 +506,11 @@ def test_reference_composition_accepts_data_ports_and_exports_them_lazily() -> N
 
 
 def test_reference_data_module_has_no_ambient_environment_or_process_exits() -> None:
-    source = (ROOT / "synaptic_tuner/api/v1/reference/data.py").read_text(encoding="utf-8")
-    facade = (ROOT / "synaptic_tuner/api/v1/data_facade.py").read_text(encoding="utf-8")
+    from synaptic_tuner.api.v1 import data_facade
+    from synaptic_tuner.api.v1.reference import data
+
+    source = Path(data.__file__).read_text(encoding="utf-8")
+    facade = Path(data_facade.__file__).read_text(encoding="utf-8")
     for needle in (r"sys\.exit", "load_dotenv", r"os\.environ", "getenv", r"(?<![A-Za-z_])print\("):
         assert re.search(needle, source) is None and re.search(needle, facade) is None, needle
     assert "import SynthChat" not in facade and "from SynthChat" not in facade and "from tuner" not in facade

@@ -71,6 +71,7 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -1220,17 +1221,20 @@ class ReferenceDataOperationsV1:
         offset = _decode_cursor(request.cursor)
         skip = 0
         if offset is not None:
-            if not offset.isdigit():
+            if (not offset.isascii() or not offset.isdigit()
+                    or len(offset) > len(str(_MAX_VALIDATION_PHYSICAL_LINES))):
                 raise _closed(DataOperationCode.CURSOR_INVALID)
             skip = int(offset)
+            if skip > _MAX_VALIDATION_PHYSICAL_LINES:
+                raise _closed(DataOperationCode.CURSOR_INVALID)
         findings: list[ValidationFinding] = []
         checked = 0
         valid = 0
         last_line = skip
         more = False
         try:
-            with path.open("r", encoding="utf-8", errors="replace") as handle:
-                for line_number, line in enumerate(handle, start=1):
+            with path.open("rb") as handle:
+                for line_number, line in enumerate(_validation_lines(handle), start=1):
                     if line_number <= skip or not line.strip():
                         continue
                     if checked >= request.limit:
@@ -1269,10 +1273,59 @@ def _classify_failure(error: BaseException) -> str:
     return DIAGNOSTIC_GENERATION_FAILED
 
 
+# Per invocation, including skipped cursor prefixes and lookahead. These are
+# finite read/work limits, not OS-call deadlines or dataset identity evidence.
+_MAX_VALIDATION_LINE_BYTES = 4 * 1024 * 1024
+_MAX_VALIDATION_READ_BYTES = 64 * 1024 * 1024
+_MAX_VALIDATION_PHYSICAL_LINES = 1_000_000
+_VALIDATION_NEWLINES = re.compile(br"\r\n|\r|\n")
+
+
+def _validation_lines(handle):
+    """Bound bytes before decoding; preserve TextIO universal newline behavior."""
+    pending = b""
+    consumed = 0
+    lines = 0
+    while True:
+        # One sentinel byte detects an exceeded bound without unbounded reads.
+        maximum = min(65536, _MAX_VALIDATION_LINE_BYTES - len(pending) + 1,
+                      _MAX_VALIDATION_READ_BYTES - consumed + 1)
+        if maximum < 1:
+            raise _closed(DataOperationCode.MANIFEST_INVALID)
+        raw = handle.read(maximum)
+        consumed += len(raw)
+        if consumed > _MAX_VALIDATION_READ_BYTES:
+            raise _closed(DataOperationCode.MANIFEST_INVALID)
+        pending += raw
+        start = 0
+        for ending in _VALIDATION_NEWLINES.finditer(pending):
+            # A trailing CR may be the first half of a CRLF split across reads.
+            if raw and ending.group() == b"\r" and ending.end() == len(pending):
+                break
+            line = pending[start:ending.end()]
+            if len(line) > _MAX_VALIDATION_LINE_BYTES:
+                raise _closed(DataOperationCode.MANIFEST_INVALID)
+            lines += 1
+            if lines > _MAX_VALIDATION_PHYSICAL_LINES:
+                raise _closed(DataOperationCode.MANIFEST_INVALID)
+            yield line.decode("utf-8", errors="replace")
+            start = ending.end()
+        pending = pending[start:]
+        if len(pending) > _MAX_VALIDATION_LINE_BYTES:
+            raise _closed(DataOperationCode.MANIFEST_INVALID)
+        if not raw:
+            if pending:
+                lines += 1
+                if lines > _MAX_VALIDATION_PHYSICAL_LINES:
+                    raise _closed(DataOperationCode.MANIFEST_INVALID)
+                yield pending.decode("utf-8", errors="replace")
+            return
+
+
 def _validate_row(line: str) -> ValidationFindingCode | None:
     try:
         row = json.loads(line)
-    except ValueError:
+    except (ValueError, RecursionError):
         return ValidationFindingCode.MALFORMED_JSON
     if type(row) is not dict:
         return ValidationFindingCode.ROW_NOT_OBJECT

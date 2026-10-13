@@ -55,3 +55,16 @@ schemas, mappings, and quality policy in caller configuration.
 - Use `fine-tuning` after the dataset is admitted and ready to train.
 - Do not package, publish, deploy, or promote generated artifacts unless the user
   separately authorizes that action.
+
+## Public dataset validation limits
+
+The reference `DataAPI.validate` scans at most 4 MiB per physical line, 64 MiB
+per invocation and one million physical lines before parsing rows. The line
+ceiling includes terminator bytes. The byte
+and line budgets include blank lines, the rescanned cursor prefix and page
+lookahead. Later pages beyond these bounds reject with `manifest_invalid`;
+oversized or invalid line-number cursors reject with `cursor_invalid`. These
+are finite read limits, not filesystem-call deadlines or immutable dataset
+verification. LF, CRLF, bare CR and UTF-8 replacement decoding remain supported.
+Use the existing preparation workflow for immutable provenance/split identity
+before training; structural row validation does not establish that identity.
