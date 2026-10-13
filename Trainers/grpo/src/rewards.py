@@ -49,7 +49,7 @@ class RewardRubric:
     - Evaluation method that returns a reward score
     """
 
-    def __init__(self, rubric_path: Path, schema_config: Dict = None):
+    def __init__(self, rubric_path: Path, schema_config: Dict = None, *, document=None, raw_only=False):
         """
         Load rubric from YAML file.
 
@@ -60,8 +60,13 @@ class RewardRubric:
         self.rubric_path = rubric_path
         self.schema_config = schema_config or {}
 
-        with open(rubric_path, "r", encoding="utf-8") as f:
-            self.config = yaml.safe_load(f) or {}
+        self.raw_only = raw_only
+        if document is None:
+            with open(rubric_path, "r", encoding="utf-8") as f:
+                self.config = yaml.safe_load(f) or {}
+        else:
+            import copy
+            self.config = copy.deepcopy(document)
 
         self.name = self.config.get("name", rubric_path.stem)
         self.description = self.config.get("description", "")
@@ -112,6 +117,8 @@ class RewardRubric:
         """
         result = {"raw_text": text}
 
+        if self.raw_only:
+            return result
         ea = extract(text, mode="tool_call")
         if ea.found:
             result["tool_name"] = ea.tool_name
@@ -324,7 +331,7 @@ class RewardEngine:
     Loads all reward rubrics and builds combined reward function.
     """
 
-    def __init__(self, rewards_dir: Path):
+    def __init__(self, rewards_dir: Path, *, documents=None, schema_config=None, raw_only=False):
         """
         Initialize reward engine.
 
@@ -335,8 +342,17 @@ class RewardEngine:
         self.rubrics: Dict[str, RewardRubric] = {}
         self.schema_config: Dict = {}
 
-        self._load_schema_config()
-        self._load_rubrics()
+        if documents is None:
+            self._load_schema_config()
+            self._load_rubrics()
+        else:
+            import copy
+            self.schema_config = copy.deepcopy(schema_config or {})
+            for name, document in documents.items():
+                rubric = RewardRubric(Path(name), self.schema_config, document=document, raw_only=raw_only)
+                if rubric.name != name:
+                    raise ValueError("reward document name differs")
+                self.rubrics[name] = rubric
 
     def _load_schema_config(self) -> None:
         """Load shared schema config from _schema.yaml."""
@@ -516,6 +532,7 @@ def build_rubric_reward(rubric: RewardRubric) -> Callable:
 def build_combined_reward_function(
     rewards_config: Dict[str, Any],
     base_dir: Path,
+    *, documents=None, schema_config=None, raw_only=False,
 ) -> Tuple[Callable, List[Dict]]:
     """
     Build combined reward function from config.
@@ -530,7 +547,8 @@ def build_combined_reward_function(
     rewards_dir = base_dir / "configs" / "rewards"
 
     # Load reward engine
-    engine = RewardEngine(rewards_dir) if rewards_dir.exists() else None
+    engine = (RewardEngine(rewards_dir, documents=documents, schema_config=schema_config, raw_only=raw_only)
+              if documents is not None else RewardEngine(rewards_dir) if rewards_dir.exists() else None)
 
     items = rewards_config.get("items", []) or []
     plan: List[Dict] = []
@@ -570,6 +588,8 @@ def build_combined_reward_function(
                 continue
 
         # Rubric not found
+        if documents is not None:
+            raise ValueError("declared reward missing")
         print(f"Warning: Reward rubric '{name}' not found in {rewards_dir}")
 
     # Handle custom rewards loaded from a Python file

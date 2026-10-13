@@ -36,7 +36,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.env_bootstrap import init_trainer_env, suppress_transformers_logging  # noqa: E402
 from shared.training_utils import (  # noqa: E402
     apply_wandb_destination,
-    build_trainer_config,
     reject_unknown_config_keys,
     setup_wandb,
 )
@@ -79,89 +78,7 @@ logger = logging.getLogger(__name__)
 # ``rewards`` are read by src/rewards.py:build_combined_reward_function.
 # tests/trainers/grpo/test_grpo_config_keys.py fails if this drifts from the
 # keys the code reads.
-GRPO_CONFIG_SCHEMA = {
-    "model": {
-        "model_name": None,
-        "lora_path": None,
-        "max_seq_length": None,
-        "dtype": None,
-        "load_in_4bit": None,
-        "chat_template": None,
-    },
-    "lora": {
-        "r": None,
-        "lora_alpha": None,
-        "lora_dropout": None,
-        "bias": None,
-        "target_modules": None,
-        "use_gradient_checkpointing": None,
-        "random_state": None,
-        "use_rslora": None,
-        "use_dora": None,
-    },
-    "training": {
-        "output_dir": None,
-        "per_device_train_batch_size": None,
-        "gradient_accumulation_steps": None,
-        "num_generations": None,
-        "max_prompt_length": None,
-        "max_completion_length": None,
-        "temperature": None,
-        "learning_rate": None,
-        "weight_decay": None,
-        "warmup_ratio": None,
-        "lr_scheduler_type": None,
-        "num_train_epochs": None,
-        "max_steps": None,
-        "max_grad_norm": None,
-        "beta": None,
-        "fp16": None,
-        "bf16": None,
-        "optim": None,
-        "logging_steps": None,
-        "save_steps": None,
-        "save_total_limit": None,
-        "report_to": None,
-        "use_gspo": None,
-        "chat_template_kwargs": None,
-        "extra_args": None,
-    },
-    "dataset": {
-        "dataset_name": None,
-        "dataset_file": None,
-        "local_file": None,
-        "num_proc": None,
-        "prompt_column": None,
-    },
-    "rewards": {
-        "items": [{"name": None, "weight": None}],
-        "custom": {
-            "enabled": None,
-            "file": None,
-            "functions": [{"name": None, "weight": None}],
-        },
-    },
-    "pivot": {
-        "enabled": None,
-        "profiled_file": None,
-        "sft_source": None,
-        "profiling": {
-            "n_rollouts": None,
-            "temperature": None,
-            "max_completion_length": None,
-            "batch_size": None,
-        },
-        "filtering": {
-            "variance_threshold": None,
-            "min_candidates": None,
-            "max_candidates": None,
-            "mean_reward_range": None,
-        },
-        "cache": {"enabled": None, "cache_dir": None},
-    },
-    "wandb": {"enabled": None, "project": None, "run_name": None, "entity": None},
-    "seed": None,
-}
+from Trainers.grpo.runtime_v1 import GRPO_CONFIG_SCHEMA
 
 
 def load_config(config_path: str | None = None) -> dict:
@@ -192,79 +109,10 @@ def _detect_chat_template(model_name: str) -> str:
 
 
 def _build_grpo_config(config: dict, checkpoints_dir: Path) -> GRPOConfig:
-    training = config['training']
-    wandb_cfg = config.get('wandb') or {}
-    bf16_supported = is_bfloat16_supported()
-    bf16 = bool(training.get('bf16') and bf16_supported)
-    fp16 = bool(training.get('fp16') and not bf16)
-    if not bf16 and not fp16:
-        fp16 = not bf16_supported
-
-    args: Dict[str, Any] = {
-        "output_dir": str(checkpoints_dir),
-        "per_device_train_batch_size": int(training['per_device_train_batch_size']),
-        "gradient_accumulation_steps": int(training['gradient_accumulation_steps']),
-        "num_generations": int(training['num_generations']),
-        "max_completion_length": int(training['max_completion_length']),
-        "temperature": float(training['temperature']),
-        "learning_rate": float(training['learning_rate']),
-        "weight_decay": float(training['weight_decay']),
-        "warmup_ratio": float(training['warmup_ratio']),
-        "lr_scheduler_type": str(training['lr_scheduler_type']),
-        "optim": str(training['optim']),
-        "logging_steps": int(training['logging_steps']),
-        "save_steps": int(training['save_steps']),
-        "save_total_limit": int(training['save_total_limit']),
-        "num_train_epochs": int(training['num_train_epochs']),
-        "fp16": fp16,
-        "bf16": bf16,
-        "seed": int(config.get('seed', 42)),
-        "report_to": str(training.get('report_to', 'none')),
-        # KL penalty coefficient - critical for preventing divergence
-        "beta": float(training.get('beta', 0.1)),
-    }
-    # Every argument the user's YAML (or a CLI override written into it) set,
-    # mapped to the config path that set it. build_trainer_config refuses any
-    # of these the installed TRL GRPOConfig does not accept.
-    origins: Dict[str, str] = {
-        name: f"training.{name}" for name in args if name in training
-    }
-    if 'seed' in config:
-        origins["seed"] = "seed"
-
-    # Optional: GRPOConfig dropped max_prompt_length in trl 0.28; set it only
-    # when the YAML does (TRL's own default applies otherwise).
-    if 'max_prompt_length' in training:
-        args["max_prompt_length"] = int(training['max_prompt_length'])
-        origins["max_prompt_length"] = "training.max_prompt_length"
-    if training.get('max_grad_norm') is not None:
-        args["max_grad_norm"] = float(training['max_grad_norm'])
-        origins["max_grad_norm"] = "training.max_grad_norm"
-
-    max_steps = training.get('max_steps', 0)
-    if max_steps and int(max_steps) > 0:
-        args["max_steps"] = int(max_steps)
-        origins["max_steps"] = "training.max_steps"
-
-    # GSPO toggle uses sequence-level importance sampling.
-    if training.get('use_gspo'):
-        args["importance_sampling_level"] = "sequence"
-        origins["importance_sampling_level"] = "training.use_gspo"
-
-    if args["report_to"] == "wandb" and wandb_cfg.get('run_name'):
-        args["run_name"] = str(wandb_cfg['run_name'])
-        origins["run_name"] = "wandb.run_name"
-
-    # Pass-through GRPOConfig args; each must be accepted by the installed TRL.
-    extra_args = training.get('extra_args') or {}
-    if not isinstance(extra_args, dict):
-        raise TypeError("training.extra_args must be a mapping/dict")
-    args.update(extra_args)
-    origins.update({name: f"training.extra_args.{name}" for name in extra_args})
-
-    # Every internal default above is accepted by all supported TRL releases,
-    # so nothing is version-dependent here: any unsupported argument raises.
-    return build_trainer_config(GRPOConfig, args, origins=origins)
+    from Trainers.grpo.runtime_v1 import build_grpo_config
+    return build_grpo_config(config, checkpoints_dir,
+                             config_class=GRPOConfig,
+                             bf16_supported=is_bfloat16_supported())
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -500,7 +348,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             )
         ]
 
-    trainer = GRPOTrainer(
+    from Trainers.grpo.runtime_v1 import create_grpo_trainer
+
+    trainer = create_grpo_trainer(trainer_class=GRPOTrainer,
         model=model,
         processing_class=tokenizer,
         reward_funcs=reward_fn,
@@ -516,7 +366,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         print("✓ Using LiveDashboard for training progress")
 
     print("Starting training...\n")
-    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    from Trainers.grpo.runtime_v1 import train_grpo_trainer
+    train_grpo_trainer(trainer, resume=args.resume_from_checkpoint)
 
     final_model_path = run_dir / "final_model"
     final_model_path.mkdir(parents=True, exist_ok=True)

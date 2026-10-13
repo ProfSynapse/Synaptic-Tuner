@@ -8,9 +8,11 @@ Expected dataset shape for tool-calling:
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
-from datasets import Dataset, load_dataset
+if TYPE_CHECKING:
+    from datasets import Dataset
+
 
 
 def load_raw_dataset(
@@ -19,6 +21,8 @@ def load_raw_dataset(
     local_file: Optional[str] = None,
     num_proc: int = 1,
 ) -> Dataset:
+    from datasets import load_dataset
+
     print("=" * 60)
     print("LOADING DATASET FOR GRPO")
     print("=" * 60)
@@ -109,3 +113,12 @@ def print_dataset_samples(dataset: Dataset, num_samples: int = 2):
             args_preview = ex['ground_truth_args_json'][:200] if isinstance(ex['ground_truth_args_json'], str) else str(ex['ground_truth_args_json'])[:200]
             print(f"ground_truth_args_json: {args_preview}...")
         print("-" * 60)
+
+
+def dataset_from_rows(rows, *, dataset_class=None):
+    """Materialize admitted rows without resolving any path or dataset name."""
+    import copy
+    if dataset_class is None:
+        from datasets import Dataset
+        dataset_class = Dataset
+    return dataset_class.from_list(copy.deepcopy(list(rows)))

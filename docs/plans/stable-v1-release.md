@@ -661,3 +661,25 @@ This is preparation support only. The new
 `synaptic-conversation-sft-row/v1` format is not yet admitted by SFT compilation,
 loaders or packaged runtime releases. The Data-to-training installed workflow
 and provider qualification remain separate follow-up gates.
+
+### GRPO trainer core preparation
+
+The legacy GRPO CLI and a new retained-input entry share configuration building,
+trainer construction and training calls. The new entry consumes explicit input
+bytes, reward documents and a local model, checks their declared commitments
+before loading ML dependencies, and requires adapter and tokenizer saves.
+Metrics report actual trainer observations; step counts do not prove a parameter
+update or useful reward variation. Existing CLI behavior remains available.
+
+A fresh source-archive-built wheel passed the base-only neutral consumer and
+40 installed core/configuration tests. One additional retained-input test with
+the real Dataset library initially hit the local harness's overly long Unix
+socket temporary path, then passed with a short private scratch path and the
+same wheel. All five changed production files matched reviewed source bytes.
+The installed CI lane uses Dataset 5.1.0 and pytest 8; trainer/model effects remain
+explicit CPU substitutes. This is not validation of the GPU image's ML stack.
+
+The public GRPO compiler, separate offline inventory, provider dispatch, native
+verification and live candidate qualification remain open. This entry alone
+does not authenticate a public plan, verify model member custody or advertise
+GRPO through the public API.
