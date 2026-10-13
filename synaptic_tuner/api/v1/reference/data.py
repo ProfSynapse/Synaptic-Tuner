@@ -825,7 +825,7 @@ class ReferenceDataOperationsV1:
             raise _closed(DataOperationCode.OUTPUT_CONFLICT)
         # Imported here so composing a host never loads the provider client stack.
         from shared.llm.metering import MeteredLLMClient
-        from shared.llm.usage import UsageAccumulator
+        from shared.llm.usage import LLMCompletionV1, LLMStructuredV1, UsageAccumulator
 
         meter = UsageAccumulator()
         client_type = MeteredLLMClient
@@ -836,12 +836,14 @@ class ReferenceDataOperationsV1:
                         validator.check_boundary()
                     except Exception as error:
                         raise _EnvironmentInterrupted(error) from None
-                def chat(self, *args, **kwargs):
+                def chat(self, *args, **kwargs) -> LLMCompletionV1:
                     self._boundary()
-                    return super().chat(*args, **kwargs)
-                def structured_output(self, *args, **kwargs):
+                    completion = super().chat(*args, **kwargs)
+                    return completion
+                def structured_output(self, *args, **kwargs) -> LLMStructuredV1:
                     self._boundary()
-                    return super().structured_output(*args, **kwargs)
+                    completion = super().structured_output(*args, **kwargs)
+                    return completion
             client_type = GuardedMeteredClient
         if selected:
             self._genesis(plan, self._initial_result(plan, run, DataRunState.PLANNED))

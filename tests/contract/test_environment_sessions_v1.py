@@ -621,3 +621,38 @@ def test_uncertainty_survives_later_artifact_failure(selected, monkeypatch):
         for runtime in runtimes:
             runtime.teardown()
         operations._environment_owners.clear()
+
+
+def test_guarded_data_proxy_preserves_completion_identity_usage_and_pre_dispatch_boundary(selected, monkeypatch):
+    from shared.llm.usage import LLMCompletionV1, LLMStructuredV1, measured_usage
+    from synaptic_tuner.api.v1.reference.data import _EnvironmentInterrupted
+
+    operations, request, _, _, _, _, _, _, _, _ = selected
+    usage = measured_usage(2, 3)
+    chat_result = LLMCompletionV1('reply', usage)
+    structured_result = LLMStructuredV1({'value': 'reply'}, usage)
+    inner = ScriptedClient([], [])
+    dispatched = []
+    inner.chat = lambda *a, **k: dispatched.append('chat') or chat_result
+    inner.structured_output = lambda *a, **k: dispatched.append('structured') or structured_result
+    api, _ = public_client(selected, inner)
+    def execute(plan, run, client, meter, scope, *, admitted_inputs, environment_validator):
+        try:
+            assert client.chat([]) is chat_result
+            assert client.structured_output([], {}) is structured_result
+            assert meter.calls == 2 and meter.measured and not meter.indeterminate
+            record = meter.record()
+            assert record.input_tokens == 4 and record.output_tokens == 6
+            def cancelled():
+                raise TimeoutError('boundary')
+            environment_validator.check_boundary = cancelled
+            for call in (lambda: client.chat([]), lambda: client.structured_output([], {})):
+                with pytest.raises(_EnvironmentInterrupted):
+                    call()
+            assert dispatched == ['chat', 'structured']
+            assert meter.calls == 2 and not meter.indeterminate
+        finally:
+            environment_validator.close()
+            operations._environment_owners.pop(run.run_id, None)
+    monkeypatch.setattr(operations, '_execute', execute)
+    api.start(api.plan(request))
