@@ -43,6 +43,7 @@ def load_model_and_tokenizer(
     dtype: Optional[str] = None,
     load_in_4bit: bool = True,
     hf_token: Optional[str] = None,
+    *, offline: bool = False,
 ) -> Tuple[object, object, bool]:
     """
     Load a model + tokenizer/processor using Unsloth.
@@ -50,7 +51,12 @@ def load_model_and_tokenizer(
     Returns:
         (model, tokenizer_or_processor, is_vision_model)
     """
-    is_vl = _is_vision_model(model_name)
+    if type(offline) is not bool:
+        raise ValueError("invalid offline selection")
+    if offline and (hf_token is not None or not __import__("pathlib").Path(model_name).is_absolute()):
+        raise ValueError("offline model requires explicit local input")
+    offline_args = {"local_files_only": True} if offline else {}
+    is_vl = False if offline else _is_vision_model(model_name)
 
     print("=" * 60)
     print("LOADING MODEL AND TOKENIZER")
@@ -74,7 +80,8 @@ def load_model_and_tokenizer(
             max_seq_length=max_seq_length,
             dtype=dtype,
             load_in_4bit=load_in_4bit,
-            token=hf_token,
+            token=False if offline else hf_token,
+            **offline_args,
         )
         tokenizer_or_processor = processor
     else:
@@ -83,7 +90,8 @@ def load_model_and_tokenizer(
             max_seq_length=max_seq_length,
             dtype=dtype,
             load_in_4bit=load_in_4bit,
-            token=hf_token,
+            token=False if offline else hf_token,
+            **offline_args,
         )
         tokenizer_or_processor = tokenizer
 

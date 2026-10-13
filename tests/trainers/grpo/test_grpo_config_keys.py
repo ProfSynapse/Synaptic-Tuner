@@ -19,7 +19,6 @@ import yaml
 from shared.training_utils import (
     UnknownConfigKeysError,
     UnsupportedTrainerArgumentError,
-    build_trainer_config,
     reject_unknown_config_keys,
 )
 
@@ -52,7 +51,7 @@ def _literal(path: Path, name: str) -> Any:
     raise AssertionError(f"{name} not found in {path}")
 
 
-GRPO_SCHEMA = _literal(TRAIN_GRPO, "GRPO_CONFIG_SCHEMA")
+GRPO_SCHEMA = _literal(GRPO / "runtime_v1.py", "GRPO_CONFIG_SCHEMA")
 ENV_GRPO_SCHEMA = _literal(TRAIN_ENV_GRPO, "ENV_GRPO_CONFIG_SCHEMA")
 
 
@@ -133,6 +132,7 @@ def test_loaders_validate_before_returning():
 # (file, function or None for the whole module) -> {variable: schema path}.
 # A schema path is dotted; ``[]`` steps into a list-of-sections item.
 GRPO_READERS = {
+    (GRPO / "runtime_v1.py", "build_grpo_config"): {"config": "", "training": "training", "wandb_cfg": "wandb"},
     (TRAIN_GRPO, None): {
         "config": "",
         "training": "training",
@@ -316,22 +316,9 @@ class FakeGRPOConfig:
 
 
 def _build_grpo_config_function():
-    tree = _module_tree(TRAIN_GRPO)
-    function = next(
-        node for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_build_grpo_config"
-    )
-    module = ast.Module(body=[function], type_ignores=[])
-    namespace: Dict[str, Any] = {
-        "Any": Any,
-        "Dict": Dict,
-        "Path": Path,
-        "GRPOConfig": FakeGRPOConfig,
-        "build_trainer_config": build_trainer_config,
-        "is_bfloat16_supported": lambda: True,
-    }
-    exec(compile(module, str(TRAIN_GRPO), "exec"), namespace)
-    return namespace["_build_grpo_config"]
+    from Trainers.grpo.runtime_v1 import build_grpo_config
+    return lambda config, checkpoints_dir: build_grpo_config(
+        config, checkpoints_dir, config_class=FakeGRPOConfig, bf16_supported=True)
 
 
 def test_build_grpo_config_applies_checked_in_config():
