@@ -75,7 +75,10 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Protocol
+from typing import Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .environment import AdmittedEnvironmentInputs
 
 from synaptic_tuner.api.v1.data_facade import (
     DATA_PLAN_SCHEMA_VERSION,
@@ -462,12 +465,13 @@ class ReferenceDataOperationsV1:
         if admitted is None:
             binding = None
         else:
-            scenarios, rows, digest, binding = admitted
+            scenarios, rows, digest, binding = admitted.targets, admitted.rows_requested, admitted.source_digest, admitted.binding
             _absolute_path(request.output_ref)
         schema = ENVIRONMENT_DATA_PLAN_SCHEMA if binding is not None else DATA_PLAN_SCHEMA_VERSION
         return DataPlan(schema, request, scenarios, rows, digest, binding)
 
-    def _verify_plan(self, plan: DataPlan) -> None:
+    def _verify_plan(self, plan: DataPlan) -> AdmittedEnvironmentInputs | None:
+        """Return only the fresh matching private capture, never cached plan inputs."""
         if type(plan) is not DataPlan:
             raise TypeError("plan must be exact DataPlan")
         from .environment import admit_environment
@@ -477,11 +481,12 @@ class ReferenceDataOperationsV1:
         if admitted is None:
             binding = None
         else:
-            scenarios, rows, digest, binding = admitted
+            scenarios, rows, digest, binding = admitted.targets, admitted.rows_requested, admitted.source_digest, admitted.binding
         if (scenarios, rows, digest) != (plan.scenarios, plan.rows_requested, plan.source_digest):
             raise _closed(DataOperationCode.MANIFEST_INVALID)
         if binding != plan.environment_binding:
             raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
+        return admitted
 
     def preflight(self, plan: DataPlan) -> DataPreflight:
         self._verify_plan(plan)
@@ -697,8 +702,12 @@ class ReferenceDataOperationsV1:
         )
 
     def start(self, plan: DataPlan) -> DataStart:
-        self._verify_plan(plan)
+        admitted_inputs = self._verify_plan(plan)
         if plan.environment_binding is not None:
+            # Keep custody through this boundary; no claims or clients until
+            # a separately qualified adapter can consume the retained bytes.
+            if admitted_inputs is None:
+                raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
             raise _closed(DataOperationCode.ENVIRONMENT_UNAVAILABLE)
         scope = _check_backend(self._ports.llm_clients, plan.request.backend)
         existing = self._existing_run(plan)
