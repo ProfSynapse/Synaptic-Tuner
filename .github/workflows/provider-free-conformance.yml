@@ -124,6 +124,35 @@ jobs:
             --wheel-dir "$RUNNER_TEMP/wheelhouse" .
           python -m pip install "$RUNNER_TEMP"/wheelhouse/synaptic_tuner-*.whl
 
+      - name: Verify exact schema inventory through source archive and wheel builds
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import setuptools.build_meta
+          directory = Path(os.environ["RUNNER_TEMP"]) / "sdist"
+          directory.mkdir()
+          setuptools.build_meta.build_sdist(str(directory))
+          PY
+          python -m pip wheel --no-deps --no-build-isolation \
+            --wheel-dir "$RUNNER_TEMP/sdist-wheelhouse" "$RUNNER_TEMP"/sdist/*.tar.gz
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import zipfile
+          root = Path(os.environ["RUNNER_TEMP"])
+          expected = {"schemas/" + path.name: path.read_bytes()
+                      for path in Path("schemas").glob("synaptic-*.schema.json")}
+          assert expected
+          for directory in ("wheelhouse", "sdist-wheelhouse"):
+              wheels = list((root / directory).glob("synaptic_tuner-*.whl"))
+              assert len(wheels) == 1
+              with zipfile.ZipFile(wheels[0]) as archive:
+                  actual = {name: archive.read(name) for name in archive.namelist()
+                            if name.startswith("schemas/")}
+                  assert actual == expected
+          PY
+
       - name: Verify declared pytest range and excluded provider SDK
         run: |
           python - <<'PY'
@@ -140,7 +169,7 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           python -m venv "$RUNNER_TEMP/wheel-import-venv"
-          "$RUNNER_TEMP/wheel-import-venv/bin/python" -m pip install "$RUNNER_TEMP"/wheelhouse/synaptic_tuner-*.whl
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -m pip install "$RUNNER_TEMP"/sdist-wheelhouse/synaptic_tuner-*.whl
           "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PY'
           import importlib.resources
           import importlib.util
@@ -211,6 +240,29 @@ jobs:
           import tuner.execution.providers.modal.inference_entrypoint
           import tuner.execution.providers.modal.inference_transport
           import tuner.execution.providers.modal.inference_run_chat
+          import tempfile
+          import subprocess
+          import sys
+          from pathlib import Path
+          from tuner.project.manifest import load_project_manifest
+          from tuner.capabilities.registry import builtin_registry
+
+          assert builtin_registry().list()
+          with tempfile.TemporaryDirectory() as directory:
+              manifest = Path(directory) / "synaptic.yaml"
+              manifest.write_text(
+                  "schema_version: synaptic-project/v1\n"
+                  "project: {id: wheel-consumer, name: Wheel consumer}\n"
+                  "engine: {requires: '>=1', api: v1}\n",
+                  encoding="utf-8",
+              )
+              assert load_project_manifest(manifest).project_id == "wheel-consumer"
+              cli = Path(sys.executable).parent / "synaptic"
+              result = subprocess.run(
+                  [str(cli), "--project-root", directory, "capabilities", "list", "--json"],
+                  cwd=directory, check=True, capture_output=True, text=True,
+              )
+              assert json.loads(result.stdout)["success"] is True
           PY
 
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock

@@ -38,6 +38,21 @@ def test_packaged_sft_default_is_an_exact_distribution_asset() -> None:
             assert archive.read(member) == (REPO_ROOT / member).read_bytes()
 
 
+def test_public_schemas_are_exact_distribution_assets() -> None:
+    document = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    assert "schemas" in document["tool"]["setuptools"]["packages"]["find"]["include"]
+    assert document["tool"]["setuptools"]["package-data"]["schemas"] == ["synaptic-*.schema.json"]
+    candidate = os.environ.get(WHEEL_ENV)
+    if candidate:
+        with zipfile.ZipFile(candidate) as archive:
+            paths = sorted((REPO_ROOT / "schemas").glob("synaptic-*.schema.json"))
+            assert {name for name in archive.namelist() if name.startswith("schemas/")} == {
+                "schemas/" + path.name for path in paths
+            }
+            for path in paths:
+                assert archive.read("schemas/" + path.name) == path.read_bytes()
+
+
 @dataclass(frozen=True)
 class AssetFamily:
     """A deliberate family in the supported runtime boundary."""
