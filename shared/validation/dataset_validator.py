@@ -53,18 +53,20 @@ from shared.validation.parsing.configured_formats import (
 ALLOWED_ROLES = {"system", "user", "assistant"}
 
 # Engine tool schema catalog, resolved from the engine root (not the CWD).
+from shared.tool_catalog_resources import tool_catalog_path
+
 SCHEMAS_FILE = get_engine_root() / "Tools" / "tool_schemas.json"
 
 
-def load_tool_schemas(path: Path = SCHEMAS_FILE) -> Dict[str, Dict[str, Any]]:
-    """Load a tool schema catalog (tool name -> schema) from JSON."""
-    if path.exists():
-        try:
-            with open(path, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Warning: Could not load tool schemas: {e}", file=sys.stderr)
-    return {}
+def load_tool_schemas(path: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
+    """Load the selected catalog; explicit paths never select bundled defaults."""
+    with tool_catalog_path("tools", path) as selected:
+        payload = json.loads(selected.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or any(not isinstance(value, dict) for value in payload.values()):
+        raise ValueError("Tool schema catalog must map names to schema objects")
+    if path is None and not payload:
+        raise ValueError("Default tool schema catalog is empty")
+    return payload
 
 
 @dataclass(frozen=True)
@@ -582,17 +584,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if not args.path.exists():
         sys.exit(f"File not found: {args.path}")
 
-    default = default_validator_config()
-    wrapper_specs = default.wrapper_specs
+    wrapper_specs = get_configured_wrapper_specs()
     if args.tool_call_formats is not None:
         if not args.tool_call_formats.is_file():
             sys.exit(f"Tool-call format registry not found: {args.tool_call_formats}")
         wrapper_specs = build_wrapper_specs(load_tool_call_formats(str(args.tool_call_formats)))
-    tool_schemas = default.tool_schemas
     if args.tool_schemas is not None:
         if not args.tool_schemas.is_file():
             sys.exit(f"Tool schema catalog not found: {args.tool_schemas}")
-        tool_schemas = load_tool_schemas(args.tool_schemas)
+    tool_schemas = load_tool_schemas(args.tool_schemas)
     config = ValidatorConfig(wrapper_specs=wrapper_specs, tool_schemas=tool_schemas)
 
     reports: List[ExampleReport] = []
