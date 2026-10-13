@@ -712,3 +712,92 @@ def test_host_without_evaluation_ports_leaves_the_slot_empty(tmp_path) -> None:
     assert composition.evaluation is None
     with pytest.raises(Exception):
         api.evaluation
+
+
+class ComparisonScriptedClient(ScriptedClient):
+    def comparison_configuration(self):
+        from Evaluator.comparison_basis import GENERATION_KEYS
+        return {"backend": "scripted", "revision": "scripted-request/v1",
+                "generation": {key: None for key in GENERATION_KEYS}}
+
+
+class ComparisonScriptedBackend(ScriptedBackend):
+    def open(self, model):
+        self.opened.append(model)
+        return ComparisonScriptedClient(self, self._responses, self._on_chat)
+
+
+def test_actual_reports_compare_model_variable_without_reopening_backend(tmp_path):
+    from Evaluator.compare import compare_payloads
+    reports = []
+    backends = []
+    for name, response in (("first", "hello"), ("second", "goodbye")):
+        backend = ComparisonScriptedBackend({**RESPONSES, "Say hello": response})
+        _, api, _, _, _, sink = _host(tmp_path / name, backends={"local": backend})
+        request = _request("alpha.yaml")
+        from dataclasses import replace
+        request = replace(request, model=EvaluationModelRef("fixture-" + name, "revision"))
+        run = api.evaluation.start(api.evaluation.plan(request)).run
+        reports.append(json.loads(_artifact_bytes(sink, run, EVALUATION_RESULTS_ROLE)))
+        backends.append(backend)
+    assert all(report["metadata"]["comparison_basis"]["status"] == "verified" for report in reports)
+    result = compare_payloads(*reports)
+    assert result["passed"] is True
+    assert result["candidates"][0]["flips"]["regression_count"] == 1
+    assert [len(backend.chats) for backend in backends] == [2, 2]
+    raw = json.dumps(result)
+    assert SECRET_VALUE not in raw and "Say hello" not in raw and "goodbye" not in raw
+
+
+def test_report_basis_uses_consumed_cases_after_source_deletion(tmp_path):
+    import shutil
+    backend = ComparisonScriptedBackend(on_chat=lambda question: shutil.rmtree(tmp_path / "config", ignore_errors=True))
+    _, api, _, _, _, sink = _host(tmp_path, backends={"local": backend})
+    _, _, started = _run(api)
+    payload = json.loads(_artifact_bytes(sink, started.run, EVALUATION_RESULTS_ROLE))
+    assert payload["metadata"]["comparison_basis"]["status"] == "verified"
+    assert len(backend.chats) == 2 and not (tmp_path / "config").exists()
+
+
+def test_legacy_backend_keeps_working_but_basis_is_explicitly_unverified(tmp_path):
+    backend = ScriptedBackend()
+    _, api, _, _, _, sink = _host(tmp_path, backends={"local": backend})
+    _, _, started = _run(api)
+    basis = json.loads(_artifact_bytes(sink, started.run, EVALUATION_RESULTS_ROLE))["metadata"]["comparison_basis"]
+    assert basis["status"] == "unverified" and basis["reasons"] == ["backend_controls_unavailable"]
+    assert api.evaluation.show(started.run).state is EvaluationRunState.SUCCEEDED
+
+
+def test_optional_declaration_capture_failure_never_strands_running(tmp_path, monkeypatch):
+    from shared.validation import dataset_validator
+    backend = ComparisonScriptedBackend()
+    _, api, _, _, _, _ = _host(tmp_path, backends={"local": backend})
+    monkeypatch.setattr(dataset_validator, "default_validator_config", lambda: (_ for _ in ()).throw(ValueError("private failure")))
+    _, _, started = _run(api)
+    assert api.evaluation.show(started.run).state is EvaluationRunState.FAILED
+    assert len(backend.chats) == 2
+
+
+def test_second_backend_projection_failure_retains_actual_scored_results(tmp_path):
+    class Client(ComparisonScriptedClient):
+        def __init__(self, *args):
+            super().__init__(*args)
+            self.projections = 0
+        def comparison_configuration(self):
+            self.projections += 1
+            if self.projections == 2:
+                raise ValueError("private projection failure")
+            return super().comparison_configuration()
+    class Backend(ComparisonScriptedBackend):
+        def open(self, model):
+            self.opened.append(model)
+            return Client(self, self._responses, self._on_chat)
+    backend = Backend()
+    _, api, _, _, _, sink = _host(tmp_path, backends={"local": backend})
+    plan, _, started = _run(api)
+    outcome = api.evaluation.show(started.run)
+    assert outcome.state is EvaluationRunState.SUCCEEDED and outcome.cases_scored == 2
+    payload = json.loads(_artifact_bytes(sink, started.run, EVALUATION_RESULTS_ROLE))
+    assert payload["metadata"]["scenario_digest"] == plan.scenario_digest
+    assert payload["metadata"]["comparison_basis"]["reasons"] == ["comparison_recheck_unavailable"]
+    assert "private projection failure" not in json.dumps(payload)

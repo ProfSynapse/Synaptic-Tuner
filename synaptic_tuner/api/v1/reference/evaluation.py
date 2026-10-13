@@ -339,7 +339,22 @@ class LocalHttpEvaluatorBackendV1:
             model=model.model_ref, scheme=self._scheme, api_key=api_key,
             host=self._host, port=self._port,
         )
-        return create_client(self._backend, settings, timeout=self._timeout, retries=self._retries)
+        return _LocalComparisonClient(create_client(self._backend, settings, timeout=self._timeout, retries=self._retries),
+                                      self._backend, settings)
+
+
+class _LocalComparisonClient:
+    """Declare only generation settings used by this exact client instance."""
+    def __init__(self, client, backend, settings):
+        self._client, self._backend, self._settings = client, backend, settings
+
+    def comparison_configuration(self):
+        from Evaluator.comparison_basis import GENERATION_KEYS
+        return {"backend": self._backend, "revision": "synaptic-local-http-request/v1",
+                "generation": {name: getattr(self._settings, name, None) for name in GENERATION_KEYS}}
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
 
 
 class UnmeteredPaidBackendV1:
@@ -1269,8 +1284,16 @@ class ReferenceEvaluationOperationsV1:
         return EvaluationStart(run, True)
 
     def _execute(self, head: _Head, backend: EvaluationBackendPort, resolved: _ResolvedScenarios) -> None:
+        from copy import deepcopy
+        from Evaluator.comparison_basis import backend_controls, build_basis, unverified_basis
+        from shared.validation.dataset_validator import ValidatorConfig, default_validator_config
+        validator_config = None
+        comparison_basis = unverified_basis("comparison_inputs_unavailable")
+        original_basis = None
         run = head.record.run
         request = head.record.plan.request
+        selection = {"scenario_refs": list(request.scenario_refs), "preset": request.preset,
+                     "tags": list(request.tags), "case_limit": request.case_limit}
         observations = _ObservationWriter(self._streams, run, self._clock)
         records: list[EvaluationRecord] = []
         verdicts: list[tuple[JudgeVerdict, float]] = []
@@ -1280,6 +1303,12 @@ class ReferenceEvaluationOperationsV1:
         spend: SpendEffectRecordV1 | None = None
         ledger = SpendLedgerV1(self._records, self._clock)
         try:
+            try:
+                resolved = _ResolvedScenarios(deepcopy(resolved.groups), resolved.scenario_digest)
+                declared = default_validator_config()
+                validator_config = ValidatorConfig(deepcopy(declared.wrapper_specs), deepcopy(declared.tool_schemas))
+            except Exception:
+                comparison_basis = unverified_basis("declarations_unavailable")
             scope = self._spend_scope(backend)
             if scope is not None:
                 # One spend effect per run, claimed before the first call (§4.4).
@@ -1298,6 +1327,13 @@ class ReferenceEvaluationOperationsV1:
                     judge = self._ports.judge.open()
                 except Exception:
                     raise _error(EvaluationOperationCode.JUDGE_FAILED) from None
+            if validator_config is not None:
+                try:
+                    controls = backend_controls(client)
+                    comparison_basis = build_basis(resolved.groups, validator_config, controls, judge=judge is not None, selection=selection)
+                    original_basis = deepcopy(comparison_basis)
+                except Exception:
+                    comparison_basis = unverified_basis("comparison_inputs_unavailable")
             for ref, cases in resolved.groups:
                 head = self._require_head(run)
                 if head.record.state is EvaluationRunState.CANCEL_REQUESTED:
@@ -1310,7 +1346,7 @@ class ReferenceEvaluationOperationsV1:
                     observations.emit(
                         ObservationKind.EVALUATION_CASE_STARTED, EvaluationCaseStartedPayloadV1(case_ref)
                     )
-                    (record,) = evaluate_cases([case], client, judge_validator=judge)  # type: ignore[list-item]
+                    (record,) = evaluate_cases([case], client, judge_validator=judge, validator_config=validator_config)  # type: ignore[list-item]
                     verdict, score = _verdict(record)
                     records.append(record)
                     verdicts.append((verdict, score))
@@ -1329,10 +1365,19 @@ class ReferenceEvaluationOperationsV1:
         except Exception:
             failure = EvaluationOperationCode.INTEGRITY_ERROR.value
 
+        if original_basis is not None:
+            try:
+                current_basis = build_basis(resolved.groups, validator_config, backend_controls(client), judge=judge is not None, selection=selection)
+                if current_basis != original_basis:
+                    comparison_basis = {**original_basis, "status": "unverified",
+                                        "reasons": sorted(set(original_basis["reasons"]) | {"consumed_controls_changed"})}
+            except Exception:
+                comparison_basis = {**original_basis, "status": "unverified",
+                                    "reasons": sorted(set(original_basis["reasons"]) | {"comparison_recheck_unavailable"})}
         artifacts: tuple[VerifiedArtifact, ...] = ()
         if failure is None:
             try:
-                artifacts = self._write_artifacts(run, request, records, cancelled)
+                artifacts = self._write_artifacts(run, request, records, cancelled, comparison_basis=comparison_basis, scenario_digest=head.record.plan.scenario_digest)
             except EvaluationOperationError as error:
                 failure = error.code.value
             except Exception:
@@ -1398,6 +1443,7 @@ class ReferenceEvaluationOperationsV1:
         request: EvaluationRequest,
         records: list[EvaluationRecord],
         cancelled: bool,
+        *, comparison_basis=None, scenario_digest=None,
     ) -> tuple[VerifiedArtifact, ...]:
         metadata = {
             "run_id": run.run_id,
@@ -1411,6 +1457,10 @@ class ReferenceEvaluationOperationsV1:
             "case_limit": request.case_limit,
             "partial": cancelled,
         }
+        if comparison_basis is not None:
+            metadata["comparison_basis"] = comparison_basis
+        if scenario_digest is not None:
+            metadata["scenario_digest"] = scenario_digest
         payload = build_run_payload(records, metadata, generated_at=self._clock.now())
         payload["records"] = [_redacted(record_to_dict(record)) for record in records]
         trace = {
