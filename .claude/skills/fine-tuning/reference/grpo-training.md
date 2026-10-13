@@ -2,6 +2,90 @@
 
 Group Relative Policy Optimization — optimizes model behavior using reward functions against generated completions.
 
+## Public GRPO declarations and CPU preparation
+
+The provider-neutral `TrainingInputV1` accepts explicit method `grpo` with
+`synaptic-grpo-hyperparameters/v1` and rewards `{items, documents, schema}`.
+This lane supports **CPU preparation and pure developer compilation only**.
+It does not enable public provider execution, establish model/image compatibility,
+or qualify GRPO training. The legacy trainer commands below remain separate.
+
+Use the existing generic preparation service with explicit host-owned roots:
+
+```python
+from pathlib import Path
+from synaptic_tuner.api.v1.training_sources import (
+    LocalTrainingInputPathV1, TrainingPreparationConfigV1,
+)
+from tuner.training.grpo_preparation import (
+    GRPONormalizerConfigV1, GRPOTrainingInputNormalizerV1,
+    GRPOPreparedInputFormatVerifierV1,
+)
+from tuner.training.input_preparation import (
+    PosixPrivatePreparedRootAuthorityV1, TrainingInputPreparationServiceV1,
+)
+
+# source_root and prepared_root are explicit absolute caller-owned 0700 Paths.
+normalizer = GRPOTrainingInputNormalizerV1(allowed_source_roots=(source_root,))
+verifier = GRPOPreparedInputFormatVerifierV1()
+service = TrainingInputPreparationServiceV1(
+    prepared_root=prepared_root,
+    normalizers={"synaptic.grpo-prompts/v1": normalizer},
+    format_verifiers={verifier.format: verifier},
+    root_authority=PosixPrivatePreparedRootAuthorityV1(),
+)
+result = service.prepare(
+    LocalTrainingInputPathV1(source_root),
+    TrainingPreparationConfigV1(
+        request_id, project_ref, canonical_training_json,
+        GRPONormalizerConfigV1(member_name, prompt_column),
+    ),
+)
+```
+
+`canonical_training_json` is the exact validated GRPO training input, not a
+legacy trainer YAML document. Choose `prompt_column` explicitly in both its
+hyperparameters and the normalizer config. The source is one declared private,
+regular, single-link JSONL leaf beneath the exact admitted source root. This
+adapter currently requires Linux retained-descriptor support.
+
+Prepared format is `synaptic-grpo-prompts/v1`, with at most 64 KiB and 128 rows.
+Original UTF-8 bytes and finite reward columns are preserved; BOM, duplicate
+fields, nonfinite values and ambiguous reserved `prompt` column collisions
+reject. There are no invented SFT targets or splits. A closed manifest binds
+format, prompt column, byte/hash identity and row count. Fresh writes are
+exclusive; independently verified identical publications may be reused across
+legitimate model, reward and hyperparameter changes. Changed destinations reject.
+Uncertain publication failures retain their owned stage/publication and report
+failure.
+
+The optional verifier input check validates the selected request through the
+actual retained GRPO core using the same verified bytes, before the generic
+service verifies the retained lease and returns. `result.prepared` is the public
+identity/request; `result.retained_source` is host-only input custody. Keep that
+source for later explicitly supported composition; do not serialize it or infer
+execution authority from its identity.
+
+For pure compilation, explicitly register `tuner.training.GRPORecipe` in an
+existing `RecipeRegistry`. The resolved `CanonicalDocument` has exactly
+`schema_version: synaptic-grpo-config/v1`, `method: grpo`,
+`execution: {mode: developer_integration}`, `training_input` from the prepared
+request, and `prepared_input` from its identity. Pass an actual authenticated
+`ExecutionSourceV1` to existing `compile_execution_workload`. The default registry
+remains SFT-only. The resulting `synaptic-grpo-workload/v1` commits normalized
+config, original dataset bytes, model/tokenizer revisions and declarative reward
+documents/schema. Compilation alone does not attest rows, reward dispersion,
+parameter updates or a runnable packaged runtime.
+
+The first declaration lane is native-template, step-limited, single-process
+plain GRPO with raw-response binary regex rewards and explicit empty reward
+schema. Custom Python, judges, environment rollout, GSPO, pivot, existing adapter
+loading and checkpoint retention are unsupported here. Precision follows the
+retained core's hardware selection; both precision flags false do not promise
+FP32. See `docs/plans/public-grpo-compilation.md` (repository root)
+for the exact fields, schemas and limits. Packaged dispatch and live qualification are
+separate gates; do not use a provider-specific launcher to bypass them.
+
 ---
 
 ## Overview

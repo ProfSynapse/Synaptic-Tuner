@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import hashlib
+import importlib.util
 import json
 import math
 import subprocess
@@ -640,7 +641,9 @@ print(json.dumps(forbidden))
 
 
 def test_training_input_source_imports_only_stdlib_and_contract_primitives() -> None:
-    path = ROOT / "synaptic_tuner/api/v1/training_input.py"
+    spec = importlib.util.find_spec("synaptic_tuner.api.v1.training_input")
+    assert spec is not None and spec.origin is not None
+    path = Path(spec.origin)
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imports = {
         alias.name.split(".")[0]
