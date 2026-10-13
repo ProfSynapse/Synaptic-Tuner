@@ -1,4 +1,4 @@
-"""Generic terminal-run CLI delegation; provider-free retained reader double."""
+"""Generic retained-run CLI delegation; provider-free retained reader double."""
 
 from contextlib import contextmanager
 from hashlib import sha256
@@ -67,6 +67,11 @@ def setup_reader(tmp_path, monkeypatch, *, verified=True, fail=False):
                 "synaptic-run-outcome/v1", run, TrainingRunState.SUCCEEDED
             )
 
+        def outcome(self, supplied):
+            assert supplied == run
+            calls.append("observe")
+            return RunOutcome("synaptic-run-outcome/v1", run, TrainingRunState.RUNNING)
+
         def verify(self, supplied):
             assert supplied == run
             calls.append("verify")
@@ -104,7 +109,7 @@ def setup_reader(tmp_path, monkeypatch, *, verified=True, fail=False):
     return calls
 
 
-@pytest.mark.parametrize("action", ["show", "verify", "download"])
+@pytest.mark.parametrize("action", ["show", "observe", "verify", "download"])
 def test_routes_only_public_reads_and_closes_reader(
     tmp_path, monkeypatch, capsys, action
 ):

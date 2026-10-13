@@ -1,4 +1,4 @@
-"""Read an exact retained terminal workflow through public RunsAPI."""
+"""Read an exact retained workflow through public RunsAPI."""
 
 from pathlib import Path
 import re
@@ -23,7 +23,7 @@ class RunsHandler(BaseHandler):
             role = getattr(self.args, "artifact_role", None)
             destination = getattr(self.args, "dest", None)
             if (
-                action not in {"show", "verify", "download"}
+                action not in {"show", "observe", "verify", "download"}
                 or type(run_id) is not str
                 or run_id == "latest"
                 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", run_id) is None
@@ -59,6 +59,12 @@ class RunsHandler(BaseHandler):
                     data = {
                         "run": run.to_dict(),
                         "outcome": retained.runs.show(run).to_dict(),
+                    }
+                    succeeded = True
+                elif action == "observe":
+                    data = {
+                        "run": run.to_dict(),
+                        "outcome": retained.runs.outcome(run).to_dict(),
                     }
                     succeeded = True
                 elif action == "verify":
