@@ -10,9 +10,11 @@ Delegates all actual work to focused services.
 """
 
 import json
+import hashlib
+from copy import deepcopy
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from pathlib import Path
 
 from .config import ConfigLoader
@@ -153,6 +155,8 @@ class ImprovementEngine:
         rubric_keys: List[str],
         max_iterations: int = 3,
         prompt_context: Optional[Dict[str, Any]] = None,
+        *,
+        candidate_evaluator: Optional[Callable[[Dict[str, Any], str, Dict[str, Any]], Dict[str, Any]]] = None,
     ) -> ImprovementResult:
         """
         Run improvement loop: process scopes sequentially.
@@ -164,6 +168,12 @@ class ImprovementEngine:
             example: Example to improve
             rubric_keys: List of rubric keys to evaluate against
             max_iterations: Maximum improvement iterations per scope
+            candidate_evaluator: Optional candidate-copy/digest/base-context callback
+                returning a complete fresh prompt-context mapping. The caller owns
+                projection and removal of any stale feedback. Called for the initial candidate
+                and each changed candidate before judgment. Exceptions propagate
+                without retry or fallback. The callback owns configured projection
+                and execution; this engine grants no effect authority.
 
         Returns:
             ImprovementResult with final example and metrics
@@ -173,6 +183,33 @@ class ImprovementEngine:
         by_scope = self._group_rubrics_by_scope(all_rubrics)
 
         improved = example
+        evaluated_digest = None
+        evaluated_context = None
+        if candidate_evaluator is not None and not callable(candidate_evaluator):
+            raise TypeError("candidate_evaluator must be callable")
+        base_context = deepcopy(prompt_context or {}) if candidate_evaluator is not None else None
+
+        def context_for(candidate):
+            nonlocal evaluated_digest, evaluated_context
+            if candidate_evaluator is None:
+                return prompt_context
+            raw = json.dumps(candidate, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=False, allow_nan=False).encode("utf-8")
+            digest = hashlib.sha256(raw).hexdigest()
+            if digest != evaluated_digest:
+                feedback = candidate_evaluator(deepcopy(candidate), digest, deepcopy(base_context))
+                if type(feedback) is not dict:
+                    raise TypeError("candidate evaluator must return a fresh context mapping")
+                # Keep the retained context independent of callback-owned objects.
+                context = deepcopy(feedback)
+                if "candidate_digest" in context and context["candidate_digest"] != digest:
+                    raise ValueError("candidate evaluator returned a conflicting digest")
+                context["candidate_digest"] = digest
+                evaluated_context, evaluated_digest = context, digest
+            return deepcopy(evaluated_context)
+
+        if candidate_evaluator is not None:
+            context_for(improved)
         all_scopes_improved = []
         all_scores = {}
         total_iterations = 0
@@ -199,7 +236,7 @@ class ImprovementEngine:
                     improved,
                     scope_rubrics,
                     validation_results,
-                    prompt_context=prompt_context,
+                    prompt_context=context_for(improved),
                 )
 
                 # 3. Execute judge with retry
@@ -259,7 +296,7 @@ class ImprovementEngine:
                         scope,
                         failing_rubrics,  # ALL failing rubrics together
                         judgment,
-                        prompt_context=prompt_context,
+                        prompt_context=context_for(improved),
                     )
 
                     if improved_example != improved:
@@ -269,7 +306,7 @@ class ImprovementEngine:
                             improved_example,
                             scope_rubrics,
                             after_validation,
-                            prompt_context=prompt_context,
+                            prompt_context=context_for(improved_example),
                         )
                         after_judgment = self._call_with_retry(
                             lambda: self.judge_service.judge(
@@ -303,6 +340,10 @@ class ImprovementEngine:
 
             if not scope_passed:
                 self.logger.warning(f"  {scope} did not pass after {max_iterations} iterations")
+
+        if candidate_evaluator is not None:
+            # Bind retained feedback to the actual selected final candidate.
+            context_for(improved)
 
         # Check if all scopes passed
         all_passed = all(
