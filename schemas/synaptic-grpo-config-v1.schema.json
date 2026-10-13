@@ -1,0 +1,448 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-grpo-config-v1.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "synaptic-grpo-config/v1"
+    },
+    "method": {
+      "const": "grpo"
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "developer_integration"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "training_input": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "synaptic-training-input/v1"
+        },
+        "method": {
+          "const": "grpo"
+        },
+        "model": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "tokenizer_revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            }
+          },
+          "required": [
+            "ref",
+            "revision",
+            "tokenizer_revision"
+          ],
+          "additionalProperties": false
+        },
+        "dataset": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "ref"
+          ],
+          "additionalProperties": false
+        },
+        "hyperparameters": {
+          "type": "object",
+          "properties": {
+            "batch_size": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "gradient_accumulation_steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "num_generations": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 4096
+            },
+            "max_steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "max_seq_length": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "max_prompt_length": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "max_completion_length": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "logging_steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "save_steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "save_total_limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "lora_rank": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "lora_alpha": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "learning_rate": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "temperature": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 10
+            },
+            "max_grad_norm": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 100
+            },
+            "beta": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "weight_decay": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "warmup_ratio": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "lora_dropout": {
+              "type": "number",
+              "minimum": 0,
+              "exclusiveMaximum": 1
+            },
+            "lora_target_modules": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "use_dora": {
+              "type": "boolean"
+            },
+            "use_rslora": {
+              "type": "boolean"
+            },
+            "load_in_4bit": {
+              "type": "boolean"
+            },
+            "bf16": {
+              "type": "boolean"
+            },
+            "fp16": {
+              "type": "boolean"
+            },
+            "prompt_column": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "schema_version": {
+              "const": "synaptic-grpo-hyperparameters/v1"
+            },
+            "chat_template_kwargs": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 64
+            }
+          },
+          "required": [
+            "batch_size",
+            "gradient_accumulation_steps",
+            "num_generations",
+            "max_steps",
+            "max_seq_length",
+            "max_prompt_length",
+            "max_completion_length",
+            "logging_steps",
+            "save_steps",
+            "save_total_limit",
+            "lora_rank",
+            "lora_alpha",
+            "seed",
+            "learning_rate",
+            "temperature",
+            "max_grad_norm",
+            "beta",
+            "weight_decay",
+            "warmup_ratio",
+            "lora_dropout",
+            "lora_target_modules",
+            "use_dora",
+            "use_rslora",
+            "load_in_4bit",
+            "bf16",
+            "fp16",
+            "prompt_column",
+            "schema_version"
+          ],
+          "additionalProperties": false
+        },
+        "artifacts": {
+          "type": "object",
+          "properties": {
+            "required_kinds": {
+              "type": "array",
+              "minItems": 5,
+              "maxItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "workload_record",
+                  "training_lineage",
+                  "training_metrics",
+                  "final_model",
+                  "tokenizer"
+                ]
+              }
+            },
+            "retain_checkpoints": {
+              "const": false
+            }
+          },
+          "required": [
+            "required_kinds",
+            "retain_checkpoints"
+          ],
+          "additionalProperties": false
+        },
+        "rewards": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "weight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "name",
+                  "weight"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "documents": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 32,
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "scope": {
+                    "const": "response"
+                  },
+                  "validation": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "const": "regex"
+                        },
+                        "match": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "match"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "scoring": {
+                    "type": "object",
+                    "properties": {
+                      "strategy": {
+                        "const": "binary"
+                      },
+                      "on_pass": {
+                        "type": "number",
+                        "minimum": -100,
+                        "maximum": 100
+                      },
+                      "on_fail": {
+                        "type": "number",
+                        "minimum": -100,
+                        "maximum": 100
+                      }
+                    },
+                    "required": [
+                      "strategy",
+                      "on_pass",
+                      "on_fail"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "type": {
+                    "const": "rubric"
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                },
+                "required": [
+                  "name",
+                  "scope",
+                  "validation",
+                  "scoring"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "schema": {
+              "type": "object",
+              "maxProperties": 0
+            }
+          },
+          "required": [
+            "items",
+            "documents",
+            "schema"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schema_version",
+        "method",
+        "model",
+        "dataset",
+        "hyperparameters",
+        "artifacts",
+        "rewards"
+      ],
+      "additionalProperties": false
+    },
+    "prepared_input": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string",
+          "pattern": "^prepared://sha256/[0-9a-f]{64}$"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "content_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "format": {
+          "const": "synaptic-grpo-prompts/v1"
+        }
+      },
+      "required": [
+        "ref",
+        "revision",
+        "content_digest",
+        "size_bytes",
+        "format"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "method",
+    "execution",
+    "training_input",
+    "prepared_input"
+  ],
+  "additionalProperties": false
+}

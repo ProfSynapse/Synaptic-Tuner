@@ -592,12 +592,6 @@ class TrainingInputPreparationServiceV1:
             size_bytes=verified.size_bytes,
             format=verifier.format,
         )
-        retained = verifier.source(candidate_path, identity)
-        if not isinstance(retained, RetainedPreparedTrainingInputSourceV1):
-            raise TypeError("format verifier returned an invalid retained source")
-        if _verified_lease_bytes(retained, identity) != verified.snapshot:
-            raise ValueError("retained source differs from the verified publication")
-        self._root_authority.verify(root_attestation)  # type: ignore[union-attr]
         training_input = TrainingInputV1.from_json(config.canonical_training_json)
         request_document = training_input.to_dict()
         request_document["dataset"] = {"ref": identity.ref}
@@ -605,6 +599,17 @@ class TrainingInputPreparationServiceV1:
             request_document, sort_keys=True, separators=(",", ":"),
             ensure_ascii=False, allow_nan=False,
         )
+        validator = getattr(verifier, "validate_training_input", None)
+        if validator is not None:
+            if not callable(validator):
+                raise TypeError("format verifier input validation must be callable")
+            validator(candidate_path, identity, canonical_request)
+        retained = verifier.source(candidate_path, identity)
+        if not isinstance(retained, RetainedPreparedTrainingInputSourceV1):
+            raise TypeError("format verifier returned an invalid retained source")
+        if _verified_lease_bytes(retained, identity) != verified.snapshot:
+            raise ValueError("retained source differs from the verified publication")
+        self._root_authority.verify(root_attestation)  # type: ignore[union-attr]
         TrainingInputV1.from_json(canonical_request)
         prepared = PreparedTrainingInputV1(
             identity,

@@ -251,6 +251,7 @@ def _fields(value: object, expected: frozenset[str], name: str) -> dict[str, obj
 
 class TrainingMethodV1(str, Enum):
     SFT = "sft"
+    GRPO = "grpo"
 
 
 @dataclass(frozen=True, slots=True)
@@ -637,31 +638,203 @@ def validate_chat_template_kwargs(value: object) -> dict[str, object]:
 
 
 @dataclass(frozen=True, slots=True)
+class GRPOTrainingHyperparametersV1:
+    batch_size: int
+    gradient_accumulation_steps: int
+    num_generations: int
+    max_steps: int
+    max_seq_length: int
+    max_prompt_length: int
+    max_completion_length: int
+    learning_rate: float
+    temperature: float
+    beta: float
+    weight_decay: float
+    warmup_ratio: float
+    max_grad_norm: float
+    seed: int
+    logging_steps: int
+    save_steps: int
+    save_total_limit: int
+    lora_rank: int
+    lora_alpha: int
+    lora_dropout: float
+    lora_target_modules: tuple[str, ...]
+    use_dora: bool
+    use_rslora: bool
+    load_in_4bit: bool
+    bf16: bool
+    fp16: bool
+    prompt_column: str
+    chat_template_kwargs: dict[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        bounds = {
+            "batch_size": 4096, "gradient_accumulation_steps": 4096,
+            "num_generations": 4096, "max_steps": 100000,
+            "max_seq_length": 100000, "max_prompt_length": 100000,
+            "max_completion_length": 100000, "logging_steps": 100000,
+            "save_steps": 100000, "save_total_limit": 100000,
+            "lora_rank": 4096, "lora_alpha": 65536, "seed": _MAX_SEED,
+        }
+        for name, maximum in bounds.items():
+            minimum = 0 if name == "seed" else 2 if name == "num_generations" else 1
+            object.__setattr__(self, name, _exact_integer(
+                getattr(self, name), name, minimum=minimum, maximum=maximum))
+        if self.batch_size * self.gradient_accumulation_steps % self.num_generations:
+            raise ValueError("effective batch must be divisible by num_generations")
+        if self.max_prompt_length + self.max_completion_length > self.max_seq_length:
+            raise ValueError("prompt and completion exceed sequence length")
+        for name, maximum in (("learning_rate", 1), ("temperature", 10),
+                              ("max_grad_norm", 100)):
+            object.__setattr__(self, name, _finite_float(getattr(self, name), name,
+                minimum_exclusive=0, maximum_inclusive=maximum))
+        for name in ("beta", "weight_decay", "warmup_ratio"):
+            value = getattr(self, name)
+            if type(value) not in (int, float):
+                raise TypeError(f"{name} must be a number")
+            try:
+                value = float(value)
+            except OverflowError:
+                raise ValueError(f"{name} is outside its allowed range") from None
+            if not math.isfinite(value) or not 0 <= value <= 1:
+                raise ValueError(f"{name} is outside its allowed range")
+            object.__setattr__(self, name, value)
+        object.__setattr__(self, "lora_dropout", _dropout(self.lora_dropout))
+        object.__setattr__(self, "lora_target_modules", _canonical_items(
+            self.lora_target_modules, "lora_target_modules", maximum_items=256))
+        object.__setattr__(self, "prompt_column", _text(
+            self.prompt_column, "prompt_column", maximum_bytes=128))
+        for name in ("use_dora", "use_rslora", "load_in_4bit", "bf16", "fp16"):
+            object.__setattr__(self, name, _exact_bool(getattr(self, name), name))
+        if self.bf16 and self.fp16:
+            raise ValueError("bf16 and fp16 cannot both be enabled")
+        if self.chat_template_kwargs is not None:
+            object.__setattr__(self, "chat_template_kwargs",
+                               validate_chat_template_kwargs(self.chat_template_kwargs))
+
+    def to_dict(self) -> dict[str, object]:
+        result = {name: getattr(self, name) for name in self.__dataclass_fields__
+                  if name != "chat_template_kwargs"}
+        result["schema_version"] = "synaptic-grpo-hyperparameters/v1"
+        result["lora_target_modules"] = list(self.lora_target_modules)
+        if self.chat_template_kwargs is not None:
+            result["chat_template_kwargs"] = validate_chat_template_kwargs(self.chat_template_kwargs)
+        return result
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "GRPOTrainingHyperparametersV1":
+        names = set(cls.__dataclass_fields__) - {"chat_template_kwargs"}
+        expected = names | {"schema_version"}
+        if type(value) is dict and "chat_template_kwargs" in value:
+            expected.add("chat_template_kwargs")
+        snapshot = _fields(value, frozenset(expected), "grpo hyperparameters")
+        if snapshot.pop("schema_version") != "synaptic-grpo-hyperparameters/v1":
+            raise ValueError("GRPO hyperparameter schema is unsupported")
+        return cls(**snapshot)
+
+
+def validate_grpo_rewards(value: object) -> dict[str, object]:
+    """Detach the first raw-response declarative reward lane."""
+    value = _fields(value, frozenset({"items", "documents", "schema"}), "rewards")
+    if type(value["schema"]) is not dict or value["schema"]:
+        raise ValueError("raw GRPO rewards require an empty schema")
+    items, documents = value["items"], value["documents"]
+    if type(items) is not list or not 1 <= len(items) <= 32:
+        raise ValueError("rewards.items exceeds its bounds")
+    if type(documents) is not dict or any(type(k) is not str for k in documents):
+        raise TypeError("rewards.documents must be an object")
+    selected = set()
+    positive = False
+    for item in items:
+        item = _fields(item, frozenset({"name", "weight"}), "reward item")
+        name = _text(item["name"], "reward name", maximum_bytes=128)
+        if name in selected:
+            raise ValueError("duplicate reward name")
+        selected.add(name)
+        weight = item["weight"]
+        if type(weight) not in (int, float) or not 0 <= weight <= 100:
+            raise ValueError("reward weight is outside its bounds")
+        positive |= weight > 0
+    if not positive or set(documents) != selected:
+        raise ValueError("reward documents must exactly match positive selections")
+    for name, document in documents.items():
+        required = {"name", "scope", "validation", "scoring"}
+        allowed = required | {"type", "description"}
+        if type(document) is not dict or any(type(k) is not str for k in document):
+            raise TypeError("reward document must be an object")
+        if not required <= set(document) <= allowed:
+            raise ValueError("reward document has invalid fields")
+        if document["name"] != name or document["scope"] != "response":
+            raise ValueError("reward identity or scope is unsupported")
+        if "type" in document and document["type"] != "rubric":
+            raise ValueError("reward type is unsupported")
+        if "description" in document:
+            _text(document["description"], "reward description", maximum_bytes=4096)
+        rules = document["validation"]
+        if type(rules) is not list or not 1 <= len(rules) <= 32:
+            raise ValueError("reward validation exceeds its bounds")
+        for rule in rules:
+            rule = _fields(rule, frozenset({"type", "match"}), "reward rule")
+            if rule["type"] != "regex":
+                raise ValueError("reward rule is unsupported")
+            pattern = _text(rule["match"], "reward pattern", maximum_bytes=4096)
+            try:
+                re.compile(pattern)
+            except re.error:
+                raise ValueError("reward pattern is invalid") from None
+        scoring = _fields(document["scoring"],
+                          frozenset({"strategy", "on_pass", "on_fail"}), "scoring")
+        if scoring["strategy"] != "binary":
+            raise ValueError("reward scoring is unsupported")
+        for key in ("on_pass", "on_fail"):
+            number = scoring[key]
+            if type(number) not in (int, float) or not -100 <= number <= 100:
+                raise ValueError("reward score is outside its bounds")
+    try:
+        raw = json.dumps(value, sort_keys=True, ensure_ascii=False,
+                         separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError):
+        raise ValueError("rewards must be finite JSON") from None
+    if len(raw) > 65536:
+        raise ValueError("rewards exceeds its byte bound")
+    return json.loads(raw)
+
+
+@dataclass(frozen=True, slots=True)
 class TrainingInputV1:
     schema_version: str
     method: TrainingMethodV1
     model: TrainingModelInputV1
     dataset: TrainingDatasetInputV1
-    hyperparameters: SFTTrainingHyperparametersV1
+    hyperparameters: SFTTrainingHyperparametersV1 | GRPOTrainingHyperparametersV1
     artifacts: TrainingArtifactRequirementsV1
+    rewards: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != _TRAINING_SCHEMA:
             raise ValueError("training input schema is unsupported")
-        if type(self.method) is not TrainingMethodV1 or self.method is not TrainingMethodV1.SFT:
+        if type(self.method) is not TrainingMethodV1:
             raise TypeError("method must be exact TrainingMethodV1")
         expected = (
             (self.model, TrainingModelInputV1, "model"),
             (self.dataset, TrainingDatasetInputV1, "dataset"),
-            (self.hyperparameters, SFTTrainingHyperparametersV1, "hyperparameters"),
+            (self.hyperparameters, SFTTrainingHyperparametersV1 if self.method is TrainingMethodV1.SFT
+             else GRPOTrainingHyperparametersV1, "hyperparameters"),
             (self.artifacts, TrainingArtifactRequirementsV1, "artifacts"),
         )
         for value, expected_type, field in expected:
             if type(value) is not expected_type:
                 raise TypeError(f"{field} has an invalid exact type")
 
+        if self.method is TrainingMethodV1.SFT:
+            if self.rewards is not None:
+                raise ValueError("SFT does not accept GRPO rewards")
+        else:
+            object.__setattr__(self, "rewards", validate_grpo_rewards(self.rewards))
+
     def to_dict(self) -> dict[str, object]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "method": self.method.value,
             "model": self.model.to_dict(),
@@ -669,19 +842,19 @@ class TrainingInputV1:
             "hyperparameters": self.hyperparameters.to_dict(),
             "artifacts": self.artifacts.to_dict(),
         }
+        if self.method is TrainingMethodV1.GRPO:
+            result["rewards"] = validate_grpo_rewards(self.rewards)
+        return result
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> "TrainingInputV1":
-        value = _fields(
-            value,
-            frozenset(
-                {"schema_version", "method", "model", "dataset", "hyperparameters", "artifacts"}
-            ),
-            "training_input",
-        )
+        fields = {"schema_version", "method", "model", "dataset", "hyperparameters", "artifacts"}
+        if type(value) is dict and value.get("method") == "grpo":
+            fields.add("rewards")
+        value = _fields(value, frozenset(fields), "training_input")
         if value["schema_version"] != _TRAINING_SCHEMA:
             raise ValueError("training input schema is unsupported")
-        if value["method"] != TrainingMethodV1.SFT.value:
+        if value["method"] not in {method.value for method in TrainingMethodV1}:
             raise ValueError("training method is unsupported")
         nested = {}
         for field in ("model", "dataset", "hyperparameters", "artifacts"):
@@ -691,13 +864,13 @@ class TrainingInputV1:
             nested[field] = item
         return cls(
             schema_version=_TRAINING_SCHEMA,
-            method=TrainingMethodV1.SFT,
+            method=TrainingMethodV1(value["method"]),
             model=TrainingModelInputV1.from_dict(nested["model"]),
             dataset=TrainingDatasetInputV1.from_dict(nested["dataset"]),
-            hyperparameters=SFTTrainingHyperparametersV1.from_dict(
-                nested["hyperparameters"]
-            ),
+            hyperparameters=(SFTTrainingHyperparametersV1 if value["method"] == "sft"
+                             else GRPOTrainingHyperparametersV1).from_dict(nested["hyperparameters"]),
             artifacts=TrainingArtifactRequirementsV1.from_dict(nested["artifacts"]),
+            rewards=value.get("rewards"),
         )
 
     @classmethod

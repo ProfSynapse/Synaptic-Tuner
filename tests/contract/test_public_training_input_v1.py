@@ -101,7 +101,7 @@ def test_valid_document_is_exact_immutable_and_canonical() -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         value.schema_version = "changed"  # type: ignore[misc]
     assert not hasattr(value, "__dict__")
-    assert tuple(item.value for item in TrainingMethodV1) == ("sft",)
+    assert tuple(item.value for item in TrainingMethodV1) == ("sft", "grpo")
     assert "schema_version" not in {
         field.name for field in dataclasses.fields(SFTTrainingHyperparametersV1)
     }
