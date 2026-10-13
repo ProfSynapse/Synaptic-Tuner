@@ -146,6 +146,31 @@ class _SynapticArgumentParser(argparse.ArgumentParser):
         parsed = super().parse_args(args=arguments, namespace=namespace)
         command = getattr(parsed, "command", None)
         capability_id = getattr(parsed, "capability_id", None)
+        if command == "runs":
+            import re
+            allowed = {"--run", "--modal-profile", "--modal-environment", "--json", "--env-file"}
+            if parsed.subcommand == "download":
+                allowed.update({"--artifact-role", "--dest"})
+            if _explicit_long_options(arguments) - allowed:
+                self.error("runs accepts only retained readback options")
+            action = getattr(parsed, "subcommand", None)
+            if action not in {"show", "verify", "download"}:
+                self.error("runs requires show, verify, or download")
+            if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", parsed.run or "")
+                    or parsed.run == "latest"):
+                self.error("runs requires --run with one exact retained run id")
+            if not parsed.modal_profile or not parsed.modal_environment:
+                self.error("runs requires explicit --modal-profile and --modal-environment")
+            if action == "download":
+                if not parsed.artifact_role or not parsed.dest:
+                    self.error("runs download requires --artifact-role and --dest")
+            elif parsed.artifact_role is not None or parsed.dest is not None:
+                self.error("--artifact-role and --dest require runs download")
+            if any(getattr(parsed, name, None) for name in (
+                    "job_config", "plan", "quote", "qualify", "qualify_metrics", "fresh_attempt")):
+                self.error("runs cannot plan or execute training")
+        elif getattr(parsed, "artifact_role", None) is not None:
+            self.error("--artifact-role requires runs download")
         if getattr(parsed, "prepare_local", False):
             if (command != "train" or not getattr(parsed, "job_config", None)
                     or getattr(parsed, "fresh_attempt", False)
@@ -306,6 +331,7 @@ Commands:
   ingest      Ingest one explicit local Markdown selection to a private bundle
   prepare-dataset  Convert one verified bundle into a private training dataset
   list        Discover available resources
+  runs        Show, verify, or download artifacts from an exact retained terminal run
   list-runs   Query unified experiment tracking registry
   check-contamination  N-gram containment of eval prompts inside training data
 
@@ -374,7 +400,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "modal-runtime-release", "ingest", "prepare-dataset", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compare-runs", "create-experiment", "check-contamination"],
+        choices=["runs", "train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "hf-source", "hf-smoke", "hf-training-smoke", "modal-runtime-release", "ingest", "prepare-dataset", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compare-runs", "create-experiment", "check-contamination"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -618,7 +644,8 @@ Examples:
     )
 
     # Cloud-specific flags
-    parser.add_argument("--run", help="Cloud run slug or prefix to use (cloud-eval, cloud-gym only). Use 'latest' for newest.")
+    parser.add_argument("--run", help="Exact retained run id for runs; cloud run slug/prefix for cloud-eval or cloud-gym.")
+    parser.add_argument("--artifact-role", choices=("final_model", "tokenizer", "training_lineage", "training_metrics", "workload_record"), help="Verified artifact role for runs download.")
     parser.add_argument("--method", choices=list(TRAINING_METHODS), help="Training method for cloud-pipeline, or training method filter for cloud-eval/cloud-gym.")
     parser.add_argument("--bucket", help="Override HF bucket identifier for cloud-eval/cloud-gym/bucket.")
     parser.add_argument("--path", help="Bucket-relative, hf://, or local path for bucket commands.")
@@ -750,8 +777,8 @@ Examples:
     parser.add_argument("--qualification-workspace", help="Expected Modal workspace reference for metrics admission planning.")
     parser.add_argument("--qualification-output", help="With metrics admission planning, create canonical admission bytes in an existing private directory outside the engine checkout.")
     parser.add_argument("--fresh-attempt", action="store_true", help="Explicitly start a separate one-shot Modal attempt with a new private journal.")
-    parser.add_argument("--modal-profile", help="Named local Modal credential profile for train --quote or execution.")
-    parser.add_argument("--modal-environment", help="Existing Modal environment for train --quote or execution.")
+    parser.add_argument("--modal-profile", help="Named local Modal credential profile for training or retained runs.")
+    parser.add_argument("--modal-environment", help="Existing Modal environment for training or retained runs.")
     parser.add_argument(
         "--provider",
         choices=["local", "modal"],

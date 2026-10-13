@@ -185,6 +185,7 @@ COMMAND_ROUTES: dict[str, Route] = {
     "doctor": Route(_H + "doctor_handler:DoctorHandler", _run_doctor),
     "list": Route(_H + "list_handler:ListHandler", _run_list),
     "list-runs": Route(_R + "_handle_list_runs", _run_function),
+    "runs": Route(_H + "runs_handler:RunsHandler", _run_with_context),
     # Training, cloud and evaluation.
     "train": Route(_H + "train_handler:TrainHandler", _run_bound),
     "cloud": Route(_H + "cloud_train_handler:CloudTrainHandler", _run_bound),
