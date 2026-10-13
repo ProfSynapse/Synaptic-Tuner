@@ -1,7 +1,8 @@
 # Public environment execution through DataAPI
 
-Status: architecture approved for implementation planning, 2026-10-13. No runtime
-implementation or backend qualification is claimed by this document. This is node
+Status: effect-free contract/admission and a generic candidate-feedback seam
+implemented and reviewed at `846f754b`, 2026-10-13. Actual environment execution
+and backend qualification remain open. This is node
 C of the [stable release plan](stable-v1-release.md); installation assets and
 lightweight imports are parallel prerequisites for its installed acceptance.
 Root owns release task `97d0f9df-6701-4887-a7a3-2993a117f90f`; design task
@@ -160,6 +161,13 @@ database. A generic factory's existence does not qualify local execution or E2B.
 | C1: contract and admission | Approved design | Explicit contract submodule, opt-in DataRequest/plan binding, precise dependency digests and host policy validation. Legacy bytes unchanged; missing/corrupt config, missing authority and scenario escalation reject before effects. |
 | C2: local adapter and feedback | C1 | Host-injected local filesystem adapter and per-candidate generation/improvement feedback. Actual fixture actions, finite bounds, containment and cleanup tested; simulation is distinct. No security-sandbox or remote qualification claim. |
 | C3: installed and lifecycle acceptance | C2, installed assets/import nodes A/B | Same deterministic fixture through checkout and installed sdist-built wheel from neutral CWD; actual public DataAPI execution, retained attempts, cancellation, uncertainty and recomposition checks. Remaining resume/recovery gaps explicitly open. |
+
+C1 and the independent generic improvement callback passed 153 combined focused
+tests at `846f754b`, plus the source-archive-built wheel resource/consumer gate.
+The callback is not yet wired to a local environment adapter or generator.
+Selected environment starts still reject before clients and claims. C2 must
+retain admitted bytes and consume those snapshots, enforce host authorization,
+and prove bounded local execution and cleanup before C3 can qualify the workflow.
 
 The shared fixture starts with bounded files and a declared action/assertion
 policy. A deterministic LLM reply first triggers a missing-file failure. That
