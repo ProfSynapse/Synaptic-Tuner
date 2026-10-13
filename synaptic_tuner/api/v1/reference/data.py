@@ -133,6 +133,7 @@ from synaptic_tuner.api.v1.training_facade import AuthorizationRequirement
 from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest, parse_canonical_object, safe_ref
 from tuner.execution.redaction import redact
 
+from .atomic_storage import atomic_commit_method
 from .spend import (
     SpendAuthorizationV1,
     SpendEffectRecordV1,
@@ -608,7 +609,14 @@ class ReferenceDataOperationsV1:
     def _existing_run(self, plan: DataPlan) -> DataRunRef | None:
         stored = _read(self._records, _DATA, _plan_key(plan))
         if stored is None:
-            return None
+            # A crash after genesis but before index publication must not replay.
+            run = data_run_ref(plan)
+            head = self._read_head(run)
+            if head is None:
+                return None
+            if head.plan != plan:
+                raise _integrity()
+            return run
         document = _load(stored.canonical, DATA_PLAN_INDEX_SCHEMA)
         if set(document) != {"schema_version", "run"}:
             raise _integrity()
@@ -651,12 +659,31 @@ class ReferenceDataOperationsV1:
         )
         head = _Head(plan, result, 0 + 1, 0, chain, 1)
         try:
-            created = self._records.create(partition=_DATA, key=_run_key(run), canonical=self._head_document(head))
+            atomic = atomic_commit_method(self._records, self._streams)
+        except Exception:
+            raise _integrity() from None
+        try:
+            if atomic is not None:
+                created = atomic(
+                    record_partition=_DATA,
+                    key=_run_key(run),
+                    expected_revision=None,
+                    record_canonical=self._head_document(head),
+                    stream_partition=_DATA,
+                    stream_key=_run_key(run),
+                    expected_tail=None,
+                    sequence=0,
+                    stream_canonical=document,
+                )
+            else:
+                created = self._records.create(
+                    partition=_DATA, key=_run_key(run), canonical=self._head_document(head))
         except Exception:
             raise _integrity() from None
         if created is not True:
             raise _closed(DataOperationCode.STATE_CONFLICT)
-        self._append_history(run, 0, document)
+        if atomic is None:
+            self._append_history(run, 0, document)
         index = _dump({"schema_version": DATA_PLAN_INDEX_SCHEMA, "run": run.to_dict()})
         try:
             self._records.put_if_absent(partition=_DATA, key=_plan_key(plan), canonical=index)
@@ -678,13 +705,31 @@ class ReferenceDataOperationsV1:
                 revision=head.revision, occurred_at=self._clock.now(), result=result,
                 previous_chain=head.chain_digest, note=note,
             )
-            self._append_history(run, sequence, document)
+            try:
+                atomic = atomic_commit_method(self._records, self._streams)
+            except Exception:
+                raise _integrity() from None
+            if atomic is None:
+                self._append_history(run, sequence, document)
             updated = _Head(head.plan, result, head.revision + 1, sequence, chain, head.stored_revision + 1)
             try:
-                swapped = self._records.compare_and_swap(
-                    partition=_DATA, key=_run_key(run), expected_revision=head.stored_revision,
-                    canonical=self._head_document(updated),
-                )
+                if atomic is not None:
+                    swapped = atomic(
+                        record_partition=_DATA,
+                        key=_run_key(run),
+                        expected_revision=head.stored_revision,
+                        record_canonical=self._head_document(updated),
+                        stream_partition=_DATA,
+                        stream_key=_run_key(run),
+                        expected_tail=head.sequence,
+                        sequence=sequence,
+                        stream_canonical=document,
+                    )
+                else:
+                    swapped = self._records.compare_and_swap(
+                        partition=_DATA, key=_run_key(run), expected_revision=head.stored_revision,
+                        canonical=self._head_document(updated),
+                    )
             except Exception:
                 raise _integrity() from None
             if swapped is not True:
