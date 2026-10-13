@@ -103,7 +103,7 @@ def host_fixture(material, tmp_path):
     executable.write_bytes(b'fixture executable identity; never executed')
     config.mkdir()
     commands, state = [], {'exists': False, 'status': 'created', 'code': 0,
-        'labels': None, 'unknown_create': False, 'claims': None}
+        'labels': None, 'unknown_create': False, 'claims': None, 'container_ref': CID}
     authority = DockerLaunchAuthority({}, _validate_docker_inputs(executable, config))
 
     def runner(spec):
@@ -114,7 +114,7 @@ def host_fixture(material, tmp_path):
         elif args[:2] == ('image', 'inspect'):
             result = json.dumps(profile.image.image_digest) + '\n[]'
         elif args[:2] == ('container', 'ls'):
-            result = CID if state['exists'] else ''
+            result = state['container_ref'] if state['exists'] else ''
         elif args[:2] == ('container', 'create'):
             # Source publication preceded create; exact input bytes are present.
             assert any(p.read_bytes() == raw for p in source['artifact_root'].rglob('*.jsonl'))
@@ -135,7 +135,7 @@ def host_fixture(material, tmp_path):
             result = CID
         elif args[:2] == ('container', 'inspect'):
             name = state['name']
-            result = '\n'.join(map(json.dumps, [CID, '/' + name, profile.image.image_digest,
+            result = '\n'.join(map(json.dumps, [state['container_ref'], '/' + name, profile.image.image_digest,
                 state['labels'], state['status'], state['code']]))
         elif args[:2] == ('container', 'stop'):
             state['status'] = 'exited'
@@ -301,6 +301,40 @@ def test_unknown_submit_reopen_never_creates_again(host_fixture):
         cold.api.runs.show(run)
         cold.api.training.start(plan, preflight)
     assert len([x for x in commands if x[:2] == ('container', 'create')]) == 1
+
+
+@pytest.mark.parametrize('substitute', ['authority_key', 'evidence_key', 'container_ref'])
+def test_cold_original_target_refuses_changed_keys_and_container(host_fixture, substitute):
+    from synaptic_tuner.api.v1.runs_facade import RunOperationError
+    compose, kwargs, commands, state, _, grants, tmp_path = host_fixture
+    path = tmp_path / 'workflow.sqlite3'
+    with SQLiteDurableStoreV1(path) as store, compose(store) as host:
+        _, _, _, run = start(host, kwargs)
+    before = len(commands)
+    class ChangedSecrets(Secrets):
+        def resolve(self, ref):
+            changed = SECRET if substitute == 'authority_key' else EVIDENCE
+            if substitute != 'container_ref' and ref == changed:
+                return 'different-fixture-key-' + 'z' * 40
+            return super().resolve(ref)
+    if substitute == 'container_ref':
+        state['container_ref'] = 'e' * 64
+    with SQLiteDurableStoreV1(path, create=False) as store:
+        with compose_docker_reference_host(**{**kwargs, 'source_inputs': None},
+                ports=ReferenceHostPortsV1(store, store, state['clock'], grants, ChangedSecrets())) as cold:
+            with pytest.raises(RunOperationError):
+                cold.api.runs.outcome(run)
+            if substitute == 'container_ref':
+                cold.api.runs.cancel(run, 'operator request')
+                workflow = cold.composition.stores.workflow_store.get(run)
+                assert workflow.phase.value == 'cancel_reconcile_required'
+                assert workflow.bound_cancellation is None
+            else:
+                with pytest.raises(RunOperationError):
+                    cold.api.runs.cancel(run, 'operator request')
+                assert len(commands) == before
+    assert not any(args[:2] in (('container', 'create'), ('container', 'start'),
+                                ('container', 'stop')) for args in commands[before:])
 
 
 @pytest.mark.parametrize('attack', ['training_lineage', 'workload_record', 'final_model', 'tokenizer', 'failed_exit'])
