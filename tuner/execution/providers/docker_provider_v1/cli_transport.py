@@ -37,7 +37,7 @@ class DockerCLISessionV1:
 
     def __init__(self, *, authority: DockerLaunchAuthority, endpoint: str,
                  daemon_id: str, image_refs, source_roots, artifact_roots,
-                 environment, deadline: float, runner=subprocess_runner, profile=None):
+                 environment, deadline: float, runner=subprocess_runner, profile=None, source_submit_check=None):
         if type(authority) is not DockerLaunchAuthority:
             raise ValueError("docker_cli_configuration_invalid")
         if type(endpoint) is not str or not endpoint.startswith("unix:///") or len(endpoint) > 4096 or any(c in endpoint for c in "\n\r\0"):
@@ -68,6 +68,9 @@ class DockerCLISessionV1:
         if sum(len(k.encode()) + len(v.encode()) for k, v in values.items()) > 32768:
             raise ValueError("docker_cli_configuration_invalid")
         self._environment = MappingProxyType(values)
+        if source_submit_check is not None and not callable(source_submit_check):
+            raise ValueError("docker_cli_configuration_invalid")
+        self._source_submit_check = source_submit_check
         self._profile = None if profile is None else validated_profile_snapshot(profile)
         self._created, self._started, self._owned = set(), set(), {}
 
@@ -223,7 +226,7 @@ class DockerCLISessionV1:
             image_id = self._image(image)
             identifier = self._checked(
                 [*args, image_id, *workload.arguments[1:]],
-                before=lambda: self._recheck_mounts(source, artifact),
+                before=lambda: self._check_source_before_create(labels, source_ref, source, artifact),
             ).strip()
             status, _ = self._inspect(identifier, labels, image_id)
             if status != 'created':
@@ -232,6 +235,13 @@ class DockerCLISessionV1:
             return DockerCreateResultV1(Create.CREATED, labels, identifier)
         except Exception:
             return DockerCreateResultV1(Create.INDETERMINATE)
+
+    def _check_source_before_create(self, labels, source_ref, source, artifact):
+        self._recheck_mounts(source, artifact)
+        if self._source_submit_check is not None:
+            if self._source_submit_check(labels=labels, source_ref=source_ref) is not None:
+                raise ValueError("docker_cli_configuration_invalid")
+        self._recheck_mounts(source, artifact)
 
     def start_once(self, container_ref, labels):
         key = (container_ref, labels.digest)

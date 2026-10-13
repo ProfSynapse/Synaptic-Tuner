@@ -172,7 +172,7 @@ class DockerEffectExecutorV1:
     payload_schemas = ("stage-payload/v2", "submit-payload/v2", "cancel-payload/v2")
 
     def __init__(self, profile, command_catalog, binding_authority, image_inventory, source, control,
-                 cancellations, evidence_authority):
+                 cancellations, evidence_authority, *, source_submit_check=None):
         profile = validated_profile_snapshot(profile)
         self.descriptor = profile.executor_descriptor
         self.provider_id = profile.provider.provider_id
@@ -183,6 +183,9 @@ class DockerEffectExecutorV1:
         self._binding_authority = binding_authority
         self._images, self._source, self._control = image_inventory, source, control
         self._cancellations = cancellations
+        if source_submit_check is not None and not callable(source_submit_check):
+            raise ValueError("Docker source submit check must be callable")
+        self._source_submit_check = source_submit_check
         self._authority = evidence_authority
         self._lock = Lock()
         self._attempted: set[str] = set()
@@ -262,6 +265,9 @@ class DockerEffectExecutorV1:
         plan = binding.plan
         labels = labels_for(binding.identity)
         try:
+            if self._source_submit_check is not None:
+                if self._source_submit_check(labels=labels, source_ref=plan.profile.roots.source_ref) is not None:
+                    raise ValueError("Docker source submit check result invalid")
             result = self._control.create_once(
                 labels=_rebuilt(labels, DockerLabelsV1),
                 image=plan.profile.image, runtime=plan.profile.runtime,
