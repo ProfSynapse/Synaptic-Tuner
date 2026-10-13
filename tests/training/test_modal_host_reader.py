@@ -449,3 +449,19 @@ def test_source_revision_change_during_pending_poll_is_closed(monkeypatch):
     monkeypatch.setattr(reader, '_poll_packaged_call', poll)
     with pytest.raises(ModalPackagedReadUnavailable, match='workflow_mismatch'):
         reader.observe(request)
+
+
+@pytest.mark.parametrize('returned', ['none', 'timeout_subclass'])
+def test_no_result_and_timeout_subclass_do_not_mean_pending(monkeypatch, returned):
+    reader, _, _ = _reader(ModalFunctionCallState.RETURNED)
+    call = reader._facade.sdk.FunctionCall.from_id('fc-1', client=reader._facade.client)
+    class TransportTimeout(TimeoutError):
+        pass
+    def get(**kwargs):
+        if returned == 'timeout_subclass':
+            raise TransportTimeout('controlled timeout')
+        return None
+    monkeypatch.setattr(call, 'get', get)
+    monkeypatch.setattr(reader._facade.sdk.FunctionCall, 'from_id', lambda *args, **kwargs: call)
+    with pytest.raises(ModalPackagedReadUnavailable, match='call_unknown'):
+        reader._poll_packaged_call(reader.binding, 'fc-1')

@@ -46,6 +46,8 @@ def _active(tmp_path, monkeypatch):
                 raise TimeoutError()
             if state[0] == 'unknown':
                 raise RuntimeError('untrusted provider text')
+            if state[0] == 'none':
+                return None
             if state[0] == 'failed':
                 return {'schema_version': 'synaptic-modal-packaged-worker-result/v1', 'effect_id': 'unavailable', 'status_code': 'failed', 'completion_sha256': '0' * 64}
             return {'schema_version': 'synaptic-modal-packaged-worker-result/v1', 'effect_id': binding.command.operation.effect.effect_id, 'status_code': 'completed', 'completion_sha256': 'f' * 64}
@@ -92,7 +94,7 @@ def test_pending_then_completed_across_fresh_contexts(tmp_path, monkeypatch):
     assert effects == ['bootstrap', 'cpu', 'stage', 'spawn']
 
 
-@pytest.mark.parametrize('status', ['unknown', 'failed'])
+@pytest.mark.parametrize('status', ['unknown', 'failed', 'none'])
 def test_unknown_or_failed_call_preserves_original_checkpoint(tmp_path, monkeypatch, status):
     run, root, effects, state, polls = _active(tmp_path, monkeypatch)
     state[0] = status

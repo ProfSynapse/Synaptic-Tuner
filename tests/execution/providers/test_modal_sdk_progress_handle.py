@@ -106,3 +106,59 @@ def test_real_container_sdk_upload_collision_and_readback_requires_http(monkeypa
             with pytest.raises(RuntimeError, match="controlled disabled HTTP"):
                 tuple(volume.read_file("/" + path))
             assert trace[6] == "READ_URLS" and "HTTP_DISABLED" in trace[7:]
+
+
+@pytest.mark.parametrize('output', ['pending', 'remote_timeout', 'completed_none'])
+def test_real_sdk_known_call_poll_distinguishes_no_output_from_terminal_values(monkeypatch, output):
+    """Real SDK result decoding is exercised against controlled no-network RPCs."""
+    from types import SimpleNamespace
+    import builtins
+    modal = pytest.importorskip('modal')
+    from modal_proto import api_pb2
+    from modal._serialization import serialize
+    from modal._utils.async_utils import synchronizer
+    from tuner.training.modal_host_reader import ModalPackagedCoordinatorReaderV1, ModalPackagedReadUnavailable
+    from tuner.execution.providers.modal.facade import ModalFunctionCallState
+    assert version('modal') == '1.5.4'
+    requests = []
+    class Stub:
+        async def FunctionGetOutputs(self, request, **kwargs):
+            assert request.function_call_id == 'fc-proof'
+            assert request.clear_on_success is False
+            requests.append(request)
+            if output == 'pending':
+                return api_pb2.FunctionGetOutputsResponse(num_unfinished_inputs=1)
+            result = api_pb2.GenericResult(
+                status=(api_pb2.GenericResult.GENERIC_STATUS_TIMEOUT if output == 'remote_timeout'
+                        else api_pb2.GenericResult.GENERIC_STATUS_SUCCESS),
+                data=b'' if output == 'remote_timeout' else serialize(None),
+            )
+            return api_pb2.FunctionGetOutputsResponse(outputs=[api_pb2.FunctionGetOutputsItem(
+                result=result, data_format=api_pb2.DATA_FORMAT_PICKLE,
+            )])
+    client = modal.Client('http://127.0.0.1:1', api_pb2.CLIENT_TYPE_CONTAINER, None)
+    synchronizer._translate_in(client)._stub = Stub()
+    call = modal.FunctionCall._new_hydrated('fc-proof', client, None)
+    if output == 'pending':
+        with pytest.raises(builtins.TimeoutError) as timeout:
+            call.get(timeout=0)
+        assert type(timeout.value) is builtins.TimeoutError
+    elif output == 'remote_timeout':
+        with pytest.raises(modal.exception.FunctionTimeoutError):
+            call.get(timeout=0)
+        assert not issubclass(modal.exception.FunctionTimeoutError, builtins.TimeoutError)
+    else:
+        assert call.get(timeout=0) is None
+    class Calls:
+        @staticmethod
+        def from_id(reference, *, client):
+            assert reference == 'fc-proof' and client is call.client
+            return call
+    reader = ModalPackagedCoordinatorReaderV1.__new__(ModalPackagedCoordinatorReaderV1)
+    reader._facade = SimpleNamespace(client=client, sdk=SimpleNamespace(FunctionCall=Calls))
+    if output == 'pending':
+        assert reader._poll_packaged_call(None, 'fc-proof') == (ModalFunctionCallState.PENDING, None)
+    else:
+        with pytest.raises(ModalPackagedReadUnavailable, match='call_unknown'):
+            reader._poll_packaged_call(None, 'fc-proof')
+    assert len(requests) == 2

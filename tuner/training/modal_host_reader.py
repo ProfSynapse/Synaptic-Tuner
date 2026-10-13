@@ -198,6 +198,7 @@ class ModalPackagedCoordinatorReaderV1:
                             provider_job_ref: str, *,
                             deadline: float | None = None) -> tuple[ModalFunctionCallState, str | None]:
         try:
+            no_output = object()
             def read_call():
                 call = self._facade.sdk.FunctionCall.from_id(
                     provider_job_ref, client=self._facade.client,
@@ -208,15 +209,17 @@ class ModalPackagedCoordinatorReaderV1:
                     raise ValueError
                 try:
                     return call.get(timeout=0)
-                except TimeoutError:
-                    return None
+                except TimeoutError as error:
+                    if type(error) is TimeoutError:
+                        return no_output
+                    raise
 
             result = _bounded(
                 read_call, deadline=min(time.monotonic() + 30,
                                         deadline if deadline is not None else float("inf")),
                 code="modal_packaged_call_read_unavailable",
             )
-            if result is None:
+            if result is no_output:
                 return ModalFunctionCallState.PENDING, None
             if type(result) is dict and result == _FIXED_WORKER_FAILURE:
                 raise ModalPackagedReadUnavailable("modal_packaged_call_failed")
