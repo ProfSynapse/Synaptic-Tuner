@@ -265,6 +265,7 @@ def _compose_modal_packaged_reference_host(
         authority=authority, input_preparation=input_preparation,
     )
     reader.bind_foundation(composed.foundation)
+    reader.bind_workflows(composed.stores.workflow_store)
     verifier.bind_foundation(composed.foundation)
     return ModalPackagedReferenceHostV1(composed, adapter, effects, reader, verifier)
 

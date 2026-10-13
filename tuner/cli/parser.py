@@ -154,8 +154,8 @@ class _SynapticArgumentParser(argparse.ArgumentParser):
             if _explicit_long_options(arguments) - allowed:
                 self.error("runs accepts only retained readback options")
             action = getattr(parsed, "subcommand", None)
-            if action not in {"show", "verify", "download"}:
-                self.error("runs requires show, verify, or download")
+            if action not in {"show", "observe", "verify", "download"}:
+                self.error("runs requires show, observe, verify, or download")
             if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", parsed.run or "")
                     or parsed.run == "latest"):
                 self.error("runs requires --run with one exact retained run id")
@@ -331,7 +331,7 @@ Commands:
   ingest      Ingest one explicit local Markdown selection to a private bundle
   prepare-dataset  Convert one verified bundle into a private training dataset
   list        Discover available resources
-  runs        Show, verify, or download artifacts from an exact retained terminal run
+  runs        Show, observe, verify, or download an exact retained run
   list-runs   Query unified experiment tracking registry
   check-contamination  N-gram containment of eval prompts inside training data
 

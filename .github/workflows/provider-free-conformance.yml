@@ -457,7 +457,7 @@ jobs:
           ]))
           PYCODE
 
-      - name: Exercise installed standalone Modal retention and terminal reads
+      - name: Exercise installed standalone Modal retention and known-call reads
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}
         run: |
@@ -486,6 +486,7 @@ jobs:
               "training/test_modal_run_retention_io.py",
               "training/test_modal_run_retention_integration.py",
               "training/test_modal_retained_reader.py",
+              "training/test_modal_active_readback.py",
               "training/test_retained_storage_open.py",
               "training/test_modal_retained_run_diagnostics.py",
               "training/test_retained_runs_cli_integration.py",
@@ -517,6 +518,7 @@ jobs:
               str(root / "tests/training/test_modal_run_retention_io.py"),
               str(root / "tests/training/test_modal_run_retention_integration.py"),
               str(root / "tests/training/test_modal_retained_reader.py"),
+              str(root / "tests/training/test_modal_active_readback.py"),
               str(root / "tests/training/test_retained_storage_open.py"),
               str(root / "tests/training/test_modal_retained_run_diagnostics.py"),
               str(root / "tests/training/test_retained_runs_cli_integration.py"),

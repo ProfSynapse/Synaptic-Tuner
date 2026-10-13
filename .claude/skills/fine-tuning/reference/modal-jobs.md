@@ -574,7 +574,7 @@ run. Hub publication is optional and separately authorized. The remote producer
 emits exactly five artifacts: workload record, training lineage, training
 metrics, final model, and tokenizer.
 
-### Read a retained terminal run
+### Read a retained run
 
 New standalone runs retain the original signing keys, exact composition inputs
 and generic workflow database under `$XDG_STATE_HOME/synaptic-training/<run-id>`
@@ -593,22 +593,29 @@ hard-linked files; the normal CI consumer uses `pip`, which installs copies.
 
 ```bash
 synaptic runs show --run <run-id> --modal-profile <profile> --modal-environment <environment> --json
+synaptic runs observe --run <run-id> --modal-profile <profile> --modal-environment <environment> --json
 synaptic runs verify --run <run-id> --modal-profile <profile> --modal-environment <environment> --json
 synaptic runs download --run <run-id> --modal-profile <profile> --modal-environment <environment> --artifact-role final_model --dest <private-output-directory> --json
 ```
 
 `python tuner.py` accepts the same arguments from a checkout. `latest` is not
 supported. These commands use the retained inputs rather than loading the current
-recipe or preparing another training job. The reader accepts only authenticated
-terminal workflows (`SUCCEEDED_UNVERIFIED`, `VERIFIED`, `VERIFICATION_FAILED`);
-it rejects pending, ambiguous or missing state before contacting the provider.
+recipe or preparing another training job. The reader accepts authenticated
+`QUEUED`, `RUNNING`, `CANCEL_REQUESTED`, `SUCCEEDED_UNVERIFIED`, `VERIFIED` and
+`VERIFICATION_FAILED` workflows with an exact original submit and retained call.
+Missing or ambiguous submission state is refused before contacting the provider.
 The named profile must still resolve to the retained account/workspace/environment.
 Local replay authenticates the saved workflow with its original host keys. The
 runtime completion key is checked against signed remote evidence; a changed but
 well-formed completion key cannot be independently detected before those reads.
 It still cannot produce an accepted artifact or authorize another submission.
 
-`show` reads the outcome. `verify` checks native artifacts for a retained
+`show` reads the stored outcome without polling the call. `observe` polls an
+active call once through the public outcome API. A pending response preserves
+the authenticated stored phase and does not establish current scheduler or GPU
+activity; signed completion evidence advances the outcome. Unknown or failed
+provider responses leave the checkpoint unchanged and report an unavailable read.
+`verify` checks native artifacts for a retained
 `SUCCEEDED_UNVERIFIED` or `VERIFICATION_FAILED` workflow and returns exit code 2
 when verification fails or is unavailable. A `VERIFIED` workflow uses `show` and
 `download`; calling `verify` again is refused because the separate `reverify`
@@ -621,7 +628,8 @@ unused destination for another download attempt.
 
 Provider reads can persist authenticated observations or verification in the
 local workflow database. This path does not rebuild or submit training and does
-not expose logs, cancellation, reconciliation or in-flight recovery. It cannot
+not expose logs, cancellation, reconciliation or submission continuation. It
+can reconnect only to a known retained call, and cannot
 recover historical lost signing keys. These are provider-free implementation
 claims until separately qualified against a live retained run.
 

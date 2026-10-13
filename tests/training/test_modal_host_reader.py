@@ -11,6 +11,7 @@ from tuner.training.modal_host_authority import HMACAuthenticator, ReaderEvidenc
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from tuner.execution.coordinator_v1.model import (
     EffectIntentV1, ProviderReadPurposeV1, ProviderRunReadRequestV1,
+    WorkflowPhaseV1,
 )
 from tuner.execution.coordinator_v1.state_machine import _derive_foundation
 from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest
@@ -85,6 +86,8 @@ class _FakePackagedReader:
 class _ProjectedReader(ModalPackagedCoordinatorReaderV1):
     def _binding(self, _request, _purpose):
         return self.binding
+    def _source_workflow(self, request):
+        return SimpleNamespace(phase=WorkflowPhaseV1.QUEUED)
 
 
 def _reader(state):
@@ -146,9 +149,10 @@ def test_returned_call_requires_completion_then_projects_five_artifacts():
 
 
 def test_pending_call_does_not_manufacture_queued_or_running_state():
-    reader, request, _ = _reader(ModalFunctionCallState.PENDING)
-    with pytest.raises(ModalPackagedReadUnavailable, match="pending"):
-        reader.observe(request)
+    reader, request, auth = _reader(ModalFunctionCallState.PENDING)
+    observation = reader.observe(request)
+    assert auth.authenticate_observation(observation)
+    assert observation.content.phase.value == "queued"
     with pytest.raises(ModalPackagedReadUnavailable, match="log_query_invalid"):
         reader.logs(request, None)
 
@@ -380,3 +384,84 @@ def test_reader_authenticates_retained_foundation_assessment_after_clock_advance
         clock=SimpleNamespace(now=lambda: "2026-10-01T00:00:00Z"),
     )
     assert reader._binding(request, ProviderReadPurposeV1.OBSERVE) == binding
+
+
+@pytest.mark.parametrize('phase', [WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.RUNNING, WorkflowPhaseV1.CANCEL_REQUESTED])
+def test_pending_preserves_authenticated_source_phase_through_reducer(monkeypatch, phase):
+    from tests.execution.coordinator_v1 import test_state_machine as state
+    from tuner.execution.coordinator_v1.state_machine import apply_provider_observation, record_cancel_intent
+    from tuner.execution.foundation_v2.references import CancellationRefV1, ProviderRunRefV1
+    from tuner.execution.coordinator_v1.model import ProviderRunPhaseV1
+    current, foundation = state.queued_evidence()
+    if phase is WorkflowPhaseV1.RUNNING:
+        request, observed = state.observation(current, foundation, ProviderRunPhaseV1.RUNNING, {'phase': 'fixture-running'})
+        current = apply_provider_observation(current, request, observed, state.ObservationAuth())
+    elif phase is WorkflowPhaseV1.CANCEL_REQUESTED:
+        raw = state.intent('cancel')
+        pending = record_cancel_intent(current, raw)
+        cancellation = CancellationRefV1(ProviderRunRefV1(state.PROVIDER_RUN.provider_job_ref), state.D[14])
+        current = state.apply_cancel_effect_record(pending, state.record(raw, state.EffectState.FOUND, cancellation), state.Auth())
+    request, _ = state.observation(current, foundation, ProviderRunPhaseV1.QUEUED, {'fixture': 'request'})
+    reader, _, evidence = _reader(ModalFunctionCallState.PENDING)
+    monkeypatch.setattr(reader, '_source_workflow', lambda selected: current)
+    polls = []
+    monkeypatch.setattr(reader, '_poll_packaged_call', lambda *args: (polls.append(1) or ModalFunctionCallState.PENDING, None))
+    observed = reader.observe(request)
+    assert evidence.authenticate_observation(observed)
+    assert apply_provider_observation(current, request, observed, state.ObservationAuth()) is current
+    from tuner.execution.foundation_v2.canonical import parse_canonical_object
+    document = parse_canonical_object(observed.content.canonical_evidence, name='pending hint')
+    assert document['retained_workflow_phase'] == phase.value
+    assert document['phase_basis'] == 'preserved_authenticated_workflow'
+    assert document['status'] == 'no_completion_observed'
+    assert polls == [1]
+
+
+def test_source_workflow_mismatch_or_unbound_reader_refuses_before_poll(monkeypatch):
+    from dataclasses import replace
+    from tests.execution.coordinator_v1 import test_state_machine as state
+    from tuner.execution.coordinator_v1.model import ProviderRunPhaseV1
+    current, foundation = state.queued_evidence()
+    request, _ = state.observation(current, foundation, ProviderRunPhaseV1.QUEUED, {'fixture': 'request'})
+    reader, _, _ = _reader(ModalFunctionCallState.PENDING)
+    monkeypatch.setattr(reader, '_source_workflow', ModalPackagedCoordinatorReaderV1._source_workflow.__get__(reader))
+    monkeypatch.setattr(reader, '_poll_packaged_call', lambda *args: pytest.fail('polled without exact source workflow'))
+    with pytest.raises(ModalPackagedReadUnavailable, match='workflow_unavailable'):
+        reader.observe(request)
+    reader.bind_workflows(SimpleNamespace(get=lambda run: replace(current, revision=current.revision + 1)))
+    with pytest.raises(ModalPackagedReadUnavailable, match='workflow_mismatch'):
+        reader.observe(request)
+
+
+def test_source_revision_change_during_pending_poll_is_closed(monkeypatch):
+    from dataclasses import replace
+    from tests.execution.coordinator_v1 import test_state_machine as state
+    from tuner.execution.coordinator_v1.model import ProviderRunPhaseV1
+    current, foundation = state.queued_evidence()
+    request, _ = state.observation(current, foundation, ProviderRunPhaseV1.QUEUED, {'fixture': 'request'})
+    reader, _, _ = _reader(ModalFunctionCallState.PENDING)
+    selected = [current]
+    reader.bind_workflows(SimpleNamespace(get=lambda run: selected[0]))
+    monkeypatch.setattr(reader, '_source_workflow', ModalPackagedCoordinatorReaderV1._source_workflow.__get__(reader))
+    def poll(*args):
+        selected[0] = replace(current, revision=current.revision + 1)
+        return ModalFunctionCallState.PENDING, None
+    monkeypatch.setattr(reader, '_poll_packaged_call', poll)
+    with pytest.raises(ModalPackagedReadUnavailable, match='workflow_mismatch'):
+        reader.observe(request)
+
+
+@pytest.mark.parametrize('returned', ['none', 'timeout_subclass'])
+def test_no_result_and_timeout_subclass_do_not_mean_pending(monkeypatch, returned):
+    reader, _, _ = _reader(ModalFunctionCallState.RETURNED)
+    call = reader._facade.sdk.FunctionCall.from_id('fc-1', client=reader._facade.client)
+    class TransportTimeout(TimeoutError):
+        pass
+    def get(**kwargs):
+        if returned == 'timeout_subclass':
+            raise TransportTimeout('controlled timeout')
+        return None
+    monkeypatch.setattr(call, 'get', get)
+    monkeypatch.setattr(reader._facade.sdk.FunctionCall, 'from_id', lambda *args, **kwargs: call)
+    with pytest.raises(ModalPackagedReadUnavailable, match='call_unknown'):
+        reader._poll_packaged_call(reader.binding, 'fc-1')

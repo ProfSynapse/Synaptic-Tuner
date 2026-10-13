@@ -53,7 +53,7 @@ def test_terminal_cli_reads_after_local_training_inputs_are_removed(
                     modal_profile="fixture",
                     modal_environment="main",
                 )
-            assert failure.value.phase == "RUN_VERIFY"
+            assert failure.value.phase == "RUN_VERIFY", failure.value.start_causes
         run = failure.value.retained_run
         assert type(run) is TrainingRunRef
     root = tmp_path / "state" / "synaptic-training" / run.run_id
@@ -172,4 +172,129 @@ def test_terminal_cli_reads_after_local_training_inputs_are_removed(
     downloaded = Path(outputs[2]["path"]).read_bytes()
     assert sha256(downloaded).hexdigest() == sha256(b"data").hexdigest()
     assert sdk.Volume.publications == list(publications)
+    assert events == ["bootstrap", "cpu", "stage", "spawn"]
+
+
+def test_active_cli_observes_known_call_pending_then_completed_without_replay(
+    tmp_path, monkeypatch, capsys
+):
+    from tuner.training import modal_retained_reader as reader
+    from synaptic_tuner.api.v1.training_facade import TrainingAPI
+    from tuner.training.modal_host_effects import ModalPackagedHostEffectsV1
+    from tuner.training.modal_host_reader import ModalPackagedCoordinatorReaderV1
+    from tuner.execution.providers.modal.facade import ModalFunctionCallState
+
+    plan, context, events = _setup(tmp_path, monkeypatch)
+
+    def stop_original_observation(*args, **kwargs):
+        raise RuntimeError("fixture host observation interruption")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            ModalPackagedCoordinatorReaderV1,
+            "_poll_packaged_call",
+            stop_original_observation,
+        )
+        with pytest.raises(runner.ModalStandalonePhaseUnavailable) as failure:
+            runner.run_modal_standalone_job(
+                plan=plan,
+                context=context,
+                modal_profile="fixture",
+                modal_environment="main",
+            )
+        assert failure.value.phase == "RUN_CALL_OBSERVE"
+    run = failure.value.retained_run
+    assert run is not None
+    root = tmp_path / "state" / "synaptic-training" / run.run_id
+    retained = retention.load_retained_modal_run(root, expected_run=run)
+    client, scope = runner.open_modal_host_scope()
+    facts = ModalPackagedRuntimeFactsV1.from_dict(retained.inputs["runtime_facts"])
+    monkeypatch.setattr(reader, "validate_local_launcher", lambda: None)
+    monkeypatch.setattr(
+        reader, "open_modal_host_scope", lambda **kwargs: (client, scope)
+    )
+    monkeypatch.setattr(
+        reader,
+        "observe_modal_host_scope",
+        lambda **kwargs: (
+            scope.account_ref,
+            scope.workspace_ref,
+            scope.environment_ref,
+            scope.client_ref,
+        ),
+    )
+    monkeypatch.setattr(
+        reader._CurrentPackagedDeploymentReader,
+        "observe",
+        lambda *args, **kwargs: facts,
+    )
+    for path in (tmp_path / "source", tmp_path / ".tracking", tmp_path / "Trainers"):
+        if path.exists():
+            shutil.rmtree(path)
+    for path in root.iterdir():
+        if path.name not in {
+            retention.KEYS_FILE,
+            retention.INPUTS_FILE,
+            retention.WORKFLOW_FILE,
+        }:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("active observation attempted training authority")
+
+    for name in (
+        "prepare_modal_standalone_local",
+        "_qualified_runtime",
+        "stage_published_modal_dataset",
+    ):
+        monkeypatch.setattr(runner, name, forbidden)
+    monkeypatch.setattr(TrainingAPI, "start", forbidden)
+    monkeypatch.setattr(ModalPackagedHostEffectsV1, "authorize", forbidden)
+    monkeypatch.setattr(ModalPackagedHostEffectsV1, "bind", forbidden)
+    monkeypatch.setattr("tuner.training.modal_recipe.plan_modal_sft_recipe", forbidden)
+    states = [ModalFunctionCallState.PENDING, ModalFunctionCallState.RETURNED]
+    polls = []
+
+    def poll(self, binding, call, **kwargs):
+        assert call == "fc-owned"
+        state = states.pop(0)
+        polls.append((call, state))
+        return state, None if state is ModalFunctionCallState.PENDING else "f" * 64
+
+    monkeypatch.setattr(ModalPackagedCoordinatorReaderV1, "_poll_packaged_call", poll)
+    capsys.readouterr()
+    outputs = []
+    for action in ("show", "observe", "show", "observe", "show"):
+        arguments = [
+            "runs",
+            action,
+            "--run",
+            run.run_id,
+            "--modal-profile",
+            "fixture",
+            "--modal-environment",
+            "main",
+            "--json",
+        ]
+        assert (
+            route_command(create_parser().parse_args(arguments), context=context) == 0
+        )
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert payload["success"] is True
+        assert payload["data"]["run"] == run.to_dict()
+        assert all(
+            value not in captured.out + captured.err
+            for value in retained.signing_keys.values()
+        )
+        outputs.append(payload["data"]["outcome"]["state"])
+    assert outputs == ["queued", "queued", "queued", "succeeded", "succeeded"]
+    assert polls == [
+        ("fc-owned", ModalFunctionCallState.PENDING),
+        ("fc-owned", ModalFunctionCallState.RETURNED),
+    ]
+    assert states == []
     assert events == ["bootstrap", "cpu", "stage", "spawn"]
