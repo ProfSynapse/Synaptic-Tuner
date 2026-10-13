@@ -290,8 +290,12 @@ def test_completion_racing_acknowledged_cancel_remains_successful(tmp_path, monk
 def test_cancel_authorization_opt_in_requires_exact_bool(value):
     from synaptic_tuner.api.v1.reference import compose_reference_authority
     from synaptic_tuner.api.v1.secrets import SecretRef
-    from tests.training.test_modal_durable_host_composition import UTCClock, _Secrets
-    authority = compose_reference_authority(clock=UTCClock(), secrets=_Secrets(), authority_secret=SecretRef("env", "test"))
+    from tuner.training.modal_host_authority import UTCClock
+    class Secrets:
+        def resolve(self, ref):
+            assert ref == SecretRef("env", "test")
+            return "host-only-test-authority-value-" + "x" * 40
+    authority = compose_reference_authority(clock=UTCClock(), secrets=Secrets(), authority_secret=SecretRef("env", "test"))
     with pytest.raises(TypeError, match="cancellation opt-in"):
         ReferenceAuthorizationV1(records=None, grants=None, authority=authority.grant_authority,
             clock=authority.clock, allow_current_cancel_authorization=value)
