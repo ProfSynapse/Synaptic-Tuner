@@ -317,7 +317,7 @@ def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualif
             ModalRuntimeReleaseSecretFactV1(ModalRuntimeReleaseSecretSpecV1(
                 "qualification", EXACT_QUALIFICATION_SECRET_REQUIRED_KEYS), "st-qualification"),
             ModalRuntimeReleaseSecretFactV1(ModalRuntimeReleaseSecretSpecV1(
-                "hf-token", ("HF_TOKEN",)), "st-hf-token"),
+                "hf-token", ("HF_TOKEN",)), "st-hftoken"),
         ), python_implementation=release.python_implementation,
         python_version=release.python_version, python_executable=release.python_executable,
         python_executable_digest=release.python_executable_digest,
