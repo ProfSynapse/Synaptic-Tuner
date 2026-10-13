@@ -13,9 +13,15 @@ import secrets
 from dataclasses import dataclass, field
 from threading import RLock
 
-from synaptic_tuner.api.v1.execution import ExecutionGrant
+from synaptic_tuner.api.v1.execution import AuthorizationRequirement, ExecutionGrant
+from synaptic_tuner.api.v1.results import TrainingRunRef
+from tuner.execution.coordinator_v1.model import (
+    AuthenticatedFoundationRecordAssessmentV1, FoundationDispositionV1,
+    WorkflowPhaseV1, WorkflowRecordV1,
+)
+from tuner.execution.coordinator_v1.state_machine import _derive_foundation
 from tuner.execution.foundation_v2.canonical import canonical_bytes, parse_canonical_object
-from tuner.execution.foundation_v2.commands import StageCommandV2, SubmitCommandV2
+from tuner.execution.foundation_v2.commands import CancelCommandV2, StageCommandV2, SubmitCommandV2
 from tuner.execution.providers.modal.packaged_binding import ModalPackagedCommandBinding
 from tuner.execution.providers.modal.packaged_dispatch import (
     ModalPackagedVolumeMarker, build_modal_packaged_dispatch,
@@ -208,8 +214,54 @@ class ModalPackagedHostEffectsV1:
         self._cost, self._currency = maximum_cost_minor_units, currency
         self._stage_effects: dict[str, str] = {}
         self._grant = ExecutionGrant("modal-packaged-training-v1")
+        self._cancel_grant = ExecutionGrant("modal-packaged-cancellation-v1")
+        self._cancel_stores = None
+
+    def bind_cancel_stores(self, *, workflows, foundation, foundation_authenticator,
+                           assessment_authenticator) -> None:
+        """Attach the existing authenticated stores once; this enables no public verb."""
+        if (self._cancel_stores is not None or not callable(getattr(workflows, "get", None))
+                or not callable(getattr(foundation, "get", None))):
+            raise ValueError("cancellation stores unavailable")
+        self._cancel_stores = (workflows, foundation, foundation_authenticator, assessment_authenticator)
+
+    def _cancel_target(self, command: CancelCommandV2) -> None:
+        """Authenticate the original submit and exact recorded intent before effects."""
+        if self._cancel_stores is None:
+            raise ValueError("cancellation stores unavailable")
+        workflows, foundation, authenticator, assessor = self._cancel_stores
+        preparation = command.preparation
+        workflow = workflows.get(TrainingRunRef(preparation.run_id, preparation.project_ref))
+        if (type(workflow) is not WorkflowRecordV1
+                or workflow.phase is not WorkflowPhaseV1.CANCEL_INTENT_RECORDED
+                or workflow.plan_fingerprint != preparation.plan_fingerprint
+                or workflow.preparation_digest != preparation.preparation_digest
+                or workflow.cancel is None or workflow.submit is None
+                or workflow.cancel.canonical_command_bytes != command.canonical_bytes
+                or not workflow.submit.foundation_bindings or not workflow.submit.foundation_outcomes):
+            raise ValueError("cancellation intent differs from workflow")
+        submit = workflow.submit
+        record = foundation.get(submit.effect_id)
+        assessment = AuthenticatedFoundationRecordAssessmentV1.parse(
+            submit.foundation_bindings[-1].canonical_assessment_bytes,
+        )
+        derived = _derive_foundation(submit, record, assessment, authenticator, assessor, None)
+        if (derived != (submit.foundation_bindings[-1], submit.foundation_outcomes[-1], workflow.provider_run_ref)
+                or derived[1].disposition is not FoundationDispositionV1.FOUND or derived[2] is None):
+            raise ValueError("original submit is not authenticated FOUND")
+        target = command.to_dict()["cancellation"]["provider_job_ref"]
+        binding = self.bindings.resolve(submit.command_digest)
+        if (type(binding) is not ModalPackagedCommandBinding
+                or binding.command_bytes != submit.canonical_command_bytes
+                or binding.command.preparation != preparation
+                or self.authenticate(binding) is not True
+                or derived[2].reference.provider_job_ref != target
+                or self.calls.resolve(submit.command_digest) != target):
+            raise ValueError("cancellation target differs from retained submit")
 
     def authorize(self, requirements: tuple[object, ...]) -> ExecutionGrant:
+        if requirements == (AuthorizationRequirement("training.cancel", False),):
+            return self._cancel_grant
         if (len(requirements) != 1
                 or requirements[0].operation != "training.start"
                 or requirements[0].paid_effect is not True
@@ -234,8 +286,14 @@ class ModalPackagedHostEffectsV1:
 
     def bind(self, grant: ExecutionGrant, *, operation: object,
              requirements: tuple[object, ...]) -> object:
-        if grant != self.authorize(requirements) or type(operation) not in (StageCommandV2, SubmitCommandV2):
+        if grant != self.authorize(requirements) or type(operation) not in (StageCommandV2, SubmitCommandV2, CancelCommandV2):
             raise ValueError("unsupported packaged Modal operation")
+        if type(operation) is CancelCommandV2:
+            if grant != self._cancel_grant:
+                raise ValueError("explicit cancellation authorization required")
+            self._cancel_target(operation)
+        elif grant != self._grant:
+            raise ValueError("training authorization required")
         binding = ModalPackagedCommandBinding(
             operation.canonical_bytes, _canonical(self._release),
             _canonical(self._provider), _canonical(self._facts),
@@ -266,7 +324,7 @@ class ModalPackagedHostEffectsV1:
                 artifact_volume_id=self._facts.artifact_volume_id,
             ))
             self._stage_effects[operation.operation.effect.effect_id] = operation.digest
-        else:
+        elif type(operation) is SubmitCommandV2:
             materials = _new_marker_materials(self._facts)
             self.marker_materials.publish_if_absent(operation.digest, materials)
             self.dispatches.publish(operation.digest, build_modal_packaged_dispatch(

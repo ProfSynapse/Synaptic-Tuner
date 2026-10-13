@@ -29,6 +29,12 @@ start authorizable from the public ports:
   effect and reconciliation grants an in-flight run needs. A commitment
   carries the host grant *reference* only, never a credential value.
 
+  Explicit ``allow_current_cancel_authorization`` lets an exact cancel command
+  request current nonpaid host permission after the original start expiry. Its
+  Foundation grant retains the original policy and requirement identities;
+  it neither changes that commitment nor extends staging/submission permission.
+  Exact cancellation reconciliation may similarly request lookup-only permission.
+
 Consumed by ``synaptic_tuner/api/v1/reference/provider_family.py`` and
 ``synaptic_tuner/api/v1/reference/__init__.py``.
 """
@@ -39,7 +45,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
 
-from synaptic_tuner.api.v1.execution import ExecutionGrant
+from synaptic_tuner.api.v1.execution import AuthorizationRequirement, ExecutionGrant
 from synaptic_tuner.api.v1.planning import TrainingPlan
 from synaptic_tuner.api.v1.ports import (
     DurableRecordStorePort,
@@ -58,7 +64,7 @@ from tuner.execution.foundation_v2.canonical import (
     parse_canonical_object,
     safe_ref,
 )
-from tuner.execution.foundation_v2.commands import parse_exact_command
+from tuner.execution.foundation_v2.commands import CancelCommandV2, parse_exact_command
 from tuner.execution.foundation_v2.repository import EffectRecordV2
 from tuner.training.coordinator_service import CoordinatorTrainingService
 
@@ -176,17 +182,21 @@ class ReferenceAuthorizationV1:
         clock,
         maximum_grant_seconds: int = 900,
         owner_ref: str = "synaptic-reference-coordinator",
+        allow_current_cancel_authorization: bool = False,
     ) -> None:
         if type(authority) is not GrantAuthorityV2:
             raise TypeError("exact GrantAuthorityV2 required")
         if type(maximum_grant_seconds) is not int or not 1 <= maximum_grant_seconds <= 3600:
             raise ValueError("maximum_grant_seconds must be within 1..3600")
+        if type(allow_current_cancel_authorization) is not bool:
+            raise TypeError("exact cancellation opt-in required")
         self._records = records
         self._grants = grants
         self._authority = authority
         self._clock = clock
         self._maximum = maximum_grant_seconds
         self._owner_ref = safe_ref(owner_ref, "owner_ref")
+        self._allow_current_cancel_authorization = allow_current_cancel_authorization
         self._lock = RLock()
 
     # -- durable commitments -------------------------------------------------
@@ -317,11 +327,22 @@ class ReferenceAuthorizationV1:
         command = parse_exact_command(command_bytes)
         if command.preparation.plan_fingerprint != commitment.plan_fingerprint:
             raise ReferenceAuthorizationError("authorization_invalid")
-        expires = self._expiry(commitment, now_epoch)
+        if self._allow_current_cancel_authorization and type(command) is CancelCommandV2:
+            if type(now_epoch) is not int or now_epoch < 0:
+                raise ReferenceAuthorizationError("authorization_invalid")
+            requirements = (AuthorizationRequirement("training.cancel", False),)
+            host_grant = self._grants.authorize(requirements)
+            if type(host_grant) is not ExecutionGrant:
+                raise ReferenceAuthorizationError("authorization_refused")
+            expires = now_epoch + self._maximum
+        else:
+            requirements = commitment.preflight.authorization
+            host_grant = commitment.host_grant
+            expires = self._expiry(commitment, now_epoch)
         self._grants.bind(
-            commitment.host_grant,
+            host_grant,
             operation=command,
-            requirements=commitment.preflight.authorization,
+            requirements=requirements,
         )
         kind = command.operation.effect.kind.value
         return self._authority.issue(
@@ -354,7 +375,16 @@ class ReferenceAuthorizationV1:
             commitment = None if policy is None else self._commitment(policy)
         if commitment is None:
             raise ReferenceAuthorizationError("authorization_invalid")
-        expires = self._expiry(commitment, now_epoch)
+        if self._allow_current_cancel_authorization and type(command) is CancelCommandV2:
+            if type(now_epoch) is not int or now_epoch < 0:
+                raise ReferenceAuthorizationError("authorization_invalid")
+            current = self._grants.authorize((AuthorizationRequirement("training.cancel", False),))
+            if type(current) is not ExecutionGrant:
+                raise ReferenceAuthorizationError("authorization_refused")
+            # Lookup authority cannot dispatch or replay the recorded command.
+            expires = now_epoch + self._maximum
+        else:
+            expires = self._expiry(commitment, now_epoch)
         content = ReconciliationGrantContentV1(
             f"reference-reconcile-{slot.generation}-{slot.ownership_epoch}-{command.digest[:16]}",
             command.digest,
