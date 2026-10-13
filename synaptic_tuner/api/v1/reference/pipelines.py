@@ -118,6 +118,7 @@ from synaptic_tuner.api.v1.runs_facade import RunsAPI
 from synaptic_tuner.api.v1.training_facade import TrainingAPI
 from tuner.execution.foundation_v2.canonical import digest_text, domain_digest
 
+from .atomic_storage import atomic_commit_method
 from .provider_family import require_methods
 
 
@@ -562,8 +563,8 @@ class ReferencePipelineOperationsV1:
             }
         )
 
-    def _append_event(self, key: str, *, kind: str, record: PipelineRecord, previous: _Head | None) -> tuple[int, str]:
-        """Append one lifecycle event; asserts the per-pipeline durable event budget."""
+    def _append_event(self, key: str, *, kind: str, record: PipelineRecord, previous: _Head | None, defer: bool = False) -> tuple[int, str] | tuple[int, str, bytes]:
+        """Prepare, and optionally append, one lifecycle event; asserts the per-pipeline durable event budget."""
         previous_sequence = None if previous is None else previous.sequence
         previous_chain = None if previous is None else previous.chain_digest
         sequence = (previous_sequence or 0) + 1
@@ -583,6 +584,8 @@ class ReferencePipelineOperationsV1:
                 "chain_digest": chain,
             }
         )
+        if defer:
+            return sequence, chain, canonical
         try:
             appended = self._streams.append(partition=_PIPELINE, stream_key=key, sequence=sequence, canonical=canonical)
         except Exception:
@@ -594,14 +597,32 @@ class ReferencePipelineOperationsV1:
         raise _integrity()
 
     def _create(self, record: PipelineRecord) -> _Head | None:
-        """Genesis: event 1 then the head at revision 1; ``None`` when another writer won."""
+        """Create event/head atomically when supported; otherwise preserve split writes."""
         if record.revision != 1:
             raise _integrity()
         key = _head_key(record.pipeline)
-        sequence, chain = self._append_event(key, kind="created", record=record, previous=None)
+        try:
+            atomic = atomic_commit_method(self._records, self._streams)
+        except Exception:
+            raise _integrity() from None
+        prepared = self._append_event(key, kind="created", record=record, previous=None, defer=atomic is not None)
+        sequence, chain = prepared[:2]
         raw = self._head_document(record, sequence=sequence, chain=chain)
         try:
-            created = self._records.create(partition=_PIPELINE, key=key, canonical=raw)
+            if atomic is not None:
+                created = atomic(
+                    record_partition=_PIPELINE,
+                    key=key,
+                    expected_revision=None,
+                    record_canonical=raw,
+                    stream_partition=_PIPELINE,
+                    stream_key=key,
+                    expected_tail=None,
+                    sequence=sequence,
+                    stream_canonical=prepared[2],
+                )
+            else:
+                created = self._records.create(partition=_PIPELINE, key=key, canonical=raw)
         except Exception:
             raise _integrity() from None
         if created is not True:
@@ -612,16 +633,34 @@ class ReferencePipelineOperationsV1:
         return head
 
     def _transition(self, head: _Head, record: PipelineRecord, kind: str) -> _Head:
-        """Append the event, then commit through the head compare-and-swap."""
+        """Commit event/head atomically when supported; otherwise append then CAS."""
         if record.revision != head.revision + 1:
             raise _integrity()
         key = _head_key(record.pipeline)
-        sequence, chain = self._append_event(key, kind=kind, record=record, previous=head)
+        try:
+            atomic = atomic_commit_method(self._records, self._streams)
+        except Exception:
+            raise _integrity() from None
+        prepared = self._append_event(key, kind=kind, record=record, previous=head, defer=atomic is not None)
+        sequence, chain = prepared[:2]
         raw = self._head_document(record, sequence=sequence, chain=chain)
         try:
-            swapped = self._records.compare_and_swap(
-                partition=_PIPELINE, key=key, expected_revision=head.revision, canonical=raw
-            )
+            if atomic is not None:
+                swapped = atomic(
+                    record_partition=_PIPELINE,
+                    key=key,
+                    expected_revision=head.revision,
+                    record_canonical=raw,
+                    stream_partition=_PIPELINE,
+                    stream_key=key,
+                    expected_tail=head.sequence,
+                    sequence=sequence,
+                    stream_canonical=prepared[2],
+                )
+            else:
+                swapped = self._records.compare_and_swap(
+                    partition=_PIPELINE, key=key, expected_revision=head.revision, canonical=raw
+                )
         except Exception:
             raise _integrity() from None
         if swapped is not True:

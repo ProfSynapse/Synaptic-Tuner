@@ -362,7 +362,7 @@ jobs:
               assert not list(private.iterdir())
           PY
 
-      - name: Exercise installed environment workflows without checkout imports
+      - name: Exercise installed environment and durable lifecycle workflows
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}
         run: |
@@ -375,10 +375,11 @@ jobs:
           import sys
           import SynthChat
           import synaptic_tuner.api.v1.reference.environment_sessions as sessions
+          import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
           import shared.environments.local_worker as worker
 
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (SynthChat, sessions, worker):
+          for module in (SynthChat, sessions, worker, sqlite_store):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -386,13 +387,17 @@ jobs:
           tests = root / "tests" / "contract"
           tests.mkdir(parents=True)
           for name in ("test_environment_sessions_v1.py", "test_environment_admission_v1.py",
-                       "test_reference_data_v1.py"):
+                       "test_reference_data_v1.py", "test_atomic_lifecycle_v1.py",
+                       "test_reference_evaluation_v1.py", "test_reference_pipelines_v1.py",
+                       "test_sqlite_store_v1.py"):
               shutil.copy2(checkout / "tests" / "contract" / name, tests / name)
           for name in ("config", "rubrics"):
               shutil.copytree(Path(SynthChat.__file__).parent / name, root / "SynthChat" / name,
                               ignore=shutil.ignore_patterns("*.py", "__pycache__"))
           subprocess.run([sys.executable, "-I", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                          str(tests / "test_environment_sessions_v1.py")], cwd=root, check=True)
+                          str(tests / "test_environment_sessions_v1.py"),
+                          str(tests / "test_atomic_lifecycle_v1.py"),
+                          str(tests / "test_sqlite_store_v1.py")], cwd=root, check=True)
           PY
 
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
