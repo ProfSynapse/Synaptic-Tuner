@@ -722,5 +722,24 @@ bounded strict payload validation and existing Markdown/console rendering.
 The permanent CI lane copies only tests and installed non-Python assets into a
 neutral directory. Comparison limits reports to 64 MiB, comparison output to 4 MiB and
 10,000 cases, retaining full counts when displayed IDs are capped. These limits
-do not bound upstream HTTP acquisition; transport bounds, in-flight recovery
-and live backend/judge qualification remain separate stable gates.
+do not themselves bound upstream HTTP acquisition. The local reference backend
+now has the separate transport bounds below; in-flight recovery and live
+backend/judge qualification remain open.
+
+### Local evaluation HTTP bounds
+
+The local HTTP reference backend now defaults to finite 1 MiB request and
+decompressed response body limits. Hosts can configure exact positive integer
+limits through 64 MiB; invalid values reject before client creation or secret
+resolution. The existing transport rejects oversized encoded requests before
+HTTP and closes streamed responses and sessions at the response boundary.
+An omitted token ceiling remains independent of these byte limits. Legacy
+client-factory calls keep their previous constructor arguments.
+
+A fresh source-archive-built wheel passed the base-only consumer and all 226
+installed evaluation/comparison/transport cases. The 17 new cases include exact
+UTF-8 byte boundaries, split codepoints, oversize rejection, resource closure
+and complete text in verified public report readback. Both changed production
+files matched the wheel. These limits do not provide an aggregate wall-clock
+deadline, cancellation or recovery; HTTP timeouts bound inactivity. No network
+provider or model-quality qualification was performed.
