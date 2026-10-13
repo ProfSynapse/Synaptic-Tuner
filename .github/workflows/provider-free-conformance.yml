@@ -742,7 +742,7 @@ jobs:
           python -m venv --copies "$RUNNER_TEMP/conversation-sft-venv"
           "$RUNNER_TEMP/conversation-sft-venv/bin/python" -m pip install "$RUNNER_TEMP"/sdist-wheelhouse/synaptic_tuner-*.whl pytest==8.4.2 datasets==5.1.0
           "$RUNNER_TEMP/conversation-sft-venv/bin/python" -I -B - <<'PYCODE'
-          import importlib
+          import importlib.util
           import os
           from pathlib import Path
           import shutil
@@ -756,7 +756,7 @@ jobs:
                        "Trainers.sft.src.preprocessing", "shared.sft_preprocessing",
                        "tuner.runtime.offline_sft_worker", "tuner.runtime.verification",
                        "tuner.training.methods.sft", "tuner.training.packaged_compilation"):
-              location = Path(importlib.import_module(name).__file__).resolve()
+              location = Path(importlib.util.find_spec(name).origin).resolve()
               assert location.is_relative_to(prefix) and not location.is_relative_to(checkout), location
           root = Path(os.environ["RUNNER_TEMP"]) / "installed-conversation-sft-tests"
           root.mkdir()

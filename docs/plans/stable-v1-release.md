@@ -657,10 +657,11 @@ installed preparation/source tests. Three production modules and three packaged
 schemas matched the reviewed source bytes; the permanent CI lane resolves schema
 resources from that installation. Existing v1/v2 publisher behavior is preserved.
 
-This is preparation support only. The new
-`synaptic-conversation-sft-row/v1` format is not yet admitted by SFT compilation,
-loaders or packaged runtime releases. The Data-to-training installed workflow
-and provider qualification remain separate follow-up gates.
+The new `synaptic-conversation-sft-row/v1` format now has CPU-tested SFT
+compiler, loader, preprocessing and native verification support. Existing
+packaged runtime release allowlists remain unchanged and reject this format;
+an additive candidate selection, the Data-to-training installed workflow and
+provider qualification remain separate follow-up gates.
 
 ### GRPO trainer core preparation
 
@@ -683,3 +684,20 @@ The public GRPO compiler, separate offline inventory, provider dispatch, native
 verification and live candidate qualification remain open. This entry alone
 does not authenticate a public plan, verify model member custody or advertise
 GRPO through the public API.
+
+### Conversation SFT compilation and execution preparation
+
+The SFT path preserves the selected ordered prefix and assistant target, uses
+preassigned group splits, and masks all prefix tokens. It rejects truncation,
+missing target tokens and mismatched row formats. Compiled chat-template options
+now pass the same bounded validation at the offline worker boundary. Existing
+legacy and v1/v2 behavior is retained; release format allowlists are unchanged.
+
+A fresh source-archive-built wheel passed the neutral base-only consumer and
+47 installed tests, including six real Dataset cases and the real isolated
+decoder/worker fixture. The latter uses a copied Python interpreter so resolving
+its executable retains the test installation's dependencies. All ten changed
+production files and five lock/closure documents matched the wheel bytes.
+Runtime lock refreshes change source commitments only: inventories, image/SDK/
+Python pins and release admissions remain unchanged. This is CPU execution and
+packaging evidence, not a provider run or GPU training qualification.
