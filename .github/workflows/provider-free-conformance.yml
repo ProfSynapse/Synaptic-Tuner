@@ -335,6 +335,31 @@ jobs:
                   cwd=directory, check=True, capture_output=True, text=True,
               )
               assert json.loads(result.stdout)["success"] is True
+          from shared.environments.bounded_local_runtime import FilesystemLimits
+          from shared.environments.fixture_parser import EnvironmentFixture
+          from shared.environments.local_worker import WorkerEnvironmentRuntime
+          with tempfile.TemporaryDirectory() as directory:
+              private = Path(directory) / "fixtures"
+              private.mkdir(mode=0o700)
+              runtime = WorkerEnvironmentRuntime(
+                  private, FilesystemLimits(8, 4096, 4096, 4096, 4, 128, 10),
+              )
+              try:
+                  runtime.setup(EnvironmentFixture(["nested"], {"nested/input.txt": "installed fixture"}))
+                  runtime.write_text("nested/output.txt", "fixed child response")
+                  assert runtime.read_text("nested/input.txt") == "installed fixture"
+                  assert runtime.read_text("nested/output.txt") == "fixed child response"
+                  snapshot = runtime.snapshot()
+                  assert snapshot["runtime"] == "bounded_local" and not snapshot["truncated"]
+                  assert "root" not in snapshot
+                  assert {item["path"] for item in snapshot["files"]} == {
+                      "nested/input.txt", "nested/output.txt",
+                  }
+                  process = runtime._process
+              finally:
+                  runtime.teardown()
+              assert process.returncode is not None and process.poll() is not None
+              assert not list(private.iterdir())
           PY
 
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
