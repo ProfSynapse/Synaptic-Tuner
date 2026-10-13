@@ -633,6 +633,13 @@ can reconnect only to a known retained call, and cannot
 recover historical lost signing keys. These are provider-free implementation
 claims until separately qualified against a live retained run.
 
+Internal cancellation machinery has provider-free coverage for exact-call
+authentication, a current cancel-only host grant, bounded SDK cancellation and
+uncertain-response retention. It does not enable ordinary cancellation or
+reconciliation commands. A provider acknowledgment means cancellation was
+requested; it does not establish terminal stopped compute. The original
+staging/submission grant is never renewed by cancellation.
+
 ### Training artifact retention policy
 
 The live Modal training policy admits at most **192 MiB for one artifact** and
