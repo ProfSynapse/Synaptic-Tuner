@@ -67,6 +67,10 @@ from tuner.training.modal_host_runtime import (
 )
 from tuner.training.modal_host_scope import observe_modal_host_scope, open_modal_host_scope
 from tuner.training.modal_host_storage import ModalHostStorageV1
+from synaptic_tuner.api.v1.reference.sqlite_store import SQLiteDurableStoreV1
+from tuner.training.modal_run_retention import (
+    WORKFLOW_FILE, KEY_NAMES, validate_retention_root, retain_modal_run, retained_bytes,
+)
 from tuner.training.modal_recipe import ModalSFTRecipePlanV1, resolve_modal_sft_build
 from tuner.training.packaged_compilation import (
     PACKAGED_CONTEXT_SCHEMA, compile_packaged_sft_workload,
@@ -93,6 +97,7 @@ _RUN_PHASE_DIAGNOSTICS = {
     "RUN_RESOLVE_REPARSE": ("UNAVAILABLE", "modal_standalone_runner.resolve_reparse"),
     "RUN_PUBLIC_PLAN": ("UNAVAILABLE", "modal_standalone_runner.public_plan"),
     "RUN_PUBLIC_PREFLIGHT": ("UNAVAILABLE", "modal_standalone_runner.public_preflight"),
+    "RUN_RETAIN_READ_INPUTS": ("UNAVAILABLE", "modal_standalone_runner.retain_read_inputs"),
     "RUN_START_INDETERMINATE": ("INDETERMINATE", "modal_standalone_runner.training_start"),
     "RUN_STAGE_RECONCILE_REQUIRED": ("INDETERMINATE", "modal_standalone_runner.stage_reconcile"),
     "RUN_SUBMIT_RECONCILE_REQUIRED": ("INDETERMINATE", "modal_standalone_runner.submit_reconcile"),
@@ -478,6 +483,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             expected_dataset_digest=plan.prepared_identity.revision,
             expected_content_digest=plan.prepared_identity.content_digest,
         )
+        validate_retention_root(prepared_root)
         normalizer = PublishedPreparedDatasetNormalizerV1(authorized_root=prepared_root)
         preparation = TrainingInputPreparationServiceV1(
             prepared_root=prepared_root,
@@ -513,10 +519,10 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             with ModalHostStorageV1(root / "modal-host.sqlite3", "standalone-training") as claim_store:
                 claim_store.attempts.claim("metrics-qual-" + metrics_admission.document["attempt_ref"],
                                            metrics_admission.canonical)
-        with ModalHostStorageV1(
-            _attempt_journal(root, run_id, fresh_attempt=fresh_attempt),
-            project_ref,
-        ) as storage:
+        journal_path = _attempt_journal(root, run_id, fresh_attempt=fresh_attempt)
+        with ModalHostStorageV1(journal_path, project_ref) as storage, SQLiteDurableStoreV1(
+            prepared_root / WORKFLOW_FILE,
+        ) as workflow_storage:
             secrets_port, client, client_binding, runtime, qualification = _qualified_runtime(
                 modal=modal, plan=plan, context=context, resources=resources,
                 storage=storage, effect_id="cpu-qual-" + run_id,
@@ -617,6 +623,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 quote_digest=runtime.quote_digest,
                 maximum_cost_minor_units=recipe.maximum_cost_minor_units,
                 cpu_qualification=qualification,
+                records=workflow_storage, streams=workflow_storage,
             )
             api = host.api
             phase = "RUN_PUBLIC_PREPARE"
@@ -631,6 +638,59 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             training_plan = api.training.plan(resolved, ProviderRef("modal", recipe.runtime_profile))
             phase = "RUN_PUBLIC_PREFLIGHT"
             preflight = api.training.preflight(training_plan)
+            phase = "RUN_RETAIN_READ_INPUTS"
+            retain_modal_run(
+                root=prepared_root, run=run,
+                signing_keys={name: secrets_port.resolve(SecretRef("env", name)) for name in KEY_NAMES},
+                qualification_key=runtime.qualification_key,
+                inputs={
+                    "prepared_request": {
+                        "request_id": prepared.prepared.request.request_id,
+                        "project_ref": prepared.prepared.request.project_ref,
+                        "canonical_json": prepared.prepared.request.canonical_json,
+                    },
+                    "components": {
+                        "execution_source": execution.to_dict(),
+                        "execution_context": retained_bytes(components.execution_context.canonical_json.encode("utf-8")),
+                        "resolved_config": retained_bytes(components.resolved_config.canonical_json.encode("utf-8")),
+                        "runtime": {
+                            "image": components.runtime.image,
+                            "dependency_lock_digest": components.runtime.dependency_lock_digest,
+                            "python_version": components.runtime.python_version,
+                            "material_kind": components.runtime.material_kind,
+                            "material_digest": components.runtime.material_digest,
+                        },
+                        "resources": {
+                            "accelerator": resources.accelerator,
+                            "accelerator_count": resources.accelerator_count,
+                            "timeout_seconds": resources.timeout_seconds,
+                        },
+                        "artifact_policy": {
+                            "required_kinds": list(components.artifact_policy.required_kinds),
+                            "retain_checkpoints": components.artifact_policy.retain_checkpoints,
+                        },
+                    },
+                    "workload": retained_bytes(workload.canonical_bytes),
+                    "runtime_release": release.to_dict(),
+                    "runtime_facts": facts.to_dict(),
+                    "deployment_facts": runtime.deployment_facts.to_dict(),
+                    "client_binding": {
+                        "account_ref": client_binding.account_ref, "workspace_ref": client_binding.workspace_ref,
+                        "environment_ref": client_binding.environment_ref, "client_ref": client_binding.client_ref,
+                        "sdk_version": client_binding.sdk_version,
+                    },
+                    "volume_names": [list(item) for item in runtime.volume_names_by_id],
+                    "modal_profile": modal_profile, "modal_environment": modal_environment,
+                    "profile_digest": plan.profile_sha256.removeprefix("sha256:"),
+                    "quote_digest": runtime.quote_digest,
+                    "maximum_cost_minor_units": recipe.maximum_cost_minor_units,
+                    "attempt_journal": str(journal_path), "workflow_file": WORKFLOW_FILE,
+                    "engine_root": str(context.engine_root),
+                    "cpu_receipt": qualification.receipt.to_dict(),
+                    "training_plan": training_plan.to_dict(),
+                    "training_preflight": preflight.to_dict(),
+                },
+            )
             phase = "RUN_START_INDETERMINATE"
             started = api.training.start(training_plan, preflight)
             if started.accepted is not True:
