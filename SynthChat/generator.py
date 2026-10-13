@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Mapping, Sequence
 from dataclasses import dataclass
 from copy import deepcopy
+from shared.validation.parsing.configured_formats import build_wrapper_specs
 
 from .utils.yaml_loader import load_yaml
 from .utils.docs_loader import DocFile
@@ -256,6 +257,9 @@ class SynthChatGenerator:
             if self._privacy_settings.get("enabled") and not self._privacy_profiles["profiles"]:
                 raise ValueError("Selected privacy processing requires snapshot profiles")
         self._privacy_preprocessor_factory = privacy_preprocessor_factory or PrivacyPreprocessor.from_registry
+        self._wrapper_specs = (
+            None if input_snapshot is None else build_wrapper_specs(self._tool_call_formats)
+        )
         self._privacy_preprocessor_cache: Dict[str, PrivacyPreprocessor] = {}
         self._privacy_doc_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
@@ -1974,7 +1978,7 @@ class SynthChatGenerator:
 
     def _parse_assistant_response(self, content: str, scenario: Dict) -> Dict:
         """Parse assistant response for tool calls and thinking."""
-        return parse_assistant_response(content, scenario)
+        return parse_assistant_response(content, scenario, wrapper_specs=self._wrapper_specs)
 
     def _parse_json_object(self, content: str) -> Optional[Dict[str, Any]]:
         """Parse a JSON object from model output, tolerating code fences."""

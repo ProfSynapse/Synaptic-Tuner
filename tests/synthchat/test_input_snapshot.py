@@ -290,3 +290,28 @@ def test_selected_empty_privacy_profile_cannot_fallback():
         for role, ref, raw in inputs.documents))
     with pytest.raises(ValueError, match='privacy'):
         inputs.validate_generation(('selected',), privacy_settings={'enabled': True, 'profile': 'empty'})
+
+
+def test_generator_parsing_retains_independent_snapshot_wrapper_contexts(monkeypatch):
+    import json
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Snapshot parsing consulted ambient wrapper formats')
+    monkeypatch.setattr('shared.validation.parsing.configured_formats.get_configured_wrapper_specs', forbidden)
+    generators = []
+    for wrapper, field in (('dispatch_alpha', 'tenant'), ('dispatch_beta', 'account')):
+        inputs = snapshot(validation=False)
+        registry = {'formats': {'default': {'wrapper_name': wrapper,
+            'argument_fields': {'required': [field, 'command'], 'properties': {
+                field: {'type': 'string'}, 'command': {'type': 'string'}}}, 'command_field': 'command'}}}
+        inputs = replace(inputs, documents=tuple((role, ref, yaml.safe_dump(registry).encode()
+            if ref == 'registry:tool_call_formats' else raw) for role, ref, raw in inputs.documents))
+        current = generator(inputs, validation=False)
+        registry['formats']['default']['wrapper_name'] = 'mutated'
+        generators.append((current, wrapper, field))
+    for current, wrapper, field in generators:
+        content = json.dumps({'tool_calls': [{'function': {'name': wrapper,
+            'arguments': {field: 'bound', 'command': 'configured command'}}}]})
+        parsed = current._parse_assistant_response(content, SELECTED)
+        assert json.loads(parsed['tool_calls'][0]['function']['arguments'])[field] == 'bound'
+        assert current._wrapper_specs[0]['wrapper_name'] == wrapper

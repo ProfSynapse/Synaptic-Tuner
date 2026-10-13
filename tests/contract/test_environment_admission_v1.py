@@ -105,6 +105,135 @@ def test_opt_in_plan_is_versioned_bound_and_nonexecuting(harness):
     assert clients.calls == 0
 
 
+def _forbid_workflow_paths(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Captured workflow consulted mutable inputs")
+    for name in ("load_tool_call_formats", "load_workspace_formats", "load_label_mappings", "load_privacy_profiles", "load_yaml"):
+        monkeypatch.setattr("SynthChat.generator." + name, forbidden)
+    monkeypatch.setattr("shared.validation.parsing.configured_formats.get_configured_wrapper_specs", forbidden)
+    monkeypatch.setattr("shared.environments.tool_executor.cli_command_catalog", forbidden)
+    monkeypatch.setattr("synaptic_tuner.api.v1.reference.data._read_dataset_rows", forbidden)
+
+
+def test_real_generation_consumes_capture_after_source_deletion(harness, monkeypatch):
+    from shared.llm.metering import MeteredLLMClient
+    from shared.llm.usage import UsageAccumulator
+    from test_reference_data_v1 import FakeLocalClient
+
+    operations, request, ports, _, clients, scenario = harness
+    scenario.write_text('scenarios:\n  selected:\n    type: behavioral\n    environment_execution: required\n    prompts: {system: system, user: user, assistant: assistant}\n')
+    plan = operations.plan(request)
+    captured = operations._verify_plan(plan)
+    shutil.rmtree(ports.config_dir)
+    scenario.unlink()
+    _forbid_workflow_paths(monkeypatch)
+    inner = FakeLocalClient(['bound system', 'bound user', '{"tool_calls":[{"function":{"name":"direct_action","arguments":{"value":"bound"}}}]}'])
+    client = MeteredLLMClient(inner, UsageAccumulator())
+    rows = []
+    operations._generate(plan, client, None, lambda ref, row, passed, writer: rows.append((row, passed)),
+                         lambda: None, lambda *args: None, admitted_inputs=captured)
+    assert inner.chat_calls == 3 and clients.calls == 0
+    assert rows[0][1] is True
+    assert rows[0][0]['conversations'][0]['content'] == 'bound system'
+    assert rows[0][0]['conversations'][-1]['tool_calls'][0]['function']['name'] == 'direct_action'
+
+
+def test_real_improvement_consumes_captured_dataset_and_rubrics(harness, tmp_path, monkeypatch):
+    from shared.llm.metering import MeteredLLMClient
+    from shared.llm.usage import UsageAccumulator
+    from test_reference_data_v1 import FakeLocalClient
+
+    operations, request, ports, _, clients, _ = harness
+    rubrics = tmp_path / 'bound-rubrics'
+    shutil.copytree(ports.rubrics_dir, rubrics)
+    ports = replace(ports, rubrics_dir=rubrics)
+    operations._ports = ports
+    dataset = tmp_path / 'input.jsonl'
+    example = {'conversations': [{'role': 'user', 'content': 'bound question'}, {'role': 'assistant', 'content': 'bound answer'}]}
+    dataset.write_text(json.dumps(example) + '\n')
+    request = replace(request, mode=DataMode.IMPROVE, scenarios=(), input_dataset_ref=str(dataset), rubric_refs=('data_quality',))
+    plan = operations.plan(request)
+    captured = operations._verify_plan(plan)
+    dataset.unlink()
+    shutil.rmtree(ports.config_dir)
+    shutil.rmtree(rubrics)
+    _forbid_workflow_paths(monkeypatch)
+    inner = FakeLocalClient([], structured=[{'data_quality_score': .95}])
+    client = MeteredLLMClient(inner, UsageAccumulator())
+    rows = []
+    operations._improve(plan, client, None, lambda ref, row, passed, writer: rows.append((row, passed)),
+                        lambda: None, lambda *args: None, admitted_inputs=captured)
+    assert rows == [(example, True)] and inner.structured == [] and clients.calls == 0
+
+
+def test_private_capture_must_match_plan_before_workflow_construction(harness):
+    operations, request, _, _, clients, _ = harness
+    plan = operations.plan(request)
+    captured = operations._verify_plan(plan)
+    mismatched = replace(plan, source_digest='b' * 64)
+    with pytest.raises(DataOperationError, match='environment_invalid'):
+        operations._workflow_snapshot(mismatched, captured)
+    assert clients.calls == 0
+
+
+@pytest.mark.parametrize('helper', ['_generate', '_improve'])
+def test_selected_private_helpers_refuse_missing_capture_without_path_fallback(harness, helper, monkeypatch):
+    operations, request, _, _, clients, _ = harness
+    plan = operations.plan(request)
+    _forbid_workflow_paths(monkeypatch)
+    with pytest.raises(DataOperationError, match='environment_invalid'):
+        getattr(operations, helper)(plan, None, None, None, None, None)
+    assert clients.calls == 0
+
+
+def test_effective_snapshot_validation_rejects_stage_override_before_clients(harness):
+    operations, request, _, _, clients, scenario = harness
+    scenario.write_text('scenarios:\n  selected:\n    environment_execution: required\n    assistant_generation: {model: raw-provider-override}\n')
+    plan = operations.plan(request)
+    with pytest.raises(DataOperationError, match='environment_invalid'):
+        operations.start(plan)
+    assert clients.calls == 0
+
+
+@pytest.mark.parametrize('invalid_format', [
+    {'wrapper_name': 'custom', 'command_field': 'undeclared'},
+    {'wrapper_name': 'custom', 'command_escapes': {'multi-character': 'x'}},
+    {'wrapper_name': 'custom', 'argument_fields': 'malformed shape'},
+    {'wrapper_name': 'custom', 'argument_fields': ['malformed shape']},
+])
+def test_effective_wrapper_normalization_rejects_before_client_factory(harness, monkeypatch, invalid_format):
+    import yaml
+    import SynthChat.config.format_resolver as formats
+
+    operations, request, ports, _, clients, _ = harness
+    # Registry discovery remains the normal byte-binding path, redirected to this
+    # host-owned fixture so the checked-in global registry is never modified.
+    (ports.config_dir / 'tool_call_formats.yaml').write_text(yaml.safe_dump({'formats': {'default': invalid_format}}))
+    monkeypatch.setattr(formats, '_CONFIG_DIR', ports.config_dir)
+    plan = operations.plan(request)
+    with pytest.raises(DataOperationError, match='environment_invalid'):
+        operations.preflight(plan)
+    with pytest.raises(DataOperationError, match='environment_invalid'):
+        operations.start(plan)
+    assert clients.calls == 0
+
+
+def test_malformed_captured_validation_shape_has_closed_diagnostic(harness):
+    import yaml
+
+    operations, request, ports, _, clients, _ = harness
+    path = ports.config_dir / 'validation.yaml'
+    config = yaml.safe_load(path.read_text())
+    config['scopes']['response']['extraction'] = 'malformed shape'
+    path.write_text(yaml.safe_dump(config))
+    plan = operations.plan(replace(request, max_iterations=2))
+    with pytest.raises(DataOperationError, match='environment_invalid'):
+        operations.preflight(plan)
+    with pytest.raises(DataOperationError, match='environment_invalid'):
+        operations.start(plan)
+    assert clients.calls == 0
+
+
 def test_simulation_is_also_disabled_until_an_adapter_is_qualified(harness):
     operations, request, ports, _, clients, _ = harness
     selection = replace(SELECTION, mode=EnvironmentMode.SIMULATE)

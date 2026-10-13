@@ -88,6 +88,8 @@ class WorkflowInputSnapshot:
         for name, parser in (("tool_call_formats", parse_tool_call_formats),
                              ("workspace_formats", parse_workspace_formats), ("label_mappings", parse_label_mappings)):
             registries[name] = parser(self.document("registry", "registry:" + name), require_complete=True)
+        from shared.validation.parsing.configured_formats import build_wrapper_specs
+        build_wrapper_specs(registries["tool_call_formats"])
         if type(scenario_refs) is not tuple or not scenario_refs or any(type(ref) is not str or not ref for ref in scenario_refs) or len(set(scenario_refs)) != len(scenario_refs):
             raise ValueError("Snapshot generation requires explicit selected scenario references")
         scenarios = self.role_documents("scenario")
