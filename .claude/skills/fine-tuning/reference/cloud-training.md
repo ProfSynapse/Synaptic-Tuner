@@ -6,9 +6,12 @@ Cloud training uses the existing SFT and KTO trainers plus the env-backed GRPO p
 
 The new product path is the submodule-first public training API documented in
 `docs/architecture/submodule-first-training-v1.md`. Modal SFT and host-selected
-local publication are live-proven. Hugging Face publication is implemented and
-fake-tested only. Local Docker, HF Jobs, and RunPod are not yet execution
-providers through that API.
+local publication have bounded historical live evidence. Docker and ordinary
+HF Jobs now have explicit public host compositions with provider-free tests;
+their live SFT, cancellation and recovery qualification remains open. The HF
+candidate supports final native SFT artifacts, prepared v1 inputs up to 2 MiB
+and no checkpoint retention. Hugging Face model publication is implemented and
+fake-tested only. RunPod is not an execution provider through this API.
 
 The protected HF source/bootstrap lane and the older `cloud-run`,
 `cloud-pipeline`, and experiment commands documented below are legacy or
@@ -815,3 +818,12 @@ That trains on HF Jobs first, then launches cloud evaluation against the exact f
 - Resume-from-provider-native-storage is not automatic yet.
 - Persistence is guaranteed first; resume flows can be added later.
 - Clean up old runs from the provider-native backend explicitly when they are no longer needed.
+
+### Ordinary public HF SFT parent maintenance
+
+The ordinary HF provider candidate authenticates a separate fixed parent import
+closure. Check it with `python3 scripts/regenerate_hf_parent_closure.py`. After
+reviewing intentional member changes, use `--write`, then rerun the default
+check. This refreshes only hashes and sizes of the reviewed inventory; it does
+not change model, image, runtime pins or qualify a live HF run. The protected
+smoke and Modal inventories remain separate.

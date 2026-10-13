@@ -8,6 +8,10 @@ on:
       - "tuner/execution/foundation_v2/**"
       - "tuner/execution/fake_provider_v1.py"
       - "tuner/execution/providers/modal/**"
+      - "tuner/execution/providers/hf_jobs_provider_v1/**"
+      - "tests/execution/providers/test_hf_jobs_public_family.py"
+      - "tests/execution/providers/test_hf_pinned_model_snapshot.py"
+      - "Trainers/runtime_profiles/**"
       - "tuner/training/**"
       - "tuner/project/**"
       - "tuner/runtime/**"
@@ -72,6 +76,7 @@ on:
       - "schemas/**"
       - "scripts/regenerate_modal_runtime_lock.py"
       - "scripts/regenerate_offline_sft_worker_closure.py"
+      - "scripts/regenerate_hf_parent_closure.py"
       - "scripts/capture_modal_inference_runtime.py"
       - "scripts/inspect_modal_inference_runtime.py"
       - "scripts/ci_pytest_shard.sh"
@@ -659,8 +664,83 @@ jobs:
               str(root / "tests/training/test_docker_host_composition.py")]))
           PYCODE
 
+      - name: Exercise installed ordinary HF Jobs host with pinned SDK
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -m venv "$RUNNER_TEMP/hf-host-venv"
+          "$RUNNER_TEMP/hf-host-venv/bin/python" -m pip install --require-hashes -r "$GITHUB_WORKSPACE/tuner/execution/providers/hf_jobs_provider_v1/host-dependencies.lock"
+          "$RUNNER_TEMP/hf-host-venv/bin/python" -m pip install "$RUNNER_TEMP"/sdist-wheelhouse/synaptic_tuner-*.whl pytest==8.4.2
+          "$RUNNER_TEMP/hf-host-venv/bin/python" -I -B - <<'PYCODE'
+          import importlib
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import huggingface_hub
+          assert huggingface_hub.__version__ == "1.33.0"
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          for name in ("model", "preparation", "transport", "bootstrap", "source_worker", "reader", "composition"):
+              module = importlib.import_module("tuner.execution.providers.hf_jobs_provider_v1." + name)
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-hf-host-tests"
+          schema_root = root / "schemas"
+          schema_root.mkdir(parents=True)
+          installed = Path(importlib.import_module("tuner").__file__).resolve().parent.parent
+          for name in ("synaptic-sft-workload-v1.schema.json", "synaptic-execution-source-v1.schema.json"):
+              shutil.copy2(installed / "schemas" / name, schema_root / name)
+          for name in (
+              "execution/providers/test_hf_jobs_public_family.py",
+              "training/test_sft_compilation.py",
+              "runtime/test_artifact_verification.py",
+          ):
+              target = root / "tests" / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / "tests" / name, target)
+              for parent in target.parents:
+                  if parent == root:
+                      break
+                  (parent / "__init__.py").touch()
+          import pytest
+          sys.path.insert(0, str(root))
+          os.chdir(root)
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
+              str(root / "tests/execution/providers/test_hf_jobs_public_family.py")]))
+          PYCODE
+
+      - name: Exercise installed model preparation with the candidate image Hub SDK
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -m venv "$RUNNER_TEMP/hf-model-venv"
+          "$RUNNER_TEMP/hf-model-venv/bin/python" -m pip install --require-hashes -r "$GITHUB_WORKSPACE/tuner/execution/providers/hf_jobs_provider_v1/model-dependencies.lock"
+          "$RUNNER_TEMP/hf-model-venv/bin/python" -m pip install "$RUNNER_TEMP"/sdist-wheelhouse/synaptic_tuner-*.whl pytest==8.4.2
+          "$RUNNER_TEMP/hf-model-venv/bin/python" -I -B - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import huggingface_hub
+          import tuner.execution.providers.modal.model_snapshot as model_snapshot
+          assert huggingface_hub.__version__ == "1.32.0"
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          location = Path(model_snapshot.__file__).resolve()
+          assert not location.is_relative_to(checkout), location
+          assert location.is_relative_to(Path(sys.prefix)), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-hf-model-tests"
+          root.mkdir()
+          target = root / "test_hf_pinned_model_snapshot.py"
+          shutil.copy2(checkout / "tests/execution/providers" / target.name, target)
+          import pytest
+          os.chdir(root)
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider", str(target)]))
+          PYCODE
+
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
         run: |
+          python -B scripts/regenerate_hf_parent_closure.py
           python -B scripts/regenerate_offline_sft_worker_closure.py
           python -B scripts/regenerate_modal_runtime_lock.py
 
