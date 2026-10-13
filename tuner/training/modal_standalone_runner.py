@@ -220,9 +220,13 @@ def _closed_start_failure_causes(error: BaseException) -> list[dict[str, object]
 class ModalStandalonePhaseUnavailable(RuntimeError):
     """Closed, non-authorizing diagnosis after a validated CPU receipt."""
 
-    def __init__(self, phase: str, *, start_causes: object = ()):
+    def __init__(self, phase: str, *, start_causes: object = (),
+                 retained_run: TrainingRunRef | None = None):
         if phase not in _RUN_PHASE_DIAGNOSTICS:
             raise ValueError("invalid_modal_standalone_phase")
+        if retained_run is not None and type(retained_run) is not TrainingRunRef:
+            raise TypeError("exact retained run required")
+        self.retained_run = retained_run
         self.phase = phase
         self.failure_class, self.location = _RUN_PHASE_DIAGNOSTICS[phase]
         self.retry_authorized = False
@@ -458,6 +462,13 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             or plan.recipe.maximum_cost_minor_units is None):
         raise ModalStandaloneRunUnavailable("modal_host_configuration_invalid")
     phase: str | None = None
+    retained_run = None
+
+    def diagnosis(selected_phase, *, start_causes=()):
+        return ModalStandalonePhaseUnavailable(
+            selected_phase, start_causes=start_causes, retained_run=retained_run,
+        )
+
     ledger = None
     local_inputs = None
     try:
@@ -691,6 +702,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                     "training_preflight": preflight.to_dict(),
                 },
             )
+            retained_run = run
             phase = "RUN_START_INDETERMINATE"
             started = api.training.start(training_plan, preflight)
             if started.accepted is not True:
@@ -699,7 +711,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             workflow = host.composition.stores.workflow_store.get(started.run)
             stopped_phase = _post_start_phase(workflow.phase)
             if stopped_phase is not None:
-                raise ModalStandalonePhaseUnavailable(stopped_phase)
+                raise diagnosis(stopped_phase)
             if workflow.phase is not WorkflowPhaseV1.QUEUED:
                 raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable")
             phase = "RUN_READ_BINDING"
@@ -795,7 +807,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 evaluation = json.loads(raw)["evaluation"]
                 if (evaluation["status"] not in ("completed", "failed")
                         or type(evaluation["gate_passed"]) is not bool):
-                    raise ModalStandalonePhaseUnavailable(phase)
+                    raise diagnosis(phase)
                 evaluation_passed = evaluation["gate_passed"]
             return ModalStandaloneRunResultV1(
                 started.run, artifact_paths,
@@ -808,17 +820,17 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             )
     except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable, ModalLocalPreparationUnavailable):
         raise
-    except ModalStandalonePhaseUnavailable:
-        raise
+    except ModalStandalonePhaseUnavailable as failure:
+        raise diagnosis(failure.phase, start_causes=failure.start_causes) from None
     except ModalPackagedReadUnavailable as failure:
         if phase == "RUN_CALL_OBSERVE" and type(failure) is ModalPackagedReadUnavailable:
             if failure.args == ("modal_packaged_call_failed",):
-                raise ModalStandalonePhaseUnavailable("RUN_WORKER_FAILED") from None
+                raise diagnosis("RUN_WORKER_FAILED") from None
             for stage in PACKAGED_WORKER_FAILURE_STAGES:
                 if failure.args == ("modal_packaged_call_failed_" + stage,):
-                    raise ModalStandalonePhaseUnavailable("RUN_WORKER_" + stage) from None
+                    raise diagnosis("RUN_WORKER_" + stage) from None
         if phase is not None:
-            raise ModalStandalonePhaseUnavailable(phase) from None
+            raise diagnosis(phase) from None
         raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable") from None
     except ModalPackagedResolutionUnavailable as failure:
         if phase == "RUN_PUBLIC_RESOLVE" and type(failure) is ModalPackagedResolutionUnavailable:
@@ -828,9 +840,9 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                 "REPARSE": "RUN_RESOLVE_REPARSE",
             }.get(failure.stage)
             if stage_phase is not None:
-                raise ModalStandalonePhaseUnavailable(stage_phase) from None
+                raise diagnosis(stage_phase) from None
         if phase is not None:
-            raise ModalStandalonePhaseUnavailable(phase) from None
+            raise diagnosis(phase) from None
         raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable") from None
     except Exception as failure:
         if phase is not None:
@@ -840,7 +852,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                     causes = _closed_start_failure_causes(failure)
                 except Exception:
                     pass  # Diagnostic failure cannot replace the original closed phase.
-            raise ModalStandalonePhaseUnavailable(phase, start_causes=causes) from None
+            raise diagnosis(phase, start_causes=causes) from None
         raise ModalStandaloneRunUnavailable("modal_standalone_run_unavailable") from None
     finally:
         if ledger is not None and not ledger.finished:

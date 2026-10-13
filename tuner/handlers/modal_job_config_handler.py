@@ -151,6 +151,11 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
                 "location": error.location,
                 "retry_authorized": False,
             }
+            from synaptic_tuner.api.v1.results import TrainingRunRef
+            retained_run = getattr(error, "retained_run", None)
+            if type(retained_run) is TrainingRunRef:
+                details["run_ref"] = retained_run.to_dict()
+                details["retention_ready"] = True
             if error.phase == "RUN_START_INDETERMINATE":
                 try:
                     from tuner.training.modal_standalone_runner import validate_start_failure_causes
