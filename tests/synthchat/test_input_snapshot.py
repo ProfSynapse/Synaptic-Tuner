@@ -251,7 +251,7 @@ def test_missing_requested_rubric_rejects_before_client_factory(monkeypatch):
     engine = ImprovementEngine(client, Path('/unused'), input_snapshot=snapshot())
     with pytest.raises(ValueError, match='rubric'):
         engine.run({'value': 'candidate'}, ['selected', 'missing'])
-    client.assert_not_called()
+    assert client.mock_calls == []
     factory.assert_not_called()
 
 
@@ -265,7 +265,7 @@ def test_admitted_unselected_sibling_cannot_expand_constructor_selection(path):
             current.generate_single('unselected', sibling, max_iterations=1, randomize_params=False)
         else:
             current.prepare_seed_bundle(scenario_key='unselected', scenario=sibling, randomize_params=False)
-    client.assert_not_called()
+    assert client.mock_calls == []
 
 
 @pytest.mark.parametrize(('field', 'registry'), [('tool_call_format', 'tool_call_formats'),
