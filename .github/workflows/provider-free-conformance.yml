@@ -798,13 +798,14 @@ jobs:
           import SynthChat
           import synaptic_tuner
           import Evaluator.comparison_basis as basis
+          import Evaluator.client_factory as factory
           import Evaluator.compare as comparison
           import Evaluator.runner as runner
           import Evaluator.schema_validator as validator
           import synaptic_tuner.api.v1.reference.evaluation as reference
           import synaptic_tuner.api.v1.evaluation_facade as facade
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (basis, comparison, runner, validator, reference, facade):
+          for module in (basis, comparison, runner, validator, reference, facade, factory):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -813,6 +814,7 @@ jobs:
           root = Path(os.environ["RUNNER_TEMP"]) / "installed-evaluation-comparison-tests"
           names = (
               "contract/test_public_evaluation_api_v1.py",
+              "contract/test_local_evaluation_http_bounds.py",
               "contract/test_reference_evaluation_v1.py",
               "contract/test_reference_spend_v1.py",
               "evaluator/test_compare.py",
