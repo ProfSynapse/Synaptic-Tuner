@@ -64,6 +64,14 @@ COMPARABLE_SETTINGS = (
     "environment",
 )
 
+# Public EvaluationAPI reports and legacy CLI reports name these same settings
+# differently. Keep one comparison dimension; never invent absent defaults.
+SETTING_ALIASES = {
+    "scenarios": ("scenarios", "scenario_refs"),
+    "tags_filter": ("tags_filter", "tags"),
+    "limit": ("limit", "case_limit"),
+}
+
 # Float tolerance for threshold comparisons on percentage points.
 _EPSILON = 1e-9
 
@@ -264,12 +272,25 @@ def _normalized_setting(value: Any) -> Any:
 
 
 def settings_mismatches(reference: Mapping[str, Any], candidate: Mapping[str, Any]) -> List[str]:
-    """Differences in eval settings recorded by both results files."""
+    """Compare recorded settings, rejecting contradictory aliases on either side.
+
+    Missing metadata remains unknown, as for legacy files. Alias spelling does
+    not change scope; explicit null and an absent setting remain distinct.
+    """
     mismatches = []
     for key in COMPARABLE_SETTINGS:
-        if key not in reference or key not in candidate:
+        aliases = SETTING_ALIASES.get(key, (key,))
+        resolved = []
+        conflicting = False
+        for role, metadata in (("reference", reference), ("candidate", candidate)):
+            present = [alias for alias in aliases if alias in metadata]
+            if len(present) > 1 and _normalized_setting(metadata[present[0]]) != _normalized_setting(metadata[present[1]]):
+                mismatches.append(f"{role} setting '{key}' has conflicting aliases {present!r}")
+                conflicting = True
+            resolved.append((bool(present), metadata[present[0]] if present else None))
+        if conflicting or not all(present for present, _ in resolved):
             continue
-        ref_value, cand_value = reference[key], candidate[key]
+        (_, ref_value), (_, cand_value) = resolved
         if _normalized_setting(ref_value) != _normalized_setting(cand_value):
             mismatches.append(f"setting '{key}' differs: reference={ref_value!r} candidate={cand_value!r}")
     return mismatches
