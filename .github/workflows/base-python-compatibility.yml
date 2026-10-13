@@ -1,0 +1,84 @@
+name: Installed base compatibility
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: base-compatibility-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-base:
+    name: Base / ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - {os: ubuntu-24.04, python: '3.10'}
+          - {os: ubuntu-24.04, python: '3.11'}
+          - {os: ubuntu-24.04, python: '3.12'}
+          - {os: ubuntu-24.04, python: '3.13'}
+          - {os: ubuntu-24.04, python: '3.14'}
+          - {os: windows-latest, python: '3.12'}
+          - {os: macos-latest, python: '3.12'}
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+    steps:
+      - name: Check out source without persisted credentials
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Set up base Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Build from sdist and exercise a neutral base-only consumer
+        shell: python
+        run: |
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+          import venv
+
+          checkout = Path(os.environ['GITHUB_WORKSPACE']).resolve()
+          scratch = Path(os.environ['RUNNER_TEMP']) / 'base-compatibility'
+          artifacts = scratch / 'artifacts'
+          artifacts.mkdir(parents=True)
+          temporary = scratch / 'temporary'
+          temporary.mkdir()
+          os.environ['TMPDIR'] = str(temporary)
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'build>=1,<2'], check=True)
+          subprocess.run([sys.executable, '-m', 'build', '--sdist', '--outdir', str(artifacts)], cwd=checkout, check=True)
+          sdist, = artifacts.glob('synaptic_tuner-*.tar.gz')
+          wheels = scratch / 'wheels'
+          subprocess.run([sys.executable, '-m', 'pip', 'wheel', '--no-deps', '--wheel-dir', str(wheels), str(sdist)], cwd=scratch, check=True)
+          wheel, = wheels.glob('synaptic_tuner-*.whl')
+          consumer = scratch / 'consumer'
+          venv.EnvBuilder(with_pip=True, symlinks=os.name != 'nt').create(consumer)
+          python = consumer / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+          subprocess.run([str(python), '-m', 'pip', 'install', str(wheel)], cwd=scratch, check=True)
+          expected = {'schemas/' + path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                      for path in (checkout / 'schemas').glob('synaptic-*.schema.json')}
+          for source, member in [('cli-first-tool-schemas.json', 'cli-first-tool-schemas.json'),
+                                 ('Tools/tool_schemas.json', 'Tools/tool_schemas.json')]:
+              expected['synaptic_tuner/runtime/' + member] = hashlib.sha256((checkout / source).read_bytes()).hexdigest()
+          expectations = scratch / 'expected-resources.json'
+          expectations.write_text(json.dumps(expected), encoding='utf-8')
+          helper = scratch / 'test_installed_base_compatibility.py'
+          shutil.copy2(checkout / 'tests/contract/test_installed_base_compatibility.py', helper)
+          subprocess.run([str(python), '-I', '-B', str(helper), '--checkout-root', str(checkout),
+                          '--expectations', str(expectations)], cwd=scratch, check=True, timeout=180)
