@@ -197,5 +197,6 @@ def test_fixture_source_identity_is_explicit_and_other_process_calls_forward(tmp
     assert runtime_build.subprocess.run(query).stdout == ("1" * 40 + "\n").encode()
     assert runtime_build.subprocess.run(["other"], timeout=7) is sentinel
     assert forwarded == [(["other"], (), {"timeout": 7})]
-    with pytest.raises(pytest.fail.Exception, match="unexpected fixture source identity"):
-        runtime_build.subprocess.run(["git", "-C", "/unselected", "rev-parse", "HEAD"])
+    alternate = ["git", "-C", "/unselected", "rev-parse", "HEAD"]
+    assert runtime_build.subprocess.run(alternate, check=False) is sentinel
+    assert forwarded[-1] == (alternate, (), {"check": False})
