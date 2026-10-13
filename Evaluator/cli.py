@@ -751,7 +751,6 @@ def main(
     if not args.no_dashboard and not args.dry_run:
         try:
             from shared.ui import LiveEvaluationDashboard, RICH_AVAILABLE as _SHARED_RICH
-            from .ui import rich_summary, rich_failure_details
             _DASHBOARD_AVAILABLE = True
         except ImportError:
             pass
@@ -1065,7 +1064,8 @@ def main(
         print(f"Markdown summary saved to {markdown_path}")
 
     # Display summary using rich UI if available
-    if _DASHBOARD_AVAILABLE and _SHARED_RICH:
+    from .ui import RICH_AVAILABLE as summary_rich_available, rich_summary, rich_failure_details
+    if summary_rich_available:
         rich_summary(records)
         # Show detailed failure info
         failed_count = sum(1 for r in records if not r.passed)

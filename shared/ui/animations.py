@@ -11,35 +11,11 @@ Public API for terminal animations:
 These animations temporarily take over the terminal, then return control to Rich.
 """
 
-import subprocess
 import sys
 from typing import Optional, Callable, List, Tuple
 
 
-def _ensure_asciimatics_installed():
-    """Auto-install asciimatics if not present."""
-    try:
-        import asciimatics  # noqa: F401  availability probe
-        return True
-    except ImportError:
-        print("Installing asciimatics for terminal animations...")
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "asciimatics", "-q"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            print("asciimatics installed successfully!")
-            return True
-        except subprocess.CalledProcessError:
-            print("Warning: Could not install asciimatics. Animations will be disabled.")
-            return False
-
-
-# Auto-install asciimatics if needed
-_ensure_asciimatics_installed()
-
-# Check for asciimatics availability (after potential install)
+# Optional animation dependencies are detected, never installed at import.
 ASCIIMATICS_AVAILABLE = False
 try:
     from asciimatics.screen import Screen

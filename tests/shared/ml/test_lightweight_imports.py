@@ -94,3 +94,30 @@ def test_remote_worker_policy_without_torch_but_gpu_use_requires_it():
         else:
             raise AssertionError('GPU dependency failure hidden')
     """)
+
+
+def test_no_dashboard_keeps_final_rich_summary_without_install_or_network():
+    pytest.importorskip('rich')
+    result = run_isolated("""
+        import importlib.abc, tempfile, pathlib, socket, subprocess
+        from unittest.mock import patch
+        class BlockAnimation(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname.split('.')[0] == 'asciimatics':
+                    raise ModuleNotFoundError('optional animation absent', name='asciimatics')
+        sys.meta_path.insert(0, BlockAnimation())
+        def forbidden(*args, **kwargs):
+            raise AssertionError('evaluation attempted install or network')
+        subprocess.Popen = forbidden
+        socket.socket.connect = forbidden
+        socket.create_connection = forbidden
+        import Evaluator.cli as cli
+        with tempfile.TemporaryDirectory() as directory:
+            output = str(pathlib.Path(directory) / 'results.json')
+            with patch.object(cli, 'create_client', return_value=object()), patch('shared.experiment_tracking.registry.RunRegistry'), patch('tuner.project.context.find_git_superproject', return_value=None):
+                cli.main(['--backend','llamacpp','--model','model.gguf','--scenario','tool_prompts.yaml',
+                    '--limit','1','--dry-run','--no-dashboard','--output',output])
+        from shared.ui import animations
+        assert animations.ASCIIMATICS_AVAILABLE is False
+    """)
+    assert 'Schema Pass Rate' in result.stdout
