@@ -735,6 +735,57 @@ jobs:
               str(root / "tests/training/test_conversation_input_preparation.py")]))
           PYCODE
 
+      - name: Exercise installed conversation SFT compiler and isolated worker
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -m venv --copies "$RUNNER_TEMP/conversation-sft-venv"
+          "$RUNNER_TEMP/conversation-sft-venv/bin/python" -m pip install "$RUNNER_TEMP"/sdist-wheelhouse/synaptic_tuner-*.whl pytest==8.4.2 datasets==5.1.0
+          "$RUNNER_TEMP/conversation-sft-venv/bin/python" -I -B - <<'PYCODE'
+          import importlib.util
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import datasets
+          assert datasets.__version__ == "5.1.0"
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          prefix = Path(sys.prefix).resolve()
+          assert Path(sys.executable).resolve().is_relative_to(prefix)
+          for name in ("Trainers.sft.runtime_v1", "Trainers.sft.src.data_loader",
+                       "Trainers.sft.src.preprocessing", "shared.sft_preprocessing",
+                       "tuner.runtime.offline_sft_worker", "tuner.runtime.verification",
+                       "tuner.training.methods.sft", "tuner.training.packaged_compilation"):
+              location = Path(importlib.util.find_spec(name).origin).resolve()
+              assert location.is_relative_to(prefix) and not location.is_relative_to(checkout), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-conversation-sft-tests"
+          root.mkdir()
+          helpers = (
+              "training/test_conversation_sft_support.py",
+              "trainers/sft/test_conversation_data_loader.py",
+              "trainers/sft/test_runtime_v1.py",
+              "trainers/_trainer_import.py",
+              "runtime/test_artifact_verification.py",
+              "training/test_sft_compilation.py",
+              "training/test_packaged_execution_material.py",
+              "runtime/test_packaged_runtime_releases.py",
+              "training/test_training_compiler.py",
+          )
+          for relative in helpers:
+              target = root / "tests" / relative
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / "tests" / relative, target)
+          for package in ("tests", "tests/training", "tests/runtime", "tests/trainers", "tests/trainers/sft"):
+              (root / package / "__init__.py").touch()
+          sys.path.insert(0, str(root))
+          os.chdir(root)
+          import pytest
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
+              str(root / "tests/training/test_conversation_sft_support.py"),
+              str(root / "tests/trainers/sft/test_conversation_data_loader.py"),
+              str(root / "tests/trainers/sft/test_runtime_v1.py") + "::test_real_decoder_and_isolated_worker_preserve_exact_closure"]))
+          PYCODE
+
       - name: Exercise installed ordinary HF Jobs host with pinned SDK
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}

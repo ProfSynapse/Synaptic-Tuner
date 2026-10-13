@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import weakref
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
@@ -13,6 +14,7 @@ ExampleFormat = Literal["messages", "prompt_completion", "raw_text"]
 RAW_TEXT_SCHEMA_VERSION = "syntunia-sft-row/v1"
 RAW_TEXT_FORMAT = "raw_text"
 MESSAGES_SCHEMA_VERSION_V2 = "syntunia-sft-row/v2"
+CONVERSATION_SCHEMA_VERSION = "synaptic-conversation-sft-row/v1"
 MESSAGES_FORMAT = "messages"
 
 
@@ -385,6 +387,32 @@ def normalize_sft_messages(record: dict[str, Any]) -> tuple[list[dict[str, Any]]
     return messages, "prompt_completion"
 
 
+def _validate_conversation_record(record: dict[str, Any]) -> None:
+    fields = {"schema_version", "format", "row_id", "source_row_number",
+              "target_message_index", "group_id", "split", "messages"}
+    if type(record) is not dict or set(record) != fields or record.get("format") != MESSAGES_FORMAT:
+        raise ValueError("authoritative conversation SFT row fields are invalid")
+    if (type(record["row_id"]) is not str or re.fullmatch(r"row-[0-9a-f]{64}", record["row_id"]) is None
+            or type(record["source_row_number"]) is not int or not 1 <= record["source_row_number"] <= 100_000
+            or type(record["target_message_index"]) is not int or not 1 <= record["target_message_index"] <= 127
+            or type(record["group_id"]) is not str or not record["group_id"]
+            or len(record["group_id"].encode("utf-8")) > 256
+            or any(ord(char) < 32 for char in record["group_id"])
+            or type(record["split"]) is not str or record["split"] not in {"train", "validation"}):
+        raise ValueError("authoritative conversation SFT identity/split is invalid")
+    messages = record["messages"]
+    if type(messages) is not list or len(messages) != record["target_message_index"] + 1:
+        raise ValueError("authoritative conversation SFT target must end its ordered prefix")
+    for index, message in enumerate(messages):
+        if (type(message) is not dict or set(message) != {"role", "content"}
+                or type(message["role"]) is not str or message["role"] not in {"system", "user", "assistant"}
+                or type(message["content"]) is not str or not message["content"]
+                or message["role"] == "system" and index != 0):
+            raise ValueError("authoritative conversation SFT requires declared text messages")
+    if messages[0]["role"] == "assistant" or messages[-1]["role"] != "assistant":
+        raise ValueError("authoritative conversation SFT requires a prompt and final assistant target")
+
+
 def detect_sft_record_format(record: dict[str, Any]) -> ExampleFormat:
     """Identify the declared SFT row format without treating arbitrary text as authority."""
     schema_version = record.get("schema_version")
@@ -411,6 +439,10 @@ def detect_sft_record_format(record: dict[str, Any]) -> ExampleFormat:
                 "raw_text SFT rows require split='train' or split='validation'."
             )
         return "raw_text"
+
+    if schema_version == CONVERSATION_SCHEMA_VERSION:
+        _validate_conversation_record(record)
+        return "messages"
 
     claims_authoritative_messages = (
         schema_version == MESSAGES_SCHEMA_VERSION_V2
@@ -465,6 +497,9 @@ def is_authoritative_preassigned_sft_record(record: dict[str, Any]) -> bool:
     if schema_version == RAW_TEXT_SCHEMA_VERSION or declared_format == RAW_TEXT_FORMAT:
         detect_sft_record_format(record)
         return True
+    if schema_version == CONVERSATION_SCHEMA_VERSION:
+        detect_sft_record_format(record)
+        return True
     if schema_version == MESSAGES_SCHEMA_VERSION_V2 or declared_format == MESSAGES_FORMAT:
         detect_sft_record_format(record)
         return True
@@ -490,9 +525,13 @@ def materialize_sft_example(
 
     example_format = detect_sft_record_format(record)
     authoritative_messages = (
-        record.get("schema_version") == MESSAGES_SCHEMA_VERSION_V2
+        record.get("schema_version") in {MESSAGES_SCHEMA_VERSION_V2, CONVERSATION_SCHEMA_VERSION}
         and record.get("format") == MESSAGES_FORMAT
     )
+
+    conversation_messages = record.get("schema_version") == CONVERSATION_SCHEMA_VERSION
+    if conversation_messages and (assistant_only_loss is not True or prompt_render != "prompt_completion"):
+        raise ValueError("authoritative conversation SFT requires final-target prompt_completion loss")
 
     if example_format == "raw_text":
         if assistant_only_loss:
@@ -571,9 +610,10 @@ def materialize_sft_example(
                 f"{type(completion_text).__name__}."
             )
         terminal_id = prompt_completion_terminal_id(tokenizer, template_kwargs)
-        completion_ids = (
-            _encoder.encode(completion_text, add_special_tokens=False) + [terminal_id]
-        )
+        target_ids = _encoder.encode(completion_text, add_special_tokens=False)
+        if conversation_messages and not target_ids:
+            raise ValueError("authoritative conversation SFT requires supervised target tokens")
+        completion_ids = target_ids + [terminal_id]
 
         full_ids = prompt_ids + completion_ids
         if authoritative_messages and len(full_ids) > max_seq_length:

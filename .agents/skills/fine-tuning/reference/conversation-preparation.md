@@ -1,9 +1,10 @@
-# Immutable conversation preparation (Stage 1)
+# Immutable conversation preparation and CPU SFT support (Stages 1–2)
 
 The reusable host preparation extension accepts caller-declared text conversation
 rows and publishes `synaptic-conversation-sft-row/v1` with a canonical manifest.
-This is **preparation only**: current compiled SFT loaders and qualified runtime
-releases do not admit this format. Do not relabel it as `syntunia-sft-row/v2`,
+The compiler, offline parser and native verifier support its text-message
+contract in CPU conformance tests. **Qualified runtime releases do not yet admit
+this format**. Do not relabel it as `syntunia-sft-row/v2`,
 change an old release allowlist, or report a preparation test as training evidence.
 
 Use existing `TrainingAPI.prepare` with `TrainingPreparationConfigV1`. Compose
@@ -53,10 +54,29 @@ assumed `.meta.json` suffix.
   when unrelated row IDs, metadata or discarded suffixes differ.
 
 One row selects one target. Multiple preceding assistant turns are context; the
-future SFT integration must mask them and train only the selected final target.
+SFT prompt-completion path masks them and trains only the selected final target.
 This does not provide all-assistant-turn loss or chronological splitting. Group
 truth and semantic relationships remain caller responsibilities; exact hashes
 cannot prove absence of related paraphrases or derivatives.
+
+## Explicit SFT controls and release boundary
+
+The new format requires `dataset_format: messages`, `use_preassigned_splits: true`,
+`split_dataset: false`, `completion_only_loss: true`, `assistant_only_loss: false`,
+`prompt_render: prompt_completion`, `packing: false`, and
+`require_memory_efficient_loss: true`. Optional `chat_template_kwargs` remain
+recipe configuration and retain the admitted template-generation anchor. Rows
+must fit without truncation and produce target tokens. The declared dataset
+schema travels through offline argv and row loading; mixed schemas and new rows
+masquerading as the old v2 format reject.
+
+A CPU parser/native-artifact fixture proves contract behavior, not GPU training,
+model quality, image qualification or provider reliability. Existing release
+allowlists remain unchanged and reject this format. A future additive candidate
+selection needs separate review; do not bypass or edit a historical selection.
+The native prepared-path verifier retains its 2 MiB limit for old v1/v2 and the
+new conversation format; preparation's larger publication bound is not execution
+support.
 
 ## Public Data provenance
 
@@ -82,7 +102,7 @@ structural/depth limits apply; rejection never truncates data.
 
 The current executable preparation adapter rejects publications above **2 MiB**.
 A larger publication can be independently verified within the 64 MiB bound; this
-is not large-input execution support. Runtime format compatibility remains a
+is not large-input execution support. Qualified release/profile format compatibility remains a
 separate gate even below 2 MiB.
 
 The returned public prepared value contains identity/count-independent digest

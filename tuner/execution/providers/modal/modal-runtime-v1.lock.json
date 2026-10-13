@@ -318,11 +318,11 @@
     },
     "bootstrap__tuner__runtime__manifests__offline-sft-worker-v1_json": {
       "path": "tuner/runtime/manifests/offline-sft-worker-v1.json",
-      "sha256": "9fdce5644e9d0f1e1adea4db2422877db46ace3bd361e95e4e6192aca32c27cd"
+      "sha256": "6413dd378c116c86900f8ebfc95447a8564d8dd4c240b0aa9a0abde6f0bd1895"
     },
     "bootstrap__tuner__runtime__offline_sft_worker_py": {
       "path": "tuner/runtime/offline_sft_worker.py",
-      "sha256": "b0889773413f2a7147b22ce29a255dc50a7055ba2a01b5e71b91a094fe462b27"
+      "sha256": "ed495ecba9e5fd7a2fbe7367fb78cc1f7fe66d90801c40d0a8f0fcd6b1f711e9"
     },
     "bootstrap__tuner__training____init___py": {
       "path": "tuner/training/__init__.py",
@@ -342,7 +342,7 @@
     },
     "bootstrap__tuner__training__methods__sft_py": {
       "path": "tuner/training/methods/sft.py",
-      "sha256": "63d775d6b56e31dbe042defd916f4521e17acd3c1bf837e567860f4124344d21"
+      "sha256": "8840c7f4c6434b69644e4e5d778e2587fc5d173b7eaf0b91729e181da68a5bc0"
     },
     "bootstrap__tuner__training__recipes_py": {
       "path": "tuner/training/recipes.py",
@@ -390,7 +390,7 @@
     },
     "sft_runtime": {
       "path": "Trainers/sft/runtime_v1.py",
-      "sha256": "dcef6818a12211846eaf782cb44e4f502c7154619e962cdb86bcbf0df972b12d"
+      "sha256": "f4e3f6a1d36d41d91e7814ea265dfed5db0852ea33d456d913d6edcf467de534"
     }
   },
   "ml_stack": {

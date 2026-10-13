@@ -7,8 +7,8 @@ Dataset requirements for the current CLI-first tool-calling stack.
 ## SFT Dataset Formats
 
 For immutable preparation of generic text conversations, see
-[conversation preparation](conversation-preparation.md). This Stage 1 format is
-not yet admitted by compiled SFT/runtime releases; the v1/v2 formats below retain
+[conversation preparation](conversation-preparation.md). Its CPU-tested compiler/runtime
+contract is not yet admitted by qualified runtime releases; the v1/v2 formats below retain
 their existing semantics.
 
 ### Verified raw text

@@ -77,6 +77,7 @@ _VALUE_FLAGS = frozenset(
         "--runtime-v1-dataset-schema",
         "--runtime-v1-dataset-format",
         "--aux-head-prompt-render",
+        "--chat-template-kwargs",
         "--batch-size",
         "--gradient-accumulation",
         "--learning-rate",
@@ -620,6 +621,42 @@ def verify_loaded_owned_module_origins(
             raise OfflineSFTWorkerError("loaded owned module has no stable origin") from exc
 
 
+def _validate_chat_template_argument(raw: str) -> None:
+    # Offline bootstrap cannot import host API modules outside its fixed closure.
+    try:
+        if not 0 < len(raw.encode("utf-8")) <= 4096:
+            raise ValueError
+        value = json.loads(raw, object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
+        if type(value) is not dict or not value or set(value) & {
+            "messages", "tokenize", "add_generation_prompt", "return_dict",
+            "return_tensors", "continue_final_message", "chat_template",
+        }:
+            raise ValueError
+        nodes = 0
+        def check(item: object, depth: int) -> None:
+            nonlocal nodes
+            nodes += 1
+            if depth > 4 or nodes > 64:
+                raise ValueError
+            if type(item) is dict:
+                for key, child in item.items():
+                    if type(key) is not str or not 0 < len(key.encode("utf-8")) <= 128:
+                        raise ValueError
+                    check(child, depth + 1)
+            elif type(item) is list:
+                for child in item:
+                    check(child, depth + 1)
+            elif type(item) is str:
+                if len(item.encode("utf-8")) > 1024:
+                    raise ValueError
+            elif type(item) not in (int, float, bool, type(None)):
+                raise ValueError
+        check(value, 0)
+        _canonical_json(value)  # Reject float overflows as well as explicit constants.
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        raise OfflineSFTWorkerError("offline SFT chat template kwargs are invalid") from None
+
+
 def _validate_trainer_arguments(arguments: Sequence[str]) -> None:
     if not arguments:
         raise OfflineSFTWorkerError("offline SFT trainer arguments are empty")
@@ -642,6 +679,10 @@ def _validate_trainer_arguments(arguments: Sequence[str]) -> None:
             index += 2
             continue
         raise OfflineSFTWorkerError("offline SFT trainer feature is unavailable")
+    if "--chat-template-kwargs" in values:
+        if values.get("--runtime-v1-dataset-format") == "raw_text":
+            raise OfflineSFTWorkerError("offline SFT raw text cannot use chat template kwargs")
+        _validate_chat_template_argument(values["--chat-template-kwargs"])
     if ("--max-steps" in seen) == ("--num-epochs" in seen):
         raise OfflineSFTWorkerError("offline SFT trainer duration is ambiguous")
     if ("--load-in-4bit" in seen) == ("--no-load-in-4bit" in seen):
@@ -663,7 +704,7 @@ def _validate_trainer_arguments(arguments: Sequence[str]) -> None:
             expected = _RAW_TEXT_FLAGS
             label = "raw-text"
         elif (
-            schema == "syntunia-sft-row/v2"
+            schema in {"syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"}
             or dataset_format == "messages"
             or (
                 schema is None
@@ -703,7 +744,7 @@ def _validate_trainer_arguments(arguments: Sequence[str]) -> None:
                 "offline SFT raw-text trainer arguments are invalid"
             )
         if label == "message" and (
-            schema != "syntunia-sft-row/v2"
+            schema not in {"syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"}
             or dataset_format != "messages"
             or values.get("--aux-head-prompt-render") != "prompt_completion"
         ):

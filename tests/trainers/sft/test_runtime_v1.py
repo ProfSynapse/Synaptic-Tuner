@@ -41,7 +41,7 @@ from tuner.runtime.verification import (
 )
 
 
-_REPO = Path(__file__).parents[3]
+_REPO = Path(runtime_v1.__file__).resolve().parents[2]
 _OWNED_PREFIXES = frozenset(
     {"tuner", "synaptic_tuner", "Trainers", "shared", "SynthChat", "Evaluator", "MechInterp", "configs", "src"}
 )

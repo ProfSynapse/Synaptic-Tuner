@@ -25,7 +25,7 @@ _REVISION = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _PREPARED_REF = re.compile(r"^prepared://sha256/([0-9a-f]{64})$")
 _PREPARED_DATASET_FORMATS = frozenset(
-    {"syntunia-sft-row/v1", "syntunia-sft-row/v2"}
+    {"syntunia-sft-row/v1", "syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"}
 )
 _UNSLOTH_INIT_LORA_WEIGHTS = frozenset({"gaussian", "loftq", "corda"})
 
@@ -141,6 +141,8 @@ def _validate_dataset_identity(dataset: dict[str, object]) -> None:
     size = dataset["size_bytes"]
     if type(size) is not int or size <= 0:
         raise ValueError("prepared dataset size_bytes must be an exact positive integer")
+    if dataset["format"] == "synaptic-conversation-sft-row/v1" and size > 2 * 1024 * 1024:
+        raise ValueError("conversation SFT input exceeds the 2MiB executable limit")
 
 
 def compile_sft_workload(
@@ -170,6 +172,14 @@ def compile_sft_workload(
     method_config = config.get("sft")
     if not isinstance(method_config, Mapping):
         raise TypeError("sft must be a mapping")
+    if dataset.get("format") == "synaptic-conversation-sft-row/v1":
+        required = {"dataset_format": "messages", "completion_only_loss": True,
+                    "assistant_only_loss": False, "use_preassigned_splits": True,
+                    "split_dataset": False, "prompt_render": "prompt_completion",
+                    "packing": False, "require_memory_efficient_loss": True}
+        if any(type(method_config.get(key)) is not type(value) or method_config[key] != value
+               for key, value in required.items()):
+            raise ValueError("conversation SFT requires explicit final-target/preassigned controls")
     if "init_lora_weights" in method_config:
         _validate_init_lora_weights(method_config["init_lora_weights"])
     config_bytes = resolved_config.canonical_json.encode("utf-8")

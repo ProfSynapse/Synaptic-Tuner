@@ -506,7 +506,7 @@ def _expected_dataset_path(
             "ref", "revision", "content_digest", "size_bytes", "format",
         }
         or dataset.get("revision") != match.group(1)
-        or dataset.get("format") != "syntunia-sft-row/v1"
+        or dataset.get("format") not in {"syntunia-sft-row/v1", "syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"}
         or not isinstance(digest, str)
         or re.fullmatch(r"[0-9a-f]{64}", digest) is None
         or type(size) is not int
@@ -777,7 +777,7 @@ def _expected_trainer_argv(
     present_prepared_keys = message_sft_keys & set(sft)
     dataset_claims_raw = config["dataset"].get("format") == "syntunia-sft-row/v1"
     dataset_claims_messages = (
-        config["dataset"].get("format") == "syntunia-sft-row/v2"
+        config["dataset"].get("format") in {"syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"}
     )
     if dataset_claims_raw:
         if (
@@ -826,7 +826,7 @@ def _expected_trainer_argv(
                 "prompt_completion",
                 "--require-memory-efficient-loss",
                 "--runtime-v1-dataset-schema",
-                "syntunia-sft-row/v2",
+                config["dataset"]["format"],
                 "--runtime-v1-dataset-format",
                 "messages",
             )
