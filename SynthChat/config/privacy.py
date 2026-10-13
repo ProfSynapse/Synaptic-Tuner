@@ -77,19 +77,23 @@ def get_default_privacy_settings() -> Dict[str, Any]:
     return deepcopy(_DEFAULT_PRIVACY_SETTINGS)
 
 
-def load_privacy_profiles(config_path: Optional[str | Path] = None) -> Dict[str, Any]:
-    """Load named privacy preprocess profiles."""
-    path = Path(config_path) if config_path else _CONFIG_DIR / "privacy_profiles.yaml"
-    if path.is_file():
-        data = load_yaml(path)
-        if isinstance(data, dict) and isinstance(data.get("profiles"), dict):
-            return {
-                "profiles": {
-                    **deepcopy(_DEFAULT_PRIVACY_PROFILES["profiles"]),
-                    **deepcopy(data["profiles"]),
-                }
-            }
+def parse_privacy_profiles(data, *, require_complete=False):
+    """Normalize declared profiles without selecting a filesystem source."""
+    if isinstance(data, dict) and isinstance(data.get("profiles"), dict):
+        if require_complete:
+            if not data["profiles"] or any(type(value) is not dict for value in data["profiles"].values()):
+                raise ValueError("Snapshot privacy profiles require named definitions")
+            return deepcopy(data)
+        return {"profiles": {**deepcopy(_DEFAULT_PRIVACY_PROFILES["profiles"]), **deepcopy(data["profiles"])}}
+    if require_complete:
+        raise ValueError("Snapshot privacy registry is missing profiles")
     return deepcopy(_DEFAULT_PRIVACY_PROFILES)
+
+
+def load_privacy_profiles(config_path: Optional[str | Path] = None) -> Dict[str, Any]:
+    """Load path-mode profiles with the existing built-in merge/fallback."""
+    path = Path(config_path) if config_path else _CONFIG_DIR / "privacy_profiles.yaml"
+    return parse_privacy_profiles(load_yaml(path) if path.is_file() else None)
 
 
 def resolve_privacy_settings(settings: Dict[str, Any], overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

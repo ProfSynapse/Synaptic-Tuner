@@ -4,6 +4,7 @@ Single Responsibility: Coordinate rubric loading and provide query interface.
 """
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -58,7 +59,26 @@ class RubricRepository:
 
         # Metadata store (populated on init)
         self._metadata: Dict[str, RubricMetadata] = {}
+        self._documents = None
         self._discover_rubrics()
+
+    @classmethod
+    def from_documents(cls, documents, logger=None):
+        """Admitted selected rubrics without discovery, reopening or shared cache."""
+        result = cls.__new__(cls)
+        result.rubrics_dir = None
+        result.skip_files = set()
+        result.logger = logger or logging.getLogger(__name__)
+        result.loader = None
+        result.cache = RubricCache(max_size=100)
+        result._documents = {key: RubricLoader.parse_document(value, key, require_complete=True)
+                             for key, value in documents.items()}
+        result._metadata = {}
+        for key, data in result._documents.items():
+            result._metadata[key] = RubricMetadata(key=key, name=data.get("name", key),
+                description=data.get("description", ""), filename=key + ".yaml",
+                scope=data.get("scope", "response"), pass_threshold=data.get("pass_threshold", .8))
+        return result
 
     def get_rubric(self, key: str) -> Dict:
         """
@@ -78,6 +98,9 @@ class RubricRepository:
             raise ValueError(
                 f"Rubric '{key}' not found. Available: {self.list_keys()}"
             )
+
+        if self._documents is not None:
+            return deepcopy(self._documents[key])
 
         # Try cache first
         cached = self.cache.get(key)
@@ -155,6 +178,8 @@ class RubricRepository:
 
         Useful if rubric files have been modified.
         """
+        if self._documents is not None:
+            raise ValueError("Snapshot rubric repository cannot reload from a path")
         self.cache.clear()
         self._metadata.clear()
         self._discover_rubrics()

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from pathlib import Path
 
+from .input_snapshot import WorkflowInputSnapshot
 from .config import ConfigLoader
 from .services.data import RubricRepository
 from .services.parsing import ConversationParser, ScopeExtractor
@@ -102,6 +103,8 @@ class ImprovementEngine:
     All actual work delegated to focused services.
     """
 
+    input_snapshot: Optional[WorkflowInputSnapshot] = None
+
     def __init__(
         self,
         llm_client,  # From shared.llm
@@ -109,7 +112,9 @@ class ImprovementEngine:
         config_path: Optional[Path] = None,
         logger: Optional[ImproveLogger] = None,
         interaction_logger: Optional[InteractionLogger] = None,
-        enable_interactions: bool = True
+        enable_interactions: bool = True,
+        *,
+        input_snapshot: Optional[WorkflowInputSnapshot] = None,
     ):
         """
         Initialize improvement engine.
@@ -121,13 +126,21 @@ class ImprovementEngine:
             logger: Logger instance
             interaction_logger: Interaction logger (optional, will create if None)
             enable_interactions: Whether to enable interaction logging (default: True)
+            input_snapshot: Optional admitted inputs. Snapshot mode has no implicit
+                path logging; an explicit interaction_logger remains host-owned.
+                Same injected-client retries remain, provider switching is unsupported.
         """
+        if input_snapshot is not None and type(input_snapshot) is not WorkflowInputSnapshot:
+            raise TypeError("input_snapshot must be an exact WorkflowInputSnapshot")
+        if input_snapshot is not None:
+            input_snapshot.validate_improvement()
+        self.input_snapshot = input_snapshot
         self.logger = logger or ImproveLogger()
 
         # Initialize interaction logger
         if interaction_logger is not None:
             self.interaction_logger = interaction_logger
-        elif enable_interactions:
+        elif enable_interactions and input_snapshot is None:
             interactions_dir = Path(rubrics_dir).parent / "interactions"
             self.interaction_logger = InteractionLogger(
                 output_dir=interactions_dir,
@@ -142,15 +155,21 @@ class ImprovementEngine:
             )
 
         # Load configuration
-        config_loader = ConfigLoader(config_path)
+        config_loader = (ConfigLoader(config_path) if input_snapshot is None else
+                         ConfigLoader.from_mapping(input_snapshot.document("validation", "config:validation")))
         self.scope_config = config_loader.load()
 
         # Initialize data layer
-        self.rubric_repo = RubricRepository(
-            rubrics_dir=rubrics_dir,
-            skip_files=["quality_labels.yaml"],
-            logger=self.logger
-        )
+        if input_snapshot is None:
+            self.rubric_repo = RubricRepository(
+                rubrics_dir=rubrics_dir,
+                skip_files=["quality_labels.yaml"],
+                logger=self.logger
+            )
+        else:
+            self.rubric_repo = RubricRepository.from_documents(
+                input_snapshot.role_documents("rubric"), logger=self.logger)
+
 
         # Initialize parsing layer
         self.conversation_parser = ConversationParser()
@@ -220,6 +239,8 @@ class ImprovementEngine:
         Returns:
             ImprovementResult with final example and metrics
         """
+        if self.input_snapshot is not None:
+            self.input_snapshot.validate_improvement(tuple(rubric_keys))
         # Load all rubrics and group by scope
         all_rubrics = [self.rubric_repo.get_rubric(key) for key in rubric_keys]
         by_scope = self._group_rubrics_by_scope(all_rubrics)
@@ -437,7 +458,7 @@ class ImprovementEngine:
         # Build provider attempt order: current provider first, then fallbacks
         current_provider = self.llm_client.provider_name
         providers_to_try = [current_provider]
-        for fb in FALLBACK_PROVIDERS:
+        for fb in ([] if self.input_snapshot is not None else FALLBACK_PROVIDERS):
             if fb != current_provider and fb not in providers_to_try:
                 providers_to_try.append(fb)
 
@@ -480,6 +501,8 @@ class ImprovementEngine:
         Returns:
             True if the switch succeeded, False if the provider is unavailable
         """
+        if self.input_snapshot is not None:
+            raise ValueError("Provider switching is unsupported with input snapshots")
         from shared.llm import create_client
 
         self.logger.warning(

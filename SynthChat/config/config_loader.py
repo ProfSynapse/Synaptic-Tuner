@@ -5,6 +5,7 @@ This eliminates all hardcoding from the codebase.
 """
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional
 import re
@@ -159,7 +160,26 @@ class ConfigLoader:
             return self._config
 
         data = load_yaml(self.config_path)
+        return self._parse(data)
 
+    @classmethod
+    def from_mapping(cls, data):
+        """Parse admitted data using the same normalization without file I/O."""
+        if type(data) is not dict or not data:
+            raise ValueError("Scope configuration must be a nonempty object")
+        scopes, order = data.get("scopes"), data.get("scope_processing_order")
+        if (type(scopes) is not dict or not scopes or any(type(name) is not str for name in scopes)
+                or any(type(value) is not dict for value in scopes.values())
+                or type(order) is not list or not order or any(type(name) is not str for name in order)
+                or len(set(order)) != len(order) or any(name not in scopes for name in order)):
+            raise ValueError("Snapshot validation requires declared scopes and processing order")
+        result = cls.__new__(cls)
+        result.config_path = None
+        result._config = None
+        result._parse(deepcopy(data))
+        return result
+
+    def _parse(self, data):
         # Parse scopes
         scopes = {}
         for scope_name, scope_data in data.get("scopes", {}).items():
@@ -245,5 +265,7 @@ class ConfigLoader:
 
     def reload(self) -> ScopeConfig:
         """Reload configuration from disk."""
+        if self.config_path is None:
+            raise ValueError("Snapshot scope configuration cannot reload from a path")
         self._config = None
         return self.load()
