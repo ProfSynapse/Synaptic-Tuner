@@ -125,6 +125,7 @@ from synaptic_tuner.api.v1.ports import (
     StoredRecordV1,
 )
 from synaptic_tuner.api.v1.results import VerifiedArtifact
+from synaptic_tuner.api.v1.environment_execution import EnvironmentExecutionPort, ENVIRONMENT_DATA_PLAN_SCHEMA
 from synaptic_tuner.api.v1.training_facade import AuthorizationRequirement
 from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest, parse_canonical_object, safe_ref
 from tuner.execution.redaction import redact
@@ -184,6 +185,7 @@ class ReferenceDataPortsV1:
     scenarios_dir: Path
     rubrics_dir: Path
     llm_clients: LLMClientFactoryPort
+    environments: EnvironmentExecutionPort | None = None
 
     def __post_init__(self) -> None:
         for name in ("config_dir", "scenarios_dir", "rubrics_dir"):
@@ -453,21 +455,41 @@ class ReferenceDataOperationsV1:
     def plan(self, request: DataRequest) -> DataPlan:
         if type(request) is not DataRequest:
             raise TypeError("request must be exact DataRequest")
-        scenarios, rows, digest = self._resolve(request)
-        return DataPlan(DATA_PLAN_SCHEMA_VERSION, request, scenarios, rows, digest)
+        from .environment import admit_environment
+        if request.environment_selection is None:
+            scenarios, rows, digest = self._resolve(request)
+        admitted = admit_environment(request, self._ports)
+        if admitted is None:
+            binding = None
+        else:
+            scenarios, rows, digest, binding = admitted
+            _absolute_path(request.output_ref)
+        schema = ENVIRONMENT_DATA_PLAN_SCHEMA if binding is not None else DATA_PLAN_SCHEMA_VERSION
+        return DataPlan(schema, request, scenarios, rows, digest, binding)
 
     def _verify_plan(self, plan: DataPlan) -> None:
         if type(plan) is not DataPlan:
             raise TypeError("plan must be exact DataPlan")
-        scenarios, rows, digest = self._resolve(plan.request)
+        from .environment import admit_environment
+        if plan.request.environment_selection is None:
+            scenarios, rows, digest = self._resolve(plan.request)
+        admitted = admit_environment(plan.request, self._ports)
+        if admitted is None:
+            binding = None
+        else:
+            scenarios, rows, digest, binding = admitted
         if (scenarios, rows, digest) != (plan.scenarios, plan.rows_requested, plan.source_digest):
             raise _closed(DataOperationCode.MANIFEST_INVALID)
+        if binding != plan.environment_binding:
+            raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
 
     def preflight(self, plan: DataPlan) -> DataPreflight:
         self._verify_plan(plan)
         checked_at = self._clock.now()
         expires_at = _plus_seconds(checked_at, DATA_PREFLIGHT_SECONDS)
         codes: list[str] = []
+        if plan.environment_binding is not None:
+            codes.append(DataOperationCode.ENVIRONMENT_UNAVAILABLE.value)
         backend = plan.request.backend
         try:
             _check_backend(self._ports.llm_clients, backend)
@@ -676,6 +698,8 @@ class ReferenceDataOperationsV1:
 
     def start(self, plan: DataPlan) -> DataStart:
         self._verify_plan(plan)
+        if plan.environment_binding is not None:
+            raise _closed(DataOperationCode.ENVIRONMENT_UNAVAILABLE)
         scope = _check_backend(self._ports.llm_clients, plan.request.backend)
         existing = self._existing_run(plan)
         if existing is not None:

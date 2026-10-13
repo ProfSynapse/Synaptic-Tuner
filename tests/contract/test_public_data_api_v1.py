@@ -193,6 +193,7 @@ def test_closed_vocabularies_match_the_architecture() -> None:
         "run_missing", "cursor_invalid", "scenario_invalid", "manifest_invalid", "backend_unavailable",
         "backend_unmetered", "spend_indeterminate", "output_conflict", "cancel_ineligible",
         "dataset_missing", "state_conflict", "integrity_error",
+        "environment_required", "environment_invalid", "environment_unavailable",
     )
     assert tuple(item.value for item in DataMode) == ("generate", "improve")
     assert set(RESULT_SCHEMA["properties"]["state"]["enum"]) == {item.value for item in DataRunState}

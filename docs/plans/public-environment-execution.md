@@ -78,6 +78,27 @@ execution acceptance gate. Credentials and absolute scratch paths are absent
 from public selection/binding documents. Launch authorization, generic port
 conformance and observed backend execution are separate evidence.
 
+The C1 admission contract adds the optional scenario declaration
+`environment_execution: disabled|required`. `disabled` explicitly selects
+generation of environment data without executing it; the existing
+`environment: {enabled: false}` declaration is also explicit nonexecution.
+`required` needs an environment selection, and a simulate selection cannot
+satisfy that execution requirement. Unknown values, explicit null and nonstring
+values reject. Without either nonexecuting declaration, a scenario that requests
+environment data needs an explicit selection. Scenarios without environment data
+and requests without a selection retain the legacy request and plan documents.
+There is no existing closed scenario-document JSON schema; C1 validates this
+declaration during public reference admission. The opt-in closed dataset-plan v2
+schema represents the selection and resolved environment binding.
+
+C1 rejects external JSON Schema references and the legacy
+`system: {template: <file>}` indirection rather than opening an unbound template.
+It checks catalog ambiguity but commits only selected file bytes. Execution of
+immutable admitted snapshots and validation of the effective fixture merge are
+C2 requirements: nested fixture schema validity is not permission to override
+host policy. Both execute and simulate starts remain unavailable, and their
+preflight remains not ready, until a qualified adapter is connected.
+
 ## Session custody, usage and lifecycle
 
 Open each episode with exact run, row, attempt, input and binding identities,
