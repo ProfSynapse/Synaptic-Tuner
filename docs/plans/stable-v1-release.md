@@ -166,8 +166,9 @@ exact retained run. It reconstructs the existing public read ports and authentic
 workflow; it does not prepare, stage or submit another job. Provider-free CLI
 integration removes the original local recipe/configuration/dataset, reopens
 stores and performs actual public verification/download against the same fake
-provider. These are fresh-object and reopened-store checks within a process;
-they do not qualify an actual service restart or a live provider.
+provider. These initial CLI checks use fresh objects and reopened stores within
+a process; the separate process-loss test below extends that evidence without
+qualifying a live provider.
 A fresh source-archive-built wheel passed the base neutral consumer, nine asset
 checks and 81 installed retention/readback/storage/CLI cases. All nine changed
 production modules matched the tested wheel byte-for-byte; the pinned launcher
@@ -193,6 +194,28 @@ supported. Already verified runs support show/download;
 re-verification, logs, cancellation, reconciliation and in-flight continuation
 remain unavailable. Historical runs without retained signing keys cannot be
 recovered. See the [operational commands](../../.skills/fine-tuning/reference/modal-jobs.md#read-a-retained-run).
+
+### Known-call process-loss qualification
+
+A POSIX provider-free test kills the submitting host with `SIGKILL` after its
+exact call has been retained, while the original connections and runner stack
+are still alive. A fresh isolated process makes the first database open after
+the kill and observes pending without changing the stored records or history.
+After the scripted provider completes, another fresh process authenticates the
+original-key HMAC completion, verifies and downloads all five artifact hashes.
+A final process reads the persisted verified outcome without polling or reading
+provider artifacts. Original source/preparation files are removed, and database
+recovery files remain intact throughout the test.
+
+The installed retention suite passed all 88 cases. After integrating the current
+main branch, the fresh source-archive-built wheel also passed the restart proof
+and evaluator comparison regressions (38 cases). Production imports were checked
+against the isolated installation; the subprocess proof uses that same wheel.
+
+This establishes host reconstruction at the retained known-call boundary against
+an explicit disk-backed SDK fixture. It does not establish live Modal behavior,
+uncertain-submission recovery, cancellation, cross-machine transfer or recovery
+at every possible crash boundary.
 
 ### Installed base compatibility evidence
 
@@ -295,6 +318,10 @@ all supported providers using only declared assets/dependencies.
   inputs before training starts. Partial retention prevents stage/submit;
   typed reconstruction and known-call standalone readback are implemented. Live
   recovery and uncertain-submission reconciliation remain open.
+- [x] Kill a standalone host after it retains an exact Modal call, then use fresh
+  processes to observe pending, verify/download signed fixture artifacts and
+  read the persisted verified outcome. The provider remains a scripted SDK
+  fixture; live recovery and other interruption boundaries remain open.
 - [ ] Compose the existing generic persistence/authority ports into a supported
   durable host boundary. The host owns credentials, configuration, grants,
   coordinator/Foundation records, prepared-input catalogs and product state.
@@ -342,6 +369,27 @@ qualification remain separate.
 All 44 focused artifact cases passed from a fresh source-archive-built wheel,
 including the authenticated reader chains. The neutral base consumer passed,
 and the installed artifact and transport modules matched the reviewed source.
+
+The packaged Modal cancellation machinery now supports an explicit host opt-in
+for a current cancellation grant after the original start grant expires. It
+authenticates the recorded cancellation intent, original successful submit,
+retained binding and exact call before consuming the existing attempt claim.
+The original commitment and staging/submission expiry remain unchanged.
+
+Scripted public-API tests cover repeated requests, lost replies, a late
+acknowledgment after a bounded wait, reopened workflow/journal state and a race
+with successful completion. Actual Modal 1.5.4 SDK controls verify hydration,
+client/call identity and cancellation acknowledgment without network requests.
+An acknowledgment produces `cancel_requested`, not proof of stopped compute;
+uncertain results retain the consumed claim and never repeat the provider call.
+Ordinary Modal cancel/reconcile capabilities remain disabled, including the
+retained reader and CLI. Live terminal evidence and full restart composition
+are separate acceptance gates.
+
+The fresh source-archive-built wheel passed the neutral base consumer and all
+102 installed retention/readback/cancellation tests. Its five changed production
+modules matched the reviewed source bytes. Both actual pinned-SDK controls also
+passed; the packaged runtime inventories and pins remain unchanged.
 
 - [ ] Fault-inject before/after claim, provider submission, call-ID retention,
   terminal observation and artifact acknowledgment; kill/restart the host at
