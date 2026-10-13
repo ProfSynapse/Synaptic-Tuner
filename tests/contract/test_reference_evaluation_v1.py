@@ -276,7 +276,7 @@ def _write_config(root: Path) -> Path:
     return root / "config"
 
 
-def _host(tmp_path: Path, *, backends, records=None, streams=None, judge=None, sink_root=None):
+def _host(tmp_path: Path, *, backends, records=None, streams=None, judge=None, sink_root=None, artifact_reader=None):
     """Compose a reference host with the evaluation family over the fake provider family."""
     records = records if records is not None else InMemoryDurableRecordStoreV1()
     streams = streams if streams is not None else InMemoryDurableStreamStoreV1()
@@ -362,7 +362,7 @@ def _host(tmp_path: Path, *, backends, records=None, streams=None, judge=None, s
     if backends is not None:
         evaluation = ReferenceEvaluationPortsV1(
             config_root, EvaluationBackendRegistryV1(backends),
-            DirectoryEvaluationArtifactSinkV1(sink_root), judge,
+            DirectoryEvaluationArtifactSinkV1(sink_root), judge, artifact_reader,
         )
     composition = compose_reference_host(
         family=family, ports=ports,
@@ -801,3 +801,88 @@ def test_second_backend_projection_failure_retains_actual_scored_results(tmp_pat
     assert payload["metadata"]["scenario_digest"] == plan.scenario_digest
     assert payload["metadata"]["comparison_basis"]["reasons"] == ["comparison_recheck_unavailable"]
     assert "private projection failure" not in json.dumps(payload)
+
+
+def test_public_compare_reads_two_bound_reports_without_backend_or_grant_effects(tmp_path):
+    from dataclasses import replace
+    sink = DirectoryEvaluationArtifactSinkV1(tmp_path / "sink")
+    backend = ComparisonScriptedBackend()
+    _, api, grants, records, streams, _ = _host(tmp_path, backends={"local": backend}, artifact_reader=sink)
+    requests = [replace(_request("alpha.yaml"), model=EvaluationModelRef("fixture-" + name, "revision"))
+                for name in ("one", "two")]
+    runs = [api.evaluation.start(api.evaluation.plan(request)).run for request in requests]
+    before = (len(backend.chats), len(grants.authorized), len(grants.bound))
+    backend.open = lambda *args: pytest.fail("comparison opens backend")
+    backend.requirement = lambda *args: pytest.fail("comparison asks for effect")
+    result = api.evaluation.compare(*(EvaluationResultRequest(run) for run in runs))
+    assert result["passed"] and result["reference_run"] == runs[0].to_dict()
+    assert result["candidate_run"] == runs[1].to_dict()
+    assert before == (len(backend.chats), len(grants.authorized), len(grants.bound))
+
+
+def test_public_compare_without_host_reader_is_closed_unavailable(tmp_path):
+    _, api, _, _, _, _ = _host(tmp_path, backends={"local": ComparisonScriptedBackend()})
+    _, _, started = _run(api)
+    with pytest.raises(EvaluationOperationError) as caught:
+        api.evaluation.compare(EvaluationResultRequest(started.run), EvaluationResultRequest(started.run))
+    assert caught.value.code is EvaluationOperationCode.RESULT_UNAVAILABLE
+
+
+def test_public_compare_refuses_hash_tamper_before_parsing(tmp_path):
+    sink = DirectoryEvaluationArtifactSinkV1(tmp_path / "sink")
+    _, api, _, _, _, _ = _host(tmp_path, backends={"local": ComparisonScriptedBackend()}, artifact_reader=sink)
+    _, _, started = _run(api)
+    path = sink.root / started.run.run_id / (EVALUATION_RESULTS_ROLE + ".json")
+    path.write_bytes(path.read_bytes() + b" ")
+    with pytest.raises(EvaluationOperationError) as caught:
+        api.evaluation.compare(EvaluationResultRequest(started.run), EvaluationResultRequest(started.run))
+    assert caught.value.code is EvaluationOperationCode.INTEGRITY_ERROR
+
+
+def test_actual_sqlite_cold_comparison_needs_no_current_scenarios_or_backend(tmp_path):
+    import shutil
+    from dataclasses import replace
+    from synaptic_tuner.api.v1.evaluation_facade import EvaluationAPI
+    from synaptic_tuner.api.v1.reference.sqlite_store import SQLiteDurableStoreV1
+    from synaptic_tuner.api.v1.reference.evaluation import ReferenceEvaluationOperationsV1
+    sink = DirectoryEvaluationArtifactSinkV1(tmp_path / "sink")
+    backend = ComparisonScriptedBackend()
+    store = SQLiteDurableStoreV1(tmp_path / "workflow.sqlite3")
+    _, api, grants, _, _, _ = _host(tmp_path, backends={"local": backend}, records=store, streams=store, artifact_reader=sink)
+    requests = [replace(_request("alpha.yaml"), model=EvaluationModelRef("fixture-" + name, "revision")) for name in ("one", "two")]
+    runs = [api.evaluation.start(api.evaluation.plan(request)).run for request in requests]
+    counts = (len(backend.chats), len(grants.authorized), len(grants.bound))
+    store.close()
+    shutil.rmtree(tmp_path / "config")
+    class NoBackends:
+        def resolve(self, name):
+            pytest.fail("cold comparison resolves backend")
+    with SQLiteDurableStoreV1(tmp_path / "workflow.sqlite3") as cold:
+        ports = ReferenceEvaluationPortsV1(tmp_path / "config", NoBackends(), sink, artifact_reader=sink)
+        operations = ReferenceEvaluationOperationsV1(records=cold, streams=cold, clock=Clock(), ports=ports)
+        report = EvaluationAPI(operations).compare(*(EvaluationResultRequest(run) for run in runs))
+        assert report["passed"] is True
+    assert counts == (len(backend.chats), len(grants.authorized), len(grants.bound))
+    assert not (tmp_path / "config").exists()
+
+
+@pytest.mark.parametrize("substitution", ["run", "role", "type"])
+def test_bound_reader_rejects_substituted_artifact_before_comparison(tmp_path, substitution):
+    sink = DirectoryEvaluationArtifactSinkV1(tmp_path / "sink")
+    class Reader:
+        def read(self, run_id, role, maximum_bytes):
+            assert role == EVALUATION_RESULTS_ROLE
+            if substitution == "type":
+                return "not bytes"
+            source_run = other_run.run_id if substitution == "run" else run_id
+            source_role = EVALUATION_TRACE_ROLE if substitution == "role" else role
+            return sink.read(source_run, source_role, EVALUATION_ARTIFACT_MAXIMUM_BYTES)
+    from synaptic_tuner.api.v1.reference.evaluation import EVALUATION_ARTIFACT_MAXIMUM_BYTES
+    from dataclasses import replace
+    _, api, _, _, _, _ = _host(tmp_path, backends={"local": ComparisonScriptedBackend()}, artifact_reader=Reader())
+    _, _, started = _run(api)
+    other = replace(_request("alpha.yaml"), request_id="other")
+    other_run = api.evaluation.start(api.evaluation.plan(other)).run
+    with pytest.raises(EvaluationOperationError) as caught:
+        api.evaluation.compare(EvaluationResultRequest(started.run), EvaluationResultRequest(started.run))
+    assert caught.value.code is EvaluationOperationCode.INTEGRITY_ERROR

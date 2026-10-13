@@ -218,6 +218,8 @@ def from_payload(payload: Mapping[str, Any], *, label: str) -> ResultsFile:
                 or record.get("error") is not None and type(record["error"]) not in (str, bool)
                 or record.get("judge") is not None and type(record["judge"]) is not dict):
             raise CompareInputError("invalid evaluation record projection")
+        if len(record.get("tags", [])) != len(set(record.get("tags", []))):
+            raise CompareInputError("duplicate evaluation tags")
         status = record.get("status")
         if status is not None and record["passed"] != (status in {"pass", "warn"}):
             raise CompareInputError("contradictory evaluation record status")

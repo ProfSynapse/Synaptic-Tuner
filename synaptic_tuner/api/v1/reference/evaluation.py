@@ -239,6 +239,15 @@ class EvaluationArtifactSinkPort(Protocol):
     def open(self, run_id: str, role: str, maximum_bytes: int): ...
 
 
+class EvaluationArtifactReaderPort(Protocol):
+    """Optional host-selected report source; exact bytes under the supplied cap.
+
+    The reference verifies these bytes against the stored run's role, size and
+    digest before parsing. Reads must not create destinations or execute models.
+    """
+    def read(self, run_id: str, role: str, maximum_bytes: int) -> bytes: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ReferenceEvaluationPortsV1:
     """What a host injects to compose the evaluation family."""
@@ -247,6 +256,7 @@ class ReferenceEvaluationPortsV1:
     backends: EvaluationBackendRegistryPort
     artifacts: EvaluationArtifactSinkPort
     judge: EvaluationJudgePort | None = None
+    artifact_reader: EvaluationArtifactReaderPort | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.config_root, Path):
@@ -255,6 +265,8 @@ class ReferenceEvaluationPortsV1:
         require_methods(self.artifacts, "open")
         if self.judge is not None:
             require_methods(self.judge, "requirement", "open")
+        if self.artifact_reader is not None:
+            require_methods(self.artifact_reader, "read")
 
 
 # --- reference port implementations ------------------------------------------------
@@ -554,6 +566,15 @@ class DirectoryEvaluationArtifactSinkV1:
         directory = self._root / run_id
         directory.mkdir(parents=True, exist_ok=True)
         return _FileSink(directory / f"{role}.json", maximum_bytes)
+
+    def read(self, run_id: str, role: str, maximum_bytes: int) -> bytes:
+        """Optional host-selected bounded read; never create an output directory."""
+        if (type(run_id) is not str or _SINK_ID_RE.fullmatch(run_id) is None
+                or type(role) is not str or _SINK_ID_RE.fullmatch(role) is None
+                or type(maximum_bytes) is not int or not 0 < maximum_bytes <= EVALUATION_ARTIFACT_MAXIMUM_BYTES):
+            raise ValueError("invalid evaluation artifact read")
+        from tuner.runtime.packaged_worker_closure import stable_read
+        return stable_read(self._root / run_id / (role + ".json"), maximum_bytes)
 
 
 # --- canonical documents ------------------------------------------------------------
@@ -1553,6 +1574,61 @@ class ReferenceEvaluationOperationsV1:
             record.verdicts, record.artifacts, record.diagnostic_code, record.usage,
         )
 
+
+    def _comparison_report(self, request: EvaluationResultRequest):
+        record = self._require_head(request.run).record
+        if record.state not in _TERMINAL_STATES:
+            raise _error(EvaluationOperationCode.RESULT_UNAVAILABLE)
+        artifacts = [value for value in record.artifacts if value.role == EVALUATION_RESULTS_ROLE]
+        if len(artifacts) != 1:
+            raise _error(EvaluationOperationCode.RESULT_UNAVAILABLE)
+        artifact = artifacts[0]
+        try:
+            raw = self._ports.artifact_reader.read(request.run.run_id, artifact.role,
+                                                  min(artifact.size_bytes, EVALUATION_ARTIFACT_MAXIMUM_BYTES))
+            if (type(raw) is not bytes or len(raw) != artifact.size_bytes
+                    or len(raw) > EVALUATION_ARTIFACT_MAXIMUM_BYTES
+                    or hashlib.sha256(raw).hexdigest() != artifact.sha256):
+                raise ValueError("artifact binding mismatch")
+            def unique(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("duplicate report key")
+                    result[key] = value
+                return result
+            document = json.loads(raw, object_pairs_hook=unique,
+                                  parse_constant=lambda value: (_ for _ in ()).throw(ValueError("nonfinite report")))
+            from Evaluator.compare import from_payload
+            payload = from_payload(document, label="stored")
+            if len(document["records"]) != record.cases_scored:
+                raise ValueError("report case count mismatch")
+            original = record.plan.request
+            expected = {"run_id": request.run.run_id, "project_ref": request.run.project_ref,
+                        "backend": original.backend, "model": original.model.model_ref,
+                        "model_revision": original.model.model_revision}
+            if any(payload.metadata.get(key) != value for key, value in expected.items()):
+                raise ValueError("report run binding mismatch")
+            if payload.metadata.get("scenario_digest", record.plan.scenario_digest) != record.plan.scenario_digest:
+                raise ValueError("report scenario binding mismatch")
+            return document
+        except Exception:
+            raise _integrity() from None
+
+    def compare(self, reference: EvaluationResultRequest, candidate: EvaluationResultRequest,
+                intended_variable: str = "model"):
+        if self._ports.artifact_reader is None:
+            raise _error(EvaluationOperationCode.RESULT_UNAVAILABLE)
+        try:
+            from Evaluator.compare import compare_payloads
+            report = compare_payloads(self._comparison_report(reference), self._comparison_report(candidate),
+                                      intended_variable=intended_variable)
+            return {**report, "reference_run": reference.run.to_dict(), "candidate_run": candidate.run.to_dict()}
+        except EvaluationOperationError:
+            raise
+        except Exception:
+            raise _integrity() from None
+
     def observations(self, request: ObservationsRequest) -> ObservationPage:
         run = EvaluationRunRef(request.stream.entity_id, request.stream.project_ref)
         self._require_head(run)
@@ -1589,6 +1665,7 @@ __all__ = [
     "EVALUATION_TRACE_ROLE",
     "DirectoryEvaluationArtifactSinkV1",
     "EvaluationArtifactSinkPort",
+    "EvaluationArtifactReaderPort",
     "EvaluationBackendPort",
     "EvaluationBackendRegistryPort",
     "EvaluationBackendRegistryV1",

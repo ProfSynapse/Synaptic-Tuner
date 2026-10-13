@@ -140,7 +140,7 @@ def test_evaluation_api_and_operations_have_only_the_accepted_verbs() -> None:
             name for name, member in owner.__dict__.items()
             if not name.startswith("_") and inspect.isfunction(member)
         }
-    assert verbs(EvaluationAPI) == VERBS
+    assert verbs(EvaluationAPI) == VERBS | {"compare"}
     assert verbs(EvaluationOperations) == VERBS
     for name in VERBS:
         assert tuple(inspect.signature(getattr(EvaluationAPI, name)).parameters) == tuple(
@@ -613,3 +613,115 @@ print(json.dumps(sorted(n for n in sys.modules if n in ('tuner', 'sqlite3', 'mod
 """
     completed = subprocess.run([sys.executable, "-I", "-c", script], cwd=ROOT, check=True, capture_output=True, text=True)
     assert json.loads(completed.stdout) == []
+
+
+def _comparison_for(reference, candidate):
+    from Evaluator.compare import compare_payloads
+    from Evaluator.comparison_basis import BASIS_SCHEMA, SCORER_REVISION
+    basis = {"schema_version": BASIS_SCHEMA, "status": "verified", "reasons": [],
+             "scorer_revision": SCORER_REVISION, "inputs_digest": "a" * 64, "validator_digest": "b" * 64,
+             "backend_digest": "c" * 64, "generation_digest": "d" * 64, "judge_digest": None}
+    payload = {"metadata": {"comparison_basis": basis, "model": "fixture", "model_revision": "rev"},
+               "summary": {}, "records": [{"case_id": "one", "passed": True, "tags": []}]}
+    return {**compare_payloads(payload, payload), "reference_run": reference.run.to_dict(),
+            "candidate_run": candidate.run.to_dict()}
+
+
+def test_optional_compare_missing_is_closed_unavailable():
+    api = EvaluationAPI(type("Operations", (), {name: lambda *args: None for name in VERBS})())
+    with pytest.raises(EvaluationOperationError) as caught:
+        api.compare(EvaluationResultRequest(RUN), EvaluationResultRequest(RUN))
+    assert caught.value.code is EvaluationOperationCode.RESULT_UNAVAILABLE
+
+
+@pytest.mark.parametrize("side", [0, 1])
+@pytest.mark.parametrize("target", ["original", "presentation"])
+@pytest.mark.parametrize("raises", [False, True])
+def test_compare_revalidates_both_detached_inputs_after_callback(side, target, raises):
+    original = (EvaluationResultRequest(RUN), EvaluationResultRequest(EvaluationRunRef("other", "acme")))
+    class Operations:
+        def compare(self, reference, candidate, intended_variable):
+            presented = (reference, candidate)
+            assert all(value is not original[index] and value.run is not original[index].run
+                       for index, value in enumerate(presented))
+            selected = original[side] if target == "original" else presented[side]
+            object.__setattr__(selected.run, "run_id", "mutated")
+            if raises:
+                raise RuntimeError("private callback error")
+            return _comparison_for(*presented)
+    with pytest.raises(ValueError, match="input changed"):
+        EvaluationAPI(Operations()).compare(*original)
+
+
+def test_compare_detaches_output_and_binds_both_run_refs():
+    requests = (EvaluationResultRequest(RUN), EvaluationResultRequest(EvaluationRunRef("other", "acme")))
+    report = _comparison_for(*requests)
+    class Operations:
+        def compare(self, *args):
+            return report
+    returned = EvaluationAPI(Operations()).compare(*requests)
+    returned["candidates"][0]["by_tag"]["new"] = {}
+    assert "new" not in report["candidates"][0]["by_tag"]
+    report["candidate_run"]["run_id"] = "wrong"
+    with pytest.raises(ValueError, match="bind both"):
+        EvaluationAPI(Operations()).compare(*requests)
+
+
+@pytest.mark.parametrize("damage", ["raw_field", "raw_reason", "nonfinite", "wrong_role_shape"])
+def test_public_comparison_refuses_unbounded_or_raw_output_shapes(damage):
+    requests = (EvaluationResultRequest(RUN), EvaluationResultRequest(RUN))
+    report = _comparison_for(*requests)
+    row = report["candidates"][0]
+    if damage == "raw_field":
+        row["response_text"] = "private response"
+    elif damage == "raw_reason":
+        row["mismatches"] = ["private response"]
+    elif damage == "nonfinite":
+        row["latency"]["ratio"] = float("inf")
+    else:
+        row["reference"]["raw_response"] = "private response"
+    class Operations:
+        def compare(self, *args):
+            return report
+    with pytest.raises(ValueError):
+        EvaluationAPI(Operations()).compare(*requests)
+
+
+@pytest.mark.parametrize("damage", ["excluded_string", "negative_count", "fractional_count", "null_count",
+    "wrong_label", "rate_above_one", "wrong_omitted", "wrong_discordant", "null_probability"])
+def test_public_comparison_validates_count_and_rate_semantics(damage):
+    requests = (EvaluationResultRequest(RUN), EvaluationResultRequest(RUN))
+    report = _comparison_for(*requests)
+    row = report["candidates"][0]
+    if damage == "excluded_string":
+        row["excluded_pair_count"] = "raw response"
+    elif damage == "wrong_label":
+        row["label"] = "raw response"
+    elif damage == "rate_above_one":
+        row["reference"]["pass_rate"] = 2.0
+    elif damage == "wrong_omitted":
+        row["omitted_case_id_counts"]["regressions"] = 1
+    elif damage == "wrong_discordant":
+        row["flips"]["discordant"] = 1
+    elif damage == "null_probability":
+        row["flips"]["mcnemar_p"] = None
+    else:
+        row["reference"]["total"] = {"negative_count": -1, "fractional_count": 0.5, "null_count": None}[damage]
+    class Operations:
+        def compare(self, *args):
+            return report
+    with pytest.raises((ValueError, TypeError)):
+        EvaluationAPI(Operations()).compare(*requests)
+
+
+def test_compare_revalidates_both_inputs_even_when_output_validation_raises(monkeypatch):
+    requests = (EvaluationResultRequest(RUN), EvaluationResultRequest(EvaluationRunRef("other", "acme")))
+    class Operations:
+        def compare(self, *args):
+            return _comparison_for(*requests)
+    def invalid_output(value):
+        object.__setattr__(requests[1].run, "run_id", "mutated")
+        raise ValueError("private validation failure")
+    monkeypatch.setattr(EvaluationAPI, "_comparison_document", staticmethod(invalid_output))
+    with pytest.raises(ValueError, match="input changed"):
+        EvaluationAPI(Operations()).compare(*requests)

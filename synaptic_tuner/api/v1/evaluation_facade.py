@@ -32,6 +32,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+import json
+import math
 from typing import Protocol
 
 from ._contract import contract_digest, digest_text, exact_fields, required_text
@@ -923,6 +925,183 @@ class EvaluationAPI:
         self._unchanged(request, baseline, self._result_request)
         self._unchanged(presented, baseline, self._result_request)
         return rebuilt
+
+
+    def compare(self, reference: EvaluationResultRequest, candidate: EvaluationResultRequest, *,
+                intended_variable: str = "model") -> dict[str, object]:
+        """Read-only paired report comparison; optional on existing operations.
+
+        Configuration provenance is distinct from remote model attestation or
+        a model-quality conclusion. The reference uses host-selected artifact
+        reads and consumes no execution grants.
+        """
+        if type(intended_variable) is not str or intended_variable not in {"model", "backend"}:
+            raise ValueError("unsupported comparison variable")
+        originals = (reference, candidate)
+        baselines = tuple(self._result_request(value) for value in originals)
+        presentations = tuple(self._result_request(value) for value in baselines)
+        callback = getattr(self._operations, "compare", None)
+        if not callable(callback):
+            raise EvaluationOperationError(EvaluationOperationCode.RESULT_UNAVAILABLE)
+        def unchanged():
+            for original, baseline, presentation in zip(originals, baselines, presentations):
+                self._unchanged(original, baseline, self._result_request)
+                self._unchanged(presentation, baseline, self._result_request)
+        try:
+            report = callback(*presentations, intended_variable)
+        except BaseException:
+            unchanged()
+            raise
+        unchanged()
+        try:
+            result = self._comparison_document(report)
+            if (result["reference_run"] != baselines[0].run.to_dict()
+                    or result["candidate_run"] != baselines[1].run.to_dict()
+                    or result["intended_variable"] != intended_variable):
+                raise ValueError("evaluation comparison does not bind both requests")
+            return result
+        finally:
+            unchanged()
+
+    @staticmethod
+    def _comparison_document(value):
+        """Validate and detach the existing finite JSON report, no runtime imports."""
+        keys = {"schema_version", "intended_variable", "reference", "candidates", "passed",
+                "reference_run", "candidate_run"}
+        value = exact_fields(value, frozenset(keys), "evaluation_comparison")
+        if (value["schema_version"] != "synaptic-evaluation-comparison/v1"
+                or type(value["passed"]) is not bool
+                or type(value["candidates"]) is not list or len(value["candidates"]) != 1):
+            raise ValueError("invalid evaluation comparison report")
+        value["reference"] = exact_fields(value["reference"], frozenset({"label", "model", "model_revision", "backend"}),
+                                          "evaluation_comparison_reference")
+        expected_candidate = {"label", "path", "model", "model_revision", "backend", "model_artifact",
+            "comparable", "mismatches", "warnings", "case_counts", "only_reference_case_ids",
+            "only_candidate_case_ids", "reference", "candidate", "deltas", "flips", "request_errors",
+            "latency", "by_tag", "gate", "excluded_pair_count", "provenance", "omitted_case_id_counts"}
+        row = exact_fields(value["candidates"][0], frozenset(expected_candidate), "evaluation_comparison_candidate")
+        if (row["warnings"] != []
+                or row["model_artifact"] is not None or row["path"] != "candidate"
+                or type(row["comparable"]) is not bool or value["passed"] != row["comparable"]):
+            raise ValueError("invalid evaluation comparison candidate")
+        allowed_reasons = {"comparison_basis_unverified", "inputs_digest_differs", "validator_digest_differs",
+            "scorer_revision_differs", "generation_digest_differs", "judge_digest_differs", "backend_digest_differs",
+            "model_differs", "ambiguous_case_identity", "evaluation_incomplete", "inconclusive_pairs",
+            "case_selection_or_completion_differs"}
+        if (type(row["mismatches"]) is not list or any(type(reason) is not str or reason not in allowed_reasons
+                for reason in row["mismatches"]) or row["provenance"] not in {"verified", "unverified"}
+                or row["comparable"] and (row["provenance"] != "verified" or row["mismatches"])
+                or row["gate"] != {"active": False, "passed": row["comparable"], "breaches": []}):
+            raise ValueError("invalid evaluation comparison verdict")
+        for identity in (value["reference"], row):
+            for name in ("model", "model_revision", "backend"):
+                text = identity[name]
+                if text is not None and (type(text) is not str or not 1 <= len(text) <= 512):
+                    raise ValueError("invalid evaluation comparison identity")
+        if value["reference"]["label"] != "reference" or row["label"] != "candidate":
+            raise ValueError("invalid evaluation comparison labels")
+        _count(row["excluded_pair_count"], "excluded_pair_count")
+        def numeric_mapping(item, fields):
+            item = exact_fields(item, frozenset(fields), "evaluation_comparison_statistics")
+            if any(child is not None and type(child) not in (int, float) for child in item.values()):
+                raise ValueError("invalid evaluation comparison statistics")
+        stats = {"total", "passed", "pass_rate", "correctness_tested", "correctness_passed",
+                 "correctness_pass_rate", "request_errors", "mean_latency_s"}
+        for key in ("reference", "candidate"):
+            numeric_mapping(row[key], stats)
+        for key, fields in (("case_counts", {"shared", "only_reference", "only_candidate"}),
+                            ("deltas", {"pass_rate_pp", "correctness_pass_rate_pp"}),
+                            ("request_errors", {"reference", "candidate"}),
+                            ("latency", {"reference_mean_s", "candidate_mean_s", "ratio"}),
+                            ("omitted_case_id_counts", {"only_reference_case_ids", "only_candidate_case_ids", "regressions", "improvements"})):
+            numeric_mapping(row[key], fields)
+        if type(row["flips"]) is not dict or set(row["flips"]) != {"regressions", "improvements", "regression_count", "improvement_count", "discordant", "mcnemar_p"}:
+            raise ValueError("invalid evaluation comparison flips")
+        numeric_mapping({name: row["flips"][name] for name in
+                         ("regression_count", "improvement_count", "discordant", "mcnemar_p")},
+                        {"regression_count", "improvement_count", "discordant", "mcnemar_p"})
+        for item in (row["only_reference_case_ids"], row["only_candidate_case_ids"],
+                     row["flips"].get("regressions"), row["flips"].get("improvements")):
+            if type(item) is not list or len(item) > 100 or any(type(name) is not str or len(name) > 256 for name in item):
+                raise ValueError("invalid evaluation comparison case IDs")
+        if type(row["by_tag"]) is not dict or len(row["by_tag"]) > 100:
+            raise ValueError("invalid evaluation comparison tag bound")
+        for tag, bucket in row["by_tag"].items():
+            if type(tag) is not str or len(tag) > 256:
+                raise ValueError("invalid evaluation comparison tag")
+            numeric_mapping(bucket, {"reference_total", "reference_passed", "reference_pass_rate",
+                "candidate_total", "candidate_passed", "candidate_pass_rate", "delta_pp", "regressions",
+                "improvements", "mcnemar_p"})
+        def count_fields(item, names):
+            for name in names:
+                _count(item[name], name)
+        def rate(number):
+            if number is not None and not 0 <= _finite_float(number, "rate") <= 1:
+                raise ValueError("invalid evaluation comparison rate")
+        for key in ("reference", "candidate"):
+            bucket = row[key]
+            count_fields(bucket, ("total", "passed", "correctness_tested", "correctness_passed", "request_errors"))
+            if not (bucket["passed"] <= bucket["total"] and bucket["correctness_passed"] <= bucket["correctness_tested"] <= bucket["total"]
+                    and bucket["request_errors"] <= bucket["total"]):
+                raise ValueError("invalid evaluation comparison counts")
+            rate(bucket["pass_rate"])
+            rate(bucket["correctness_pass_rate"])
+        count_fields(row["case_counts"], ("shared", "only_reference", "only_candidate"))
+        if row["reference"]["total"] != row["case_counts"]["shared"] or row["candidate"]["total"] != row["case_counts"]["shared"]:
+            raise ValueError("invalid paired comparison counts")
+        count_fields(row["flips"], ("regression_count", "improvement_count", "discordant"))
+        if row["flips"]["discordant"] != row["flips"]["regression_count"] + row["flips"]["improvement_count"] or row["flips"]["discordant"] > row["case_counts"]["shared"]:
+            raise ValueError("invalid paired flip counts")
+        _finite_float(row["flips"]["mcnemar_p"], "mcnemar_p")
+        rate(row["flips"]["mcnemar_p"])
+        count_fields(row["request_errors"], ("reference", "candidate"))
+        for side in ("reference", "candidate"):
+            if row["request_errors"][side] > row["excluded_pair_count"]:
+                raise ValueError("invalid excluded error count")
+        count_fields(row["omitted_case_id_counts"], ("only_reference_case_ids", "only_candidate_case_ids", "regressions", "improvements"))
+        for field, count in (("only_reference_case_ids", row["case_counts"]["only_reference"]),
+                             ("only_candidate_case_ids", row["case_counts"]["only_candidate"])):
+            if len(row[field]) + row["omitted_case_id_counts"][field] != count:
+                raise ValueError("invalid omitted comparison count")
+        for field, count in (("regressions", row["flips"]["regression_count"]),
+                             ("improvements", row["flips"]["improvement_count"])):
+            if len(row["flips"][field]) + row["omitted_case_id_counts"][field] != count:
+                raise ValueError("invalid omitted flip count")
+        for bucket in row["by_tag"].values():
+            count_fields(bucket, ("reference_total", "reference_passed", "candidate_total", "candidate_passed", "regressions", "improvements"))
+            if (bucket["reference_passed"] > bucket["reference_total"] or bucket["candidate_passed"] > bucket["candidate_total"]
+                    or max(bucket["reference_total"], bucket["candidate_total"]) > row["case_counts"]["shared"]):
+                raise ValueError("invalid tag comparison counts")
+            _finite_float(bucket["mcnemar_p"], "mcnemar_p")
+            for field in ("reference_pass_rate", "candidate_pass_rate", "mcnemar_p"):
+                rate(bucket[field])
+        remaining = 200000
+        def check(item, depth=0, ancestors=()):
+            nonlocal remaining
+            remaining -= 1
+            if remaining < 0 or depth > 32:
+                raise ValueError("evaluation comparison exceeds tree bound")
+            if type(item) in (dict, list):
+                if id(item) in ancestors:
+                    raise ValueError("evaluation comparison contains a cycle")
+                ancestors += (id(item),)
+                if type(item) is dict:
+                    if any(type(key) is not str for key in item):
+                        raise ValueError("evaluation comparison keys must be strings")
+                    children = item.values()
+                else:
+                    children = item
+                for child in children:
+                    check(child, depth + 1, ancestors)
+            elif type(item) not in (str, int, float, bool, type(None)):
+                raise ValueError("evaluation comparison is not JSON")
+            elif type(item) is float and not math.isfinite(item):
+                raise ValueError("evaluation comparison is not finite")
+        check(value)
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+        if len(raw) > 4 * 1024 * 1024:
+            raise ValueError("evaluation comparison exceeds byte bound")
+        return json.loads(raw)
 
     def observations(self, request: ObservationsRequest) -> ObservationPage:
         baseline = self._observations_request(request)
