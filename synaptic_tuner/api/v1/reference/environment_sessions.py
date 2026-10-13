@@ -172,6 +172,10 @@ class CapturedEnvironmentValidator(EnvironmentValidator):
                     "candidate_digest": candidate_digest}
         return evaluate
 
+    def close(self):
+        if self._pending_session is not None:
+            self._pending_session.close()
+
 
 class CapturedEnvironmentSession(EnvironmentSession):
     def __post_init__(self):

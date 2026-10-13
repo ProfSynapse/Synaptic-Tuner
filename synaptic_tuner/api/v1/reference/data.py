@@ -19,20 +19,20 @@ Durable layout, all under the ``data`` partition and keyed by
   size is independent of how many rows the run wrote.
 - **History** (stream port, same key): one entry per state transition
   (``planned``, ``running``, optionally ``cancel_requested``, then one
-  terminal state), so a run never exceeds four durable events; the budget the
-  architecture grants the family is twelve.
+  terminal state). Retained uncertainty and cancellation can add transitions;
+  the family's durable history budget remains twelve.
 - ``plan/<project_digest>/<plan_fingerprint>`` names the run a plan started,
   which makes ``start`` idempotent for an identical plan.
 
 Per-row and per-scenario progress goes to the ``observation`` partition as
 ``synaptic-observation/v1`` records under ``data/<project_digest>/<run_id>``.
 
-``start`` runs the whole generation synchronously in the caller's thread and
-returns once the run is terminal. Cancellation is cooperative: ``cancel``
-records ``cancel_requested`` on the head, and the loop checks the head at
-every row and scenario boundary, finishing as ``cancelled`` with the artifact
-produced so far. A backend failure after some rows were written finishes as
-``partially_succeeded``, also with the artifact.
+``start`` runs synchronously in the caller's thread. Selected environment runs
+may return nonterminal when launch, termination or cleanup remains uncertain;
+their process-local owners stay retained and another start never replays them.
+Cancellation persists intent; selected model requests, row writes and parent
+worker polls check it. Verified cleanup permits cancellation finalization.
+Recomposition reads retained state but does not restore worker ownership.
 
 Backends and spend (slice 11, §4.4): an unknown backend is refused with
 ``backend_unavailable``. A paid backend (``METERED_BACKENDS``: openrouter,
@@ -386,6 +386,12 @@ class _Cancelled(Exception):
     """Internal signal: the head asked the loop to stop at a boundary."""
 
 
+class _EnvironmentInterrupted(BaseException):
+    """Host cancellation/deadline bypasses model retry, without changing clients."""
+    def __init__(self, error):
+        self.error = error
+
+
 # --- operations ---------------------------------------------------------------------
 
 
@@ -408,6 +414,8 @@ class ReferenceDataOperationsV1:
         self._ports = ports
         self._lock = RLock()
         self._cancel_flags: set[str] = set()
+        # Process-local cleanup custody, not durable worker restoration.
+        self._environment_owners: dict[str, object] = {}
 
     # -- plan and preflight ------------------------------------------------------
 
@@ -520,12 +528,19 @@ class ReferenceDataOperationsV1:
             raise _closed(DataOperationCode.ENVIRONMENT_INVALID) from None
 
     def preflight(self, plan: DataPlan) -> DataPreflight:
-        self._verify_plan(plan)
+        admitted_inputs = self._verify_plan(plan)
         checked_at = self._clock.now()
         expires_at = _plus_seconds(checked_at, DATA_PREFLIGHT_SECONDS)
         codes: list[str] = []
         if plan.environment_binding is not None:
-            codes.append(DataOperationCode.ENVIRONMENT_UNAVAILABLE.value)
+            factory = self._ports.environment_sessions
+            if factory is None:
+                codes.append(DataOperationCode.ENVIRONMENT_UNAVAILABLE.value)
+            else:
+                try:
+                    factory.prepare(plan, admitted_inputs, lambda: None)
+                except DataOperationError as error:
+                    codes.append(error.code.value)
         backend = plan.request.backend
         try:
             _check_backend(self._ports.llm_clients, backend)
@@ -733,13 +748,29 @@ class ReferenceDataOperationsV1:
         )
 
     def start(self, plan: DataPlan) -> DataStart:
+        if type(plan) is not DataPlan:
+            raise TypeError("plan must be exact DataPlan")
+        selected = plan.environment_binding is not None
+        if selected:
+            existing = self._existing_run(plan)
+            if existing is not None:
+                if self._require_head(existing).plan != plan:
+                    raise _integrity()
+                return DataStart(existing, True)
         admitted_inputs = self._verify_plan(plan)
-        if plan.environment_binding is not None:
-            # Keep custody through this boundary; no claims or clients until
-            # a separately qualified adapter can consume the retained bytes.
-            if admitted_inputs is None:
+        validator = None
+        run = data_run_ref(plan)
+        claimed = False
+        def environment_boundary():
+            if claimed and self._cancel_requested(run):
+                raise _Cancelled()
+        if selected:
+            if admitted_inputs is None or self._ports.environment_sessions is None:
+                raise _closed(DataOperationCode.ENVIRONMENT_UNAVAILABLE)
+            validator = self._ports.environment_sessions.prepare(plan, admitted_inputs, environment_boundary)
+            if any(not callable(getattr(validator, method, None)) for method in (
+                    "close", "check_boundary", "validate_response", "start_session", "candidate_evaluator")):
                 raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
-            raise _closed(DataOperationCode.ENVIRONMENT_UNAVAILABLE)
         scope = _check_backend(self._ports.llm_clients, plan.request.backend)
         existing = self._existing_run(plan)
         if existing is not None:
@@ -752,16 +783,44 @@ class ReferenceDataOperationsV1:
         from shared.llm.usage import UsageAccumulator
 
         meter = UsageAccumulator()
+        client_type = MeteredLLMClient
+        if selected:
+            class GuardedMeteredClient(MeteredLLMClient):
+                def _boundary(self):
+                    try:
+                        validator.check_boundary()
+                    except Exception as error:
+                        raise _EnvironmentInterrupted(error) from None
+                def chat(self, *args, **kwargs):
+                    self._boundary()
+                    return super().chat(*args, **kwargs)
+                def structured_output(self, *args, **kwargs):
+                    self._boundary()
+                    return super().structured_output(*args, **kwargs)
+            client_type = GuardedMeteredClient
+        if selected:
+            self._genesis(plan, self._initial_result(plan, run, DataRunState.PLANNED))
+            claimed = True
+            self._environment_owners[run.run_id] = validator
         try:
-            client = MeteredLLMClient(
+            client = client_type(
                 self._ports.llm_clients.create(backend=plan.request.backend, model=plan.request.model), meter
             )
         except Exception:
+            if selected:
+                self._transition(run, lambda result: DataResult(
+                    result.schema_version, result.run,
+                    DataRunState.CANCELLED if result.state is DataRunState.CANCEL_REQUESTED else DataRunState.FAILED,
+                    result.mode, result.backend,
+                    result.model, result.rows_requested, 0, result.scenarios,
+                    diagnostic_code=DIAGNOSTIC_CANCELLED if result.state is DataRunState.CANCEL_REQUESTED else DIAGNOSTIC_BACKEND_UNAVAILABLE))
+                self._environment_owners.pop(run.run_id, None)
             raise _closed(DataOperationCode.BACKEND_UNAVAILABLE) from None
-        run = data_run_ref(plan)
-        self._genesis(plan, self._initial_result(plan, run, DataRunState.PLANNED))
-        self._transition(run, lambda result: _with_state(result, DataRunState.RUNNING))
-        self._execute(plan, run, client, meter, scope)
+        if not selected:
+            self._genesis(plan, self._initial_result(plan, run, DataRunState.PLANNED))
+        self._transition(run, lambda result: result if result.state.terminal or result.state is DataRunState.CANCEL_REQUESTED
+                         else _with_state(result, DataRunState.RUNNING))
+        self._execute(plan, run, client, meter, scope, admitted_inputs=admitted_inputs, environment_validator=validator)
         return DataStart(run, True)
 
     def _claim_spend(self, plan: DataPlan, run: DataRunRef, scope: SpendScopeV1) -> SpendEffectRecordV1:
@@ -778,8 +837,10 @@ class ReferenceDataOperationsV1:
                 return True
         return self._require_head(run).result.state is DataRunState.CANCEL_REQUESTED
 
-    def _execute(self, plan: DataPlan, run: DataRunRef, client, meter, scope: SpendScopeV1 | None) -> None:
+    def _execute(self, plan: DataPlan, run: DataRunRef, client, meter, scope: SpendScopeV1 | None,
+                 *, admitted_inputs=None, environment_validator=None) -> None:
         from SynthChat.result_writer import StreamingResultWriter
+        from shared.environments.local_worker import WorkerLifecycleError
 
         request = plan.request
         output = _absolute_path(request.output_ref)
@@ -788,6 +849,8 @@ class ReferenceDataOperationsV1:
         sequence = 0
         diagnostic: str | None = None
         cancelled = False
+        uncertain = False
+        uncertainty_code = None
         spend: SpendEffectRecordV1 | None = None
         if scope is not None:
             spend = self._claim_spend(plan, run, scope)
@@ -798,10 +861,14 @@ class ReferenceDataOperationsV1:
             sequence += 1
 
         def boundary() -> None:
+            if environment_validator is not None:
+                environment_validator.check_boundary()
             if self._cancel_requested(run):
                 raise _Cancelled()
 
         def on_row(scenario_ref: str, example: dict, passed: bool, writer) -> None:
+            if environment_validator is not None:
+                boundary()
             if writer.write(_WrittenRow(example)) is not True:
                 raise OSError("write")
             written[scenario_ref] += 1
@@ -812,21 +879,62 @@ class ReferenceDataOperationsV1:
             observe(ObservationKind.DATA_ROW_WRITTEN, DataRowWrittenPayloadV1(scenario_ref, written[scenario_ref]))
             boundary()
 
+        def classify_interruption(error):
+            nonlocal diagnostic, cancelled, uncertain, uncertainty_code
+            if isinstance(error, _Cancelled):
+                cancelled = True
+            elif isinstance(error, WorkerLifecycleError):
+                diagnostic = error.code
+                if error.code in {"worker_start_uncertain", "worker_termination_uncertain", "worker_cleanup_uncertain"}:
+                    uncertain, uncertainty_code = True, error.code
+            elif isinstance(error, TimeoutError):
+                diagnostic = "worker_deadline_exceeded"
+            elif isinstance(error, DataOperationError):
+                diagnostic = error.code.value
+            else:
+                diagnostic = _classify_failure(error)
+
         try:
+            boundary()
             with StreamingResultWriter(output, settings) as writer:
                 try:
                     if request.mode is DataMode.GENERATE:
-                        self._generate(plan, client, writer, on_row, boundary, observe)
+                        self._generate(plan, client, writer, on_row, boundary, observe,
+                                       admitted_inputs=admitted_inputs, environment_validator=environment_validator)
                     else:
-                        self._improve(plan, client, writer, on_row, boundary, observe)
+                        self._improve(plan, client, writer, on_row, boundary, observe,
+                                      admitted_inputs=admitted_inputs, environment_validator=environment_validator)
                 except _Cancelled:
                     cancelled = True
+                except _EnvironmentInterrupted as interruption:
+                    classify_interruption(interruption.error)
+                except WorkerLifecycleError as error:
+                    classify_interruption(error)
+                except TimeoutError:
+                    diagnostic = "worker_deadline_exceeded"
                 except OSError:
                     diagnostic = DIAGNOSTIC_OUTPUT_FAILED
                 except Exception as error:  # noqa: BLE001 - classified to a closed code, text discarded
                     diagnostic = _classify_failure(error)
+        except _Cancelled:
+            cancelled = True
+        except TimeoutError:
+            diagnostic = "worker_deadline_exceeded"
         except OSError:
             diagnostic = DIAGNOSTIC_OUTPUT_FAILED
+        finally:
+            if environment_validator is not None:
+                try:
+                    environment_validator.close()
+                except WorkerLifecycleError as error:
+                    diagnostic = error.code
+                    if error.code in {"worker_start_uncertain", "worker_termination_uncertain", "worker_cleanup_uncertain"}:
+                        uncertain, uncertainty_code = True, error.code
+                except Exception:
+                    diagnostic, uncertain = "worker_cleanup_uncertain", True
+                    uncertainty_code = diagnostic
+                if not uncertain:
+                    self._environment_owners.pop(run.run_id, None)
         rows_written = sum(written.values())
         artifacts: tuple[VerifiedArtifact, ...] = ()
         if rows_written > 0:
@@ -866,16 +974,25 @@ class ReferenceDataOperationsV1:
         )
 
         def finalize(result: DataResult) -> DataResult:
+            if result.state.terminal:
+                return result
+            final_state, final_diagnostic = state, diagnostic
+            if uncertain:
+                final_state = result.state
+                final_diagnostic = uncertainty_code
+            elif result.state is DataRunState.CANCEL_REQUESTED:
+                final_state, final_diagnostic = DataRunState.CANCELLED, DIAGNOSTIC_CANCELLED
             return DataResult(
-                result.schema_version, result.run, state, result.mode, result.backend, result.model,
-                result.rows_requested, rows_written, scenarios, artifacts, diagnostic, usage,
+                result.schema_version, result.run, final_state, result.mode, result.backend, result.model,
+                result.rows_requested, rows_written, scenarios, artifacts, final_diagnostic, usage,
             )
 
         self._transition(run, finalize)
         with self._lock:
             self._cancel_flags.discard(run.run_id)
 
-    def _generate(self, plan: DataPlan, client, writer, on_row, boundary, observe, *, admitted_inputs=None) -> None:
+    def _generate(self, plan: DataPlan, client, writer, on_row, boundary, observe,
+                  *, admitted_inputs=None, environment_validator=None) -> None:
         from SynthChat.engine import ImprovementEngine
         from SynthChat.generator import SynthChatGenerator
 
@@ -884,8 +1001,9 @@ class ReferenceDataOperationsV1:
         if plan.environment_binding is not None and admitted_inputs is None:
             raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
         snapshot = None if admitted_inputs is None else self._workflow_snapshot(plan, admitted_inputs)
-        validator = None if snapshot is None or ports.environment_sessions is None else ports.environment_sessions.prepare(
-            plan, admitted_inputs, boundary)
+        validator = environment_validator
+        if validator is None and snapshot is not None and ports.environment_sessions is not None:
+            validator = ports.environment_sessions.prepare(plan, admitted_inputs, boundary)
         stage_validation = request.max_iterations > 1
         engine = None
         if stage_validation:
@@ -926,7 +1044,8 @@ class ReferenceDataOperationsV1:
                 produced += 1
             observe(ObservationKind.DATA_SCENARIO_COMPLETED, DataScenarioCompletedPayloadV1(target.scenario_ref, produced))
 
-    def _improve(self, plan: DataPlan, client, writer, on_row, boundary, observe, *, admitted_inputs=None) -> None:
+    def _improve(self, plan: DataPlan, client, writer, on_row, boundary, observe,
+                 *, admitted_inputs=None, environment_validator=None) -> None:
         from SynthChat.engine import ImprovementEngine
 
         request = plan.request
@@ -934,8 +1053,9 @@ class ReferenceDataOperationsV1:
         if plan.environment_binding is not None and admitted_inputs is None:
             raise _closed(DataOperationCode.ENVIRONMENT_INVALID)
         snapshot = None if admitted_inputs is None else self._workflow_snapshot(plan, admitted_inputs)
-        validator = None if snapshot is None or ports.environment_sessions is None else ports.environment_sessions.prepare(
-            plan, admitted_inputs, boundary)
+        validator = environment_validator
+        if validator is None and snapshot is not None and ports.environment_sessions is not None:
+            validator = ports.environment_sessions.prepare(plan, admitted_inputs, boundary)
         engine = ImprovementEngine(
             llm_client=client,
             rubrics_dir=ports.rubrics_dir,
@@ -979,13 +1099,19 @@ class ReferenceDataOperationsV1:
                 raise _closed(DataOperationCode.CANCEL_INELIGIBLE)
             if state is DataRunState.CANCEL_REQUESTED:
                 return head.result.outcome()
-            self._cancel_flags.add(run.run_id)
             updated = self._transition(
                 run,
-                lambda result: _with_state(result, DataRunState.CANCEL_REQUESTED),
+                self._cancel_result,
                 note=redact(reason, max_string_bytes=256),
             )
+            self._cancel_flags.add(run.run_id)
         return updated.result.outcome()
+
+    @staticmethod
+    def _cancel_result(result):
+        if result.state.terminal:
+            raise _closed(DataOperationCode.CANCEL_INELIGIBLE)
+        return _with_state(result, DataRunState.CANCEL_REQUESTED)
 
     def list(self, request: DataListRequest) -> DataPage:
         if type(request) is not DataListRequest:

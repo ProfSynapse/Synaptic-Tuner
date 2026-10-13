@@ -2,6 +2,8 @@
 from dataclasses import replace
 import hashlib
 import json
+import os
+import signal
 import shutil
 
 import pytest
@@ -13,7 +15,7 @@ from shared.environments.bounded_local_runtime import BoundedLocalEnvironmentRun
 from shared.environments.local_worker import WorkerLifecycleError, WorkerEnvironmentRuntime
 from shared.llm.metering import MeteredLLMClient
 from shared.llm.usage import UsageAccumulator
-from synaptic_tuner.api.v1.data_facade import DataMode, DataOperationError
+from synaptic_tuner.api.v1.data_facade import DataAPI, DataMode, DataOperationError, DataRunState
 from synaptic_tuner.api.v1.environment_execution import EnvironmentMode
 from synaptic_tuner.api.v1.reference.environment_sessions import CapturedEnvironmentSessionFactory
 
@@ -152,14 +154,13 @@ def test_actual_improvement_reexecutes_changed_candidate_from_retained_input(sel
     assert not list(scratch.iterdir())
 
 
-def test_prepare_is_pure_and_public_start_remains_closed(selected):
+def test_prepare_and_composed_preflight_are_pure(selected):
     operations, request, ports, _, clients, _, _, _, runtimes, _ = selected
     plan = operations.plan(request)
     capture = operations._verify_plan(plan)
     validator = ports.environment_sessions.prepare(plan, capture, lambda: None)
     assert validator.catalog == {} and not runtimes
-    with pytest.raises(DataOperationError, match='environment_unavailable'):
-        operations.start(plan)
+    assert operations.preflight(plan).ready
     assert not runtimes and clients.calls == 0
 
 
@@ -319,3 +320,304 @@ def test_generation_propagates_lifecycle_interruption_without_model_retry_or_out
     assert not rows and inner.chat_calls == 3 and inner.judge_calls == 0
     assert len(runtimes) == 1 and prepared[0]._pending_session is None
     assert not list(scratch.iterdir())
+
+
+def public_client(selected, inner, *, on_create=None):
+    operations, _, ports, _, _, _, _, _, runtimes, _ = selected
+    created = []
+    class Factory:
+        def create(self, **kwargs):
+            assert not runtimes, 'No fixture may open before client construction and run claim'
+            created.append(kwargs)
+            if on_create is not None:
+                on_create()
+            return inner
+    operations._ports = replace(ports, llm_clients=Factory())
+    return DataAPI(operations), created
+
+
+def test_public_generation_claims_before_effects_and_never_replays_after_recomposition(selected):
+    from synaptic_tuner.api.v1.reference.data import ReferenceDataOperationsV1, data_run_ref
+
+    operations, request, ports, _, _, scenario, _, scratch, runtimes, _ = selected
+    inner = ScriptedClient(['bound system', 'bound user', json.dumps(response('files_fetch', path='result.txt')),
+                           json.dumps(response('files_store', path='result.txt', content='fixed'))], [.1, .95, .95])
+    def claimed_and_delete_sources():
+        head = operations._require_head(data_run_ref(plan))
+        assert head.result.state is DataRunState.PLANNED
+        scenario.unlink()
+        shutil.rmtree(ports.config_dir)
+        shutil.rmtree(ports.rubrics_dir)
+    api, created = public_client(selected, inner, on_create=claimed_and_delete_sources)
+    plan = api.plan(request)
+    assert api.preflight(plan).ready
+    start = api.start(plan)
+    outcome = api.show(start.run)
+    assert outcome.state is DataRunState.SUCCEEDED and outcome.rows_written == 1
+    assert len(created) == 1 and inner.chat_calls == 4 and not list(scratch.iterdir())
+    assert len(runtimes) == 3 and not operations._environment_owners
+    cold = ReferenceDataOperationsV1(records=operations._records, streams=operations._streams,
+                                     clock=operations._clock, ports=operations._ports)
+    assert DataAPI(cold).show(start.run) == outcome
+    assert DataAPI(cold).start(plan).run == start.run
+    assert len(created) == 1 and inner.chat_calls == 4
+
+
+def test_public_improvement_executes_revised_candidate(selected, tmp_path):
+    operations, request, _, host, _, _, environment, scratch, runtimes, _ = selected
+    policy = json.loads(host.raw['policy'])
+    policy['execution']['candidate_projection']['environment'] = ['environment']
+    update_host(host, execution=policy['execution'])
+    dataset = tmp_path / 'public-seed.jsonl'
+    dataset.write_text(json.dumps({'conversations': [{'role': 'system', 'content': 'bound'},
+        response('files_fetch', path='result.txt')], 'environment': environment}) + '\n')
+    request = replace(request, mode=DataMode.IMPROVE, scenarios=(), input_dataset_ref=str(dataset), rubric_refs=('repair',))
+    inner = ScriptedClient([json.dumps(response('files_store', path='result.txt', content='fixed'))], [.1, .95, .95])
+    api, _ = public_client(selected, inner, on_create=dataset.unlink)
+    plan = api.plan(request)
+    start = api.start(plan)
+    outcome = api.show(start.run)
+    assert outcome.state is DataRunState.SUCCEEDED and outcome.rows_written == 1
+    assert len(runtimes) == 2 and not list(scratch.iterdir())
+    assert not operations._environment_owners
+
+
+def test_public_cancel_during_client_creation_is_not_overwritten(selected):
+    from synaptic_tuner.api.v1.reference.data import ReferenceDataOperationsV1, data_run_ref
+
+    operations, request, _, _, _, _, _, scratch, runtimes, _ = selected
+    inner = ScriptedClient([], [])
+    def cancel_from_cold_host():
+        cold = ReferenceDataOperationsV1(records=operations._records, streams=operations._streams,
+                                         clock=operations._clock, ports=operations._ports)
+        assert DataAPI(cold).cancel(data_run_ref(plan), 'stop').state is DataRunState.CANCEL_REQUESTED
+    api, created = public_client(selected, inner, on_create=cancel_from_cold_host)
+    plan = api.plan(request)
+    outcome = api.show(api.start(plan).run)
+    assert outcome.state is DataRunState.CANCELLED and outcome.rows_written == 0
+    assert len(created) == 1 and inner.chat_calls == 0 and not runtimes
+    assert not list(scratch.iterdir())
+
+
+def test_public_cancel_after_chat_prevents_next_model_request_and_row(selected):
+    from synaptic_tuner.api.v1.reference.data import ReferenceDataOperationsV1, data_run_ref
+
+    operations, request, _, _, _, _, _, _, runtimes, _ = selected
+    inner = ScriptedClient(['bound system'], [])
+    original = inner.chat
+    def cancelling_chat(*args, **kwargs):
+        result = original(*args, **kwargs)
+        cold = ReferenceDataOperationsV1(records=operations._records, streams=operations._streams,
+                                         clock=operations._clock, ports=operations._ports)
+        DataAPI(cold).cancel(data_run_ref(plan), 'stop after this request')
+        return result
+    inner.chat = cancelling_chat
+    api, _ = public_client(selected, inner)
+    plan = api.plan(request)
+    outcome = api.show(api.start(plan).run)
+    assert outcome.state is DataRunState.CANCELLED and outcome.rows_written == 0
+    assert inner.chat_calls == 1 and inner.judge_calls == 0 and not runtimes
+
+
+def test_public_cleanup_uncertainty_retains_owner_and_no_restart_replay(selected):
+    from synaptic_tuner.api.v1.reference.data import ReferenceDataOperationsV1
+
+    operations, request, ports, _, _, _, _, _, runtimes, _ = selected
+    original = ports.environment_sessions.runtime_factory
+    def uncertain_cleanup(**kwargs):
+        runtime = original(**kwargs)
+        runtime.original_teardown = runtime.teardown
+        runtime.teardown = lambda: (_ for _ in ()).throw(WorkerLifecycleError('worker_cleanup_uncertain'))
+        return runtime
+    ports.environment_sessions.runtime_factory = uncertain_cleanup
+    inner = ScriptedClient(['bound system', 'bound user', json.dumps(response('files_fetch', path='result.txt'))], [])
+    api, created = public_client(selected, inner)
+    plan = api.plan(request)
+    try:
+        start = api.start(plan)
+        outcome = api.show(start.run)
+        assert outcome.state is DataRunState.RUNNING and outcome.diagnostic_code == 'worker_cleanup_uncertain'
+        assert outcome.rows_written == 0 and start.run.run_id in operations._environment_owners
+        cold = ReferenceDataOperationsV1(records=operations._records, streams=operations._streams,
+                                         clock=operations._clock, ports=operations._ports)
+        assert DataAPI(cold).start(plan).run == start.run
+        assert len(created) == 1 and inner.chat_calls == 3 and len(runtimes) == 1
+        assert DataAPI(cold).cancel(start.run, 'stop unknown attempt').state is DataRunState.CANCEL_REQUESTED
+        assert api.show(start.run).diagnostic_code == 'worker_cleanup_uncertain'
+    finally:
+        # Explicit cleanup of exact test-owned instances, never replay.
+        for runtime in runtimes:
+            runtime.teardown = runtime.original_teardown
+            runtime.teardown()
+        for owner in operations._environment_owners.values():
+            owner.close()
+
+
+def test_cancel_landing_before_final_transition_is_not_overwritten(selected, monkeypatch):
+    from synaptic_tuner.api.v1.reference.data import ReferenceDataOperationsV1
+
+    operations, request, _, _, _, _, _, _, _, _ = selected
+    inner = ScriptedClient(['bound system', 'bound user', json.dumps(response('files_fetch', path='result.txt')),
+                           json.dumps(response('files_store', path='result.txt', content='fixed'))], [.1, .95, .95])
+    api, _ = public_client(selected, inner)
+    original = operations._transition
+    def late_cancel(run, mutate, **kwargs):
+        if mutate.__name__ == 'finalize':
+            cold = ReferenceDataOperationsV1(records=operations._records, streams=operations._streams,
+                                             clock=operations._clock, ports=operations._ports)
+            DataAPI(cold).cancel(run, 'cancel before final head update')
+        return original(run, mutate, **kwargs)
+    monkeypatch.setattr(operations, '_transition', late_cancel)
+    plan = api.plan(request)
+    outcome = api.show(api.start(plan).run)
+    assert outcome.state is DataRunState.CANCELLED and outcome.rows_written == 1
+
+
+def test_failed_final_cas_remains_claimed_and_never_reexecutes(selected, monkeypatch):
+    from synaptic_tuner.api.v1.reference.data import ReferenceDataOperationsV1, data_run_ref
+
+    operations, request, _, _, _, _, _, _, _, _ = selected
+    inner = ScriptedClient(['bound system', 'bound user', json.dumps(response('files_fetch', path='result.txt')),
+                           json.dumps(response('files_store', path='result.txt', content='fixed'))], [.1, .95, .95])
+    api, created = public_client(selected, inner)
+    store = operations._records
+    original = type(store).compare_and_swap
+    def fail_final(self, **kwargs):
+        document = json.loads(kwargs['canonical'])
+        if self is store and document.get('result', {}).get('state') == 'succeeded':
+            return False
+        return original(self, **kwargs)
+    monkeypatch.setattr(type(store), 'compare_and_swap', fail_final)
+    plan = api.plan(request)
+    with pytest.raises(DataOperationError, match='state_conflict'):
+        api.start(plan)
+    run = data_run_ref(plan)
+    assert api.show(run).state is DataRunState.RUNNING
+    cold = ReferenceDataOperationsV1(records=operations._records, streams=operations._streams,
+                                     clock=operations._clock, ports=operations._ports)
+    assert DataAPI(cold).start(plan).run == run and len(created) == 1 and inner.chat_calls == 4
+    # The orphan history slot cannot be guessed/adopted as cancellation or replay.
+    with pytest.raises(DataOperationError, match='state_conflict'):
+        DataAPI(cold).cancel(run, 'cancel uncertain persistence')
+
+
+def test_boundary_integrity_failure_is_not_reported_as_deadline(selected):
+    from synaptic_tuner.api.v1.data_facade import DataOperationCode
+
+    operations, request, ports, _, _, _, _, _, runtimes, _ = selected
+    inner = ScriptedClient(['bound system'], [])
+    original = ports.environment_sessions.prepare
+    def prepare(*args):
+        validator = original(*args)
+        boundary = validator.check_boundary
+        def interrupted():
+            boundary()
+            if inner.chat_calls:
+                raise DataOperationError(DataOperationCode.INTEGRITY_ERROR)
+        validator.check_boundary = interrupted
+        return validator
+    ports.environment_sessions.prepare = prepare
+    api, _ = public_client(selected, inner)
+    outcome = api.show(api.start(api.plan(request)).run)
+    assert outcome.state is DataRunState.FAILED and outcome.diagnostic_code == 'integrity_error'
+    assert inner.chat_calls == 1 and inner.judge_calls == 0 and not runtimes
+
+
+@pytest.mark.parametrize('code', ['worker_start_uncertain', 'worker_termination_uncertain', 'worker_cleanup_uncertain'])
+def test_unknown_worker_signal_stays_nonterminal_without_restart_replay(selected, code):
+    from synaptic_tuner.api.v1.reference.data import ReferenceDataOperationsV1
+
+    operations, request, ports, _, _, _, _, scratch, _, _ = selected
+    original = ports.environment_sessions.runtime_factory
+    def unknown_runtime(**kwargs):
+        runtime = original(**kwargs)
+        runtime.read_text = lambda path: (_ for _ in ()).throw(WorkerLifecycleError(code))
+        return runtime
+    ports.environment_sessions.runtime_factory = unknown_runtime
+    inner = ScriptedClient(['bound system', 'bound user', json.dumps(response('files_fetch', path='result.txt'))], [])
+    api, created = public_client(selected, inner)
+    plan = api.plan(request)
+    start = api.start(plan)
+    outcome = api.show(start.run)
+    assert outcome.state is DataRunState.RUNNING and outcome.diagnostic_code == code
+    assert not list(scratch.iterdir())
+    cold = ReferenceDataOperationsV1(records=operations._records, streams=operations._streams,
+                                     clock=operations._clock, ports=operations._ports)
+    assert DataAPI(cold).start(plan).run == start.run and len(created) == 1
+    assert inner.chat_calls == 3 and inner.judge_calls == 0
+
+
+def test_public_cancel_reaps_stalled_owned_child_from_parent_poll(selected, request):
+    from synaptic_tuner.api.v1.reference.data import ReferenceDataOperationsV1, data_run_ref
+
+    if request.node.callspec.params['selected'] != 'worker':
+        pytest.skip('Actual process cancellation applies to the supervised worker')
+    operations, data_request, ports, _, _, _, _, scratch, runtimes, _ = selected
+    factory = ports.environment_sessions
+    original_prepare, original_runtime = factory.prepare, factory.runtime_factory
+    armed = cancelled = False
+    stopped_processes = []
+    def prepare(plan, capture, boundary):
+        def parent_poll():
+            nonlocal cancelled
+            if armed and not cancelled:
+                cold = ReferenceDataOperationsV1(records=operations._records, streams=operations._streams,
+                                                 clock=operations._clock, ports=operations._ports)
+                DataAPI(cold).cancel(data_run_ref(plan), 'cancel stopped owned worker')
+                cancelled = True
+            boundary()
+        return original_prepare(plan, capture, parent_poll)
+    def runtime_factory(**kwargs):
+        runtime = original_runtime(**kwargs)
+        original_read = runtime.read_text
+        def stalled_read(path):
+            nonlocal armed
+            process = runtime._process
+            os.kill(process.pid, signal.SIGSTOP)
+            stopped_processes.append(process)
+            armed = True
+            return original_read(path)
+        runtime.read_text = stalled_read
+        return runtime
+    factory.prepare, factory.runtime_factory = prepare, runtime_factory
+    inner = ScriptedClient(['bound system', 'bound user', json.dumps(response('files_fetch', path='result.txt'))], [])
+    api, _ = public_client(selected, inner)
+    try:
+        plan = api.plan(data_request)
+        outcome = api.show(api.start(plan).run)
+        assert outcome.state is DataRunState.CANCELLED and outcome.rows_written == 0
+        assert armed and cancelled and stopped_processes
+        assert all(process.poll() is not None for process in stopped_processes)
+        assert inner.chat_calls == 3 and inner.judge_calls == 0 and not list(scratch.iterdir())
+        assert not operations._environment_owners
+    finally:
+        for runtime in runtimes:
+            runtime.teardown()
+
+
+def test_uncertainty_survives_later_artifact_failure(selected, monkeypatch):
+    from synaptic_tuner.api.v1.reference import data as data_module
+
+    operations, request, ports, _, _, _, _, scratch, runtimes, _ = selected
+    original_prepare = ports.environment_sessions.prepare
+    def prepare(*args, **kwargs):
+        validator = original_prepare(*args, **kwargs)
+        validator.close = lambda: (_ for _ in ()).throw(WorkerLifecycleError('worker_cleanup_uncertain'))
+        return validator
+    monkeypatch.setattr(ports.environment_sessions, 'prepare', prepare)
+    monkeypatch.setattr(data_module, '_verified_artifact',
+                        lambda *args: (_ for _ in ()).throw(OSError('private artifact failure')))
+    inner = ScriptedClient(['bound system', 'bound user', json.dumps(response('files_fetch', path='result.txt')),
+                           json.dumps(response('files_store', path='result.txt', content='fixed'))], [.1, .95, .95])
+    api, _ = public_client(selected, inner)
+    plan = api.plan(request)
+    try:
+        outcome = api.show(api.start(plan).run)
+        assert outcome.rows_written == 1 and not outcome.artifacts
+        assert outcome.state is DataRunState.RUNNING
+        assert outcome.diagnostic_code == 'worker_cleanup_uncertain'
+        assert not list(scratch.iterdir())
+    finally:
+        for runtime in runtimes:
+            runtime.teardown()
+        operations._environment_owners.clear()
