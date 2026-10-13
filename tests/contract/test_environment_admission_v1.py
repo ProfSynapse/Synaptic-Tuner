@@ -400,3 +400,49 @@ def test_improvement_input_bytes_stay_reference_owned(harness, tmp_path):
     with pytest.raises(DataOperationError):
         operations.start(plan)
     assert clients.calls == 0
+
+
+_BAD_WORKFLOW_YAML = (
+    b"a: 1\na: 2\n",
+    b"a: &cycle [*cycle]\n",
+    b"x: .nan\n", b"x: .inf\n",
+    b"x: " + b"[" * 40 + b"0" + b"]" * 40,
+    b"x: [" + b"0," * 20000 + b"0]\n",
+    b"x: !!binary YQ==\n", b"x: 2026-10-13\n",
+    b"1: not-a-string-key\n", b"[]\n",
+    b"base: &base {x: 1}\nuse: {<<: *base, x: 2}\n",
+)
+
+
+@pytest.mark.parametrize("raw", _BAD_WORKFLOW_YAML)
+def test_shared_workflow_parser_and_admission_reject_same_unsafe_documents(harness, raw):
+    from SynthChat.utils.yaml_loader import parse_workflow_yaml
+    from synaptic_tuner.api.v1.reference.environment import _yaml
+    with pytest.raises(ValueError):
+        parse_workflow_yaml(raw)
+    with pytest.raises(ValueError):
+        _yaml(raw)
+    operations, request, _, host, clients, _ = harness
+    host.raw["tool-schema"] = raw
+    host.dependencies = tuple(replace(item, sha256=hashlib.sha256(raw).hexdigest(), size_bytes=len(raw))
+                              if item.role == "tool_schema" else item for item in host.dependencies)
+    with pytest.raises(DataOperationError, match="environment_invalid"):
+        operations.plan(request)
+    assert clients.calls == 0
+
+
+def test_valid_merge_alias_fractional_and_encoded_yaml_have_same_meaning(harness):
+    from SynthChat.utils.yaml_loader import parse_workflow_yaml
+    from synaptic_tuner.api.v1.reference.environment import _yaml
+    text = "base: &base {fraction: 0.125}\nmerged: {<<: *base, label: café}\n"
+    expected = {"base": {"fraction": 0.125}, "merged": {"fraction": 0.125, "label": "café"}}
+    for raw in (text.encode("utf-8"), text.encode("utf-16")):
+        assert parse_workflow_yaml(raw) == _yaml(raw) == expected
+    operations, request, _, host, clients, _ = harness
+    raw = text.encode("utf-8")
+    host.raw["tool-schema"] = raw
+    host.dependencies = tuple(replace(item, sha256=hashlib.sha256(raw).hexdigest(), size_bytes=len(raw))
+                              if item.role == "tool_schema" else item for item in host.dependencies)
+    capture = operations._verify_plan(operations.plan(request))
+    assert parse_workflow_yaml(capture.document_bytes("tool_schema", "tool-schema")) == expected
+    assert clients.calls == 0

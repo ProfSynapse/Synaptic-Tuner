@@ -17,7 +17,6 @@ from contextlib import ExitStack
 from pathlib import Path
 from dataclasses import dataclass, field
 
-import yaml
 from jsonschema import Draft202012Validator
 from referencing import Registry
 
@@ -133,24 +132,6 @@ def _read(path: Path) -> bytes:
         return bytes(chunks)
 
 
-class _UniqueLoader(yaml.SafeLoader):
-    pass
-
-
-def _mapping(loader, node, deep=False):
-    loader.flatten_mapping(node)
-    result = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        if type(key) is not str or key in result:
-            raise _invalid()
-        result[key] = loader.construct_object(value_node, deep=deep)
-    return result
-
-
-_UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapping)
-
-
 def _tree(value, depth=0, budget=None, active=None):
     budget = [20000] if budget is None else budget
     active = set() if active is None else active
@@ -172,21 +153,10 @@ def _tree(value, depth=0, budget=None, active=None):
 
 
 def _yaml(raw):
-    depth = 0
-    for count, event in enumerate(yaml.parse(raw, Loader=yaml.SafeLoader)):
-        if count > 20000:
-            raise _invalid()
-        if isinstance(event, (yaml.events.MappingStartEvent, yaml.events.SequenceStartEvent)):
-            depth += 1
-            if depth > 32:
-                raise _invalid()
-        elif isinstance(event, (yaml.events.MappingEndEvent, yaml.events.SequenceEndEvent)):
-            depth -= 1
-    document = yaml.load(raw, Loader=_UniqueLoader)
-    _tree(document)
-    if type(document) is not dict:
-        raise _invalid()
-    return document
+    # The same pure parser will consume retained snapshot documents. This
+    # import remains lazy so composing the reference does not load SynthChat.
+    from SynthChat.utils.yaml_loader import parse_workflow_yaml
+    return parse_workflow_yaml(raw)
 
 
 def _dependency(role, ref, raw):
