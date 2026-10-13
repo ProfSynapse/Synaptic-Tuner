@@ -364,3 +364,89 @@ def test_main_exit_codes(tmp_path):
     not_results = _write(tmp_path / "other.json", {"hello": "world"})
     assert run("--candidate", str(not_results)) == EXIT_INPUT_ERROR
     assert compare.main(["--reference", str(ref)]) == EXIT_INPUT_ERROR
+
+
+def _public_payload(records, **metadata):
+    """Actual reference EvaluationAPI artifact metadata spelling, no CLI defaults."""
+    values = {
+        "run_id": "evaluation-test", "project_ref": "project-test",
+        "backend": "local", "model": "model", "model_revision": "revision",
+        "scenario_refs": ["tool_prompts.yaml"], "preset": None,
+        "tags": [], "case_limit": None, "partial": False,
+    }
+    values.update(metadata)
+    return {"schema_version": "synaptic-evaluation-run-payload/v1",
+            "metadata": values, "summary": {}, "records": records}
+
+
+def _comparison_of_payloads(tmp_path, reference, candidate):
+    ref = load_results(_write(tmp_path / "reference.json", reference))
+    cand = load_results(_write(tmp_path / "candidate.json", candidate))
+    return build_comparison(ref, [cand], GateThresholds(max_pass_rate_drop=100))["candidates"][0]
+
+
+@pytest.mark.parametrize(('setting', 'changed', 'canonical'), [
+    ('scenario_refs', ['other.yaml'], 'scenarios'),
+    ('tags', ['subset'], 'tags_filter'),
+    ('case_limit', 1, 'limit'),
+])
+def test_public_report_scope_difference_is_noncomparable(tmp_path, setting, changed, canonical):
+    item = _comparison_of_payloads(tmp_path, _public_payload(_reference_records()),
+        _public_payload(_reference_records(), **{setting: changed}))
+    assert not item['comparable'] and not item['gate']['passed']
+    assert any(f"'{canonical}' differs" in mismatch for mismatch in item['mismatches'])
+
+
+def test_public_and_legacy_aliases_compare_same_settings(tmp_path):
+    reference = _reference_payload(scenarios=['b.yaml', 'a.yaml'], tags_filter=['b', 'a'], limit=10)
+    candidate = _public_payload(_reference_records(), scenario_refs=['a.yaml', 'b.yaml'], tags=['a', 'b'], case_limit=10)
+    item = _comparison_of_payloads(tmp_path, reference, candidate)
+    assert item['comparable'] and item['gate']['passed']
+
+
+@pytest.mark.parametrize(('legacy', 'public', 'original', 'different'), [
+    ('scenarios', 'scenario_refs', ['tool_prompts.yaml'], ['other.yaml']),
+    ('tags_filter', 'tags', [], ['subset']),
+    ('limit', 'case_limit', None, 1),
+])
+@pytest.mark.parametrize('side', ['reference', 'candidate'])
+def test_conflicting_aliases_reject_even_when_other_artifact_omits_setting(tmp_path, legacy, public, original, different, side):
+    contradictory = _public_payload(_reference_records(), **{legacy: different, public: original})
+    unknown = _public_payload(_reference_records())
+    del unknown['metadata'][public]
+    reference, candidate = (contradictory, unknown) if side == 'reference' else (unknown, contradictory)
+    item = _comparison_of_payloads(tmp_path, reference, candidate)
+    assert not item['comparable'] and not item['gate']['passed']
+    assert any(f"{side} setting '{legacy}' has conflicting aliases" in mismatch for mismatch in item['mismatches'])
+
+
+def test_equal_dual_aliases_are_not_conflicts(tmp_path):
+    candidate = _public_payload(_reference_records(), scenario_refs=['a', 'b'], scenarios=['b', 'a'],
+                                tags=['x', 'y'], tags_filter=['y', 'x'], case_limit=None, limit=None)
+    reference = _public_payload(_reference_records(), scenario_refs=['b', 'a'], tags=['y', 'x'])
+    item = _comparison_of_payloads(tmp_path, reference, candidate)
+    assert item['comparable'] and item['gate']['passed']
+
+
+def test_absent_public_setting_remains_unknown_not_an_empty_default(tmp_path):
+    reference = _public_payload(_reference_records(), tags=['subset'])
+    candidate = _public_payload(_reference_records())
+    del candidate['metadata']['tags']
+    assert _comparison_of_payloads(tmp_path, reference, candidate)['comparable']
+
+
+def test_case_identity_check_still_applies_after_alias_normalization(tmp_path):
+    reference = _public_payload([_record('first-case', True)], scenario_refs=['a', 'b'], case_limit=1)
+    candidate = _payload([_record('other-case', True)], scenarios=['b', 'a'], limit=1)
+    item = _comparison_of_payloads(tmp_path, reference, candidate)
+    assert not item['comparable'] and not item['gate']['passed']
+    assert any('case ids differ' in mismatch for mismatch in item['mismatches'])
+
+
+def test_cli_public_scope_gate_exit_and_allow_incomparable(tmp_path):
+    reference = _write(tmp_path / 'reference.json', _public_payload(_reference_records()))
+    candidate = _write(tmp_path / 'candidate.json', _public_payload(_reference_records(), case_limit=1))
+    arguments = ['--reference', str(reference), '--candidate', str(candidate)]
+    assert compare.main(arguments) == EXIT_OK  # Existing report-only behavior.
+    assert compare.main([*arguments, '--max-pass-rate-drop', '100']) == EXIT_GATE_FAILED
+    assert compare.main([*arguments, '--max-pass-rate-drop', '100', '--allow-mismatch']) == EXIT_OK
