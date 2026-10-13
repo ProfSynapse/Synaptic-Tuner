@@ -168,7 +168,7 @@ def test_missing_retained_database_rejects_before_scope_without_recreation(tmp_p
     assert events == ['bootstrap', 'cpu', 'stage', 'spawn']
 
 
-def test_nonterminal_retained_run_refuses_before_sdk(tmp_path, monkeypatch):
+def test_nonterminal_run_without_retained_call_refuses_before_sdk(tmp_path, monkeypatch):
     import json
     from synaptic_tuner.api.v1.results import TrainingRunRef
     from tuner.execution.coordinator_v1.operations import RunOperationsV1
@@ -180,6 +180,10 @@ def test_nonterminal_retained_run_refuses_before_sdk(tmp_path, monkeypatch):
     keys = list((tmp_path / 'state' / 'synaptic-training').glob('*/authority-keys.json'))
     assert len(keys) == 1
     run = TrainingRunRef.from_dict(json.loads(keys[0].read_bytes())['run'])
+    retained = reader.load_retained_modal_run(keys[0].parent, expected_run=run)
+    import sqlite3
+    with sqlite3.connect(retained.inputs['attempt_journal']) as db:
+        db.execute("DELETE FROM catalogs WHERE catalog_ref = 'packaged-calls-v1'")
     monkeypatch.setattr(reader, 'validate_local_launcher', lambda: None)
     monkeypatch.setattr(reader, 'open_modal_host_scope', lambda **kwargs: pytest.fail('nonterminal SDK read'))
     with pytest.raises(reader.ModalRetainedReadUnavailable):

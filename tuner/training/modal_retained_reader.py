@@ -1,7 +1,7 @@
-"""Provider-read-only RunsAPI for new, privately retained terminal Modal runs.
+"""Provider-read-only RunsAPI for new, privately retained known Modal calls.
 
 Local authenticated observations and verification may advance durable records.
-This never restores executable sources, grants, log proof or an in-flight run.
+This never restores executable sources, effect grants, log proof or continuation.
 """
 from __future__ import annotations
 
@@ -52,6 +52,9 @@ from tuner.training.packaged_boundary import derive_packaged_coordinator_materia
 _TERMINAL = frozenset({
     WorkflowPhaseV1.SUCCEEDED_UNVERIFIED, WorkflowPhaseV1.VERIFIED, WorkflowPhaseV1.VERIFICATION_FAILED,
 })
+_ACTIVE = frozenset({WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.RUNNING,
+                     WorkflowPhaseV1.CANCEL_REQUESTED})
+_READABLE = _TERMINAL | _ACTIVE
 
 
 class ModalRetainedReadUnavailable(RuntimeError):
@@ -95,7 +98,7 @@ class _TerminalOperations:
         if run != self._run:
             raise RunOperationError(RunOperationCode.RUN_MISSING)
         record = self._workflows.get(run)
-        if record is None or record.phase not in _TERMINAL:
+        if record is None or record.phase not in _READABLE:
             raise RunOperationError(RunOperationCode.READ_INELIGIBLE)
     def show(self, run):
         self._check(run)
@@ -209,7 +212,7 @@ def _typed_inputs(retained):
 
 @contextmanager
 def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk, clock=None):
-    """Open one exact terminal run; provider reads only, local CAS writes allowed."""
+    """Open one exact retained call; provider reads only, local CAS writes allowed."""
     opened = False
     try:
         if type(run) is not TrainingRunRef or not isinstance(root, Path):
@@ -269,8 +272,9 @@ def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk
                 observation_authenticator=ObservationAuthenticator(evidence), artifact_verifier=verifier,
             )
             workflow = workflows.get(run)
-            if workflow is None or workflow.phase not in _TERMINAL or workflow.submit is None:
+            if workflow is None or workflow.phase not in _READABLE or workflow.submit is None:
                 raise ValueError
+            reader.bind_workflows(workflows)
             commitment_record = records.read(
                 partition=_AUTHORIZATION, key=f"policy/{workflow.preflight_digest}",
             )
@@ -304,8 +308,10 @@ def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk
                 artifact_verifier=verifier, cursor_authority=authority.cursor_authority, clock=authority.clock,
             )
             # This uses the exact assessment retained in the original submit.
-            request = operations._request(workflow, ProviderReadPurposeV1.ARTIFACTS)
-            binding = reader._binding(request, ProviderReadPurposeV1.ARTIFACTS)
+            purpose = (ProviderReadPurposeV1.OBSERVE if workflow.phase in _ACTIVE
+                       else ProviderReadPurposeV1.ARTIFACTS)
+            request = operations._request(workflow, purpose)
+            binding = reader._binding(request, purpose)
             call = effects.calls.resolve(binding.command_digest)
             resource_digest = domain_digest(
                 "synaptic-modal-packaged-resource-request/v1", canonical_bytes({
