@@ -100,7 +100,8 @@ def _producer(root):
         run_root = root / 'host/state/synaptic-training' / run.run_id
         retained = reader.load_retained_modal_run(run_root, expected_run=run)
         _publish_provider_fixture(root, binding, call_ref, retained)
-        print(json.dumps({'ready': True, 'pid': os.getpid(), 'run': run.to_dict(), 'effects': events}), flush=True)
+        print(json.dumps({'ready': True, 'pid': os.getpid(), 'run': run.to_dict(), 'effects': events,
+                          'census_digest': _census_digest(root, run.to_dict())}), flush=True)
         # The parent kills this exact Popen process while the original host's
         # SQLite connections and runner stack are still alive.
         signal.alarm(60)
@@ -199,7 +200,8 @@ def _consumer(root, role):
             assert observed == state['artifact_hashes']
         restored = view.runs.show(run)
     return {'pid': os.getpid(), 'before': before, 'state': restored.state.value,
-            'verified_artifacts': len(restored.artifacts), 'reads': reads}
+            'verified_artifacts': len(restored.artifacts), 'reads': reads,
+            'census_digest': _census_digest(root, run.to_dict())}
 
 
 def _child(role, root, expected_source):
@@ -223,6 +225,18 @@ def _census(root, run):
     path = root / 'host/state/synaptic-training' / run['run_id'] / 'workflow.sqlite3'
     with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as db:
         return tuple(db.execute('SELECT partition,key,revision,canonical FROM records ORDER BY partition,key')), tuple(db.execute('SELECT partition,stream_key,sequence,canonical FROM streams ORDER BY partition,stream_key,sequence'))
+
+
+def _census_digest(root, run):
+    digest = hashlib.sha256()
+    for table, rows in zip(('records', 'streams'), _census(root, run), strict=True):
+        digest.update(table.encode())
+        for row in rows:
+            for value in row:
+                raw = value if type(value) is bytes else json.dumps(value).encode()
+                digest.update(len(raw).to_bytes(8, 'big'))
+                digest.update(raw)
+    return digest.hexdigest()
 
 
 @pytest.mark.skipif(os.name != 'posix', reason='finite SIGKILL host-loss proof is POSIX-only')
@@ -252,7 +266,6 @@ def test_killed_host_reconnects_in_fresh_processes_with_real_signed_artifacts(tm
             producer.wait(timeout=5)
         producer.stdout.close()
         producer.stderr.close()
-    before = _census(root, ready['run'])
     import shutil
     for path in (root / 'host').iterdir():
         if path.name == 'state':
@@ -263,7 +276,8 @@ def test_killed_host_reconnects_in_fresh_processes_with_real_signed_artifacts(tm
             path.unlink()
     run_root = root / 'host/state/synaptic-training' / ready['run']['run_id']
     for path in run_root.iterdir():
-        if path.name in {'authority-keys.json', 'readback-inputs.json', 'workflow.sqlite3'}:
+        if path.name in {'authority-keys.json', 'readback-inputs.json', 'workflow.sqlite3',
+                         'workflow.sqlite3-wal', 'workflow.sqlite3-shm', 'workflow.sqlite3-journal'}:
             continue
         if path.is_dir():
             shutil.rmtree(path)
@@ -273,7 +287,10 @@ def test_killed_host_reconnects_in_fresh_processes_with_real_signed_artifacts(tm
     assert pending.returncode == 0, pending.stderr.decode()
     first = json.loads(pending.stdout)
     assert first['pid'] != producer.pid and first['state'] == 'queued'
-    assert _census(root, ready['run']) == before
+    assert first['census_digest'] == ready['census_digest']
+    # The parent does not open either database until the first fresh consumer
+    # has reopened retained state and completed its public pending observation.
+    assert _census_digest(root, ready['run']) == ready['census_digest']
     snapshot = _snapshot(root)
     snapshot['phase'] = 'completed'
     temporary = root / 'completed-provider.json'
@@ -285,11 +302,12 @@ def test_killed_host_reconnects_in_fresh_processes_with_real_signed_artifacts(tm
     assert second['pid'] not in (producer.pid, first['pid'])
     assert second['before'] == 'queued' and second['state'] == 'succeeded'
     assert second['verified_artifacts'] == 5
-    assert _census(root, ready['run']) != before
-    verified_census = _census(root, ready['run'])
+    assert second['census_digest'] != ready['census_digest']
+    verified_census = _census_digest(root, ready['run'])
     verified = subprocess.run(_command(root, 'verified'), env=environment, capture_output=True, timeout=60)
     assert verified.returncode == 0, verified.stderr.decode()
     third = json.loads(verified.stdout)
     assert third['pid'] not in (producer.pid, first['pid'], second['pid'])
     assert third['verified_artifacts'] == 5 and not third['reads']
-    assert _census(root, ready['run']) == verified_census
+    assert third['census_digest'] == verified_census
+    assert _census_digest(root, ready['run']) == verified_census
