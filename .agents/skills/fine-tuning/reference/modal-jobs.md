@@ -574,6 +574,57 @@ run. Hub publication is optional and separately authorized. The remote producer
 emits exactly five artifacts: workload record, training lineage, training
 metrics, final model, and tokenizer.
 
+### Read a retained terminal run
+
+New standalone runs retain the original signing keys, exact composition inputs
+and generic workflow database under `$XDG_STATE_HOME/synaptic-training/<run-id>`
+(default `~/.local/state/synaptic-training/<run-id>`). Keep the private directory
+and original attempt journal together. Keys are private host authentication
+material; do not commit or share these files.
+
+Use the exact run ID returned by training, the same named Modal profile and the
+same environment, from the pinned launcher environment. A failure after successful
+retention includes `error.details.run_ref` and `retention_ready: true`; this means
+private state was saved, not that the workflow is terminal or eligible for
+readback. The reader checks eligibility independently.
+When installing the package with `uv` on the same filesystem as its cache, use
+`uv pip install --link-mode copy ...`. Runtime source checks reject shared
+hard-linked files; the normal CI consumer uses `pip`, which installs copies.
+
+```bash
+synaptic runs show --run <run-id> --modal-profile <profile> --modal-environment <environment> --json
+synaptic runs verify --run <run-id> --modal-profile <profile> --modal-environment <environment> --json
+synaptic runs download --run <run-id> --modal-profile <profile> --modal-environment <environment> --artifact-role final_model --dest <private-output-directory> --json
+```
+
+`python tuner.py` accepts the same arguments from a checkout. `latest` is not
+supported. These commands use the retained inputs rather than loading the current
+recipe or preparing another training job. The reader accepts only authenticated
+terminal workflows (`SUCCEEDED_UNVERIFIED`, `VERIFIED`, `VERIFICATION_FAILED`);
+it rejects pending, ambiguous or missing state before contacting the provider.
+The named profile must still resolve to the retained account/workspace/environment.
+Local replay authenticates the saved workflow with its original host keys. The
+runtime completion key is checked against signed remote evidence; a changed but
+well-formed completion key cannot be independently detected before those reads.
+It still cannot produce an accepted artifact or authorize another submission.
+
+`show` reads the outcome. `verify` checks native artifacts for a retained
+`SUCCEEDED_UNVERIFIED` or `VERIFICATION_FAILED` workflow and returns exit code 2
+when verification fails or is unavailable. A `VERIFIED` workflow uses `show` and
+`download`; calling `verify` again is refused because the separate `reverify`
+operation is not exposed by this reader. `download` uses the existing verified stream and
+creates `<artifact-role>.artifact` only after the full length and hash match.
+The supported roles are `final_model`, `tokenizer`, `training_lineage`,
+`training_metrics` and `workload_record`. Existing destination files are never
+overwritten; failed transfers preserve their private partial files. Use an
+unused destination for another download attempt.
+
+Provider reads can persist authenticated observations or verification in the
+local workflow database. This path does not rebuild or submit training and does
+not expose logs, cancellation, reconciliation or in-flight recovery. It cannot
+recover historical lost signing keys. These are provider-free implementation
+claims until separately qualified against a live retained run.
+
 ### Training artifact retention policy
 
 The live Modal training policy admits at most **192 MiB for one artifact** and
@@ -591,8 +642,9 @@ aggregate limits and final size/hash verification. Test a multi-MiB SDK-shaped
 block through the real facade and public artifact stream; tiny fake payloads
 do not exercise this boundary. A zero-byte local partial identifies pre-body
 failure only; it does not establish which authentication or transport check
-failed. Do not rerun a consumed submission to recover a download. The standalone
-host's process-local coordinator state is not durable download-resume support.
+failed. Do not rerun a consumed submission to recover a download. Newly retained
+terminal runs support retained readback through the commands above; older
+runs without their original private keys and workflow state cannot be restored.
 
 Large LoRA output is not trusted merely because training reports success. Its
 publication and later retrieval stream bounded bytes, then verify the expected

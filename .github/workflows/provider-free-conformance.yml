@@ -457,7 +457,7 @@ jobs:
           ]))
           PYCODE
 
-      - name: Exercise installed standalone Modal run retention
+      - name: Exercise installed standalone Modal retention and terminal reads
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}
         run: |
@@ -468,10 +468,12 @@ jobs:
           import sys
           import tuner.training.modal_run_retention as retention
           import tuner.training.modal_standalone_runner as runner
+          import tuner.training.modal_retained_reader as retained_reader
+          import tuner.handlers.runs_handler as runs_handler
           import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
 
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (retention, runner, sqlite_store):
+          for module in (retention, runner, sqlite_store, retained_reader, runs_handler):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -483,6 +485,11 @@ jobs:
               "training/test_modal_standalone_runner.py",
               "training/test_modal_run_retention_io.py",
               "training/test_modal_run_retention_integration.py",
+              "training/test_modal_retained_reader.py",
+              "training/test_retained_storage_open.py",
+              "training/test_modal_retained_run_diagnostics.py",
+              "training/test_retained_runs_cli_integration.py",
+              "cli/test_retained_runs.py",
           ):
               target = root / "tests" / name
               target.parent.mkdir(parents=True, exist_ok=True)
@@ -509,6 +516,11 @@ jobs:
               "-q", "-p", "no:cacheprovider",
               str(root / "tests/training/test_modal_run_retention_io.py"),
               str(root / "tests/training/test_modal_run_retention_integration.py"),
+              str(root / "tests/training/test_modal_retained_reader.py"),
+              str(root / "tests/training/test_retained_storage_open.py"),
+              str(root / "tests/training/test_modal_retained_run_diagnostics.py"),
+              str(root / "tests/training/test_retained_runs_cli_integration.py"),
+              str(root / "tests/cli/test_retained_runs.py"),
           ]))
           PYCODE
 
