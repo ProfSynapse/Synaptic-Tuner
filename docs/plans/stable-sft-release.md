@@ -116,21 +116,57 @@ new submission grant or renewing a deadline.
 Exit: the same fault/restart/cancel suite passes against all three providers,
 with independent review of submission and cleanup authority.
 
-## 5. Make progress durable across local and HF publication
+## 5. Make final artifact publication durable
+
+The reference publication composition currently uses in-memory state and an
+empty destination registry. It does not establish durable host-local or Hugging
+Face model-repository publication. HF bucket progress is a different operation
+and cannot close this gate.
+
+- [ ] Support final verified native artifact streaming to host-local storage and
+  HF model repositories through the public artifact/publication boundary.
+  Persist exact source/run/artifact hashes, destination identity, authority and
+  publication attempt before writing; do not infer authority from a path or run.
+- [ ] Persist claimed, transferring, committed, verified and ambiguous outcomes
+  with versioned transitions, concurrency fencing and bounded deadlines. A
+  remote commit and its durable local receipt are distinct facts.
+- [ ] Bound source streams, spool files, per-file and aggregate bytes, staging
+  lifetime and readback. Verify exact destination inventory, sizes and hashes
+  before reporting completion; partial spools do not become final artifacts.
+- [ ] Use destination-appropriate no-replace/CAS publication. For HF model
+  repositories, bind the expected parent revision and retain the exact returned
+  immutable commit; verify readback at that pinned commit rather than mutable
+  HEAD. Conflicting concurrent writers must reject rather than overwrite.
+- [ ] Recover external success followed by local receipt loss through bounded
+  exact-identity readback/reconciliation. Unknown completion remains ambiguous;
+  restart cannot blindly repeat destination writes or create another commit.
+- [ ] Test crashes during transfer, before/after destination commit and before
+  durable receipt/verification, plus competing host processes and destination
+  conflicts. Reconcile only the exact authorized publication, preserving failed
+  attempts and inconsistent evidence without adoption or cleanup authority.
+
+Exit: both host-local and HF model-repository publication survive restart and
+concurrency without duplicate destination writes/commits, and expose verified
+or explicitly ambiguous results through the supported durable host composition.
+
+### Progress retention and reconnect are a separate gate
 
 - [ ] Define signed/verified bounded progress, cursor and duplicate/conflict
   semantics, durable retention acknowledgment and restart reconstruction.
-- [ ] Qualify local publication and HF provider storage through their real public
-  readers, including delayed visibility, transient reads, malformed/partial
-  content, truncation, conflicting duplicates and interrupted local fsync.
-- [ ] Reuse the Modal SDK create-only publication strategy and per-call proof
+- [ ] Qualify local progress publication and HF progress storage through their
+  real public readers, including delayed visibility, transient reads,
+  malformed/partial content, truncation, conflicting duplicates and interrupted
+  local fsync. This is not final model publication.
+- [ ] Reuse the Modal SDK create-only progress strategy and exact per-call proof
   gate where applicable. Historical CPU fixtures do not qualify GPU metrics on
   a new source, nor prove freshness/completeness or atomic server transactions.
+  Preserve the finite per-call read/page/ledger/deadline limits.
 - [ ] Keep progress best-effort unless a stronger guarantee is separately proved;
   verified terminal outcomes/artifacts determine completion, never missing tails.
 
-Exit: documented durability and reconnect behavior is demonstrated rather than
-inferred from process-local cursors or retained JSONL alone.
+Exit: documented progress durability and reconnect behavior is demonstrated,
+not inferred from process-local cursors or retained JSONL alone. Neither this
+exit nor bucket progress substitutes for durable final artifact publication.
 
 ## 6. Close provider parity in order
 
