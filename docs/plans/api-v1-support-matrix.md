@@ -8,7 +8,9 @@ updated: 2026-10-13
 
 This matrix inventories the selected stable-v1 scope at `df166a75`; it is not a
 release certification. Subsequent work must update individual rows only after
-implementation and exact-source acceptance. The [stable release plan](stable-v1-release.md)
+implementation and exact-source acceptance. Environment rows include later
+admission/snapshot and fixed-worker evidence through `27dde56e`; optional session
+integration remains pending public acceptance. The [stable release plan](stable-v1-release.md)
 is the acceptance authority. SFT requires Docker, Modal and HF Jobs parity;
 GRPO selects Modal as the first candidate, still unqualified. DPO/KTO, RunPod,
 Syntunia and broader GRPO provider parity are deferred.
@@ -30,8 +32,8 @@ Status vocabulary:
 | --- | --- | --- |
 | Scenarios: author/edit/version | Existing config-first YAML/CLI authoring; complete public authoring operation unavailable | Scenario/rubric schemas and loaders exist. `DataAPI` consumes scenario refs; it is not a scenario CRUD/version authority. Define immutable public authoring/validation references and installed resources. |
 | Scenarios: validate/select | Implemented/provider-free loaders and validation | Config/scenario validation does not establish semantic input coverage or permission for environment effects. Qualify actual installed assets and representative full scenarios. |
-| Environments: config/create/validate | Legacy configurable runtime paths implemented; public reference data integration unavailable | `ReferenceDataPortsV1` has config/scenario/rubric/client ports only; generation passes `environment_validator=None`. Config alone cannot add executor/authority. Proposed C1 is future work until reviewed and integrated. |
-| Environments: execute/tools/feedback | Existing local/runtime execution and provider-free tests; included public workflow unqualified | Require reusable bound executor/authority port, tool allowlists, custody, finite deadlines, structured errors and judge/improver feedback. Configured simulation must remain distinguishable from actual execution. |
+| Environments: config/create/validate | Reviewed admission/snapshot inputs and fixed worker; optional host session integration pending public acceptance | C1 admission, retained bytes and explicit parsing are reviewed. Current integration adds optional `ReferenceDataPortsV1.environment_sessions` and a host-configured session factory over existing runtime methods; it must pass actual public/installed acceptance before support is claimed. No new public environment facade or grant framework is required. |
+| Environments: execute/tools/feedback | Accepted bounded filesystem/fixed supervisor primitives; public generation/improvement execution acceptance pending | Worker `27dde56e` has real-child tests and permanent installed smoke. Host policy/fixture inputs and callback feedback must be exercised through normal DataAPI. Supervisor failures and uncertain cleanup are infrastructure facts, not model-quality failures; simulation remains explicit. No sandbox, universal wall-clock or restart-controller claim. |
 | SynthChat: plan/preflight/generate | Implemented/provider-free public `DataAPI` + optional reference backend | Host supplies exact `ReferenceDataPortsV1` and LLM clients. Public generation is not automatically environment-backed; installed and real backend acceptance remain open. |
 | SynthChat: improve/judge | Improve mode implemented/provider-free; judge is configured workflow behavior, not a standalone `DataAPI` mode | `DataMode` exposes generate/improve. Judge/rubric client, usage and input lineage need bounded backend qualification; CLI availability is not a public judging-service guarantee. |
 | SynthChat: export/datasets/validation | Implemented/provider-free result/dataset operations and validators | Bind immutable export, format, source coverage and split lineage; no manual relabeling. Installed source assets and exact downstream training identities must be checked. |
@@ -84,8 +86,10 @@ passed checkout and sdist-built wheel asset checks plus a fresh base consumer in
 a neutral working directory. Catalog resolution and evaluator startup are tested
 without optional ML dependencies. Snapshot workflow source `f7d2df31` passed 793
 combined checks, including retained-input generation and improvement after source
-deletion. These do not qualify public environment execution or lifecycle recovery;
-those starts remain disabled. Selected ML/GPU operations still require their real
+deletion. Fixed-worker source `27dde56e` adds accepted process/fixture primitives
+and the permanent neutral installed smoke. Optional session-factory integration
+is not yet public execution or lifecycle recovery acceptance; selected starts
+remain disabled until that integration is accepted. Selected ML/GPU operations still require their real
 dependencies. Source checkout success alone is not installed workflow acceptance.
 
 HTTP/SSE/browser transport, auth service, credentials, durable grants/stores and
@@ -103,3 +107,13 @@ explicitly host supplied and outside any automatic universal stability claim.
 - [Data modes/operations](../../synaptic_tuner/api/v1/data_facade.py), [reference data ports/execution](../../synaptic_tuner/api/v1/reference/data.py).
 - [Reference evaluation backends/cancellation](../../synaptic_tuner/api/v1/reference/evaluation.py), [reporting](../../Evaluator/reporting.py), [comparison CLI](../../Evaluator/compare.py).
 - [Reference artifact defaults](../../synaptic_tuner/api/v1/reference/artifacts.py), [public publication](../../synaptic_tuner/api/v1/artifacts_facade.py), [SFT method compiler](../../tuner/training/methods/__init__.py).
+
+## Environment lifecycle scope
+
+The selected implementation preserves normal DataAPI operations and existing host
+record/stream stores. The proposed additional grant/episode contract framework and
+parallel v2 outcome/result/list family were cancelled; they are not acceptance
+requirements. Host-supplied policy and a session factory do not automatically
+qualify restart, cancellation or safe continuation. Unknown active attempts retain
+their uncertainty and cannot be replayed or falsely terminalized. Fixed-worker
+process descriptors are local custody, not a restored durable controller.
