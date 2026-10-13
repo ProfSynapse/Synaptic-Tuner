@@ -54,6 +54,9 @@ def create_client(
     settings: BackendSettings,
     timeout: float = 60.0,
     retries: int = 2,
+    *,
+    max_request_bytes: int | None = None,
+    max_response_bytes: int | None = None,
 ) -> BackendClient:
     """Create a backend client for the specified backend type.
 
@@ -62,6 +65,8 @@ def create_client(
         settings: Backend-specific settings object
         timeout: HTTP request timeout in seconds
         retries: Number of retry attempts
+        max_request_bytes: Optional finite HTTP JSON request body bound
+        max_response_bytes: Optional finite decompressed HTTP response body bound
 
     Returns:
         Configured backend client
@@ -90,7 +95,12 @@ def create_client(
             f"Supported: {', '.join(b.value for b in _CLIENT_REGISTRY)}"
         )
 
-    return client_class(settings=settings, timeout=timeout, retries=retries)
+    transport = {}
+    if max_request_bytes is not None:
+        transport["max_request_bytes"] = max_request_bytes
+    if max_response_bytes is not None:
+        transport["max_response_bytes"] = max_response_bytes
+    return client_class(settings=settings, timeout=timeout, retries=retries, **transport)
 
 
 def create_settings(
