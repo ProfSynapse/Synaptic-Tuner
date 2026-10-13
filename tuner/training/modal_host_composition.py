@@ -267,6 +267,13 @@ def _compose_modal_packaged_reference_host(
     reader.bind_foundation(composed.foundation)
     reader.bind_workflows(composed.stores.workflow_store)
     verifier.bind_foundation(composed.foundation)
+    bind_cancel_stores = getattr(effects, "bind_cancel_stores", None)
+    if callable(bind_cancel_stores):
+        bind_cancel_stores(
+            workflows=composed.stores.workflow_store, foundation=composed.foundation,
+            foundation_authenticator=authority.foundation_authenticator,
+            assessment_authenticator=authority.assessment_authority,
+        )
     return ModalPackagedReferenceHostV1(composed, adapter, effects, reader, verifier)
 
 

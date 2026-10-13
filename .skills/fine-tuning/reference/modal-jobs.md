@@ -633,6 +633,22 @@ can reconnect only to a known retained call, and cannot
 recover historical lost signing keys. These are provider-free implementation
 claims until separately qualified against a live retained run.
 
+Internal cancellation machinery has provider-free coverage for exact-call
+authentication, a current cancel-only host grant, bounded SDK cancellation and
+uncertain-response retention. It does not enable ordinary cancellation or
+reconciliation commands. A provider acknowledgment means cancellation was
+requested; it does not establish terminal stopped compute. The original
+staging/submission grant is never renewed by cancellation.
+
+A provider-free POSIX process-loss test kills the original host after retaining
+its exact call. Fresh isolated processes reopen the original state, preserve a
+pending checkpoint, authenticate signed fixture completion, verify/download the
+five artifact roles and read back the persisted verified result. The first
+post-kill database open belongs to the replacement host; original source inputs
+are removed and database recovery files are preserved. This qualifies that host
+restart boundary against a scripted SDK fixture, not live provider recovery or
+an uncertain submission.
+
 ### Training artifact retention policy
 
 The live Modal training policy admits at most **192 MiB for one artifact** and
