@@ -1,8 +1,9 @@
 """Bounded input admission for the disabled C1 environment execution seam.
 
 Only selected files are committed. Catalog discovery is freshly checked for
-ambiguity; unselected contents are not committed. C2 must execute immutable
-admitted snapshots: pre-read hashes alone do not remove file races.
+ambiguity; unselected contents are not committed. Captured bytes are retained
+from the same reads that derive identity. Execution remains disabled; later
+adapters must consume these bytes rather than reopen the original paths.
 """
 
 from __future__ import annotations
@@ -14,12 +15,13 @@ import stat
 import math
 from contextlib import ExitStack
 from pathlib import Path
+from dataclasses import dataclass, field
 
-import yaml
 from jsonschema import Draft202012Validator
 from referencing import Registry
 
 from ..data_facade import DataMode, DataOperationCode, DataOperationError, DataScenarioTarget
+from .._contract import digest_text
 from ..environment_execution import (
     EnvironmentBindingV1, EnvironmentDependencyV1, MAX_DEPENDENCY_BYTES,
     MAX_DEPENDENCIES, MAX_DEPENDENCY_TOTAL_BYTES, logical_ref,
@@ -28,6 +30,71 @@ from ..environment_execution import (
 
 def _invalid():
     return DataOperationError(DataOperationCode.ENVIRONMENT_INVALID)
+
+
+@dataclass(frozen=True, slots=True)
+class AdmittedEnvironmentInputs:
+    """Private, process-local input custody; never a session or restart grant.
+
+    No raw bytes appear in public plans or durable records. Only fresh
+    re-admission may supply this capture; it is not reconstructed from a plan.
+    """
+
+    targets: tuple[DataScenarioTarget, ...]
+    rows_requested: int
+    source_digest: str
+    binding: EnvironmentBindingV1
+    documents: tuple[tuple[str, str, bytes], ...] = field(repr=False)
+    _binding_digest: str = field(init=False, repr=False)
+
+    def __post_init__(self):
+        if type(self.binding) is not EnvironmentBindingV1:
+            raise TypeError("exact environment binding required")
+        binding = EnvironmentBindingV1.from_dict(self.binding.to_dict())
+        object.__setattr__(self, "binding", binding)
+        object.__setattr__(self, "_binding_digest", binding.binding_digest)
+        if type(self.targets) is not tuple or any(type(item) is not DataScenarioTarget for item in self.targets):
+            raise TypeError("exact scenario targets required")
+        object.__setattr__(self, "targets", tuple(DataScenarioTarget.from_dict(item.to_dict()) for item in self.targets))
+        if (not self.targets or type(self.rows_requested) is not int or
+                not 1 <= self.rows_requested <= binding.bounds.max_rows or
+                self.rows_requested != sum(item.rows for item in self.targets)):
+            raise ValueError("rows must match captured targets")
+        digest_text(self.source_digest, "source_digest")
+        self._check_documents()
+
+    def _check_documents(self):
+        if self.binding.binding_digest != self._binding_digest:
+            raise _invalid()
+        if type(self.documents) is not tuple or len(self.documents) != len(self.binding.dependencies):
+            raise _invalid()
+        expected = {dependency.ref: dependency for dependency in self.binding.dependencies}
+        seen = set()
+        for entry in self.documents:
+            if type(entry) is not tuple or len(entry) != 3:
+                raise _invalid()
+            role, ref, raw = entry
+            if type(role) is not str or type(ref) is not str or type(raw) is not bytes:
+                raise _invalid()
+            dependency = expected.get(ref)
+            if dependency is None or ref in seen or role != dependency.role:
+                raise _invalid()
+            if len(raw) != dependency.size_bytes or hashlib.sha256(raw).hexdigest() != dependency.sha256:
+                raise _invalid()
+            seen.add(ref)
+
+    def document_bytes(self, role: str, ref: str) -> bytes:
+        self._check_documents()
+        for item_role, item_ref, raw in self.documents:
+            if (item_role, item_ref) == (role, ref):
+                return raw
+        raise _invalid()
+
+    def workflow_documents(self) -> tuple[tuple[str, str, bytes], ...]:
+        """The exact common WorkflowInputSnapshot input, excluding host/dataset bytes."""
+        self._check_documents()
+        roles = {"validation", "privacy", "registry", "scenario", "rubric"}
+        return tuple(entry for entry in self.documents if entry[0] in roles)
 
 
 def _read(path: Path) -> bytes:
@@ -65,24 +132,6 @@ def _read(path: Path) -> bytes:
         return bytes(chunks)
 
 
-class _UniqueLoader(yaml.SafeLoader):
-    pass
-
-
-def _mapping(loader, node, deep=False):
-    loader.flatten_mapping(node)
-    result = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        if type(key) is not str or key in result:
-            raise _invalid()
-        result[key] = loader.construct_object(value_node, deep=deep)
-    return result
-
-
-_UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapping)
-
-
 def _tree(value, depth=0, budget=None, active=None):
     budget = [20000] if budget is None else budget
     active = set() if active is None else active
@@ -104,21 +153,10 @@ def _tree(value, depth=0, budget=None, active=None):
 
 
 def _yaml(raw):
-    depth = 0
-    for count, event in enumerate(yaml.parse(raw, Loader=yaml.SafeLoader)):
-        if count > 20000:
-            raise _invalid()
-        if isinstance(event, (yaml.events.MappingStartEvent, yaml.events.SequenceStartEvent)):
-            depth += 1
-            if depth > 32:
-                raise _invalid()
-        elif isinstance(event, (yaml.events.MappingEndEvent, yaml.events.SequenceEndEvent)):
-            depth -= 1
-    document = yaml.load(raw, Loader=_UniqueLoader)
-    _tree(document)
-    if type(document) is not dict:
-        raise _invalid()
-    return document
+    # The same pure parser will consume retained snapshot documents. This
+    # import remains lazy so composing the reference does not load SynthChat.
+    from SynthChat.utils.yaml_loader import parse_workflow_yaml
+    return parse_workflow_yaml(raw)
 
 
 def _dependency(role, ref, raw):
@@ -222,6 +260,7 @@ def admit_environment(request, ports):
         if request.max_iterations > binding.bounds.max_turns:
             raise _invalid()
         host = {}
+        captured_documents = []
         for dependency in binding.dependencies:
             if dependency.role not in {"tool_schema", "execution_policy", "fixture_schema"} or dependency.role in host:
                 raise _invalid()
@@ -233,6 +272,7 @@ def admit_environment(request, ports):
                 raise _invalid()
             _no_external_refs(document)
             host[dependency.role] = document
+            captured_documents.append((dependency.role, dependency.ref, raw))
         if set(host) != {"tool_schema", "execution_policy", "fixture_schema"}:
             raise _invalid()
         policy = {
@@ -260,9 +300,12 @@ def admit_environment(request, ports):
                 raise _invalid()
             fixture_validator.validate(configuration)
         dependencies = list(binding.dependencies)
+        def capture(role, ref, raw):
+            dependencies.append(_dependency(role, ref, raw))
+            captured_documents.append((role, ref, raw))
         for path, raw in selected_files.items():
             logical_ref(path.stem, "scenario file")
-            dependencies.append(_dependency("scenario", "scenario:" + path.stem, raw))
+            capture("scenario", "scenario:" + path.stem, raw)
         rubric_refs = set(request.rubric_refs)
         engine = request.mode is DataMode.IMPROVE or request.max_iterations > 1
         if engine:
@@ -275,7 +318,7 @@ def admit_environment(request, ports):
                         raise _invalid()
                     rubric_refs.update(refs)
             raw = _read(ports.config_dir / "validation.yaml")
-            dependencies.append(_dependency("validation", "config:validation", raw))
+            capture("validation", "config:validation", raw)
             _no_external_refs(_yaml(raw))
             discovered = {path.stem: (raw, document) for path, raw, document in _scan(ports.rubrics_dir) if path.name != "quality_labels.yaml"}
             for ref in sorted(rubric_refs):
@@ -284,19 +327,19 @@ def admit_environment(request, ports):
                     raise _invalid()
                 raw, document = discovered[ref]
                 _no_external_refs(document)
-                dependencies.append(_dependency("rubric", "rubric:" + ref, raw))
+                capture("rubric", "rubric:" + ref, raw)
         if request.mode is DataMode.GENERATE:
             from SynthChat.config.format_resolver import _CONFIG_DIR
             for name in ("tool_call_formats", "workspace_formats", "label_mappings"):
                 raw = _read(_CONFIG_DIR / (name + ".yaml"))
                 _no_external_refs(_yaml(raw))
-                dependencies.append(_dependency("registry", "registry:" + name, raw))
+                capture("registry", "registry:" + name, raw)
             raw = _read(ports.config_dir / "privacy_profiles.yaml")
             _no_external_refs(_yaml(raw))
-            dependencies.append(_dependency("privacy", "config:privacy_profiles", raw))
+            capture("privacy", "config:privacy_profiles", raw)
         else:
             raw = _read(Path(request.input_dataset_ref))
-            dependencies.append(_dependency("dataset", "input:dataset", raw))
+            capture("dataset", "input:dataset", raw)
             dataset_rows = []
             for line in raw.decode("utf-8").splitlines():
                 if not line.strip():
@@ -325,7 +368,10 @@ def admit_environment(request, ports):
         rows = sum(target.rows for target in targets)
         if rows > binding.bounds.max_rows:
             raise _invalid()
-        return targets, rows, domain_digest("synaptic-reference-data-source/v1", source), resolved
+        return AdmittedEnvironmentInputs(
+            targets, rows, domain_digest("synaptic-reference-data-source/v1", source), resolved,
+            tuple(sorted(captured_documents, key=lambda entry: entry[1])),
+        )
     except DataOperationError:
         raise
     except Exception:

@@ -328,3 +328,121 @@ def test_explicit_contract_submodule_imports_no_engine_or_provider():
     subprocess.run([sys.executable, "-I", "-c", f"import sys;sys.path.insert(0,{str(ROOT)!r});"
         "import synaptic_tuner.api.v1.environment_execution;"
         "assert not any(n.split('.')[0] in {'tuner','SynthChat','modal','e2b','torch'} for n in sys.modules)"], check=True)
+
+
+def test_fresh_capture_keeps_same_read_bytes_after_sources_change_or_disappear(harness, monkeypatch):
+    operations, request, ports, host, clients, scenario = harness
+    plan = operations.plan(request)
+    capture = operations._verify_plan(plan)
+    assert capture is not None
+    expected_scenario = scenario.read_bytes()
+    expected_privacy = (ports.config_dir / "privacy_profiles.yaml").read_bytes()
+    expected_policy = host.raw["policy"]
+    original_documents = capture.documents
+    scenario.unlink()
+    (ports.config_dir / "privacy_profiles.yaml").write_bytes(b"profiles: {}\n")
+    host.raw["policy"] = b"changed after capture"
+    # Consumption is strictly in-memory; no hidden reopen or resolver read.
+    import synaptic_tuner.api.v1.reference.environment as admission
+    monkeypatch.setattr(admission, "_read", lambda path: pytest.fail("captured access reopened source"))
+    assert capture.document_bytes("scenario", "scenario:selected") == expected_scenario
+    assert capture.document_bytes("privacy", "config:privacy_profiles") == expected_privacy
+    assert capture.document_bytes("execution_policy", "policy") == expected_policy
+    assert capture.documents == original_documents
+    workflow = capture.workflow_documents()
+    assert {entry[0] for entry in workflow} == {"scenario", "registry", "privacy"}
+    assert all(type(entry[2]) is bytes for entry in workflow)
+    assert clients.calls == 0
+
+
+def test_new_start_capture_must_match_plan_before_clients(harness):
+    operations, request, _, _, clients, scenario = harness
+    plan = operations.plan(request)
+    first = operations._verify_plan(plan)
+    scenario.write_bytes(scenario.read_bytes() + b"\n# changed exact bytes, same parsed scenario\n")
+    with pytest.raises(DataOperationError, match="environment_invalid"):
+        operations._verify_plan(plan)
+    with pytest.raises(DataOperationError, match="environment_invalid"):
+        operations.start(plan)
+    assert first.document_bytes("scenario", "scenario:selected") != scenario.read_bytes()
+    assert clients.calls == 0
+
+
+def test_capture_clones_host_binding_and_rejects_substituted_documents(harness):
+    operations, request, _, host, _, _ = harness
+    plan = operations.plan(request)
+    capture = operations._verify_plan(plan)
+    object.__setattr__(host.dependencies[0], "sha256", "f" * 64)
+    assert capture.binding == plan.environment_binding
+    capture.workflow_documents()
+    with pytest.raises(DataOperationError, match="environment_invalid"):
+        replace(capture, documents=capture.documents[:-1])
+    changed = list(capture.documents)
+    role, ref, raw = changed[0]
+    changed[0] = (role, ref, raw + b" ")
+    with pytest.raises(DataOperationError, match="environment_invalid"):
+        replace(capture, documents=tuple(changed))
+
+
+def test_improvement_input_bytes_stay_reference_owned(harness, tmp_path):
+    operations, request, _, _, clients, _ = harness
+    dataset = tmp_path / "input.jsonl"
+    raw = b'{"messages": [{"role": "assistant", "content": "original"}]}\n'
+    dataset.write_bytes(raw)
+    request = replace(request, mode=DataMode.IMPROVE, scenarios=(), input_dataset_ref=str(dataset),
+                      rubric_refs=("response_quality",))
+    plan = operations.plan(request)
+    capture = operations._verify_plan(plan)
+    dataset.unlink()
+    assert capture.document_bytes("dataset", "input:dataset") == raw
+    assert {entry[0] for entry in capture.workflow_documents()} == {"validation", "rubric"}
+    assert "documents" not in plan.to_dict()
+    with pytest.raises(DataOperationError):
+        operations.start(plan)
+    assert clients.calls == 0
+
+
+_BAD_WORKFLOW_YAML = (
+    b"a: 1\na: 2\n",
+    b"a: &cycle [*cycle]\n",
+    b"x: .nan\n", b"x: .inf\n",
+    b"x: " + b"[" * 40 + b"0" + b"]" * 40,
+    b"x: [" + b"0," * 20000 + b"0]\n",
+    b"x: !!binary YQ==\n", b"x: 2026-10-13\n",
+    b"1: not-a-string-key\n", b"[]\n",
+    b"base: &base {x: 1}\nuse: {<<: *base, x: 2}\n",
+)
+
+
+@pytest.mark.parametrize("raw", _BAD_WORKFLOW_YAML)
+def test_shared_workflow_parser_and_admission_reject_same_unsafe_documents(harness, raw):
+    from SynthChat.utils.yaml_loader import parse_workflow_yaml
+    from synaptic_tuner.api.v1.reference.environment import _yaml
+    with pytest.raises(ValueError):
+        parse_workflow_yaml(raw)
+    with pytest.raises(ValueError):
+        _yaml(raw)
+    operations, request, _, host, clients, _ = harness
+    host.raw["tool-schema"] = raw
+    host.dependencies = tuple(replace(item, sha256=hashlib.sha256(raw).hexdigest(), size_bytes=len(raw))
+                              if item.role == "tool_schema" else item for item in host.dependencies)
+    with pytest.raises(DataOperationError, match="environment_invalid"):
+        operations.plan(request)
+    assert clients.calls == 0
+
+
+def test_valid_merge_alias_fractional_and_encoded_yaml_have_same_meaning(harness):
+    from SynthChat.utils.yaml_loader import parse_workflow_yaml
+    from synaptic_tuner.api.v1.reference.environment import _yaml
+    text = "base: &base {fraction: 0.125}\nmerged: {<<: *base, label: café}\n"
+    expected = {"base": {"fraction": 0.125}, "merged": {"fraction": 0.125, "label": "café"}}
+    for raw in (text.encode("utf-8"), text.encode("utf-16")):
+        assert parse_workflow_yaml(raw) == _yaml(raw) == expected
+    operations, request, _, host, clients, _ = harness
+    raw = text.encode("utf-8")
+    host.raw["tool-schema"] = raw
+    host.dependencies = tuple(replace(item, sha256=hashlib.sha256(raw).hexdigest(), size_bytes=len(raw))
+                              if item.role == "tool_schema" else item for item in host.dependencies)
+    capture = operations._verify_plan(operations.plan(request))
+    assert parse_workflow_yaml(capture.document_bytes("tool_schema", "tool-schema")) == expected
+    assert clients.calls == 0

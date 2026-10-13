@@ -169,6 +169,18 @@ Selected environment starts still reject before clients and claims. C2 must
 retain admitted bytes and consume those snapshots, enforce host authorization,
 and prove bounded local execution and cleanup before C3 can qualify the workflow.
 
+The first C2 prerequisite retains private input captures from the same bounded
+reads that establish dependency identity. Fresh re-admission must match the full
+plan before returning a capture. Subsequent source mutation or deletion cannot
+change those retained bytes. Public plans contain only dependency identities;
+host policy, tool schemas, fixtures and dataset bytes remain reference-owned.
+This process-local capture is not persisted recovery authority. Admission and
+future workflow consumption share a bounded YAML parser that checks expanded
+alias graphs before constructing mappings. The integrated capture/parser slice
+passed 193 focused checks at `028fab5f`. Actual snapshot consumption, explicit
+parser/catalog injection, authorization and execution remain separate C2 gates;
+both execute and simulate starts remain disabled.
+
 The shared fixture starts with bounded files and a declared action/assertion
 policy. A deterministic LLM reply first triggers a missing-file failure. That
 structured result reaches the judge and improver; the revised reply performs the
