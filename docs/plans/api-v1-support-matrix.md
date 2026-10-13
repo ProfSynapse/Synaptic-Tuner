@@ -79,9 +79,10 @@ Modal launching requires exact POSIX CPython 3.11.14 / Modal 1.5.4 and its pinne
 closure. Do not equate these with a universal library install requirement.
 
 Public schemas and workflow asset/catalog packaging are release preparation
-work. Base `df166a75` includes lightweight evaluator import fixes, but later A/D
-asset/catalog changes and installed-consumer gate G must supply exact terminal
-evidence before this matrix says their installed workflows are accepted. Base
+work. Base `df166a75` includes A's asset inventory and its individual packaging checks
+as well as lightweight evaluator import fixes. D's catalog resolution and the
+combined installed-consumer gate G are later; combined installed workflow
+acceptance must be recorded separately before broader operational claims. Base
 help does not require optional ML dependencies; selected ML/GPU operations still
 require their real dependencies. Source checkout success is not wheel/sdist
 acceptance or safe runtime asset resolution.
