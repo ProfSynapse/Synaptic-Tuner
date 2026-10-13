@@ -6,7 +6,7 @@ import hashlib
 from pathlib import PurePosixPath
 
 from synaptic_tuner.api.v1.planning import (
-    ProviderPlanContextV1,
+    ProviderPlanContextV1, ProviderPlanRef, ResolvedTrainingRequest, TrainingPlanBasisV1,
     TrainingPlan as LegacyTrainingPlan,
 )
 from synaptic_tuner.api.v1.providers import ProviderRef
@@ -14,7 +14,7 @@ from synaptic_tuner.api.v1.results import TrainingRunRef
 from tuner.training.contracts import TrainingPlan
 
 from ...coordinator_v1.model import ProviderExecutionBindingV1
-from ...foundation_v2.canonical import canonical_bytes, digest_text
+from ...foundation_v2.canonical import canonical_bytes, digest_text, domain_digest
 from ...foundation_v2.commands import CanonicalProviderPayloadV1
 from ...foundation_v2.identities import EffectKind
 from ...foundation_v2.preparation import CanonicalPreparationV2
@@ -229,6 +229,62 @@ class DockerTrainingPreparationBridgeV1:
 
     def _snapshot(self) -> DockerProfileV1:
         return validated_profile_snapshot(self._profile)
+
+    def coordinator_material(self, plan, material, recipes):
+        """Project complete admitted rich material onto existing Docker identities.
+
+        The material commitment preserves runtime/policy fields not represented
+        by the Docker profile. Neither fingerprint replaces the other.
+        """
+        from tuner.training.coordinator_material import (
+            CoordinatorResolvedMaterial, _canonical, _runtime, _resources, _policy,
+        )
+        if type(plan) is not TrainingPlan or type(material) is not CoordinatorResolvedMaterial:
+            raise ValueError("docker_coordinator_material_invalid")
+        owned = CoordinatorResolvedMaterial.parse(material.canonical_bytes, recipes)
+        actual = (
+            _canonical(plan.execution_source.to_dict()),
+            _canonical(plan.execution_context.to_dict()),
+            _canonical(plan.resolved_config.to_dict()),
+            _canonical(plan.workload.to_dict()),
+            _canonical(_runtime(plan.runtime)),
+            _canonical(_resources(plan.resources)),
+            _canonical(_policy(plan.artifact_policy)),
+        )
+        expected = (owned.execution_source_bytes, owned.execution_context_bytes,
+                    owned.resolved_config_bytes, owned.workload_bytes,
+                    owned.runtime_bytes, owned.resources_bytes, owned.artifact_policy_bytes)
+        if actual != expected or owned.run_id != plan.execution_source.run_id:
+            raise ValueError("docker_coordinator_material_invalid")
+        original = owned.planning_request
+        run = TrainingRunRef(owned.run_id, original.project_ref)
+        profile, _, _ = self._expected(plan, run, original.source_digest)
+        projected = ResolvedTrainingRequest(
+            original.schema_version, original.request_id, original.project_ref,
+            original.source_digest,
+            domain_digest("synaptic-docker-coordinator-material/v1", owned.canonical_bytes),
+            profile.workload.workload_digest, profile.runtime.digest, profile.artifacts.digest,
+        )
+        return owned, projected
+
+    def coordinator_prepared(self, *, plan, material, coordinator_plan, run, recipes):
+        owned, projected = self.coordinator_material(plan, material, recipes)
+        profile = self._snapshot()
+        basis = TrainingPlanBasisV1.from_resolved(projected)
+        context = ProviderPlanContextV1(
+            "synaptic-provider-plan-context/v1", profile.provider, basis.basis_digest,
+            profile.descriptor.descriptor_digest, profile.profile_digest,
+        )
+        expected = LegacyTrainingPlan("synaptic-training-plan/v2", basis,
+                                      ProviderPlanRef(context.provider_context_digest))
+        if (type(coordinator_plan) is not LegacyTrainingPlan or coordinator_plan != expected
+                or type(run) is not TrainingRunRef
+                or run != TrainingRunRef(owned.run_id, projected.project_ref)):
+            raise ValueError("docker_coordinator_plan_invalid")
+        materializer = DockerPreparationMaterializerV1(profile)
+        binding = DockerBindingResolverV1(profile).resolve(profile.provider, context)
+        preparation = materializer.prepare(expected, run, binding)
+        return preparation, materializer.prepared(preparation)
 
     def _expected(
         self,

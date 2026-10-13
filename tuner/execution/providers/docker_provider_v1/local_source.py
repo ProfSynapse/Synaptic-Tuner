@@ -107,7 +107,8 @@ class DockerLocalSourceSealsV1:
     """
     def __init__(self, *, training_plan, prepared_plan, bundle, closure_members,
                  prepared_lease, source_root, source_container_root,
-                 artifact_root, artifact_container_root, deadline, sign_seal):
+                 artifact_root, artifact_container_root, deadline, sign_seal,
+                 coordinator_plan=None, coordinator_material=None, recipes=None):
         if (type(training_plan) is not RichTrainingPlan or
             type(prepared_plan) is not PreparedDockerPlanV1 or
             type(bundle) is not WorkerBundleMaterializationV1 or
@@ -123,8 +124,19 @@ class DockerLocalSourceSealsV1:
         if prepared_plan.source_digest != execution_material_digest(training_plan.execution_source):
             raise ValueError('docker_source_identity_invalid')
         bridge = DockerTrainingPreparationBridgeV1(prepared_plan.profile)
-        prep = bridge.prepare(training_plan, run, prepared_plan.source_digest)
-        if bridge.prepared(preparation=prep, plan=training_plan, run=run, source_digest=prepared_plan.source_digest) != prepared_plan:
+        if (coordinator_plan is None) != (coordinator_material is None):
+            raise ValueError('docker_source_plan_invalid')
+        if coordinator_plan is None:
+            if recipes is not None:
+                raise ValueError('docker_source_plan_invalid')
+            prep = bridge.prepare(training_plan, run, prepared_plan.source_digest)
+            expected_plan = bridge.prepared(preparation=prep, plan=training_plan,
+                run=run, source_digest=prepared_plan.source_digest)
+        else:
+            prep, expected_plan = bridge.coordinator_prepared(plan=training_plan,
+                material=coordinator_material, coordinator_plan=coordinator_plan,
+                run=run, recipes=recipes)
+        if expected_plan != prepared_plan:
             raise ValueError('docker_source_plan_invalid')
         control = WorkerControlLocationV1(PurePosixPath('/source/control'))
         expected = materialize_worker_bundle(build_source_worker_invocation(

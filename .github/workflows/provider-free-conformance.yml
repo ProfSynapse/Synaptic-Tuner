@@ -382,9 +382,10 @@ jobs:
           import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
           import synaptic_tuner.api.v1.reference.repositories as repositories
           import shared.environments.local_worker as worker
+          import shared.environments.bounded_local_runtime as bounded_runtime
 
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (SynthChat, data, sessions, worker, sqlite_store, repositories):
+          for module in (SynthChat, data, sessions, worker, bounded_runtime, sqlite_store, repositories):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -398,6 +399,10 @@ jobs:
                        "test_sqlite_store_v1.py", "test_atomic_workflow_store_v1.py",
                        "test_sqlite_workflow_host_v1.py", "test_reference_composition_v1.py"):
               shutil.copy2(checkout / "tests" / "contract" / name, tests / name)
+          environments = root / "tests" / "environments"
+          environments.mkdir()
+          for name in ("test_local_worker.py", "test_bounded_local_runtime.py"):
+              shutil.copy2(checkout / "tests" / "environments" / name, environments / name)
           for name in ("config", "rubrics"):
               shutil.copytree(Path(SynthChat.__file__).parent / name, root / "SynthChat" / name,
                               ignore=shutil.ignore_patterns("*.py", "__pycache__"))
@@ -408,7 +413,9 @@ jobs:
                           str(tests / "test_atomic_lifecycle_v1.py"),
                           str(tests / "test_sqlite_store_v1.py"),
                           str(tests / "test_atomic_workflow_store_v1.py"),
-                          str(tests / "test_sqlite_workflow_host_v1.py")], cwd=root, check=True)
+                          str(tests / "test_sqlite_workflow_host_v1.py"),
+                          str(environments / "test_local_worker.py"),
+                          str(environments / "test_bounded_local_runtime.py")], cwd=root, check=True)
           PY
 
       - name: Exercise installed Modal durable host composition
@@ -607,6 +614,49 @@ jobs:
               str(root / "tests/execution/providers/docker_provider_v1/test_local_artifacts.py"),
               str(root / "tests/execution/providers/docker_provider_v1/test_cancellation_transport.py"),
               str(root / "tests/execution/providers/docker_provider_v1/test_local_source.py")]))
+          PYCODE
+
+      - name: Exercise installed Docker public host lifecycle
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import tuner.training.docker_host_composition as composition
+          import tuner.training.docker_host_authority as authority
+          import tuner.execution.providers.docker_provider_v1.preparation as preparation
+          import tuner.execution.providers.docker_provider_v1.local_source as source
+          import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
+
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          for module in (composition, authority, preparation, source, sqlite_store):
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-docker-host-tests"
+          for name in (
+              "training/test_docker_host_composition.py",
+              "execution/providers/docker_provider_v1/conftest.py",
+              "execution/providers/docker_provider_v1/test_local_source.py",
+              "execution/providers/docker_provider_v1/test_preparation.py",
+              "training/test_sft_compilation.py",
+              "runtime/test_artifact_verification.py",
+          ):
+              target = root / "tests" / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / "tests" / name, target)
+              for parent in target.parents:
+                  if parent == root:
+                      break
+                  (parent / "__init__.py").touch()
+          import pytest
+          sys.path.insert(0, str(root))
+          os.chdir(root)
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
+              str(root / "tests/training/test_docker_host_composition.py")]))
           PYCODE
 
       - name: Check source hashes and the token-profile example pin without refreshing the runtime lock
