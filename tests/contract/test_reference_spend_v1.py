@@ -483,3 +483,27 @@ def test_paid_data_backend_without_a_factory_spend_scope_stays_refused_backend_u
         assert refused.value.code is DataOperationCode.BACKEND_UNMETERED
         assert factory.requests == [] and client.chat_calls == 0
         assert not harness.records.list_page(partition=EFFECTS, prefix="", after_key=None, limit=10).records
+
+
+def test_comparison_recheck_exception_preserves_measured_usage_and_closed_spend(tmp_path):
+    from Evaluator.comparison_basis import GENERATION_KEYS
+    class Client(MeteredScriptedClient):
+        projections = 0
+        def comparison_configuration(self):
+            self.projections += 1
+            if self.projections == 2:
+                raise ValueError("private comparison failure")
+            return {"backend": "scripted", "revision": "v1",
+                    "generation": {name: None for name in GENERATION_KEYS}}
+    class Backend(MeteredScriptedBackend):
+        def open(self, model):
+            self.opened.append(model)
+            return Client(self, self._responses, None, self._unmeasured)
+    backend = Backend()
+    api, _, records, plan, _ = _evaluate(tmp_path, backend)
+    run = api.evaluation.start(plan).run
+    result = api.evaluation.result(EvaluationResultRequest(run))
+    assert result.state is EvaluationRunState.SUCCEEDED
+    assert (result.usage.input_tokens, result.usage.output_tokens) == (2 * PER_CALL[0], 2 * PER_CALL[1])
+    (effect,) = _spend_records(records)
+    assert effect.state is SpendEffectState.FOUND and effect.usage == result.usage

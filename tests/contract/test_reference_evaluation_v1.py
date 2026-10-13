@@ -276,7 +276,7 @@ def _write_config(root: Path) -> Path:
     return root / "config"
 
 
-def _host(tmp_path: Path, *, backends, records=None, streams=None, judge=None, sink_root=None):
+def _host(tmp_path: Path, *, backends, records=None, streams=None, judge=None, sink_root=None, artifact_reader=None):
     """Compose a reference host with the evaluation family over the fake provider family."""
     records = records if records is not None else InMemoryDurableRecordStoreV1()
     streams = streams if streams is not None else InMemoryDurableStreamStoreV1()
@@ -362,7 +362,7 @@ def _host(tmp_path: Path, *, backends, records=None, streams=None, judge=None, s
     if backends is not None:
         evaluation = ReferenceEvaluationPortsV1(
             config_root, EvaluationBackendRegistryV1(backends),
-            DirectoryEvaluationArtifactSinkV1(sink_root), judge,
+            DirectoryEvaluationArtifactSinkV1(sink_root), judge, artifact_reader,
         )
     composition = compose_reference_host(
         family=family, ports=ports,
@@ -712,3 +712,191 @@ def test_host_without_evaluation_ports_leaves_the_slot_empty(tmp_path) -> None:
     assert composition.evaluation is None
     with pytest.raises(Exception):
         api.evaluation
+
+
+class ComparisonScriptedClient(ScriptedClient):
+    def comparison_configuration(self):
+        from Evaluator.comparison_basis import GENERATION_KEYS
+        return {"backend": "scripted", "revision": "scripted-request/v1",
+                "generation": {key: None for key in GENERATION_KEYS}}
+
+
+class ComparisonScriptedBackend(ScriptedBackend):
+    def open(self, model):
+        self.opened.append(model)
+        return ComparisonScriptedClient(self, self._responses, self._on_chat)
+
+
+def test_actual_reports_compare_model_variable_without_reopening_backend(tmp_path):
+    from Evaluator.compare import compare_payloads
+    reports = []
+    backends = []
+    for name, response in (("first", "hello"), ("second", "goodbye")):
+        backend = ComparisonScriptedBackend({**RESPONSES, "Say hello": response})
+        _, api, _, _, _, sink = _host(tmp_path / name, backends={"local": backend})
+        request = _request("alpha.yaml")
+        from dataclasses import replace
+        request = replace(request, model=EvaluationModelRef("fixture-" + name, "revision"))
+        run = api.evaluation.start(api.evaluation.plan(request)).run
+        reports.append(json.loads(_artifact_bytes(sink, run, EVALUATION_RESULTS_ROLE)))
+        backends.append(backend)
+    assert all(report["metadata"]["comparison_basis"]["status"] == "verified" for report in reports)
+    result = compare_payloads(*reports)
+    assert result["passed"] is True
+    assert result["candidates"][0]["flips"]["regression_count"] == 1
+    assert [len(backend.chats) for backend in backends] == [2, 2]
+    raw = json.dumps(result)
+    assert SECRET_VALUE not in raw and "Say hello" not in raw and "goodbye" not in raw
+
+
+def test_report_basis_uses_consumed_cases_after_source_deletion(tmp_path):
+    import shutil
+    backend = ComparisonScriptedBackend(on_chat=lambda question: shutil.rmtree(tmp_path / "config", ignore_errors=True))
+    _, api, _, _, _, sink = _host(tmp_path, backends={"local": backend})
+    _, _, started = _run(api)
+    payload = json.loads(_artifact_bytes(sink, started.run, EVALUATION_RESULTS_ROLE))
+    assert payload["metadata"]["comparison_basis"]["status"] == "verified"
+    assert len(backend.chats) == 2 and not (tmp_path / "config").exists()
+
+
+def test_legacy_backend_keeps_working_but_basis_is_explicitly_unverified(tmp_path):
+    backend = ScriptedBackend()
+    _, api, _, _, _, sink = _host(tmp_path, backends={"local": backend})
+    _, _, started = _run(api)
+    basis = json.loads(_artifact_bytes(sink, started.run, EVALUATION_RESULTS_ROLE))["metadata"]["comparison_basis"]
+    assert basis["status"] == "unverified" and basis["reasons"] == ["backend_controls_unavailable"]
+    assert api.evaluation.show(started.run).state is EvaluationRunState.SUCCEEDED
+
+
+def test_optional_declaration_capture_failure_never_strands_running(tmp_path, monkeypatch):
+    from shared.validation import dataset_validator
+    backend = ComparisonScriptedBackend()
+    _, api, _, _, _, _ = _host(tmp_path, backends={"local": backend})
+    monkeypatch.setattr(dataset_validator, "default_validator_config", lambda: (_ for _ in ()).throw(ValueError("private failure")))
+    _, _, started = _run(api)
+    assert api.evaluation.show(started.run).state is EvaluationRunState.FAILED
+    assert len(backend.chats) == 2
+
+
+def test_second_backend_projection_failure_retains_actual_scored_results(tmp_path):
+    class Client(ComparisonScriptedClient):
+        def __init__(self, *args):
+            super().__init__(*args)
+            self.projections = 0
+        def comparison_configuration(self):
+            self.projections += 1
+            if self.projections == 2:
+                raise ValueError("private projection failure")
+            return super().comparison_configuration()
+    class Backend(ComparisonScriptedBackend):
+        def open(self, model):
+            self.opened.append(model)
+            return Client(self, self._responses, self._on_chat)
+    backend = Backend()
+    _, api, _, _, _, sink = _host(tmp_path, backends={"local": backend})
+    plan, _, started = _run(api)
+    outcome = api.evaluation.show(started.run)
+    assert outcome.state is EvaluationRunState.SUCCEEDED and outcome.cases_scored == 2
+    payload = json.loads(_artifact_bytes(sink, started.run, EVALUATION_RESULTS_ROLE))
+    assert payload["metadata"]["scenario_digest"] == plan.scenario_digest
+    assert payload["metadata"]["comparison_basis"]["reasons"] == ["comparison_recheck_unavailable"]
+    assert "private projection failure" not in json.dumps(payload)
+
+
+def test_public_compare_reads_two_bound_reports_without_backend_or_grant_effects(tmp_path):
+    from dataclasses import replace
+    sink = DirectoryEvaluationArtifactSinkV1(tmp_path / "sink")
+    backend = ComparisonScriptedBackend()
+    _, api, grants, records, streams, _ = _host(tmp_path, backends={"local": backend}, artifact_reader=sink)
+    requests = [replace(_request("alpha.yaml"), model=EvaluationModelRef("fixture-" + name, "revision"))
+                for name in ("one", "two")]
+    runs = [api.evaluation.start(api.evaluation.plan(request)).run for request in requests]
+    before = (len(backend.chats), len(grants.authorized), len(grants.bound))
+    backend.open = lambda *args: pytest.fail("comparison opens backend")
+    backend.requirement = lambda *args: pytest.fail("comparison asks for effect")
+    result = api.evaluation.compare(*(EvaluationResultRequest(run) for run in runs))
+    assert result["passed"] and result["reference_run"] == runs[0].to_dict()
+    assert result["candidate_run"] == runs[1].to_dict()
+    assert before == (len(backend.chats), len(grants.authorized), len(grants.bound))
+
+
+def test_public_compare_without_host_reader_is_closed_unavailable(tmp_path):
+    _, api, _, _, _, _ = _host(tmp_path, backends={"local": ComparisonScriptedBackend()})
+    _, _, started = _run(api)
+    with pytest.raises(EvaluationOperationError) as caught:
+        api.evaluation.compare(EvaluationResultRequest(started.run), EvaluationResultRequest(started.run))
+    assert caught.value.code is EvaluationOperationCode.RESULT_UNAVAILABLE
+
+
+def test_public_compare_refuses_hash_tamper_before_parsing(tmp_path):
+    sink = DirectoryEvaluationArtifactSinkV1(tmp_path / "sink")
+    _, api, _, _, _, _ = _host(tmp_path, backends={"local": ComparisonScriptedBackend()}, artifact_reader=sink)
+    _, _, started = _run(api)
+    path = sink.root / started.run.run_id / (EVALUATION_RESULTS_ROLE + ".json")
+    path.write_bytes(path.read_bytes() + b" ")
+    with pytest.raises(EvaluationOperationError) as caught:
+        api.evaluation.compare(EvaluationResultRequest(started.run), EvaluationResultRequest(started.run))
+    assert caught.value.code is EvaluationOperationCode.INTEGRITY_ERROR
+
+
+def test_actual_sqlite_cold_comparison_needs_no_current_scenarios_or_backend(tmp_path):
+    import shutil
+    from dataclasses import replace
+    from synaptic_tuner.api.v1.evaluation_facade import EvaluationAPI
+    from synaptic_tuner.api.v1.reference.sqlite_store import SQLiteDurableStoreV1
+    from synaptic_tuner.api.v1.reference.evaluation import ReferenceEvaluationOperationsV1
+    sink = DirectoryEvaluationArtifactSinkV1(tmp_path / "sink")
+    backend = ComparisonScriptedBackend()
+    store = SQLiteDurableStoreV1(tmp_path / "workflow.sqlite3")
+    _, api, grants, _, _, _ = _host(tmp_path, backends={"local": backend}, records=store, streams=store, artifact_reader=sink)
+    requests = [replace(_request("alpha.yaml"), model=EvaluationModelRef("fixture-" + name, "revision")) for name in ("one", "two")]
+    runs = [api.evaluation.start(api.evaluation.plan(request)).run for request in requests]
+    counts = (len(backend.chats), len(grants.authorized), len(grants.bound))
+    store.close()
+    shutil.rmtree(tmp_path / "config")
+    class NoBackends:
+        def resolve(self, name):
+            pytest.fail("cold comparison resolves backend")
+    with SQLiteDurableStoreV1(tmp_path / "workflow.sqlite3") as cold:
+        ports = ReferenceEvaluationPortsV1(tmp_path / "config", NoBackends(), sink, artifact_reader=sink)
+        operations = ReferenceEvaluationOperationsV1(records=cold, streams=cold, clock=Clock(), ports=ports)
+        report = EvaluationAPI(operations).compare(*(EvaluationResultRequest(run) for run in runs))
+        assert report["passed"] is True
+    assert counts == (len(backend.chats), len(grants.authorized), len(grants.bound))
+    assert not (tmp_path / "config").exists()
+
+
+@pytest.mark.parametrize("substitution", ["run", "role", "type"])
+def test_bound_reader_rejects_substituted_artifact_before_comparison(tmp_path, substitution):
+    sink = DirectoryEvaluationArtifactSinkV1(tmp_path / "sink")
+    class Reader:
+        def read(self, run_id, role, maximum_bytes):
+            assert role == EVALUATION_RESULTS_ROLE
+            if substitution == "type":
+                return "not bytes"
+            source_run = other_run.run_id if substitution == "run" else run_id
+            source_role = EVALUATION_TRACE_ROLE if substitution == "role" else role
+            return sink.read(source_run, source_role, EVALUATION_ARTIFACT_MAXIMUM_BYTES)
+    from synaptic_tuner.api.v1.reference.evaluation import EVALUATION_ARTIFACT_MAXIMUM_BYTES
+    from dataclasses import replace
+    _, api, _, _, _, _ = _host(tmp_path, backends={"local": ComparisonScriptedBackend()}, artifact_reader=Reader())
+    _, _, started = _run(api)
+    other = replace(_request("alpha.yaml"), request_id="other")
+    other_run = api.evaluation.start(api.evaluation.plan(other)).run
+    with pytest.raises(EvaluationOperationError) as caught:
+        api.evaluation.compare(EvaluationResultRequest(started.run), EvaluationResultRequest(started.run))
+    assert caught.value.code is EvaluationOperationCode.INTEGRITY_ERROR
+
+
+def test_public_comparison_uses_existing_renderers_and_explicit_clock(tmp_path):
+    from Evaluator.compare import render_markdown, render_console
+    sink = DirectoryEvaluationArtifactSinkV1(tmp_path / "sink")
+    _, api, _, _, _, _ = _host(tmp_path, backends={"local": ComparisonScriptedBackend()}, artifact_reader=sink)
+    _, _, started = _run(api)
+    report = api.evaluation.compare(EvaluationResultRequest(started.run), EvaluationResultRequest(started.run))
+    assert report["generated_at"] == NOW
+    assert report["thresholds"]["active"] is False
+    assert report["reference"]["path"] == "reference" and report["reference"]["stats"]["total"] == 2
+    assert "Evaluation Comparison" in render_markdown(report)
+    assert "Reference: reference" in render_console(report)
+    assert SECRET_VALUE not in render_markdown(report) and "Say hello" not in render_console(report)

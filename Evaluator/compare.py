@@ -181,6 +181,165 @@ def load_results(path: Path, label: Optional[str] = None) -> ResultsFile:
     )
 
 
+
+def from_payload(payload: Mapping[str, Any], *, label: str) -> ResultsFile:
+    """Bounded detached report input for pure comparison; no path reads."""
+    from .comparison_basis import bounded_json, MAX_CASES
+    detached = json.loads(bounded_json(payload))
+    if type(detached) is not dict or type(detached.get("records")) is not list:
+        raise CompareInputError("invalid evaluation report")
+    if len(detached["records"]) > MAX_CASES:
+        raise CompareInputError("evaluation report exceeds case bound")
+    metadata = detached.get("metadata", {})
+    if type(metadata) is not dict:
+        raise CompareInputError("invalid evaluation report metadata")
+    if type(detached.get("summary", {})) is not dict:
+        raise CompareInputError("invalid evaluation report summary")
+    for key in ("partial", "dry_run"):
+        if key in metadata and type(metadata[key]) is not bool:
+            raise CompareInputError("invalid evaluation completion metadata")
+    if "artifact_status" in metadata and metadata["artifact_status"] not in {"complete", "partial", "failed"}:
+        raise CompareInputError("invalid evaluation completion status")
+    for key in ("model", "model_revision", "backend"):
+        value = metadata.get(key)
+        if value is not None and (type(value) is not str or not 1 <= len(value) <= 512):
+            raise CompareInputError("invalid evaluation identity metadata")
+    cases, duplicates = {}, []
+    for record in detached["records"]:
+        if type(record) is not dict or type(record.get("case_id")) is not str or not record["case_id"]:
+            raise CompareInputError("evaluation report requires exact case identities")
+        if (len(record["case_id"]) > 256 or type(record.get("passed")) is not bool
+                or record.get("correctness_passed") is not None and type(record["correctness_passed"]) is not bool
+                or type(record.get("tags", [])) is not list
+                or len(record.get("tags", [])) > 128
+                or any(type(tag) is not str or len(tag) > 256 for tag in record.get("tags", []))
+                or record.get("latency_s") is not None and (type(record["latency_s"]) not in (int, float) or record["latency_s"] < 0)
+                or record.get("status") is not None and record["status"] not in {"pass", "warn", "fail", "inconclusive"}
+                or record.get("error") is not None and type(record["error"]) not in (str, bool)
+                or record.get("judge") is not None and type(record["judge"]) is not dict):
+            raise CompareInputError("invalid evaluation record projection")
+        if len(record.get("tags", [])) != len(set(record.get("tags", []))):
+            raise CompareInputError("duplicate evaluation tags")
+        status = record.get("status")
+        if status is not None and record["passed"] != (status in {"pass", "warn"}):
+            raise CompareInputError("contradictory evaluation record status")
+        name = record["case_id"]
+        if name in cases:
+            duplicates.append(name)
+            index = 1
+            while name in cases:
+                name = record["case_id"] + "#" + str(index)
+                index += 1
+        cases[name] = record
+    return ResultsFile(label, Path(label), metadata, detached.get("summary", {}), cases, duplicates)
+
+
+def compare_payloads(reference: Mapping[str, Any], candidate: Mapping[str, Any], *,
+                     intended_variable: str = "model", generated_at: str | None = None) -> Dict[str, Any]:
+    """Strict provenance-aware mechanical comparison of two existing reports.
+
+    Model/checkpoint is the default variable. Backend variation must be named
+    explicitly; missing historical provenance is never made comparable by an
+    override. Returned reports contain statistics and IDs, never response text.
+    """
+    import re
+    from .comparison_basis import BASIS_SCHEMA, bounded_json, MAX_COMPARISON_BYTES
+    if generated_at is not None:
+        from synaptic_tuner.api.v1._timestamps import require_rfc3339
+        require_rfc3339(generated_at, "generated_at")
+    if intended_variable not in {"model", "backend"}:
+        raise CompareInputError("unsupported comparison variable")
+    left = from_payload(reference, label="reference")
+    right = from_payload(candidate, label="candidate")
+    reasons = []
+    bases = []
+    expected = {"schema_version", "status", "reasons", "scorer_revision", "inputs_digest",
+                "validator_digest", "backend_digest", "generation_digest", "judge_digest"}
+    for side in (left, right):
+        basis = side.metadata.get("comparison_basis")
+        if basis is None:
+            bases.append(None)
+            continue
+        if (type(basis) is not dict or set(basis) != expected
+                or basis["schema_version"] != BASIS_SCHEMA
+                or basis["status"] not in {"verified", "unverified"}
+                or type(basis["reasons"]) is not list
+                or any(type(item) is not str for item in basis["reasons"])
+                or type(basis["scorer_revision"]) is not str):
+            raise CompareInputError("invalid comparison basis")
+        for key in ("inputs_digest", "validator_digest", "backend_digest", "generation_digest", "judge_digest"):
+            value = basis[key]
+            if value is not None and (type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None):
+                raise CompareInputError("invalid comparison digest")
+        if basis["status"] == "verified" and (basis["reasons"] or any(basis[key] is None for key in
+                ("inputs_digest", "validator_digest", "backend_digest", "generation_digest"))):
+            raise CompareInputError("invalid verified comparison basis")
+        bases.append(basis)
+    provenance = "verified"
+    if any(value is None or value["status"] != "verified" for value in bases):
+        provenance = "unverified"
+        reasons.append("comparison_basis_unverified")
+    else:
+        fields = ["inputs_digest", "validator_digest", "scorer_revision", "generation_digest", "judge_digest"]
+        if intended_variable == "model":
+            fields.append("backend_digest")
+        for field in fields:
+            if bases[0][field] != bases[1][field]:
+                reasons.append(field + "_differs")
+        if intended_variable == "backend" and any(left.metadata.get(key) != right.metadata.get(key)
+                for key in ("model", "model_revision")):
+            reasons.append("model_differs")
+    if left.duplicate_case_ids or right.duplicate_case_ids:
+        reasons.append("ambiguous_case_identity")
+    for side in (left, right):
+        if side.metadata.get("partial") or side.metadata.get("dry_run") or side.metadata.get("artifact_status") in {"partial", "failed"}:
+            reasons.append("evaluation_incomplete")
+    excluded = set()
+    error_counts = []
+    for side in (left, right):
+        error_counts.append(sum(bool(row.get("error")) for row in side.cases.values()))
+        for name, row in side.cases.items():
+            if row.get("error") or row.get("status") == "inconclusive" or row.get("judge", {}) and row["judge"].get("error"):
+                excluded.add(name)
+    if excluded:
+        reasons.append("inconclusive_pairs")
+        for side in (left, right):
+            side.cases = {name: row for name, row in side.cases.items() if name not in excluded}
+    # Sanitized report views prevent free-form metadata/errors leaking into output.
+    for side in (left, right):
+        side.metadata = {key: side.metadata[key] for key in ("model", "model_revision", "backend", "partial", "artifact_status", "dry_run") if key in side.metadata}
+        for row in side.cases.values():
+            row["error"] = bool(row.get("error"))
+    if len({tag for side in (left, right) for row in side.cases.values() for tag in row.get("tags", [])}) > 100:
+        raise CompareInputError("comparison exceeds configured tag bound")
+    result = compare_candidate(left, right, GateThresholds())
+    if result["mismatches"]:
+        reasons.append("case_selection_or_completion_differs")
+    result["warnings"] = []
+    result["model_revision"] = right.metadata.get("model_revision")
+    result["excluded_pair_count"] = len(excluded)
+    result["request_errors"] = {"reference": error_counts[0], "candidate": error_counts[1]}
+    result["mismatches"] = reasons
+    result["comparable"] = provenance == "verified" and not reasons
+    result["gate"] = {"active": False, "passed": result["comparable"], "breaches": []}
+    result["provenance"] = provenance
+    omitted = {}
+    for key in ("only_reference_case_ids", "only_candidate_case_ids"):
+        omitted[key] = max(0, len(result[key]) - 100)
+        result[key] = result[key][:100]
+    for key in ("regressions", "improvements"):
+        omitted[key] = max(0, len(result["flips"][key]) - 100)
+        result["flips"][key] = result["flips"][key][:100]
+    result["omitted_case_id_counts"] = omitted
+    report = {"schema_version": COMPARISON_SCHEMA_VERSION, "intended_variable": intended_variable,
+              "generated_at": generated_at, "warnings": [], "thresholds": GateThresholds().to_dict(),
+              "reference": {"label": "reference", "path": "reference", "model": left.metadata.get("model"),
+                            "model_revision": left.metadata.get("model_revision"), "backend": left.metadata.get("backend"),
+                            "model_artifact": None, "stats": side_stats(left, list(left.cases))},
+              "candidates": [result], "passed": result["comparable"]}
+    bounded_json(report, MAX_COMPARISON_BYTES)
+    return report
+
 def parse_candidate_arg(value: str) -> Tuple[Optional[str], str]:
     """Split ``LABEL=PATH``; a bare path (or one whose prefix has a separator) has no label."""
     label, sep, path = value.partition("=")

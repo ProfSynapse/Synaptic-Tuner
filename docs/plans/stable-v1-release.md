@@ -701,3 +701,26 @@ production files and five lock/closure documents matched the wheel bytes.
 Runtime lock refreshes change source commitments only: inventories, image/SDK/
 Python pins and release admissions remain unchanged. This is CPU execution and
 packaging evidence, not a provider run or GPU training qualification.
+
+### Public retained evaluation comparison
+
+The public evaluation facade compares two existing result requests through an
+optional read-only reference callback. It verifies retained report identity,
+size and digest before parsing; reopened SQLite records and host artifacts work
+without resolving a backend or rereading deleted scenario configuration.
+Reports capture the prompt, validator, scoring and generation controls actually
+consumed. The selected model or backend may vary explicitly; missing controls,
+external judge/environment inputs, partial results and ambiguous identities do
+not silently become comparable. Error and inconclusive cases remain distinct
+from model pass/fail changes. Configuration provenance does not attest a remote
+model or service implementation.
+
+A fresh source-archive-built wheel passed the neutral base-only consumer and
+209 installed tests. All six changed production modules matched reviewed source
+bytes. Tests include cold retained-report reads, public callback isolation,
+bounded strict payload validation and existing Markdown/console rendering.
+The permanent CI lane copies only tests and installed non-Python assets into a
+neutral directory. Comparison limits reports to 64 MiB, comparison output to 4 MiB and
+10,000 cases, retaining full counts when displayed IDs are capped. These limits
+do not bound upstream HTTP acquisition; transport bounds, in-flight recovery
+and live backend/judge qualification remain separate stable gates.

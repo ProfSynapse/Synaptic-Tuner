@@ -450,3 +450,131 @@ def test_cli_public_scope_gate_exit_and_allow_incomparable(tmp_path):
     assert compare.main(arguments) == EXIT_OK  # Existing report-only behavior.
     assert compare.main([*arguments, '--max-pass-rate-drop', '100']) == EXIT_GATE_FAILED
     assert compare.main([*arguments, '--max-pass-rate-drop', '100', '--allow-mismatch']) == EXIT_OK
+
+
+def _basis_payload():
+    from Evaluator.comparison_basis import BASIS_SCHEMA, SCORER_REVISION
+    basis = {"schema_version": BASIS_SCHEMA, "status": "verified", "reasons": [],
+             "scorer_revision": SCORER_REVISION, "inputs_digest": "a" * 64,
+             "validator_digest": "b" * 64, "backend_digest": "c" * 64,
+             "generation_digest": "d" * 64, "judge_digest": None}
+    return _payload([_record("one", True)], model="fixture", model_revision="one", comparison_basis=basis)
+
+
+@pytest.mark.parametrize("field", ["inputs_digest", "validator_digest", "generation_digest", "judge_digest", "scorer_revision"])
+def test_pure_comparison_rejects_changed_consumed_controls(field):
+    from copy import deepcopy
+    left = _basis_payload()
+    right = deepcopy(left)
+    right["metadata"]["comparison_basis"][field] = "changed" if field == "scorer_revision" else "e" * 64
+    result = compare.compare_payloads(left, right)
+    assert not result["passed"] and field + "_differs" in result["candidates"][0]["mismatches"]
+
+
+def test_missing_historical_basis_is_unverified_without_default_reconstruction():
+    left = _basis_payload()
+    right = _payload([_record("one", True)])
+    result = compare.compare_payloads(left, right)
+    assert not result["passed"] and result["candidates"][0]["provenance"] == "unverified"
+
+
+def test_backend_variable_is_explicit_and_cannot_change_model_or_generation():
+    from copy import deepcopy
+    left = _basis_payload()
+    right = deepcopy(left)
+    right["metadata"]["comparison_basis"]["backend_digest"] = "e" * 64
+    right["metadata"]["backend"] = "other"
+    assert not compare.compare_payloads(left, right)["passed"]
+    assert compare.compare_payloads(left, right, intended_variable="backend")["passed"]
+    right["metadata"]["model_revision"] = "changed"
+    assert not compare.compare_payloads(left, right, intended_variable="backend")["passed"]
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), {1: "coerced"}, ("tuple",)])
+def test_pure_comparison_rejects_non_json_or_nonfinite(invalid):
+    left = _basis_payload()
+    left["metadata"]["invalid"] = invalid
+    with pytest.raises(ValueError):
+        compare.compare_payloads(left, _basis_payload())
+
+
+def test_pure_comparison_duplicate_identity_is_not_verified_pairing():
+    left = _basis_payload()
+    left["records"].append(left["records"][0].copy())
+    result = compare.compare_payloads(left, left)
+    assert not result["passed"] and "ambiguous_case_identity" in result["candidates"][0]["mismatches"]
+
+
+@pytest.mark.parametrize("key,value", [("partial", True), ("dry_run", True), ("artifact_status", "partial")])
+def test_equal_incomplete_reports_never_become_verified_comparison(key, value):
+    payload = _basis_payload()
+    payload["metadata"][key] = value
+    assert not compare.compare_payloads(payload, payload)["passed"]
+
+
+@pytest.mark.parametrize("field,value", [("passed", "false"), ("correctness_passed", 1),
+    ("tags", "tag"), ("tags", [1]), ("latency_s", True), ("latency_s", -1), ("status", "unknown")])
+def test_pure_comparator_consumed_scoring_fields_are_exact(field, value):
+    payload = _basis_payload()
+    payload["records"][0][field] = value
+    with pytest.raises(compare.CompareInputError):
+        compare.compare_payloads(payload, _basis_payload())
+
+
+def test_error_pair_is_excluded_from_model_regression_and_counted_separately():
+    from copy import deepcopy
+    reference = _basis_payload()
+    candidate = deepcopy(reference)
+    candidate["records"][0].update(passed=False, correctness_passed=False, error="private transport response")
+    report = compare.compare_payloads(reference, candidate)
+    result = report["candidates"][0]
+    assert not report["passed"] and result["excluded_pair_count"] == 1
+    assert result["flips"]["regression_count"] == 0
+    assert result["request_errors"] == {"reference": 0, "candidate": 1}
+    assert "private transport response" not in json.dumps(report)
+    assert report["reference"]["model_revision"] == "one" and result["model_revision"] == "one"
+
+
+@pytest.mark.parametrize("key", ["model", "model_revision", "backend"])
+def test_pure_report_identity_cannot_carry_arbitrary_json(key):
+    payload = _basis_payload()
+    payload["metadata"][key] = {"secret": "response"}
+    with pytest.raises(compare.CompareInputError):
+        compare.compare_payloads(payload, _basis_payload())
+
+
+@pytest.mark.parametrize("status,passed", [("pass", False), ("warn", False), ("fail", True), ("inconclusive", True)])
+def test_contradictory_case_status_rejects(status, passed):
+    payload = _basis_payload()
+    payload["records"][0].update(status=status, passed=passed)
+    with pytest.raises(compare.CompareInputError):
+        compare.compare_payloads(payload, _basis_payload())
+
+
+def test_duplicate_disambiguation_never_overwrites_real_case_id():
+    payload = _basis_payload()
+    payload["records"] = [_record("a", True), _record("a", False), _record("a#1", True)]
+    assert len(compare.from_payload(payload, label="fixture").cases) == 3
+    report = compare.compare_payloads(payload, payload)
+    assert not report["passed"] and report["candidates"][0]["reference"]["total"] == 3
+
+
+def test_listed_flip_ids_truncate_but_all_paired_math_is_preserved():
+    from copy import deepcopy
+    reference = _basis_payload()
+    reference["records"] = [_record("case-" + str(index), True) for index in range(150)]
+    candidate = deepcopy(reference)
+    for row in candidate["records"]:
+        row.update(passed=False, correctness_passed=False)
+    result = compare.compare_payloads(reference, candidate)["candidates"][0]
+    assert result["flips"]["regression_count"] == 150 and len(result["flips"]["regressions"]) == 100
+    assert result["omitted_case_id_counts"]["regressions"] == 50
+    assert result["reference"]["total"] == result["candidate"]["total"] == 150
+
+
+def test_pure_report_timestamp_is_explicit_and_deterministic():
+    first = compare.compare_payloads(_basis_payload(), _basis_payload(), generated_at="2026-10-13T12:00:00Z")
+    second = compare.compare_payloads(_basis_payload(), _basis_payload(), generated_at="2026-10-13T12:00:00Z")
+    assert first == second and first["generated_at"] == "2026-10-13T12:00:00Z"
+    assert "Evaluation Comparison" in compare.render_markdown(first)
+    assert "Reference: reference" in compare.render_console(first)

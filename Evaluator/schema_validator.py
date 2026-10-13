@@ -41,6 +41,7 @@ class ValidationResult:
 def validate_assistant_response(
     content: Union[str, Dict[str, Any]],
     eval_context: Optional[Dict[str, Any]] = None,
+    *, validator_config: dataset_validator.ValidatorConfig | None = None,
 ) -> ValidationResult:
     """
     Validate a single assistant response.
@@ -87,7 +88,7 @@ def validate_assistant_response(
 
         # OpenAI format with structured tool_calls
         if "tool_calls" in message:
-            dataset_validator.validate_assistant_message_openai(message, report)
+            dataset_validator.validate_assistant_message_openai(message, report, config=validator_config)
             # Extract tool calls
             try:
                 tool_calls_array = message.get("tool_calls", [])
@@ -97,7 +98,7 @@ def validate_assistant_response(
                 # Extraction errors already surfaced as validation issues
                 pass
         elif isinstance(message.get("content"), str):
-            dataset_validator.validate_assistant_content(message["content"], report)
+            dataset_validator.validate_assistant_content(message["content"], report, config=validator_config)
         else:
             # Dict without tool_calls - invalid
             report.add("ERROR", "Assistant response dict must contain 'tool_calls' field")
@@ -105,7 +106,7 @@ def validate_assistant_response(
         if is_gemma_tool_call(content):
             converted = _convert_gemma_to_openai(content)
             if converted:
-                dataset_validator.validate_assistant_message_openai(converted, report)
+                dataset_validator.validate_assistant_message_openai(converted, report, config=validator_config)
                 try:
                     for name, args in dataset_validator.extract_tool_calls_openai(converted["tool_calls"]):
                         tool_calls.append(ToolCall(name=name, arguments=args))
@@ -116,7 +117,7 @@ def validate_assistant_response(
         elif "<tool_call>" in content:
             converted = _convert_qwen_to_openai(content)
             if converted:
-                dataset_validator.validate_assistant_message_openai(converted, report)
+                dataset_validator.validate_assistant_message_openai(converted, report, config=validator_config)
                 recovered_calls = [
                     tc for tc in converted.get("tool_calls", [])
                     if isinstance(tc, dict) and tc.get("recovered")
@@ -135,7 +136,7 @@ def validate_assistant_response(
                 report.add("ERROR", "Assistant response contains <tool_call> markers but could not be parsed")
         else:
             # ChatML or Mistral format with content string
-            dataset_validator.validate_assistant_content(content, report)
+            dataset_validator.validate_assistant_content(content, report, config=validator_config)
             # Extract tool calls even if validation failed to help debugging.
             # Check for Mistral format first (more specific marker)
             if "[TOOL_CALLS]" in content:

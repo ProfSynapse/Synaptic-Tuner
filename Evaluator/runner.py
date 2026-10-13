@@ -235,6 +235,7 @@ def evaluate_cases(
     judge_validator: "JudgeValidator" | None = None,
     parallel: bool = False,
     max_workers: int = 4,
+    validator_config=None,
 ) -> List[EvaluationRecord]:
     """Run evaluation for the provided prompts.
 
@@ -263,6 +264,7 @@ def evaluate_cases(
                 validate_context,
                 environment_validator=environment_validator,
                 judge_validator=judge_validator,
+                validator_config=validator_config,
             )
             records.append(record)
             if on_record:
@@ -283,6 +285,7 @@ def evaluate_cases(
                 validate_context,
                 environment_validator,
                 judge_validator,
+                validator_config,
             ): index
             for index, case in enumerate(cases)
         }
@@ -310,6 +313,7 @@ def _evaluate_single_case(
     validate_context: bool = False,
     environment_validator: "EnvironmentValidator" | None = None,
     judge_validator: "JudgeValidator" | None = None,
+    validator_config=None,
 ) -> EvaluationRecord:
     """Evaluate a single prompt case.
 
@@ -410,7 +414,9 @@ def _evaluate_single_case(
 
     # Run schema validation (with optional context validation)
     try:
-        validator_result = _validate_case_response(case, response.message, eval_context)
+        validator_result = (_validate_case_response(case, response.message, eval_context)
+                            if validator_config is None else
+                            _validate_case_response(case, response.message, eval_context, validator_config))
     except Exception as exc:
         return EvaluationRecord(
             case=case,
@@ -851,15 +857,19 @@ def _validate_case_response(
     case: PromptCase,
     response: Any,
     eval_context: Optional[Dict[str, Any]],
+    validator_config=None,
 ) -> ValidationResult:
-    return _validate_response_structure(response, eval_context)
+    return _validate_response_structure(response, eval_context, validator_config)
 
 
 def _validate_response_structure(
     response: Any,
     eval_context: Optional[Dict[str, Any]],
+    validator_config=None,
 ) -> ValidationResult:
-    return validate_assistant_response(response, eval_context)
+    if validator_config is None:
+        return validate_assistant_response(response, eval_context)
+    return validate_assistant_response(response, eval_context, validator_config=validator_config)
 
 
 def _has_correctness_expectation(case: PromptCase) -> bool:

@@ -786,6 +786,60 @@ jobs:
               str(root / "tests/trainers/sft/test_runtime_v1.py") + "::test_real_decoder_and_isolated_worker_preserve_exact_closure"]))
           PYCODE
 
+      - name: Exercise installed public evaluation comparison and report readers
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import SynthChat
+          import synaptic_tuner
+          import Evaluator.comparison_basis as basis
+          import Evaluator.compare as comparison
+          import Evaluator.runner as runner
+          import Evaluator.schema_validator as validator
+          import synaptic_tuner.api.v1.reference.evaluation as reference
+          import synaptic_tuner.api.v1.evaluation_facade as facade
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          for module in (basis, comparison, runner, validator, reference, facade):
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          installed = Path(synaptic_tuner.__file__).resolve().parent.parent
+          assert installed.is_relative_to(Path(sys.prefix)), installed
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-evaluation-comparison-tests"
+          names = (
+              "contract/test_public_evaluation_api_v1.py",
+              "contract/test_reference_evaluation_v1.py",
+              "contract/test_reference_spend_v1.py",
+              "evaluator/test_compare.py",
+              "evaluator/test_comparison_basis.py",
+              "cloud/test_schema_validator.py",
+          )
+          for name in (*names, "contract/test_reference_data_v1.py"):
+              target = root / "tests" / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / "tests" / name, target)
+          schemas = root / "schemas"
+          schemas.mkdir()
+          for name in ("synaptic-evaluation-plan-v1.schema.json", "synaptic-evaluation-result-v1.schema.json"):
+              shutil.copy2(installed / "schemas" / name, schemas / name)
+          for name in ("config", "rubrics"):
+              source = Path(SynthChat.__file__).resolve().parent / name
+              assert source.is_relative_to(Path(sys.prefix)), source
+              shutil.copytree(source, root / "SynthChat" / name,
+                              ignore=shutil.ignore_patterns("*.py", "__pycache__"))
+          # Copy only tests and installed non-Python fixtures. No checkout production code.
+          import pytest
+          sys.path.insert(0, str(root))
+          os.chdir(root)
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
+              *(str(root / "tests" / name) for name in names)]))
+          PYCODE
+
       - name: Exercise installed ordinary HF Jobs host with pinned SDK
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}
