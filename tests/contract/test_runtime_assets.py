@@ -53,6 +53,37 @@ def test_public_schemas_are_exact_distribution_assets() -> None:
                 assert archive.read("schemas/" + path.name) == path.read_bytes()
 
 
+def test_installed_workflow_configuration_assets_are_exact() -> None:
+    """Check reviewed declarative inputs without promoting complete wheel support."""
+    families = tuple(family for family in PACKAGE_RESOURCE_FAMILIES if family.name in {
+        "evaluator configuration and recipes", "SynthChat core configuration",
+        "SynthChat rubric and scenario catalogs", "GRPO reward and environment configuration",
+        "tool schema catalogs",
+    })
+    expected = _expanded_assets(families)
+    candidate = os.environ.get(WHEEL_ENV)
+    if candidate:
+        with zipfile.ZipFile(candidate) as archive:
+            targets = set()
+            for member in expected:
+                target = RUNTIME_BUNDLE_PREFIX + member if member in {
+                    "cli-first-tool-schemas.json", "Tools/tool_schemas.json",
+                } else member
+                targets.add(target)
+                assert archive.read(target) == (REPO_ROOT / member).read_bytes()
+            prefixes = (
+                "Evaluator/config/", "Evaluator/recipes/", "SynthChat/config/",
+                "SynthChat/rubrics/", "SynthChat/scenarios/", "Trainers/grpo/configs/",
+                RUNTIME_BUNDLE_PREFIX,
+            )
+            assert {member for member in archive.namelist()
+                    if member.startswith(prefixes) and not member.endswith(".py")} == targets
+            forbidden = [member for member in archive.namelist() if
+                         any(member.startswith(prefix) for prefix in FORBIDDEN_WHEEL_PREFIXES)
+                         or member.startswith("SynthChat/config/targets_")]
+            assert not forbidden
+
+
 @dataclass(frozen=True)
 class AssetFamily:
     """A deliberate family in the supported runtime boundary."""
@@ -78,6 +109,7 @@ PACKAGE_RESOURCE_FAMILIES = (
         ),
     ),
     AssetFamily("job recipe catalog", "package-resource", ("Trainers/recipes/*.yaml",)),
+    AssetFamily("GRPO reward and environment configuration", "package-resource", ("Trainers/grpo/configs/*.yaml", "Trainers/grpo/configs/rewards/*.yaml")),
     AssetFamily(
         "cloud defaults and experiments",
         "package-resource",

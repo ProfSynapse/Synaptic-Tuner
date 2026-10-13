@@ -1,0 +1,3 @@
+include _build_support.py
+include cli-first-tool-schemas.json
+include Tools/tool_schemas.json
