@@ -3,6 +3,8 @@
 No shell, user code, provider client or credentials cross this boundary. Process
 custody is local to the Popen owner, not restorable from a PID or serialized data.
 This is process supervision and bounded fixture I/O, not a security sandbox.
+Popen construction and parent filesystem setup/cleanup are synchronous OS calls;
+finite IPC/termination waits do not impose a general wall-clock bound on them.
 """
 from __future__ import annotations
 
