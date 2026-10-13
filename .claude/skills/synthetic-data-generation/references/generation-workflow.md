@@ -413,6 +413,6 @@ For preparation of actual generated/improved conversation artifacts through
 `TrainingAPI.prepare`, use the [conversation preparation extension](../../fine-tuning/reference/conversation-preparation.md).
 Bind the actual DataOutcome dataset/metadata hashes and counts, configure role/field
 projection and explicit group splits, and retain the returned source. This is
-preparation only; current compiled SFT releases do not admit the new conversation
-format. Never substitute an unrelated ingestion bundle or invent chronological
+a preparation/CPU SFT contract; qualified runtime releases do not yet admit the
+new conversation format. Never substitute an unrelated ingestion bundle or invent chronological
 lineage to make a handoff test pass.

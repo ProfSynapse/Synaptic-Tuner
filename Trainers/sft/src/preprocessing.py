@@ -11,6 +11,7 @@ from datasets import Dataset
 
 from shared.sft_preprocessing import (
     DEFAULT_MAX_DROPPED_ROW_FRACTION,
+    CONVERSATION_SCHEMA_VERSION,
     DROP_MASK_PREFIX_MISMATCH,
     DROP_NO_SUPERVISED_TOKENS,
     DROP_REASONS,
@@ -65,7 +66,11 @@ def sanitize_conversations(messages: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def normalize_sft_example(example: dict[str, Any]) -> dict[str, Any]:
+    if example.get("schema_version") == CONVERSATION_SCHEMA_VERSION:
+        example = dict(example)  # Dataset.map supplies a LazyRow mapping.
     detected = detect_sft_record_format(example)
+    if example.get("schema_version") == CONVERSATION_SCHEMA_VERSION:
+        return dict(example)
     if detected == "raw_text":
         return {
             "schema_version": example["schema_version"],
@@ -170,6 +175,9 @@ def validate_sft_dataset_contract(
     :func:`prepare_sft_dataset` runs this before materializing any row; the SFT
     mask doctor runs it too, so a dataset the trainer would reject is reported.
     """
+    schemas = [dataset[index].get("schema_version") for index in range(len(dataset))]
+    if CONVERSATION_SCHEMA_VERSION in schemas and any(schema != CONVERSATION_SCHEMA_VERSION for schema in schemas):
+        raise ValueError("authoritative conversation rows cannot mix dataset schemas")
     dataset_formats = {detect_sft_record_format(dataset[index]) for index in range(len(dataset))}
     authoritative_rows = [
         is_authoritative_preassigned_sft_record(dataset[index]) for index in range(len(dataset))

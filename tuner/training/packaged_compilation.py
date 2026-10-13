@@ -112,18 +112,23 @@ def _validated_config(config: CanonicalDocument):
     if canonical_json_bytes(hyperparameters.to_dict()) != canonical_json_bytes(value["sft"]):
         raise ValueError("packaged hyperparameters must already be canonical")
     # Prepared data controls are explicit; the trainer must not reinterpret its split/format.
-    formats = {"syntunia-sft-row/v1": "raw_text", "syntunia-sft-row/v2": "messages"}
+    formats = {"syntunia-sft-row/v1": "raw_text", "syntunia-sft-row/v2": "messages", "synaptic-conversation-sft-row/v1": "messages"}
     if identity.format not in formats or hyperparameters.dataset_format != formats[identity.format]:
         raise ValueError("prepared format differs from SFT controls")
     if hyperparameters.use_preassigned_splits is not True or hyperparameters.split_dataset:
         raise ValueError("prepared input requires preassigned splits")
-    if identity.format == "syntunia-sft-row/v2" and (
+    if identity.format in {"syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"} and (
         hyperparameters.packing is not False
         or hyperparameters.completion_only_loss is not True
         or hyperparameters.assistant_only_loss is not False
         or hyperparameters.prompt_render != "prompt_completion"
     ):
         raise ValueError("prepared messages require prompt completion controls")
+    if identity.format == "synaptic-conversation-sft-row/v1":
+        if identity.size_bytes > 2 * 1024 * 1024:
+            raise ValueError("conversation SFT input exceeds the 2MiB executable limit")
+        if hyperparameters.require_memory_efficient_loss is not True:
+            raise ValueError("conversation SFT requires the memory-efficient loss guard")
     canonical_json_bytes(value)
     return value, identity
 

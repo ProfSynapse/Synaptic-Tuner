@@ -1331,6 +1331,7 @@ def run(args: argparse.Namespace):
         aux_token_position=aux_head_cfg.token_position if aux_head_enabled else None,
         use_preassigned_splits=getattr(config.dataset, "use_preassigned_splits", False),
         preparation_metadata=dataset_preparation_metadata,
+        expected_prepared_schema=getattr(args, "runtime_v1_dataset_schema", None),
         validation_group_key=config.dataset.validation_group_key,
         max_dropped_row_fraction=config.training.max_dropped_row_fraction,
     )

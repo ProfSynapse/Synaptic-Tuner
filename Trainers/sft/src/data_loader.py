@@ -13,6 +13,7 @@ from preprocessing import (
 )
 from shared.sft_preprocessing import (
     DEFAULT_MAX_DROPPED_ROW_FRACTION,
+    CONVERSATION_SCHEMA_VERSION,
     detect_sft_record_format,
     is_authoritative_preassigned_sft_record,
 )
@@ -241,6 +242,7 @@ def load_and_prepare_tokenized_dataset(
     preparation_metadata: Optional[dict[str, str]] = None,
     validation_group_key: Optional[str] = None,
     max_dropped_row_fraction: float = DEFAULT_MAX_DROPPED_ROW_FRACTION,
+    expected_prepared_schema: str | None = None,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare dataset into explicit tokenized SFT features.
@@ -310,6 +312,14 @@ def load_and_prepare_tokenized_dataset(
     print("\nPreparing explicit encoded SFT features...")
     eval_dataset = None
     records = [raw_datasets[index] for index in range(len(raw_datasets))]
+    schemas = [record.get("schema_version") for record in records]
+    if expected_prepared_schema is not None:
+        if type(expected_prepared_schema) is not str or expected_prepared_schema not in {"syntunia-sft-row/v1", "syntunia-sft-row/v2", CONVERSATION_SCHEMA_VERSION}:
+            raise ValueError("expected prepared SFT schema is unsupported")
+        if not records or any(schema != expected_prepared_schema for schema in schemas):
+            raise ValueError("prepared SFT row schema differs from the admitted dataset identity")
+    if CONVERSATION_SCHEMA_VERSION in schemas and any(schema != CONVERSATION_SCHEMA_VERSION for schema in schemas):
+        raise ValueError("authoritative conversation rows cannot mix dataset schemas")
     formats = {detect_sft_record_format(record) for record in records}
     authoritative = [is_authoritative_preassigned_sft_record(record) for record in records]
     if any(authoritative) and not all(authoritative):

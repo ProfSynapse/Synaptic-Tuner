@@ -468,7 +468,11 @@ def _admit_contracts(release, provider_binding, execution, workload_bytes, polic
     from Trainers.sft import runtime_v1 as core
     projection = _runtime_projection(compiled)
     trainer_args = []
-    core._append_sft_arguments(trainer_args, projection.document["configuration"]["document"]["sft"], config["model"])
+    if config["dataset"]["format"] == "synaptic-conversation-sft-row/v1":
+        core._append_sft_arguments(trainer_args, projection.document["configuration"]["document"]["sft"],
+                                   config["model"], dataset_schema=config["dataset"]["format"])
+    else:
+        core._append_sft_arguments(trainer_args, projection.document["configuration"]["document"]["sft"], config["model"])
     core._model_snapshot_path(config["model"], Path("/cache"))
     if config["sft"]["packing"] is not False:
         raise ValueError
@@ -861,7 +865,10 @@ def _invocation_spec(admitted, workload, snapshot, dataset_path, model_snapshot=
             "--runtime-v1-tokenizer-revision", model["tokenizer_revision"],
             "--runtime-v1-dataset-revision", dataset["revision"],
             "--runtime-v1-dataset-digest", dataset["content_digest"]]
-    core._append_sft_arguments(args, config["sft"], model)
+    if config["dataset"]["format"] == "synaptic-conversation-sft-row/v1":
+        core._append_sft_arguments(args, config["sft"], model, dataset_schema=config["dataset"]["format"])
+    else:
+        core._append_sft_arguments(args, config["sft"], model)
     if config["sft"]["dataset_format"] == "raw_text":
         args.extend(("--aux-head-prompt-render", config["sft"]["prompt_render"]))
         if config["sft"]["require_memory_efficient_loss"]:

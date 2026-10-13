@@ -1236,7 +1236,7 @@ def build_trainer_invocation(
         raise RuntimeV1Error("resolved SFT configuration is not fully specified")
     present_prepared_keys = _MESSAGE_SFT_KEYS & set(sft)
     dataset_claims_raw = dataset.get("format") == "syntunia-sft-row/v1"
-    dataset_claims_messages = dataset.get("format") == "syntunia-sft-row/v2"
+    dataset_claims_messages = dataset.get("format") in {"syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"}
     if dataset_claims_raw:
         if (
             present_prepared_keys != _PREPARED_SFT_KEYS
@@ -1324,7 +1324,7 @@ def build_trainer_invocation(
             }
             or dataset.get("revision") != prepared_digest
             or dataset.get("format") not in {
-                "syntunia-sft-row/v1", "syntunia-sft-row/v2"
+                "syntunia-sft-row/v1", "syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"
             }
             or type(size_bytes) is not int
             or not 0 < size_bytes <= _MAX_PREPARED_DATASET_BYTES
@@ -1332,6 +1332,8 @@ def build_trainer_invocation(
             or re.fullmatch(r"[0-9a-f]{64}", content_digest) is None
         ):
             raise RuntimeV1Error("prepared dataset identity is malformed")
+        if dataset["format"] == "synaptic-conversation-sft-row/v1" and size_bytes > 2 * 1024 * 1024:
+            raise RuntimeV1Error("conversation SFT input exceeds the 2MiB executable limit")
         dataset_path = (
             roots.state
             / "prepared-inputs"
@@ -1458,7 +1460,10 @@ def build_trainer_invocation(
         "--runtime-v1-dataset-digest",
         str(content_digest),
     ]
-    _append_sft_arguments(argv, sft, model)
+    if config["dataset"].get("format") == "synaptic-conversation-sft-row/v1":
+        _append_sft_arguments(argv, sft, model, dataset_schema=config["dataset"]["format"])
+    else:
+        _append_sft_arguments(argv, sft, model)
     child_env = dict(planned_environment)
     child_env.pop("PYTHONPATH", None)
     child_env.update({name: environment[name] for name in _CLOSURE_ENV})
@@ -1512,7 +1517,8 @@ def build_trainer_invocation(
 
 
 def _append_sft_arguments(
-    argv: list[str], sft: Mapping[str, object], model: Mapping[str, object]
+    argv: list[str], sft: Mapping[str, object], model: Mapping[str, object],
+    *, dataset_schema: str | None = None,
 ) -> None:
     mappings = (
         ("batch_size", "--batch-size", _positive_int),
@@ -1579,6 +1585,9 @@ def _append_sft_arguments(
             )
         )
     elif sft.get("dataset_format") == "messages":
+        schema = "syntunia-sft-row/v2" if dataset_schema is None else dataset_schema
+        if schema not in {"syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"}:
+            raise RuntimeV1Error("authoritative message dataset schema is unsupported")
         argv.extend(
             (
                 "--completion-only-loss",
@@ -1588,7 +1597,7 @@ def _append_sft_arguments(
                 "prompt_completion",
                 "--require-memory-efficient-loss",
                 "--runtime-v1-dataset-schema",
-                "syntunia-sft-row/v2",
+                schema,
                 "--runtime-v1-dataset-format",
                 "messages",
             )
