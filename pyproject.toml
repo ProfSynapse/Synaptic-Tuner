@@ -65,6 +65,7 @@ namespaces = true
   "config/settings.yaml", "config/tool_call_formats.yaml", "config/validation.yaml",
   "config/workspace_formats.yaml", "rubrics/*.yaml", "rubrics/*.example", "scenarios/*.yaml",
 ]
+"Trainers.runtime_profiles" = ["qwen35-sft-v1.yaml", "qwen35-sft-v1.inventory.json"]
 "Trainers.grpo" = ["configs/*.yaml", "configs/rewards/*.yaml"]
 "tuner.execution.providers.modal" = [
   "modal-runtime-v1.lock.json",
@@ -73,6 +74,7 @@ namespaces = true
   "inference-worker-closure.json",
   "inference-dependencies.lock",
 ]
+"tuner.execution.providers.hf_jobs_provider_v1" = ["hf-parent-closure.json", "host-dependencies.in", "host-dependencies.lock", "model-dependencies.in", "model-dependencies.lock"]
 "tuner.runtime" = ["manifests/offline-sft-worker-v1.json", "manifests/packaged-training-worker-v1.json"]
 "Trainers.sft.configs" = ["config.yaml"]
 

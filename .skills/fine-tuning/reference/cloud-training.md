@@ -815,3 +815,12 @@ That trains on HF Jobs first, then launches cloud evaluation against the exact f
 - Resume-from-provider-native-storage is not automatic yet.
 - Persistence is guaranteed first; resume flows can be added later.
 - Clean up old runs from the provider-native backend explicitly when they are no longer needed.
+
+### Ordinary public HF SFT parent maintenance
+
+The ordinary HF provider candidate authenticates a separate fixed parent import
+closure. Check it with `python3 scripts/regenerate_hf_parent_closure.py`. After
+reviewing intentional member changes, use `--write`, then rerun the default
+check. This refreshes only hashes and sizes of the reviewed inventory; it does
+not change model, image, runtime pins or qualify a live HF run. The protected
+smoke and Modal inventories remain separate.
