@@ -11,11 +11,16 @@ import yaml
 from pathlib import Path
 from typing import Dict
 
+from shared.tool_catalog_resources import tool_catalog_path
 
-def load_tool_schemas(schema_file: Path) -> Dict:
+
+def load_tool_schemas(schema_file: Path | None = None) -> Dict:
     """Load tool schemas from JSON file."""
-    with open(schema_file) as f:
-        return json.load(f)
+    with tool_catalog_path("cli", schema_file) as selected:
+        payload = json.loads(selected.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError("Tool catalog must be a nonempty JSON object")
+    return payload
 
 
 def convert_json_schema_to_simple(json_schema: Dict) -> Dict:
@@ -116,10 +121,10 @@ def main():
     """Main entry point."""
     # Paths
     repo_root = Path(__file__).parent.parent.parent
-    schema_file = repo_root / "cli-first-tool-schemas.json"
+    schema_file = None
     rubrics_dir = repo_root / "SynthChat" / "rubrics"
 
-    print(f"Loading schemas from: {schema_file}")
+    print("Loading the canonical CLI tool catalog")
 
     # Load and convert schemas
     raw_schemas = load_tool_schemas(schema_file)

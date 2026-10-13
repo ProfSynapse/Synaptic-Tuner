@@ -100,12 +100,28 @@ a new gate. Retain failed attempts, consumed claims and uncertain submissions.
 
 ## Current preparation progress (2026-10-13)
 
-The preparation branch now packages an explicit inventory of 51 public schemas.
-Its 26 focused tests and source-archive → wheel clean-install host-manifest and
-capability checks passed. Main CI and merge remain pending. This closes neither
-the broader installed-asset inventory nor the stable release gate: evaluator,
-SynthChat, GRPO, environment and other supported workflow assets/backends still
-need their own installed-consumer acceptance. No version or tag was changed.
+PR #178 packages the 51 public schemas and defines these release gates; its main
+merge is still pending. The next integrated preparation source, `268fc534`, adds
+the reviewed evaluator/SynthChat/GRPO configuration inventory and two canonical
+tool catalogs, explicit installed catalog resolution, and lightweight evaluator
+startup. Missing or corrupt selected catalogs reject instead of becoming empty
+defaults. Optional UI imports no longer install dependencies; disabling the live
+dashboard preserves the final formatted summary.
+
+Both checkout and source-archive-built wheels passed exact inventory/byte checks
+(nine asset checks each). A fresh base installation in a neutral directory passed
+real configuration/catalog loading, host manifest/capabilities and evaluator help
+with process/network access prohibited inside help. The integrated focused suite
+passed 76 tests with one Rich-dependent skip; a separate Rich-enabled run passed
+five checks with only the optional ML identity check skipped. Both Modal source
+inventories remain current. This is installed foundation evidence, not complete
+workflow execution, provider parity or stable release acceptance.
+
+The [operation support matrix](api-v1-support-matrix.md) records actual backend
+and lifecycle gaps. The [public environment design](public-environment-execution.md)
+defines contract/admission → local adapter/feedback → installed lifecycle
+acceptance. Contract work does not enable execution before adapter review. No
+version, tag or provider resource was changed by this preparation.
 
 ## 1. Freeze the public support contract
 
@@ -142,9 +158,9 @@ capabilities, package metadata and each advertised provider.
   boundaries and host configuration. Secret material never enters packages,
   recipes, runtime image environment or the isolated trainer.
 
-### Confirmed installed-package blockers
+### Baseline blockers and preparation status
 
-- Current wheel inventory omits Evaluator's 16 configuration YAML files and one
+- The baseline wheel inventory omitted Evaluator's 16 configuration YAML files and one
   recipe, SynthChat's seven configuration YAML files, 19 rubrics and 11 scenarios,
   12 GRPO configuration YAML files, four flywheel YAML files and Tools JSON.
   Explicitly review required members rather than packaging all repository files.
@@ -168,7 +184,10 @@ capabilities, package metadata and each advertised provider.
   evaluation benchmark before a stable judging claim. Do not bypass metering or
   treat a facade/mock response as paid backend qualification.
 
-These are open release blockers, not repaired or accepted behavior.
+The reviewed package inventory, catalog resolution and lightweight help fixes
+above address those specific preparation defects. Complete installed execution,
+strict environment admission, public environment authority, paid judging and
+the broader asset inventory remain open release gates.
 
 Exit: clean installed consumer can perform provider-free planning and compose
 all supported providers using only declared assets/dependencies.

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from shared.validation.parsing.response_parser import parse_response
@@ -23,6 +22,8 @@ from shared.validation.parsing.cli_commands import (
     parse_cli_commands,
 )
 from shared.validation.parsing.configured_formats import match_configured_wrapper
+
+from shared.tool_catalog_resources import tool_catalog_path
 
 from .base import EnvironmentRuntime
 from .types import EnvironmentIssue, ExecutedToolCall
@@ -223,13 +224,11 @@ def format_tool_results_message(
 @lru_cache(maxsize=1)
 def cli_command_catalog() -> Dict[str, CliCommandSpec]:
     """The CLI command catalog wrapped commands are expanded against."""
-    schema_path = Path(__file__).resolve().parents[2] / "cli-first-tool-schemas.json"
-    if not schema_path.exists():
-        return {}
-    try:
-        return load_cli_command_catalog(schema_path)
-    except Exception:
-        return {}
+    with tool_catalog_path("cli") as schema_path:
+        catalog = load_cli_command_catalog(schema_path)
+    if not catalog:
+        raise ValueError("Default CLI command catalog contains no usable commands")
+    return catalog
 
 
 def expand_cli_wrapper_commands(name: Optional[str], arguments: Any) -> Optional[List[ParsedCliCommand]]:

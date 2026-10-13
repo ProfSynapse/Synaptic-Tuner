@@ -140,17 +140,37 @@ jobs:
           import os
           from pathlib import Path
           import zipfile
+          import runpy
           root = Path(os.environ["RUNNER_TEMP"])
           expected = {"schemas/" + path.name: path.read_bytes()
                       for path in Path("schemas").glob("synaptic-*.schema.json")}
           assert expected
+          contract = runpy.run_path("tests/contract/test_runtime_assets.py")
+          workflow_families = tuple(family for family in contract["PACKAGE_RESOURCE_FAMILIES"]
+              if family.name in {"evaluator configuration and recipes", "SynthChat core configuration",
+                                "SynthChat rubric and scenario catalogs",
+                                "GRPO reward and environment configuration", "tool schema catalogs"})
+          workflow = {}
+          for member in contract["_expanded_assets"](workflow_families):
+              target = "synaptic_tuner/runtime/" + member if member in {
+                  "cli-first-tool-schemas.json", "Tools/tool_schemas.json"} else member
+              workflow[target] = Path(member).read_bytes()
           for directory in ("wheelhouse", "sdist-wheelhouse"):
               wheels = list((root / directory).glob("synaptic_tuner-*.whl"))
               assert len(wheels) == 1
+              os.environ[contract["WHEEL_ENV"]] = str(wheels[0])
+              contract["test_installed_workflow_configuration_assets_are_exact"]()
               with zipfile.ZipFile(wheels[0]) as archive:
                   actual = {name: archive.read(name) for name in archive.namelist()
                             if name.startswith("schemas/")}
                   assert actual == expected
+                  assert {name: archive.read(name) for name in workflow} == workflow
+                  assert {name for name in archive.namelist()
+                          if name.startswith("synaptic_tuner/runtime/")} == {
+                              "synaptic_tuner/runtime/cli-first-tool-schemas.json",
+                              "synaptic_tuner/runtime/Tools/tool_schemas.json"}
+                  assert not any(name.startswith("SynthChat/config/targets_")
+                                 for name in archive.namelist())
           PY
 
       - name: Verify declared pytest range and excluded provider SDK
@@ -248,6 +268,58 @@ jobs:
           from tuner.capabilities.registry import builtin_registry
 
           assert builtin_registry().list()
+          import Evaluator
+          import SynthChat
+          from Evaluator.config_loader import ConfigLoader as EvaluationConfigLoader
+          from SynthChat.generator import ScenarioLoader
+          from SynthChat.config.config_loader import ConfigLoader as ScopeConfigLoader
+          from shared.environments import EnvironmentValidator
+
+          evaluation = EvaluationConfigLoader(Path(Evaluator.__file__).parent / "config")
+          assert evaluation.tool_schema
+          assert evaluation.load_all_scenarios(evaluation.load_eval_run().scenarios)
+          assert ScenarioLoader(Path(SynthChat.__file__).parent / "scenarios").list_scenarios()
+          assert ScopeConfigLoader().load().scopes
+          environment = EnvironmentValidator()
+          assert environment.tool_schema and environment.execution_config["verb_rules"]
+          catalogs = importlib.resources.files("synaptic_tuner").joinpath("runtime")
+          assert json.loads(catalogs.joinpath("cli-first-tool-schemas.json").read_text())
+          assert json.loads(catalogs.joinpath("Tools/tool_schemas.json").read_text())
+          from shared.environments.tool_executor import cli_command_catalog
+          from shared.validation.parsing.cli_commands import load_cli_command_catalog
+          from shared.validation.dataset_validator import load_tool_schemas
+          from SynthChat.scripts.embed_tool_schemas import load_tool_schemas as load_embed_catalog
+          with importlib.resources.as_file(catalogs.joinpath("cli-first-tool-schemas.json")) as path:
+              assert cli_command_catalog() == load_cli_command_catalog(path)
+          assert cli_command_catalog()
+          assert load_tool_schemas() == json.loads(catalogs.joinpath("Tools/tool_schemas.json").read_text())
+          assert load_embed_catalog() == json.loads(catalogs.joinpath("cli-first-tool-schemas.json").read_text())
+
+          # Spawn first; prohibit process/network effects inside the fresh child.
+          import textwrap
+          child = textwrap.dedent("""
+              import importlib.util, runpy, socket, subprocess, sys
+              for name in ("pandas", "numpy", "torch", "sklearn"):
+                  assert importlib.util.find_spec(name) is None, name
+              def forbidden(*args, **kwargs):
+                  raise AssertionError("installed help attempted process or network effects")
+              subprocess.Popen = forbidden
+              socket.socket.connect = forbidden
+              socket.create_connection = forbidden
+              from synaptic_tuner.api.v1 import EvaluationAPI, TrainingAPI
+              sys.argv = ["Evaluator.cli", "--help"]
+              try:
+                  runpy.run_module("Evaluator.cli", run_name="__main__")
+              except SystemExit as error:
+                  assert error.code == 0
+              else:
+                  raise AssertionError("help did not exit")
+              assert "shared.ui" not in sys.modules
+              assert not any(name in sys.modules for name in ("pandas", "numpy", "torch", "sklearn"))
+          """)
+          help_result = subprocess.run([sys.executable, "-I", "-B", "-c", child],
+              check=True, capture_output=True, text=True, timeout=30)
+          assert "usage:" in help_result.stdout
           with tempfile.TemporaryDirectory() as directory:
               manifest = Path(directory) / "synaptic.yaml"
               manifest.write_text(

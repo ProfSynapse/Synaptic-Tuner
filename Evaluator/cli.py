@@ -15,24 +15,6 @@ from typing import Any, Dict, List
 
 import yaml
 
-# Rich console for colored output (optional)
-try:
-    from rich.console import Console
-    _console = Console()
-    _RICH_AVAILABLE = True
-except ImportError:
-    _console = None
-    _RICH_AVAILABLE = False
-
-# Import live dashboard and UI components
-try:
-    from shared.ui import LiveEvaluationDashboard, RICH_AVAILABLE as _SHARED_RICH
-    from .ui import rich_summary, rich_failure_details
-    _DASHBOARD_AVAILABLE = True
-except ImportError:
-    _DASHBOARD_AVAILABLE = False
-    _SHARED_RICH = False
-
 from .cli_utils import (
     build_metadata,
     build_settings_kwargs,
@@ -63,7 +45,6 @@ from shared.experiment_tracking.lineage_enrichment import (
     build_loss_lineage,
     write_json as write_lineage_json,
 )
-from shared.experiment_tracking.runtime_autotune import recommend_eval_max_workers
 from shared.utilities.env import get_hf_token
 from tuner.project import (
     ProjectContext,
@@ -758,10 +739,21 @@ def main(
 
     safe_parallel_backends = {"vllm", "lmstudio", "ollama", "openrouter", "openai_responses", "mlc"}
     eval_parallel = bool(run_config.parallel and args.backend in safe_parallel_backends and not args.dry_run)
+    from shared.experiment_tracking.runtime_autotune import recommend_eval_max_workers
     eval_max_workers = recommend_eval_max_workers(
         backend=args.backend,
         requested_max_workers=int(run_config.max_workers or 0),
     )
+
+    # Optional presentation is loaded only for an executing evaluation, never
+    # for module import or argument parsing (--help exits during parsing).
+    _DASHBOARD_AVAILABLE = _SHARED_RICH = False
+    if not args.no_dashboard and not args.dry_run:
+        try:
+            from shared.ui import LiveEvaluationDashboard, RICH_AVAILABLE as _SHARED_RICH
+            _DASHBOARD_AVAILABLE = True
+        except ImportError:
+            pass
 
     # Determine if we should use the live dashboard
     use_dashboard = (
@@ -1072,7 +1064,8 @@ def main(
         print(f"Markdown summary saved to {markdown_path}")
 
     # Display summary using rich UI if available
-    if _DASHBOARD_AVAILABLE and _SHARED_RICH:
+    from .ui import RICH_AVAILABLE as summary_rich_available, rich_summary, rich_failure_details
+    if summary_rich_available:
         rich_summary(records)
         # Show detailed failure info
         failed_count = sum(1 for r in records if not r.passed)

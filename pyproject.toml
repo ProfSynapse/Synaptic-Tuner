@@ -40,6 +40,9 @@ synaptic = "tuner.cli.main:main"
 [tool.setuptools.dynamic]
 version = { attr = "synaptic_tuner._version.__version__" }
 
+[tool.setuptools.cmdclass]
+build_py = "_build_support.PublicAssetBuild"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = [
@@ -56,6 +59,13 @@ namespaces = true
 
 [tool.setuptools.package-data]
 "schemas" = ["synaptic-*.schema.json"]
+"Evaluator" = ["config/*.yaml", "config/rubrics/*.yaml", "config/scenarios/*.yaml", "config/templates/*.yaml", "recipes/*.yaml"]
+"SynthChat" = [
+  "config/defaults.yaml", "config/label_mappings.yaml", "config/privacy_profiles.yaml",
+  "config/settings.yaml", "config/tool_call_formats.yaml", "config/validation.yaml",
+  "config/workspace_formats.yaml", "rubrics/*.yaml", "rubrics/*.example", "scenarios/*.yaml",
+]
+"Trainers.grpo" = ["configs/*.yaml", "configs/rewards/*.yaml"]
 "tuner.execution.providers.modal" = [
   "modal-runtime-v1.lock.json",
   "modal-wheel-builder.lock.json",
@@ -67,7 +77,7 @@ namespaces = true
 "Trainers.sft.configs" = ["config.yaml"]
 
 # The Modal runtime lock and exact packaged SFT default config ship as assets. Broader
-# runtime scripts, schemas, templates, containers, and configuration assets are
+# runtime scripts, templates, containers, and configuration assets are
 # still source-tree assets pending the full publication inventory.
 
 # Lint: start with pyflakes (F) only; widen rule families deliberately later.
