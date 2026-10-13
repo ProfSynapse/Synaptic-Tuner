@@ -200,7 +200,7 @@ def test_historical_log_descriptor_cannot_enable_read_view_operations():
     class Historical:
         def __getattr__(self, name):
             pytest.fail('blocked verb delegated to historical host')
-    restricted = reader._TerminalOperations(Historical(), None, None)
+    restricted = reader._RetainedOperations(Historical(), None, None)
     for callback in (lambda: restricted.logs(None), lambda: restricted.cancel(None, 'request'), lambda: restricted.reconcile(None), lambda: restricted.reverify(None)):
         with pytest.raises(reader.RunOperationError) as denied:
             callback()

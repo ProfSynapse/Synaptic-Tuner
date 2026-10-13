@@ -90,7 +90,7 @@ class _PlanningReads:
         return self._descriptor
 
 
-class _TerminalOperations:
+class _RetainedOperations:
     __slots__ = ("_operations", "_workflows", "_run")
     def __init__(self, operations, workflows, run):
         self._operations, self._workflows, self._run = operations, workflows, run
@@ -346,7 +346,7 @@ def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk
             reader._reader = ModalPackagedReader(
                 facade=facade, deployment_observer=observer, verifier=signer, key_ref=signer_ref,
             )
-            view = RetainedModalRunsV1(run, RunsAPI(_TerminalOperations(operations, workflows, run)))
+            view = RetainedModalRunsV1(run, RunsAPI(_RetainedOperations(operations, workflows, run)))
             opened = True
             yield view
         return
