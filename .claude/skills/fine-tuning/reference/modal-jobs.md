@@ -1731,6 +1731,15 @@ and revalidates its own retained inputs. Explicit preparation is optional,
 not an operator wheel-upload step or execution grant. Do not combine it with
 `--plan`, `--quote`, `--qualify`, `--qualify-metrics` or `--fresh-attempt`.
 
+The fixed current-source archive includes the packaging command helper,
+`MANIFEST.in`, both declared public tool catalogs and the public schema directory,
+alongside the existing package trees. The actual pinned offline builder must
+produce these resources byte-for-byte; a metadata-only or synthetic wheel fixture
+does not establish cold source-build readiness. A checkout-only CPython 3.11.14
+CI control builds a genuine Git snapshot independently of that archive allowlist.
+It verifies schemas, catalogs and candidate resources without provider effects.
+This does not qualify an image, GPU, model or subsequent live attempt.
+
 `train --plan --json` remains read-only and network-free. Its `local_readiness`
 reports `bootstrap_cache_ready`, `unprepared` or `invalid`; source-wheel
 preflight occurs during execution or `--prepare-local`. Cache readiness does
