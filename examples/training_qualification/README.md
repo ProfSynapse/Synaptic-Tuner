@@ -160,3 +160,59 @@ material commitments, without a provider client or original input/source files.
 A missing diagnostic remains unavailable; this is neither provider job evidence
 nor cancellation, recovery, absence proof or permission to replay. Known-job
 `show` and native verification keep their existing authenticated reader path.
+
+## Preparing genuine Docker consumer material
+
+`prepare_docker.py` uses the existing public source authentication, immutable
+prepared-input verifier, SFT compiler and Docker bridge to generate the exact
+request, CoordinatorResolvedMaterial, DockerProfile and consumer preview. Copy
+`prepare-docker.config.example.json` and replace all placeholders with reviewed
+host-owned inputs. The selected runtime release must admit the exact model,
+revision and prepared v1 format; the image profile/report and immutable image
+must still be qualified through the existing derived-image workflow. The template
+is a candidate configuration, not a live qualification or approval. It does not
+upgrade historical runtime profiles or enable logs/cancel/reconcile.
+
+Run from a neutral directory with the installed engine interpreter:
+
+```sh
+python -I /absolute/checkout/examples/training_qualification/prepare_docker.py plan /private/prepare.json
+python -I /absolute/checkout/examples/training_qualification/prepare_docker.py prepare /private/prepare.json
+python -I /absolute/checkout/examples/training_qualification/prepare_docker.py prepare-model /private/prepare.json
+python -I /absolute/checkout/examples/training_qualification/launch.py start /private/prepared/consumer.json
+```
+
+`plan` reads declarations without keys, downloads or daemon calls. `prepare`
+uses a separately named source-signing key and bounded public Git reads, verifies
+an existing published v1 input (at most 2 MiB), recompiles actual material and
+exclusively publishes a preview. Full public operational preflight occurs only
+in the subsequent existing `start` composition. Preparation does not install,
+pull, build, download a model or start a container. Original host manifests and
+pushed source evidence must be genuine and fresh. Its source admission helper
+is shared with the HF preparer without changing HF canonical outputs.
+
+`prepare-model` is the explicit public-model network boundary: it uses the existing
+pinned model preparer with anonymous credentials, private persistent/SDK scratch
+under the preparation output and destination under the authenticated artifact
+mount's `run/cache`. The existing verifier checks pinned file metadata/content;
+the native snapshot validator checks the resulting offline path. The source
+mount remains empty until the original claimed stage. Writable runtime directories
+are private and disjoint; the exact prepared-input slot is never adopted. A
+create-only local attempt prevents automatic repeat after an uncertain download.
+Vendor download behavior is not a hard job deadline or bill cap. No manual weight
+upload, source inventory widening or restored training authority is involved.
+
+Docker staging creates only the authenticated empty project directory plus its
+necessary parents, retaining their descriptors through submit checks. Extra files,
+directories, symlinks, replacement and permission changes still refuse. This
+allows the real source worker's root binding without manufacturing project data.
+Native artifact role paths remain separate from the model cache; successful
+preview or model preparation does not establish a real SFT update.
+
+The same checked-in consumer has a stdlib-only `probe-filesystem` diagnostic for
+a reviewed CPU container plan. It executes exact hash-verified native writer bytes
+on fixed nonsecret data and reports actual modes/UID/GID and unchanged initial
+umask. A fresh host-owned output and bounded host read are required to establish
+accessibility. It does not create a TrainingAPI receipt or qualify training/GPU
+behavior. The base image's root user alone does not prove output unreadability;
+no UID API or permission guard has been relaxed.

@@ -445,3 +445,18 @@ material and successful consumer validation/HF preview publish consumer.json.
 Full public preflight remains deferred to warm composition. No Job, bucket,
 model download, image/GPU qualification or capability promotion occurs here.
 See the checked-in example README for commands and exact fixture coverage.
+
+## Public Docker qualification consumer preparation
+
+The checkout-owned `examples/training_qualification/prepare_docker.py` closes
+material setup for the public Docker consumer. With an installed engine,
+`plan` validates declared release/model/layout, `prepare` authenticates genuine
+sources and existing immutable v1 input before publishing canonical material,
+and `prepare-model` explicitly downloads the pinned public snapshot into the
+private artifact-mount cache. See `examples/training_qualification/README.md`
+for the template and exact commands. Full public preflight remains deferred
+until host composition; missing image/runtime/model qualification still refuses.
+The CPU `probe-filesystem` command measures actual native writer modes and host
+readability under a reviewed finite container plan; it is not training, GPU,
+provider or cancellation qualification. Source inventory and five-role native
+verification remain closed; no default capability or UID policy is promoted.

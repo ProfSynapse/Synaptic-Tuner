@@ -1,0 +1,173 @@
+{
+  "project": {
+    "root": "/absolute/REPLACE_HOST_PROJECT",
+    "engine_root": "/absolute/REPLACE_CLEAN_ENGINE_GITLINK",
+    "manifest": "/absolute/REPLACE_HOST_PROJECT/synaptic.yaml"
+  },
+  "run_id": "REPLACE_UNUSED_RUN",
+  "request_id": "REPLACE_UNUSED_REQUEST",
+  "output_root": "/absolute/private/REPLACE_UNUSED_PREPARATION",
+  "prepared_publication": "/absolute/REPLACE_VERIFIED_V1_PUBLICATION",
+  "resolved_config": "/absolute/REPLACE_CANONICAL_SFT_CONFIG.json",
+  "runtime_release": "/absolute/REPLACE_ACTUAL_VERIFIED_RUNTIME_RELEASE.json",
+  "source_authority": {
+    "secret": {
+      "provider": "env",
+      "name": "DOCKER_SOURCE_SIGNING_KEY"
+    },
+    "issuer_ref": "REPLACE_SOURCE_ISSUER",
+    "key_ref": "REPLACE_SOURCE_KEY_REF",
+    "audience_ref": "REPLACE_SOURCE_AUDIENCE"
+  },
+  "resources": {
+    "accelerator": "nvidia",
+    "accelerator_count": 1,
+    "timeout_seconds": 900
+  },
+  "runtime_environment": {
+    "PYTHONPATH": "/source/engine",
+    "PYTHONSAFEPATH": "1",
+    "PYTHONNOUSERSITE": "1",
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1",
+    "WANDB_DISABLED": "true",
+    "PATH": "/opt/unsloth-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "SYNAPTIC_ENGINE_ROOT": "/source/engine",
+    "SYNAPTIC_PROJECT_ROOT": "/source/project",
+    "SYNAPTIC_ARTIFACT_ROOT": "/artifacts/run/artifacts",
+    "SYNAPTIC_STATE_ROOT": "/artifacts/run/state",
+    "SYNAPTIC_TRACKING_ROOT": "/artifacts/run/tracking",
+    "SYNAPTIC_CACHE_ROOT": "/artifacts/run/cache",
+    "SYNAPTIC_TMP_ROOT": "/artifacts/run/tmp",
+    "HF_HOME": "/artifacts/run/cache/huggingface",
+    "TRANSFORMERS_CACHE": "/artifacts/run/cache/transformers"
+  },
+  "profile": {
+    "provider": {
+      "provider_id": "docker",
+      "profile_ref": "REPLACE_SELECTED_CANDIDATE_PROFILE"
+    },
+    "descriptor": {
+      "schema_version": "synaptic-provider-descriptor/v1",
+      "provider_id": "docker",
+      "display_name": "Docker",
+      "implementation_version": "1.0.0",
+      "capabilities": {
+        "observe": true,
+        "logs": false,
+        "cancel": false,
+        "reconcile": false,
+        "artifact_streaming": true,
+        "cost_quote": false
+      }
+    },
+    "scope": {
+      "account_ref": "REPLACE_LOCAL_ACCOUNT",
+      "namespace_ref": "REPLACE_LOCAL_NAMESPACE"
+    },
+    "executor_descriptor": {
+      "provider_id": "docker",
+      "executor_id": "docker-executor-v1",
+      "implementation_version": "1.0.0"
+    },
+    "adapter_descriptor": {
+      "provider_id": "docker",
+      "adapter_id": "docker-reconcile-v1",
+      "implementation_version": "1.0.0"
+    },
+    "runtime": {
+      "cpu_count": 2,
+      "memory_bytes": 17179869184,
+      "timeout_seconds": 900,
+      "network_mode": "none",
+      "accelerator_devices": {
+        "kind": "nvidia",
+        "device_indices": [
+          0
+        ],
+        "capabilities": [
+          "gpu"
+        ]
+      }
+    },
+    "roots": {
+      "source_ref": "REPLACE_SOURCE_MOUNT_REF",
+      "artifact_ref": "REPLACE_ARTIFACT_MOUNT_REF",
+      "source_read_only": true
+    },
+    "artifacts": {
+      "maximum_artifact_bytes": 268435456,
+      "maximum_total_bytes": 1073741824
+    }
+  },
+  "consumer": {
+    "provider": "docker",
+    "state_root": "/absolute/private/REPLACE_NEW_ATTEMPT",
+    "request_file": {
+      "path": "/absolute/private/REPLACE_CANONICAL_REQUEST.json",
+      "sha256": "REPLACE_ACTUAL_SHA256",
+      "size_bytes": 1
+    },
+    "host": {
+      "authority_secret": {
+        "provider": "env",
+        "name": "DOCKER_HOST_AUTHORITY"
+      },
+      "evidence_secret": {
+        "provider": "env",
+        "name": "DOCKER_HOST_EVIDENCE"
+      },
+      "grant_ref": "REPLACE_EXISTING_HOST_GRANT_REFERENCE",
+      "allowed_requirements": [
+        {
+          "operation": "training.start",
+          "paid_effect": false,
+          "maximum_cost_minor_units": null,
+          "currency": null
+        }
+      ]
+    },
+    "docker": {
+      "material_file": {
+        "path": "/absolute/private/REPLACE_COORDINATOR_MATERIAL.json",
+        "sha256": "REPLACE_ACTUAL_SHA256",
+        "size_bytes": 1
+      },
+      "profile_file": {
+        "path": "/absolute/private/REPLACE_DOCKER_PROFILE.json",
+        "sha256": "REPLACE_ACTUAL_SHA256",
+        "size_bytes": 1
+      },
+      "image_profile_file": {
+        "path": "/absolute/private/REPLACE_DERIVED_IMAGE_PROFILE.yaml",
+        "sha256": "REPLACE_ACTUAL_SHA256",
+        "size_bytes": 1
+      },
+      "image_verification_file": {
+        "path": "/absolute/private/REPLACE_VERIFICATION_REPORT.json",
+        "sha256": "REPLACE_ACTUAL_SHA256",
+        "size_bytes": 1
+      },
+      "executable": "/absolute/REPLACE_DOCKER_EXECUTABLE",
+      "config_directory": "/absolute/private/REPLACE_DOCKER_CONFIG",
+      "endpoint": "unix:///REPLACE_LOCAL_DAEMON_SOCKET",
+      "daemon_id": "REPLACE_ACTUAL_DAEMON_ID",
+      "source_host_root": "/absolute/private/REPLACE_NEW_ATTEMPT/source",
+      "source_container_root": "/source",
+      "artifact_host_root": "/absolute/private/REPLACE_NEW_ATTEMPT/artifacts",
+      "artifact_container_root": "/artifacts",
+      "control_container_root": "/source/control",
+      "prepared_publication": "/absolute/private/REPLACE_VERIFIED_PUBLICATION.jsonl",
+      "role_paths": {
+        "final_model": "run/artifacts/final_model.tar",
+        "tokenizer": "run/artifacts/tokenizer.tar",
+        "training_lineage": "run/artifacts/training_lineage.json",
+        "training_metrics": "run/artifacts/training_metrics.json",
+        "workload_record": "run/artifacts/workload.json"
+      },
+      "command_seconds": 120,
+      "read_seconds": 60,
+      "allow_current_cancel_authorization": false
+    }
+  }
+}

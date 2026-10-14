@@ -167,7 +167,15 @@ class DockerLocalSourceSealsV1:
             if not relative.parts or any(p in ('', '.', '..') for p in relative.parts):
                 raise ValueError('docker_source_path_invalid')
             return kind, relative.as_posix()
+        project = PurePosixPath(roots['project'])
         engine = PurePosixPath(roots['engine'])
+        if (not project.is_relative_to(source_mount) or project == source_mount
+                or project == engine or project in engine.parents or engine in project.parents
+                or project == control.control_root or project in control.control_root.parents
+                or control.control_root in project.parents):
+            raise ValueError('docker_source_project_invalid')
+        self._project_relative = project.relative_to(source_mount).as_posix()
+        self._project_chain, self._project_fd = (), None
         for member in manifest.closure.members:
             raw = closure_members.get(member.path.as_posix())
             if type(raw) is not bytes or len(raw) != member.size_bytes or hashlib.sha256(raw).hexdigest() != member.sha256:
@@ -313,6 +321,8 @@ class DockerLocalSourceSealsV1:
     def _source_inventory(self):
         expected = {p for kind, p in (*self._files, self._input_key) if kind == 'source'}
         allowed_dirs = {str(parent) for p in expected for parent in PurePosixPath(p).parents if str(parent) != '.'}
+        project = PurePosixPath(self._project_relative)
+        allowed_dirs.update(str(p) for p in (project, *project.parents) if str(p) != '.')
         observed = set()
         def walk(fd, prefix=''):
             self._check()
@@ -343,6 +353,13 @@ class DockerLocalSourceSealsV1:
     def _revalidate(self):
         self._check()
         self._source_inventory()
+        if self._project_fd is None:
+            raise ValueError
+        DockerLocalArtifactsV1._recheck(self._project_chain)
+        for _, _, fd in self._project_chain:
+            project = os.fstat(fd)
+            if project.st_uid != os.getuid() or stat.S_IMODE(project.st_mode) != 0o700:
+                raise ValueError
         for key, (size, digest, _) in self._retained.items():
             self._verify(key, size, digest)
         if len(self._retained) != len(self._files) + 1:
@@ -390,6 +407,12 @@ class DockerLocalSourceSealsV1:
                         remaining -= len(raw)
                     if stream.read(1) != b'' or digest.hexdigest() != self._identity.content_digest:
                         raise ValueError
+                    # Only the authenticated empty project root joins the closed
+                    # source directory inventory. Its descriptor remains owned until
+                    # close, so replacement cannot be hidden by inode reuse.
+                    self._project_fd, _, self._project_chain = self._roots['source'].parent(
+                        self._project_relative + '/unused-leaf', self._roots['source'].stack,
+                        create=True, fresh_prefix=self._project_relative)
                     for key, raw in self._files.items():
                         import io
                         self._publish(key, io.BytesIO(raw), len(raw), hashlib.sha256(raw).hexdigest())
