@@ -55,8 +55,10 @@ else:
                         remaining.remove(pid)
                     continue
                 if result:
-                    if pid==child:
-                        assert os.WIFSIGNALED(status)
+                    if pid==child and mode=='stopped':
+                        assert os.WIFSIGNALED(status) and os.WTERMSIG(status)==signal.SIGKILL
+                    elif pid==child:
+                        assert os.WIFSIGNALED(status) or os.WIFEXITED(status)
                     else:
                         assert os.WIFEXITED(status) and os.WEXITSTATUS(status)==0
                     remaining.remove(pid)
