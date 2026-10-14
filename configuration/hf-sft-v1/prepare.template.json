@@ -1,16 +1,16 @@
 {
   "project": {
     "root": "/ABSOLUTE/CLEAN/HOST",
-    "engine_root": "/ABSOLUTE/CLEAN/HOST/engine",
+    "engine_root": "/ABSOLUTE/CLEAN/HOST/synaptic-tuner",
     "manifest": "/ABSOLUTE/CLEAN/HOST/synaptic.yaml"
   },
   "run_id": "REPLACE_WITH_ALLOCATED_RUN_ID",
   "request_id": "REPLACE_WITH_STABLE_REQUEST_ID",
   "output_root": "/ABSOLUTE/UNUSED/PRIVATE/MATERIAL",
-  "prepared_publication": "/ABSOLUTE/VERIFIED/dataset-7aa26aba079ac1210466c5c2cdf747f00c764b5bc4ed366e2f67af7ffa0d3770",
-  "resolved_config": "/ABSOLUTE/CONFIG/sft-config.json",
+  "prepared_publication": "/ABSOLUTE/CLEAN/HOST/data/hf-sft-v1/prepared/dataset-7aa26aba079ac1210466c5c2cdf747f00c764b5bc4ed366e2f67af7ffa0d3770",
+  "resolved_config": "/ABSOLUTE/CLEAN/HOST/configuration/hf-sft-v1/sft-config.json",
   "runtime_declaration": "/ABSOLUTE/CONFIG/hf-runtime-declaration.json",
-  "image_profile": "/ABSOLUTE/CLEAN/HOST/engine/Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c/profile.yaml",
+  "image_profile": "/ABSOLUTE/CLEAN/HOST/synaptic-tuner/Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c/profile.yaml",
   "source_authority": {
     "secret": {
       "provider": "env",
