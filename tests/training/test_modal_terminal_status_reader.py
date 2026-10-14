@@ -88,3 +88,41 @@ def test_status_collaborator_requires_exact_internal_enum(state):
         ModalPackagedReadUnavailable, match="modal_packaged_call_unknown"
     ):
         reader.observe(request)
+
+
+@pytest.mark.parametrize(
+    "terminal", [ModalFunctionCallState.CANCELLED, ModalFunctionCallState.FAILED]
+)
+def test_public_cancel_ack_then_independent_terminal_observation(
+    tmp_path, monkeypatch, terminal
+):
+    from tuner.execution.coordinator_v1.model import WorkflowPhaseV1
+    from tuner.execution.providers.modal.facade import ExplicitModal154ReadFacade
+    from tuner.training.modal_host_reader import ModalPackagedCoordinatorReaderV1
+    from tests.training.test_modal_cancel_machinery import _scripted
+
+    original_poll = ModalPackagedCoordinatorReaderV1._poll_packaged_call
+    monkeypatch.setattr(
+        ExplicitModal154ReadFacade,
+        "observe_known_call_status",
+        lambda *_a, **_k: terminal,
+    )
+
+    def action(host, run, clock, calls, events):
+        assert (
+            host.api.runs.cancel(run, "operator stop").state.value == "cancel_requested"
+        )
+        before = host.composition.stores.workflow_store.get(run)
+        assert before.phase is WorkflowPhaseV1.CANCEL_REQUESTED
+        original_cancel = before.cancel.to_dict()
+        monkeypatch.setattr(
+            ModalPackagedCoordinatorReaderV1, "_poll_packaged_call", original_poll
+        )
+        result = host.api.runs.outcome(run)
+        assert result.state.value == terminal.value
+        after = host.composition.stores.workflow_store.get(run)
+        assert after.cancel.to_dict() == original_cancel
+        assert calls == ["fc-owned"]
+        assert not result.artifacts
+
+    _scripted(tmp_path, monkeypatch, action)

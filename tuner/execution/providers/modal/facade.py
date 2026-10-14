@@ -331,7 +331,10 @@ class ExplicitModal154ReadFacade:
                 )
                 if (raw_client._snapshotted is not False
                         or raw_client._owner_pid != os.getpid()
-                        or method.client is not raw_client):
+                        or method.client is not raw_client
+                        or raw_call.object_id != provider_job_ref
+                        or raw_call.client is not raw_client
+                        or raw_call.is_hydrated is not True):
                     raise ValueError
                 return response
 

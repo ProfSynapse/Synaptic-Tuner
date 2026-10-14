@@ -217,3 +217,31 @@ def test_original_deadline_bounds_sdk_loop_wait():
         is ModalFunctionCallState.UNKNOWN
     )
     assert len(calls) == 1 and time.monotonic() - started < 0.5
+
+
+def test_call_identity_substitution_during_rpc_is_unknown(monkeypatch):
+    facade, calls, raw = _facade(
+        _response(api_pb2.GenericResult.GENERIC_STATUS_TERMINATED)
+    )
+    original_factory = modal.FunctionCall.from_id
+    held = []
+
+    def factory(ref, **kwargs):
+        call = original_factory(ref, **kwargs)
+        held.append(synchronizer._translate_in(call))
+        return call
+
+    monkeypatch.setattr(modal.FunctionCall, "from_id", factory)
+    original_direct = raw._stub.FunctionGetOutputs.direct
+
+    async def substitute(request, *, timeout):
+        response = await original_direct(request, timeout=timeout)
+        held[0]._object_id = "fc-other"
+        return response
+
+    raw._stub.FunctionGetOutputs.direct = substitute
+    assert (
+        facade.observe_known_call_status("fc-known", deadline=time.monotonic() + 5)
+        is ModalFunctionCallState.UNKNOWN
+    )
+    assert len(calls) == 1
