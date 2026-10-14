@@ -116,3 +116,36 @@ is a preparer assertion derived from the admitted read; after deletion a digest
 cannot independently reconstruct historical source truth. Rewriting provenance
 creates a different semantic identity and cannot satisfy an old expected prepared
 identity. Preserve original Data outcome and source commitments for audit.
+
+## Data-to-SFT candidate planning (Stage 3)
+
+The Python API handoff uses actual `DataAPI` generation and improvement outputs,
+`DataAPI.validate`, and the conversation normalizer/verifier through
+`TrainingAPI.prepare`. Bind the selected run's exact `DataOutcome` when it is
+supplied; a generated run's commitments cannot be substituted for an improved
+run's artifact. Optional generic provenance remains a preparer declaration.
+Retain the prepared source and immutable publication. Raw datasets, metadata,
+scenario and generation/preparation configuration copies can then be removed;
+subsequent prepared leases and configured `TrainingAPI.resolve` / `plan` use the
+retained identity and bytes without regenerating data.
+
+`qwen35-conversation-sft-candidate-v1` is a separate, **unqualified** planning
+selection for `synaptic-conversation-sft-row/v1`. It preserves the exact Qwen
+model/revision and immutable base inventory; historical Qwen SFT profiles and
+release format allowlists remain unchanged. Its source/host-owned build profile
+is `Trainers/image_profiles/qwen35_4b_conversation_sft_candidate_v1/profile.yaml`.
+It binds the accepted Stage 2 wheel SHA-256
+`13aff34e7e0a0414a46770637b54d2393320097a02fc5bc0a42fe1e7d48f8199`.
+The build profile is outside that wheel to avoid a circular self-hash. The
+candidate runtime-profile and compatibility declarations are installed assets;
+the consuming host supplies the build profile explicitly.
+
+The joined CPU contract test uses text-only configured environment fixtures,
+real bounded filesystem assertions, and scripted judge/improver corrections.
+It does not coerce structured tool calls or `content: null` into text. Its
+provider/release metadata and Git observation are explicitly synthetic planning
+fixtures, not deployment observations, source admission or build capture.
+Actual image construction, CPU/GPU qualification and training remain separate.
+This handoff supports Python API resolve/plan only: the ordinary Modal recipe
+CLI remains bound to its existing v2 messages path. No model-quality, live
+training or new provider capability claim follows from this planning selection.
