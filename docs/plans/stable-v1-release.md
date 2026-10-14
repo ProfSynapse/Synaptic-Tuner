@@ -31,24 +31,26 @@ The Python API is a library contract, not a deployed HTTP/MCP service.
 ## Current release status — 2026-10-14
 
 The source distribution is still **1.1.0 / Beta**, not a stable release. At this
-checkpoint, main is `76842ecb` through merged [#243](https://github.com/ProfSynapse/Synaptic-Tuner/pull/243).
+checkpoint, main is `35a11c03` through merged [#245](https://github.com/ProfSynapse/Synaptic-Tuner/pull/245).
 HF publication [#238](https://github.com/ProfSynapse/Synaptic-Tuner/pull/238),
 launcher closure [#239](https://github.com/ProfSynapse/Synaptic-Tuner/pull/239),
-cold HF cancellation [#240](https://github.com/ProfSynapse/Synaptic-Tuner/pull/240)
+cold HF cancellation [#240](https://github.com/ProfSynapse/Synaptic-Tuner/pull/240),
 native GRPO publication [#241](https://github.com/ProfSynapse/Synaptic-Tuner/pull/241),
-HF material preparation [#242](https://github.com/ProfSynapse/Synaptic-Tuner/pull/242)
-and Modal capture diagnostics #243 each passed all 18 checks on their accepted
+HF material preparation [#242](https://github.com/ProfSynapse/Synaptic-Tuner/pull/242),
+Modal capture diagnostics #243, configured Modal lifecycle #244 and finite
+CPU-parent diagnostics #245 each passed all 18 checks on their accepted
 heads; each merged tree matches its reviewed head. No stable version,
 tag or package publication has been selected. The dated log below retains exact
 source/wheel hashes, failures and evidence limits; older unavailable/baseline
 summaries are historical rather than current backend verdicts. Counts below are
 overlapping installed lane totals, not a cumulative unique-test count.
 
-The candidate stack [#244](https://github.com/ProfSynapse/Synaptic-Tuner/pull/244)
+The remaining candidate stack [#246](https://github.com/ProfSynapse/Synaptic-Tuner/pull/246)
 through [#247](https://github.com/ProfSynapse/Synaptic-Tuner/pull/247) is separate
-from merged main: CI and merge remain pending at this checkpoint. It adds the
-configured Modal lifecycle, finite CPU-parent diagnostics, orphaned-cancel
-observation and same-model nontraining comparison. Independent source review and
+from merged main: CI and merge remain pending at this checkpoint. It adds
+orphaned-cancel observation and same-model nontraining comparison. The merged
+#244/#245 implementations retain their provider-free scope; they do not qualify
+live cancellation or establish earlier attempt causes. Independent source review and
 local installed acceptance do not substitute for exact-head CI or live qualification.
 
 | Supported preparation/composition | Current accepted evidence | Remaining release work |
@@ -105,11 +107,11 @@ then an unclassified installed-child qualification operation failed. No CPU
 qualification receipt, native child code or specific failing operation was
 retained; the underlying cause remains unknown. Preserve its consumed claims and
 known call. There was no model download or GPU training. More precise finite-stage
-diagnostics are implemented in candidate #245; a separately bound fresh attempt
+diagnostics are merged in #245; a separately bound fresh attempt
 is still necessary. This does not retrospectively establish E's cause.
 
-The Modal lifecycle candidate joins recipe opt-in and current caller permission
-to the existing public cancellation/reconciliation operations. Acknowledgment is
+The merged #244 Modal lifecycle implementation joins recipe opt-in and current
+caller permission to the existing public cancellation/reconciliation operations. Acknowledgment is
 distinct from an independent provider terminal observation. If an acknowledged
 cancel loses its Foundation receipt before persistence, candidate #246 retains
 the consumed effect and permits known-run reads through the original authenticated
