@@ -586,12 +586,12 @@ class HFJobsTransport:
         return expected
 
     def cancel(self, command):
-        self._mutation()
         """One acknowledged request, not a terminal/physical-stop assertion.
 
         The absolute deadline bounds provider work, not synchronous host store
         callbacks. A late provider thread cannot write the owning-thread journal.
         """
+        self._mutation()
         submit, receipt = self._validate(command, EffectKind.CANCEL)
         retained = self._cancel_receipt(command, submit, receipt["job_id"])
         if retained is not None:
@@ -614,8 +614,8 @@ class HFJobsTransport:
         return self._retain("cancel", command, value)
 
     def lookup(self, command):
-        self._mutation()
         """Read retained exact receipts only; absence never permits replay."""
+        self._mutation()
         kind = command.operation.effect.kind
         target = self._validate(command, kind)
         if kind is EffectKind.CANCEL:
