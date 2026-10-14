@@ -31,33 +31,33 @@ The Python API is a library contract, not a deployed HTTP/MCP service.
 ## Current release status — 2026-10-14
 
 The source distribution is still **1.1.0 / Beta**, not a stable release. At this
-checkpoint, main is `b56efba7` through merged [#246](https://github.com/ProfSynapse/Synaptic-Tuner/pull/246).
+checkpoint, main is `1603b60b` through merged [#249](https://github.com/ProfSynapse/Synaptic-Tuner/pull/249).
 HF publication [#238](https://github.com/ProfSynapse/Synaptic-Tuner/pull/238),
 launcher closure [#239](https://github.com/ProfSynapse/Synaptic-Tuner/pull/239),
 cold HF cancellation [#240](https://github.com/ProfSynapse/Synaptic-Tuner/pull/240),
 native GRPO publication [#241](https://github.com/ProfSynapse/Synaptic-Tuner/pull/241),
 HF material preparation [#242](https://github.com/ProfSynapse/Synaptic-Tuner/pull/242),
 Modal capture diagnostics #243, configured Modal lifecycle #244 and finite
-CPU-parent diagnostics #245 and orphaned-cancel observation #246 each passed all 18 checks on their accepted
-heads; each merged tree matches its reviewed head. No stable version,
+CPU-parent diagnostics #245, orphaned-cancel observation #246, same-model consumer
+#247, its token-default repair #248 and source-root fixture correction #249 each
+passed all 18 checks on their accepted heads; each merged tree matches its reviewed head. No stable version,
 tag or package publication has been selected. The dated log below retains exact
 source/wheel hashes, failures and evidence limits; older unavailable/baseline
 summaries are historical rather than current backend verdicts. Counts below are
 overlapping installed lane totals, not a cumulative unique-test count.
 
-The remaining candidates [#247](https://github.com/ProfSynapse/Synaptic-Tuner/pull/247)
-at `cf049501` and [#248](https://github.com/ProfSynapse/Synaptic-Tuner/pull/248) at
-`7b8639ea` are separate from merged main: exact-head CI and merge remain pending
-at this checkpoint. They add same-model nontraining comparison, optional consumer
-reasoning effort and the admitted injected-client token default. The merged #244–#246 implementations retain their
-provider-free scope; they do not qualify live cancellation or establish earlier
-attempt causes. Independent source review and
-local installed acceptance do not substitute for exact-head CI or live qualification.
+The reviewed HF batch staging/local-read diagnostics and portable CPU sealed-input
+probe fixes are integrated locally but remain separate from merged main. Their
+full installed acceptance and next PRs are pending at this checkpoint; PRs #250
+and #251 have not yet been created. Independent source review, narrow installed
+readback evidence and local CPU experiments do not substitute for live training
+qualification. The merged lifecycle implementations do not establish earlier
+attempt causes or physical provider quiescence.
 
 | Supported preparation/composition | Current accepted evidence | Remaining release work |
 | --- | --- | --- |
 | Durable host records/history | Caller-owned SQLite implements existing record/stream ports and atomic Data/Evaluation/Pipeline/training-workflow updates; retained plans, claims and original keys support bounded cold reads. | Final supported-host/recovery qualification; a database does not restore credentials, source leases or active processes. |
-| Data/environment/evaluation consumer | **356 installed controls** exercise public generate/improve/validate, actual local fixture workers, immutable exports, reports/comparison and SQLite readback. Bounded live Luna attempt D on checkout consumer `7b8639ea` and engine wheel `d9e14291` completed two one-row Data operations, two one-case evaluations and four measured `FOUND` spend effects. Improvement validated an already-passing row without changing its JSONL bytes; comparison remained incompatible. | Representative scenario/source and genuine corrective-edit coverage, advertised cancellation behavior and broader backend/account qualification. The bounded synthetic smoke does not establish quality ranking, immutable model identity or invoice enforcement. |
+| Data/environment/evaluation consumer | **356 installed controls** exercise public generate/improve/validate, actual local fixture workers, immutable exports, reports/comparison and SQLite readback. Bounded live Luna attempt D on checkout consumer `7b8639ea` and engine wheel `d9e14291` completed two one-row Data operations, two one-case evaluations and four measured `FOUND` spend effects. Improvement validated an already-passing row without changing its JSONL bytes; comparison remained incompatible. | Representative scenario/source coverage, advertised cancellation behavior and broader backend/account qualification. The bounded synthetic smoke does not establish quality ranking, immutable model identity or invoice enforcement. |
 | Ordinary SFT consumers | Shared checkout consumer with installed production passed **Docker 61 / HF 80** controls, including public start, known reads, native five-role verification/download and uncertain-submit non-replay. Modal also has the normal retained-run/public lifecycle and historical exact-source live evidence. | Final-source **Docker/Modal/HF** live SFT parity, real cancellation/reconciliation and known-run recovery with original inputs/keys. Historical Modal success does not qualify the final stack. |
 | Modal GRPO | Public compiler/preparation, fixed isolated child, native verification, normal runner and retained known-run reads are implemented. The actual captured SmolLM candidate passed **256 installed controls** and retains the observed **396-distribution base**. | Qualify the actual augmented image/CPU closure, pinned model/tokenizer and one bounded **Modal GPU GRPO** run with real update/grouped reward evidence; constant/unchanged observations remain inconclusive. Other GRPO providers remain deferred. |
 | Artifact publication | Caller-owned durable store/spool/create-only destination passed **377 installed controls + one existing skip**; native RunsAPI join passed **73 installed Docker/publication controls** with five-role streams and cold marker lookup. Optional HF SFT publication passed **115 installed controls**, including owned snapshot lookup after process death. The native GRPO renderer/publication join passed **145 combined installed HF controls**, **256 GRPO controls** and **39 source-closure controls** (overlapping lane totals) on wheel source `371d4b05`. | Live repository/account/destination qualification remains open; expected-parent submission and verified owned immutable snapshot do not establish RPC causality or an introducing commit after a lost reply. The GRPO join uses actual native verification over synthetic CPU model files; genuine GPU training and live publication qualification remain open. |
@@ -129,11 +129,11 @@ and **426 installed native custody controls**, with one portable SFT control
 deselected in the real-seal Python 3.14 lane. Source, wheel and installed production
 bytes matched on wheel
 `2b390c59073600d9396fd395ea734906bcfa3e26a8ef2a6dffdb6011b8a72a7a`.
-Candidate #247's source `c52be233` passed **345 installed evaluation/nontraining
+Merged #247's source `c52be233` passed **345 installed evaluation/nontraining
 controls** in 57.00 seconds on wheel
 `d9e14291368baaa2c2011ed41c0b544b98b4ac2e52409eddb9624e783756b0d9`,
 with source/wheel/installed production equality. After nine additional optional
-consumer effort controls, candidate #247 at `cf049501` passed **354 installed
+consumer effort controls, merged #247 at `cf049501` passed **354 installed
 controls** in 57.04 seconds using the same engine wheel. The changed consumer is
 checkout-owned; the installed engine bytes are unchanged. Its optional
 `provider.thinking_effort` forwards to the existing Data client constructor only
@@ -163,8 +163,51 @@ Evidence is retained in `nontraining-qualification-20261014/attempt-d/readback.j
 and `root-execution-review.json`. Attempt C remains failed and conservatively
 indeterminate after the pre-inner-dispatch token guard refusal; it was never
 replayed or rewritten. The separate host-only default repair follows the existing
-SynthChat client convention and does not change engine code. Full CI/merge and
-remaining stable gates stay open.
+SynthChat client convention and does not change engine code. The reviewed #247/#248 heads passed exact full CI and merged. Remaining stable
+qualification gates stay open.
+
+### Current HF, Modal CPU and Docker prerequisites
+
+HF SFT attempt A remains **stage-only indeterminate**, with no authenticated
+submit or known provider job. The original workflow is
+`stage_reconcile_required`; its consumed stage effect remains indeterminate and
+must not be replayed. A bounded read-only batch experiment retrieved all 87
+source files (982,148 bytes) in a three-second UTC measurement window and matched
+the source-owned bytes. That result does not establish the original stage failure
+cause or authorize adoption/re-upload. The locally integrated HF fix passed a
+narrow installed legacy `show`: original 12 records and four streams remained
+logically unchanged, the result retained reconciliation-required/no-provider-
+evidence/no-replay status, and no HF credential/client, source preparation or
+grant was opened. Full installed batch/diagnostic acceptance and another admitted
+training attempt remain pending. Evidence is retained under
+`hf-sft-final-bound-plan-20261014/`, including the stage summary, batch-read
+experiment and installed legacy-show record.
+
+Modal GRPO CPU F on merged source `cf049501` ran the normal reviewed command once
+and failed `CALL_INPUT_FD / UNAVAILABLE` at
+`packaged_training_worker.input_fd`. Its build, deployment and qualification
+claims and exact call remain retained; no signed CPU receipt was returned. This
+boundary precedes `os.memfd_create`/`MFD_ALLOW_SEALING`, not the later seal step;
+it cannot identify the remote exception or retrospectively settle E. The exact
+copied local CPython 3.11.14 lacks those Python entrypoints. The existing training
+helper succeeded locally through its reviewed libc fallback, checked real kernel
+seals/hash/readback and refused a write with `EPERM`. The separate probe repair
+reuses that authenticated helper and guarded core seal constants, without a new
+ABI, fake Python constants, inventory/pin change or guard waiver. Source controls
+passed **239 with one existing optional-Torch skip** on real portable 3.11; peer
+controls passed **228 with one skip** (overlapping totals). Fresh installed proof
+and a new admitted live CPU attempt remain pending. F retains no local image/
+Sandbox identity or affirmative cleanup record; no GPU/model weights or replay
+occurred. Evidence is `grpo-normal-cpu-qualification-20261014-f/outcome.json` and
+its local existing-helper experiment.
+
+The authorized Windows desktop is now reachable and has a ready WSL Docker
+daemon through an explicit Unix socket; its default Windows `npipe` context is
+unsuitable for the selected WSL/POSIX consumer. No global context change is
+required. The idle RTX 3090 was observed; this is hardware readiness, not SFT
+qualification. Physical storage verification remains required before an image
+pull. No Docker training, model download or final-source lifecycle parity has
+been established by these read-only observations.
 
 No new grant, lifecycle DTO, store or scenario CRUD framework is required merely
 to close this plan. Supported host composition and installed/source prerequisites
