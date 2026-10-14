@@ -2,9 +2,9 @@
 
 This dedicated host branch is not an engine PR. Its engine Gitlink is exactly
 58225583be620625febba9c7e175af696bf71a5d, with the actual pushed
-`release/nontraining-same-model-integration` branch hint. A credential-disabled
-public ls-remote observed that exact branch HEAD during preparation. Do not use
-`main` as its source hint: main has a different commit despite identical tree.
+`release/portable-cpu-input-integration` branch hint. Verify its actual public
+branch HEAD before authenticating a new source proof. Do not substitute `main`
+for this exact selected source.
 The host itself must be reviewed/pushed and its exact branch verified before
 source authentication; local creation is not pushed proof.
 
@@ -43,9 +43,10 @@ Read-only pinned Hub1.33 CLI on 2026-10-14 confirmed professorsynapse, membershi
 SynapticLabs and unsloth-jobs, no buckets listed under SynapticLabs, and existing
 personal buckets professorsynapse/toolset-training-bootstrap and
 professorsynapse/toolset-training-artifacts, plus org bucket
-unsloth-jobs/jobs-artifacts. These are candidates, not selected
-qualification destinations or verified empty attempt prefixes. Owner billing,
-namespace/destination selection and fresh finite quote remain open. The repo
+unsloth-jobs/jobs-artifacts. The owner selected the personal namespace professorsynapse and existing private
+professorsynapse/toolset-training-artifacts bucket. This selection does not prove
+empty attempt prefixes, available credits or current write/job permission.
+A fresh finite quote remains part of operational admission. The repo
 bucket CLI refused before provider access due to optional transformers import;
 no dependencies/runtime workaround was added. Official pinned hf buckets list
 was used instead, with named credentials through explicit dotenv CLI.
@@ -53,4 +54,5 @@ was used instead, with named credentials through explicit dotenv CLI.
 No Job, bucket creation/upload, model download, image build or paid training was
 performed. Existing capability defaults and lost-reply/no-replay rules remain.
 
-Final-source candidate rebind preserves the original7df0a0bf host history and exact eight authored rows. The current engine is the actual pushed PR251 source. CI is pending, and this host fixture is not live qualification. Owner selected private professorsynapse/toolset-training-artifacts, but no job/upload/model download is authorized by this host. Fresh local source/authority/reader keys and caller config remain private, outside tracked files.
+This candidate rebind preserves the original 7df0a0bf host history and exact
+eight authored rows. The current engine is the actual pushed PR251 source. CI is pending, and this host fixture is not live qualification. Owner selected private professorsynapse/toolset-training-artifacts, but no job/upload/model download is authorized by this host. Fresh local source/authority/reader keys and caller config remain private, outside tracked files.
