@@ -8,8 +8,13 @@ from contextlib import contextmanager
 import json
 import time
 
-import httpx
 import pytest
+
+httpx = pytest.importorskip("httpx")
+sdk = pytest.importorskip("huggingface_hub")
+pytestmark = pytest.mark.skipif(
+    sdk.__version__ != "1.33.0", reason="pinned HF 1.33 publication transport proof"
+)
 
 from tests.training.test_docker_host_composition import host_fixture as host_fixture
 from tests.execution.providers.docker_provider_v1.conftest import profile  # noqa: F401
