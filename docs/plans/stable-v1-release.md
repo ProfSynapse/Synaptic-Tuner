@@ -693,6 +693,17 @@ dispersion, provider execution or public cancellation. Provider routing and
 live candidate qualification remain open; no current SFT release is relabeled.
 See the canonical GRPO reference for maintenance and deadline scope.
 
+The integrated isolated candidate passed a fresh sdist-built wheel's base-only
+consumer and all 341 installed conversation/SFT/GRPO controls (10.44 seconds).
+The wheel SHA-256 is
+`75f8ca2af1849b7c911dd2ec9493b6eba9146206c11b072babd14d3d331dace1`.
+All 24 changed packaged source/schema/manifest assets matched reviewed bytes;
+five source-only manifest-maintenance controls also passed. Existing lock
+refreshes retain their inventories and runtime pins. The installed trace fixture
+selects engine-owned module namespaces independently of manifest membership;
+neighboring third-party packages are excluded without hiding undeclared owned
+imports. Actual child/model/image observations remain explicit CPU substitutes.
+
 ### Conversation SFT compilation and execution preparation
 
 The SFT path preserves the selected ordered prefix and assistant target, uses
