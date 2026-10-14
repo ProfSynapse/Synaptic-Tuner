@@ -1253,7 +1253,7 @@ jobs:
               "contract/test_nontraining_metered_join_v1.py",
               "contract/test_paid_evaluation_judge_v1.py",
               "contract/test_paid_http_bounds_v1.py",
-              "contract/test_nontraining_qualification_consumer.py",  # 25 controls; lane total 345
+              "contract/test_nontraining_qualification_consumer.py",  # 34 controls; lane total 354
               "contract/test_metered_uncertain_calls_v1.py",
               "evaluator/test_compare.py",
               "evaluator/test_comparison_basis.py",
