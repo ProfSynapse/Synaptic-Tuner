@@ -437,11 +437,12 @@ def _stamp_packaged_adapter(final_model, model_ref):
 
 def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
              model_snapshot, model_identity, output_root, workload,
-             metric_sink=None, _dependency_factory=None, _packaged_artifacts=False):
+             metric_sink=None, _dependency_factory=None, _packaged_artifacts=False,
+             qualification_evidence=None, _child_deadline=None):
     """Run the existing GRPO core with explicit immutable admitted inputs.
 
     This entry does not authenticate a public plan or attest model member
-    inventory. The future packaged caller must do both before invoking it.
+    inventory. The packaged caller must do both before invoking it.
     It never claims parameter updates or reward dispersion from step count.
     """
     config, rows, documents, schema = admit_grpo_inputs(
@@ -451,9 +452,16 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
         raise ValueError("invalid packaged artifact mode")
     if _packaged_artifacts and model_identity.get("tokenizer_revision") != model_identity["revision"]:
         raise ValueError("packaged GRPO requires one model/tokenizer snapshot")
+    measurements = None
+    if qualification_evidence is not None:
+        if not _packaged_artifacts:
+            raise ValueError("qualification measurements require packaged custody")
+        measurements = _QualificationMeasurements(qualification_evidence, _child_deadline)
     from Trainers.grpo.src.rewards import build_combined_reward_function
     reward_fn, reward_plan = build_combined_reward_function(
         config['rewards'], Path('.'), documents=documents, schema_config=schema, raw_only=True)
+    if measurements is not None:
+        reward_fn = measurements.reward_wrapper(reward_fn)
     model_identity = json.loads(_canonical(model_identity))
     workload = json.loads(_canonical(workload))
     if not isinstance(model_snapshot, Path):
@@ -493,9 +501,28 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
                                if type(value) in (int, float) and math.isfinite(value)})
                 metric_sink(record)
         callbacks.append(Metrics())
+    if measurements is not None:
+        callback_class = deps.get('callback_class')
+        if callback_class is None:
+            from transformers import TrainerCallback
+            callback_class = TrainerCallback
+        class Evidence(callback_class):
+            def on_train_begin(self, args, state, control, model=None, **kwargs):
+                measurements.begin(model, args)
+                return control
+
+            def on_train_end(self, args, state, control, model=None, **kwargs):
+                measurements.end(model)
+                return control
+
+            def on_log(self, args, state, control, logs=None, **kwargs):
+                measurements.log(state, logs)
+                return control
+        callbacks.append(Evidence())
     trainer, result = train_grpo_core(model=model, tokenizer=tokenizer, reward_fn=reward_fn,
         formatted_dataset=dataset, training_args=args, callbacks=callbacks,
         trainer_class=deps['trainer_class'])
+    evidence = measurements.record(workload) if measurements is not None else None
     final = output_root / 'final_model'
     token = output_root / 'tokenizer'
     final.mkdir(exist_ok=False)
@@ -514,6 +541,9 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
                'input_commitments': {key: workload[key] for key in
                    ('config_sha256', 'dataset_sha256', 'rewards_sha256')},
                'reward_plan': reward_plan, 'actual_steps': trainer.state.global_step}
+    if evidence is not None:
+        metrics['qualification_evidence'] = evidence
+        lineage['qualification_evidence'] = evidence
     for role, document in (('training_metrics', metrics), ('training_lineage', lineage),
                            ('workload_record', workload)):
         raw = _canonical(document)
@@ -528,3 +558,324 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
 
 def train_grpo_trainer(trainer, *, resume=None):
     return trainer.train(resume_from_checkpoint=resume)
+
+
+_EVIDENCE_SCHEMA = "synaptic-grpo-qualification-evidence/v1"
+_EVIDENCE_CAPS = {
+    "max_trainable_bytes": 268435456,
+    "max_trainable_tensors": 4096,
+    "max_reward_values": 1048576,
+}
+_EVIDENCE_CHUNK_BYTES = 1024 * 1024
+
+
+def validate_qualification_evidence_policy(value):
+    """Pure optional policy admission; imports no ML dependencies."""
+    if type(value) is not dict or set(value) != set(_EVIDENCE_CAPS):
+        raise ValueError("invalid GRPO evidence policy")
+    for name, maximum in _EVIDENCE_CAPS.items():
+        if type(value[name]) is not int or not 1 <= value[name] <= maximum:
+            raise ValueError("invalid GRPO evidence bound")
+    return dict(value)
+
+
+class _QualificationMeasurements:
+    """Trusted child measurements, not independent historical tensor witnesses."""
+
+    def __init__(self, policy, deadline):
+        import time
+        if type(deadline) not in (int, float) or not math.isfinite(deadline):
+            raise ValueError("finite original child deadline required")
+        self.policy = validate_qualification_evidence_policy(policy)
+        self.deadline = deadline
+        self._clock = time.monotonic
+        self.before = self.after = None
+        self._model = None
+        self.scale_rewards = None
+        self.callbacks = self.values = self.nonconstant = 0
+        self.minimum = self.maximum = None
+        self.mean = self.m2 = 0.0
+        self.reward_digest = hashlib.sha256(b"synaptic-grpo-reward-values/v1\0")
+        self.grouped = []
+        self._check()
+
+    def _check(self):
+        if self._clock() >= self.deadline:
+            raise TimeoutError("GRPO measurement deadline")
+
+    def _copy_chunk(self, chunk):
+        # chunk is a bounded byte view; never copy or cast a complete model.
+        import torch
+        cpu = chunk.to(device="cpu", copy=True)
+        # Signed zeros compare numerically equal. Canonicalize only this bounded
+        # detached copy, never mutate the model or promote its dtype.
+        cpu[cpu == 0] = 0
+        return cpu.view(torch.uint8).numpy().tobytes()
+
+    def fingerprint(self, model):
+        import torch
+        self._check()
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            if torch.distributed.get_world_size() != 1:
+                raise ValueError("distributed GRPO evidence unsupported")
+        metadata, parameters, names = [], [], set()
+        total = 0
+        device = None
+        for examined, (name, parameter) in enumerate(model.named_parameters()):
+            self._check()
+            if examined >= 65536 or type(name) is not str or not 0 < len(name.encode("utf-8")) <= 512:
+                raise ValueError("parameter enumeration exceeds bound")
+            if not parameter.requires_grad:
+                continue
+            if name in names or len(parameters) >= self.policy["max_trainable_tensors"]:
+                raise ValueError("trainable parameter count exceeds bound")
+            if (type(parameter) is not torch.nn.Parameter
+                    or getattr(parameter, "_is_flat_param", False) or hasattr(parameter, "ds_id")
+                    or parameter.device.type not in {"cpu", "cuda"}
+                    or parameter.layout != torch.strided or not parameter.is_contiguous()
+                    or parameter.dtype not in (torch.float16, torch.bfloat16, torch.float32)
+                    or parameter.ndim > 32):
+                raise ValueError("unsupported trainable parameter layout")
+            current_device = str(parameter.device)
+            if device is not None and device != current_device:
+                raise ValueError("multiple trainable devices unsupported")
+            device = current_device
+            size = parameter.numel() * parameter.element_size()
+            if size <= 0 or size > self.policy["max_trainable_bytes"] - total:
+                raise ValueError("trainable parameter bytes exceed bound")
+            names.add(name)
+            total += size
+            metadata.append({"name": name, "shape": list(parameter.shape),
+                             "dtype": str(parameter.dtype), "device": current_device, "size_bytes": size})
+            parameters.append((name, parameter))
+        if not parameters:
+            raise ValueError("no trainable parameters measured")
+        ordered = sorted(zip(metadata, parameters), key=lambda item: item[0]["name"])
+        inventory = hashlib.sha256(b"synaptic-grpo-trainable-inventory/v1\0")
+        for item, _ in ordered:
+            inventory.update(_canonical(item) + b"\n")
+        inventory_sha = inventory.hexdigest()
+        digest = hashlib.sha256(b"synaptic-grpo-trainable-values/v1\0" + inventory_sha.encode("ascii"))
+        with torch.no_grad():
+            for item, (_, parameter) in ordered:
+                view = parameter.detach().view(-1)
+                per_chunk = max(1, _EVIDENCE_CHUNK_BYTES // parameter.element_size())
+                for offset in range(0, view.numel(), per_chunk):
+                    self._check()
+                    chunk = view[offset:offset + per_chunk]
+                    if not bool(torch.isfinite(chunk).all().item()):
+                        raise ValueError("nonfinite trainable parameter")
+                    raw = self._copy_chunk(chunk)
+                    if not 0 < len(raw) <= _EVIDENCE_CHUNK_BYTES:
+                        raise ValueError("invalid parameter transfer")
+                    digest.update(raw)
+                    self._check()
+        return {"inventory_sha256": inventory_sha, "tensor_count": len(parameters),
+                "total_bytes": total, "sha256": digest.hexdigest()}
+
+    def begin(self, model, args):
+        self._check()
+        if (self.before is not None or type(getattr(args, "world_size", None)) is not int
+                or args.world_size != 1):
+            raise ValueError("single training begin required")
+        mode = getattr(args, "scale_rewards", None)
+        if mode is not None and (type(mode) is not str or mode not in {"group", "none", "batch"}):
+            raise ValueError("unknown trainer reward scale")
+        self.scale_rewards = mode
+        self.before = self.fingerprint(model)
+        self._model = model
+
+    def end(self, model):
+        self._check()
+        if self.before is None or self.after is not None or model is not self._model:
+            raise ValueError("same model and single training end required")
+        self.after = self.fingerprint(model)
+        if any(self.before[key] != self.after[key] for key in
+               ("inventory_sha256", "tensor_count", "total_bytes")):
+            raise ValueError("trainable inventory changed")
+
+    def reward_wrapper(self, actual):
+        def observe(completions, prompts=None, **kwargs):
+            import struct
+            self._check()
+            if self.before is None or self.after is not None:
+                raise ValueError("reward outside measured training interval")
+            count = len(completions)
+            if count <= 0 or count > self.policy["max_reward_values"] - self.values:
+                raise ValueError("reward observation bound exceeded")
+            values = actual(completions, prompts=prompts, **kwargs)
+            if type(values) is not list or len(values) != count:
+                raise ValueError("invalid reward observations")
+            low = high = None
+            for item in values:
+                self._check()
+                if type(item) not in (int, float) or not math.isfinite(item):
+                    raise ValueError("nonfinite reward observation")
+                value = float(item)
+                low = value if low is None else min(low, value)
+                high = value if high is None else max(high, value)
+                self.values += 1
+                delta = value - self.mean
+                self.mean += delta / self.values
+                self.m2 += delta * (value - self.mean)
+                if not math.isfinite(self.mean) or not math.isfinite(self.m2):
+                    raise ValueError("reward moments overflow")
+                self.minimum = value if self.minimum is None else min(self.minimum, value)
+                self.maximum = value if self.maximum is None else max(self.maximum, value)
+                self.reward_digest.update(struct.pack(">d", value))
+            self.callbacks += 1
+            self.nonconstant += int(low != high)
+            self._check()
+            return values
+        return observe
+
+    def log(self, state, logs):
+        self._check()
+        logs = logs or {}
+        if "reward_std" not in logs and "frac_reward_zero_std" not in logs:
+            return
+        if len(self.grouped) >= min(10000, self.policy["max_reward_values"]) or type(state.global_step) is not int or state.global_step < 0:
+            raise ValueError("grouped observation bound exceeded")
+        item = {"step": state.global_step, "reward_std": None, "frac_reward_zero_std": None}
+        for key in ("reward_std", "frac_reward_zero_std"):
+            if key in logs:
+                value = logs[key]
+                if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                    raise ValueError("invalid grouped reward observation")
+                if key == "frac_reward_zero_std" and value > 1:
+                    raise ValueError("invalid grouped reward fraction")
+                item[key] = float(value)
+        self.grouped.append(item)
+
+    def record(self, core):
+        self._check()
+        if self.before is None or self.after is None:
+            raise ValueError("training boundaries not measured")
+        parameters = {
+            "before_checkpoint": "on_train_begin", "after_checkpoint": "on_train_end",
+            "before_inventory_sha256": self.before["inventory_sha256"],
+            "after_inventory_sha256": self.after["inventory_sha256"],
+            "tensor_count": self.before["tensor_count"], "total_bytes": self.before["total_bytes"],
+            "before_sha256": self.before["sha256"], "after_sha256": self.after["sha256"],
+            "changed": self.before["sha256"] != self.after["sha256"],
+        }
+        rewards = {"callback_count": self.callbacks, "value_count": self.values,
+                   "nonconstant_callbacks": self.nonconstant, "minimum": self.minimum,
+                   "maximum": self.maximum, "mean": self.mean if self.values else None,
+                   "variance": max(0.0, self.m2 / self.values) if self.values else None,
+                   "values_sha256": self.reward_digest.hexdigest(),
+                   "trainer_scale_rewards": self.scale_rewards,
+                   "grouped_observations": list(self.grouped)}
+        varied = (self.scale_rewards in {"group", "none"} and
+                  any(item["reward_std"] is not None and item["reward_std"] > 0
+                      and item["frac_reward_zero_std"] is not None and item["frac_reward_zero_std"] < 1
+                      for item in self.grouped))
+        return {"schema_version": _EVIDENCE_SCHEMA, "policy": dict(self.policy),
+                "core_workload_sha256": _sha(_canonical(core)),
+                "parameters": parameters, "rewards": rewards,
+                "measurement_result": "changed_with_grouped_variation"
+                if parameters["changed"] and self.nonconstant and varied else "inconclusive"}
+
+
+def validate_qualification_evidence_record(value, *, policy, core, log_history):
+    """Validate trusted measurement declarations; historical weights are absent."""
+    policy = validate_qualification_evidence_policy(policy)
+    _finite_tree(value)
+    fields = {"schema_version", "policy", "core_workload_sha256", "parameters", "rewards", "measurement_result"}
+    if (type(value) is not dict or set(value) != fields
+            or value["schema_version"] != _EVIDENCE_SCHEMA
+            or value["policy"] != policy
+            or validate_qualification_evidence_policy(value["policy"]) != policy
+            or value["core_workload_sha256"] != _sha(_canonical(core))):
+        raise ValueError("invalid qualification measurement bindings")
+    parameters = value["parameters"]
+    if (type(parameters) is not dict or set(parameters) != {
+            "before_checkpoint", "after_checkpoint", "before_inventory_sha256", "after_inventory_sha256",
+            "tensor_count", "total_bytes", "before_sha256", "after_sha256", "changed"}
+            or parameters["before_checkpoint"] != "on_train_begin"
+            or parameters["after_checkpoint"] != "on_train_end"):
+        raise ValueError("invalid parameter measurement")
+    for key in ("before_inventory_sha256", "after_inventory_sha256", "before_sha256", "after_sha256"):
+        if type(parameters[key]) is not str or re.fullmatch(r"[0-9a-f]{64}", parameters[key]) is None:
+            raise ValueError("invalid measurement digest")
+    if (parameters["before_inventory_sha256"] != parameters["after_inventory_sha256"]
+            or type(parameters["tensor_count"]) is not int
+            or not 1 <= parameters["tensor_count"] <= policy["max_trainable_tensors"]
+            or type(parameters["total_bytes"]) is not int
+            or not parameters["tensor_count"] * 2 <= parameters["total_bytes"] <= policy["max_trainable_bytes"]
+            or type(parameters["changed"]) is not bool
+            or parameters["changed"] != (parameters["before_sha256"] != parameters["after_sha256"])):
+        raise ValueError("inconsistent parameter measurement")
+    rewards = value["rewards"]
+    if type(rewards) is not dict or set(rewards) != {
+            "callback_count", "value_count", "nonconstant_callbacks", "minimum", "maximum", "mean",
+            "variance", "values_sha256", "trainer_scale_rewards", "grouped_observations"}:
+        raise ValueError("invalid reward measurement")
+    for key in ("callback_count", "value_count", "nonconstant_callbacks"):
+        if type(rewards[key]) is not int or not 0 <= rewards[key] <= policy["max_reward_values"]:
+            raise ValueError("invalid reward count")
+    if (not rewards["nonconstant_callbacks"] <= rewards["callback_count"] <= rewards["value_count"]
+            or rewards["value_count"] < rewards["callback_count"] + rewards["nonconstant_callbacks"]
+            or (rewards["callback_count"] == 0) != (rewards["value_count"] == 0)
+            or type(rewards["values_sha256"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", rewards["values_sha256"]) is None):
+        raise ValueError("inconsistent reward count")
+    for key in ("minimum", "maximum", "mean", "variance"):
+        item = rewards[key]
+        if rewards["value_count"] == 0:
+            if item is not None:
+                raise ValueError("unobserved reward statistic")
+        elif type(item) not in (int, float) or not math.isfinite(item):
+            raise ValueError("invalid reward statistic")
+    if rewards["value_count"]:
+        if (rewards["minimum"] > rewards["maximum"] or rewards["variance"] < 0
+                or not rewards["minimum"] <= rewards["mean"] <= rewards["maximum"]
+                or (rewards["minimum"] == rewards["maximum"] and
+                    (rewards["nonconstant_callbacks"] or rewards["variance"] != 0))):
+            raise ValueError("inconsistent reward moments")
+        if rewards["value_count"] == 1 and (rewards["minimum"] != rewards["maximum"]
+                or rewards["mean"] != rewards["minimum"] or rewards["variance"] != 0):
+            raise ValueError("inconsistent single reward value")
+    elif rewards["values_sha256"] != hashlib.sha256(b"synaptic-grpo-reward-values/v1\0").hexdigest():
+        raise ValueError("invalid unobserved reward digest")
+    mode = rewards["trainer_scale_rewards"]
+    if mode is not None and (type(mode) is not str or mode not in {"group", "none", "batch"}):
+        raise ValueError("invalid trainer reward scale")
+    groups = rewards["grouped_observations"]
+    if type(groups) is not list or len(groups) > min(10000, policy["max_reward_values"]):
+        raise ValueError("invalid grouped observations")
+    if type(log_history) is not list or len(log_history) > 100000:
+        raise ValueError("trainer log count exceeds bound")
+    expected = []
+    for log in log_history:
+        if type(log) is not dict:
+            raise ValueError("invalid trainer log")
+        if "reward_std" not in log and "frac_reward_zero_std" not in log:
+            continue
+        if len(expected) >= min(10000, policy["max_reward_values"]):
+            raise ValueError("trainer log bound exceeded")
+        expected.append({"step": log.get("step"), "reward_std": log.get("reward_std"),
+                         "frac_reward_zero_std": log.get("frac_reward_zero_std")})
+    last = -1
+    for item in groups:
+        if (type(item) is not dict or set(item) != {"step", "reward_std", "frac_reward_zero_std"}
+                or type(item["step"]) is not int or not max(0, last) <= item["step"] <= core["config"]["training"]["max_steps"]):
+            raise ValueError("invalid grouped step")
+        last = item["step"]
+        if item["reward_std"] is None and item["frac_reward_zero_std"] is None:
+            raise ValueError("empty grouped observation")
+        for key in ("reward_std", "frac_reward_zero_std"):
+            number = item[key]
+            if number is not None and (type(number) not in (int, float) or not math.isfinite(number)
+                                      or number < 0 or (key == "frac_reward_zero_std" and number > 1)):
+                raise ValueError("invalid grouped value")
+    if _canonical(groups) != _canonical(expected):
+        raise ValueError("grouped observations differ from trainer logs")
+    varied = (mode in {"group", "none"} and
+              any(item["reward_std"] is not None and item["reward_std"] > 0
+                  and item["frac_reward_zero_std"] is not None and item["frac_reward_zero_std"] < 1
+                  for item in groups))
+    result = ("changed_with_grouped_variation" if parameters["changed"]
+              and rewards["nonconstant_callbacks"] and varied else "inconclusive")
+    if value["measurement_result"] != result:
+        raise ValueError("inconsistent measurement result")

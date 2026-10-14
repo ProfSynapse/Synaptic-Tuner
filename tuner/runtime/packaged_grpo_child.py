@@ -124,7 +124,10 @@ def _run(argv, phase):
         run_grpo(config=core["config"], dataset_bytes=content,
             reward_documents=core["reward_documents"], reward_schema=core["reward_schema"],
             model_snapshot=retained.snapshot, model_identity=core["model"], output_root=output.path,
-            workload=core, metric_sink=sink, _packaged_artifacts=True)
+            workload=core, metric_sink=sink, _packaged_artifacts=True,
+            **({"qualification_evidence": compiled.document["limits"]["qualification_evidence"],
+                "_child_deadline": deadline}
+               if "qualification_evidence" in compiled.document["limits"] else {}))
         phase[0] = "POSTCHECK"
         retained.check()
         state.check()

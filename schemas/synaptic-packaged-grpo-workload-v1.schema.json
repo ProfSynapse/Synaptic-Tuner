@@ -60,6 +60,32 @@
           "minimum": 1,
           "maximum": 86400,
           "description": "One child-only execution budget minted after preparation. Cleanup confirmation may take up to five additional seconds; this is not a provider-job or end-to-end deadline."
+        },
+        "qualification_evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_trainable_bytes",
+            "max_trainable_tensors",
+            "max_reward_values"
+          ],
+          "properties": {
+            "max_trainable_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 268435456
+            },
+            "max_trainable_tensors": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "max_reward_values": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            }
+          }
         }
       }
     },

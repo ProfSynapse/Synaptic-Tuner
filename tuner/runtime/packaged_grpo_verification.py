@@ -10,27 +10,34 @@ from tuner.runtime import packaged_sft_execution as shared
 from tuner.training.packaged_grpo_compilation import ROLES, parse_packaged_grpo_workload
 
 
-def _validate_core_records(core, lineage, metrics):
+def _validate_core_records(core, lineage, metrics, policy=None):
     expected_plan = [{"type": "rubric", "name": item["name"], "weight": float(item["weight"]),
                       "source": str(Path(item["name"]))} for item in core["config"]["rewards"]["items"]]
     from Trainers.grpo.runtime_v1 import _finite_tree
     _finite_tree(lineage)
     _finite_tree(metrics)
+    optional = {"qualification_evidence"} if policy is not None else set()
     if (type(lineage) is not dict
-            or set(lineage) != {"method", "model", "input_commitments", "reward_plan", "actual_steps"}
+            or set(lineage) != {"method", "model", "input_commitments", "reward_plan", "actual_steps"} | optional
             or lineage["method"] != "grpo" or lineage["model"] != core["model"]
             or lineage["input_commitments"] != {key: core[key] for key in
                 ("config_sha256", "dataset_sha256", "rewards_sha256")}
             or shared._canonical({"plan": lineage["reward_plan"]}) !=
                 shared._canonical({"plan": expected_plan})):
         raise ValueError("PACKAGED_GRPO_LINEAGE_REJECTED")
-    if (type(metrics) is not dict or set(metrics) != {"global_step", "log_history", "train_metrics"}
+    if (type(metrics) is not dict or set(metrics) != {"global_step", "log_history", "train_metrics"} | optional
             or type(metrics["global_step"]) is not int
             or not 1 <= metrics["global_step"] <= core["config"]["training"]["max_steps"]
             or lineage["actual_steps"] != metrics["global_step"]
             or type(lineage["actual_steps"]) is not int
             or type(metrics["log_history"]) is not list or type(metrics["train_metrics"]) is not dict):
         raise ValueError("PACKAGED_GRPO_METRICS_REJECTED")
+    if policy is not None:
+        from Trainers.grpo.runtime_v1 import validate_qualification_evidence_record
+        if shared._canonical(lineage["qualification_evidence"]) != shared._canonical(metrics["qualification_evidence"]):
+            raise ValueError("PACKAGED_GRPO_EVIDENCE_REJECTED")
+        validate_qualification_evidence_record(lineage["qualification_evidence"],
+            policy=policy, core=core, log_history=metrics["log_history"])
 
 
 def assemble_grpo_artifacts(admitted, compiled, manifest):
@@ -45,7 +52,8 @@ def assemble_grpo_artifacts(admitted, compiled, manifest):
                    for role in ("training_lineage", "training_metrics", "workload_record")}
         if shared._canonical(records["workload_record"]) != shared._canonical(core):
             raise ValueError("PACKAGED_GRPO_WORKLOAD_REJECTED")
-        _validate_core_records(core, records["training_lineage"], records["training_metrics"])
+        _validate_core_records(core, records["training_lineage"], records["training_metrics"],
+                               compiled.document["limits"].get("qualification_evidence"))
         lineage = {"schema_version": LINEAGE_SCHEMA, **shared._bindings(admitted),
             "prepared_input": core["prepared_input"], "model_snapshot": manifest,
             "trainer_lineage": records["training_lineage"], "status": "completed", "trainer_exit_code": 0,
@@ -134,7 +142,8 @@ def verify_packaged_grpo_artifacts(*, admitted, inventory_bytes, terminal_bytes)
         shared._check_artifact_namespace(artifact_root, members)
         shared._private_manifest(lineage["model_snapshot"], admitted.paths,
             {"ref": core["model"]["model_id"], "revision": core["model"]["revision"]})
-        _validate_core_records(core, lineage["trainer_lineage"], contents["training_metrics.json"])
+        _validate_core_records(core, lineage["trainer_lineage"], contents["training_metrics.json"],
+                               compiled.document["limits"].get("qualification_evidence"))
         for member in members:
             if member.path.suffix == ".tar":
                 kind = "model" if member.path.name == "final_model.tar" else "tokenizer"

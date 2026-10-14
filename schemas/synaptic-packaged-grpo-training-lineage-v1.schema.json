@@ -177,6 +177,9 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100000
+        },
+        "qualification_evidence": {
+          "$ref": "#/$defs/qualification_evidence"
         }
       }
     },
@@ -258,6 +261,216 @@
           }
         }
       }
+    },
+    "qualification_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "policy",
+        "core_workload_sha256",
+        "parameters",
+        "rewards",
+        "measurement_result"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "synaptic-grpo-qualification-evidence/v1"
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_trainable_bytes",
+            "max_trainable_tensors",
+            "max_reward_values"
+          ],
+          "properties": {
+            "max_trainable_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 268435456
+            },
+            "max_trainable_tensors": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "max_reward_values": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            }
+          }
+        },
+        "core_workload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "before_checkpoint",
+            "after_checkpoint",
+            "before_inventory_sha256",
+            "after_inventory_sha256",
+            "tensor_count",
+            "total_bytes",
+            "before_sha256",
+            "after_sha256",
+            "changed"
+          ],
+          "properties": {
+            "before_checkpoint": {
+              "const": "on_train_begin"
+            },
+            "after_checkpoint": {
+              "const": "on_train_end"
+            },
+            "before_inventory_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "after_inventory_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "tensor_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "total_bytes": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 268435456
+            },
+            "before_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "after_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "changed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "rewards": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "callback_count",
+            "value_count",
+            "nonconstant_callbacks",
+            "minimum",
+            "maximum",
+            "mean",
+            "variance",
+            "values_sha256",
+            "trainer_scale_rewards",
+            "grouped_observations"
+          ],
+          "properties": {
+            "callback_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1048576
+            },
+            "value_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1048576
+            },
+            "nonconstant_callbacks": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1048576
+            },
+            "minimum": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "maximum": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "mean": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "variance": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "values_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "trainer_scale_rewards": {
+              "enum": [
+                "group",
+                "none",
+                "batch",
+                null
+              ]
+            },
+            "grouped_observations": {
+              "type": "array",
+              "maxItems": 10000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "step",
+                  "reward_std",
+                  "frac_reward_zero_std"
+                ],
+                "properties": {
+                  "step": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100000
+                  },
+                  "reward_std": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "frac_reward_zero_std": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "measurement_result": {
+          "enum": [
+            "inconclusive",
+            "changed_with_grouped_variation"
+          ]
+        }
+      },
+      "$comment": "Measurements emitted by the trusted locked child. Historical parameter/reward values are not retained; native verification checks declared bounds and exact workload/policy/log binding, not independent reconstruction of historical tensors. Positive measurements are not provider or model-quality qualification."
     }
   }
 }

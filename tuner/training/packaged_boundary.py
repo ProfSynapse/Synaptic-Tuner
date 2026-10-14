@@ -49,10 +49,17 @@ def _selected_packaged_projection(config, execution_context=None):
                 or value["execution"] != {"mode": "packaged_runtime"}
                 or type(execution_context) is not CanonicalDocument):
             raise ValueError("packaged GRPO configuration or context differs")
-        limits = _fields(value["limits"], {"child_max_seconds"}, "packaged GRPO limits")
+        limits = value["limits"]
+        if type(limits) is not dict or set(limits) not in (
+                {"child_max_seconds"}, {"child_max_seconds", "qualification_evidence"}):
+            raise ValueError("packaged GRPO limits differ")
+        optional = {}
+        if "qualification_evidence" in limits:
+            from Trainers.grpo.runtime_v1 import validate_qualification_evidence_policy
+            optional["qualification_evidence"] = validate_qualification_evidence_policy(limits["qualification_evidence"])
         core = _core(value["core_workload"])
         workload = compile_packaged_grpo_workload(core_workload=core,
-            context=execution_context.to_dict(), child_max_seconds=limits["child_max_seconds"])
+            context=execution_context.to_dict(), child_max_seconds=limits["child_max_seconds"], **optional)
         return workload, packaged_grpo_configuration_digest(workload), core.document["prepared_input"]
     workload = compile_packaged_sft_workload(resolved_config=config)
     return workload, workload.document["configuration"]["digest"], workload.document["identities"]["dataset"]

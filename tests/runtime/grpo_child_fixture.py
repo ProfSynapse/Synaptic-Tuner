@@ -15,7 +15,7 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 
-def install(source_root):
+def install(source_root, *, cpu_evidence=False, update=True):
     from tuner.runtime import packaged_sft_execution as shared
     from tuner.runtime import packaged_sft_child
     from tuner.runtime import packaged_training_worker
@@ -42,11 +42,18 @@ def install(source_root):
     shared._inspect_release = lambda release, **kwargs: source_root / "Trainers/grpo/runtime_v1.py"
     packaged_training_worker.admit_packaged_training_release = lambda raw, **kwargs: __import__(
         "tuner.runtime.releases", fromlist=["parse_packaged_runtime_release"]).parse_packaged_runtime_release(json.loads(raw))
+    real_torch = None
+    if cpu_evidence:
+        import torch as real_torch
+        assert real_torch.__version__ == "2.9.0+cpu" and real_torch.version.cuda is None
     for name in ("torch", "unsloth", "trl", "datasets", "transformers"):
+        if name == "torch" and cpu_evidence:
+            continue
         module = ModuleType(name)
         module.__spec__ = importlib.machinery.ModuleSpec(name, None)
         sys.modules[name] = module
-    sys.modules["torch"].cuda = SimpleNamespace(is_available=lambda: False)
+    if not cpu_evidence:
+        sys.modules["torch"].cuda = SimpleNamespace(is_available=lambda: False)
 
     class Tokenizer:
         def apply_chat_template(self, messages, **kwargs):
@@ -68,6 +75,11 @@ def install(source_root):
         def from_pretrained(**kwargs):
             assert kwargs["token"] is False and kwargs["local_files_only"] is True
             assert (Path(kwargs["model_name"]) / "config.json").read_bytes() == b"{}"
+            if cpu_evidence:
+                model = real_torch.nn.Module()
+                model.register_parameter("weight", real_torch.nn.Parameter(real_torch.tensor([1.0])))
+                model.config = Model.config
+                return model, Tokenizer()
             return Model(), Tokenizer()
         @staticmethod
         def get_peft_model(model, **kwargs):
@@ -95,24 +107,45 @@ def install(source_root):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
             self.state = SimpleNamespace(global_step=0, log_history=[])
+            if cpu_evidence:
+                self.kwargs["args"].world_size = 1
+                self.kwargs["args"].scale_rewards = "group"
         def train(self, **kwargs):
             assert kwargs == {"resume_from_checkpoint": None}
             assert self.kwargs["train_dataset"][0]["declared"] == "retained"
+            if cpu_evidence:
+                for callback in self.kwargs["callbacks"]:
+                    if hasattr(callback, "on_train_begin"):
+                        callback.on_train_begin(self.kwargs["args"], self.state, None, model=self.kwargs["model"])
+                optimizer = real_torch.optim.SGD(self.kwargs["model"].parameters(), lr=self.kwargs["args"].learning_rate)
             for step in range(self.kwargs["args"].max_steps):
                 scores = self.kwargs["reward_funcs"](["OK", "bad"])
                 assert scores == [1.0, 0.0]
-                self.kwargs["model"].value += 1
+                if cpu_evidence:
+                    if update:
+                        optimizer.zero_grad()
+                        self.kwargs["model"].weight.square().sum().backward()
+                        optimizer.step()
+                else:
+                    self.kwargs["model"].value += 1
                 self.state.global_step = step + 1
                 record = {"loss": 1 / (step + 1), "reward": sum(scores) / len(scores)}
+                if cpu_evidence:
+                    std = real_torch.tensor(scores).std(correction=1).item()
+                    record.update(step=step + 1, reward_std=std, frac_reward_zero_std=float(std <= 1e-8))
                 self.state.log_history.append(record)
                 for callback in self.kwargs["callbacks"]:
-                    callback.on_log(None, self.state, None, logs=record)
+                    callback.on_log(self.kwargs["args"] if cpu_evidence else None, self.state, None, logs=record)
+            if cpu_evidence:
+                for callback in self.kwargs["callbacks"]:
+                    if hasattr(callback, "on_train_end"):
+                        callback.on_train_end(self.kwargs["args"], self.state, None, model=self.kwargs["model"])
             return SimpleNamespace(metrics={"train_loss": self.state.log_history[-1]["loss"]})
         def save_model(self, destination):
             root = Path(destination)
             (root / "adapter_config.json").write_text(json.dumps({"peft_type": "LORA", "base_model_name_or_path": "/controlled/private"}))
             header = json.dumps({"lora_A": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
-            (root / "adapter_model.safetensors").write_bytes(struct.pack("<Q", len(header)) + header + struct.pack("<f", self.kwargs["model"].value))
+            (root / "adapter_model.safetensors").write_bytes(struct.pack("<Q", len(header)) + header + struct.pack("<f", self.kwargs["model"].weight.detach().item() if cpu_evidence else self.kwargs["model"].value))
     sys.modules["trl"].GRPOConfig = config_class
     sys.modules["trl"].GRPOTrainer = Trainer
     sys.modules["datasets"].Dataset = Dataset
