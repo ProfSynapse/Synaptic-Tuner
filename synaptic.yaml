@@ -1,7 +1,7 @@
 schema_version: synaptic-project/v1
 project:
-  id: synaptic-grpo-qualification-g
-  name: Synaptic Tuner GRPO Qualification G
+  id: synaptic-grpo-final-1da
+  name: GRPO final stable candidate qualification
 engine:
   requires: ==1.1.0
   api: v1

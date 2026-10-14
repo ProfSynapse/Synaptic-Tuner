@@ -1,4 +1,4 @@
-name: grpo-cpu-qualification-g
+name: grpo-cpu-qualification-g-final-1da
 description: Three-step candidate measurement; no model/GPU/update qualification claimed
 target: cloud
 provider: modal
