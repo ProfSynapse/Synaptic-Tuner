@@ -1005,3 +1005,33 @@ import guard and source compilation with explicit package/image/device-namespace
 observations. They do not prove container isolation, live image compatibility or
 training. Ordinary GRPO runner integration and cold full-host recovery remain
 separate gates.
+
+### Bounded GRPO parameter and reward evidence
+
+An optional closed `limits.qualification_evidence` policy measures the complete
+trainable population at the actual training callbacks and the values returned by
+the configured reward function. Bounded original-dtype CPU chunks, finite
+counts and the original child deadline constrain measurement. Signed zeros are
+normalized only in detached CPU copies. Native verification checks the same
+policy-bound evidence in lineage and metrics without adding artifact roles.
+
+Actual parameter change and usable grouped reward variation are separate
+requirements. Missing or constant observations, unchanged parameters and batch
+reward scaling remain explicitly inconclusive. These are trusted locked-child
+measurements; historical before-tensors are not retained. The optional policy
+preserves existing canonical bytes when absent and does not promote a runtime
+profile or claim GPU, model-quality or provider qualification.
+
+Independent source, CI/skill and fixed-inventory review passed. The root source
+suite passed 69 controls; the fresh sdist-built wheel
+`3b7ae76f7120ab0524249107afee3575466d95b6bee0b374c3e4b6983ea691b2`
+passed the base-only consumer and 69 installed evidence controls using exact
+CPU Torch 2.9.0 (21.26 seconds). The custody suite passed 393 cases on local
+Python 3.14; its sole portable SFT version rejection passed on Python 3.12
+(0.84 seconds). This is split local evidence, not one 394-case run; CI retains
+the complete suite on Python 3.12. All eleven changed production/resource files
+are byte-exact in the wheel and installed package. Only reviewed source hashes
+changed in the fixed 131/13-member GRPO inventories; all seven checks are current.
+
+The same installed wheel also passed all 163 recipe, retention and profile
+controls (132.31 seconds) and 247 public GRPO/material controls (1.70 seconds).
