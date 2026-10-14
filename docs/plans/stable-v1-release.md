@@ -54,7 +54,7 @@ local installed acceptance do not substitute for exact-head CI or live qualifica
 | Supported preparation/composition | Current accepted evidence | Remaining release work |
 | --- | --- | --- |
 | Durable host records/history | Caller-owned SQLite implements existing record/stream ports and atomic Data/Evaluation/Pipeline/training-workflow updates; retained plans, claims and original keys support bounded cold reads. | Final supported-host/recovery qualification; a database does not restore credentials, source leases or active processes. |
-| Data/environment/evaluation consumer | **345 installed controls** exercise public generate/improve/validate, actual local fixture workers, measured scripted response/judge calls, immutable exports, reports/comparison and SQLite readback. Paid-call uncertainty stops later paid dispatches; bounded HTTP acquisition is implemented. | Genuine bounded paid backend/judge/account acceptance, representative scenario/source coverage and advertised cancellation behavior. CPU scripted calls are not live model/account qualification. |
+| Data/environment/evaluation consumer | **354 installed controls** exercise public generate/improve/validate, actual local fixture workers, measured scripted response/judge calls, immutable exports, reports/comparison and SQLite readback. Paid-call uncertainty stops later paid dispatches; bounded HTTP acquisition is implemented. | Genuine bounded paid backend/judge/account acceptance, representative scenario/source coverage and advertised cancellation behavior. CPU scripted calls are not live model/account qualification. |
 | Ordinary SFT consumers | Shared checkout consumer with installed production passed **Docker 61 / HF 80** controls, including public start, known reads, native five-role verification/download and uncertain-submit non-replay. Modal also has the normal retained-run/public lifecycle and historical exact-source live evidence. | Final-source **Docker/Modal/HF** live SFT parity, real cancellation/reconciliation and known-run recovery with original inputs/keys. Historical Modal success does not qualify the final stack. |
 | Modal GRPO | Public compiler/preparation, fixed isolated child, native verification, normal runner and retained known-run reads are implemented. The actual captured SmolLM candidate passed **256 installed controls** and retains the observed **396-distribution base**. | Qualify the actual augmented image/CPU closure, pinned model/tokenizer and one bounded **Modal GPU GRPO** run with real update/grouped reward evidence; constant/unchanged observations remain inconclusive. Other GRPO providers remain deferred. |
 | Artifact publication | Caller-owned durable store/spool/create-only destination passed **377 installed controls + one existing skip**; native RunsAPI join passed **73 installed Docker/publication controls** with five-role streams and cold marker lookup. Optional HF SFT publication passed **115 installed controls**, including owned snapshot lookup after process death. The native GRPO renderer/publication join passed **145 combined installed HF controls**, **256 GRPO controls** and **39 source-closure controls** (overlapping lane totals) on wheel source `371d4b05`. | Live repository/account/destination qualification remains open; expected-parent submission and verified owned immutable snapshot do not establish RPC causality or an introducing commit after a lost reply. The GRPO join uses actual native verification over synthetic CPU model files; genuine GPU training and live publication qualification remain open. |
@@ -128,7 +128,14 @@ bytes matched on wheel
 Candidate #247's source `c52be233` passed **345 installed evaluation/nontraining
 controls** in 57.00 seconds on wheel
 `d9e14291368baaa2c2011ed41c0b544b98b4ac2e52409eddb9624e783756b0d9`,
-with source/wheel/installed production equality. Its retained public evaluation
+with source/wheel/installed production equality. After nine additional optional
+consumer effort controls, candidate #247 at `cf049501` passed **354 installed
+controls** in 57.04 seconds using the same engine wheel. The changed consumer is
+checkout-owned; the installed engine bytes are unchanged. Its optional
+`provider.thinking_effort` forwards to the existing Data client constructor only
+when selected; omission preserves defaults. An external evaluation judge uses
+its own configuration, where null effort/temperature omit those parameters
+rather than requesting explicit effort `none`. Its retained public evaluation
 plans bind configuration-ordered run refs, including two runs of the same model;
 legacy distinct-model attempts remain readable. The model alias is not an
 immutable checkpoint, and external judging remains unverified/incomparable.
