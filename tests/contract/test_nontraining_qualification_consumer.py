@@ -514,3 +514,30 @@ def test_configured_token_ceiling_is_explicit_before_inner_call(configured, requ
         with pytest.raises(ValueError, match="token ceiling"):
             client.chat([], max_tokens=requested)
         assert not calls and factory.calls == 0
+
+
+def test_cross_run_output_and_metadata_swap_refuses_readback(configured, monkeypatch):
+    config, _, _ = configured
+    secrets, _, _, backend = install_clients(monkeypatch)
+    consumer.execute(config, secrets=secrets, backends={"openrouter": backend})
+    first = Path(config["data"]["generate"]["output_ref"])
+    second = Path(config["data"]["improve"]["output_ref"])
+    for a, b in (
+        (first, second),
+        (
+            first.with_name(first.name + ".meta.json"),
+            second.with_name(second.name + ".meta.json"),
+        ),
+    ):
+        left, right = a.read_bytes(), b.read_bytes()
+        a.write_bytes(right)
+        b.write_bytes(left)
+    with pytest.raises(ValueError, match="artifact commitment mismatch"):
+        consumer.readback(config["state_root"])
+
+
+def test_retained_snapshot_write_rejects_unreadable_document_before_create(tmp_path):
+    target = tmp_path / "plan.json"
+    with pytest.raises(ValueError, match="readback bound"):
+        consumer._write(target, {"too_large": "x" * (4 << 20)})
+    assert not target.exists()
