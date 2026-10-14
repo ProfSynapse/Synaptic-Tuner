@@ -8,7 +8,9 @@ The provider-neutral `TrainingInputV1` accepts explicit method `grpo` with
 `synaptic-grpo-hyperparameters/v1` and rewards `{items, documents, schema}`.
 This lane supports **CPU preparation and pure developer compilation only**.
 It does not enable public provider execution, establish model/image compatibility,
-or qualify GRPO training. The legacy trainer commands below remain separate.
+or qualify GRPO training. The legacy trainer commands below remain separate. The generic Modal private-copy
+helper can preserve an already verified GRPO prompt publication through these
+ports, but this does not enable normal Modal GRPO recipe planning or start.
 
 Use the existing generic preparation service with explicit host-owned roots:
 

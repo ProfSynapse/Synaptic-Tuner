@@ -499,15 +499,21 @@ jobs:
           import tuner.training.modal_retained_reader as retained_reader
           import tuner.handlers.runs_handler as runs_handler
           import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
+          import tuner.training.modal_recipe as recipe
+          import tuner.training.modal_host_prepared_copy as prepared_copy
+          import tuner.training.grpo_preparation as grpo_preparation
 
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (retention, runner, sqlite_store, retained_reader, runs_handler):
+          for module in (retention, runner, sqlite_store, retained_reader, runs_handler, recipe, prepared_copy, grpo_preparation):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
           root = Path(os.environ["RUNNER_TEMP"]) / "installed-modal-retention-tests"
           for name in (
               "dataset_prep/test_context_messages_v2.py",
+              "dataset_prep/test_conversation_messages.py",
+              "contract/test_grpo_training_input_v1.py",
+              "training/test_modal_method_preparation.py",
               "execution/providers/test_modal_runtime_build.py",
               "execution/test_observation_logs.py",
               "training/test_modal_standalone_runner.py",
@@ -540,11 +546,31 @@ jobs:
               target = root / name
               target.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(checkout / name, target)
+          # Runtime candidate declarations are installed assets. Build profiles
+          # remain explicit host-owned fixtures, as in the Stage 3 handoff.
+          import tuner
+          installed = Path(tuner.__file__).resolve().parent.parent
+          for name in (
+              "Trainers/runtime_profiles/qwen35-conversation-sft-candidate-v1.yaml",
+              "Trainers/runtime_profiles/qwen35-conversation-sft-candidate-v1.compatibility.json",
+          ):
+              resource = installed / name
+              assert resource.is_relative_to(Path(sys.prefix)), resource
+              assert resource.read_bytes() == (checkout / name).read_bytes(), name
+              target = root / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(resource, target)
+          host_profile = "Trainers/image_profiles/qwen35_4b_conversation_sft_candidate_v1/profile.yaml"
+          target = root / host_profile
+          target.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(checkout / host_profile, target)
           import pytest
           sys.path.insert(0, str(root))
           os.chdir(root)
           raise SystemExit(pytest.main([
               "-q", "-p", "no:cacheprovider",
+              str(root / "tests/training/test_modal_method_preparation.py"),
+              str(root / "tests/training/test_modal_standalone_runner.py") + "::test_cli_v2_fake_transcript_prepares_submits_verifies_and_downloads",
               str(root / "tests/training/test_modal_run_retention_io.py"),
               str(root / "tests/training/test_modal_run_retention_integration.py"),
               str(root / "tests/training/test_modal_retained_reader.py"),
