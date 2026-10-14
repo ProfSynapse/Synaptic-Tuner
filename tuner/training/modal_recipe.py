@@ -138,7 +138,7 @@ class ModalSFTRecipePlanV1:
 
 
 def plan_modal_sft_recipe(recipe_path: Path, *, project_root: Path,
-                          profiles_root: Path) -> ModalSFTRecipePlanV1:
+                          profiles_root: Path, source_root: Path | None = None) -> ModalSFTRecipePlanV1:
     """Resolve and verify one publication without any provider or host mutation."""
     from tuner.dataset_prep.publication import snapshot_prepared_dataset_v2
 
@@ -173,7 +173,7 @@ def plan_modal_sft_recipe(recipe_path: Path, *, project_root: Path,
     workload = compile_packaged_sft_workload(resolved_config=config)
     profile = load_runtime_profile(recipe.runtime_profile, profiles_root)
     _build_profile, build_intent = resolve_modal_sft_build(profile, profiles_root,
-                                                         recipe.model.ref, recipe.model.revision, prepared_format=recipe.prepared_format)
+                                                         recipe.model.ref, recipe.model.revision, prepared_format=recipe.prepared_format, source_root=source_root)
     return ModalSFTRecipePlanV1(
         recipe, identity, profile.profile_sha256, profile.image,
         build_intent["intent_digest"],
@@ -183,14 +183,15 @@ def plan_modal_sft_recipe(recipe_path: Path, *, project_root: Path,
 
 def resolve_modal_sft_build(profile: RuntimeProfile, profiles_root: Path,
                             model: str, revision: str, *,
-                            prepared_format: str = "syntunia-sft-row/v2") -> tuple[Path, dict[str, object]]:
+                            prepared_format: str = "syntunia-sft-row/v2",
+                            source_root: Path | None = None) -> tuple[Path, dict[str, object]]:
     """Bind a named runtime profile to one compatible packaged build intent."""
     from tuner.cloud.derived_training_image import load_profile
     from tuner.execution.providers.modal.runtime_build import plan_modal_build_material
     from tuner.training.packaged_compilation import PACKAGED_SFT_WORKLOAD_SCHEMA
 
     build_path = profile.modal_build_profile_path(profiles_root.parent / "image_profiles")
-    intent = plan_modal_build_material(build_path)
+    intent = plan_modal_build_material(build_path, **({"source_root": source_root} if source_root is not None else {}))
     build = load_profile(build_path)
     if (intent["profile_digest"] != build.canonical_sha256
             or intent["base_image"].removeprefix("docker.io/") != profile.image.removeprefix("docker.io/")

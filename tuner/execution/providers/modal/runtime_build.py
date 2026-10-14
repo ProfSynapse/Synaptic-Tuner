@@ -20,6 +20,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import zipfile
 from typing import Callable
 from typing import Mapping
 
@@ -159,12 +160,25 @@ def _canonical_capture_bytes(document: dict[str, object]) -> bytes:
     return encoded
 
 
-def plan_modal_build_material(profile_path: Path) -> dict[str, object]:
+def current_clean_source_commit(source_root: Path) -> str:
+    """Observe one explicitly selected local build source; not pushed authority."""
+    root = Path(source_root).resolve(strict=True)
+    head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                          capture_output=True, timeout=30, check=False)
+    status = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+                            capture_output=True, timeout=30, check=False)
+    commit = head.stdout.decode("ascii", "strict").strip()
+    if head.returncode or status.returncode or status.stdout or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("accepted clean engine source identity is unavailable")
+    return commit
+
+
+def plan_modal_build_material(profile_path: Path, *, source_root: Path | None = None) -> dict[str, object]:
     """Read-only intent; the final material digest follows the wheel build."""
     profile = load_profile(profile_path)
     if profile.packaged_runtime is None or profile.packages:
         raise ValueError("only the pinned packaged Modal profile is supported")
-    root = Path(__file__).resolve().parents[4]
+    root = Path(__file__).resolve().parents[4] if source_root is None else Path(source_root).resolve(strict=True)
     commit = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "HEAD"],
         capture_output=True, timeout=30, check=False,
@@ -172,7 +186,12 @@ def plan_modal_build_material(profile_path: Path) -> dict[str, object]:
     source_commit = commit.stdout.decode("ascii", "strict").strip() if commit.returncode == 0 else ""
     if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
         raise ValueError("accepted engine source identity is unavailable")
-    inspector = root / "tuner" / "runtime" / "modal_build_inspector.py"
+    if source_root is not None and current_clean_source_commit(root) != source_commit:
+        raise ValueError("selected source identity changed")
+    inspector = Path(__file__).resolve().parents[4] / "tuner" / "runtime" / "modal_build_inspector.py"
+    inspector_raw = stable_read(inspector, 128 * 1024)
+    if stable_read(root / "tuner/runtime/modal_build_inspector.py", 128 * 1024) != inspector_raw:
+        raise ValueError("selected source inspector differs from installed policy")
     builder_lock_digest = hashlib.sha256(builder_lock_bytes()).hexdigest()
     intent = {
         "schema_version": "synaptic-modal-build-material-intent/v1",
@@ -400,6 +419,20 @@ def _cleanup_sandbox(sandbox: object) -> None:
 def prepare_capture_build_inputs(profile, staged: Path, wheel: Path, digest: str, *, bootstrap_paths=None):
     """Build the same exact local material before any provider authority claim."""
     try:
+        # The image executes this wheel member, not the installed host module.
+        inspector = Path(__file__).resolve().parents[4] / "tuner/runtime/modal_build_inspector.py"
+        expected_inspector = stable_read(inspector, 128 * 1024)
+        wheel_raw = stable_read(wheel, 256 * 1024 * 1024)
+        if hashlib.sha256(wheel_raw).hexdigest() != digest:
+            raise ValueError("source wheel digest differs")
+        with zipfile.ZipFile(io.BytesIO(wheel_raw)) as archive:
+            members = [item for item in archive.infolist() if item.filename == "tuner/runtime/modal_build_inspector.py"]
+            if len(members) != 1 or not 0 < members[0].file_size <= 128 * 1024:
+                raise ValueError("wheel inspector inventory differs")
+            with archive.open(members[0]) as member:
+                actual = member.read(128 * 1024 + 1)
+            if actual != expected_inspector:
+                raise ValueError("wheel inspector differs from installed policy")
         packaged = json.loads(json.dumps(profile.packaged_runtime))
         packaged["wheel"]["filename"] = wheel.name
         packaged["wheel"]["sha256"] = digest
@@ -452,6 +485,7 @@ def capture_modal_build_candidate(
     build_app: object | None = None,
     builder_cache_root: Path | None = None,
     local_inputs=None,
+    source_root: Path | None = None,
 ) -> ModalBuildCandidateV1:
     """Build the fixed pinned image, then measure it before release construction.
 
@@ -461,7 +495,7 @@ def capture_modal_build_candidate(
     """
     if getattr(sdk, "__version__", None) != "1.5.4" or client is None or not callable(build_claim):
         raise ValueError("Modal build client or authorization is invalid")
-    intent = plan_modal_build_material(profile_path)
+    intent = plan_modal_build_material(profile_path, **({"source_root": source_root} if source_root is not None else {}))
     if _SHA256.fullmatch(expected_intent_digest) is None or intent["intent_digest"] != expected_intent_digest:
         raise ValueError("Modal build intent changed")
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,126}", app_name) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,126}", environment_name):
@@ -469,8 +503,8 @@ def capture_modal_build_candidate(
     profile = load_profile(profile_path)
     if profile.packaged_runtime is None or profile.packages:
         raise ValueError("only the pinned packaged Modal profile is supported")
-    root = Path(__file__).resolve().parents[4]
-    inspector = root / "tuner" / "runtime" / "modal_build_inspector.py"
+    root = Path(__file__).resolve().parents[4] if source_root is None else Path(source_root).resolve(strict=True)
+    inspector = Path(__file__).resolve().parents[4] / "tuner" / "runtime" / "modal_build_inspector.py"
     inspector_raw = stable_read(inspector, 128 * 1024)
     inspector_digest = hashlib.sha256(inspector_raw).hexdigest()
     deadline = time.monotonic() + 3600
@@ -478,7 +512,7 @@ def capture_modal_build_candidate(
         from tuner.training.modal_local_preparation import PreparedModalLocalInputs
         if type(local_inputs) is not PreparedModalLocalInputs:
             raise ModalBuildStageFailure("BUILD_INPUTS", "INVALID")
-        local_inputs.revalidate(profile_path, expected_intent_digest)
+        local_inputs.revalidate(profile_path, expected_intent_digest, **({"source_root": source_root} if source_root is not None else {}))
     scratch_context = (nullcontext(str(local_inputs.staged)) if local_inputs is not None
                        else tempfile.TemporaryDirectory(prefix="synaptic-modal-build-"))
     with scratch_context as scratch:
@@ -502,7 +536,7 @@ def capture_modal_build_candidate(
                 profile, staged, wheel, digest,
             )
         all_wheels = [packaged["wheel"], *packaged["bootstrap"]]
-        if plan_modal_build_material(profile_path)["intent_digest"] != expected_intent_digest:
+        if plan_modal_build_material(profile_path, **({"source_root": source_root} if source_root is not None else {}))["intent_digest"] != expected_intent_digest:
             raise ModalBuildStageFailure("BUILD_INPUTS", "INVALID")
         build_claim()
         app = (build_app if build_app is not None else _bounded(

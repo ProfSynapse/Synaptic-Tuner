@@ -201,12 +201,27 @@ compiler and execution integration are accepted.
 
 ### Installed Modal source prerequisite
 
-The current build planner derives its engine root from the imported
-`runtime_build` module and requires an accepted Git `HEAD`. An ordinary wheel
-installed into site-packages has no engine Git checkout. The installed CPU
-planning/runner fixtures therefore supply one explicitly synthetic source
-observation; all unrelated subprocess calls remain unchanged. This is not proof
-that wheel-only Modal planning or launch works. A usable explicit accepted source
-location/build-material path for a clean installed host remains a separate
-release integration gate. Retained run reads do not replan the current recipe
-and are a different surface.
+An installed host selects a separate engine build source through the existing
+`SYNAPTIC_ENGINE_ROOT` environment variable, or Python's
+`ProjectContext.engine_root`. For example, use the normal pinned launcher with
+`SYNAPTIC_ENGINE_ROOT=/path/to/accepted/engine synaptic train --job-config <recipe>
+--plan --json`; the build source must be an actual Git checkout, not site-packages.
+The same selected root flows through recipe planning, local preparation and image
+capture. Preparation retains its directory identity and rechecks its original
+clean `HEAD` and build intent before provider claims. Existing source/Gitlink and
+pushed-source authority remain separate requirements; a local clean commit alone
+does not prove those requirements.
+
+Installed inspector and wheel-builder policy remain the host's policy assets.
+The selected source inspector must match the installed inspector, and the built
+wheel's bounded inspector member must match it before provider effects. This does
+not import application modules from the source checkout or change runtime pins.
+Omitting explicit source selection preserves the checkout default. Restricted
+metrics qualification retains its original source restriction.
+
+CPU controls use real test-owned Git source roots and scripted wheel-builder and
+provider operations; they establish source propagation, consistency rejection
+and retained custody, not a live build or model/hardware qualification. Some
+legacy planning fixtures still supply synthetic source observations. A wheel
+without a separately admitted source checkout is not a training build source.
+Retained run reads do not replan the current recipe and are a different surface.

@@ -222,7 +222,7 @@ class ModalJobConfigHandler(BaseHandler):
                 })
             plan = plan_modal_sft_recipe(
                 recipe_path, project_root=self.project_root,
-                profiles_root=profiles_root,
+                profiles_root=profiles_root, source_root=self.engine_root,
             )
             if getattr(self.args, "plan", False):
                 document = plan.to_dict()
@@ -232,7 +232,7 @@ class ModalJobConfigHandler(BaseHandler):
                 selected = load_runtime_profile(
                     plan.recipe.runtime_profile, profiles_root,
                 ).resolve(model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision, method="sft")
-                profile_path, _ = resolve_modal_sft_build(selected, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision)
+                profile_path, _ = resolve_modal_sft_build(selected, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision, prepared_format=plan.recipe.prepared_format, source_root=self.engine_root)
                 document["local_readiness"] = local_readiness(profile_path)
                 if attempt is not None:
                     from tuner.training.modal_metrics_qualification import candidate_admission, current_clean_commit, write_candidate

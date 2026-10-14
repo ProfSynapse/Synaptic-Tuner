@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import zipfile
 
 import pytest
 import yaml
@@ -142,7 +143,11 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
     profile = tmp_path / "profile.yaml"
     profile.write_text(yaml.safe_dump(profile_data), encoding="utf-8")
     source_wheel = tmp_path / "synaptic_tuner-1.1.0-py3-none-any.whl"
-    source_wheel.write_bytes(b"fixture source wheel")
+    # The build path consumes this exact wheel member. A plain-text placeholder
+    # cannot satisfy source handoff's real ZIP/inspector validation.
+    inspector = Path(runtime_build.__file__).resolve().parents[4] / "tuner/runtime/modal_build_inspector.py"
+    with zipfile.ZipFile(source_wheel, "w") as archive:
+        archive.writestr("tuner/runtime/modal_build_inspector.py", inspector.read_bytes())
     events: list[str] = []
 
     def prepare(_source, destination, *, expected_source_commit, builder_cache_root):

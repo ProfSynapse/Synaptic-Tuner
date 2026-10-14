@@ -231,7 +231,7 @@ def test_normal_runner_conversation_reaches_real_public_prepare_resolve_start(tm
     from tuner.training import modal_recipe
     monkeypatch.setattr(modal_recipe, "load_recipe", lambda *_: document)
     plan = plan_modal_sft_recipe(RECIPE, project_root=tmp_path,
-                                 profiles_root=tmp_path / "Trainers/runtime_profiles")
+                                 profiles_root=tmp_path / "Trainers/runtime_profiles", source_root=tmp_path)
     reached = []
     original_prepare, original_resolve, original_start = TrainingAPI.prepare, TrainingAPI.resolve, TrainingAPI.start
     def prepare(api, source, config):

@@ -256,20 +256,20 @@ def _private_root() -> Path:
 def prepare_modal_standalone_local(*, plan, context):
     """The same mandatory local-only preparation used by normal execution."""
     validate_local_launcher()
-    from tuner.training.modal_metrics_qualification import current_clean_commit
-    current_clean_commit(context.engine_root)
+    from tuner.execution.providers.modal.runtime_build import current_clean_source_commit
+    current_clean_source_commit(context.engine_root)
     profiles_root = context.engine_root / "Trainers" / "runtime_profiles"
     admitted = load_runtime_profile(plan.recipe.runtime_profile, profiles_root).resolve(
         model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision, method="sft",
     )
     profile_path, intent = resolve_modal_sft_build(
         admitted, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision,
-        prepared_format=plan.recipe.prepared_format,
+        prepared_format=plan.recipe.prepared_format, source_root=context.engine_root,
     )
     if (admitted.profile_sha256 != plan.profile_sha256 or admitted.image != plan.profile_base_image
             or intent["intent_digest"] != plan.runtime_material_intent_digest):
         raise ModalLocalPreparationUnavailable("PROFILE_BINDING")
-    return prepare_local_inputs(profile_path, root=_private_root(), expected_intent=plan.runtime_material_intent_digest)
+    return prepare_local_inputs(profile_path, root=_private_root(), expected_intent=plan.runtime_material_intent_digest, source_root=context.engine_root)
 
 
 def _attempt_journal(root: Path, attempt_ref: str, *, fresh_attempt: bool) -> Path:
@@ -336,14 +336,14 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
     )
     profile_path, build_intent = resolve_modal_sft_build(
         admitted, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision,
-        prepared_format=plan.recipe.prepared_format,
+        prepared_format=plan.recipe.prepared_format, source_root=context.engine_root,
     )
     if (admitted.profile_sha256 != plan.profile_sha256
             or admitted.image != plan.profile_base_image
             or build_intent["intent_digest"] != plan.runtime_material_intent_digest):
         raise ModalStandaloneRunUnavailable("modal_runtime_profile_changed")
     if local_inputs is not None:
-        local_inputs.revalidate(profile_path, plan.runtime_material_intent_digest)
+        local_inputs.revalidate(profile_path, plan.runtime_material_intent_digest, source_root=context.engine_root)
     secrets_port = _HostSecrets({
         "SYNAPTIC_TRAIN_AUTHORITY_KEY": secrets.token_hex(32),
         "SYNAPTIC_TRAIN_READER_KEY": secrets.token_hex(32),
@@ -366,7 +366,7 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
         qualification_secret_name=_QUALIFICATION_SECRET_NAME,
         hf_token_secret_name=_HF_TOKEN_SECRET_NAME,
         app_name=_APP_NAME, environment_name=modal_environment,
-        builder_cache_root=builder_cache_root,
+        builder_cache_root=builder_cache_root, source_root=context.engine_root,
         execution_attempt_ref=effect_id, local_inputs=local_inputs, metrics_admission=metrics_admission,
     )
     qualification = qualify_modal_runtime_for_host(

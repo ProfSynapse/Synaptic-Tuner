@@ -181,10 +181,12 @@ def bootstrap_paths(profile, root, *, prepare):
 
 class PreparedModalLocalInputs:
     """Process-local verified files with retained identities, never an execution grant."""
-    def __init__(self, profile_path, intent, temporary, layout, *, token):
+    def __init__(self, profile_path, intent, temporary, layout, *, token, source_root=None):
         if token is not _ATTESTED:
             raise ModalLocalPreparationUnavailable('LOCAL_INPUTS_CHANGED')
         self.profile_path, self.intent, self._temporary, self.layout = profile_path, intent, temporary, layout
+        self.source_root = Path(__file__).resolve().parents[2] if source_root is None else Path(source_root).resolve(strict=True)
+        self._explicit_source = source_root is not None
         self.staged = Path(temporary.name)
         self.wheel = next(self.staged.glob('synaptic_tuner-*-py3-none-any.whl'))
         self.wheel_sha256 = hashlib.sha256(stable_read(self.wheel,_MAX_WHEEL)).hexdigest()
@@ -196,12 +198,16 @@ class PreparedModalLocalInputs:
         self._snapshot = self._material_snapshot()
         try:
             self._retain_files()
+            self._source_fd = os.open(self.source_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            self._stack.callback(os.close, self._source_fd)
+            held = os.fstat(self._source_fd)
+            self._source_identity = (held.st_dev, held.st_ino)
         except Exception:
             self._stack.close()
             raise
 
     def _material_snapshot(self):
-        return json.dumps({"intent":self.intent,"staged":str(self.staged),"wheel":str(self.wheel),
+        return json.dumps({"intent":self.intent,"source_root":str(self.source_root),"staged":str(self.staged),"wheel":str(self.wheel),
             "wheel_sha256":self.wheel_sha256,"paths":[str(self.layout[1]),str(self.layout[2])],
             "packaged":self.layout[0],"command":self.layout[3],"recipe":self.layout[4],
             "material":self.layout[5]},sort_keys=True,separators=(",",":"),allow_nan=False).encode()
@@ -221,15 +227,25 @@ class PreparedModalLocalInputs:
             info = os.fstat(fd)
             self._files.append((path,fd,info.st_dev,info.st_ino,hashlib.sha256(raw).hexdigest()))
 
-    def revalidate(self, profile_path, expected_intent):
+    def revalidate(self, profile_path, expected_intent, *, source_root=None):
         try:
             if (self._closed or self._token is not _ATTESTED or profile_path != self.profile_path
                     or expected_intent != self.intent['intent_digest']
-                    or plan_modal_build_material(profile_path) != self.intent
+                    or (source_root is not None and Path(source_root).resolve(strict=True) != self.source_root)
+                    or plan_modal_build_material(profile_path, **({"source_root": self.source_root} if self._explicit_source else {})) != self.intent
                     or self._material_snapshot() != self._snapshot):
                 raise ValueError
+            held, named = os.fstat(self._source_fd), self.source_root.lstat()
+            if ((held.st_dev, held.st_ino) != self._source_identity
+                    or (named.st_dev, named.st_ino) != self._source_identity):
+                raise ValueError
             from tuner.training.modal_metrics_qualification import current_clean_commit
-            if current_clean_commit(Path(__file__).resolve().parents[2]) != self.intent["engine_source_commit"]:
+            if self._explicit_source:
+                from tuner.execution.providers.modal.runtime_build import current_clean_source_commit
+                current = current_clean_source_commit(self.source_root)
+            else:
+                current = current_clean_commit(self.source_root)
+            if current != self.intent["engine_source_commit"]:
                 raise ValueError
             for path,fd,device,inode in self._directories:
                 held,named = os.fstat(fd),path.lstat()
@@ -264,20 +280,20 @@ class PreparedModalLocalInputs:
             self._temporary.cleanup()
 
 
-def prepare_local_inputs(profile_path: Path, *, root: Path, expected_intent: str):
+def prepare_local_inputs(profile_path: Path, *, root: Path, expected_intent: str, source_root: Path | None = None):
     temporary = None
     try:
         validate_local_launcher()
         private_directory(root)
         profile = load_profile(profile_path)
-        intent = plan_modal_build_material(profile_path)
+        intent = plan_modal_build_material(profile_path, **({"source_root": source_root} if source_root is not None else {}))
         if intent['intent_digest'] != expected_intent or profile.packaged_runtime is None:
             raise ModalLocalPreparationUnavailable('PROFILE_BINDING')
         paths = bootstrap_paths(profile,root,prepare=True)
         temporary = tempfile.TemporaryDirectory(prefix='modal-local-',dir=root)
         staged = Path(temporary.name)
         try:
-            wheel,digest = prepare_current_source_wheel(Path(__file__).resolve().parents[2],staged,
+            wheel,digest = prepare_current_source_wheel(Path(__file__).resolve().parents[2] if source_root is None else source_root,staged,
                 expected_source_commit=intent['engine_source_commit'],builder_cache_root=root/'modal-wheel-builder')
         except Exception:
             raise ModalLocalPreparationUnavailable('SOURCE_WHEEL_UNAVAILABLE') from None
@@ -285,7 +301,7 @@ def prepare_local_inputs(profile_path: Path, *, root: Path, expected_intent: str
             layout = prepare_capture_build_inputs(profile,staged,wheel,digest,bootstrap_paths=paths)
         except ModalBuildStageFailure:
             raise ModalLocalPreparationUnavailable('BUILD_INPUTS_INVALID') from None
-        prepared = PreparedModalLocalInputs(profile_path,intent,temporary,layout,token=_ATTESTED)
+        prepared = PreparedModalLocalInputs(profile_path,intent,temporary,layout,token=_ATTESTED,source_root=source_root)
         prepared.revalidate(profile_path,expected_intent)
         return prepared
     except ModalLocalPreparationUnavailable:

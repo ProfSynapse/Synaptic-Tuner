@@ -205,7 +205,10 @@ def test_fixture_source_identity_is_explicit_and_other_process_calls_forward(tmp
     from tuner.execution.providers.modal import runtime_build
     forwarded = []
     sentinel = object()
+    real_run = runtime_build.subprocess.run
     def original(command, *args, **kwargs):
+        if command[:3] == ["git", "-C", str(tmp_path)]:
+            return real_run(command, *args, **kwargs)
         forwarded.append((command, args, kwargs))
         return sentinel
     monkeypatch.setattr(runtime_build.subprocess, "run", original)
