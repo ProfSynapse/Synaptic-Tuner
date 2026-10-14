@@ -2,11 +2,11 @@
 
 This dedicated host branch reuses the genuine archived smoke topology. It is not
 an engine development branch and must not be merged into engine main. The engine
-gitlink selects exact `4b77bd1f8e8a0abd664907a575166bfa41f11a7d`.
+gitlink selects exact `58225583be620625febba9c7e175af696bf71a5d`.
 
 `configuration/grpo.yaml` selects the checked-in unqualified SmolLM135 candidate,
 three steps/four generations and deterministic blue regex reward. `data/rows.jsonl`
-and its independently verified four-row `.tracking/datasets` publication are synthetic fixtures;
+and its independently verified four-row `.synaptic/tracking/datasets` publication are synthetic fixtures;
 `configuration/preparation.json` records exact original bytes/semantic identity.
 All paths are host-relative. No provider IDs, old resources, credentials or
 qualification receipts are retained here.

@@ -1,9 +1,9 @@
 schema_version: synaptic-project/v1
 project:
-  id: synaptic-grpo-qualification
-  name: Synaptic Tuner GRPO Qualification Host
+  id: synaptic-grpo-qualification-g
+  name: Synaptic Tuner GRPO Qualification G
 engine:
-  requires: "==1.1.0"
+  requires: ==1.1.0
   api: v1
   path: project://synaptic-tuner
 paths:
@@ -18,7 +18,9 @@ policies:
   source_writes: deny
   external_paths: deny
   dirty_sources: deny
-  repository_schemes: [https]
-  repository_hosts: [github.com]
+  repository_schemes:
+  - https
+  repository_hosts:
+  - github.com
   nested_submodules: false
   max_submodule_depth: 0

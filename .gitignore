@@ -5,3 +5,5 @@ private/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+private-grpo-source/

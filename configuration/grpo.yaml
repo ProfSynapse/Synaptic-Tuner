@@ -1,6 +1,4 @@
-# Candidate configuration only, not launch authority or a provider billing cap.
-# Live resource/prompt/reward review is required; no grouped variation is guaranteed.
-name: captured-smollm2-grpo-candidate
+name: grpo-cpu-qualification-g
 description: Three-step candidate measurement; no model/GPU/update qualification claimed
 target: cloud
 provider: modal
@@ -15,7 +13,7 @@ job:
   timeout_seconds: 900
   maximum_cost_minor_units: 100
 dataset:
-  local_file: .tracking/datasets/dataset-0ea76d987aab3a43edde7f90b4b28e26da662363a20da62e531d92ceb3f64b44/dataset.jsonl
+  local_file: .synaptic/tracking/datasets/dataset-0ea76d987aab3a43edde7f90b4b28e26da662363a20da62e531d92ceb3f64b44/dataset.jsonl
   schema_version: synaptic-grpo-prompts/v1
   expected_digest: 0ea76d987aab3a43edde7f90b4b28e26da662363a20da62e531d92ceb3f64b44
   expected_row_count: 4
