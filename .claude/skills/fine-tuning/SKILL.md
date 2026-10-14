@@ -17,7 +17,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | SFT training | `cd Trainers/sft && python train_sft.py --model-size 7b` |
 | KTO training | `cd Trainers/kto && python train_kto.py --model-size 7b` |
 | Modal conversation SFT host path | Existing `train --job-config <recipe> --plan --json`, explicit conversation format and compatible named candidate; CPU host proof, unqualified runtime; see `reference/conversation-preparation.md` |
-| Public GRPO CPU preparation/compiler | Explicit host-owned generic preparation ports and lazy GRPORecipe; execution remains closed; see `reference/grpo-training.md` |
+| Public GRPO preparation and Modal runner | Explicit host-owned preparation ports and compatible named GRPO profile; normal execution/CPU qualification joined, live image/model qualification remains unproven; see `reference/grpo-training.md` |
 | Legacy GRPO training | `cd Trainers/grpo && python train_grpo.py` |
 | Pivot-profile GRPO dataset | `cd Trainers/grpo && python train_grpo.py --config configs/pivot_config.yaml --pivot-profile-only` |
 | GRPO with pivot filtering | `cd Trainers/grpo && python train_grpo.py --config configs/pivot_config.yaml` |
