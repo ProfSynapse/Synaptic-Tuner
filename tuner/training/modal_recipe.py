@@ -62,6 +62,7 @@ class ModalSFTRecipeV1:
     maximum_cost_minor_units: int | None
     post_training: dict[str, object] | None = None
     observation_capture: dict[str, object] | None = None
+    prepared_format: str = "syntunia-sft-row/v2"
 
     def training_input(self, dataset_ref: str) -> TrainingInputV1:
         return TrainingInputV1(
@@ -72,7 +73,7 @@ class ModalSFTRecipeV1:
     def packaged_config(self, identity: PreparedTrainingInputIdentity) -> CanonicalDocument:
         if type(identity) is not PreparedTrainingInputIdentity:
             raise TypeError("exact prepared identity required")
-        if identity.format != "syntunia-sft-row/v2" or identity.revision != self.dataset_digest:
+        if identity.format != self.prepared_format or identity.revision != self.dataset_digest:
             raise ValueError("prepared input differs from recipe identity")
         public = self.training_input(identity.ref)
         document = {
@@ -151,9 +152,13 @@ def plan_modal_sft_recipe(recipe_path: Path, *, project_root: Path,
     if os.name == "posix":
         from tuner.training.modal_host_prepared_copy import inspect_mounted_prepared_dataset
 
-        verified = inspect_mounted_prepared_dataset(directory)
+        verified = inspect_mounted_prepared_dataset(directory, prepared_format=recipe.prepared_format)
     else:
-        verified, _ = snapshot_prepared_dataset_v2(directory)
+        if recipe.prepared_format == "synaptic-conversation-sft-row/v1":
+            from tuner.dataset_prep.conversation_messages import snapshot_conversation_dataset
+            verified, _ = snapshot_conversation_dataset(directory)
+        else:
+            verified, _ = snapshot_prepared_dataset_v2(directory)
     semantic = verified.semantic_identity
     if (semantic.dataset_digest != recipe.dataset_digest
             or dict(semantic.split_counts) != {
@@ -162,13 +167,13 @@ def plan_modal_sft_recipe(recipe_path: Path, *, project_root: Path,
         raise ValueError("prepared publication differs from recipe assertions")
     identity = PreparedTrainingInputIdentity(
         f"prepared://sha256/{semantic.dataset_digest}", semantic.dataset_digest,
-        semantic.dataset_sha256, semantic.dataset_bytes, "syntunia-sft-row/v2",
+        semantic.dataset_sha256, semantic.dataset_bytes, recipe.prepared_format,
     )
     config = recipe.packaged_config(identity)
     workload = compile_packaged_sft_workload(resolved_config=config)
     profile = load_runtime_profile(recipe.runtime_profile, profiles_root)
     _build_profile, build_intent = resolve_modal_sft_build(profile, profiles_root,
-                                                         recipe.model.ref, recipe.model.revision)
+                                                         recipe.model.ref, recipe.model.revision, prepared_format=recipe.prepared_format)
     return ModalSFTRecipePlanV1(
         recipe, identity, profile.profile_sha256, profile.image,
         build_intent["intent_digest"],
@@ -177,7 +182,8 @@ def plan_modal_sft_recipe(recipe_path: Path, *, project_root: Path,
 
 
 def resolve_modal_sft_build(profile: RuntimeProfile, profiles_root: Path,
-                            model: str, revision: str) -> tuple[Path, dict[str, object]]:
+                            model: str, revision: str, *,
+                            prepared_format: str = "syntunia-sft-row/v2") -> tuple[Path, dict[str, object]]:
     """Bind a named runtime profile to one compatible packaged build intent."""
     from tuner.cloud.derived_training_image import load_profile
     from tuner.execution.providers.modal.runtime_build import plan_modal_build_material
@@ -194,7 +200,7 @@ def resolve_modal_sft_build(profile: RuntimeProfile, profiles_root: Path,
     contracts = build.packaged_runtime["capabilities"]["contracts"]
     if ("sft" not in compatibility["methods"]
             or {"ref": model, "revision": revision} not in compatibility["models"]
-            or "syntunia-sft-row/v2" not in compatibility["dataset_formats"]
+            or prepared_format not in compatibility["dataset_formats"]
             or contracts["workload_schema"] != PACKAGED_SFT_WORKLOAD_SCHEMA):
         raise ValueError("Modal build capability differs from the admitted runtime profile")
     return build_path, intent
@@ -241,8 +247,9 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
         "local_file", "schema_version", "format", "use_preassigned_splits",
         "split_dataset", "expected_digest", "expected_split_counts",
     }, "dataset")
-    if dataset.get("schema_version") != "syntunia-sft-row/v2" or dataset.get("format") != "messages":
-        raise ValueError("Modal SFT requires a prepared v2 messages dataset")
+    prepared_format = dataset.get("schema_version")
+    if prepared_format not in {"syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"} or dataset.get("format") != "messages":
+        raise ValueError("Modal SFT requires an explicitly supported prepared messages dataset")
     if dataset.get("use_preassigned_splits") is not True or dataset.get("split_dataset") is not False:
         raise ValueError("Modal SFT requires preassigned splits")
     counts = _section(dataset.get("expected_split_counts"), {"train", "validation"}, "expected_split_counts")
@@ -286,6 +293,8 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
         require_memory_efficient_loss=training["require_memory_efficient_loss"],
         chat_template_kwargs=training.get("chat_template_kwargs"),
     )
+    if prepared_format == "synaptic-conversation-sft-row/v1" and hyperparameters.require_memory_efficient_loss is not True:
+        raise ValueError("conversation SFT requires the memory-efficient loss guard")
     return ModalSFTRecipeV1(
         cfg.get("name", path.stem), locator, dataset["expected_digest"],
         counts["train"], counts["validation"], profile_name, model_input,
@@ -294,4 +303,5 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
         validate_post_training_config(cfg.get("post_training")),
         (validate_observation_capture_config(cfg["observation_capture"])
          if "observation_capture" in cfg else None),
+        prepared_format,
     )
