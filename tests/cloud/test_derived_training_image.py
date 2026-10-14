@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -789,3 +791,58 @@ def test_live_verification_rejects_docker_authority_change(tmp_path: Path) -> No
             docker_config=docker_config,
             runner=runner,
         )
+
+
+def test_same_version_derived_install_restores_exact_wheel_provenance(tmp_path):
+    """Offline pip control: installed same-version packages must not be skipped."""
+    import csv
+    import io
+    import sys
+    from pathlib import Path
+    import shlex
+    from types import SimpleNamespace
+    profile = SimpleNamespace(packages=(), base_image=BASE, canonical_sha256="sha256:" + "3" * 64,
+                              python_executable=str(sys.executable), packaged_runtime={"fixture": True})
+    dockerfile = render_dockerfile(profile)
+    line = next(line for line in dockerfile.splitlines() if " -I -m pip install " in line)
+    arguments = shlex.split(line.strip().rstrip("\\").strip().rstrip(";"))
+    _CAPTURE_INSTALLER_FLAGS = tuple(arguments[arguments.index("install") + 1:arguments.index("-r")])
+    assert dockerfile.count(" -I -m pip check ") == 2
+    env = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", "--copies", str(env)],
+                   check=True, capture_output=True, timeout=60)
+    python = env / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    wheel = tmp_path / "synaptic_provenance_fixture-1.0-py3-none-any.whl"
+    info = "synaptic_provenance_fixture-1.0.dist-info/"
+    members = {"synaptic_provenance_fixture.py": b"VALUE = 1\n",
+               info + "METADATA": b"Metadata-Version: 2.1\nName: synaptic-provenance-fixture\nVersion: 1.0\n",
+               info + "WHEEL": b"Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n"}
+    record = io.StringIO()
+    writer = csv.writer(record)
+    for name, raw in members.items():
+        writer.writerow([name, "", len(raw)])
+    writer.writerow([info + "RECORD", "", ""])
+    members[info + "RECORD"] = record.getvalue().encode()
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name, raw in members.items():
+            archive.writestr(name, raw)
+    def pip(*args):
+        return subprocess.run([str(python), "-I", "-m", "pip", *args],
+                              check=True, capture_output=True, timeout=60)
+    pip("install", "--no-index", "--no-deps", str(wheel))
+    purelib = subprocess.run([str(python), "-I", "-c", "import sysconfig;print(sysconfig.get_path('purelib'))"],
+                             check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+    direct_url = Path(purelib) / info / "direct_url.json"
+    direct_url.unlink()  # Model the index-installed base's absent direct_url.
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text(f"{wheel.as_uri()} --hash=sha256:{digest}\n")
+    pip("install", *[flag for flag in _CAPTURE_INSTALLER_FLAGS if flag != "--force-reinstall"], "-r", str(requirements))
+    assert not direct_url.exists()
+    before = pip("check").stdout
+    pip("install", *_CAPTURE_INSTALLER_FLAGS, "-r", str(requirements))
+    assert pip("check").stdout == before
+    document = json.loads(direct_url.read_bytes())
+    assert document["url"] == wheel.as_uri()
+    assert document["archive_info"]["hashes"]["sha256"] == digest
+    assert (Path(purelib) / "synaptic_provenance_fixture.py").read_bytes() == members["synaptic_provenance_fixture.py"]
