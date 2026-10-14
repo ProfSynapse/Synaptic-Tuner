@@ -290,3 +290,21 @@ lineage, describe what was evaluated:
 | `load_settings` | Backend load settings; for `unsloth`, `load_in_4bit` and `max_seq_length` |
 | `manifest` | With `--artifact-manifest`: the matching `file` entry (`filename`, `quant_type`, `sha256`, `imatrix_used`, ...), the `calibration` block and scalar `header` fields |
 | `warnings` | Non-fatal problems, e.g. no manifest entry matched the model file name |
+
+## Comparing two public runs of the same model
+
+The checkout-owned `examples/nontraining/qualification.py` consumer accepts two
+distinct evaluation requests selecting the same model. It retains each public
+`EvaluationPlan` before starting and uses the reference composition's pure
+`evaluation_run_ref(plan)` helper to bind cold results to their exact run refs.
+Configuration order determines reference and candidate; model labels and sorted
+run IDs do not. Missing, swapped or changed same-model plan snapshots reject.
+Older distinct-model attempts remain readable through their existing identities.
+
+The consumer labels this output `comparison_scope: same_model_runs`. It measures
+two runs, not two different checkpoints or model quality. A documented API alias
+used for both `model_ref` and `model_revision` commits that alias choice; it does
+not attest an immutable provider snapshot. External paid judging retains the
+existing unverified/incomparable verdict. Do not convert successful execution or
+accounted calls into a successful model ranking. Retained readback opens no model,
+credential resolver or paid request; uncertainty never authorizes replay.
