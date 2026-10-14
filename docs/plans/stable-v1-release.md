@@ -1178,3 +1178,31 @@ without inventory or pin changes; skill mirrors match. No live provider
 effects occurred. This closes the paid judge accounting gap above; live
 qualification still needs bounded HTTP response/deadline handling and review
 of retries after uncertain requests. Authorization caps are not invoice proof.
+
+### HF known-job recovery without original source or preparation
+
+Ordinary HF host composition now retains bounded original read material in its
+existing record store. A fresh read-only composition authenticates the original
+plan, descriptor, workload, submit command, retained assessment and current
+Foundation record before reading the exact known job. It reconstructs the
+original submitted request and uses the existing native verifier and artifact
+streams. Missing or conflicting records, altered request fields and unknown
+submissions reject without adoption or replay. Cold cancellation, reconciliation,
+logs and reverify remain unavailable even for an originally enabled descriptor.
+
+Independent source and CI/skill review passed. Root passed all 69 source controls
+in 75.52 seconds. The process test kills the real public producer, removes its
+source/input/model-cache/preparation directories and opens original SQLite in
+fresh readers before parent recovery access. It checks pending and mismatched
+provider observations, verifies five native artifacts, and reads persisted
+verified results in another process without provider polls. Provider, image and
+trainer boundaries remain explicit fixtures; bootstrap/source-worker custody and
+native verification are real. This is known-job host recovery, not live HF
+qualification or active training restoration.
+
+Fresh sdist-built wheel
+`2759af578fde6b1e3f6a5e0c7f4bd90c2ec99c7b80801f6cfa4eaa5242bfc206`
+passed the base consumer and all 69 installed HF controls with pinned Hub 1.33.0
+in 84.89 seconds. All four changed production modules match reviewed bytes in
+the wheel and installed package. Seven maintenance checks remain current without
+inventory or pin changes; skill mirrors match. No live provider effects occurred.

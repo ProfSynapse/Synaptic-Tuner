@@ -837,3 +837,42 @@ reviewing intentional member changes, use `--write`, then rerun the default
 check. This refreshes only hashes and sizes of the reviewed inventory; it does
 not change model, image, runtime pins or qualify a live HF run. The protected
 smoke and Modal inventories remain separate.
+
+### Source-free known-job HF readback
+
+New ordinary host compositions retain one private read-material record in the
+host's existing generic record store before training effects. It contains three
+exact bounded blobs (original material, plain worker-bundle projection, captured
+bootstrap) plus the original typed provider descriptor, authenticated against the
+original stored plan/context/workflow. The projection already embeds the compiled
+workload and closure; no rich-plan, executable profile, input lease, or issued
+bundle object is fabricated. Raw input rows, engine member bytes, model cache and
+credential values are not retained in this record. Bounds are 1 MiB material,
+3 MiB projection, 64 KiB bootstrap, 16 KiB descriptor, and 6 MiB encoded aggregate.
+Only exactly identical genuine warm captures may reuse the record; conflicting
+bytes fail.
+
+The private `open_retained_hf_runs` composition accepts the original caller-owned
+stores and authority/reader keys, current named host credential port, pinned host
+SDK, API boundary and private scratch. It returns only existing `RunsAPI` reads
+for the exact authenticated known job. Observation and native verification may
+advance local records; this is provider-read-only, not filesystem-read-only. The
+original submit assessment and current Foundation record remain authenticated.
+Exact request reconstruction checks original image, command, environment, flavor,
+labels, scope, volumes and job identity. Missing read records or ambiguous
+submission fail; no current source/config/profile is replanned or adopted.
+
+Cold readback categorically refuses logs, cancel, reconciliation and reverify,
+even when the original descriptor was explicitly enabled. It cannot start,
+stage, submit, bind new grants or continue execution. Existing ordinary default
+capabilities and the protected paid smoke are unchanged.
+
+Permanent pinned-SDK provider-free tests kill a real public producer, remove its
+source/input/model-cache/preparation directories, and let the first fresh reader
+open SQLite before any parent recovery access. Later fresh processes verify and
+stream all five native roles, then read persisted verified state without provider
+polling. Full returned-request mismatches refuse acceptance without advancing
+history. The provider/image/trainer boundaries are explicit test doubles; actual
+bootstrap/source-worker custody, Foundation/history and native verifier remain
+real. This is known-job host reconstruction evidence, not live HF recovery, GPU
+training, cancellation causal proof or permission to replay an uncertain effect.

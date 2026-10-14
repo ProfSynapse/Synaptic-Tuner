@@ -217,6 +217,8 @@ def compose_hf_jobs_host(*, preparation, sdk, api, ports, requests, authority,
     if (type(ports) is not ReferenceHostPortsV1
             or type(allow_current_cancel_authorization) is not bool):
         raise HFJobsError("input_invalid")
+    from .retained_reader import _capture
+    _capture(preparation, ports.records)
     transport = HFJobsTransport(preparation=preparation, sdk=sdk, api=api,
         records=ports.records, secrets=ports.secrets, scratch_root=scratch_root,
         deadline_seconds=deadline_seconds)
