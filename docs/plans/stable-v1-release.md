@@ -79,6 +79,13 @@ claim and local records remain retained. That code identifies the failed
 inspection boundary, not its underlying cause or confirmed cleanup; no GPU
 training or model preparation was performed. Diagnose this exact attempt before
 reviewing any fresh attempt.
+A separate isolated CPU experiment reproduced a build defect: the captured base
+already contains Hyperframe 6.1.0, and pip skips its same-version local wheel
+under the current install flags, leaving the required wheel provenance absent.
+Adding `--force-reinstall` produced the exact local-wheel URI/hash and nine
+byte-identical installed members. This supports the installer correction; it
+does not retrospectively establish attempt D's cause. The correction and bounded
+inspector diagnostics still require implementation review and CI.
 No new grant, lifecycle DTO, store or scenario CRUD framework is required merely
 to close this plan. Supported host composition and installed/source prerequisites
 are detailed in the [operation matrix](api-v1-support-matrix.md) and
