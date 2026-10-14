@@ -100,9 +100,11 @@ class WorkerEnvironmentRuntime(EnvironmentRuntime):
         self._request_id = 0
         self._owner_write = None
         self._status_read = None
+        self._status_buffer = bytearray()
         self._worker_pid = None
         self._shutdown_status = None
         self._custody = False
+        self._initializing = False
         self._input_bound = min(_MAX_FRAME, 6 * limits.max_content_bytes +
                                 limits.max_entries * (6 * limits.max_path_bytes + 64) + 8192)
         self._output_bound = min(_MAX_FRAME, 6 * max(limits.max_output_bytes, limits.max_snapshot_bytes) + 8192)
@@ -183,25 +185,22 @@ class WorkerEnvironmentRuntime(EnvironmentRuntime):
                     env={'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'},
                     pass_fds=(*descriptors, command_read, reply_write, owner_read, status_write),
                     close_fds=True, shell=False)
-                self._process.stdin.write(initial_bytes)
+                self._initializing = True
+                os.set_blocking(self._process.stdin.fileno(), False)
+                self._send(initial_bytes)
                 self._process.stdin.close()
                 self._process.stdin = os.fdopen(command_write, 'wb', buffering=0)
                 command_write = None
                 self._process.stdout = os.fdopen(reply_read, 'rb', buffering=0)
                 reply_read = None
+                self._initializing = False
             finally:
                 for fd in (command_read, reply_write, owner_read, status_write, command_write, reply_read):
                     if fd is not None:
                         os.close(fd)
             os.set_blocking(self._process.stdin.fileno(), False)
             os.set_blocking(self._process.stdout.fileno(), False)
-            custody = self._read_status(self._deadline)
-            if (type(custody) is not dict or set(custody) != {'custody', 'worker_pid'} or
-                    custody['custody'] is not True or type(custody['worker_pid']) is not int or
-                    custody['worker_pid'] <= 0):
-                raise WorkerLifecycleError('worker_start_uncertain')
-            self._worker_pid = custody['worker_pid']
-            self._custody = True
+            self._accept_custody(self._read_status(self._deadline, check_boundary=True))
             self._request('initialize', [{'limits': asdict(self.limits),
                 'anchors': self._storage._anchors, 'root_fd': self._storage._root_fd,
                 'name': self._storage._name, 'identity': self._storage._created_identity,
@@ -349,13 +348,27 @@ class WorkerEnvironmentRuntime(EnvironmentRuntime):
         # A definite operation error is not an IPC uncertainty or automatic retry.
         raise error('worker_operation_rejected')
 
-    def _read_status(self, deadline):
-        raw = bytearray()
-        length = None
+    def _accept_custody(self, value):
+        if (type(value) is not dict or set(value) != {'custody', 'worker_pid'} or
+                value['custody'] is not True or type(value['worker_pid']) is not int or
+                value['worker_pid'] <= 0):
+            raise WorkerLifecycleError('worker_start_uncertain')
+        self._worker_pid = value['worker_pid']
+        self._custody = True
+
+    def _read_status(self, deadline, *, check_boundary=False):
+        raw = self._status_buffer
+        length = struct.unpack('!I', raw[:4])[0] if len(raw) >= 4 else None
+        if length is not None and not 0 < length <= 4096:
+            raise WorkerLifecycleError('worker_protocol_invalid')
         while length is None or len(raw) < length + 4:
+            if check_boundary:
+                self._guard()
             remaining = deadline - time.monotonic()
-            if remaining <= 0 or not select.select([self._status_read], [], [], remaining)[0]:
+            if remaining <= 0:
                 raise WorkerLifecycleError('worker_termination_uncertain')
+            if not select.select([self._status_read], [], [], min(.05, remaining))[0]:
+                continue
             chunk = os.read(self._status_read, (4 if length is None else length + 4) - len(raw))
             if not chunk:
                 raise WorkerLifecycleError('worker_termination_uncertain')
@@ -366,7 +379,9 @@ class WorkerEnvironmentRuntime(EnvironmentRuntime):
                     raise WorkerLifecycleError('worker_protocol_invalid')
         if len(raw) != length + 4:
             raise WorkerLifecycleError('worker_protocol_invalid')
-        return _decode(raw[4:])
+        value = _decode(raw[4:])
+        raw.clear()
+        return value
 
     def teardown(self):
         self._failed = True
@@ -381,12 +396,19 @@ class WorkerEnvironmentRuntime(EnvironmentRuntime):
                     setattr(self, attribute, None)
             self._storage.teardown()
             return
+        if self._initializing and process.stdin is not None and not process.stdin.closed:
+            process.stdin.close()
         if self._owner_write is not None:
             os.close(self._owner_write)
             self._owner_write = None
         try:
             if self._shutdown_status is None:
-                self._shutdown_status = self._read_status(time.monotonic() + 3)
+                deadline = time.monotonic() + 3
+                value = self._read_status(deadline)
+                if type(value) is dict and 'custody' in value:
+                    self._accept_custody(value)
+                    value = self._read_status(deadline)
+                self._shutdown_status = value
             process.wait(timeout=3)
             status = self._shutdown_status
             if (type(status) is not dict or set(status) != {'worker_exited', 'cleanup'} or

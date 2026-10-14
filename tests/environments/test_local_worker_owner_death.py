@@ -157,3 +157,124 @@ def test_partial_pipe_allocation_closes_every_owned_descriptor(tmp_path, monkeyp
     for fd in allocated:
         with pytest.raises(OSError):
             os.fstat(fd)
+
+
+def test_post_spawn_before_custody_failure_drains_custody_then_exit(tmp_path, monkeypatch):
+    from shared.environments.bounded_local_runtime import FilesystemLimits
+    from shared.environments.fixture_parser import EnvironmentFixture
+    parent = tmp_path / 'private'
+    parent.mkdir(mode=0o700)
+    runtime = worker.WorkerEnvironmentRuntime(parent, FilesystemLimits(30,4096,2048,4096,8,128,10))
+    original = runtime._read_status
+    def fail_first(deadline, *, check_boundary=False):
+        if check_boundary:
+            raise ValueError('post-spawn injected fault')
+        return original(deadline)
+    monkeypatch.setattr(runtime, '_read_status', fail_first)
+    with pytest.raises(ValueError, match='post-spawn'):
+        runtime.setup(EnvironmentFixture())
+    assert runtime._custody and runtime._shutdown_status == {'worker_exited': True, 'cleanup': True}
+    assert runtime._process.returncode == 0 and not list(parent.iterdir())
+    runtime.teardown()
+
+
+def test_custody_wait_polls_owner_boundary_and_cleanup_ignores_cancel(tmp_path, monkeypatch):
+    import signal
+    import time
+    from shared.environments.bounded_local_runtime import FilesystemLimits
+    from shared.environments.fixture_parser import EnvironmentFixture
+    parent = tmp_path / 'private'
+    parent.mkdir(mode=0o700)
+    original = worker.subprocess.Popen
+    process = None
+    def stopped(*args, **kwargs):
+        nonlocal process
+        process = original(*args, **kwargs)
+        process.send_signal(signal.SIGSTOP)
+        return process
+    monkeypatch.setattr(worker.subprocess, 'Popen', stopped)
+    checks = 0
+    def cancel():
+        nonlocal checks
+        checks += 1
+        if checks > 5:
+            raise RuntimeError('cancelled')
+    runtime = worker.WorkerEnvironmentRuntime(parent, FilesystemLimits(30,4096,2048,4096,8,128,10), boundary=cancel)
+    started = time.monotonic()
+    try:
+        with pytest.raises(worker.WorkerLifecycleError, match='termination_uncertain'):
+            runtime.setup(EnvironmentFixture())
+        assert checks > 5 and time.monotonic() - started < 5
+        assert runtime._storage._root_fd is not None
+    finally:
+        process.send_signal(signal.SIGCONT)
+        process.wait(timeout=4)
+        # Pending custody and final exit must be consumed, without rechecking cancellation.
+        runtime.teardown()
+    assert not list(parent.iterdir())
+
+
+def test_initialization_backpressure_checks_boundary_without_blocking_write(tmp_path, monkeypatch):
+    import os
+    import time
+    from shared.environments.bounded_local_runtime import FilesystemLimits
+    from shared.environments.fixture_parser import EnvironmentFixture
+    parent = tmp_path / 'private'
+    parent.mkdir(mode=0o700)
+    checks = 0
+    attempts = 0
+    def cancel():
+        nonlocal checks
+        checks += 1
+        if checks > 8:
+            raise RuntimeError('cancelled')
+    runtime = worker.WorkerEnvironmentRuntime(parent, FilesystemLimits(30,4096,2048,4096,8,128,10), boundary=cancel)
+    original = os.write
+    def blocked(fd, value):
+        nonlocal attempts
+        if runtime._initializing:
+            attempts += 1
+            assert not os.get_blocking(fd)
+            raise BlockingIOError()
+        return original(fd, value)
+    monkeypatch.setattr(worker.os, 'write', blocked)
+    started = time.monotonic()
+    try:
+        with pytest.raises(worker.WorkerLifecycleError, match='termination_uncertain'):
+            runtime.setup(EnvironmentFixture())
+        assert attempts and time.monotonic() - started < 4
+        assert not runtime._custody and runtime._storage._root_fd is not None
+    finally:
+        runtime._process.wait(timeout=3)
+        # Test injected zero initialization bytes: guardian never spawned a worker.
+        runtime._storage.teardown()
+        for pipe in (runtime._process.stdin, runtime._process.stdout):
+            if pipe is not None and not pipe.closed:
+                pipe.close()
+        if runtime._status_read is not None:
+            os.close(runtime._status_read)
+
+
+def test_cancellation_after_custody_header_preserves_status_frame_for_cleanup(tmp_path, monkeypatch):
+    import os
+    from shared.environments.bounded_local_runtime import FilesystemLimits
+    from shared.environments.fixture_parser import EnvironmentFixture
+    parent = tmp_path / 'private'
+    parent.mkdir(mode=0o700)
+    armed = False
+    def boundary():
+        if armed:
+            raise RuntimeError('cancelled after header')
+    runtime = worker.WorkerEnvironmentRuntime(parent, FilesystemLimits(30,4096,2048,4096,8,128,10), boundary=boundary)
+    original = os.read
+    def read(fd, count):
+        nonlocal armed
+        value = original(fd, count)
+        if fd == runtime._status_read and count == 4 and value:
+            armed = True
+        return value
+    monkeypatch.setattr(worker.os, 'read', read)
+    with pytest.raises(worker.WorkerLifecycleError, match='boundary_interrupted'):
+        runtime.setup(EnvironmentFixture())
+    assert runtime._custody and runtime._shutdown_status == {'worker_exited': True, 'cleanup': True}
+    assert runtime._process.returncode == 0 and not list(parent.iterdir())
