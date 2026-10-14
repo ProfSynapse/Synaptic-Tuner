@@ -1026,7 +1026,6 @@ jobs:
               str(root / "tests/runtime/test_packaged_training_worker.py"),
               str(root / "tests/execution/providers/test_modal_grpo_cpu_qualification.py"),
               str(root / "tests/training/test_modal_grpo_standalone_runner.py"),
-              str(root / "tests/training/test_modal_process_restart.py"),
               str(root / "tests/training/test_modal_grpo_process_restart.py")]))
           PYCODE
 
