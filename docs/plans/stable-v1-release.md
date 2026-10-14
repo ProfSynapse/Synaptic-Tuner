@@ -204,8 +204,9 @@ ABI, fake Python constants, inventory/pin change or guard waiver. Source control
 passed **239 with one existing optional-Torch skip** on real portable 3.11; peer
 controls passed **228 with one skip** (overlapping totals). The combined fresh wheel passed **237 installed controls**, with one optional-
 Torch skip and two checkout-only controls deselected (covered by source tests).
-Its 1,050 source-owned members matched byte-for-byte and all 2,772 verified
-RECORD members had link count one; all seven maintenance checks are current.
+All 1,050 source-owned members matched source, wheel and installation and had
+link count one; 2,772 RECORD hashes were verified. All seven maintenance checks
+are current.
 A new admitted live CPU attempt remains pending. F retains no local image/
 Sandbox identity or affirmative cleanup record; no GPU/model weights or replay
 occurred. Evidence is `grpo-normal-cpu-qualification-20261014-f/outcome.json` and
