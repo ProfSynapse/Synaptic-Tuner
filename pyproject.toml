@@ -75,7 +75,7 @@ namespaces = true
   "inference-dependencies.lock",
 ]
 "tuner.execution.providers.hf_jobs_provider_v1" = ["hf-parent-closure.json", "host-dependencies.in", "host-dependencies.lock", "model-dependencies.in", "model-dependencies.lock"]
-"tuner.runtime" = ["manifests/offline-sft-worker-v1.json", "manifests/packaged-training-worker-v1.json"]
+"tuner.runtime" = ["manifests/offline-sft-worker-v1.json", "manifests/packaged-training-worker-v1.json", "manifests/offline-grpo-worker-v1.json", "manifests/packaged-grpo-worker-v1.json"]
 "Trainers.sft.configs" = ["config.yaml"]
 
 # The Modal runtime lock and exact packaged SFT default config ship as assets. Broader

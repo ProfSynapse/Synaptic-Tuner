@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-packaged-grpo-workload-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "method",
+    "entrypoint",
+    "core_workload",
+    "context",
+    "limits",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "synaptic-packaged-grpo-workload/v1"
+    },
+    "method": {
+      "const": "grpo"
+    },
+    "entrypoint": {
+      "const": "tuner.runtime.packaged_training_worker:main"
+    },
+    "core_workload": {
+      "$ref": "synaptic-grpo-workload-v1.schema.json"
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "runtime_release"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "synaptic-packaged-execution-context/v1"
+        },
+        "runtime_release": {
+          "oneOf": [
+            {
+              "$ref": "synaptic-packaged-training-runtime-release-v1.schema.json"
+            },
+            {
+              "$ref": "synaptic-packaged-training-runtime-release-v2.schema.json"
+            }
+          ]
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "child_max_seconds"
+      ],
+      "properties": {
+        "child_max_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "One child-only execution budget minted after preparation. Cleanup confirmation may take up to five additional seconds; this is not a provider-job or end-to-end deadline."
+        }
+      }
+    },
+    "artifacts": {
+      "const": {
+        "schema_version": "synaptic-grpo-artifacts/v1",
+        "requirements": [
+          {
+            "role": "workload_record",
+            "minimum": 1,
+            "maximum": 1
+          },
+          {
+            "role": "training_lineage",
+            "minimum": 1,
+            "maximum": 1
+          },
+          {
+            "role": "training_metrics",
+            "minimum": 1,
+            "maximum": 1
+          },
+          {
+            "role": "final_model",
+            "minimum": 1,
+            "maximum": 1
+          },
+          {
+            "role": "tokenizer",
+            "minimum": 1,
+            "maximum": 1
+          }
+        ]
+      }
+    }
+  }
+}

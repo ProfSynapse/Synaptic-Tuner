@@ -98,6 +98,40 @@ GRPO generates multiple completions per prompt, scores them with deterministic r
 
 ---
 
+## Packaged GRPO candidate execution
+
+The isolated packaged candidate wraps the exact public GRPO core workload with
+an authenticated runtime release and configured `child_max_seconds` (integer
+1–86400). The budget starts once after model preparation, immediately before
+child execution; supervision uses the same absolute deadline throughout. Up to
+five additional seconds confirm cleanup. This is a child-only bound, not an
+end-to-end provider deadline or public cancellation qualification. The first
+executable candidate requires identical model and tokenizer revisions because
+both consume one verified local snapshot.
+
+GRPO has a separate fixed 131-member offline inventory and 13-member outer
+closure. Existing SFT inventories remain unchanged. Maintenance uses the
+checked-in command, offline first because the outer closure binds its bytes:
+
+```bash
+python scripts/regenerate_grpo_worker_closures.py --kind offline
+python scripts/regenerate_grpo_worker_closures.py --kind outer
+```
+
+The default checks without writing. Use `--write` only for an intentionally
+reviewed source-hash refresh; it preserves fixed membership and metadata.
+`--initialize` creates a missing manifest exclusively and requires explicit
+inventory/schema/policy review first. It must not overwrite or adopt resources.
+
+CPU controls execute the real child, configuration, reward and save paths with
+explicit model/trainer/image substitutes. Separate controls exercise the actual
+selected import guard, full wheel Python checks, retained model/input custody,
+mandatory adapter/tokenizer saves, native five-role archives, and closed cleanup
+failures. The installed lane consumes wheel schemas and both manifests. These
+checks do not qualify a GPU image, provider execution, parameter changes, reward
+dispersion or model quality. Public provider routing and live candidate
+qualification remain separate gates; step counts alone are not update evidence.
+
 ## Configuration
 
 GRPO is configured entirely via YAML: `Trainers/grpo/configs/config.yaml`

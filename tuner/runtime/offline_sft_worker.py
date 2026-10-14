@@ -321,14 +321,29 @@ def _parse_manifest(
     *,
     manifest_path: Path,
     expected_digest: str,
+    method: str = "sft",
+    _method_identity: tuple[str, ...] | None = None,
+    _method_members: tuple[str, ...] | None = None,
 ) -> OfflineSFTWorkerClosure:
+    if method == "sft":
+        if _method_identity is not None or _method_members is not None:
+            raise OfflineSFTWorkerError("SFT worker identity is fixed")
+        identity = (OFFLINE_SFT_CLOSURE_SCHEMA, OFFLINE_SFT_CLOSURE_REF,
+                    OFFLINE_SFT_ENTRYPOINT, OFFLINE_SFT_TRAINER_ENTRYPOINT, OFFLINE_SFT_BOOTSTRAP)
+    elif method == "grpo":
+        if (_method_identity is None or _method_members is None
+                or len(_method_identity) != 5):
+            raise OfflineSFTWorkerError("GRPO worker identity is required")
+        identity = _method_identity
+    else:
+        raise OfflineSFTWorkerError("worker method is unsupported")
     if set(document) != _MANIFEST_FIELDS:
         raise OfflineSFTWorkerError("worker closure manifest fields are malformed")
     if (
-        document["schema_version"] != OFFLINE_SFT_CLOSURE_SCHEMA
-        or document["closure_ref"] != OFFLINE_SFT_CLOSURE_REF
-        or document["entrypoint"] != OFFLINE_SFT_ENTRYPOINT
-        or document["trainer_entrypoint"] != OFFLINE_SFT_TRAINER_ENTRYPOINT
+        document["schema_version"] != identity[0]
+        or document["closure_ref"] != identity[1]
+        or document["entrypoint"] != identity[2]
+        or document["trainer_entrypoint"] != identity[3]
         or document["owned_module_prefixes"] != list(OWNED_MODULE_PREFIXES)
         or document["optional_features"] != []
     ):
@@ -382,11 +397,9 @@ def _parse_manifest(
         or not 0 < payload_bytes <= _MAX_CLOSURE_BYTES
     ):
         raise OfflineSFTWorkerError("worker closure totals or ordering are invalid")
-    required = {
-        OFFLINE_SFT_ENTRYPOINT,
-        OFFLINE_SFT_TRAINER_ENTRYPOINT,
-        OFFLINE_SFT_BOOTSTRAP,
-    }
+    required = set(identity[2:])
+    if method == "grpo" and tuple(paths) != _method_members:
+        raise OfflineSFTWorkerError("GRPO worker inventory is unsupported")
     if not required.issubset(set(paths)):
         raise OfflineSFTWorkerError("worker closure lacks a required entrypoint")
     return OfflineSFTWorkerClosure(

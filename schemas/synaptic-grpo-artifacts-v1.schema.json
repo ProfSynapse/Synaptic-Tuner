@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-grpo-artifacts-v1.schema.json",
+  "const": {
+    "schema_version": "synaptic-grpo-artifacts/v1",
+    "requirements": [
+      {
+        "role": "workload_record",
+        "minimum": 1,
+        "maximum": 1
+      },
+      {
+        "role": "training_lineage",
+        "minimum": 1,
+        "maximum": 1
+      },
+      {
+        "role": "training_metrics",
+        "minimum": 1,
+        "maximum": 1
+      },
+      {
+        "role": "final_model",
+        "minimum": 1,
+        "maximum": 1
+      },
+      {
+        "role": "tokenizer",
+        "minimum": 1,
+        "maximum": 1
+      }
+    ]
+  }
+}

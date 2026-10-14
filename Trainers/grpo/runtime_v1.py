@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import stat
 import re
 from pathlib import Path
 from typing import Any, Dict
@@ -358,9 +360,84 @@ def _dependencies():
             'model_loader': model_loader, 'dataset_class': Dataset}
 
 
+def _stamp_packaged_adapter(final_model, model_ref):
+    """Selected offline artifacts name the verified logical model, not scratch."""
+    from contextlib import ExitStack
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+                info.st_ctime_ns, info.st_mode, info.st_uid, info.st_nlink)
+    if (not isinstance(final_model, Path) or not final_model.is_absolute()
+            or ".." in final_model.parts):
+        raise ValueError("invalid packaged adapter directory")
+    with ExitStack() as stack:
+        parent = os.open(final_model.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        stack.callback(os.close, parent)
+        chain = []
+        for part in final_model.parts[1:]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            stack.callback(os.close, child)
+            chain.append((parent, part, child))
+            parent = child
+        def check_parents():
+            for ancestor, name, retained in chain:
+                named = os.stat(name, dir_fd=ancestor, follow_symlinks=False)
+                opened = os.fstat(retained)
+                if (not stat.S_ISDIR(named.st_mode)
+                        or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)):
+                    raise ValueError("changed packaged adapter directory")
+        check_parents()
+        descriptor = os.open("adapter_config.json", os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=parent)
+        stack.callback(os.close, descriptor)
+        before = os.fstat(descriptor)
+        named = os.stat("adapter_config.json", dir_fd=parent, follow_symlinks=False)
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                or before.st_size > 65536
+                or identity(before) != identity(named)):
+            raise ValueError("invalid packaged adapter config")
+        raw = os.pread(descriptor, 65537, 0)
+        if len(raw) != before.st_size:
+            raise ValueError("invalid packaged adapter config")
+        def unique(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("duplicate packaged adapter config")
+                value[key] = item
+            return value
+        document = json.loads(raw, object_pairs_hook=unique,
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError("nonfinite adapter config")))
+        _finite_tree(document)
+        if type(document) is not dict:
+            raise ValueError("invalid packaged adapter config")
+        document["base_model_name_or_path"] = model_ref
+        content = _canonical(document)
+        check_parents()
+        if (len(content) > 65536 or identity(os.fstat(descriptor)) != identity(before)
+                or identity(os.stat("adapter_config.json", dir_fd=parent,
+                                    follow_symlinks=False)) != identity(named)):
+            raise ValueError("changed packaged adapter config")
+        os.ftruncate(descriptor, 0)
+        offset = 0
+        while offset < len(content):
+            check_parents()
+            count = os.pwrite(descriptor, content[offset:], offset)
+            if count <= 0:
+                raise OSError("packaged adapter write rejected")
+            offset += count
+        os.fsync(descriptor)
+        check_parents()
+        after = os.fstat(descriptor)
+        if ((after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
+                or identity(os.stat("adapter_config.json", dir_fd=parent,
+                                    follow_symlinks=False)) != identity(after)
+                or os.pread(descriptor, len(content) + 1, 0) != content):
+            raise ValueError("changed packaged adapter config")
+
+
 def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
              model_snapshot, model_identity, output_root, workload,
-             metric_sink=None, _dependency_factory=None):
+             metric_sink=None, _dependency_factory=None, _packaged_artifacts=False):
     """Run the existing GRPO core with explicit immutable admitted inputs.
 
     This entry does not authenticate a public plan or attest model member
@@ -370,6 +447,10 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
     config, rows, documents, schema = admit_grpo_inputs(
         config=config, dataset_bytes=dataset_bytes, reward_documents=reward_documents,
         reward_schema=reward_schema, model_identity=model_identity, workload=workload)
+    if type(_packaged_artifacts) is not bool:
+        raise ValueError("invalid packaged artifact mode")
+    if _packaged_artifacts and model_identity.get("tokenizer_revision") != model_identity["revision"]:
+        raise ValueError("packaged GRPO requires one model/tokenizer snapshot")
     from Trainers.grpo.src.rewards import build_combined_reward_function
     reward_fn, reward_plan = build_combined_reward_function(
         config['rewards'], Path('.'), documents=documents, schema_config=schema, raw_only=True)
@@ -421,6 +502,11 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
     token.mkdir(exist_ok=False)
     trainer.save_model(str(final))
     tokenizer.save_pretrained(str(token))
+    if _packaged_artifacts:
+        # The native model-bundle selector validates colocated tokenizer files.
+        # Save explicitly; do not depend on trainer processing_class side effects.
+        tokenizer.save_pretrained(str(final))
+        _stamp_packaged_adapter(final, model_identity["model_id"])
     metrics = {'global_step': trainer.state.global_step,
                'log_history': trainer.state.log_history,
                'train_metrics': getattr(result, 'metrics', {})}

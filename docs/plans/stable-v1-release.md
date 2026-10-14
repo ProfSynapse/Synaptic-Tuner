@@ -682,10 +682,27 @@ The installed CI lane uses Dataset 5.1.0 and pytest 8; trainer/model effects rem
 explicit CPU substitutes. This is not validation of the GPU image's ML stack.
 
 The additive public compiler and preparation evidence are recorded below.
-Separate offline inventory, provider dispatch, native verification and live
-candidate qualification remain open. This trainer entry alone
-does not authenticate a public plan, verify model member custody or advertise
-GRPO through the public API.
+The additive public GRPO compiler and isolated packaged candidate now have
+separate implementation nodes. The candidate preserves exact compiled core
+bytes, retained dataset/model custody and native five-role verification, with
+fixed GRPO offline131/outer13 inventories and an admitted child-only deadline.
+Focused CPU controls cover the actual owned child path using explicit ML/image
+substitutes, and separately the actual selected import guard and complete wheel
+Python checks. They do not qualify the GPU stack, parameter updates, reward
+dispersion, provider execution or public cancellation. Provider routing and
+live candidate qualification remain open; no current SFT release is relabeled.
+See the canonical GRPO reference for maintenance and deadline scope.
+
+The integrated isolated candidate passed a fresh sdist-built wheel's base-only
+consumer and all 341 installed conversation/SFT/GRPO controls (10.44 seconds).
+The wheel SHA-256 is
+`75f8ca2af1849b7c911dd2ec9493b6eba9146206c11b072babd14d3d331dace1`.
+All 24 changed packaged source/schema/manifest assets matched reviewed bytes;
+five source-only manifest-maintenance controls also passed. Existing lock
+refreshes retain their inventories and runtime pins. The installed trace fixture
+selects engine-owned module namespaces independently of manifest membership;
+neighboring third-party packages are excluded without hiding undeclared owned
+imports. Actual child/model/image observations remain explicit CPU substitutes.
 
 ### Conversation SFT compilation and execution preparation
 
@@ -883,3 +900,20 @@ machinery. Production capability flags remain disabled, and acknowledgment does
 not establish physical termination. The two cases passed against the accepted
 PR212 installed wheel; this change adds tests and permanent installed CI coverage
 without changing production code.
+
+### GRPO closure regression correction
+
+The broad core suite caught a reverse import from the shared SFT manifest parser
+into GRPO. GRPO now supplies its private fixed identity and inventory to the
+shared parser; SFT keeps its original fixed defaults and rejects overrides.
+Bootstrap and inference static closure audits pass without widening inventories.
+The schema test resolves resources from the actual installed production package,
+including editable installations, and the package-data test includes all four
+reviewed manifests.
+
+All 59 targeted controls and 341 installed SFT/GRPO controls pass after correction.
+The fresh sdist-built wheel is
+`5d7a451b1d92d406f022aa278decc74342edf1610147d195c704e35467531703`;
+its base-only consumer passes and both changed production files are byte-exact.
+Independent review confirms only required source hashes, sizes and aggregate
+digests changed in the fixed inventories; all six checks are current.
