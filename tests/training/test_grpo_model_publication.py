@@ -19,7 +19,14 @@ import pytest
 from tests.runtime.test_packaged_grpo_native import native as native  # noqa: F401
 from tests.runtime.test_packaged_grpo_native import _assemble
 from tests.runtime.test_packaged_grpo_compilation import _fixture
-from tests.training.test_hf_model_publication import Hub, Registry, PARENT, OID, REF
+from tests.training.test_hf_model_publication import (
+    Hub,
+    Registry,
+    PARENT,
+    OID,
+    REF,
+    sdk,
+)
 from synaptic_tuner.api.v1.artifacts_facade import ArtifactsAPI, PublicationRequest
 from synaptic_tuner.api.v1.results import TrainingRunRef, VerifiedArtifact
 from synaptic_tuner.api.v1.reference.authority import (
@@ -43,6 +50,10 @@ from tuner.training.packaged_grpo_compilation import (
     parse_packaged_grpo_workload,
 )
 from tuner.training.recipes import canonical_json_bytes
+
+pytestmark = pytest.mark.skipif(
+    sdk.__version__ != "1.33.0", reason="pinned HF 1.33 GRPO publication proof"
+)
 
 ADDITIONS = {
     "tuner/runtime/releases.py",
@@ -276,6 +287,7 @@ for m in list(sys.modules.values()):
  f=getattr(m,'__file__',None)
  if f and Path(f).resolve().is_relative_to(root):
   paths.add(Path(f).resolve().relative_to(root).as_posix())
+assert not any(name.split(".")[0] in {"torch","transformers","trl","unsloth","modal","huggingface_hub"} for name in sys.modules)
 print(json.dumps(sorted(paths)))
 """
     completed = subprocess.run(
@@ -286,7 +298,8 @@ print(json.dumps(sorted(paths)))
         timeout=15,
     )
     loaded = set(json.loads(completed.stdout))
-    # The locked119 predecessor remains unchanged until root-reviewed refresh.
+    # Accept only the reviewed parser roots, whether the installed resource is
+    # the approved predecessor or the refreshed inference inventory.
     locked = {
         item["path"]
         for item in json.loads(

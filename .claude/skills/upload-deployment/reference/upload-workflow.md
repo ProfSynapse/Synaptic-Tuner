@@ -132,7 +132,7 @@ python -m Evaluator.cli --backend unsloth --model ./sft_output/LATEST/final_mode
 ```
 
 
-## Public verified SFT publication to an HF model repository
+## Public verified native model publication to an HF model repository
 
 The optional `synaptic_tuner.api.v1.reference.hf_publication.HFModelPublicationDestinationV1`
 implements the existing publication destination port. Compose it through the
@@ -172,7 +172,16 @@ OS calls are synchronous, without a total hard deadline or invoice guarantee.
 
 CPU acceptance uses real public native SFT verification, SQLite close/reopen and
 a file-backed scripted provider ledger, including SIGKILL before local receipt.
-It does not qualify live HF uploads, model loading or model quality. Current GRPO
-archives have the same five roles, but their workload-record model selector is
-incompatible with this admitted renderer; the genuine GRPO publication join
-remains a separate release gate. Never rewrite its workload to masquerade as SFT.
+The GRPO join uses the real G2 native verifier over explicitly synthetic CPU model
+files, then the existing trusted source port, admitted renderer and public
+ArtifactsAPI. It verifies warm and lost-reply/cold immutable snapshots without
+fabricating a TrainingAPI success. These controls qualify neither live HF uploads,
+GPU training, model loading nor model quality.
+
+The renderer selects the model only from its original SFT workload contract or the
+exact `synaptic-packaged-grpo-workload/v1` contract revalidated by the existing
+pure GRPO compiler. Preserve the original workload bytes, configured model and
+pinned revisions, disjoint archive validation and five native roles; never rewrite
+GRPO into SFT. Its parser adds five explicitly reviewed source members to the
+inference closure (119 to124); runtime/dependency/image pins are unchanged. A source
+inventory update is not live inference-image qualification.
