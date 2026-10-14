@@ -30,33 +30,80 @@ class HFJobsReader:
         self.evidence_authority, self.clock = evidence_authority, clock
 
     def _validate(self, request, purpose):
-        if type(request) is not ProviderRunReadRequestV1 or request.purpose is not purpose:
+        if (
+            type(request) is not ProviderRunReadRequestV1
+            or request.purpose is not purpose
+        ):
             raise HFJobsError("binding_mismatch")
-        ProviderRunReadRequestV1(**{name: getattr(request, name) for name in request.__dataclass_fields__})
+        ProviderRunReadRequestV1(
+            **{name: getattr(request, name) for name in request.__dataclass_fields__}
+        )
         record = request.foundation_record
-        if (self.foundation.authenticate_grant(record.grant, record.command_bytes) is not True
-                or any(self.foundation.authenticate_receipt(value) is not True for value in record.results)
-                or any(self.foundation.authenticate_invalid_evidence(value) is not True for value in record.invalid_evidence)):
+        if (
+            self.foundation.authenticate_grant(record.grant, record.command_bytes)
+            is not True
+            or any(
+                self.foundation.authenticate_receipt(value) is not True
+                for value in record.results
+            )
+            or any(
+                self.foundation.authenticate_invalid_evidence(value) is not True
+                for value in record.invalid_evidence
+            )
+        ):
             raise HFJobsError("binding_mismatch")
         assessment = type(request.assessment).parse(request.assessment.canonical_bytes)
-        if (assessment != request.assessment or self.assessments.authenticate(assessment) is not True
-                or assessment.content.foundation_record_digest != record.record_digest
-                or assessment.content.authenticated_receipt_digests != tuple(
-                    value.authenticated_receipt_digest for value in record.results)):
+        if (
+            assessment != request.assessment
+            or self.assessments.authenticate(assessment) is not True
+            or assessment.content.foundation_record_digest != record.record_digest
+            or assessment.content.authenticated_receipt_digests
+            != tuple(value.authenticated_receipt_digest for value in record.results)
+        ):
             raise HFJobsError("binding_mismatch")
         command = parse_exact_command(request.submit_command_bytes)
-        retained = self.transport.records.read(partition="effects",
-            key=self.transport._key("command", command.digest))
-        if retained is None or base64.b64decode(json.loads(retained.canonical)["command_base64"], validate=True) != command.canonical_bytes:
+        retained = self.transport.records.read(
+            partition="effects", key=self.transport._key("command", command.digest)
+        )
+        if (
+            retained is None
+            or base64.b64decode(
+                json.loads(retained.canonical)["command_base64"], validate=True
+            )
+            != command.canonical_bytes
+        ):
             raise HFJobsError("binding_mismatch")
         ref = request.provider_run.reference
-        selection = self.preparation.selection
-        if ((ref.provider_id, ref.profile_ref, ref.account_ref, ref.namespace_ref)
-                != (selection.provider.provider_id, selection.provider.profile_ref,
-                    selection.scope.account_ref, selection.scope.namespace_ref)
-                or command.preparation.plan_fingerprint != self.preparation.plan.plan_fingerprint
-                or command.preparation.execution_binding_digest != self.preparation.binding.binding_digest
-                or command.canonical_bytes != record.command_bytes):
+        if self.preparation is None:
+            self.transport._validate(command, command.operation.effect.kind)
+            selected = self.transport._read_selection()
+            expected_scope = (
+                selected["provider"]["provider_id"],
+                selected["provider"]["profile_ref"],
+                selected["scope"]["account_ref"],
+                selected["scope"]["namespace_ref"],
+            )
+        else:
+            selection = self.preparation.selection
+            expected_scope = (
+                selection.provider.provider_id,
+                selection.provider.profile_ref,
+                selection.scope.account_ref,
+                selection.scope.namespace_ref,
+            )
+            if (
+                command.preparation.plan_fingerprint
+                != self.preparation.plan.plan_fingerprint
+                or command.preparation.execution_binding_digest
+                != self.preparation.binding.binding_digest
+            ):
+                raise HFJobsError("binding_mismatch")
+        if (
+            ref.provider_id,
+            ref.profile_ref,
+            ref.account_ref,
+            ref.namespace_ref,
+        ) != expected_scope or command.canonical_bytes != record.command_bytes:
             raise HFJobsError("binding_mismatch")
         receipt = self.transport.retained("submit", command.digest)
         if receipt["job_id"] != ref.provider_job_ref:
@@ -127,40 +174,110 @@ class HFJobsArtifactVerifier:
             raise HFJobsError("artifact_invalid")
         record = self.foundation.get(workflow.submit.effect_id)
         assessment = AuthenticatedFoundationRecordAssessmentV1.parse(
-            workflow.submit.foundation_bindings[-1].canonical_assessment_bytes)
-        request = provider_run_read_request(workflow, record, assessment,
-            self.reader.foundation, self.reader.assessments, purpose=ProviderReadPurposeV1.ARTIFACTS)
+            workflow.submit.foundation_bindings[-1].canonical_assessment_bytes
+        )
+        request = provider_run_read_request(
+            workflow,
+            record,
+            assessment,
+            self.reader.foundation,
+            self.reader.assessments,
+            purpose=ProviderReadPurposeV1.ARTIFACTS,
+        )
         if self.reader.artifacts(request) != manifest:
             raise HFJobsError("artifact_invalid")
-        workload = compile_sft_workload(resolved_config=self.reader.preparation.rich_plan.resolved_config,
-            execution_source=self.reader.preparation.rich_plan.execution_source)
+        workload = (
+            self.reader.transport._read_material["workload"]
+            if self.reader.preparation is None
+            else compile_sft_workload(
+                resolved_config=self.reader.preparation.rich_plan.resolved_config,
+                execution_source=self.reader.preparation.rich_plan.execution_source,
+            )
+        )
         completion = json.loads(manifest.canonical_evidence)
-        inventory = ArtifactInventory(tuple(ArtifactEntry(row["role"], row["path"], row["sha256"],
-            row["size_bytes"]) for row in completion["artifacts"]))
-        transport, command_digest = self.reader.transport, parse_exact_command(request.submit_command_bytes).digest
+        inventory = ArtifactInventory(
+            tuple(
+                ArtifactEntry(
+                    row["role"], row["path"], row["sha256"], row["size_bytes"]
+                )
+                for row in completion["artifacts"]
+            )
+        )
+        transport, command_digest = (
+            self.reader.transport,
+            parse_exact_command(request.submit_command_bytes).digest,
+        )
 
         class NativeReader:
             def read_bytes(self, artifact, *, maximum):
                 from tuner.runtime.verification import ArtifactReadLimitExceeded
+
                 if artifact.size > maximum:
                     raise ArtifactReadLimitExceeded
-                member = next(row for row in completion["artifacts"] if row["path"] == artifact.path)
+                member = next(
+                    row
+                    for row in completion["artifacts"]
+                    if row["path"] == artifact.path
+                )
                 return b"".join(transport.iter_artifact(command_digest, member))
 
-        report = VerificationService(WorkloadBindingVerifier(closure_digest=self.reader.preparation.bundle.closure_digest,
-            closure_manifest_path=str(self.reader.preparation.bundle.closure_manifest_runtime_path))).verify(provider_completed=True,
-            process=ProcessResult(0), workload=workload, contract=SFT_ARTIFACT_CONTRACT,
-            inventory=inventory, reader=NativeReader())
+        if self.reader.preparation is None:
+            closure = self.reader.transport._read_material["projection"][
+                "closure_manifest"
+            ]
+            closure_digest, closure_path = (
+                closure["closure_digest"],
+                closure["runtime_path"],
+            )
+        else:
+            closure_digest = self.reader.preparation.bundle.closure_digest
+            closure_path = str(
+                self.reader.preparation.bundle.closure_manifest_runtime_path
+            )
+        report = VerificationService(
+            WorkloadBindingVerifier(
+                closure_digest=closure_digest, closure_manifest_path=closure_path
+            )
+        ).verify(
+            provider_completed=True,
+            process=ProcessResult(0),
+            workload=workload,
+            contract=SFT_ARTIFACT_CONTRACT,
+            inventory=inventory,
+            reader=NativeReader(),
+        )
         if report.status is not VerificationStatus.VERIFIED:
             raise HFJobsError("artifact_invalid")
-        evidence = canonical_bytes({"schema_version": "synaptic-hf-native-verification/v1",
-            "read_request_digest": request.request_digest,
-            "semantic_checks": [{"code": row.code, "passed": row.passed} for row in report.semantic_checks]})
-        content = ArtifactVerificationContentV1("synaptic-artifact-verification-content/v1",
-            workflow.record_digest, workflow.revision, workflow.run, workflow.provider_run_ref.binding_digest,
-            manifest.manifest_digest, manifest.artifact_source_digest, manifest.artifacts, manifest.artifacts,
-            VerificationVerdictV1.VERIFIED, None, "hf-jobs-native-verifier", "0.1.0", evidence, self.clock.now())
-        return AuthenticatedArtifactVerificationReceiptV1(content, self.authority_ref, self.key_ref, self._tag(content))
+        evidence = canonical_bytes(
+            {
+                "schema_version": "synaptic-hf-native-verification/v1",
+                "read_request_digest": request.request_digest,
+                "semantic_checks": [
+                    {"code": row.code, "passed": row.passed}
+                    for row in report.semantic_checks
+                ],
+            }
+        )
+        content = ArtifactVerificationContentV1(
+            "synaptic-artifact-verification-content/v1",
+            workflow.record_digest,
+            workflow.revision,
+            workflow.run,
+            workflow.provider_run_ref.binding_digest,
+            manifest.manifest_digest,
+            manifest.artifact_source_digest,
+            manifest.artifacts,
+            manifest.artifacts,
+            VerificationVerdictV1.VERIFIED,
+            None,
+            "hf-jobs-native-verifier",
+            "0.1.0",
+            evidence,
+            self.clock.now(),
+        )
+        return AuthenticatedArtifactVerificationReceiptV1(
+            content, self.authority_ref, self.key_ref, self._tag(content)
+        )
 
     def verify(self, workflow, manifest):
         if workflow.phase not in {WorkflowPhaseV1.SUCCEEDED_UNVERIFIED, WorkflowPhaseV1.VERIFICATION_FAILED}:

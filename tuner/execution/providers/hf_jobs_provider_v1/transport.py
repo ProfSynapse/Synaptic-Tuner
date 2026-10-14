@@ -50,6 +50,73 @@ def _bounded(operation, deadline):
     return value
 
 
+def _job_request(*, sdk, material, projection, workload, bootstrap, command):
+    """One exact request builder shared by admitted execution and retained reads."""
+    selection = material["selection"]
+    config = workload["configuration"]["document"]
+    worker = {
+        "material_digest": sha(document_bytes(material)),
+        "workload_fingerprint": projection["workload_fingerprint"],
+        "source_members": [
+            row for row in material["members"] if not row["path"].startswith("parent/")
+        ],
+        "input": material["input"],
+        "dispatch": projection["dispatch"],
+        "source": workload["execution_source"],
+        "runtime_inventory_sha256": selection["inventory_sha256"],
+        "model": config["model"],
+        "timeout_seconds": selection["timeout_seconds"],
+    }
+    payload = document_bytes(
+        {
+            "schema_version": "synaptic-hf-source-bootstrap/v1",
+            "parent_members": [
+                row | {"path": row["path"].removeprefix("parent/")}
+                for row in material["members"]
+                if row["path"].startswith("parent/")
+            ],
+            "worker": worker,
+        }
+    )
+    program = (
+        bootstrap.decode("utf-8")
+        + "\ntry:\n run(__import__('base64').b64decode('"
+        + base64.b64encode(payload).decode()
+        + "'))\nexcept BaseException:\n print('HF_JOB_FAILED')\n sys.exit(1)\n"
+    )
+    executable = workload["execution_source"]["runtime"]["interpreter"]["executable"]
+    volumes = [
+        sdk.Volume(
+            type="bucket",
+            source=selection["bucket_id"],
+            path=selection["source_prefix"],
+            mount_path="/source",
+            read_only=True,
+        ),
+        sdk.Volume(
+            type="bucket",
+            source=selection["bucket_id"],
+            path=selection["run_prefix"],
+            mount_path="/artifacts",
+            read_only=False,
+        ),
+    ]
+    return {
+        "image": selection["image"],
+        "command": [executable, "-I", "-c", shlex.quote(program)],
+        "env": {},
+        "flavor": selection["flavor"],
+        "timeout": selection["timeout_seconds"],
+        "namespace": selection["scope"]["namespace_ref"],
+        "labels": {
+            "synaptic-command": command.digest,
+            "synaptic-material": sha(document_bytes(material)),
+            "name": "synaptic-" + command.digest[:32],
+        },
+        "volumes": volumes,
+    }
+
+
 class HFJobsTransport:
     """No implicit account/bucket/create/pull, retry, adoption or secret persistence.
 
@@ -58,26 +125,118 @@ class HFJobsTransport:
     Unknown SDK completion stays consumed; this is not restart continuation.
     """
 
-    def __init__(self, *, preparation, sdk, api, records, secrets, scratch_root,
-                 deadline_seconds=30):
-        if sdk.__version__ != "1.33.0" or type(deadline_seconds) is not int or not 1 <= deadline_seconds <= 180:
+    def __init__(
+        self,
+        *,
+        preparation,
+        sdk,
+        api,
+        records,
+        secrets,
+        scratch_root,
+        deadline_seconds=30,
+    ):
+        if (
+            sdk.__version__ != "1.33.0"
+            or type(deadline_seconds) is not int
+            or not 1 <= deadline_seconds <= 180
+        ):
             raise HFJobsError("input_invalid")
         root = Path(scratch_root)
         info = root.lstat()
-        if (root.is_symlink() or not root.is_absolute() or not stat.S_ISDIR(info.st_mode)
-                or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700):
+        if (
+            root.is_symlink()
+            or not root.is_absolute()
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700
+        ):
             raise HFJobsError("input_invalid")
         self.preparation, self.selection = preparation, preparation.selection
         self.sdk, self.api, self.records, self.secrets = sdk, api, records, secrets
         self.scratch_root, self.deadline_seconds = root, deadline_seconds
         self._scratch_identity = (info.st_dev, info.st_ino)
-        self.bootstrap = preparation.source_files["parent/tuner/execution/providers/hf_jobs_provider_v1/bootstrap.py"]
-        members = [{"path": path.removeprefix("parent/"), "size_bytes": len(raw), "sha256": sha(raw)}
-                   for path, raw in sorted(preparation.source_files.items()) if path.startswith("parent/")]
+        self.bootstrap = preparation.source_files[
+            "parent/tuner/execution/providers/hf_jobs_provider_v1/bootstrap.py"
+        ]
+        members = [
+            {
+                "path": path.removeprefix("parent/"),
+                "size_bytes": len(raw),
+                "sha256": sha(raw),
+            }
+            for path, raw in sorted(preparation.source_files.items())
+            if path.startswith("parent/")
+        ]
         self.parent_inventory = {"members": members}
         self._cancel_access = None
+        self._read_material = None
+
+    @classmethod
+    def for_retained_read(
+        cls,
+        *,
+        captured,
+        submit,
+        sdk,
+        api,
+        records,
+        secrets,
+        scratch_root,
+        deadline_seconds=30,
+    ):
+        """Construct no source/preparation authority, only one exact known submit."""
+        if (
+            sdk.__version__ != "1.33.0"
+            or type(deadline_seconds) is not int
+            or not 1 <= deadline_seconds <= 180
+        ):
+            raise HFJobsError("input_invalid")
+        root = Path(scratch_root)
+        info = root.lstat()
+        if (
+            root.is_symlink()
+            or not root.is_absolute()
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700
+        ):
+            raise HFJobsError("input_invalid")
+        value = object.__new__(cls)
+        value.preparation = None
+        value._read_material, value._submit_command = captured, submit
+        value.sdk, value.api, value.records, value.secrets = sdk, api, records, secrets
+        value.scratch_root, value.deadline_seconds = root, deadline_seconds
+        value._scratch_identity = (info.st_dev, info.st_ino)
+        value._cancel_access = None
+        return value
+
+    def _mutation(self):
+        if self._read_material is not None:
+            raise HFJobsError("capability_unavailable")
+
+    @property
+    def material_digest(self):
+        return (
+            self.preparation.material_digest
+            if self._read_material is None
+            else self._read_material["material_digest"]
+        )
+
+    def _read_selection(self):
+        return (
+            self.preparation.selection.projection()
+            if self._read_material is None
+            else self._read_material["material"]["selection"]
+        )
+
+    def _read_token(self):
+        from synaptic_tuner.api.v1.secrets import SecretRef
+
+        return self._secret(SecretRef.from_dict(self._read_selection()["host_token"]))
 
     def bind_cancel_access(self, access):
+        self._mutation()
         if self._cancel_access is not None or not callable(access):
             raise HFJobsError("input_invalid")
         self._cancel_access = access
@@ -95,12 +254,17 @@ class HFJobsTransport:
         return value
 
     def _key(self, kind, digest):
-        return "hf-jobs/" + self.preparation.material_digest + "/" + kind + "/" + digest
+        return "hf-jobs/" + self.material_digest + "/" + kind + "/" + digest
 
     def _claim_document(self, command):
-        return document_bytes({"schema_version": "synaptic-hf-attempt/v1",
-            "material_digest": self.preparation.material_digest,
-            "command_digest": command.digest, "kind": command.operation.effect.kind.value})
+        return document_bytes(
+            {
+                "schema_version": "synaptic-hf-attempt/v1",
+                "material_digest": self.material_digest,
+                "command_digest": command.digest,
+                "kind": command.operation.effect.kind.value,
+            }
+        )
 
     def _claim(self, command):
         value = self._claim_document(command)
@@ -122,31 +286,54 @@ class HFJobsTransport:
         return document
 
     def retained(self, kind, command_digest):
-        record = self.records.read(partition=StoragePartition.EFFECTS.value,
-                                   key=self._key(kind, command_digest))
+        record = self.records.read(
+            partition=StoragePartition.EFFECTS.value,
+            key=self._key(kind, command_digest),
+        )
         if record is None:
             raise HFJobsError("read_unavailable")
         document = json.loads(record.canonical)
-        if document["command_digest"] != command_digest or document["material_digest"] != self.preparation.material_digest:
+        if (
+            document["command_digest"] != command_digest
+            or document["material_digest"] != self.material_digest
+        ):
             raise HFJobsError("binding_mismatch")
         return document
 
     def _list(self, prefix, maximum, token, deadline):
         def collect():
             result = {}
-            for index, item in enumerate(self.api.list_bucket_tree(self.selection.bucket_id,
-                    prefix=prefix, recursive=True, token=token), 1):
+            for index, item in enumerate(
+                self.api.list_bucket_tree(
+                    self._read_selection()["bucket_id"],
+                    prefix=prefix,
+                    recursive=True,
+                    token=token,
+                ),
+                1,
+            ):
                 if index > maximum * 8 + 8 or not item.path.startswith(prefix + "/"):
                     raise ValueError
-                relative = item.path[len(prefix) + 1:]
-                if (not relative or "\\" in relative or any(p in {"", ".", ".."} for p in relative.split("/"))):
+                relative = item.path[len(prefix) + 1 :]
+                if (
+                    not relative
+                    or "\\" in relative
+                    or any(p in {"", ".", ".."} for p in relative.split("/"))
+                ):
                     raise ValueError
                 if item.type == "directory":
                     continue
-                if item.type != "file" or relative in result or len(result) >= maximum or type(item.size) is not int or item.size < 0:
+                if (
+                    item.type != "file"
+                    or relative in result
+                    or len(result) >= maximum
+                    or type(item.size) is not int
+                    or item.size < 0
+                ):
                     raise ValueError
                 result[relative] = item
             return result
+
         return _bounded(collect, deadline)
 
     @contextmanager
@@ -165,10 +352,19 @@ class HFJobsTransport:
         root_info = root.lstat()
         parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
-            _bounded(lambda: self.api.download_bucket_files(self.selection.bucket_id,
-                [(item, leaf)], token=token, raise_on_missing_files=True), deadline)
+            _bounded(
+                lambda: self.api.download_bucket_files(
+                    self._read_selection()["bucket_id"],
+                    [(item, leaf)],
+                    token=token,
+                    raise_on_missing_files=True,
+                ),
+                deadline,
+            )
             self._root()
-            descriptor = os.open("content", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            descriptor = os.open(
+                "content", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+            )
             with os.scandir(parent) as entries:
                 names = []
                 for entry in entries:
@@ -178,28 +374,48 @@ class HFJobsTransport:
             if names != ["content"]:
                 raise HFJobsError("artifact_invalid")
             before = os.fstat(descriptor)
-            if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
-                    or before.st_size != item.size or before.st_uid != os.getuid()):
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_nlink != 1
+                or before.st_size != item.size
+                or before.st_uid != os.getuid()
+            ):
                 raise HFJobsError("artifact_invalid")
             # Normalize only our checked owned regular leaf through the exact
             # descriptor, independent of SDK/ambient umask. The directory was
             # private throughout SDK writing.
             os.fchmod(descriptor, 0o600)
             before = os.fstat(descriptor)
+
             def check():
                 self._root()
                 if time.monotonic() >= deadline:
                     raise HFJobsError("deadline_exceeded")
                 held, named = os.fstat(parent), root.lstat()
-                if ((held.st_dev, held.st_ino) != (named.st_dev, named.st_ino)
-                        or held.st_uid != os.getuid() or stat.S_IMODE(held.st_mode) != 0o700
-                        or named.st_uid != os.getuid() or stat.S_IMODE(named.st_mode) != 0o700):
+                if (
+                    (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino)
+                    or held.st_uid != os.getuid()
+                    or stat.S_IMODE(held.st_mode) != 0o700
+                    or named.st_uid != os.getuid()
+                    or stat.S_IMODE(named.st_mode) != 0o700
+                ):
                     raise HFJobsError("artifact_invalid")
-                current, named = os.fstat(descriptor), os.stat("content", dir_fd=parent, follow_symlinks=False)
-                identity = lambda value: (value.st_dev, value.st_ino, value.st_size,
-                    value.st_mtime_ns, value.st_ctime_ns)
-                if identity(current) != identity(before) or identity(named) != identity(before):
+                current, named = (
+                    os.fstat(descriptor),
+                    os.stat("content", dir_fd=parent, follow_symlinks=False),
+                )
+                identity = lambda value: (
+                    value.st_dev,
+                    value.st_ino,
+                    value.st_size,
+                    value.st_mtime_ns,
+                    value.st_ctime_ns,
+                )
+                if identity(current) != identity(before) or identity(named) != identity(
+                    before
+                ):
                     raise HFJobsError("artifact_invalid")
+
             digest, total = hashlib.sha256(), 0
             while True:
                 check()
@@ -223,14 +439,27 @@ class HFJobsTransport:
                 if complete:
                     self._root()
                     named = root.lstat()
-                    if ((named.st_dev, named.st_ino) != (root_info.st_dev, root_info.st_ino)
-                            or named.st_uid != os.getuid() or stat.S_IMODE(named.st_mode) != 0o700):
+                    if (
+                        (named.st_dev, named.st_ino)
+                        != (root_info.st_dev, root_info.st_ino)
+                        or named.st_uid != os.getuid()
+                        or stat.S_IMODE(named.st_mode) != 0o700
+                    ):
                         raise HFJobsError("artifact_invalid")
                     held_leaf = os.fstat(descriptor)
-                    named_leaf = os.stat("content", dir_fd=parent, follow_symlinks=False)
-                    identity = lambda value: (value.st_dev, value.st_ino, value.st_size,
-                        value.st_mtime_ns, value.st_ctime_ns)
-                    if identity(held_leaf) != identity(before) or identity(named_leaf) != identity(before):
+                    named_leaf = os.stat(
+                        "content", dir_fd=parent, follow_symlinks=False
+                    )
+                    identity = lambda value: (
+                        value.st_dev,
+                        value.st_ino,
+                        value.st_size,
+                        value.st_mtime_ns,
+                        value.st_ctime_ns,
+                    )
+                    if identity(held_leaf) != identity(before) or identity(
+                        named_leaf
+                    ) != identity(before):
                         raise HFJobsError("artifact_invalid")
                     os.unlink("content", dir_fd=parent)
                     root.rmdir()
@@ -254,6 +483,7 @@ class HFJobsTransport:
             return b"".join(chunks), digest
 
     def stage(self, command):
+        self._mutation()
         self._validate(command, EffectKind.STAGE)
         token = self._secret(self.selection.host_token)
         self._secret(self.selection.job_token)
@@ -295,13 +525,30 @@ class HFJobsTransport:
             raise HFJobsError("stage_unavailable") from None
 
     def _validate(self, command, kind):
+        if self._read_material is not None:
+            rebuilt = parse_exact_command(command.canonical_bytes)
+            if (
+                kind is not EffectKind.SUBMIT
+                or rebuilt.canonical_bytes != self._submit_command.canonical_bytes
+                or command.canonical_bytes != self._submit_command.canonical_bytes
+            ):
+                raise HFJobsError("binding_mismatch")
+            return
         rebuilt = parse_exact_command(command.canonical_bytes)
-        if (type(rebuilt) is not type(command) or rebuilt.canonical_bytes != command.canonical_bytes
-                or command.operation.effect.kind is not kind
-                or command.preparation != self.preparation.prepare(self.preparation.plan,
-                    TrainingRunRef(
-                        command.preparation.run_id, command.preparation.project_ref), self.preparation.binding)
-                or command.payload != self.preparation.payload(command.preparation, kind)):
+        if (
+            type(rebuilt) is not type(command)
+            or rebuilt.canonical_bytes != command.canonical_bytes
+            or command.operation.effect.kind is not kind
+            or command.preparation
+            != self.preparation.prepare(
+                self.preparation.plan,
+                TrainingRunRef(
+                    command.preparation.run_id, command.preparation.project_ref
+                ),
+                self.preparation.binding,
+            )
+            or command.payload != self.preparation.payload(command.preparation, kind)
+        ):
             raise HFJobsError("binding_mismatch")
         if kind is EffectKind.CANCEL:
             return self._cancel_target(command)
@@ -318,21 +565,28 @@ class HFJobsTransport:
         return submit, receipt
 
     def _cancel_receipt(self, command, submit, job_id):
-        record = self.records.read(partition=StoragePartition.EFFECTS.value,
-            key=self._key("cancel", command.digest))
+        record = self.records.read(
+            partition=StoragePartition.EFFECTS.value,
+            key=self._key("cancel", command.digest),
+        )
         if record is None:
             return None
         self._check_claim(command)
-        expected = {"schema_version": "synaptic-hf-cancel-receipt/v1",
-            "command_digest": command.digest, "material_digest": self.preparation.material_digest,
-            "submit_command_digest": submit.digest, "job_id": job_id,
+        expected = {
+            "schema_version": "synaptic-hf-cancel-receipt/v1",
+            "command_digest": command.digest,
+            "material_digest": self.material_digest,
+            "submit_command_digest": submit.digest,
+            "job_id": job_id,
             "reason_digest": command.to_dict()["cancellation"]["reason_digest"],
-            "acknowledged": True}
+            "acknowledged": True,
+        }
         if record.canonical != document_bytes(expected):
             raise HFJobsError("binding_mismatch")
         return expected
 
     def cancel(self, command):
+        self._mutation()
         """One acknowledged request, not a terminal/physical-stop assertion.
 
         The absolute deadline bounds provider work, not synchronous host store
@@ -360,6 +614,7 @@ class HFJobsTransport:
         return self._retain("cancel", command, value)
 
     def lookup(self, command):
+        self._mutation()
         """Read retained exact receipts only; absence never permits replay."""
         kind = command.operation.effect.kind
         target = self._validate(command, kind)
@@ -390,34 +645,28 @@ class HFJobsTransport:
         return receipt
 
     def job_request(self, command):
-        prep = self.preparation
-        material = json.loads(prep.material_bytes)
-        projection = json.loads(prep.bundle.canonical_projection_bytes)
-        config = json.loads(prep.bundle.canonical_workload_bytes)["configuration"]["document"]
-        worker = {"material_digest": prep.material_digest,
-            "workload_fingerprint": prep.bundle.workload_fingerprint,
-            "source_members": [row for row in material["members"] if not row["path"].startswith("parent/")],
-            "input": prep.input_identity.to_dict(), "dispatch": projection["dispatch"],
-            "source": prep.rich_plan.execution_source.to_dict(),
-            "runtime_inventory_sha256": sha(self.selection.inventory_bytes),
-            "model": config["model"], "timeout_seconds": self.selection.timeout_seconds}
-        payload = document_bytes({"schema_version": "synaptic-hf-source-bootstrap/v1",
-                                 "parent_members": self.parent_inventory["members"], "worker": worker})
-        program = self.bootstrap.decode() + "\ntry:\n run(__import__('base64').b64decode('" + base64.b64encode(payload).decode() + "'))\nexcept BaseException:\n print('HF_JOB_FAILED')\n sys.exit(1)\n"
-        executable = prep.rich_plan.execution_source.python_executable
-        volumes = [self.sdk.Volume(type="bucket", source=self.selection.bucket_id,
-            path=self.selection.source_prefix, mount_path="/source", read_only=True),
-            self.sdk.Volume(type="bucket", source=self.selection.bucket_id,
-            path=self.selection.run_prefix, mount_path="/artifacts", read_only=False)]
-        return {"image": self.selection.runtime_profile.image,
-            "command": [executable, "-I", "-c", shlex.quote(program)],
-            "env": {}, "flavor": self.selection.flavor, "timeout": self.selection.timeout_seconds,
-            "namespace": self.selection.scope.namespace_ref,
-            "labels": {"synaptic-command": command.digest, "synaptic-material": prep.material_digest,
-                       "name": "synaptic-" + command.digest[:32]},
-            "volumes": volumes}
+        if self._read_material is not None:
+            self._validate(command, EffectKind.SUBMIT)
+            value = self._read_material
+            return _job_request(
+                sdk=self.sdk,
+                material=value["material"],
+                projection=value["projection"],
+                workload=value["workload"].document,
+                bootstrap=value["bootstrap"],
+                command=command,
+            )
+        return _job_request(
+            sdk=self.sdk,
+            material=json.loads(self.preparation.material_bytes),
+            projection=json.loads(self.preparation.bundle.canonical_projection_bytes),
+            workload=json.loads(self.preparation.bundle.canonical_workload_bytes),
+            bootstrap=self.bootstrap,
+            command=command,
+        )
 
     def submit(self, command):
+        self._mutation()
         self._validate(command, EffectKind.SUBMIT)
         index = self.records.read(partition=StoragePartition.EFFECTS.value,
             key=self._key("stage-effect", command.stage_predecessor.stage_effect_id))
@@ -441,33 +690,61 @@ class HFJobsTransport:
             raise HFJobsError("submit_indeterminate") from None
 
     def _check_job(self, job, request):
-        if (type(job.id) is not str or not job.id or len(job.id) > 128
-                or job.docker_image != request["image"] or job.command != request["command"]
-                or job.arguments not in (None, []) or job.environment != request["env"]
-                or job.flavor != request["flavor"] or job.labels != request["labels"]
-                or job.owner.name != self.selection.scope.namespace_ref
-                or [value.to_dict() for value in job.volumes] != [
-                    value.to_dict() if hasattr(value, "to_dict") else value for value in request["volumes"]]):
+        if (
+            type(job.id) is not str
+            or not job.id
+            or len(job.id) > 128
+            or job.docker_image != request["image"]
+            or job.command != request["command"]
+            or job.arguments not in (None, [])
+            or job.environment != request["env"]
+            or job.flavor != request["flavor"]
+            or job.labels != request["labels"]
+            or job.owner.name != self._read_selection()["scope"]["namespace_ref"]
+            or [value.to_dict() for value in job.volumes]
+            != [
+                value.to_dict() if hasattr(value, "to_dict") else value
+                for value in request["volumes"]
+            ]
+        ):
             raise HFJobsError("binding_mismatch")
 
     def observe(self, command_digest, *, deadline=None):
         receipt = self.retained("submit", command_digest)
         catalog = self.retained("command", command_digest)
-        command = parse_exact_command(base64.b64decode(catalog["command_base64"], validate=True))
+        command = parse_exact_command(
+            base64.b64decode(catalog["command_base64"], validate=True)
+        )
         self._validate(command, EffectKind.SUBMIT)
         expected = self.job_request(command)
         expected["volumes"] = [value.to_dict() for value in expected["volumes"]]
         if receipt["request"] != expected:
             raise HFJobsError("binding_mismatch")
-        token = self._secret(self.selection.host_token)
-        job = _bounded(lambda: self.api.inspect_job(job_id=receipt["job_id"],
-            namespace=self.selection.scope.namespace_ref, token=token),
-            time.monotonic() + self.deadline_seconds if deadline is None else deadline)
+        token = self._read_token()
+        job = _bounded(
+            lambda: self.api.inspect_job(
+                job_id=receipt["job_id"],
+                namespace=self._read_selection()["scope"]["namespace_ref"],
+                token=token,
+            ),
+            time.monotonic() + self.deadline_seconds if deadline is None else deadline,
+        )
         self._check_job(job, receipt["request"])
         if job.id != receipt["job_id"]:
             raise HFJobsError("binding_mismatch")
-        phase = str(job.status.stage.value if hasattr(job.status.stage, "value") else job.status.stage)
-        if phase not in {"SCHEDULING", "RUNNING", "COMPLETED", "ERROR", "CANCELED", "DELETED"}:
+        phase = str(
+            job.status.stage.value
+            if hasattr(job.status.stage, "value")
+            else job.status.stage
+        )
+        if phase not in {
+            "SCHEDULING",
+            "RUNNING",
+            "COMPLETED",
+            "ERROR",
+            "CANCELED",
+            "DELETED",
+        }:
             raise HFJobsError("read_unavailable")
         return phase, receipt
 
@@ -475,12 +752,13 @@ class HFJobsTransport:
         phase, receipt = self.observe(command_digest)
         if phase != "COMPLETED":
             raise HFJobsError("read_unavailable")
-        token = self._secret(self.selection.host_token)
+        token = self._read_token()
         deadline = time.monotonic() + self.deadline_seconds
-        listed = self._list(self.selection.run_prefix, 8, token, deadline)
+        listed = self._list(self._read_selection()["run_prefix"], 8, token, deadline)
         if "completion.json" not in listed:
             raise HFJobsError("read_unavailable")
         raw, _ = self._download(listed["completion.json"], 65536, token, deadline)
+
         def unique(pairs):
             result = {}
             for name, value in pairs:
@@ -488,38 +766,82 @@ class HFJobsTransport:
                     raise HFJobsError("artifact_invalid")
                 result[name] = value
             return result
+
         def reject_constant(value):
             raise HFJobsError("artifact_invalid")
-        completion = json.loads(raw, object_pairs_hook=unique, parse_constant=reject_constant)
-        if (type(completion) is not dict or set(completion) != {
-                "schema_version", "status", "material_digest", "workload_fingerprint", "job_id", "artifacts"}
-                or completion["schema_version"] != "synaptic-hf-native-completion/v1"
-                or type(completion["job_id"]) is not str or not 1 <= len(completion["job_id"]) <= 128
-                or type(completion["artifacts"]) is not list or len(completion["artifacts"]) != 5):
+
+        completion = json.loads(
+            raw, object_pairs_hook=unique, parse_constant=reject_constant
+        )
+        if (
+            type(completion) is not dict
+            or set(completion)
+            != {
+                "schema_version",
+                "status",
+                "material_digest",
+                "workload_fingerprint",
+                "job_id",
+                "artifacts",
+            }
+            or completion["schema_version"] != "synaptic-hf-native-completion/v1"
+            or type(completion["job_id"]) is not str
+            or not 1 <= len(completion["job_id"]) <= 128
+            or type(completion["artifacts"]) is not list
+            or len(completion["artifacts"]) != 5
+        ):
             raise HFJobsError("artifact_invalid")
-        if (completion["status"] != "completed" or completion["material_digest"] != self.preparation.material_digest
-                or completion["job_id"] != receipt["job_id"]
-                or completion["workload_fingerprint"] != self.preparation.bundle.workload_fingerprint):
+        if (
+            completion["status"] != "completed"
+            or completion["material_digest"] != self.material_digest
+            or completion["job_id"] != receipt["job_id"]
+            or completion["workload_fingerprint"]
+            != (
+                self.preparation.bundle.workload_fingerprint
+                if self._read_material is None
+                else self._read_material["workload"].fingerprint
+            )
+        ):
             raise HFJobsError("artifact_invalid")
         roles, paths, total = set(), set(), 0
         for member in completion["artifacts"]:
-            if (type(member) is not dict or set(member) != {"role", "path", "size_bytes", "sha256"}
-                    or type(member["role"]) is not str or type(member["path"]) is not str
-                    or type(member["sha256"]) is not str or re.fullmatch(r"[0-9a-f]{64}", member["sha256"]) is None):
+            if (
+                type(member) is not dict
+                or set(member) != {"role", "path", "size_bytes", "sha256"}
+                or type(member["role"]) is not str
+                or type(member["path"]) is not str
+                or type(member["sha256"]) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", member["sha256"]) is None
+            ):
                 raise HFJobsError("artifact_invalid")
             role, path, size = member["role"], member["path"], member["size_bytes"]
-            if (role in roles or path in paths or not path.startswith("artifacts/")
-                    or len(path.split("/")) != 2 or type(size) is not int
-                    or not 0 < size <= MAX_ARTIFACT_BYTES or path not in listed or listed[path].size != size):
+            if (
+                role in roles
+                or path in paths
+                or not path.startswith("artifacts/")
+                or len(path.split("/")) != 2
+                or type(size) is not int
+                or not 0 < size <= MAX_ARTIFACT_BYTES
+                or path not in listed
+                or listed[path].size != size
+            ):
                 raise HFJobsError("artifact_invalid")
             roles.add(role)
             paths.add(path)
             total += size
         from .model import EXACT_ROLES
-        identity = self.preparation.input_identity
+
+        identity = (
+            self.preparation.input_identity
+            if self._read_material is None
+            else self._read_material["identity"]
+        )
         input_path = "input/" + identity.content_digest + "/private-dataset.jsonl"
-        if (roles != EXACT_ROLES or total > MAX_ARTIFACT_TOTAL_BYTES
-                or set(listed) != paths | {"completion.json", input_path}):
+        if (
+            roles != EXACT_ROLES
+            or total > MAX_ARTIFACT_TOTAL_BYTES
+            or set(listed) != paths | {"completion.json", input_path}
+        ):
             raise HFJobsError("artifact_invalid")
         return completion, listed
 
@@ -527,8 +849,12 @@ class HFJobsTransport:
         completion, listed = self.native(command_digest)
         if member not in completion["artifacts"]:
             raise HFJobsError("artifact_invalid")
-        with self._spool(listed[member["path"]], member["size_bytes"],
-                self._secret(self.selection.host_token), time.monotonic() + self.deadline_seconds) as (fd, digest, size, check):
+        with self._spool(
+            listed[member["path"]],
+            member["size_bytes"],
+            self._read_token(),
+            time.monotonic() + self.deadline_seconds,
+        ) as (fd, digest, size, check):
             if digest != member["sha256"]:
                 raise HFJobsError("artifact_invalid")
             emitted = 0
