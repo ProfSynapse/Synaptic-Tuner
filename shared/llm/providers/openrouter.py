@@ -35,6 +35,10 @@ class OpenRouterClient(BaseLLMClient):
         provider: Dict[str, Any] = None,
         timeout_seconds: float = 60.0,
         thinking_effort: str | None = None,
+        *,
+        max_request_bytes: int | None = None,
+        max_response_bytes: int | None = None,
+        deadline: float | None = None,
     ):
         """
         Initialize OpenRouter client.
@@ -48,6 +52,7 @@ class OpenRouterClient(BaseLLMClient):
                 - require_parameters: Only use providers supporting all params (default: False)
                 - data_collection: "allow" or "deny" to filter by data policy
         """
+        self._http_bounds = self._http_controls(timeout_seconds, max_request_bytes, max_response_bytes, deadline)
         self.api_key = api_key
         self.model = model
         self.provider = provider
@@ -196,6 +201,10 @@ class OpenRouterClient(BaseLLMClient):
             "HTTP-Referer": "https://github.com/ProfSynapse/Toolset-Training",
             "X-Title": "Shared LLM Client"
         }
+
+        if self._http_bounds is not None:
+            return self._bounded_json_post(self.api_url, payload, headers,
+                timeout_seconds=self.timeout_seconds, controls=self._http_bounds)
 
         try:
             response = requests.post(

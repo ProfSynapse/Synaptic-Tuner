@@ -24,7 +24,12 @@ class OpenAIResponsesClient(BaseLLMClient):
         store: bool = False,
         structured_output_strict: bool = False,
         thinking_effort: str | None = None,
+        *,
+        max_request_bytes: int | None = None,
+        max_response_bytes: int | None = None,
+        deadline: float | None = None,
     ):
+        self._http_bounds = self._http_controls(timeout_seconds, max_request_bytes, max_response_bytes, deadline)
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -185,6 +190,10 @@ class OpenAIResponsesClient(BaseLLMClient):
 
     def _make_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Make HTTP request to the OpenAI Responses API."""
+        if self._http_bounds is not None:
+            return self._bounded_json_post(self.api_url, payload, self._headers(),
+                timeout_seconds=self.timeout_seconds, controls=self._http_bounds)
+
         try:
             response = requests.post(
                 self.api_url,

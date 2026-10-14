@@ -171,8 +171,18 @@ spend-linked usage contains only paid judge tokens. Paid response plus an
 unpaid judge retains response-only accounting. Missing usage, malformed
 completion values and uncertain paid construction cannot establish zero
 spend. A metered external judge remains an unverified comparison input.
-Existing provider transports here have no finite HTTP byte-cap guarantee;
-null output tokens do not promise unlimited context or elapsed time.
+`MeteredPaidBackendV1` and `MeteredPaidJudgeV1` accept optional
+`max_request_bytes`, `max_response_bytes` (exact integers 1..64 MiB) and
+`deadline` (an absolute monotonic timestamp). Selecting any control defaults
+omitted byte limits to 1 MiB. The selected path uses one POST, disables
+redirects/retries and accepts only identity-encoded responses. It bounds the
+serialized UTF-8 request and response/error body; serialization itself is
+not a hostile-input memory or time bound. JSON decoding runs in the HTTP
+worker. The deadline bounds caller observation, not physical request lifetime:
+a late worker may still finish and closes its own resources afterward. Its
+late result is rejected and paid uncertainty stops further requests. Omitted
+controls preserve legacy transport behavior. Null output tokens remove only
+the request-level token ceiling, not these transport limits.
 
 Paid reference Data and evaluation clients stop further account-linked requests
 after any request has unknown usage/outcome, including exceptions, malformed

@@ -2,7 +2,7 @@
 status: proposed
 scope: OSS API v1 stable workflow release
 baseline: 321a085f
-updated: 2026-10-13
+updated: 2026-10-14
 ---
 
 # Stable v1 release gate
@@ -1250,3 +1250,30 @@ maintenance tools: the current wheel and sdist omit both scripts. This evidence
 does not claim installed-script packaging, live provider effects or GPU/model
 compatibility. Genuine base capture is still required before authoring the
 named GRPO candidate profile and its bounded live update plan.
+
+### Bounded paid completion HTTP
+
+Paid OpenRouter and OpenAI Responses clients now support explicit request and
+response byte limits and a monotonic caller deadline. The opt-in path dispatches
+one POST with redirects and transport retries disabled, accepts only identity
+response encoding, and decodes bounded UTF-8 JSON with nonfinite numbers rejected.
+The worker owns transport resources and JSON decoding; the caller stops waiting
+at its deadline. A late request can still finish, so a timeout retains unknown
+usage and the existing paid-call latch refuses subsequent requests. This is not
+physical request termination, an invoice cap, or a bound on owner-side request
+serialization allocation/time. Omitted controls preserve the legacy path.
+
+Independent source, CI and hash-refresh reviews passed. The 36 new controls use
+an actual loopback HTTP server and cover redirects, UTF-8 byte boundaries, slow
+responses, nonfinite exponent overflow, late-worker dispatch admission, immutable
+request bytes and paid response/judge forwarding. Fresh sdist-built wheel
+`30d5f1b1b92f6826c2b624ca88daa32d0e8437595adfd93f689ae813d7fad863`
+passed the base consumer, 320 installed evaluation/report controls in 21.18
+seconds, and 247 GRPO input/material controls in 1.68 seconds. The packaged worker
+lane passed 404 controls under CPython 3.14 with real Linux sealing in 68.39
+seconds; its separate portable SFT case passed under CPython 3.12 in 0.72 seconds.
+The four changed production modules and two refreshed GRPO manifests match the
+reviewed source, wheel and installation exactly. The fixed 131/13 inventories
+and non-hash policy are unchanged, all seven maintenance checks are current,
+and skill mirrors match. No live model or training-provider effects occurred.
+Live account/model qualification and stable release acceptance remain open.
