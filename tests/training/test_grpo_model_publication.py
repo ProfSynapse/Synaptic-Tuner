@@ -5,7 +5,7 @@ TrainingAPI outcome. Synthetic CPU model files do not qualify ML or live Hub use
 """
 
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import replace, fields
 import hashlib
 import json
 import os
@@ -45,6 +45,8 @@ from tuner.execution.coordinator_v1.publication import (
 )
 from tuner.inference import retrieved_model
 from tuner.runtime.packaged_grpo_verification import verify_packaged_grpo_artifacts
+from tuner.runtime.offline_sft_worker import OWNED_MODULE_PREFIXES
+from tuner.runtime.releases import parse_packaged_runtime_release
 from tuner.training.packaged_grpo_compilation import (
     compile_packaged_grpo_workload,
     parse_packaged_grpo_workload,
@@ -279,19 +281,35 @@ def test_parser_imports_only_four_reviewed_inference_members(tmp_path):
     code = """import sys,json
 from pathlib import Path
 root=Path(sys.argv[1]);sys.path.insert(0,str(root))
+owned=set(json.loads(sys.argv[3]))
 from tuner.training.packaged_grpo_compilation import parse_packaged_grpo_workload
 result=parse_packaged_grpo_workload(Path(sys.argv[2]).read_bytes())
 assert result.canonical_bytes==Path(sys.argv[2]).read_bytes()
 paths=set()
-for m in list(sys.modules.values()):
+for name,m in list(sys.modules.items()):
  f=getattr(m,'__file__',None)
- if f and Path(f).resolve().is_relative_to(root):
-  paths.add(Path(f).resolve().relative_to(root).as_posix())
+ if not f:
+  continue
+ location=Path(f).resolve()
+ if name.split('.')[0] in owned:
+  assert location.is_relative_to(root), (name,str(location))
+ if location.is_relative_to(root):
+  relative=location.relative_to(root)
+  if relative.parts[0].removesuffix('.py') in owned:
+   paths.add(relative.as_posix())
 assert not any(name.split(".")[0] in {"torch","transformers","trl","unsloth","modal","huggingface_hub"} for name in sys.modules)
 print(json.dumps(sorted(paths)))
 """
     completed = subprocess.run(
-        [sys.executable, "-I", "-c", code, str(root), str(path)],
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            code,
+            str(root),
+            str(path),
+            json.dumps(OWNED_MODULE_PREFIXES),
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -353,20 +371,29 @@ def test_grpo_model_selector_rejects_mixed_or_malformed_declarations(
 @pytest.mark.parametrize(
     "policy,expected",
     [
-        (None, "29e2d227e9c803a6bb7c75e09088a0463a618c067031bf9a82822388727a9c68"),
+        (None, "b483ed89efcca05b9be63a0e4d0809d38e61e1e42c0815dbd7b6264075eaadaa"),
         (
             {
                 "max_trainable_bytes": 16,
                 "max_trainable_tensors": 2,
                 "max_reward_values": 3,
             },
-            "e9888bd1c1b1f80d4319346160de15cedf8e3807cec528a516713902c0c391c5",
+            "616a25ca723247d764e1ebcf55d23811dfa6053dd8577626643a92a7410f50ff",
         ),
     ],
 )
 def test_grpo_parser_refactor_preserves_pre_refactor_canonical_bytes(policy, expected):
-    # Captured from accepted pre-refactor compiler, with the same explicit fixture.
+    # Captured from exact accepted10837bc4 compiler with this SAME fixed fixture
+    # release. It is a synthetic pure declaration, not an observed interpreter.
     core, context = _fixture()
+    release = parse_packaged_runtime_release(context["runtime_release"])
+    values = {
+        field.name: getattr(release, field.name)
+        for field in fields(release)
+        if field.name not in {"schema_version", "manifest_digest"}
+    }
+    values["python_executable"] = "/opt/qualification-fixture/bin/python"
+    context["runtime_release"] = type(release).build(**values).to_dict()
     compiled = compile_packaged_grpo_workload(
         core_workload=core,
         context=context,
