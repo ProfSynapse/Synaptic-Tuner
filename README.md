@@ -28,6 +28,7 @@ evaluation and report comparison, training, known-run observation/verification,
 and verified artifact download/publication through caller-configured ports.
 The source package is **1.1.0 / Beta**; see the [support matrix](docs/plans/api-v1-support-matrix.md)
 and [release plan](docs/plans/stable-v1-release.md) for current acceptance.
+The [API v1 policy](docs/architecture/api-v1-compatibility.md) defines public compatibility.
 
 Install a reviewed wheel into your environment and inspect the packaged CLI:
 

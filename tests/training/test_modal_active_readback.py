@@ -1,5 +1,6 @@
 """Known retained calls reconnect without restoring submission authority."""
 from __future__ import annotations
+from tuner.execution.providers.modal.facade import ModalFunctionCallState
 
 import shutil
 import sys
@@ -41,11 +42,8 @@ def _active(tmp_path, monkeypatch):
             return self
         def get(self, *, timeout):
             assert timeout == 0
-            polls.append(state[0])
-            if state[0] == 'pending':
-                raise TimeoutError()
-            if state[0] == 'unknown':
-                raise RuntimeError('untrusted provider text')
+            assert state[0] not in {'pending', 'unknown'}
+            # Only an output-bearing status permits result deserialization.
             if state[0] == 'none':
                 return None
             if state[0] == 'failed':
@@ -59,6 +57,15 @@ def _active(tmp_path, monkeypatch):
     monkeypatch.setattr(sys.modules['modal'], 'FunctionCall', Calls, raising=False)
     monkeypatch.setattr(ModalPackagedCoordinatorReaderV1, '_poll_packaged_call', original_poll)
     monkeypatch.setattr(reader, 'validate_local_launcher', lambda: None)
+    monkeypatch.setattr(reader, 'observe_modal_host_scope', lambda **kwargs: (scope.account_ref, scope.workspace_ref, scope.environment_ref, scope.client_ref))
+    def status_read(*args, **kwargs):
+        polls.append(state[0])
+        if state[0] == 'pending':
+            return ModalFunctionCallState.PENDING
+        if state[0] == 'unknown':
+            return ModalFunctionCallState.UNKNOWN
+        return ModalFunctionCallState.RETURNED
+    monkeypatch.setattr(reader.ExplicitModal154ReadFacade, 'observe_known_call_status', status_read)
     monkeypatch.setattr(reader, 'open_modal_host_scope', lambda **kwargs: (client, scope))
     # Remove all owned mutable source/config/data inputs. Only private retained
     # state remains; every read context opens new SQLite connections.

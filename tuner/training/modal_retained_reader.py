@@ -22,7 +22,7 @@ from synaptic_tuner.api.v1.reference.runs import build_run_operations
 from synaptic_tuner.api.v1.reference.training import _decode_commitment, _AUTHORIZATION
 from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest
 from synaptic_tuner.api.v1.reference.sqlite_store import SQLiteDurableStoreV1
-from tuner.execution.coordinator_v1.model import ProviderReadPurposeV1, WorkflowPhaseV1
+from tuner.execution.coordinator_v1.model import WorkflowPhaseV1
 from tuner.execution.coordinator_v1.foundation import ComposedEffectFoundationV1
 from synaptic_tuner.api.v1.reference.authority import UnavailableQuiescenceEvidenceV1
 from tuner.execution.providers.modal.binding import ModalClientBinding
@@ -55,7 +55,8 @@ _TERMINAL = frozenset({
 _ACTIVE = frozenset({WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.RUNNING,
                      WorkflowPhaseV1.CANCEL_REQUESTED,
                      WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED})
-_READABLE = _TERMINAL | _ACTIVE
+_NON_ARTIFACT_TERMINAL = frozenset({WorkflowPhaseV1.FAILED, WorkflowPhaseV1.CANCELLED})
+_READABLE = _TERMINAL | _ACTIVE | _NON_ARTIFACT_TERMINAL
 
 
 class ModalRetainedReadUnavailable(RuntimeError):
@@ -132,6 +133,160 @@ class _RetainedOperations:
     def reverify(self, run):
         raise RunOperationError(RunOperationCode.CAPABILITY_UNAVAILABLE)
 
+
+class _CancellationEffects(ModalPackagedHostEffectsV1):
+    def authorize(self, requirements):
+        from synaptic_tuner.api.v1.training_facade import AuthorizationRequirement
+        if requirements != (AuthorizationRequirement("training.cancel", False),):
+            raise ModalRetainedReadUnavailable()
+        return super().authorize(requirements)
+
+    def bind(self, grant, *, operation, requirements):
+        from tuner.execution.foundation_v2.commands import CancelCommandV2
+        if type(operation) is not CancelCommandV2:
+            raise ModalRetainedReadUnavailable()
+        return super().bind(grant, operation=operation, requirements=requirements)
+
+
+class _CancellationOperations(_RetainedOperations):
+    def cancel(self, run, reason):
+        self._check(run)
+        if self._workflows.get(run).phase in _NON_ARTIFACT_TERMINAL:
+            return self._operations.show(run)
+        return self._operations.cancel(run, reason)
+
+    def reconcile(self, run):
+        self._check(run)
+        if self._workflows.get(run).cancel is None:
+            raise RunOperationError(RunOperationCode.READ_INELIGIBLE)
+        if self._workflows.get(run).phase in _NON_ARTIFACT_TERMINAL:
+            return self._operations.show(run)
+        return self._operations.reconcile(run)
+
+
+def _cancel_coordinator(*, records, authority, grants, effects, workflows, plans,
+                        plan, context, descriptor, command, sdk, client, facade, observer):
+    """Existing Foundation/coordinator assembly, only for the original known call."""
+    from synaptic_tuner.api.v1.reference.repositories import (
+        DurablePreparationStoreV1, DurableExecutionGrantStoreV1,
+        DurableReconciliationGrantStoreV1,
+    )
+    from synaptic_tuner.api.v1.reference.training import ReferenceAuthorizationV1
+    from tuner.execution.coordinator_v1.coordinator import TrainingCoordinatorV1
+    from tuner.execution.coordinator_v1.model import ProviderExecutionBindingV1
+    from tuner.execution.foundation_v2.broker import EffectBrokerV2
+    from tuner.execution.foundation_v2.reconciliation import ReconciliationServiceV1
+    from tuner.execution.foundation_v2.commands import CanonicalProviderPayloadV1, CancelCommandV2
+    from tuner.execution.foundation_v2.identities import EffectKind
+    from tuner.execution.providers.modal.packaged_transport import ModalPackagedHostTransport
+    from tuner.execution.providers.modal.packaged_staging import ModalPackagedInputStager
+    from tuner.execution.providers.modal.packaged_effects import (
+        ModalPackagedFoundationEffectExecutor, ModalPackagedFoundationExecutorResolver,
+        ModalPackagedFoundationReconciliationAdapter, ModalPackagedFoundationReconciliationResolver,
+    )
+    from tuner.training.modal_host_composition import _ModalCurrentGrants
+
+    preparation = command.preparation
+    delegate = ModalPackagedHostTransport(
+        sdk=sdk, client=client, facade=facade, deployment_observer=observer,
+        stager=ModalPackagedInputStager(facade), stage_source=effects.stages,
+        dispatch_source=effects.dispatches, stage_receipts=effects.stage_receipts,
+        call_catalog=effects.calls, dispatch_verifier=effects._signer,
+        marker_materials=effects.marker_materials,
+    )
+
+    class CancelTransport:
+        def execute_once(self, binding, operation):
+            if type(operation) is not CancelCommandV2:
+                raise ModalRetainedReadUnavailable()
+            return delegate.execute_once(binding, operation)
+
+        def lookup_once(self, binding, operation):
+            if type(operation) is not CancelCommandV2:
+                raise ModalRetainedReadUnavailable()
+            return delegate.lookup_once(binding, operation)
+
+    transport = CancelTransport()
+    executor = ModalPackagedFoundationEffectExecutor(
+        profile_ref=context.provider.profile_ref, account_ref=preparation.scope.account_ref,
+        namespace_ref=preparation.scope.namespace_ref, catalog=effects.bindings,
+        authority=effects, transport=transport,
+    )
+    adapter = ModalPackagedFoundationReconciliationAdapter(
+        profile_ref=context.provider.profile_ref, account_ref=preparation.scope.account_ref,
+        namespace_ref=preparation.scope.namespace_ref, catalog=effects.bindings,
+        authority=effects, transport=transport,
+    )
+    binding = ProviderExecutionBindingV1(
+        context.provider, descriptor.descriptor_digest, context.profile_digest,
+        preparation.scope, executor.descriptor, adapter.descriptor.digest,
+        preparation.resource_digest, preparation.quote_digest, preparation.secret_requirements_digest,
+    )
+    if command.executor != executor.descriptor:
+        raise ModalRetainedReadUnavailable()
+    preparations = DurablePreparationStoreV1(records)
+    if preparations.get(preparation.preparation_digest) != preparation:
+        raise ModalRetainedReadUnavailable()
+    workflow = workflows.get(TrainingRunRef(preparation.run_id, preparation.project_ref))
+    TrainingCoordinatorV1._validate_preparation(preparation, plan, workflow, binding)
+
+    class RetainedPorts:
+        def describe(self, provider):
+            if provider != context.provider:
+                raise ModalRetainedReadUnavailable()
+            return descriptor
+
+        def resolve(self, provider, retained_context):
+            if provider != context.provider or retained_context != context:
+                raise ModalRetainedReadUnavailable()
+            return binding
+
+        def prepare(self, *args, **kwargs):
+            raise ModalRetainedReadUnavailable()
+
+        def payload(self, supplied, kind):
+            if supplied != preparation or kind is not EffectKind.CANCEL:
+                raise ModalRetainedReadUnavailable()
+            return CanonicalProviderPayloadV1.build("modal", "cancel-payload/v2", preparation.workload_digest)
+
+    recovery = UnavailableRecoveryVerifierV1()
+    repository = DurableEffectRepositoryV1(
+        records, receipt_authority=authority.receipt_authority,
+        invalid_evidence_authority=authority.invalid_evidence_authority,
+        recovery_verifier=recovery, finality_verifier=recovery, grant_authority=authority.grant_authority,
+    )
+    broker = EffectBrokerV2(repository, ModalPackagedFoundationExecutorResolver(executor),
+                           authority.grant_authority, authority.receipt_authority,
+                           authority.invalid_evidence_authority)
+    reconciliation = ReconciliationServiceV1(
+        repository, authority.grant_authority, ModalPackagedFoundationReconciliationResolver(adapter),
+        authority.receipt_authority, authority.invalid_evidence_authority)
+    foundation = ComposedEffectFoundationV1(
+        repository, broker, reconciliation, grant_authority=authority.grant_authority,
+        receipt_authority=authority.receipt_authority,
+        invalid_evidence_authority=authority.invalid_evidence_authority,
+        assessment_authority=authority.assessment_authority,
+        trusted_quiescence_evidence=UnavailableQuiescenceEvidenceV1(),
+    )
+    current = _ModalCurrentGrants(effects, grants)
+    authorization = ReferenceAuthorizationV1(
+        records=records, grants=current, authority=authority.grant_authority,
+        clock=authority.clock, allow_current_cancel_authorization=True,
+    )
+    ports = RetainedPorts()
+    coordinator = TrainingCoordinatorV1(
+        ports, plans, workflows, preparations,
+        DurableExecutionGrantStoreV1(records, authority.grant_authority),
+        DurableReconciliationGrantStoreV1(records, authority.grant_authority),
+        ports, ports, authorization, foundation, authority.foundation_authenticator,
+        authority.clock, None,
+    )
+    effects.bind_cancel_stores(
+        workflows=workflows, foundation=foundation,
+        foundation_authenticator=authority.foundation_authenticator,
+        assessment_authenticator=authority.assessment_authority,
+    )
+    return coordinator, foundation
 
 @dataclass(frozen=True, slots=True)
 class RetainedModalRunsV1:
@@ -213,8 +368,8 @@ def _typed_inputs(retained):
 
 
 @contextmanager
-def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk, clock=None):
-    """Open one exact retained call; provider reads only, local CAS writes allowed."""
+def _open_retained_modal(*, root, run, modal_profile, modal_environment, sdk, clock=None, cancellation_grants=None, lifecycle=False):
+    """Original known call; explicit lifecycle may cancel/lookup, never restore sources or submit."""
     opened = False
     try:
         if type(run) is not TrainingRunRef or not isinstance(root, Path):
@@ -241,7 +396,7 @@ def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk
                 "modal-packaged-dispatch/v1", "modal-packaged-dispatch/v2",
                 "modal-packaged-completion/v1", "modal-packaged-evaluation/v1", PROGRESS_PURPOSE,
             }))
-            effects = _BindingReads(
+            effects = (_CancellationEffects if lifecycle else _BindingReads)(
                 storage=storage, runtime_release=release, provider_binding=provider_binding,
                 provider_facts=facts, execution_binding=components.execution_source, retained_source=None,
                 workload_bytes=workload.canonical_bytes, artifact_policy=components.artifact_policy,
@@ -297,9 +452,10 @@ def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk
                     or context.descriptor_digest != workflow.provider_descriptor_digest
                     or context.profile_digest != inputs["profile_digest"]):
                 raise ValueError
-            descriptors = [_modal_packaged_descriptor(logs=value) for value in (False, True)]
+            descriptors = [_modal_packaged_descriptor(logs=value, allow_cancel_reconcile=cancel)
+                           for value in (False, True) for cancel in (False, True)]
             matches = [d for d in descriptors if d.descriptor_digest == workflow.provider_descriptor_digest]
-            if len(matches) != 1:
+            if len(matches) != 1 or (lifecycle and not matches[0].capabilities.cancel):
                 raise ValueError
             operations = build_run_operations(
                 planning=_PlanningReads(workflow.provider, matches[0]), planning_store=plans,
@@ -309,11 +465,26 @@ def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk
                 observation_authenticator=ObservationAuthenticator(evidence), log_authenticator=LogAuthenticator(evidence),
                 artifact_verifier=verifier, cursor_authority=authority.cursor_authority, clock=authority.clock,
             )
-            # This uses the exact assessment retained in the original submit.
-            purpose = (ProviderReadPurposeV1.OBSERVE if workflow.phase in _ACTIVE
-                       else ProviderReadPurposeV1.ARTIFACTS)
-            request = operations._request(workflow, purpose)
-            binding = reader._binding(request, purpose)
+            # Authenticate the exact historical submit; terminal failure/cancellation
+            # needs no provider artifact request or renewed assessment.
+            from tuner.execution.coordinator_v1.state_machine import _derive_foundation
+            from tuner.execution.coordinator_v1.model import FoundationDispositionV1
+            from tuner.execution.coordinator_v1.model import AuthenticatedFoundationRecordAssessmentV1
+            assessment = AuthenticatedFoundationRecordAssessmentV1.parse(
+                workflow.submit.foundation_bindings[-1].canonical_assessment_bytes)
+            original = foundation.get(workflow.submit.effect_id)
+            derived = _derive_foundation(workflow.submit, original, assessment,
+                                        authority.foundation_authenticator, authority.assessment_authority,
+                                        workflow.provider_run_ref)
+            if (derived[0] != workflow.submit.foundation_bindings[-1]
+                    or derived[1] != workflow.submit.foundation_outcomes[-1]
+                    or derived[1].disposition is not FoundationDispositionV1.FOUND
+                    or derived[2] != workflow.provider_run_ref):
+                raise ValueError
+            binding = effects.bindings.resolve(workflow.submit.command_digest)
+            if (binding is None or effects.authenticate(binding) is not True
+                    or binding.command_bytes != workflow.submit.canonical_command_bytes):
+                raise ValueError
             call = effects.calls.resolve(binding.command_digest)
             resource_digest = domain_digest(
                 "synaptic-modal-packaged-resource-request/v1", canonical_bytes({
@@ -322,10 +493,15 @@ def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk
                     "timeout_seconds": components.resources.timeout_seconds,
                 }),
             )
-            if (type(call) is not str or call != request.provider_run.reference.provider_job_ref
+            if (type(call) is not str or call != workflow.provider_run_ref.reference.provider_job_ref
                     or binding.command.preparation.quote_digest != inputs["quote_digest"]
                     or binding.command.preparation.resource_digest != resource_digest):
                 raise ValueError
+            if workflow.phase in _NON_ARTIFACT_TERMINAL:
+                selected = _CancellationOperations if lifecycle else _RetainedOperations
+                opened = True
+                yield RetainedModalRunsV1(run, RunsAPI(selected(operations, workflows, run)))
+                return
             # No SDK scope/lookup occurs until the stored authenticated terminal chain above passes.
             client, observed_scope = open_modal_host_scope(
                 sdk=sdk, profile=modal_profile, environment_name=modal_environment, client_ref=scope.client_ref,
@@ -348,7 +524,25 @@ def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk
             reader._reader = ModalPackagedReader(
                 facade=facade, deployment_observer=observer, verifier=signer, key_ref=signer_ref,
             )
-            view = RetainedModalRunsV1(run, RunsAPI(_RetainedOperations(operations, workflows, run)))
+            if lifecycle:
+                from tuner.execution.foundation_v2.commands import parse_exact_command
+                coordinator, lifecycle_foundation = _cancel_coordinator(
+                    records=records, authority=authority, grants=cancellation_grants,
+                    effects=effects, workflows=workflows, plans=plans, plan=plan,
+                    context=context, descriptor=matches[0],
+                    command=parse_exact_command(workflow.submit.canonical_command_bytes),
+                    sdk=sdk, client=client, facade=facade, observer=observer,
+                )
+                operations = build_run_operations(
+                    planning=_PlanningReads(workflow.provider, matches[0]), planning_store=plans,
+                    workflow_store=workflows, coordinator=coordinator, foundation=lifecycle_foundation,
+                    foundation_authenticator=authority.foundation_authenticator,
+                    assessment_authenticator=authority.assessment_authority, reader=reader,
+                    observation_authenticator=ObservationAuthenticator(evidence), log_authenticator=LogAuthenticator(evidence),
+                    artifact_verifier=verifier, cursor_authority=authority.cursor_authority, clock=authority.clock,
+                )
+            selected = _CancellationOperations if lifecycle else _RetainedOperations
+            view = RetainedModalRunsV1(run, RunsAPI(selected(operations, workflows, run)))
             opened = True
             yield view
         return
@@ -357,3 +551,23 @@ def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk
             raise
         pass
     raise ModalRetainedReadUnavailable()
+
+
+@contextmanager
+def open_retained_modal_runs(*, root, run, modal_profile, modal_environment, sdk, clock=None):
+    """Read the original known run; cancellation remains categorically unavailable."""
+    with _open_retained_modal(root=root, run=run, modal_profile=modal_profile,
+                             modal_environment=modal_environment, sdk=sdk, clock=clock) as view:
+        yield view
+
+
+@contextmanager
+def open_retained_modal_lifecycle(*, root, run, modal_profile, modal_environment, sdk,
+                                  cancellation_grants, clock=None):
+    """Original opted-in known call and caller permission; no source/submit authority."""
+    from synaptic_tuner.api.v1.reference.provider_family import require_methods
+    require_methods(cancellation_grants, "authorize", "bind")
+    with _open_retained_modal(root=root, run=run, modal_profile=modal_profile,
+                             modal_environment=modal_environment, sdk=sdk, clock=clock,
+                             cancellation_grants=cancellation_grants, lifecycle=True) as view:
+        yield view

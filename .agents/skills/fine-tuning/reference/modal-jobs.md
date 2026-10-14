@@ -666,12 +666,65 @@ can reconnect only to a known retained call, and cannot
 recover historical lost signing keys. These are provider-free implementation
 claims until separately qualified against a live retained run.
 
-Internal cancellation machinery has provider-free coverage for exact-call
-authentication, a current cancel-only host grant, bounded SDK cancellation and
-uncertain-response retention. It does not enable ordinary cancellation or
-reconciliation commands. A provider acknowledgment means cancellation was
-requested; it does not establish terminal stopped compute. The original
-staging/submission grant is never renewed by cancellation.
+New Modal recipes may explicitly select top-level `allow_cancel_reconcile: true`
+before the original public plan is created. Omission remains false and preserves
+historical descriptor/configuration bytes. This is a caller-selected candidate
+capability, not live hardware qualification or a promotion of old runs. Python
+composition requires a current caller cancellation GrantPort; the original
+capability flag alone never supplies current permission.
+
+Use the generic existing public lifecycle from the installed CLI:
+
+```sh
+synaptic runs cancel --run <exact-id> --reason "operator stop" --modal-profile <name> --modal-environment <existing> --json
+synaptic runs reconcile --run <exact-id> --modal-profile <name> --modal-environment <existing> --json
+```
+
+The explicit local operator request supplies an exact-run port scoped only to
+unpaid `training.cancel`. Reconciliation uses current lookup permission without
+binding a new cancellation command or issuing another cancel RPC. Missing or
+refused permission rejects; `show`, `observe`, `verify` and `download` construct
+no cancellation grant. Python hosts use `open_retained_modal_lifecycle` with a
+supplied caller port, while `open_retained_modal_runs` stays read-only. Both
+reuse original private keys, authenticated FOUND submit/assessment, exact call,
+context and stores; neither restores source leases, paid submission authority,
+bootstrap work or a training entrypoint. Default-false historical descriptors
+cannot be relabeled after restart.
+
+A provider acknowledgment means a cancellation request was accepted, not that
+compute stopped. The pinned SDK terminal-input observation can report CANCELLED
+only for exact `TERMINATED` output status; FAILURE/INIT_FAILURE/TIMEOUT report
+FAILED. This does not prove cancellation causality or whole-container shutdown.
+Natural signed native completion remains SUCCEEDED. Empty unfinished output
+preserves authenticated prior state; expired, internal, unknown, ambiguous or
+invalid outputs refuse without replay. The response-size bound is checked after
+receipt and is not a gRPC wire-memory ceiling. No exception-text, log or truncated
+call-graph inference supplies terminal proof. Failed/cancelled stored views do
+not perform success-only native artifact verification.
+
+A lost SDK reply consumes the original cancel intent. Cold reconciliation may
+remain indeterminate and never reissues that effect; independent native success
+can still settle the run while preserving the uncertain cancellation history.
+A distinct post-ACK Foundation receipt gap can leave the consumed effect
+`ORPHANED_UNPROVEN` and workflow `CANCEL_INTENT_RECORDED`. This join keeps that
+case closed (`state_conflict`/unavailable quiescence) and does not expand phase
+admission or claim complete receipt recovery. Preserve its original records;
+current permission is not quiescence evidence.
+
+Original key custody remains a host responsibility. A changed authority key
+rejects authenticated replay before provider access. Reader keys authenticate
+already-retained observation/verification evidence; a queued run with no prior
+reader-signed evidence has no historical key bytes to compare. Do not describe
+that case as universal key-byte attestation or replace keys to recover previous
+signed reads. No additional key commitment/signature format is introduced.
+
+Provider-free controls cover configured normal runner/CLI cancellation, current
+permission after original submit expiry, exact call/key refusal, stage/submit
+denial and actual SIGKILL followed by fresh source-free cancellation/lookup,
+signed native verification and five verified downloads. Image/SDK/ML/provider
+boundaries are controlled CPU fixtures; these are not live cancellation,
+GPU/model quality, physical isolation or all-failure recovery qualification.
+The original staging/submission grant is never renewed by cancellation.
 
 A provider-free POSIX process-loss test kills the original host after retaining
 its exact call. Fresh isolated processes reopen the original state, preserve a

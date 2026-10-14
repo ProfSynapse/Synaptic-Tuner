@@ -39,41 +39,19 @@ _child(sys.argv[3], Path(sys.argv[4]), Path(sys.argv[2]))
 """
 
 
-def _cancel_descriptor_fixture(patch):
-    from dataclasses import replace
-    from tuner.training import modal_host_composition as composition
-
-    original = composition._modal_packaged_descriptor
-
-    def descriptor(**kwargs):
-        value = original(**kwargs)
-        return replace(
-            value, capabilities=replace(value.capabilities, cancel=True, reconcile=True)
-        )
-
-    patch.setattr(composition, "_modal_packaged_descriptor", descriptor)
-    patch.setattr(reader, "_modal_packaged_descriptor", descriptor)
-
 
 def _producer(root):
     patch = pytest.MonkeyPatch()
     uncertain_cancel = (root / "uncertain-cancel").exists()
+    cold_cancellation = (root / "cold-cancel").exists()
+    receipt_gap = (root / "receipt-gap").exists()
     captured = []
-    if uncertain_cancel:
-        _cancel_descriptor_fixture(patch)
-        from tuner.training import modal_host_composition as composition
-
-        original_generic = composition.compose_reference_host
-        patch.setattr(
-            composition,
-            "compose_reference_host",
-            lambda **kwargs: original_generic(
-                **kwargs, allow_current_cancel_authorization=True
-            ),
-        )
+    if uncertain_cancel or cold_cancellation:
         original_compose = runner.compose_modal_packaged_reference_host
 
         def compose(**kwargs):
+            from tuner.handlers.runs_handler import _CurrentCancellationGrant
+            kwargs["cancellation_grants"] = _CurrentCancellationGrant(kwargs["run"])
             value = original_compose(**kwargs)
             captured.append(value)
             return value
@@ -93,6 +71,10 @@ def _producer(root):
     plan, context, events, _, cpu, trainer, _, _ = joined._joined(
         host, patch, SimpleNamespace(addfinalizer=finalizers.append), remove_source=True
     )
+
+    if uncertain_cancel or cold_cancellation:
+        from dataclasses import replace
+        plan = replace(plan, recipe=replace(plan.recipe, allow_cancel_reconcile=True))
 
     def ready(self, binding, call_ref, **kwargs):
         from synaptic_tuner.api.v1.results import TrainingRunRef
@@ -152,6 +134,8 @@ def _producer(root):
             root / "provider.json",
             {
                 "phase": "pending",
+                "cancel_lost": cold_cancellation and not receipt_gap,
+                "cancel_receipt_gap": receipt_gap,
                 "expected_state": "reconcile_required"
                 if uncertain_cancel
                 else "queued",
@@ -203,9 +187,15 @@ def _child(role, root, expected_source):
         assert not Path(reader.__file__).resolve().is_relative_to(_TEST_ROOT)
     if role == "producer":
         _producer(root)
+    elif role == "receipt_gap_reconcile":
+        state = process._snapshot(root)
+        before = process._census_digest(root, state["run"])
+        with pytest.raises(reader.ModalRetainedReadUnavailable):
+            process._consumer(root, "reconcile")
+        assert process._census_digest(root, state["run"]) == before
+        print(json.dumps({"pid": os.getpid(), "state": "cancel_intent_recorded",
+                          "census_digest": before}), flush=True)
     else:
-        if (root / "uncertain-cancel").exists():
-            _cancel_descriptor_fixture(pytest.MonkeyPatch())
         print(json.dumps(process._consumer(root, role)), flush=True)
 
 
@@ -236,12 +226,16 @@ def _trusted_proof_root(request):
 
 @pytest.mark.skipif(os.name != "posix", reason="SIGKILL process proof requires POSIX")
 def test_grpo_killed_producer_then_three_fresh_public_readers(
-    request, *, uncertain_cancel=False
+    request, *, uncertain_cancel=False, cold_cancellation=False, receipt_gap=False
 ):
     root = _trusted_proof_root(request) / "grpo-process-proof"
     root.mkdir(mode=0o700)
     if uncertain_cancel:
         (root / "uncertain-cancel").touch(mode=0o600)
+    if cold_cancellation:
+        (root / "cold-cancel").touch(mode=0o600)
+    if receipt_gap:
+        (root / "receipt-gap").touch(mode=0o600)
     scratch = root / "scratch"
     scratch.mkdir(mode=0o700)
     environment = {"PATH": os.defpath, "TMPDIR": str(scratch)}
@@ -288,6 +282,46 @@ def test_grpo_killed_producer_then_three_fresh_public_readers(
             "workflow.sqlite3-journal",
         }:
             shutil.rmtree(path) if path.is_dir() else path.unlink()
+    if cold_cancellation:
+        # The cancellation reader is the first SQLite opener after SIGKILL.
+        result = subprocess.run(_command(root, "cancel"), env=environment,
+                                capture_output=True, timeout=60)
+        assert result.returncode == 0, result.stderr.decode()
+        cancelled = json.loads(result.stdout)
+        assert cancelled["before"] == "queued"
+        if receipt_gap:
+            assert cancelled["state"] == "cancel_intent_recorded"
+            assert cancelled["attempt_count"] == 1 and cancelled["dispatch"] == "orphaned_unproven"
+            assert (root / "cancel-events").read_text().splitlines() == [process._snapshot(root)["call_ref"]]
+            result = subprocess.run(_command(root, "receipt_gap_reconcile"), env=environment,
+                                    capture_output=True, timeout=60)
+            assert result.returncode == 0, result.stderr.decode()
+            refused = json.loads(result.stdout)
+            assert refused["census_digest"] == cancelled["census_digest"]
+            assert refused["pid"] not in (producer.pid, cancelled["pid"])
+            assert (root / "cancel-events").read_text().splitlines() == [process._snapshot(root)["call_ref"]]
+            return
+        assert cancelled["state"] == "reconcile_required"
+        assert cancelled["pid"] != producer.pid
+        assert cancelled["cancel_intent"] is not None
+        state = process._snapshot(root)
+        state["expected_state"] = "reconcile_required"
+        state["expected_cancel"] = cancelled["cancel_intent"]
+        process._write(root / "cancelled-provider.json", state)
+        (root / "cancelled-provider.json").replace(root / "provider.json")
+        result = subprocess.run(_command(root, "reconcile"), env=environment,
+                                capture_output=True, timeout=60)
+        assert result.returncode == 0, result.stderr.decode()
+        reconciled = json.loads(result.stdout)
+        assert reconciled["state"] == "reconcile_required"
+        assert reconciled["cancel_intent"]["command_digest"] == cancelled["cancel_intent"]["command_digest"]
+        state["expected_cancel"] = reconciled["cancel_intent"]
+        process._write(root / "reconciled-provider.json", state)
+        (root / "reconciled-provider.json").replace(root / "provider.json")
+        assert (root / "cancel-events").read_text().splitlines() == [state["call_ref"]]
+        uncertain_cancel = True
+        # Later read-only contexts must preserve the authenticated cancel history.
+        ready["census_digest"] = reconciled["census_digest"]
     observed = []
     for role in ("pending", "completed", "verified"):
         if role == "completed":

@@ -11,6 +11,13 @@ from tuner.training import modal_retained_reader as reader
 from tests.training.test_modal_standalone_runner import _setup
 
 
+@pytest.fixture(autouse=True)
+def retained_scope_contract(monkeypatch):
+    monkeypatch.setattr(reader, "observe_modal_host_scope", lambda *, binding, **kwargs: (
+        binding.account_ref, binding.workspace_ref, binding.environment_ref, binding.client_ref
+    ))
+
+
 def test_terminal_reader_replays_new_stores_and_exposes_public_reads(tmp_path, monkeypatch):
     plan, context, events = _setup(tmp_path, monkeypatch)
     report = runner.run_modal_standalone_job(
