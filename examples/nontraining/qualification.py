@@ -347,6 +347,9 @@ class DataClients:
             deadline=self.deadline,
             **options,
         )
+        # SynthChat callers use this existing injected-client default when a
+        # stage does not supply a request-level token budget.
+        client.default_max_tokens = b["max_output_tokens"]
         return _BudgetClient(client, self)
 
 

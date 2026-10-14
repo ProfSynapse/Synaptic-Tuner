@@ -807,3 +807,113 @@ def test_actual_judge_services_openai_request_shapes(configured, monkeypatch):
     )
     judge.judge("fixture", [])
     assert "reasoning" not in payloads[1] and "temperature" not in payloads[1]
+
+
+@pytest.mark.parametrize("cap", [512, 4096])
+def test_real_public_stages_use_admitted_default_tokens(
+    configured, monkeypatch, tmp_path, cap
+):
+    from collections import deque
+
+    config, _, _ = configured
+    config["bounds"].update(max_calls=16, max_output_tokens=cap, duration_seconds=300)
+    config["provider"].update(backend="openai_responses", thinking_effort="none")
+    for name in ("generate", "improve"):
+        config["data"][name].update(backend="openai_responses", model="gpt-6-luna")
+    for request in config["evaluation"]["requests"]:
+        request.update(
+            backend="openai_responses",
+            case_limit=1,
+            model={"model_ref": "gpt-6-luna", "model_revision": "gpt-6-luna"},
+        )
+    validation = Path(config["data"]["config_dir"]) / "validation.yaml"
+    declaration = yaml.safe_load(validation.read_text())
+    declaration["llm"].update(improvement_max_tokens=cap, judge_max_tokens=cap)
+    validation.write_text(yaml.safe_dump(declaration))
+    rubrics = tmp_path / "external-rubrics"
+    rubrics.mkdir()
+    (rubrics / "quality.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "quality",
+                "description": "CPU synthetic fixture",
+                "scope": "response",
+                "pass_threshold": 0.8,
+                "judge_prompt": "Check {response}",
+                "output_schema": {
+                    "type": "object",
+                    "properties": {"quality_score": {"type": "number"}},
+                },
+            }
+        )
+    )
+    config["evaluation"]["judge"] = {
+        "model": {"model_ref": "gpt-6-luna", "model_revision": "gpt-6-luna"},
+        "rubrics_dir": str(rubrics),
+        "rubric_refs": ["quality"],
+        "config": {"max_tokens": cap, "temperature": None, "reasoning_effort": None},
+    }
+    paths = [Path(item["path"]) for item in config["inputs"]] + [
+        rubrics / "quality.yaml"
+    ]
+    config["inputs"] = [
+        {
+            "path": str(p),
+            "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+            "size_bytes": p.stat().st_size,
+        }
+        for p in paths
+    ]
+    chats = deque(
+        [
+            "bound system",
+            "bound user",
+            "initial",
+            json.dumps({"role": "assistant", "content": "generated revised"}),
+            json.dumps({"role": "assistant", "content": "improved revised"}),
+            "hello there",
+            "hello there",
+        ]
+    )
+    scores = deque([0.1, 0.95, 0.95, 0.1, 0.95, 0.95, 0.95, 0.95])
+    payloads = []
+
+    def http_double(url, payload, headers, **kwargs):
+        payloads.append(json.loads(json.dumps(payload)))
+        if "text" in payload:
+            value = scores.popleft()
+            text = json.dumps(
+                {
+                    "repair_score": value,
+                    "quality_score": value,
+                    "overall_feedback": "CPU fixture",
+                }
+            )
+        else:
+            text = chats.popleft()
+        return {
+            "output": [
+                {"type": "message", "content": [{"type": "output_text", "text": text}]}
+            ],
+            "usage": {"input_tokens": 3, "output_tokens": 5},
+        }
+
+    monkeypatch.setattr(
+        consumer.OpenAIResponsesClient, "_bounded_json_post", staticmethod(http_double)
+    )
+
+    class Secrets:
+        def resolve(self, ref):
+            return "test-only-key"
+
+    result = consumer.execute(consumer.validate_config(config), secrets=Secrets())
+    assert len(payloads) == 15 and not chats and not scores
+    assert all(item["max_output_tokens"] == cap for item in payloads)
+    assert all(item["model"] == "gpt-6-luna" for item in payloads)
+    assert payloads[0]["input"][-1]["content"] == "system"
+    assert "user" in payloads[1]["input"][-1]["content"]
+    assert "reply" in payloads[2]["input"][-1]["content"]
+    assert sum("text" in item for item in payloads) == 8
+    assert all(row["rows_written"] == 1 for row in result["data"])
+    assert len(result["evaluation"]) == 2
+    assert all(row["state"] == "found" for row in result["spend"])

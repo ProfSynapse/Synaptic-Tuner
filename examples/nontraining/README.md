@@ -96,3 +96,16 @@ provider option to `none`. External evaluation judges use their separate
 `evaluation.judge.config`: set both `reasoning_effort` and `temperature` to null
 to omit those parameters and use provider defaults; this does not request
 explicit reasoning effort `none` for that judge.
+
+The host sets the created client's existing `default_max_tokens` attribute from
+`bounds.max_output_tokens`. SynthChat system/user stages that omit a per-call
+budget therefore use that admitted default. Explicit stage, improvement and
+judge budgets must also fit the same ceiling; an oversized explicit budget is
+rejected before inner dispatch. Configuration files alone do not replace an
+injected client's default.
+
+If you use `python -m dotenv ... run -- ...` to load a named credential, its outer
+interpreter must contain python-dotenv's CLI dependency, Click (the `cli` extra).
+Importing `dotenv` alone does not prove the command is usable. A separate existing
+verified CLI interpreter may run dotenv while launching the unchanged installed
+engine interpreter; never shell-source credentials or print their values.
