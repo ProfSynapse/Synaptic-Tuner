@@ -541,3 +541,22 @@ def test_retained_snapshot_write_rejects_unreadable_document_before_create(tmp_p
     with pytest.raises(ValueError, match="readback bound"):
         consumer._write(target, {"too_large": "x" * (4 << 20)})
     assert not target.exists()
+
+
+def test_generated_public_artifact_tamper_stops_before_improvement(
+    configured, monkeypatch
+):
+    config, _, _ = configured
+    secrets, created, _, backend = install_clients(monkeypatch)
+    original = consumer._read
+    generated = Path(config["data"]["generate"]["output_ref"])
+
+    def read(path, maximum=4 << 20):
+        if Path(path) == generated:
+            generated.write_bytes(b"{}\n")
+        return original(path, maximum)
+
+    monkeypatch.setattr(consumer, "_read", read)
+    with pytest.raises(ValueError, match="generated artifact commitment mismatch"):
+        consumer.execute(config, secrets=secrets, backends={"openrouter": backend})
+    assert len(created) == 1 and not backend.opened

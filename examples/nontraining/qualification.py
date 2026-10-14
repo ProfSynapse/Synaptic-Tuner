@@ -570,6 +570,13 @@ def execute(config, *, clients=None, backends=None, judge=None, secrets=None):
             return readback(root)
         raw = _read(request.output_ref, 64 << 20)
         before = hashlib.sha256(raw).hexdigest()
+        published = [a for a in outcome.artifacts if a.role == "dataset_jsonl"]
+        if (
+            len(published) != 1
+            or published[0].sha256 != before
+            or published[0].size_bytes != len(raw)
+        ):
+            raise ValueError("generated artifact commitment mismatch")
         checked = data.validate(
             DatasetValidateRequest(config["project_ref"], request.output_ref)
         )
