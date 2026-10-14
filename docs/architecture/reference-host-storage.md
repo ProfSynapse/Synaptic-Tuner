@@ -165,3 +165,44 @@ terminal reads and no repeated transfer. This qualifies local record/ownership
 plumbing, not a concrete destination, durable artifact spool, live publication,
 network-filesystem locks or distributed ownership. Default reference artifact
 composition still has no publication destination; those adapters remain separate.
+
+
+## Optional local publication spool and destination
+
+`reference.local_publication` supplies `LocalArtifactSpoolV1`,
+`LocalPublicationDestinationV1` and `LocalDestinationRegistryV1` for the existing
+publication ports. The caller owns separate existing 0700 local POSIX spool and
+destination roots, configured role-to-relative-filename mappings, finite byte
+limits, an absolute monotonic deadline and the existing publication evidence key.
+No default destination or public root export is added.
+
+The spool retains directory and leaf descriptors and writes exclusive 0600 files.
+Its total-byte limit applies across its entire lifetime, including partial and
+aborted sinks, with at most 100 files and 100 publication directories. Each chunk
+is at most 1 MiB and is conservatively charged before the first write. An uncertain
+partial write permanently aborts that sink without refunding its reservation.
+Per-file limits remain independent. The destination's byte limits apply to each
+publication's exact source inventory; each publication has a fresh directory.
+
+The destination copies the already verified spool streams, verifies size/hash/EOF,
+fsyncs the files, then writes an exclusive authenticated receipt marker binding the
+original command and transfer ownership. Files, marker and directories are
+rechecked before returning. Missing, incomplete or invalid markers remain
+indeterminate. Lookup verifies the original authenticated marker and files without
+writing, adopting, overwriting or retransferring anything. Partial state is retained.
+
+Actual SQLite/public-operation tests kill a producer before and after that marker.
+The first fresh database opener uses the existing lookup-only recovery permit:
+without a marker it remains ambiguous; with the original valid marker it verifies
+without destination writes or source reopening. These tests use signed test-owned
+source bytes, not a composed verified RunsAPI source. That source join and any HF
+destination remain separate implementation/qualification nodes.
+
+Retained descriptors and named identity checks detect observed path replacement,
+symlinks, special files, ownership/permission changes, hardlinks and mutation during
+reads. Cold reads authenticate content rather than claiming a persisted inode
+attestation; a same-byte replacement is independently hash-verified. These checks
+are not an atomic filesystem transaction, security sandbox, network-filesystem
+qualification or physical I/O termination. Deadlines are cooperative and never
+reset; filesystem calls may themselves block. Local fsync is not remote durability
+or a live publication qualification claim.
