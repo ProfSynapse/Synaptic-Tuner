@@ -21,6 +21,23 @@ provider dispatch, log/evaluation capability or live qualification. The default
 recipe registry remains unchanged. Hosts must not fabricate a runtime release to
 produce a final packaged plan before runtime qualification.
 
+The fixed Modal parent worker can parse an exact signed GRPO dispatch and route
+it through the isolated GRPO executor. Native verification must succeed before
+it signs completion. The existing reader authenticates that completion and
+streams the exact five artifacts with bounded size and hash checks. GRPO does
+not accept SFT runner/evaluation callbacks, post-training evaluation or capture
+configuration through this route. Its trainer environment keeps the existing
+closed override policy; image PATH and the child's derived executable search
+path are separate from a dispatch override.
+
+The installed CPU control joins the actual owned child and native verifier to
+real HMAC completion and actual reader streams, using explicit ML/image/provider
+substitutes. Fresh reader objects preserve the original binding and key. This is
+not cold public-host SQLite recovery or provider/GPU qualification. Normal
+recipe/start integration and its retained Foundation assessment controls remain
+separate dependent work; no logs, cancellation or reconciliation capability is
+promoted by the fixed-worker routing node.
+
 Use the existing generic preparation service with explicit host-owned roots:
 
 ```python

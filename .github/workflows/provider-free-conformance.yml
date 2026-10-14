@@ -909,7 +909,10 @@ jobs:
                        "Trainers.grpo.runtime_v1", "tuner.training.packaged_grpo_compilation",
                        "tuner.runtime.offline_grpo_worker", "tuner.runtime.packaged_grpo_worker_closure",
                        "tuner.runtime.packaged_grpo_execution", "tuner.runtime.packaged_grpo_child",
-                       "tuner.runtime.packaged_grpo_verification", "tuner.runtime.packaged_sft_child"):
+                       "tuner.runtime.packaged_grpo_verification", "tuner.runtime.packaged_sft_child",
+                       "tuner.execution.providers.modal.packaged_dispatch",
+                       "tuner.execution.providers.modal.packaged_worker",
+                       "tuner.execution.providers.modal.packaged_reader"):
               location = Path(importlib.util.find_spec(name).origin).resolve()
               assert location.is_relative_to(prefix) and not location.is_relative_to(checkout), location
           from importlib.resources import files
@@ -954,12 +957,22 @@ jobs:
               "contract/test_grpo_training_input_v1.py",
               "trainers/grpo/test_packaged_artifacts.py",
               "trainers/grpo/test_runtime_v1.py",
+              "execution/fakes.py",
+              "execution/providers/test_modal_packaged_binding.py",
+              "execution/providers/test_modal_packaged_deployment.py",
+              "execution/providers/test_modal_packaged_dispatch.py",
+              "execution/providers/test_modal_packaged_grpo_routing.py",
+              "execution/providers/test_modal_packaged_worker.py",
+              "execution/providers/test_modal_sdk154_adapter.py",
+              "execution/providers/test_modal_source_resolution.py",
+              "execution/test_mutation_broker.py",
+              "training/test_modal_post_training_compilation.py",
           )
           for relative in helpers:
               target = root / "tests" / relative
               target.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(checkout / "tests" / relative, target)
-          for package in ("tests", "tests/training", "tests/runtime", "tests/trainers", "tests/trainers/sft", "tests/trainers/grpo", "tests/contract"):
+          for package in ("tests", "tests/training", "tests/runtime", "tests/trainers", "tests/trainers/sft", "tests/trainers/grpo", "tests/contract", "tests/execution", "tests/execution/providers"):
               (root / package / "__init__.py").touch()
           installed = Path(importlib.util.find_spec("tuner").origin).resolve().parent.parent
           (root / "schemas").mkdir()
@@ -978,7 +991,8 @@ jobs:
               str(root / "tests/runtime/test_packaged_grpo_compilation.py"),
               str(root / "tests/runtime/test_packaged_grpo_child.py"),
               str(root / "tests/runtime/test_packaged_grpo_native.py"),
-              str(root / "tests/trainers/grpo/test_packaged_artifacts.py")]))
+              str(root / "tests/trainers/grpo/test_packaged_artifacts.py"),
+              str(root / "tests/execution/providers/test_modal_packaged_grpo_routing.py")]))
           PYCODE
 
       - name: Exercise installed public evaluation comparison and report readers
