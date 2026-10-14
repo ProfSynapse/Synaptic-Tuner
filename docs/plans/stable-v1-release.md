@@ -1134,3 +1134,25 @@ passed the base consumer and the complete installed pinned-SDK HF lane: 52
 controls in 57.21 seconds. All three changed production modules match reviewed
 bytes in the wheel and installed package. All seven maintenance checks remain
 current without inventory or pin changes. No live provider effects occurred.
+
+### Metered Data, environment and evaluation joins
+
+Four installed CPU controls now join the public Data generate/improve/validate
+paths to an actual fixed local worker, controlled repair feedback and measured
+scripted LLM calls. Every generator, judge and improver call contributes to one
+spend record per run. Published artifacts retain their bytes and hashes through
+SQLite reopening after input/config removal. Missing usage keeps the affected
+run failed and its spend indeterminate. Separate controls compare two retained
+evaluation reports after reopening SQLite without opening a backend or grant;
+comparable scores do not erase accounting uncertainty.
+
+Independent source/CI review passed; root passed all four source tests in
+5.11 seconds. The unchanged accepted HF wheel
+`966568f4128eef2347deb97e74e1fd1d438118ff5b0159191a4ecac487a9cb38`
+passed the complete installed evaluation/report lane: 230 controls in
+5.75 seconds, including these four joins and explicit production-origin checks.
+No production or lock bytes changed. Skill mirrors are synchronized; the GRPO
+quick reference now distinguishes normal runner support from unproven live
+image/model qualification. These are scripted accounting and retained-read
+controls, not live account/model quality, lost-request recovery or restoration
+of an active worker. Paid evaluation judging remains a separate metering gap.

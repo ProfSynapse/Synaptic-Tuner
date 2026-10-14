@@ -68,3 +68,14 @@ are finite read limits, not filesystem-call deadlines or immutable dataset
 verification. LF, CRLF, bare CR and UTF-8 replacement decoding remain supported.
 Use the existing preparation workflow for immutable provenance/split identity
 before training; structural row validation does not establish that identity.
+
+## Public metered workflow evidence
+
+Installed CPU tests join Data generation and improvement with the fixed local
+worker, measured scripted judge/improver calls, one spend closure per run and
+SQLite retained readback after input removal. Missing usage remains
+indeterminate. These controls establish plumbing and accounting semantics;
+they do not qualify a live model/account, restore active requests or worker
+ownership, or publish structured Markdown. Public evaluation also compares
+retained measured reports without reopening a backend; accounting uncertainty
+can coexist with comparable scoring and is never repaired by comparison.
