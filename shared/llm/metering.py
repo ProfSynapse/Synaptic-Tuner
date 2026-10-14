@@ -18,6 +18,13 @@ from .base import BaseLLMClient
 from .usage import LLMCompletionV1, LLMStructuredV1, UsageAccumulator
 
 
+class MeteredCallRefused(RuntimeError):
+    """No further request is allowed after this run acquired unknown usage."""
+
+    def __init__(self) -> None:
+        super().__init__("metered_run_indeterminate")
+
+
 class MeteredLLMClient(BaseLLMClient):
     """A ``BaseLLMClient`` proxy that feeds every call's usage to an accumulator.
 
@@ -25,20 +32,27 @@ class MeteredLLMClient(BaseLLMClient):
     ``model_name``, provider-specific settings such as ``default_max_tokens``),
     so consumers that inspect the client see the real one. A call that raises
     counts as unmeasured: the request may have reached the provider, so a paid
-    run cannot claim its spend was zero.
+    run cannot claim its spend was zero. With ``stop_on_unknown=True``, later
+    requests sharing this accumulator are refused without counting another call.
+    The default preserves local clients that do not report usage.
     """
 
-    __slots__ = ("_inner", "_meter")
+    __slots__ = ("_inner", "_meter", "_stop_on_unknown")
 
-    def __init__(self, inner: object, meter: UsageAccumulator) -> None:
+    def __init__(self, inner: object, meter: UsageAccumulator, *, stop_on_unknown: bool = False) -> None:
         if not callable(getattr(inner, "chat", None)):
             raise TypeError("wrapped client must expose chat()")
         if type(meter) is not UsageAccumulator:
             raise TypeError("meter must be exact UsageAccumulator")
+        if type(stop_on_unknown) is not bool:
+            raise TypeError("stop_on_unknown must be exact bool")
+        object.__setattr__(self, "_stop_on_unknown", stop_on_unknown)
         object.__setattr__(self, "_inner", inner)
         object.__setattr__(self, "_meter", meter)
 
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.7, max_tokens: int = 1024, **kwargs) -> LLMCompletionV1:
+        if self._stop_on_unknown and self._meter.indeterminate:
+            raise MeteredCallRefused()
         try:
             completion = self._inner.chat(messages, temperature=temperature, max_tokens=max_tokens, **kwargs)
         except BaseException:
@@ -59,6 +73,8 @@ class MeteredLLMClient(BaseLLMClient):
         max_tokens: Optional[int] = None,
         **kwargs,
     ) -> LLMStructuredV1:
+        if self._stop_on_unknown and self._meter.indeterminate:
+            raise MeteredCallRefused()
         try:
             result = self._inner.structured_output(
                 messages, schema, temperature=temperature, max_tokens=max_tokens, **kwargs
@@ -93,4 +109,4 @@ class MeteredLLMClient(BaseLLMClient):
         setattr(self._inner, name, value)
 
 
-__all__ = ["MeteredLLMClient"]
+__all__ = ["MeteredLLMClient", "MeteredCallRefused"]
