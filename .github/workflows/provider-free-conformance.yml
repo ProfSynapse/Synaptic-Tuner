@@ -11,6 +11,8 @@ on:
       - "tuner/execution/providers/hf_jobs_provider_v1/**"
       - "tests/execution/providers/test_hf_jobs_public_family.py"
       - "tests/execution/providers/test_hf_jobs_public_lifecycle.py"
+      - "tests/execution/providers/test_hf_jobs_retained_reader.py"
+      - "tests/execution/providers/test_hf_jobs_process_readback.py"
       - "tests/execution/providers/test_hf_pinned_model_snapshot.py"
       - "Trainers/runtime_profiles/**"
       - "Trainers/image_profiles/qwen35_4b_conversation_sft_candidate_v1/**"
@@ -1167,7 +1169,7 @@ jobs:
           import huggingface_hub
           assert huggingface_hub.__version__ == "1.33.0"
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for name in ("model", "preparation", "transport", "bootstrap", "source_worker", "reader", "composition"):
+          for name in ("model", "preparation", "transport", "bootstrap", "source_worker", "reader", "composition", "retained_reader"):
               module = importlib.import_module("tuner.execution.providers.hf_jobs_provider_v1." + name)
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
@@ -1181,6 +1183,8 @@ jobs:
           for name in (
               "execution/providers/test_hf_jobs_public_family.py",
               "execution/providers/test_hf_jobs_public_lifecycle.py",
+              "execution/providers/test_hf_jobs_retained_reader.py",
+              "execution/providers/test_hf_jobs_process_readback.py",
               "training/test_sft_compilation.py",
               "runtime/test_artifact_verification.py",
           ):
@@ -1196,7 +1200,9 @@ jobs:
           os.chdir(root)
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
               str(root / "tests/execution/providers/test_hf_jobs_public_family.py"),
-              str(root / "tests/execution/providers/test_hf_jobs_public_lifecycle.py")]))
+              str(root / "tests/execution/providers/test_hf_jobs_public_lifecycle.py"),
+              str(root / "tests/execution/providers/test_hf_jobs_retained_reader.py"),
+              str(root / "tests/execution/providers/test_hf_jobs_process_readback.py")]))
           PYCODE
 
       - name: Exercise installed model preparation with the candidate image Hub SDK
