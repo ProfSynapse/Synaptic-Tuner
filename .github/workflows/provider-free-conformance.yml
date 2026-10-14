@@ -989,6 +989,8 @@ jobs:
               "training/test_modal_grpo_recipe.py",
               "training/test_modal_standalone_runner.py",
               "training/test_modal_grpo_standalone_runner.py",
+              "training/test_modal_process_restart.py",
+              "training/test_modal_grpo_process_restart.py",
           )
           for relative in helpers:
               target = root / "tests" / relative
@@ -1023,7 +1025,9 @@ jobs:
               str(root / "tests/runtime/test_packaged_cpu_methods.py"),
               str(root / "tests/runtime/test_packaged_training_worker.py"),
               str(root / "tests/execution/providers/test_modal_grpo_cpu_qualification.py"),
-              str(root / "tests/training/test_modal_grpo_standalone_runner.py")]))
+              str(root / "tests/training/test_modal_grpo_standalone_runner.py"),
+              str(root / "tests/training/test_modal_process_restart.py"),
+              str(root / "tests/training/test_modal_grpo_process_restart.py")]))
           PYCODE
 
       - name: Exercise installed bounded GRPO evidence with pinned CPU Torch
