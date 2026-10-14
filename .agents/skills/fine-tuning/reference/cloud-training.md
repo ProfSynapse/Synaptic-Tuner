@@ -19,9 +19,9 @@ current cancel-only authorization while preserving the original submit
 commitments. Exact SDK acknowledgment is retained once; a lost reply remains
 indeterminate and cannot issue another cancel. Provider terminal observations
 preserve natural completion or failure and do not prove physical shutdown or
-causal cancellation. The SQLite tests reopen stores with the original
-preparation object; source-free fresh-process host reconstruction and live
-qualification remain separate gates.
+causal cancellation. A separate configured, source-free known-run lifecycle
+candidate now has actual fresh-process conformance tests as described below;
+live qualification remains a separate gate.
 
 The protected HF source/bootstrap lane and the older `cloud-run`,
 `cloud-pipeline`, and experiment commands documented below are legacy or
@@ -876,3 +876,48 @@ history. The provider/image/trainer boundaries are explicit test doubles; actual
 bootstrap/source-worker custody, Foundation/history and native verifier remain
 real. This is known-job host reconstruction evidence, not live HF recovery, GPU
 training, cancellation causal proof or permission to replay an uncertain effect.
+
+### Configured source-free HF cancellation candidate
+
+The host-owned HF consumer accepts optional exact boolean
+`hf_jobs.allow_cancel_reconcile`, default `false`. When enabled before the
+original preview/plan, genuine `HFJobsPreparation` commits the paired cancel and
+reconcile capabilities into the original descriptor/context. The template stays
+disabled. A historical false descriptor cannot be replaced or promoted after
+restart. This is an unqualified candidate, not live cancellation parity.
+
+The separate private `open_retained_hf_lifecycle` accepts the original host
+store/stream, authority, clock, named secrets and grant ports. It authenticates
+the original known submit, descriptor, preparation, request, assessment and
+current Foundation before allowing the existing public `RunsAPI.cancel` and
+`reconcile`. It returns no TrainingAPI and cannot stage, submit, restore a source
+lease or recreate execution inputs. `open_retained_hf_runs` remains categorically
+read-only even for an originally enabled descriptor. Logs and reverify stay
+unavailable on both views.
+
+Current cancellation permission is explicit and distinct from capability
+selection: the host's existing allowed requirements must include
+`training.cancel` with `paid_effect: false` and null cost/currency. This requirement
+does not assert free operation or immediate cessation of job billing. The shared
+consumer retains the initial configuration and routes its existing `cancel` and
+`reconcile` actions through the source-free view; no new provider-specific verb
+or grant service is added. The original submit assessment and expiry are never
+renewed. All records/catalogs/signing remain on the owning thread; the configured
+finite transport deadline bounds provider waits, not synchronous host callbacks.
+
+Only a durably retained exact SDK acknowledgment yields cancellation `FOUND`
+and `cancel_requested`; it does not yield `cancelled`. A missing acknowledgment
+or failed receipt write remains consumed and indeterminate. Lookup of an already
+persisted exact receipt can settle Foundation without another cancel request;
+absence cannot authorize replay. Actual terminal observation may settle an
+uncertain cancellation while retaining its original intent/history. Natural
+completion remains success, with the existing native artifact verification.
+
+Pinned-SDK CPU tests kill a genuine configured producer and use fresh processes
+with the first SQLite open after death, original keys/records and no source,
+input, preparation or model-cache files. They cover acknowledgment, lost reply,
+receipt faults, no second cancel, independent terminal status and five native
+downloads. Real shared-consumer grants also refuse missing current permission;
+unknown submissions, wrong keys and changed provider bindings remain closed.
+SDK/image/ML boundaries are explicit doubles: no live stop/quiescence, GPU,
+model quality, image qualification or universal recovery claim is made.
