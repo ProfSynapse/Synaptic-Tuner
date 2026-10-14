@@ -6,15 +6,15 @@ Group Relative Policy Optimization — optimizes model behavior using reward fun
 
 The provider-neutral `TrainingInputV1` accepts explicit method `grpo` with
 `synaptic-grpo-hyperparameters/v1` and rewards `{items, documents, schema}`.
-This lane supports **CPU preparation, pure compilation and gated host planning**.
-It does not enable public provider execution, establish model/image compatibility,
-or qualify GRPO training. The legacy trainer commands below remain separate. The generic Modal private-copy
+This lane supports **CPU preparation, compilation and the ordinary Modal runner
+join for an explicitly compatible host-supplied profile**. It does not establish
+model/image compatibility or qualify GRPO training. The legacy trainer commands below remain separate. The generic Modal private-copy
 helper can preserve an already verified GRPO prompt publication through these
 ports. A strict normal Modal recipe can report a core-only preplan when the host
 supplies an explicitly compatible named GRPO profile; no ordinary candidate
 profile/image is shipped or qualified yet. Missing or incompatible profiles reject.
-Ordinary GRPO execution, CPU qualification and provider quotation remain disabled
-before bootstrap in this integration slice.
+Ordinary execution and CPU qualification use the normal pinned host path.
+Provider quotation and metrics qualification remain refused for GRPO.
 
 The host material boundary can also validate an explicitly supplied packaged GRPO
 configuration against the exact G1 core, original public `TrainingInputV1`, actual
@@ -38,10 +38,10 @@ path are separate from a dispatch override.
 The installed CPU control joins the actual owned child and native verifier to
 real HMAC completion and actual reader streams, using explicit ML/image/provider
 substitutes. Fresh reader objects preserve the original binding and key. This is
-not cold public-host SQLite recovery or provider/GPU qualification. Normal
-start integration and its retained Foundation assessment controls remain
-separate dependent work; no logs, cancellation or reconciliation capability is
-promoted by the fixed-worker routing node.
+not cold public-host SQLite recovery or provider/GPU qualification. The ordinary
+runner now joins this worker through its actual CPU qualification receipt and
+public TrainingAPI. No logs, cancellation or reconciliation capability is
+promoted by that join.
 
 For the existing `train --job-config <recipe> --plan --json` surface, a GRPO recipe
 uses `target: cloud`, `provider: modal`, `method: grpo`,
@@ -57,7 +57,7 @@ this initial recipe scope.
 Planning checks the actual original JSONL bytes through the existing bounded
 same-descriptor publication inspector and core admission. It reports only the
 core fingerprint, immutable prepared identity, named build intent and child limit,
-with an explicit unsupported execution status; it cannot report the final wrapped
+with an explicit runtime-binding-and-CPU-qualification-required status; it cannot report the final wrapped
 workload/configuration digest before an actual release exists. The existing
 `--prepare-local` mode remains local source-wheel/bootstrap preparation, subject
 to the normal pinned launcher and accepted engine source requirements.
@@ -69,8 +69,9 @@ inputs. Keep those local inputs open through final binding. CPU tests use explic
 synthetic host profile/runtime observations and a scripted wheel builder, then the
 real public load/resolve/plan/preflight and SQLite planning-store close/reopen.
 This proves saved plan/context readback only, not a restored provider host,
-training resume or a working model/image. Existing normal execute/qualify gates
-remain closed until the full provider composition is accepted.
+training resume or a working model/image. The normal runner retains these exact
+local inputs through the actual CPU check and final binding, then uses public
+prepare/load/resolve/plan/preflight/start and native-verified signed readback.
 
 The existing internal CPU self-check selects SFT or GRPO only from the exact
 validated release contracts. It verifies the corresponding fixed worker closure,
@@ -83,9 +84,20 @@ Source controls use private test-owned captures of the same fixed member lists
 and explicit package/image/device-namespace observations. The parent and real
 isolated child retain actual environment, sealed-FD, private-root, selected import
 guard and trainer-source checks. These controls do not prove container isolation,
-GPU image compatibility or training. They do not enable ordinary GRPO runner
-qualification/start: joining the normal runner to an actual CPU receipt and cold
-public-host recovery remains separate work.
+GPU image compatibility or training. The installed runner join uses the actual
+CPU child, signed qualification receipt/operator readback, public lifecycle,
+owned isolated trainer, native verification, and signed five-artifact streaming.
+Its deterministic provider/image/ML observations remain explicit test substitutes.
+The same `train --job-config <recipe>` surface executes the joined path; `--qualify`
+reports CPU-only evidence under `synaptic-modal-grpo-cpu-qualification/v1`, and a
+successful ordinary run reports `synaptic-modal-grpo-run-result/v1`. The normal
+pinned 3.11.14 launcher, clean source and named compatible profile are still
+required. The first executor requires equal model/tokenizer revisions and does
+not rewrite an unsupported selection. A corrupted CPU receipt stops before
+training; a lost submission reply preserves the consumed claim and uncertain
+workflow, even if the scripted provider completed. Cold public-host/fresh-process
+GRPO recovery and live image/model qualification remain separate acceptance
+steps. No new GRPO candidate profile is shipped by this runner join.
 
 Use the existing generic preparation service with explicit host-owned roots:
 
