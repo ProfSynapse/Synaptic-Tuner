@@ -183,5 +183,5 @@ exact `synaptic-packaged-grpo-workload/v1` contract revalidated by the existing
 pure GRPO compiler. Preserve the original workload bytes, configured model and
 pinned revisions, disjoint archive validation and five native roles; never rewrite
 GRPO into SFT. Its parser adds five explicitly reviewed source members to the
-inference closure (119 to124); runtime/dependency/image pins are unchanged. A source
+inference closure (119 to 124); runtime/dependency/image pins are unchanged. A source
 inventory update is not live inference-image qualification.
