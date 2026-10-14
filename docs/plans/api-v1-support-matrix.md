@@ -7,9 +7,12 @@ updated: 2026-10-14
 # API v1 support and qualification matrix
 
 This is the current support view of the locally accepted preparation stack
-through PR #236 plus the source-archive correction on 2026-10-14, not a stable
-release certification. Main is `db2459a6` through merged PR #234; PRs #235–236
-and the archive correction still await exact CI/merge.
+through merged PR #237 plus installed-accepted HF publication #238 and launcher
+closure #239 on 2026-10-14, not a stable release certification. Main is
+`e915e105` through #237; #238–239 exact CI/merge remains pending. Configured cold
+HF cancellation passed 133 installed HF controls and 163 paired installed Modal
+controls on fresh-wheel source `5c8542f2`; these are overlapping lane totals,
+not additional unique-test counts. GRPO publication is not accepted.
 `df166a75` in the frontmatter is the historical matrix baseline. The
 [stable release plan](stable-v1-release.md) retains current acceptance and exact
 dated source/wheel evidence. SFT requires Docker, Modal and HF Jobs live parity;
@@ -50,8 +53,8 @@ Status vocabulary:
 | Evaluation: reports/comparison | Installed public retained-report comparison and SQLite readback | Signed run/role bindings and consumed input/scoring/generation controls determine comparability. Missing/external judge/environment provenance remains unverified; comparison does not settle unknown spend. The 337 installed lane includes actual public comparison/renderer/consumer joins. This is configuration provenance and mechanical score comparison, not remote model or quality attestation. |
 | Evaluation: progress/cancel/restart | Stored lifecycle/progress/cancel state and cold result/report reads | Retained reports read/compare without reopening backends. Interrupted active work remains truthful and non-replayable; no mid-case continuation or forced in-flight HTTP termination is claimed. Advertised real backend cancellation/recovery still needs qualification. |
 | Artifacts: run inventory/verified download | Installed public native verification/stream/download; historical exact-source Modal live proof | Ordinary Docker/HF consumer lanes pass 61/80 controls and the native/local join passes 73. Original role/hash/size plus chunk/EOF bounds are enforced. Historical live five-file proof does not qualify the final source on all providers. |
-| Artifacts: destinations/publish/verify | Optional installed durable local destination/source composition; default registry remains empty | Caller supplies original publication authority and existing stores/spool/registry. Local exclusive files and authenticated marker are implemented; source join uses trusted RunsAPI stored verified manifests and actual public streams. Usable HF model-repository publication remains an implementation and live gate. |
-| Artifacts: restart/ambiguous publication | Installed local actual-process marker lookup recovery | Real killed-publisher/first-new-SQLite-opener controls verify original markers without source streams or new writes; incomplete markers stay ambiguous, never absent/retry authority. HF expected-parent/owned immutable snapshot reconciliation remains separate; bucket progress is not final model publication. |
+| Artifacts: destinations/publish/verify | Optional installed durable local destination/source composition; default registry remains empty | Caller supplies original publication authority and existing stores/spool/registry. Local exclusive files and authenticated marker are implemented; source join uses trusted RunsAPI stored verified manifests and actual public streams. Optional HF SFT model-repository publication passed 115 installed controls with parent CAS and verified native/rendered snapshots; live destination/account qualification remains open. GRPO renderer integration is not accepted. |
+| Artifacts: restart/ambiguous publication | Installed local actual-process marker lookup recovery | Real killed-publisher/first-new-SQLite-opener controls verify original markers without source streams or new writes; incomplete markers stay ambiguous, never absent/retry authority. HF installed process-loss lookup also verifies original signed ownership and exact native/rendered immutable snapshots without another commit. It does not establish an introducing commit or RPC causality after an unknown reply; bucket progress is not final model publication. |
 | Host record/stream storage | Optional caller-owned SQLite plus atomic heads/history and retained catalogs | Data/Evaluation/Pipeline/training stores preserve exact claims/plans/history; local publication adds retained OS ownership. [Host storage](../architecture/reference-host-storage.md) states cold prerequisites. Storage does not recreate credentials, active worker/source lease or remote continuation authority. |
 
 ## Training provider and lifecycle matrix
@@ -64,7 +67,7 @@ Status vocabulary:
 | SFT Modal start/observe/verified artifacts | Implemented plus bounded exact-source live qualification | Historical native and restricted GPU pair verify reviewed runs; they do not establish final stable candidate or every recipe. Exact runtime/launcher/profile and source pins remain required. |
 | SFT Modal logs | Conditional implemented gate plus bounded CPU transport qualification | Generic preparation descriptor has logs false. Supported host composition enables logs only with exact matching reader-issued CPU probe proof and durable capture. Historical success/JSON cannot mint new authority. |
 | SFT Modal cancel/reconcile/cost quote | One-shot internal machinery; ordinary default flags remain off | Explicit qualified profile/current-cancel policy is required; logs/quote/cancel/reconcile are not promoted by historical or CPU fixture success. Known terminal observations can progress after uncertain cancellation without fabricating acknowledgment. Real final-source lifecycle parity remains open. |
-| SFT HF Jobs public API v1 | Installed ordinary public host/consumer and source-free known-job reader | Pinned host Hub 1.33/model helper 1.32; exact request/job/mount/secret-ref/native bindings. Initial lane uses prepared v1 ≤2 MiB and exactly five final roles without checkpoints. Warm cancel/reconcile machinery retains ACK-only receipts and defaults off; configuration-candidate audit/possible work remains before a qualified advertised route. Source-free cold view denies cancel/reconcile/logs/reverify. Live SFT/cancel/recovery qualification remains open; protected lane stays separate. |
+| SFT HF Jobs public API v1 | Installed ordinary public host/consumer and source-free known-job reader | Pinned host Hub 1.33/model helper 1.32; exact request/job/mount/secret-ref/native bindings. Initial lane uses prepared v1 ≤2 MiB and exactly five final roles without checkpoints. Warm ACK-only cancellation defaults off. Configured source-free known-job cancellation/reconciliation passed 133 installed HF controls and 163 paired installed Modal controls on `5c8542f2` (overlapping totals); descriptor opt-in must precede the original plan and current permission is checked. The original read-only opener still denies cancel/reconcile/logs/reverify. Unknown submissions are not adopted and missing acknowledgments never become cancellation receipts. Live SFT/cancel/recovery qualification remains open; protected lane stays separate. |
 | GRPO Modal public training route | Installed explicit compiler/preparation, isolated child/native verification, normal runner and known-run reads | Default method registry remains SFT-only; GRPO is explicitly selected. Captured SmolLM candidate retains actual 396-distribution base and passed 256 installed controls. The augmented image/model/GPU route remains unqualified; native completion and changed/grouped-variation evidence are separate, with inconclusive results preserved. |
 | Training restart/recovery, all providers | Bounded retained known-run/status/artifact recovery and no uncertain replay | Actual process-loss proofs preserve original host keys/material/catalogs and scripted provider inputs. Modal/HF known-job read views avoid original source/preparation; Docker keeps its explicit cold dependencies. Unknown submissions are not adopted. This is not arbitrary checkpoint continuation, and live three-provider recovery/cancellation parity remains open. |
 
@@ -144,3 +147,14 @@ their uncertainty and cannot be replayed or falsely terminalized. The fixed work
 after confirmed child exit. Pre-handoff owner loss, guardian/machine loss and
 unconfirmed cleanup stay outside that guarantee; no durable controller or row
 continuation is reconstructed from a PID.
+
+### Latest local preparation checkpoint
+
+The launcher closure now contains 40 exact hashed dependencies; the engine wheel
+makes 41 installed distributions and `pip check` passes. Eleven source dependency
+controls and 163 installed Modal controls are accepted. Actual private attempt C
+on exact `439608b6` used genuine host Git/engine gitlink and the existing four-row
+preparation service, then passed normal `--plan` and `--prepare-local` with a real
+source wheel and nine bootstrap wheels. It resolved the former archive/dependency
+setup defects without model downloads or provider effects. It does not qualify
+the augmented image, GPU/model route or a later final source.

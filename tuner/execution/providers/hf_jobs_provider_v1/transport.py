@@ -171,6 +171,7 @@ class HFJobsTransport:
         self.parent_inventory = {"members": members}
         self._cancel_access = None
         self._read_material = None
+        self._retained_cancellation = False
 
     @classmethod
     def for_retained_read(
@@ -209,10 +210,22 @@ class HFJobsTransport:
         value.scratch_root, value.deadline_seconds = root, deadline_seconds
         value._scratch_identity = (info.st_dev, info.st_ino)
         value._cancel_access = None
+        value._retained_cancellation = False
         return value
 
-    def _mutation(self):
-        if self._read_material is not None:
+    @classmethod
+    def for_retained_cancellation(cls, **kwargs):
+        value = cls.for_retained_read(**kwargs)
+        capabilities = value._read_material["descriptor"].capabilities
+        if capabilities.cancel is not True or capabilities.reconcile is not True:
+            raise HFJobsError("capability_unavailable")
+        value._retained_cancellation = True
+        return value
+
+    def _mutation(self, kind=None):
+        if self._read_material is not None and not (
+            self._retained_cancellation and kind is EffectKind.CANCEL
+        ):
             raise HFJobsError("capability_unavailable")
 
     @property
@@ -236,7 +249,7 @@ class HFJobsTransport:
         return self._secret(SecretRef.from_dict(self._read_selection()["host_token"]))
 
     def bind_cancel_access(self, access):
-        self._mutation()
+        self._mutation(EffectKind.CANCEL)
         if self._cancel_access is not None or not callable(access):
             raise HFJobsError("input_invalid")
         self._cancel_access = access
@@ -527,6 +540,19 @@ class HFJobsTransport:
     def _validate(self, command, kind):
         if self._read_material is not None:
             rebuilt = parse_exact_command(command.canonical_bytes)
+            if self._retained_cancellation and kind is EffectKind.CANCEL:
+                from tuner.execution.foundation_v2.commands import CancelCommandV2
+                from tuner.execution.foundation_v2.commands import CanonicalProviderPayloadV1
+
+                if (type(rebuilt) is not CancelCommandV2
+                        or rebuilt.canonical_bytes != command.canonical_bytes
+                        or command.preparation != self._submit_command.preparation
+                        or command.executor != self._submit_command.executor
+                        or command.payload != CanonicalProviderPayloadV1.build(
+                            "hf_jobs", "cancel-payload/v2",
+                            self._read_material["workload"].fingerprint)):
+                    raise HFJobsError("binding_mismatch")
+                return self._cancel_target(command)
             if (
                 kind is not EffectKind.SUBMIT
                 or rebuilt.canonical_bytes != self._submit_command.canonical_bytes
@@ -591,7 +617,7 @@ class HFJobsTransport:
         The absolute deadline bounds provider work, not synchronous host store
         callbacks. A late provider thread cannot write the owning-thread journal.
         """
-        self._mutation()
+        self._mutation(EffectKind.CANCEL)
         submit, receipt = self._validate(command, EffectKind.CANCEL)
         retained = self._cancel_receipt(command, submit, receipt["job_id"])
         if retained is not None:
@@ -600,14 +626,14 @@ class HFJobsTransport:
         phase, _ = self.observe(submit.digest, deadline=deadline)
         if phase == "DELETED":
             raise HFJobsError("read_unavailable")
-        token = self._secret(self.selection.host_token)
+        token = self._read_token()
         self._claim(command)
         acknowledged = _bounded(lambda: self.api.cancel_job(job_id=receipt["job_id"],
-            namespace=self.selection.scope.namespace_ref, token=token), deadline)
+            namespace=self._read_selection()["scope"]["namespace_ref"], token=token), deadline)
         if acknowledged is not None:
             raise HFJobsError("read_unavailable")
         value = {"schema_version": "synaptic-hf-cancel-receipt/v1",
-            "command_digest": command.digest, "material_digest": self.preparation.material_digest,
+            "command_digest": command.digest, "material_digest": self.material_digest,
             "submit_command_digest": submit.digest, "job_id": receipt["job_id"],
             "reason_digest": command.to_dict()["cancellation"]["reason_digest"],
             "acknowledged": True}
@@ -615,8 +641,8 @@ class HFJobsTransport:
 
     def lookup(self, command):
         """Read retained exact receipts only; absence never permits replay."""
-        self._mutation()
         kind = command.operation.effect.kind
+        self._mutation(kind)
         target = self._validate(command, kind)
         if kind is EffectKind.CANCEL:
             submit, receipt = target

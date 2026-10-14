@@ -13,7 +13,8 @@ import secrets
 from dataclasses import dataclass, field
 from threading import RLock
 
-from synaptic_tuner.api.v1.execution import AuthorizationRequirement, ExecutionGrant
+from synaptic_tuner.api.v1.execution import ExecutionGrant
+from synaptic_tuner.api.v1.training_facade import AuthorizationRequirement
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from tuner.execution.coordinator_v1.model import (
     AuthenticatedFoundationRecordAssessmentV1, FoundationDispositionV1,

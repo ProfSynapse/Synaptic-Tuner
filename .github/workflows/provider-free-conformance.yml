@@ -13,6 +13,7 @@ on:
       - "tests/execution/providers/test_hf_jobs_public_lifecycle.py"
       - "tests/execution/providers/test_hf_jobs_retained_reader.py"
       - "tests/execution/providers/test_hf_jobs_process_readback.py"
+      - "tests/execution/providers/test_hf_jobs_cold_cancellation.py"
       - "tests/execution/providers/test_hf_pinned_model_snapshot.py"
       - "Trainers/runtime_profiles/**"
       - "Trainers/image_profiles/smollm2_135m_packaged_grpo_candidate_v1/**"
@@ -1261,7 +1262,9 @@ jobs:
                        "synaptic_tuner.api.v1.reference.hf_publication",
                        "synaptic_tuner.api.v1.reference.local_publication",
                        "synaptic_tuner.api.v1.reference.publication_sources",
-                       "tuner.inference.retrieved_model"):
+                       "tuner.inference.retrieved_model",
+                       "synaptic_tuner.api.v1.reference.training",
+                       "tuner.training.modal_host_effects"):
               location = Path(importlib.import_module(name).__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -1283,6 +1286,7 @@ jobs:
               "execution/providers/docker_provider_v1/conftest.py",
               "execution/providers/docker_provider_v1/test_local_source.py",
               "execution/providers/docker_provider_v1/test_preparation.py",
+              "execution/providers/test_hf_jobs_cold_cancellation.py",
               "training/test_sft_compilation.py",
               "runtime/test_artifact_verification.py",
           ):
@@ -1308,6 +1312,7 @@ jobs:
               str(root / "tests/execution/providers/test_hf_jobs_public_lifecycle.py"),
               str(root / "tests/execution/providers/test_hf_jobs_retained_reader.py"),
               str(root / "tests/execution/providers/test_hf_jobs_process_readback.py"),
+              str(root / "tests/execution/providers/test_hf_jobs_cold_cancellation.py"),
               str(root / "tests/examples/test_hf_training_qualification.py"),
               str(root / "tests/training/test_hf_model_publication.py")]))
           PYCODE

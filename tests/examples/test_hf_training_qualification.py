@@ -228,8 +228,11 @@ def test_changed_inputs_refuse_before_secrets_or_sdk(configured, tmp_path, chang
     assert material.provider.calls == []
 
 
-def test_unknown_submit_never_adopted_by_cold_reader(configured, tmp_path):
+@pytest.mark.parametrize("cancel_enabled", [False, True])
+def test_unknown_submit_never_adopted_by_cold_reader(configured, tmp_path, cancel_enabled):
     config, material = configured
+    if cancel_enabled:
+        config["hf_jobs"]["allow_cancel_reconcile"] = True
     config["run"] = adapter.preview(config)["run"]
     root = tmp_path / "state"
     root.mkdir(mode=0o700)
@@ -272,8 +275,11 @@ def test_unknown_submit_never_adopted_by_cold_reader(configured, tmp_path):
     assert len([item for item in material.provider.calls if item[0] == "submit"]) == 1
 
 
-def test_cold_wrong_original_key_rejects_without_provider(configured, tmp_path):
+@pytest.mark.parametrize("cancel_enabled", [False, True])
+def test_cold_wrong_original_key_rejects_without_provider(configured, tmp_path, cancel_enabled):
     config, material = configured
+    if cancel_enabled:
+        config["hf_jobs"]["allow_cancel_reconcile"] = True
     config["run"] = adapter.preview(config)["run"]
     root = tmp_path / "state"
     root.mkdir(mode=0o700)
@@ -307,7 +313,8 @@ def test_cold_wrong_original_key_rejects_without_provider(configured, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "field,value", [("read_seconds", True), ("reader_key_ref", "")]
+    "field,value", [("read_seconds", True), ("reader_key_ref", ""),
+                    ("allow_cancel_reconcile", 1)]
 )
 def test_metadata_refuses_before_secret_resolution(configured, tmp_path, field, value):
     config, material = configured
@@ -336,13 +343,16 @@ def test_metadata_refuses_before_secret_resolution(configured, tmp_path, field, 
     assert material.provider.calls == []
 
 
+@pytest.mark.parametrize("cancel_enabled,cancel_permission", [(False, False), (True, True), (True, False)])
 def test_shared_launch_real_host_ports_and_cold_known_native_five(
-    configured, tmp_path, monkeypatch
+    configured, tmp_path, monkeypatch, cancel_enabled, cancel_permission
 ):
     """Real consumer retention/grants/secrets/SQLite; only SDK boundary scripted."""
     import os
 
     config, material = configured
+    if cancel_enabled:
+        config["hf_jobs"]["allow_cancel_reconcile"] = True
     shared_path = Path(
         os.environ.get(
             "SYNAPTIC_TEST_TRAINING_QUALIFICATION_LAUNCH",
@@ -368,6 +378,10 @@ def test_shared_launch_real_host_ports_and_cold_known_native_five(
         ],
     )
     from synaptic_tuner.api.v1.secrets import SecretRef
+    if cancel_permission:
+        from synaptic_tuner.api.v1.training_facade import AuthorizationRequirement
+        config["host"]["allowed_requirements"].append(
+            AuthorizationRequirement("training.cancel", False).to_dict())
 
     for name in ("AUTHORITY", "READER", "HOST_TOKEN", "JOB_TOKEN"):
         monkeypatch.setenv(name, Secrets().resolve(SecretRef("env", name)))
@@ -391,13 +405,30 @@ def test_shared_launch_real_host_ports_and_cold_known_native_five(
     with adapter._preparation(retained, Clock()) as (prep, _, _):
         values = _native_values(prep)
         material.preparation = prep
-        _complete(material, values)
     for item in (
         config["request_file"],
         config["hf_jobs"]["material_file"],
         config["hf_jobs"]["prepared_file"],
     ):
         Path(item["path"]).unlink()
+    if cancel_enabled:
+        from tests.execution.providers.test_hf_jobs_public_lifecycle import cancellation
+        cancellation(material)
+        if not cancel_permission:
+            from synaptic_tuner.api.v1.runs_facade import RunOperationError
+            with pytest.raises(RunOperationError):
+                shared.known(retained, "cancel", reason="current permission missing",
+                             adapter=adapter, adapter_options=options)
+            assert not [item for item in material.provider.calls if item[0] == "cancel"]
+            assert len([item for item in material.provider.calls if item[0] == "submit"]) == 1
+            return
+        canceled = shared.known(
+            retained, "cancel", reason="bounded consumer cancellation",
+            adapter=adapter, adapter_options=options)
+        assert canceled["state"] == "cancel_requested"
+        shared.known(retained, "reconcile", adapter=adapter, adapter_options=options)
+        assert len([item for item in material.provider.calls if item[0] == "cancel"]) == 1
+    _complete(material, values)
     assert (
         shared.known(retained, "observe", adapter=adapter, adapter_options=options)[
             "state"

@@ -40,7 +40,7 @@ class _BoundGrants:
         self.transport._validate(command, command.operation.effect.kind)
         permitted = self.delegate.bind(grant, operation=operation, requirements=requirements)
         raw = document_bytes({"schema_version": "synaptic-hf-command-catalog/v1",
-            "command_digest": command.digest, "material_digest": self.transport.preparation.material_digest,
+            "command_digest": command.digest, "material_digest": self.transport.material_digest,
             "command_base64": base64.b64encode(command.canonical_bytes).decode("ascii")})
         if self.transport.records.put_if_absent(partition="effects",
             key=self.transport._key("command", command.digest), canonical=raw) is not True:
@@ -52,12 +52,12 @@ class _Executor:
     effect_kinds = ("stage", "submit", "cancel")
     payload_schemas = ("stage-payload/v2", "submit-payload/v2", "cancel-payload/v2")
 
-    def __init__(self, preparation, transport, clock):
+    def __init__(self, preparation, transport, clock, *, descriptor=None):
         self.preparation, self.transport, self.clock = preparation, transport, clock
-        self.descriptor = preparation.executor
-        s = preparation.selection
-        self.provider_id, self.profile_ref = s.provider.provider_id, s.provider.profile_ref
-        self.account_ref, self.namespace_ref = s.scope.account_ref, s.scope.namespace_ref
+        self.descriptor = preparation.executor if descriptor is None else descriptor
+        s = transport._read_selection()
+        self.provider_id, self.profile_ref = s["provider"]["provider_id"], s["provider"]["profile_ref"]
+        self.account_ref, self.namespace_ref = s["scope"]["account_ref"], s["scope"]["namespace_ref"]
 
     def execute_once(self, payload, request):
         retained = self.transport.records.read(partition="effects",
@@ -67,7 +67,7 @@ class _Executor:
         document = json.loads(retained.canonical)
         command = parse_exact_command(base64.b64decode(document["command_base64"], validate=True))
         if (command.digest != request.command_digest or command.payload != payload
-                or document["material_digest"] != self.preparation.material_digest
+                or document["material_digest"] != self.transport.material_digest
                 or request.descriptor_digest != self.descriptor.digest
                 or (request.provider_id, request.profile_ref, request.account_ref, request.namespace_ref)
                 != (self.provider_id, self.profile_ref, self.account_ref, self.namespace_ref)
@@ -113,12 +113,12 @@ class _ExecutorResolver:
 class _Reconciliation:
     capabilities = ("lookup",)
 
-    def __init__(self, preparation, transport):
-        self.descriptor = preparation.adapter
+    def __init__(self, preparation, transport, *, descriptor=None):
+        self.descriptor = preparation.adapter if descriptor is None else descriptor
         self.transport = transport
-        s = preparation.selection
-        self.provider_id, self.profile_ref = s.provider.provider_id, s.provider.profile_ref
-        self.account_ref, self.namespace_ref = s.scope.account_ref, s.scope.namespace_ref
+        s = transport._read_selection()
+        self.provider_id, self.profile_ref = s["provider"]["provider_id"], s["provider"]["profile_ref"]
+        self.account_ref, self.namespace_ref = s["scope"]["account_ref"], s["scope"]["namespace_ref"]
 
     def lookup(self, target, preparation):
         if type(target) is not ReconciliationTargetV1:
@@ -159,25 +159,32 @@ class _Reconciliation:
 class _CancelAccess:
     """Read original authenticated workflow/submit on the host owning thread."""
 
-    def __init__(self, composition, preparation, authority, transport):
+    def __init__(self, composition, preparation, authority, transport, *,
+                 plan=None, context=None, descriptor=None,
+                 workflows=None, foundation=None):
         self.composition, self.preparation, self.authority = composition, preparation, authority
         self.transport = transport
+        self.plan = preparation.plan if plan is None else plan
+        self.context = preparation.context_value if context is None else context
+        self.descriptor = preparation.descriptor if descriptor is None else descriptor
+        self.workflows = composition.stores.workflow_store if workflows is None else workflows
+        self.foundation = composition.foundation if foundation is None else foundation
 
     def __call__(self, command):
         if type(command) is not CancelCommandV2:
             raise HFJobsError("binding_mismatch")
         prep = command.preparation
-        workflow = self.composition.stores.workflow_store.get(TrainingRunRef(prep.run_id, prep.project_ref))
-        if (workflow is None or workflow.plan_fingerprint != self.preparation.plan.plan_fingerprint
+        workflow = self.workflows.get(TrainingRunRef(prep.run_id, prep.project_ref))
+        if (workflow is None or workflow.plan_fingerprint != self.plan.plan_fingerprint
                 or workflow.preparation_digest != prep.preparation_digest
-                or workflow.provider_context_digest != self.preparation.context_value.provider_context_digest
-                or workflow.provider_descriptor_digest != self.preparation.descriptor.descriptor_digest
+                or workflow.provider_context_digest != self.context.provider_context_digest
+                or workflow.provider_descriptor_digest != self.descriptor.descriptor_digest
                 or workflow.cancel is None or workflow.cancel.canonical_command_bytes != command.canonical_bytes
                 or workflow.submit is None or workflow.provider_run_ref is None
                 or not workflow.submit.foundation_bindings or not workflow.submit.foundation_outcomes):
             raise HFJobsError("binding_mismatch")
         submit = workflow.submit
-        record = self.composition.foundation.get(submit.effect_id)
+        record = self.foundation.get(submit.effect_id)
         assessment = AuthenticatedFoundationRecordAssessmentV1.parse(
             submit.foundation_bindings[-1].canonical_assessment_bytes)
         derived = _derive_foundation(submit, record, assessment,

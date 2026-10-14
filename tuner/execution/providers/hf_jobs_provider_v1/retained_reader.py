@@ -463,7 +463,107 @@ class _RunsView:
         self.run, self.runs = run, runs
 
 
-def open_retained_hf_runs(
+class _LifecycleOperations(_ReadOperations):
+    """Only the original known run can acquire cancellation/lookup authority."""
+
+    def cancel(self, run, reason):
+        self._check(run)
+        return self._operations.cancel(run, reason)
+
+    def reconcile(self, run):
+        self._check(run)
+        workflow = self._workflows.get(run)
+        if workflow is None or workflow.cancel is None:
+            raise RunOperationError(RunOperationCode.READ_INELIGIBLE)
+        return self._operations.reconcile(run)
+
+
+def _cancel_coordinator(*, ports, authority, transport, workflows, plans,
+                        plan, context, descriptor, command, preparation,
+                        binding, adapter, allow_current_cancel_authorization):
+    """Reuse existing coordinator/Foundation ports, without executable preparation."""
+    from synaptic_tuner.api.v1.reference.repositories import (
+        DurablePreparationStoreV1, DurableExecutionGrantStoreV1,
+        DurableReconciliationGrantStoreV1, DurableEffectRepositoryV1,
+    )
+    from synaptic_tuner.api.v1.reference.authority import (
+        UnavailableRecoveryVerifierV1, UnavailableQuiescenceEvidenceV1,
+    )
+    from synaptic_tuner.api.v1.reference.training import ReferenceAuthorizationV1
+    from tuner.execution.coordinator_v1.coordinator import TrainingCoordinatorV1
+    from tuner.execution.coordinator_v1.foundation import ComposedEffectFoundationV1
+    from tuner.execution.foundation_v2.broker import EffectBrokerV2
+    from tuner.execution.foundation_v2.reconciliation import ReconciliationServiceV1
+    from tuner.execution.foundation_v2.commands import CanonicalProviderPayloadV1
+    from tuner.execution.foundation_v2.identities import EffectKind
+    from .composition import (
+        _BoundGrants, _Executor, _ExecutorResolver, _Reconciliation,
+        _ReconciliationResolver, _CancelAccess,
+    )
+
+    class RetainedPorts:
+        def describe(self, provider):
+            if provider != context.provider:
+                raise HFJobsError("binding_mismatch")
+            return descriptor
+
+        def resolve(self, provider, retained_context):
+            if provider != context.provider or retained_context != context:
+                raise HFJobsError("binding_mismatch")
+            return binding
+
+        def prepare(self, *args, **kwargs):
+            raise HFJobsError("capability_unavailable")
+
+        def payload(self, retained_preparation, kind):
+            if retained_preparation != preparation or kind is not EffectKind.CANCEL:
+                raise HFJobsError("binding_mismatch")
+            return CanonicalProviderPayloadV1.build(
+                "hf_jobs", "cancel-payload/v2", command.payload.input_digest)
+
+    retained_ports = RetainedPorts()
+    recovery = UnavailableRecoveryVerifierV1()
+    repository = DurableEffectRepositoryV1(
+        ports.records, receipt_authority=authority.receipt_authority,
+        invalid_evidence_authority=authority.invalid_evidence_authority,
+        recovery_verifier=recovery, finality_verifier=recovery,
+        grant_authority=authority.grant_authority,
+    )
+    executor = _Executor(None, transport, authority.clock, descriptor=command.executor)
+    broker = EffectBrokerV2(
+        repository, _ExecutorResolver(executor), authority.grant_authority,
+        authority.receipt_authority, authority.invalid_evidence_authority)
+    reconciliation = ReconciliationServiceV1(
+        repository, authority.grant_authority,
+        _ReconciliationResolver(_Reconciliation(None, transport, descriptor=adapter)),
+        authority.receipt_authority, authority.invalid_evidence_authority)
+    foundation = ComposedEffectFoundationV1(
+        repository, broker, reconciliation,
+        grant_authority=authority.grant_authority,
+        receipt_authority=authority.receipt_authority,
+        invalid_evidence_authority=authority.invalid_evidence_authority,
+        assessment_authority=authority.assessment_authority,
+        trusted_quiescence_evidence=UnavailableQuiescenceEvidenceV1(),
+    )
+    authorization = ReferenceAuthorizationV1(
+        records=ports.records, grants=_BoundGrants(ports.grants, transport),
+        authority=authority.grant_authority, clock=authority.clock,
+        allow_current_cancel_authorization=allow_current_cancel_authorization,
+    )
+    coordinator = TrainingCoordinatorV1(
+        retained_ports, plans, workflows, DurablePreparationStoreV1(ports.records),
+        DurableExecutionGrantStoreV1(ports.records, authority.grant_authority),
+        DurableReconciliationGrantStoreV1(ports.records, authority.grant_authority),
+        retained_ports, retained_ports, authorization, foundation,
+        authority.foundation_authenticator, authority.clock, None,
+    )
+    transport.bind_cancel_access(_CancelAccess(
+        None, None, authority, transport, plan=plan, context=context,
+        descriptor=descriptor, workflows=workflows, foundation=foundation))
+    return coordinator, foundation
+
+
+def _open_retained_hf_runs(
     *,
     run,
     records,
@@ -477,11 +577,13 @@ def open_retained_hf_runs(
     reader_key_ref,
     reader_key,
     deadline_seconds=30,
+    lifecycle_ports=None,
+    allow_current_cancel_authorization=False,
 ):
-    """Provider reads and authenticated local CAS only; caller owns all stores.
+    """Authenticate the original basis shared by reads and explicit cancellation.
 
-    No input/source preparation or effect authority is reconstructed. This
-    returns only the existing public RunsAPI, not an executable host.
+    No input/source preparation or start authority is reconstructed. Only the
+    lifecycle assembly accepts existing host grants for the original known run.
     """
     from synaptic_tuner.api.v1.results import TrainingRunRef
     from synaptic_tuner.api.v1.providers import ProviderRef
@@ -517,6 +619,16 @@ def open_retained_hf_runs(
     from .transport import HFJobsTransport
 
     try:
+        if type(allow_current_cancel_authorization) is not bool:
+            raise HFJobsError("input_invalid")
+        if lifecycle_ports is not None:
+            from synaptic_tuner.api.v1.reference.provider_family import ReferenceHostPortsV1
+            if (type(lifecycle_ports) is not ReferenceHostPortsV1
+                    or lifecycle_ports.records is not records
+                    or lifecycle_ports.streams is not streams
+                    or lifecycle_ports.secrets is not secrets):
+                raise HFJobsError("input_invalid")
+            require_methods(lifecycle_ports.grants, "authorize", "bind")
         if type(run) is not TrainingRunRef:
             raise HFJobsError("input_invalid")
         require_methods(
@@ -570,6 +682,8 @@ def open_retained_hf_runs(
             WorkflowPhaseV1.FAILED,
             WorkflowPhaseV1.CANCELLED,
         }
+        if lifecycle_ports is not None:
+            allowed.add(WorkflowPhaseV1.CANCEL_INTENT_RECORDED)
         if (
             workflow is None
             or workflow.phase not in allowed
@@ -663,7 +777,13 @@ def open_retained_hf_runs(
             or command.payload.input_digest != captured["workload"].fingerprint
         ):
             raise HFJobsError("binding_mismatch")
-        transport = HFJobsTransport.for_retained_read(
+        transport_constructor = HFJobsTransport.for_retained_read
+        if lifecycle_ports is not None:
+            if (descriptor.capabilities.cancel is not True
+                    or descriptor.capabilities.reconcile is not True):
+                raise HFJobsError("capability_unavailable")
+            transport_constructor = HFJobsTransport.for_retained_cancellation
+        transport = transport_constructor(
             captured=captured,
             submit=command,
             sdk=sdk,
@@ -686,6 +806,25 @@ def open_retained_hf_runs(
         expected["volumes"] = [item.to_dict() for item in expected["volumes"]]
         if receipt["request"] != expected:
             raise HFJobsError("binding_mismatch")
+        coordinator = None
+        if lifecycle_ports is not None:
+            from .preparation import _execution_binding
+            from tuner.execution.foundation_v2.executors import AdapterDescriptorV1
+            from synaptic_tuner.api.v1.reference.repositories import DurablePreparationStoreV1
+            from tuner.execution.coordinator_v1.coordinator import TrainingCoordinatorV1
+
+            adapter = AdapterDescriptorV1("hf_jobs", "hf-jobs-unavailable-reconcile", "0.1.0")
+            binding = _execution_binding(selection, descriptor, command.executor, adapter)
+            preparation = DurablePreparationStoreV1(records).get(workflow.preparation_digest)
+            if preparation is None or preparation != command.preparation:
+                raise HFJobsError("binding_mismatch")
+            TrainingCoordinatorV1._validate_preparation(preparation, plan, workflow, binding)
+            coordinator, foundation = _cancel_coordinator(
+                ports=lifecycle_ports, authority=authority, transport=transport,
+                workflows=workflows, plans=plans, plan=plan, context=context,
+                descriptor=descriptor, command=command, preparation=preparation,
+                binding=binding, adapter=adapter,
+                allow_current_cancel_authorization=allow_current_cancel_authorization)
         reader.transport = transport
         verifier.bind_foundation(foundation)
 
@@ -699,7 +838,7 @@ def open_retained_hf_runs(
             planning=PlanningReads(),
             planning_store=plans,
             workflow_store=workflows,
-            coordinator=None,
+            coordinator=coordinator,
             foundation=foundation,
             foundation_authenticator=authority.foundation_authenticator,
             assessment_authenticator=authority.assessment_authority,
@@ -710,6 +849,38 @@ def open_retained_hf_runs(
             cursor_authority=authority.cursor_authority,
             clock=authority.clock,
         )
-        return _RunsView(run, RunsAPI(_ReadOperations(operations, workflows, run)))
+        wrapper = _ReadOperations if lifecycle_ports is None else _LifecycleOperations
+        return _RunsView(run, RunsAPI(wrapper(operations, workflows, run)))
     except Exception:
         raise HFJobsError("read_unavailable") from None
+
+
+def open_retained_hf_runs(
+    *, run, records, streams, authority, secrets, sdk, api, scratch_root,
+    reader_authority_ref, reader_key_ref, reader_key, deadline_seconds=30,
+):
+    """Original known-run read surface; cancellation/reconciliation stay unavailable."""
+    return _open_retained_hf_runs(
+        run=run, records=records, streams=streams, authority=authority, secrets=secrets,
+        sdk=sdk, api=api, scratch_root=scratch_root,
+        reader_authority_ref=reader_authority_ref, reader_key_ref=reader_key_ref,
+        reader_key=reader_key, deadline_seconds=deadline_seconds)
+
+
+def open_retained_hf_lifecycle(
+    *, run, ports, authority, sdk, api, scratch_root,
+    reader_authority_ref, reader_key_ref, reader_key, deadline_seconds=30,
+    allow_current_cancel_authorization=False,
+):
+    """Original configured known run only; no source/start authority is reconstructed."""
+    from synaptic_tuner.api.v1.reference.provider_family import ReferenceHostPortsV1
+    if (type(ports) is not ReferenceHostPortsV1
+            or type(allow_current_cancel_authorization) is not bool):
+        raise HFJobsError("input_invalid")
+    return _open_retained_hf_runs(
+        run=run, records=ports.records, streams=ports.streams, authority=authority,
+        secrets=ports.secrets, sdk=sdk, api=api, scratch_root=scratch_root,
+        reader_authority_ref=reader_authority_ref, reader_key_ref=reader_key_ref,
+        reader_key=reader_key, deadline_seconds=deadline_seconds,
+        lifecycle_ports=ports,
+        allow_current_cancel_authorization=allow_current_cancel_authorization)
