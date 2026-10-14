@@ -187,3 +187,40 @@ def test_success_result_keeps_canonical_bytes(monkeypatch):
         worker.qualify_installed_child({})
     ) == execution._canonical(expected)
     assert len(spawned) == 1
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "fcntl",
+        "subprocess",
+        "tempfile",
+        "contextlib",
+        "tuner.runtime.packaged_sft_execution",
+    ],
+)
+def test_import_failure_is_release_admission_before_resources(monkeypatch, module):
+    import builtins
+
+    _fixture(monkeypatch)
+    original = builtins.__import__
+
+    def importing(name, *args, **kwargs):
+        if name == module:
+            raise ImportError("PRIVATE_IMPORT_DETAILS")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(
+        os,
+        "memfd_create",
+        lambda *_a: pytest.fail("created input after import failure"),
+    )
+    monkeypatch.setattr(
+        subprocess, "run", lambda *_a, **_k: pytest.fail("child after import failure")
+    )
+    monkeypatch.setattr(builtins, "__import__", importing)
+    with pytest.raises(worker.PackagedLocalCPUStageError) as rejected:
+        worker.qualify_installed_child({})
+    assert rejected.value.stage == "RELEASE_ADMISSION"
+    assert rejected.value.__suppress_context__
+    assert str(rejected.value) == "PACKAGED_LOCAL_CPU_REJECTED"

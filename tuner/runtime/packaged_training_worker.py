@@ -221,15 +221,8 @@ def _parent_trainer_reference(release) -> str:
 
 def qualify_installed_child(release_document):
     """Diagnostic only: exercise the installed child, never synthesize training evidence."""
-    import os
-    import fcntl
-    import subprocess
-    import tempfile
-    from contextlib import ExitStack
-    from tuner.runtime.packaged_sft_execution import _canonical, _digest, _HeldDirectory, _HeldModelFile
-
     stage = "RELEASE_ADMISSION"
-    owned = ExitStack()
+    owned = None
     primary = None
 
     def close_writer(fd):
@@ -242,6 +235,14 @@ def qualify_installed_child(release_document):
                 raise PackagedLocalCPUStageError("CLEANUP") from None
 
     try:
+        import os
+        import fcntl
+        import subprocess
+        import tempfile
+        from contextlib import ExitStack
+        from tuner.runtime.packaged_sft_execution import _canonical, _digest, _HeldDirectory, _HeldModelFile
+
+        owned = ExitStack()
         release = parse_packaged_runtime_release(release_document)
         method = _local_cpu_method(release)
         release = admit_packaged_training_release(
@@ -313,7 +314,8 @@ def qualify_installed_child(release_document):
     try:
         # ExitStack attempts every registered close even if one fails. Cleanup
         # uncertainty cannot replace the original diagnostic boundary.
-        owned.close()
+        if owned is not None:
+            owned.close()
     except BaseException:
         if primary is None:
             primary = PackagedLocalCPUStageError("CLEANUP")
