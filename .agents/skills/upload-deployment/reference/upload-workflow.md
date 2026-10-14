@@ -130,3 +130,49 @@ python3 .skills/upload-deployment/scripts/upload_model.py Trainers/sft/sft_outpu
 python -m Evaluator.cli --backend unsloth --model ./sft_output/LATEST/final_model \
   --scenario behavior_prompts.yaml --upload-to-hf user/model --update-model-card
 ```
+
+
+## Public verified SFT publication to an HF model repository
+
+The optional `synaptic_tuner.api.v1.reference.hf_publication.HFModelPublicationDestinationV1`
+implements the existing publication destination port. Compose it through the
+caller-owned registry and `compose_publication_artifacts`; the default reference
+host still has no destinations. Existing legacy upload commands are unchanged.
+
+The host supplies the original verified RunsAPI/source, durable publication store,
+private disk spool/render root, original evidence keys/clock, an explicitly named
+SecretRef/resolver and exact existing repository scope. Use Hub1.33.0, explicit
+endpoint/repo/branch/visibility, reviewed parent commit, finite native/aggregate/
+upload/commit-body limits and deadline. It creates no repository, performs no
+merge/GGUF/model loading, and never overwrites or deletes an existing release slot.
+Repository namespace is target scope, not proof of the token's authenticated owner
+or least privilege. Real account/repository authorization remains a qualification
+input; never substitute a scripted fixture identity.
+
+Verified native `final_model` and `tokenizer` are tar archives. The admitted
+renderer validates their actual members and commits disjoint model/tokenizer
+files together under `releases/<publication_id>/model/`; unchanged five native
+artifacts and an authenticated command/ownership/render marker are retained
+alongside them. A PEFT adapter requires its pinned base model; it is not a merged
+standalone model. Receipt/read paths bind an immutable commit OID.
+
+The pinned SDK prepares content uploads; the final Add-only commit uses its real
+NDJSON payload and parent CAS through bounded HTTP with redirects/retries disabled.
+Preupload may involve multiple calls or vendor retries. After a lost reply or
+process death, read-only lookup verifies original ownership plus the exact native
+and rendered inventory at an immutable owned snapshot. It never resubmits. This
+is content verification, not proof of the original introducing commit or RPC
+causality. Missing/changed markers or unexpected files remain uncertain.
+
+HTTP streams enforce actual per-file and aggregate content limits without bulk
+cache downloads. Metadata, pagination and commit response bodies are finite. Caller
+deadlines bound waiting, not physical SDK/HTTP termination; late uploads may
+continue with independently owned file handles. Host validation/serialization and
+OS calls are synchronous, without a total hard deadline or invoice guarantee.
+
+CPU acceptance uses real public native SFT verification, SQLite close/reopen and
+a file-backed scripted provider ledger, including SIGKILL before local receipt.
+It does not qualify live HF uploads, model loading or model quality. Current GRPO
+archives have the same five roles, but their workload-record model selector is
+incompatible with this admitted renderer; the genuine GRPO publication join
+remains a separate release gate. Never rewrite its workload to masquerade as SFT.
