@@ -79,6 +79,12 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
                     details["build_app_id"] = app_id
                 if image_id is not None:
                     details["image_id"] = image_id
+            if error.capture_diagnostic is not None:
+                from tuner.execution.providers.modal.runtime_build import _validate_capture_diagnostic
+                try:
+                    details["capture"] = _validate_capture_diagnostic(error.capture_diagnostic)
+                except (ValueError, TypeError):
+                    return None
             return details
     qualification = {
         "FIXTURE_STAGE": ("UNAVAILABLE", "modal_host_qualification.stage_fixture"),

@@ -20,7 +20,7 @@ from tuner.execution.providers.modal.facade import MODAL_VOLUME_V1
 from tuner.execution.providers.modal.packaged_binding import ModalPackagedRuntimeFactsV1
 from tuner.execution.providers.modal.runtime_build import (
     ModalBoundedOperationFailure, ModalBuildStageFailure, SourceArchiveInvalid,
-    _bounded, build_modal_runtime_release_v2, capture_modal_build_candidate,
+    _bounded, _validate_capture_diagnostic, build_modal_runtime_release_v2, capture_modal_build_candidate,
     plan_modal_build_material,
 )
 from tuner.execution.providers.modal.runtime_release_deployment import (
@@ -128,10 +128,10 @@ def _closed_release_diagnosis(
 class ModalHostBootstrapUnavailable(RuntimeError):
     """Closed, non-retryable diagnosis for a known host bootstrap boundary."""
 
-    __slots__ = ("_phase", "_failure_class", "_location", "_build_app_id", "_image_id")
+    __slots__ = ("_phase", "_failure_class", "_location", "_build_app_id", "_image_id", "_capture_diagnostic")
 
     def __init__(self, diagnosis: str = "SOURCE_ARCHIVE_INVALID", *,
-                 build_app_id: str | None = None, image_id: str | None = None) -> None:
+                 build_app_id: str | None = None, image_id: str | None = None, capture_diagnostic=None) -> None:
         if type(diagnosis) is not str or diagnosis not in _CLOSED_BOOTSTRAP_DIAGNOSTICS:
             raise ValueError("Modal bootstrap diagnosis is invalid")
         if ((build_app_id is not None or image_id is not None) and diagnosis != "IMAGE_BUILD_OPERATION_FAILED"
@@ -142,6 +142,9 @@ class ModalHostBootstrapUnavailable(RuntimeError):
                     type(image_id) is not str
                     or re.fullmatch(r"im-[A-Za-z0-9]{1,64}", image_id) is None)):
             raise ValueError("Modal bootstrap diagnostic identity is invalid")
+        capture_diagnostic = None if capture_diagnostic is None else _validate_capture_diagnostic(capture_diagnostic)
+        if capture_diagnostic is not None and not diagnosis.startswith("CAPTURE_"):
+            raise ValueError("capture diagnostic boundary is invalid")
         super().__init__("modal_host_bootstrap_unavailable")
         phase, failure_class, location = _CLOSED_BOOTSTRAP_DIAGNOSTICS[diagnosis]
         object.__setattr__(self, "_phase", phase)
@@ -149,11 +152,12 @@ class ModalHostBootstrapUnavailable(RuntimeError):
         object.__setattr__(self, "_location", location)
         object.__setattr__(self, "_build_app_id", build_app_id)
         object.__setattr__(self, "_image_id", image_id)
+        object.__setattr__(self, "_capture_diagnostic", capture_diagnostic)
 
     def __setattr__(self, name: str, value: object) -> None:
         if name in {"_phase", "_failure_class", "_location", "_build_app_id", "_image_id",
                     "phase", "failure_class", "location", "retry_authorized",
-                    "build_app_id", "image_id"}:
+                    "build_app_id", "image_id", "capture_diagnostic", "_capture_diagnostic"}:
             raise AttributeError("Modal bootstrap diagnosis is immutable")
         super().__setattr__(name, value)
 
@@ -172,6 +176,10 @@ class ModalHostBootstrapUnavailable(RuntimeError):
     @property
     def build_app_id(self) -> str | None:
         return self._build_app_id
+
+    @property
+    def capture_diagnostic(self):
+        return None if self._capture_diagnostic is None else dict(self._capture_diagnostic)
 
     @property
     def image_id(self) -> str | None:
@@ -530,6 +538,7 @@ def prepare_modal_runtime_for_host(
             raise ModalHostBootstrapUnavailable() from None
         except ModalBuildStageFailure as error:
             build_app_id = image_id = None
+            capture_diagnostic = None
             if (type(error) is ModalBuildStageFailure
                     and error.stage == "IMAGE_BUILD" and error.reason == "OPERATION_FAILED"):
                 try:
@@ -563,9 +572,28 @@ def prepare_modal_runtime_for_host(
                     # Diagnostic retention cannot erase or broaden the consumed
                     # build failure. No unretained identity reaches the CLI.
                     build_app_id = image_id = None
+            if type(error) is ModalBuildStageFailure and error.capture_diagnostic is not None:
+                try:
+                    capture_diagnostic = _validate_capture_diagnostic(error.capture_diagnostic)
+                    if private_storage.attempts.resolve(build_claim_ref) != claim:
+                        raise ValueError
+                    diagnostic = canonical_bytes({
+                        "schema_version": "synaptic-modal-host-build-diagnostic/v1",
+                        "build_claim_ref": build_claim_ref,
+                        "build_claim_sha256": hashlib.sha256(claim).hexdigest(),
+                        "intent_digest": runtime_material_intent_digest,
+                        "phase": error.stage, "failure_class": error.reason,
+                        "capture": capture_diagnostic, "retry_authorized": False,
+                    })
+                    retained = private_storage.catalog("host-build-diagnostics-v1", encode=bytes, decode=bytes)
+                    retained.publish_if_absent(build_claim_ref, diagnostic)
+                    if retained.resolve(build_claim_ref) != diagnostic:
+                        raise ValueError
+                except Exception:
+                    capture_diagnostic = None
             raise ModalHostBootstrapUnavailable(
                 error.stage + "_" + error.reason,
-                build_app_id=build_app_id, image_id=image_id,
+                build_app_id=build_app_id, image_id=image_id, capture_diagnostic=capture_diagnostic,
             ) from None
     except BaseException as error:
         capture_failure = error
