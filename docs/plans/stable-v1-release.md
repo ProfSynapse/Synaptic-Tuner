@@ -1084,3 +1084,27 @@ passed installed GRPO recovery (14.76 seconds) and installed SFT recovery
 (10.40 seconds) using each case's existing fixture lane. CI keeps SFT in the
 retention lane and adds GRPO to the custody lane (404 total), avoiding duplicate
 collection without its recipe fixtures. No production or lock bytes changed.
+
+### Known-run observations after uncertain cancellation
+
+Public outcome reads now accept `cancel_reconcile_required` for an originally
+authenticated known run. Pending reads preserve that state; actual terminal
+success, failure or cancellation updates run truth without manufacturing a
+cancellation acknowledgment. The original cancellation intent, uncertain
+Foundation history and absent bound cancellation remain unchanged. Both Modal
+readers share this eligibility; provider capabilities remain disabled as before.
+
+Independent source, CI and fixed-inventory review passed. Root validation passed
+31 source controls, including real SQLite reopen and a killed producer followed
+by fresh pending/native-completion readers and five verified downloads. Fresh
+sdist-built wheel
+`b85b9dd512f1a467e0a192e9b1cb4b6af2f8a25285d06be45665f1357376ce7c`
+passed the base consumer, 170 installed generic lifecycle tests (31.70 seconds),
+404 installed custody cases on Python 3.14 (64.38 seconds), the sole existing
+portable SFT case on Python 3.12 (0.77 seconds), and all 163 installed Modal
+retention controls (136.25 seconds). The portable case rejects Python 3.14 as
+required; its first failure log is retained. CI keeps all 405 custody cases on
+Python 3.12. Four production modules and three lock resources are byte-exact
+in the installed wheel. All seven maintenance checks are current; runtime
+inventories and non-hash pins are unchanged. Explicit SDK/image/ML fixtures
+mean this is host conformance, not live provider cancellation qualification.
