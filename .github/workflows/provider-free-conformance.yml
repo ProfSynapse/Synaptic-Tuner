@@ -635,8 +635,11 @@ jobs:
           import tuner.execution.providers.docker_provider_v1.cancellation_transport as cancellation
           import tuner.execution.providers.docker_provider_v1.local_source as source
           import tuner.execution.providers.docker_provider_v1.reader as reader
+          import tuner.execution.coordinator_v1.operations as operations
+          import tuner.execution.coordinator_v1.state_machine as state_machine
+          import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (artifacts, reader, cancellation, source):
+          for module in (artifacts, reader, cancellation, source, operations, state_machine, sqlite_store):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -652,6 +655,9 @@ jobs:
               "execution/providers/docker_provider_v1/test_reader.py",
               "execution/coordinator_v1/test_start_reconcile_service.py",
               "execution/coordinator_v1/test_state_machine.py",
+              "execution/coordinator_v1/test_operational_cas.py",
+              "execution/coordinator_v1/test_operations_service.py",
+              "execution/coordinator_v1/test_uncertain_cancel_observation.py",
               "execution/foundation_v2/helpers.py",
           ):
               target = root / "tests" / name
@@ -667,7 +673,9 @@ jobs:
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
               str(root / "tests/execution/providers/docker_provider_v1/test_local_artifacts.py"),
               str(root / "tests/execution/providers/docker_provider_v1/test_cancellation_transport.py"),
-              str(root / "tests/execution/providers/docker_provider_v1/test_local_source.py")]))
+              str(root / "tests/execution/providers/docker_provider_v1/test_local_source.py"),
+              str(root / "tests/execution/coordinator_v1/test_state_machine.py") + "::test_uncertain_cancel_observes_known_run_without_receipt_repair",
+              str(root / "tests/execution/coordinator_v1/test_uncertain_cancel_observation.py")]))
           PYCODE
 
       - name: Exercise installed Docker public host lifecycle
@@ -923,7 +931,8 @@ jobs:
                        "tuner.runtime.packaged_training_worker",
                        "tuner.execution.providers.modal.runtime_release_qualification",
                        "tuner.training.modal_standalone_runner", "tuner.training.modal_recipe",
-                       "tuner.handlers.modal_job_config_handler"):
+                       "tuner.handlers.modal_job_config_handler",
+                       "tuner.training.modal_host_reader", "tuner.training.modal_retained_reader"):
               location = Path(importlib.util.find_spec(name).origin).resolve()
               assert location.is_relative_to(prefix) and not location.is_relative_to(checkout), location
           from importlib.resources import files
@@ -991,6 +1000,7 @@ jobs:
               "training/test_modal_grpo_standalone_runner.py",
               "training/test_modal_process_restart.py",
               "training/test_modal_grpo_process_restart.py",
+              "training/test_uncertain_cancel_modal_observation.py",
           )
           for relative in helpers:
               target = root / "tests" / relative
@@ -1026,7 +1036,8 @@ jobs:
               str(root / "tests/runtime/test_packaged_training_worker.py"),
               str(root / "tests/execution/providers/test_modal_grpo_cpu_qualification.py"),
               str(root / "tests/training/test_modal_grpo_standalone_runner.py"),
-              str(root / "tests/training/test_modal_grpo_process_restart.py")]))
+              str(root / "tests/training/test_modal_grpo_process_restart.py"),
+              str(root / "tests/training/test_uncertain_cancel_modal_observation.py")]))
           PYCODE
 
       - name: Exercise installed bounded GRPO evidence with pinned CPU Torch
