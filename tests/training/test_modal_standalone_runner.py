@@ -133,10 +133,18 @@ def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualif
                 command, 0, stdout=("1" * 40 + "\n").encode("ascii"), stderr=b"")
         return real_run(command, *args, **kwargs)
     monkeypatch.setattr(runtime_build.subprocess, "run", fixture_source_head)
+    # The selected host source is a real test-owned Git repository. Only its
+    # inspector policy member is needed because remote/bootstrap work is mocked.
+    source_inspector = tmp_path / "tuner/runtime/modal_build_inspector.py"
+    source_inspector.parent.mkdir(parents=True)
+    source_inspector.write_bytes((engine_root / "tuner/runtime/modal_build_inspector.py").read_bytes())
+    for git_args in (["init", "-q"], ["add", "tuner/runtime/modal_build_inspector.py"],
+                     ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
+        real_run(["git", "-C", str(tmp_path), *git_args], check=True, capture_output=True)
     monkeypatch.setattr(runner.platform, "python_version", lambda: "3.11.14")
     # Source/bootstrap preparation is independently exercised through its real service.
     monkeypatch.setattr(runner, "prepare_modal_standalone_local", lambda **kw: SimpleNamespace(
-        profile_path=Path("fixture-profile"), revalidate=lambda *args: None, close=lambda: None,
+        profile_path=Path("fixture-profile"), revalidate=lambda *args, **kwargs: None, close=lambda: None,
     ))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("HF_TOKEN", "fixture-token")
@@ -179,7 +187,7 @@ def _setup(tmp_path, monkeypatch, *, failed=False, capture=False, metrics_qualif
         / "qwen35_4b_packaged_sft_3360351c/profile.yaml").read_bytes())
     profile = load_runtime_profile(recipe.runtime_profile, profile_root)
     _build_path, intent = resolve_modal_sft_build(profile, profile_root,
-                                                   recipe.model.ref, recipe.model.revision)
+                                                   recipe.model.ref, recipe.model.revision, source_root=tmp_path)
     plan = ModalSFTRecipePlanV1(
         recipe, identity, profile.profile_sha256, profile.image,
         intent["intent_digest"], compile_packaged_sft_workload(resolved_config=config).fingerprint,

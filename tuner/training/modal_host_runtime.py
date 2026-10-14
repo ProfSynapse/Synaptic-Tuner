@@ -394,6 +394,7 @@ def prepare_modal_runtime_for_host(
     local_inputs, execution_attempt_ref: str,
     builder_cache_root: Path | None = None,
     metrics_admission=None,
+    source_root: Path | None = None,
 ) -> ModalHostRuntimeV1:
     """Prepare one named runtime; all mutations follow a durable attempt claim."""
     from tuner.training.modal_local_preparation import PreparedModalLocalInputs
@@ -403,10 +404,10 @@ def prepare_modal_runtime_for_host(
     if (type(hf_token_ref) is not SecretRef or not callable(getattr(secret_resolver, "resolve", None))
             or not callable(getattr(getattr(private_storage, "attempts", None), "claim", None))
             or type(runtime_material_intent_digest) is not str
-            or plan_modal_build_material(profile_path)["intent_digest"] != runtime_material_intent_digest
+            or plan_modal_build_material(profile_path, **({"source_root": source_root} if source_root is not None else {}))["intent_digest"] != runtime_material_intent_digest
             or environment_name != client_binding.environment_ref):
         raise ValueError("Modal host runtime authority differs")
-    local_inputs.revalidate(profile_path, runtime_material_intent_digest)
+    local_inputs.revalidate(profile_path, runtime_material_intent_digest, **({"source_root": source_root} if source_root is not None else {}))
     safe_ref(execution_attempt_ref, "execution_attempt_ref")
     attempt_binding = {"intent_digest": runtime_material_intent_digest,
                        "execution_attempt_ref": execution_attempt_ref}
@@ -451,7 +452,7 @@ def prepare_modal_runtime_for_host(
         "execution_attempt": attempt_binding,
     })
     build_claim_ref = "build-" + domain_digest("synaptic-modal-bootstrap-attempt/v1", canonical_bytes(attempt_binding))
-    local_inputs.revalidate(profile_path, runtime_material_intent_digest)
+    local_inputs.revalidate(profile_path, runtime_material_intent_digest, **({"source_root": source_root} if source_root is not None else {}))
     private_storage.attempts.claim(build_claim_ref, claim)
 
     # No credential value enters the recipe, durable claim, report, or logs.
@@ -523,7 +524,7 @@ def prepare_modal_runtime_for_host(
                 expected_intent_digest=runtime_material_intent_digest,
                 build_app=entered,
                 builder_cache_root=builder_cache_root,
-                local_inputs=local_inputs,
+                local_inputs=local_inputs, source_root=source_root,
             )
         except SourceArchiveInvalid:
             raise ModalHostBootstrapUnavailable() from None

@@ -190,7 +190,7 @@ def _compose_modal_packaged_reference_host(
         selected = load_runtime_profile(adapter.effect_executor.profile_ref, profiles_root).resolve(
             model=model["ref"], model_revision=model["revision"], method="sft",
         )
-        _, current_intent = resolve_modal_sft_build(selected, profiles_root, model["ref"], model["revision"])
+        _, current_intent = resolve_modal_sft_build(selected, profiles_root, model["ref"], model["revision"], source_root=context.engine_root)
         qualification_admission.validate_scope(effects._facts)
         if (current_clean_commit(context.engine_root) != admitted["engine_commit"]
                 or current_intent["intent_digest"] != admitted["runtime_material_intent_digest"]
