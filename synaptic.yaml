@@ -1,7 +1,7 @@
 schema_version: synaptic-project/v1
 project:
   id: sft-portable-source-qualification-20261014
-  name: SFT final CF qualification
+  name: SFT portable source582 qualification
 engine:
   requires: '>=1.0,<2.0'
   api: v1
