@@ -8,7 +8,7 @@ import json
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "synaptic-tuner"
-PIN = "c685ce34227444f8a3a51876bdce3a5dc417ce1a"
+PIN = "4b77bd1f8e8a0abd664907a575166bfa41f11a7d"
 ORIGIN = "https://github.com/ProfSynapse/Synaptic-Tuner.git"
 
 if ENGINE.resolve(strict=True) != ENGINE:
@@ -27,7 +27,7 @@ class ConsumerSourceTests(unittest.TestCase):
         )
 
     def test_real_host_context_and_private_output_roots(self):
-        self.assertEqual(self.manifest.project_id, "synaptic-modal-chat-smoke")
+        self.assertEqual(self.manifest.project_id, "synaptic-hf-sft-fixture")
         self.assertEqual(self.context.mode, "host")
         self.assertEqual(self.context.path_mode, "project_v1")
         self.assertEqual(self.context.engine_root, ENGINE)
@@ -58,51 +58,30 @@ class ConsumerSourceTests(unittest.TestCase):
         self.assertEqual(source.engine_source.commit, PIN)
         self.assertEqual(source.engine_source.gitlink_commit, PIN)
         self.assertEqual(source.engine_source.submodule_path, "synaptic-tuner")
-        self.assertEqual(source.engine_source.branch, "smoke/modal-chat-engine")
+        self.assertEqual(source.engine_source.branch, "release/grpo-model-publication-integration")
         self.assertFalse(source.project_source.dirty)
         self.assertFalse(source.engine_source.dirty)
         self.assertFalse(source.project_source.pushed)
         self.assertFalse(source.engine_source.pushed)
 
-    def test_committed_tree_is_only_the_reviewed_fixture(self):
-        result = subprocess.run(
-            ["git", "-C", str(ROOT), "ls-tree", "-r", "--name-only", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(
-            result.stdout.splitlines(),
-            [
-                ".gitignore",
-                ".gitmodules",
-                "AGENTS.md",
-                "README.md",
-                "configuration/smoke.json",
-                "configuration/synthchat-sft-20260919.json",
-                "data/smoke.jsonl",
-                "data/synthchat_sft_20260919.jsonl",
-                "synaptic-tuner",
-                "synaptic.yaml",
-                "tests/test_source_fixture.py",
-            ],
-        )
-
-    def test_committed_smoke_uses_real_typed_configuration(self):
-        from examples.modal_chat.settings import ModalChatSettings
-
-        raw = (ROOT / "configuration/smoke.json").read_bytes()
-        settings = ModalChatSettings.parse(raw[:-1] if raw.endswith(b"\n") else raw)
-        self.assertEqual(settings.environment_name, "synaptic-smoke-v1")
-        self.assertEqual(settings.runtime_environment["PATH"], "/opt/conda/bin:/usr/bin:/bin")
-        self.assertEqual(settings.training_input.hyperparameters.duration.max_steps, 2)
-        rows = [
-            json.loads(line)
-            for line in (ROOT / settings.dataset_project_path).read_text().splitlines()
-        ]
+    def test_real_v1_publication_and_complete_paired_rows(self):
+        from tuner.dataset_prep import snapshot_prepared_dataset_v1
+        digest = "7aa26aba079ac1210466c5c2cdf747f00c764b5bc4ed366e2f67af7ffa0d3770"
+        publication = ROOT / "data/hf-sft-v1/prepared" / ("dataset-" + digest)
+        verified, raw = snapshot_prepared_dataset_v1(publication)
+        self.assertEqual(verified.dataset_digest, digest)
+        self.assertEqual(len(raw), 2821)
+        rows = [json.loads(line) for line in raw.decode().splitlines()]
         self.assertEqual(len(rows), 8)
-        self.assertTrue(all(row["messages"] for row in rows))
+        texts = {row["text"] for row in rows}
+        sources = list((ROOT / "data/hf-sft-v1/sources").glob("*.md"))
+        self.assertEqual(len(sources), 8)
+        self.assertEqual(texts, {p.read_text() for p in sources})
+        self.assertEqual(sum(row["split"] == "train" for row in rows), 6)
+        self.assertEqual(sum(row["split"] == "validation" for row in rows), 2)
+        config = json.loads((ROOT / "configuration/hf-sft-v1/sft-config.json").read_bytes())
+        self.assertEqual(config["dataset"]["revision"], digest)
+        self.assertEqual(config["dataset"]["format"], "syntunia-sft-row/v1")
 
 
 if __name__ == "__main__":

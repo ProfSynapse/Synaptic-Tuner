@@ -1,0 +1,33 @@
+{
+  "schema_version": "syntunia-dataset-prep/v1",
+  "source": {
+    "bundle_path": ".synaptic/tracking/ingestion/bundles/bundle-cbad3e6be421470a8f3480944f95e52f151ec315d0914472fee27e2449265a1b",
+    "expected_bundle_digest": "cbad3e6be421470a8f3480944f95e52f151ec315d0914472fee27e2449265a1b"
+  },
+  "format": "raw_text",
+  "projection": {
+    "structure_ref": {
+      "digest": "1a71fc891c09300ea950f49cbbe1692e50cafdccc5283c0819d7958e38b6083f",
+      "name": "MetricsFixtureText",
+      "version": "1"
+    },
+    "name": "text"
+  },
+  "ordering": {
+    "kind": "source_order"
+  },
+  "split": {
+    "kind": "hash_rank",
+    "seed": "hf-raw-text-qualification-v1",
+    "allocations": [
+      {
+        "name": "train",
+        "weight": 3
+      },
+      {
+        "name": "validation",
+        "weight": 1
+      }
+    ]
+  }
+}

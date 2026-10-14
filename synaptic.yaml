@@ -1,7 +1,7 @@
 schema_version: synaptic-project/v1
 project:
-  id: synaptic-modal-chat-smoke
-  name: Synaptic Tuner Modal Chat Smoke Consumer
+  id: synaptic-hf-sft-fixture
+  name: Synaptic Tuner HF SFT Qualification Consumer
 engine:
   requires: "==1.1.0"
   api: v1
