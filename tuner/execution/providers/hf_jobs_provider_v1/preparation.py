@@ -36,6 +36,24 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+def _execution_binding(selection, descriptor, executor, adapter):
+    """The same pure binding for genuine warm and authenticated retained material."""
+    from synaptic_tuner.api.v1.providers import ProviderRef
+    from tuner.execution.foundation_v2.references import ExecutionScopeV1
+    from synaptic_tuner.api.v1.secrets import SecretRef
+
+    provider = ProviderRef.from_dict(selection["provider"])
+    scope = ExecutionScopeV1(**selection["scope"])
+    job_token = SecretRef.from_dict(selection["job_token"])
+    return ProviderExecutionBindingV1(
+        provider, descriptor.descriptor_digest, sha(document_bytes(selection)),
+        scope, executor, adapter.digest,
+        sha(document_bytes({"flavor": selection["flavor"], "resources": selection["resources"]})),
+        selection["quote_digest"],
+        sha(document_bytes({"job_secret_key": "HF_TOKEN", "reference": job_token.to_dict()})),
+    )
+
+
 class HFJobsPreparation:
     """One supplied rich plan/bundle/one-use input, with no provider operations.
 
@@ -46,12 +64,14 @@ class HFJobsPreparation:
 
     def __init__(self, *, selection, training_plan, bundle, closure_members,
                  parent_members, input_lease, request_id, project_ref, clock,
-                 maximum_cost_minor_units, currency, preflight_seconds=300):
+                 maximum_cost_minor_units, currency, preflight_seconds=300,
+                 allow_cancel_reconcile=False):
         if (type(selection) is not HFJobsSelection
                 or type(training_plan) is not RichTrainingPlan
                 or type(bundle) is not WorkerBundleMaterializationV1
                 or type(input_lease) is not RetainedTrainingInputStreamLease
-                or type(preflight_seconds) is not int or not 1 <= preflight_seconds <= 3600):
+                or type(preflight_seconds) is not int or not 1 <= preflight_seconds <= 3600
+                or type(allow_cancel_reconcile) is not bool):
             raise HFJobsError("input_invalid")
         if (set(training_plan.artifact_policy.required_kinds) != EXACT_ROLES
                 or training_plan.artifact_policy.retain_checkpoints is not False):
@@ -118,7 +138,8 @@ class HFJobsPreparation:
         self.requirement = AuthorizationRequirement("training.start", True,
                                                    maximum_cost_minor_units, currency)
         self.descriptor = ProviderDescriptor("synaptic-provider-descriptor/v1", "hf_jobs",
-            "Ordinary HF Jobs SFT", "0.1.0", ProviderCapabilities(True, False, False, False, True, False))
+            "Ordinary HF Jobs SFT", "0.1.0", ProviderCapabilities(
+                True, False, allow_cancel_reconcile, allow_cancel_reconcile, True, False))
         self.executor = ExecutorDescriptorV1("hf_jobs", "hf-jobs-sft", "0.1.0")
         self.adapter = AdapterDescriptorV1("hf_jobs", "hf-jobs-unavailable-reconcile", "0.1.0")
         projection = {"schema_version": "synaptic-hf-jobs-full-material/v1",
@@ -144,11 +165,8 @@ class HFJobsPreparation:
             self.descriptor.descriptor_digest, selection.digest)
         self.plan = TrainingPlan("synaptic-training-plan/v2", TrainingPlanBasisV1.from_resolved(self.resolved),
                                  ProviderPlanRef(self.context_value.provider_context_digest))
-        self.binding = ProviderExecutionBindingV1(selection.provider, self.descriptor.descriptor_digest,
-            selection.digest, selection.scope, self.executor, self.adapter.digest,
-            sha(document_bytes({"flavor": selection.flavor, "resources": selection.projection()["resources"]})),
-            selection.quote_digest, sha(document_bytes({"job_secret_key": "HF_TOKEN",
-                                                        "reference": selection.job_token.to_dict()})))
+        self.binding = _execution_binding(
+            selection.projection(), self.descriptor, self.executor, self.adapter)
 
     def describe(self, provider):
         if provider != self.selection.provider:

@@ -75,13 +75,17 @@ def _census(root):
     return digest.hexdigest()
 
 
-def _producer(root):
+def _producer(root, *, allow_cancel_reconcile=False):
     patch = pytest.MonkeyPatch()
     source = root / "original-inputs"
     source.mkdir(mode=0o700)
     value = family.material.__wrapped__(source)
+    if allow_cancel_reconcile:
+        from tests.execution.providers.test_hf_jobs_cold_cancellation import configured
+        value = configured(value)
     store = SQLiteDurableStoreV1(root / "workflow.sqlite3")
-    api, composition, ports = lifecycle.host(value, records=store, streams=store)
+    api, composition, ports = lifecycle.host(
+        value, records=store, streams=store, current=allow_cancel_reconcile)
     run, plan, _ = lifecycle.start(api, value)
     job = root / "provider-execution"
     job.mkdir(mode=0o700)
@@ -212,7 +216,20 @@ def _consumer(root, role):
         def forbidden(self, *args, **kwargs):
             raise AssertionError("no provider mutation on cold read")
 
-        run_job = batch_bucket_files = cancel_job = forbidden
+        def cancel_job(self, *, job_id, namespace, token):
+            if not role.startswith("cancel-"):
+                return self.forbidden()
+            assert job_id == "fixture-job-1" and namespace == "fixture-owner"
+            events.append("cancel")
+            with os.fdopen(os.open(root / "cancel-count", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600), "wb") as log:
+                log.write(b"cancel\n")
+                log.flush()
+                os.fsync(log.fileno())
+            if role == "cancel-lost":
+                raise RuntimeError("scripted lost provider acknowledgment")
+            return None
+
+        run_job = batch_bucket_files = forbidden
 
     secrets, clock = Secrets(), Clock()
     authority = compose_reference_authority(
@@ -232,12 +249,17 @@ def _consumer(root, role):
 
         patch.setattr(HFJobsPreparation, "__init__", forbidden)
         patch.setattr(retained_reader, "_capture", forbidden)
-        view = retained_reader.open_retained_hf_runs(
+        options = {"records": store, "streams": store, "secrets": secrets}
+        opener = retained_reader.open_retained_hf_runs
+        if role.startswith("cancel-"):
+            from synaptic_tuner.api.v1.reference.provider_family import ReferenceHostPortsV1
+            opener = retained_reader.open_retained_hf_lifecycle
+            options = {"ports": ReferenceHostPortsV1(store, store, clock, lifecycle.CurrentGrants(), secrets),
+                       "allow_current_cancel_authorization": True}
+        view = opener(
             run=run,
-            records=store,
-            streams=store,
+            **options,
             authority=authority,
-            secrets=secrets,
             sdk=sdk,
             api=Provider(),
             scratch_root=scratch,
@@ -246,7 +268,26 @@ def _consumer(root, role):
             reader_key=base64.b64decode(keys["reader_base64"], validate=True),
         )
         before = view.runs.show(run).state.value
-        if role == "mismatch":
+        if role == "cancel-pending":
+            assert view.runs.outcome(run).state.value == before == "queued"
+        elif role in {"cancel-ack", "cancel-lost", "cancel-repeat"}:
+            outcome = view.runs.cancel(run, "bounded original known-job cancellation")
+            assert outcome.state.value == (
+                "cancel_requested" if role == "cancel-ack" else "reconcile_required")
+        elif role == "cancel-reconcile":
+            view.runs.reconcile(run)
+            assert "cancel" not in events
+        elif role == "cancel-terminal":
+            expected = "cancelled" if state["status"] == "CANCELED" else "succeeded"
+            assert view.runs.outcome(run).state.value == expected
+            if expected == "succeeded":
+                assert view.runs.verify(run).verified
+                assert len(view.runs.show(run).artifacts) == 5
+                for artifact in view.runs.show(run).artifacts:
+                    raw = b"".join(view.runs.artifacts(
+                        RunArtifactRequest(run, artifact.role, artifact.size_bytes)).iter_bytes())
+                    assert hashlib.sha256(raw).hexdigest() == artifact.sha256
+        elif role == "mismatch":
             from synaptic_tuner.api.v1.runs_facade import RunOperationError
 
             with pytest.raises(RunOperationError) as failure:
@@ -273,11 +314,24 @@ def _consumer(root, role):
                     ).iter_bytes()
                 )
                 assert hashlib.sha256(raw).hexdigest() == artifact.sha256
+        cancel_evidence = {}
+        if role.startswith("cancel-"):
+            retained = view.runs._operations._workflows.get(run)
+            cancel_evidence = {
+                "phase": retained.phase.value,
+                "cancel_command_digest": None if retained.cancel is None else retained.cancel.command_digest,
+                "cancel_disposition": None if retained.cancel is None or not retained.cancel.foundation_outcomes
+                    else retained.cancel.foundation_outcomes[-1].disposition.value,
+                "bound_cancellation": retained.bound_cancellation is not None,
+                "submit_assessment_sha256": hashlib.sha256(
+                    retained.submit.foundation_bindings[-1].canonical_assessment_bytes).hexdigest(),
+            }
     return {
         "pid": os.getpid(),
         "before": before,
         "census": _census(root),
         "events": events,
+        **cancel_evidence,
     }
 
 
@@ -290,8 +344,8 @@ def _child(role, root, source):
         os.environ.get(name)
         for name in ("HF_TOKEN", "HF_API_KEY", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET")
     )
-    if role == "producer":
-        _producer(root)
+    if role in {"producer", "producer-cancel"}:
+        _producer(root, allow_cancel_reconcile=role == "producer-cancel")
     else:
         print(json.dumps(_consumer(root, role)), flush=True)
 

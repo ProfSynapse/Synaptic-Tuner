@@ -46,6 +46,7 @@ from tuner.execution.providers.hf_jobs_provider_v1.composition import (
 )
 from tuner.execution.providers.hf_jobs_provider_v1.retained_reader import (
     open_retained_hf_runs,
+    open_retained_hf_lifecycle,
 )
 
 
@@ -86,6 +87,8 @@ def _metadata(config):
     authority_ref = SecretRef.from_dict(config["host"]["authority_secret"])
     reader_ref = SecretRef.from_dict(config["host"]["evidence_secret"])
     deadline = c["read_seconds"]
+    if type(c.get("allow_cancel_reconcile", False)) is not bool:
+        raise ValueError("hf_configuration_invalid")
     if type(deadline) is not int or not 1 <= deadline <= 180:
         raise ValueError("hf_configuration_invalid")
     if any(
@@ -121,7 +124,7 @@ def _preparation(config, clock):
         "currency",
         "read_seconds",
     }
-    if set(c) != required:
+    if set(c) not in (required, required | {"allow_cancel_reconcile"}):
         raise ValueError("hf_configuration_invalid")
     material = CoordinatorResolvedMaterial.parse(
         _file(c["material_file"], 2 << 20), default_recipe_registry()
@@ -236,6 +239,8 @@ def _preparation(config, clock):
             clock=clock,
             maximum_cost_minor_units=c["maximum_cost_minor_units"],
             currency=c["currency"],
+            **({"allow_cancel_reconcile": c["allow_cancel_reconcile"]}
+               if "allow_cancel_reconcile" in c else {}),
         )
         run = TrainingRunRef(material.run_id, document["project_ref"])
         if "run" in config and TrainingRunRef.from_dict(config["run"]) != run:
@@ -325,12 +330,16 @@ def open_host(config, *, state_root, mode, ports=None, sdk=None, api=None):
             if api is None:
                 api = sdk.HfApi()
             if mode == "read":
-                view = open_retained_hf_runs(
+                cold_options = {"records": ports.records, "streams": ports.streams,
+                                "secrets": ports.secrets}
+                opener = open_retained_hf_runs
+                if c.get("allow_cancel_reconcile", False):
+                    opener = open_retained_hf_lifecycle
+                    cold_options = {"ports": ports, "allow_current_cancel_authorization": True}
+                view = opener(
                     run=run,
-                    records=ports.records,
-                    streams=ports.streams,
+                    **cold_options,
                     authority=authority,
-                    secrets=ports.secrets,
                     sdk=sdk,
                     api=api,
                     scratch_root=root / "scratch",
@@ -354,6 +363,8 @@ def open_host(config, *, state_root, mode, ports=None, sdk=None, api=None):
                     reader_key_ref=c["reader_key_ref"],
                     reader_key=key,
                     deadline_seconds=c["read_seconds"],
+                    **({"allow_current_cancel_authorization": True}
+                       if c.get("allow_cancel_reconcile", False) else {}),
                 )
                 public = composed.api()
                 yield public.training, public.runs, provider, run

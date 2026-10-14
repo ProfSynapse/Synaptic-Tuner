@@ -28,6 +28,7 @@
     "reader_key_ref": "HOST_SELECTED_READER_KEY_REFERENCE",
     "maximum_cost_minor_units": 100,
     "currency": "USD",
-    "read_seconds": 30
+    "read_seconds": 30,
+    "allow_cancel_reconcile": false
   }
 }

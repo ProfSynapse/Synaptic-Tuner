@@ -45,7 +45,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
 
-from synaptic_tuner.api.v1.execution import AuthorizationRequirement, ExecutionGrant
+from synaptic_tuner.api.v1.execution import ExecutionGrant
+from synaptic_tuner.api.v1.training_facade import AuthorizationRequirement
 from synaptic_tuner.api.v1.planning import TrainingPlan
 from synaptic_tuner.api.v1.ports import (
     DurableRecordStorePort,
