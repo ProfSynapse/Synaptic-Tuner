@@ -12,5 +12,6 @@ credential values belong only in approved named secret stores.
 The eight authored paired documents publish syntunia-sft-row/v1 raw_text with
 full-token loss, not messages/v2. A publication/source pin is not a runtime,
 model/hardware, cancellation or paid qualification grant. Never replay unknown
-submission or erase consumed state. This fixture creation authorizes only local
-preparation and explicitly requested read-only account/bucket discovery.
+submission or erase consumed state. The fixture itself is not effect authority. Honor existing explicit bounded
+session authorization; this local preparation task stops before provider staging,
+jobs or uploads.
