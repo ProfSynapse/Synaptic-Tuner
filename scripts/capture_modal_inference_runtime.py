@@ -24,6 +24,7 @@ from typing import Any, Callable
 import stat
 
 _IMAGE = re.compile(r"docker\.io/vllm/vllm-openai@sha256:[0-9a-f]{64}")
+_TRAINING_IMAGE = re.compile(r"docker\.io/unsloth/unsloth@sha256:[0-9a-f]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,62}[A-Za-z0-9])?")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -817,6 +818,213 @@ def _parse_diagnostic(
         raise ModalInferenceRuntimeCaptureError("capture_output_invalid") from None
 
 
+def _training_options(
+    *,
+    training_base,
+    interpreter,
+    image,
+    isolated_python=False,
+    modal_additions=False,
+    engine_wheel=None,
+    engine_wheel_sha256=None,
+    check_private_directories=False,
+    verify_runtime_lock_digest=None,
+    diagnose_distributions=False,
+    read_sandbox=None,
+    image_builder_version=None,
+):
+    if type(training_base) is not bool:
+        raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
+    if not training_base:
+        if interpreter is not None or image_builder_version is not None:
+            raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
+        return
+    if (
+        isolated_python
+        or modal_additions
+        or engine_wheel is not None
+        or engine_wheel_sha256 is not None
+        or check_private_directories
+        or verify_runtime_lock_digest is not None
+        or diagnose_distributions
+        or read_sandbox is not None
+    ):
+        raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
+    _exact_text(image, _TRAINING_IMAGE)
+    if image_builder_version != "2025.06":
+        raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
+    if (
+        type(interpreter) is not str
+        or not interpreter.startswith("/")
+        or len(interpreter.encode("utf-8")) > 4096
+        or interpreter != os.path.normpath(interpreter)
+        or "//" in interpreter
+        or any(ord(c) < 32 or ord(c) == 127 for c in interpreter)
+    ):
+        raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
+
+
+def _training_builder(sdk, image: str, pin: str) -> None:
+    """Refuse registry setup that would alter Python or installed packages."""
+    try:
+        if (
+            os.environ.get("MODAL_IMAGE_BUILDER_VERSION") != pin
+            or sdk._image._get_image_builder_version("2024.10") != pin
+            or sdk.Image._registry_setup_commands(image, pin, [], None)
+            != ["FROM " + image]
+        ):
+            raise ValueError
+    except Exception:
+        raise ModalInferenceRuntimeCaptureError("capture_input_invalid") from None
+
+
+def _parse_training_candidate(
+    raw: bytes, *, image: str, source_commit: str, interpreter: str
+):
+    """Validate the finite existing inventory representation, not issue a lock."""
+
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError
+            result[key] = value
+        return result
+
+    try:
+        if not 0 < len(raw) <= _MAX_CAPTURE_BYTES:
+            raise ValueError
+        value = json.loads(
+            raw,
+            object_pairs_hook=pairs,
+            parse_constant=lambda _: (_ for _ in ()).throw(ValueError()),
+        )
+        if (
+            type(value) is not dict
+            or set(value)
+            != {"schema_version", "status", "operator_selection", "python", "inventory"}
+            or value["schema_version"]
+            != "synaptic-modal-training-base-runtime-inspection-candidate/v1"
+            or value["status"] != "CANDIDATE_ONLY"
+            or value["operator_selection"]
+            != {
+                "image": image,
+                "source_commit": source_commit,
+                "interpreter": interpreter,
+            }
+            or json.dumps(
+                value,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("ascii")
+            + b"\n"
+            != raw
+        ):
+            raise ValueError
+        python = value["python"]
+        if (
+            type(python) is not dict
+            or set(python)
+            != {
+                "implementation",
+                "version",
+                "executable",
+                "physical_executable",
+                "executable_sha256",
+                "purelib",
+                "platlib",
+            }
+            or python["implementation"] != "cpython"
+            or python["executable"] != interpreter
+            or re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", python["version"])
+            is None
+            or _SHA256.fullmatch(python["executable_sha256"]) is None
+        ):
+            raise ValueError
+        for key in ("physical_executable", "purelib", "platlib"):
+            path = python[key]
+            if (
+                type(path) is not str
+                or not path.startswith("/")
+                or len(path.encode()) > 4096
+                or path != os.path.normpath(path)
+                or "//" in path
+                or any(ord(c) < 32 or ord(c) == 127 for c in path)
+            ):
+                raise ValueError
+        inventory = value["inventory"]
+        if (
+            type(inventory) is not dict
+            or set(inventory) != {"schema_version", "image", "distributions", "runtime"}
+            or inventory["schema_version"]
+            != "syntunia-python-distribution-inventory/v1"
+            or inventory["image"] != image
+        ):
+            raise ValueError
+        entries = inventory["distributions"]
+        if type(entries) is not list or not 0 < len(entries) <= 512:
+            raise ValueError
+        distributions = {}
+        for entry in entries:
+            if type(entry) is not dict or set(entry) != {"name", "version"}:
+                raise ValueError
+            name, version = entry["name"], entry["version"]
+            if (
+                type(name) is not str
+                or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None
+                or len(name) > 128
+                or type(version) is not str
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]{0,255}", version) is None
+                or name in distributions
+            ):
+                raise ValueError
+            distributions[name] = version
+        if list(distributions) != sorted(distributions):
+            raise ValueError
+        runtime = inventory["runtime"]
+        if type(runtime) is not dict or set(runtime) != {
+            "python_implementation",
+            "python_version",
+            "os",
+            "architecture",
+            "libc",
+            "cuda_build",
+            "torch_version",
+            "transformers_version",
+            "trl_version",
+            "unsloth_version",
+            "unsloth_zoo_version",
+        }:
+            raise ValueError
+        for item in runtime.values():
+            if (
+                type(item) is not str
+                or not item
+                or len(item.encode()) > 256
+                or any(ord(c) < 32 or ord(c) == 127 for c in item)
+            ):
+                raise ValueError
+        if (
+            runtime["python_implementation"] != "CPython"
+            or runtime["python_version"] != python["version"]
+        ):
+            raise ValueError
+        for field, package in (
+            ("torch_version", "torch"),
+            ("transformers_version", "transformers"),
+            ("trl_version", "trl"),
+            ("unsloth_version", "unsloth"),
+            ("unsloth_zoo_version", "unsloth-zoo"),
+        ):
+            if distributions.get(package) != runtime[field]:
+                raise ValueError
+        return value
+    except Exception:
+        raise ModalInferenceRuntimeCaptureError("capture_output_invalid") from None
+
+
 def capture_modal_inference_runtime(
     *,
     sdk: object,
@@ -832,9 +1040,31 @@ def capture_modal_inference_runtime(
     engine_wheel_sha256: str | None = None,
     check_private_directories: bool = False,
     verify_runtime_lock_digest: str | None = None,
+    training_base: bool = False,
+    interpreter: str | None = None,
+    image_builder_version: str | None = None,
 ) -> ModalInferenceRuntimeCapture:
-    """Run the inspector once, with a finite local and remote lifetime."""
+    """Run the inspector once, with a finite local and remote lifetime.
 
+    Training-base mode requires the caller's prebound builder environment for
+    the whole process lifetime. It observes Torch CUDA metadata without loading
+    a model and reports the script-derived image separately from the registry
+    base. Neither mode issues a lock or grants training authority.
+    """
+
+    _training_options(
+        training_base=training_base,
+        interpreter=interpreter,
+        image=image,
+        isolated_python=isolated_python,
+        modal_additions=modal_additions,
+        engine_wheel=engine_wheel,
+        engine_wheel_sha256=engine_wheel_sha256,
+        check_private_directories=check_private_directories,
+        verify_runtime_lock_digest=verify_runtime_lock_digest,
+        diagnose_distributions=diagnose_distributions,
+        image_builder_version=image_builder_version,
+    )
     if (modal_additions and not isolated_python) or (
         check_private_directories and (not isolated_python or diagnose_distributions)
     ):
@@ -850,10 +1080,12 @@ def capture_modal_inference_runtime(
             raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
     app_name = _exact_text(app_name, _NAME)
     environment_name = _exact_text(environment_name, _NAME)
-    image = _exact_text(image, _IMAGE)
+    image = _exact_text(image, _TRAINING_IMAGE if training_base else _IMAGE)
     source_commit = _exact_text(source_commit, _COMMIT)
     if client is None or getattr(sdk, "__version__", None) != _SDK_VERSION:
         raise ModalInferenceRuntimeCaptureError("modal_sdk_invalid")
+    if training_base:
+        _training_builder(sdk, image, image_builder_version)
     script = _script_path()
     script_bytes, script_digest = _script_source(script)
     preparer = script.with_name("prepare_modal_inference_python.py")
@@ -887,7 +1119,13 @@ def capture_modal_inference_runtime(
         staged = Path(temporary.name) / "inspect_modal_inference_runtime.py"
         _stage_source(staged, script_bytes)
         image_value = (
-            sdk.Image.from_registry(image)
+            (
+                sdk.Image.from_registry(
+                    image, add_python=None, setup_dockerfile_commands=[]
+                )
+                if training_base
+                else sdk.Image.from_registry(image)
+            )
             .entrypoint([])
             .add_local_file(staged, _REMOTE_SCRIPT, copy=True)
         )
@@ -953,6 +1191,8 @@ def capture_modal_inference_runtime(
                 # needed. Keep it alive while a timed-out build is still using it.
                 temporary.cleanup()
 
+        if training_base:
+            _training_builder(sdk, image, image_builder_version)
         _bounded_call(
             build_image,
             deadline=deadline,
@@ -962,13 +1202,28 @@ def capture_modal_inference_runtime(
 
         def create_sandbox() -> object:
             try:
+                if training_base:
+                    _training_builder(sdk, image, image_builder_version)
                 return sdk.Sandbox.create(
-                    *((_ISOLATED_PYTHON, "-I") if isolated_python else ("python3",)),
+                    *(
+                        (interpreter, "-I")
+                        if training_base
+                        else (
+                            (_ISOLATED_PYTHON, "-I")
+                            if isolated_python
+                            else ("python3",)
+                        )
+                    ),
                     _REMOTE_SCRIPT,
                     "--image",
                     image,
                     "--source-commit",
                     source_commit,
+                    *(
+                        ("--training-base", "--interpreter", interpreter)
+                        if training_base
+                        else ()
+                    ),
                     *(("--diagnose-distributions",) if diagnose_distributions else ()),
                     *(
                         ("--check-private-directories",)
@@ -1022,7 +1277,11 @@ def capture_modal_inference_runtime(
         if wheel is not None and _wheel_source(engine_wheel)[1:] != wheel[1:]:
             raise ModalInferenceRuntimeCaptureError("engine_wheel_changed")
         candidate = (
-            _parse_diagnostic(raw, image=image, source_commit=source_commit)
+            _parse_training_candidate(
+                raw, image=image, source_commit=source_commit, interpreter=interpreter
+            )
+            if training_base
+            else _parse_diagnostic(raw, image=image, source_commit=source_commit)
             if diagnose_distributions
             else _parse_candidate(
                 raw,
@@ -1044,6 +1303,18 @@ def capture_modal_inference_runtime(
                 else "synaptic-modal-inference-runtime-capture/v1"
             ),
         }
+        if training_base:
+            envelope["schema_version"] = (
+                "synaptic-modal-training-base-runtime-capture/v1"
+            )
+            envelope["image_builder_version"] = image_builder_version
+            _training_builder(sdk, image, image_builder_version)
+            envelope["inspection_image"] = {
+                "registry_base": image,
+                "derived_provider_image_id": provider_image_id,
+                "script_copy_only": True,
+                "base_image_byte_identity_attested": False,
+            }
         if preparation is not None:
             if (
                 not diagnose_distributions
@@ -1151,6 +1422,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--image", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--diagnose-distributions", action="store_true")
+    parser.add_argument("--training-base", action="store_true")
+    parser.add_argument("--interpreter")
+    parser.add_argument("--image-builder-version")
     parser.add_argument("--isolated-python", action="store_true")
     parser.add_argument("--modal-additions", action="store_true")
     parser.add_argument("--engine-wheel", type=Path)
@@ -1171,6 +1445,25 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     try:
         arguments = build_parser().parse_args(argv)
+        _training_options(
+            training_base=arguments.training_base,
+            interpreter=arguments.interpreter,
+            image=arguments.image,
+            isolated_python=arguments.isolated_python,
+            modal_additions=arguments.modal_additions,
+            engine_wheel=arguments.engine_wheel,
+            engine_wheel_sha256=arguments.engine_wheel_sha256,
+            check_private_directories=arguments.check_private_directories,
+            verify_runtime_lock_digest=arguments.verify_runtime_lock_digest,
+            diagnose_distributions=arguments.diagnose_distributions,
+            read_sandbox=arguments.read_sandbox,
+            image_builder_version=arguments.image_builder_version,
+        )
+        if arguments.training_base:
+            current = os.environ.get("MODAL_IMAGE_BUILDER_VERSION")
+            if current is not None and current != arguments.image_builder_version:
+                raise ModalInferenceRuntimeCaptureError("capture_input_invalid")
+            os.environ["MODAL_IMAGE_BUILDER_VERSION"] = arguments.image_builder_version
         token_id = None
         token_secret = None
         if arguments.modal_profile is None:
@@ -1218,6 +1511,9 @@ def main(argv: list[str] | None = None) -> int:
                         environment_name=arguments.environment,
                         image=arguments.image,
                         source_commit=arguments.source_commit,
+                        training_base=arguments.training_base,
+                        interpreter=arguments.interpreter,
+                        image_builder_version=arguments.image_builder_version,
                         diagnose_distributions=arguments.diagnose_distributions,
                         isolated_python=arguments.isolated_python,
                         modal_additions=arguments.modal_additions,

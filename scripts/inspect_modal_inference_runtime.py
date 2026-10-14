@@ -12,12 +12,14 @@ import platform
 import re
 import stat
 import sys
+import sysconfig
 import tempfile
 
 _SCHEMA = "synaptic-modal-inference-runtime-inspection-candidate/v1"
 _ERROR_SCHEMA = "synaptic-modal-inference-runtime-inspection-error/v1"
 _DIAGNOSTIC_SCHEMA = "synaptic-modal-inference-distribution-diagnostic/v1"
 _IMAGE = re.compile(r"docker\.io/vllm/vllm-openai@sha256:[0-9a-f]{64}")
+_TRAINING_IMAGE = re.compile(r"docker\.io/unsloth/unsloth@sha256:[0-9a-f]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _VERSION = re.compile(r"[1-9][0-9]{0,2}\.(?:0|[1-9][0-9]{0,2})\.(?:0|[1-9][0-9]{0,2})")
@@ -502,11 +504,104 @@ def diagnose_distributions(*, image: str, source_commit: str) -> dict[str, objec
     return diagnostic
 
 
+def _training_interpreter(value: object) -> str:
+    value = _bounded_text(value, maximum=4096)
+    if not value.startswith("/") or value != os.path.normpath(value) or "//" in value:
+        raise _InspectionFailure("PYTHON_INVALID")
+    return value
+
+
+def inspect_training_base(
+    *, image: str, source_commit: str, interpreter: str
+) -> dict[str, object]:
+    """Observe base Python/packages plus Torch CUDA metadata; never load a model.
+
+    Torch is imported for its actual version.cuda observation. This is not an
+    entirely metadata-only inspection or GPU/training qualification.
+    """
+    if type(image) is not str or _TRAINING_IMAGE.fullmatch(image) is None:
+        raise _InspectionFailure("IMAGE_INVALID")
+    if type(source_commit) is not str or _COMMIT.fullmatch(source_commit) is None:
+        raise _InspectionFailure("SOURCE_INVALID")
+    interpreter = _training_interpreter(interpreter)
+    if sys.executable != interpreter or platform.python_implementation() != "CPython":
+        raise _InspectionFailure("PYTHON_INVALID")
+    physical, executable_digest = _executable()
+    version = _bounded_text(platform.python_version(), maximum=64)
+    if _VERSION.fullmatch(version) is None:
+        raise _InspectionFailure("PYTHON_INVALID")
+    paths = sysconfig.get_paths()
+    roots = {key: _training_interpreter(paths[key]) for key in ("purelib", "platlib")}
+    distributions = _distributions()
+    required = {
+        name: distributions.get(name)
+        for name in ("torch", "transformers", "trl", "unsloth", "unsloth-zoo")
+    }
+    if any(value is None for value in required.values()):
+        raise _InspectionFailure("METADATA_INVALID")
+    import torch
+
+    cuda = _bounded_text(torch.version.cuda, maximum=64)
+    if torch.__version__ != required["torch"]:
+        raise _InspectionFailure("METADATA_INVALID")
+    # Recheck actual metadata after importing Torch, without accepting additions
+    # or mutations as the original inventory.
+    if _distributions() != distributions or _executable() != (
+        physical,
+        executable_digest,
+    ):
+        raise _InspectionFailure("DISTRIBUTION_METADATA_READ_FAILED")
+    runtime = {
+        "python_implementation": "CPython",
+        "python_version": version,
+        "os": _bounded_text(platform.system(), maximum=64),
+        "architecture": _bounded_text(platform.machine(), maximum=64),
+        "libc": _bounded_text(" ".join(platform.libc_ver()), maximum=128),
+        "cuda_build": cuda,
+        "torch_version": required["torch"],
+        "transformers_version": required["transformers"],
+        "trl_version": required["trl"],
+        "unsloth_version": required["unsloth"],
+        "unsloth_zoo_version": required["unsloth-zoo"],
+    }
+    candidate = {
+        "schema_version": "synaptic-modal-training-base-runtime-inspection-candidate/v1",
+        "status": "CANDIDATE_ONLY",
+        "operator_selection": {
+            "image": image,
+            "source_commit": source_commit,
+            "interpreter": interpreter,
+        },
+        "python": {
+            "implementation": "cpython",
+            "version": version,
+            "executable": interpreter,
+            "physical_executable": physical,
+            "executable_sha256": executable_digest,
+            **roots,
+        },
+        "inventory": {
+            "schema_version": "syntunia-python-distribution-inventory/v1",
+            "image": image,
+            "distributions": [
+                {"name": name, "version": value}
+                for name, value in distributions.items()
+            ],
+            "runtime": runtime,
+        },
+    }
+    if len(_line(candidate)) > _MAX_OUTPUT_BYTES:
+        raise _InspectionFailure("OUTPUT_INVALID")
+    return candidate
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _ClosedParser(description=__doc__)
     parser.add_argument("--image", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--diagnose-distributions", action="store_true")
+    parser.add_argument("--training-base", action="store_true")
+    parser.add_argument("--interpreter")
     parser.add_argument("--check-private-directories", action="store_true")
     parser.add_argument("--verify-runtime-lock-digest")
     return parser
@@ -525,11 +620,28 @@ def main(argv: list[str] | None = None) -> int:
             or args.verify_runtime_lock_digest is not None
         ):
             raise _InspectionFailure("ARGUMENT_INVALID")
-        candidate = (
-            diagnose_distributions(image=args.image, source_commit=args.source_commit)
-            if args.diagnose_distributions
-            else inspect_runtime(image=args.image, source_commit=args.source_commit)
-        )
+        if args.training_base:
+            if (
+                args.diagnose_distributions
+                or args.check_private_directories
+                or args.verify_runtime_lock_digest is not None
+            ):
+                raise _InspectionFailure("ARGUMENT_INVALID")
+            candidate = inspect_training_base(
+                image=args.image,
+                source_commit=args.source_commit,
+                interpreter=args.interpreter,
+            )
+        elif args.interpreter is not None:
+            raise _InspectionFailure("ARGUMENT_INVALID")
+        else:
+            candidate = (
+                diagnose_distributions(
+                    image=args.image, source_commit=args.source_commit
+                )
+                if args.diagnose_distributions
+                else inspect_runtime(image=args.image, source_commit=args.source_commit)
+            )
         if args.check_private_directories:
             candidate["private_directories"] = inspect_private_directories()
         if args.verify_runtime_lock_digest is not None:
