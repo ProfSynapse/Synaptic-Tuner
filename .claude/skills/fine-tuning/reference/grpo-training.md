@@ -621,3 +621,20 @@ no CUDA. Other lanes skip the tiny-tensor controls before importing Torch; base
 consumers remain Torch-free. Scripted third-party trainer/model boundaries exercise
 real CPU tensor updates, isolated child custody, and native five-role verification,
 without qualifying the real GRPO training stack or provider execution.
+
+### Provider-free process-loss readback proof
+
+The permanent installed custody lane now exercises a killed normal GRPO host and
+fresh OS processes using the existing retained reader. The first post-kill SQLite
+opener observes the exact original call as pending and preserves its authenticated
+checkpoint; later processes authenticate actual signed native completion, verify
+and download all five roles, then read the persisted verified state and list with
+no provider polling. Raw source, recipes, profiles and preparation files are
+removed; original private keys, assessment, context, receipts, call catalogs and
+SQLite recovery sidecars remain. An authentic completion bound to another execution
+is refused without advancing state.
+
+Disk SDK transport and CPU image/ML boundaries are explicit test fixtures. This
+proves host-process reconstruction through the installed public APIs, not live
+Modal recovery, GPU training, restored process-local supervisors, cancellation,
+log authority or automatic continuation. An uncertain submission is never replayed.

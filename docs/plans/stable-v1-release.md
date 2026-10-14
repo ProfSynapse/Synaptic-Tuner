@@ -1063,3 +1063,24 @@ All seven source lock checks remain current without refresh.
 
 The same wheel passed the complete existing installed recipe/retention/profile
 lane: 163 controls in 132.37 seconds, including the updated recipe gates.
+
+### GRPO recovery across host process loss
+
+A CPU test now kills the actual normal GRPO producer after its durable known-call
+checkpoint. It removes original source/configuration/preparation inputs, then
+opens the original SQLite state and authority in separate processes. A pending
+read preserves the original census; an authentically signed completion for the
+wrong execution is rejected. The real signed native output then advances the run
+and all five artifacts download with verified hashes. A final process reads the
+persisted verified outcome and listing without provider polls. No submission is
+replayed and no new qualification or authority is minted during readback.
+
+This is test-only host reconstruction using disk-backed SDK replies and explicit
+CPU image/ML fixtures. It does not qualify live Modal recovery, cancellation,
+process-local descriptors, logs or GPU execution. Independent source/CI review
+passed, including the original SFT process regression. The unchanged accepted
+runner wheel `40e1aa15b91d863c4fd7965424fef8ca7f6362262b24768e2ea137b561f8f964`
+passed installed GRPO recovery (14.76 seconds) and installed SFT recovery
+(10.40 seconds) using each case's existing fixture lane. CI keeps SFT in the
+retention lane and adds GRPO to the custody lane (404 total), avoiding duplicate
+collection without its recipe fixtures. No production or lock bytes changed.
