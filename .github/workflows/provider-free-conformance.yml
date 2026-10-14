@@ -25,6 +25,7 @@ on:
       - "tests/training/test_modal_host_diagnostic_projection.py"
       - "tests/training/test_modal_terminal_status_reader.py"
       - "tests/execution/providers/test_modal_terminal_status_sdk154.py"
+      - "tests/training/test_modal_recipe.py"
       - "tests/training/test_modal_cold_cancellation.py"
       - "tests/training/test_modal_cold_cancellation_process.py"
       - "tests/runtime/test_packaged_cpu_parent_diagnostics.py"
@@ -585,6 +586,10 @@ jobs:
               assert location.is_relative_to(Path(sys.prefix)), location
           root = Path(os.environ["RUNNER_TEMP"]) / "installed-modal-retention-tests"
           for name in (
+              "training/test_modal_recipe.py",
+              "training/test_input_preparation.py",
+              "contract/test_public_training_input_v1.py",
+              "dataset_prep/test_dataset_prep_v1.py",
               "dataset_prep/test_context_messages_v2.py",
               "dataset_prep/test_conversation_messages.py",
               "contract/test_grpo_training_input_v1.py",
@@ -630,6 +635,7 @@ jobs:
           # Explicit host configuration fixtures, not proof of a bundled catalog.
           # No production Python or example code is copied into this test root.
           for name in (
+              "examples/host-project/synaptic.yaml",
               "Trainers/recipes/qwen35_4b_32k_modal_prompt_completion.yaml",
               "Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c/profile.yaml",
           ):
@@ -661,6 +667,7 @@ jobs:
           os.chdir(root)
           raise SystemExit(pytest.main([
               "-q", "-p", "no:cacheprovider",
+              str(root / "tests/training/test_modal_recipe.py") + "::test_host_manifest_publication_is_planned_from_declared_tracking",
               str(root / "tests/runtime/test_modal_build_inspector.py"),
               str(root / "tests/execution/providers/test_modal_runtime_build.py"),
               str(root / "tests/training/test_modal_host_runtime.py"),
