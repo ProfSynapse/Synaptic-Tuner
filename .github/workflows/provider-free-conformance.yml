@@ -121,6 +121,10 @@ on:
       - "scripts/ci_pytest_shard.sh"
       - ".gitattributes"
       - "pyproject.toml"
+      - "_build_support.py"
+      - "MANIFEST.in"
+      - "cli-first-tool-schemas.json"
+      - "Tools/tool_schemas.json"
       - ".github/workflows/provider-free-conformance.yml"
   push:
     branches: [main, feat/submodule-cloud-api-v1, feat/submodule-cloud-api-v1-windows]
