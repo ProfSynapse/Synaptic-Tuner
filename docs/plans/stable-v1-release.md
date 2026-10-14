@@ -46,10 +46,13 @@ source/wheel hashes, failures and evidence limits; older unavailable/baseline
 summaries are historical rather than current backend verdicts. Counts below are
 overlapping installed lane totals, not a cumulative unique-test count.
 
-The reviewed HF batch staging/local-read diagnostics and portable CPU sealed-input
-probe fixes are integrated locally but remain separate from merged main. Their
-full installed acceptance and next PRs are pending at this checkpoint; PRs #250
-and #251 have not yet been created. Independent source review, narrow installed
+The reviewed HF batch staging/local-read diagnostics are installed accepted in
+[#250](https://github.com/ProfSynapse/Synaptic-Tuner/pull/250) at `5248e576`, open
+against main. The portable CPU sealed-input probe fix is also installed accepted
+in [#251](https://github.com/ProfSynapse/Synaptic-Tuner/pull/251) at
+`58225583be620625febba9c7e175af696bf71a5d`, stacked on #250. Both remain
+separate from merged main.
+Exact-head CI and merge remain pending at this checkpoint. Independent source review, narrow installed
 readback evidence and local CPU experiments do not substitute for live training
 qualification. The merged lifecycle implementations do not establish earlier
 attempt causes or physical provider quiescence.
@@ -178,8 +181,12 @@ cause or authorize adoption/re-upload. The locally integrated HF fix passed a
 narrow installed legacy `show`: original 12 records and four streams remained
 logically unchanged, the result retained reconciliation-required/no-provider-
 evidence/no-replay status, and no HF credential/client, source preparation or
-grant was opened. Full installed batch/diagnostic acceptance and another admitted
-training attempt remain pending. Evidence is retained under
+grant was opened. The fresh copied installation passed **171 controls** in 257.66 seconds on
+wheel `72203ac13235d685b53de98853067be7f76cf80efedc7545336503201a1fe390`.
+The initial default uv hardlink installation produced 23 asset-guard failures;
+that evidence remains retained. Installing with `--link-mode copy` corrected
+physical custody without changing a guard. Exact-head CI/merge and another
+admitted training attempt remain pending. Evidence is retained under
 `hf-sft-final-bound-plan-20261014/`, including the stage summary, batch-read
 experiment and installed legacy-show record.
 
@@ -195,8 +202,11 @@ seals/hash/readback and refused a write with `EPERM`. The separate probe repair
 reuses that authenticated helper and guarded core seal constants, without a new
 ABI, fake Python constants, inventory/pin change or guard waiver. Source controls
 passed **239 with one existing optional-Torch skip** on real portable 3.11; peer
-controls passed **228 with one skip** (overlapping totals). Fresh installed proof
-and a new admitted live CPU attempt remain pending. F retains no local image/
+controls passed **228 with one skip** (overlapping totals). The combined fresh wheel passed **237 installed controls**, with one optional-
+Torch skip and two checkout-only controls deselected (covered by source tests).
+Its 1,050 source-owned members matched byte-for-byte and all 2,772 verified
+RECORD members had link count one; all seven maintenance checks are current.
+A new admitted live CPU attempt remains pending. F retains no local image/
 Sandbox identity or affirmative cleanup record; no GPU/model weights or replay
 occurred. Evidence is `grpo-normal-cpu-qualification-20261014-f/outcome.json` and
 its local existing-helper experiment.
@@ -205,9 +215,15 @@ The authorized Windows desktop is now reachable and has a ready WSL Docker
 daemon through an explicit Unix socket; its default Windows `npipe` context is
 unsuitable for the selected WSL/POSIX consumer. No global context change is
 required. The idle RTX 3090 was observed; this is hardware readiness, not SFT
-qualification. Physical storage verification remains required before an image
-pull. No Docker training, model download or final-source lifecycle parity has
-been established by these read-only observations.
+qualification. The physical Docker VHDX drive had 170 GiB free. A proposed increment of at most
+100 GiB with at least 60 GiB reserved is planning, not a quota. Root approved
+only the exact public Linux/amd64 `1644…` base-image pull, not GPU execution.
+The single pull has started with a 900-second bound; no completed result is
+recorded at this checkpoint.
+The core preparation ports exist, but a reusable checkout-consumer preparation
+CLI still needs its reviewed design/implementation before a GPU plan is ready.
+No Docker training, model download or final-source lifecycle parity is established
+by these observations or by a base pull alone.
 
 No new grant, lifecycle DTO, store or scenario CRUD framework is required merely
 to close this plan. Supported host composition and installed/source prerequisites
