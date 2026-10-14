@@ -953,6 +953,15 @@ with explicit model/image/provider substitutes. Fresh reader construction and
 wrong-signature rejection are covered; full public-host SQLite restart, ordinary
 recipe launch and live GRPO qualification remain separate integration gates.
 
+The diagnostic readers now recognize the same nine fixed GRPO failure stages as
+the worker issuer. Unknown and private values still reject; no additional
+diagnostics are exposed. The correction passed 896 source controls with the
+pinned Modal 1.5.4 SDK and 249 installed-reader controls (11.48 seconds). The
+fresh sdist-built wheel is
+`fc09461f14a4639aefcf26b0cc65c3227d1afb017734d2d3ab220aac2cdac35c`;
+its base-only consumer passes and the changed reader is byte-exact. All seven
+source lock checks remain current without refresh.
+
 ### Strict GRPO recipe planning
 
 The normal Modal planning surface now accepts a strict GRPO recipe and an exact

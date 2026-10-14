@@ -465,3 +465,36 @@ def test_no_result_and_timeout_subclass_do_not_mean_pending(monkeypatch, returne
     monkeypatch.setattr(reader._facade.sdk.FunctionCall, 'from_id', lambda *args, **kwargs: call)
     with pytest.raises(ModalPackagedReadUnavailable, match='call_unknown'):
         reader._poll_packaged_call(reader.binding, 'fc-1')
+
+
+@pytest.mark.parametrize("stage", (
+    "GRPO_ADMISSION", "GRPO_REVALIDATION", "GRPO_PREPARATION", "GRPO_INVOCATION",
+    "GRPO_TRAINER", "GRPO_CHILD_DEADLINE", "GRPO_CLEANUP_UNCERTAIN",
+    "GRPO_ARTIFACT", "GRPO_UNKNOWN",
+))
+def test_actual_grpo_worker_failure_projects_only_closed_stage(stage):
+    from tuner.execution.providers.modal.packaged_worker import packaged_worker_failure
+
+    reader, request, _ = _reader("failed")
+    reader._facade.result = packaged_worker_failure(stage)
+    with pytest.raises(ModalPackagedReadUnavailable) as caught:
+        reader.observe(request)
+    assert caught.value.args == (f"modal_packaged_call_failed_{stage}",)
+
+
+@pytest.mark.parametrize("stage", ("GRPO_TRAINER_PRIVATE_SENTINEL", "GRPO_private credential", True))
+def test_unknown_grpo_stage_never_enters_public_failure(stage):
+    from tuner.execution.providers.modal.packaged_worker import packaged_worker_failure
+
+    issued = packaged_worker_failure(stage)
+    assert issued["failure_stage"] == "SFT_UNKNOWN"
+    assert "PRIVATE_SENTINEL" not in str(issued) and "credential" not in str(issued)
+    reader, request, _ = _reader("failed")
+    reader._facade.result = {
+        "schema_version": "synaptic-modal-packaged-worker-result/v2",
+        "effect_id": "unavailable", "status_code": "failed",
+        "completion_sha256": "0" * 64, "failure_stage": stage,
+    }
+    with pytest.raises(ModalPackagedReadUnavailable) as caught:
+        reader.observe(request)
+    assert caught.value.args == ("modal_packaged_call_unknown",)
