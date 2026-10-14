@@ -139,8 +139,9 @@ def test_mixed_release_contracts_reject_before_process(tmp_path, monkeypatch, ch
         "run",
         lambda *args, **kwargs: pytest.fail("spawned invalid release"),
     )
-    with pytest.raises(ValueError, match="PACKAGED_CPU_METHOD_REJECTED"):
+    with pytest.raises(worker.PackagedLocalCPUStageError) as rejected:
         worker.qualify_installed_child(release.to_dict())
+    assert rejected.value.stage == "RELEASE_ADMISSION"
 
 
 def test_wrong_outer_closure_rejects_before_image_read(tmp_path, monkeypatch):

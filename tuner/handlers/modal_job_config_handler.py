@@ -22,7 +22,7 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
                     "location": "modal_local_preparation.prepare_local_inputs", "retry_authorized": False}
         from tuner.training.modal_host_runtime import ModalHostBootstrapUnavailable
         from tuner.training.modal_host_qualification import ModalHostQualificationUnavailable
-        from tuner.execution.providers.modal.runtime_release_qualification import PARENT_RUNTIME_FAILURE_STAGES
+        from tuner.execution.providers.modal.runtime_release_qualification import PARENT_RUNTIME_FAILURE_STAGES, LOCAL_CPU_FAILURE_STAGES
         from tuner.training.modal_standalone_runner import ModalStandalonePhaseUnavailable
         from tuner.execution.providers.modal.packaged_worker import PACKAGED_WORKER_FAILURE_STAGES
     except Exception:
@@ -107,6 +107,8 @@ def _closed_bootstrap_details(error: BaseException) -> dict[str, object] | None:
            for stage in PARENT_RUNTIME_FAILURE_STAGES},
         "CALL_CHILD_RESULT": (
             "UNAVAILABLE", "packaged_training_worker.child_result"),
+        **{"CALL_" + stage: ("UNAVAILABLE", "packaged_training_worker." + stage.lower())
+           for stage in LOCAL_CPU_FAILURE_STAGES - {"PARENT_RELEASE", "CHILD_RESULT"}},
         "RECEIPT_VERIFY": ("UNAVAILABLE", "modal_host_qualification.verify_receipt"),
     }
     if type(error) is ModalHostQualificationUnavailable and error.retry_authorized is False:

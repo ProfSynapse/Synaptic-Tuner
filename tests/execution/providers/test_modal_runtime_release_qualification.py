@@ -35,7 +35,7 @@ from tuner.execution.providers.modal.runtime_release_deployment import (
     ModalRuntimeReleaseVolumeSpecV1,
 )
 from tuner.runtime.releases import ProviderRuntimeBindingV1
-from tuner.runtime.packaged_training_worker import LOCAL_CPU_DATA
+from tuner.runtime.packaged_training_worker import LOCAL_CPU_DATA, LOCAL_CPU_FAILURE_STAGES
 
 from tests.execution.providers.test_modal_packaged_binding import _release_and_execution
 
@@ -470,7 +470,7 @@ def test_worker_classifies_only_installed_child_exception(monkeypatch, tmp_path:
     }
 
 
-@pytest.mark.parametrize("stage", ("PARENT_RELEASE", "CHILD_RESULT"))
+@pytest.mark.parametrize("stage", sorted(LOCAL_CPU_FAILURE_STAGES))
 def test_worker_projects_only_closed_local_cpu_stage(monkeypatch, tmp_path: Path, stage: str) -> None:
     from tuner.runtime.packaged_training_worker import PackagedLocalCPUStageError
 

@@ -22,7 +22,7 @@ from tuner.execution.foundation_v2.canonical import (
     parse_canonical_object,
     safe_ref,
 )
-from tuner.runtime.packaged_training_worker import LOCAL_CPU_DATA
+from tuner.runtime.packaged_training_worker import LOCAL_CPU_DATA, LOCAL_CPU_FAILURE_STAGES
 from tuner.runtime.releases import (
     PackagedRuntimeRelease, PackagedTrainingRuntimeReleaseV1,
     PackagedTrainingRuntimeReleaseV2, parse_packaged_runtime_release,
@@ -764,7 +764,7 @@ class ModalRuntimeReleaseQualificationWorker:
             try:
                 child = qualify_installed_child(release_payload)
             except PackagedLocalCPUStageError as error:
-                if error.stage not in {"PARENT_RELEASE", "CHILD_RESULT"}:
+                if type(error) is not PackagedLocalCPUStageError or error.stage not in LOCAL_CPU_FAILURE_STAGES:
                     raise ValueError from None
                 return {
                     "schema_version": QUALIFICATION_RESULT_SCHEMA,

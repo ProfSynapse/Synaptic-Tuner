@@ -195,7 +195,9 @@ def test_cpu_gate_does_not_stage_when_claim_fails(monkeypatch):
     ("unknown_worker", "CALL_OBSERVE"),
     ("receipt", "RECEIPT_VERIFY"),
 ) + tuple(("parent_runtime_" + stage.removeprefix("PARENT_RUNTIME_").lower(), "CALL_" + stage)
-          for stage in sorted(qualification.PARENT_RUNTIME_FAILURE_STAGES)))
+          for stage in sorted(qualification.PARENT_RUNTIME_FAILURE_STAGES))
+  + tuple(("local_cpu_" + stage.lower(), "CALL_" + stage)
+          for stage in sorted(qualification.LOCAL_CPU_FAILURE_STAGES - {"PARENT_RELEASE", "CHILD_RESULT"})))
 def test_cpu_gate_reports_only_closed_post_claim_stage(
         monkeypatch, failure_stage, expected_phase):
     runtime, client = _runtime()
@@ -236,7 +238,7 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
             events.append("call")
             if failure_stage == "call":
                 raise RuntimeError("HF_TOKEN=private")
-            if failure_stage in {"parent_setup", "installed_child", "parent_release", "child_result", "unknown_worker"} or failure_stage.startswith("parent_runtime_"):
+            if failure_stage in {"parent_setup", "installed_child", "parent_release", "child_result", "unknown_worker"} or failure_stage.startswith(("parent_runtime_", "local_cpu_")):
                 stages = {
                     "parent_setup": "PARENT_SETUP",
                     "installed_child": "INSTALLED_CHILD",
@@ -246,6 +248,8 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
                 }
                 if failure_stage.startswith("parent_runtime_"):
                     stages[failure_stage] = "PARENT_RUNTIME_" + failure_stage.removeprefix("parent_runtime_").upper()
+                if failure_stage.startswith("local_cpu_"):
+                    stages[failure_stage] = failure_stage.removeprefix("local_cpu_").upper()
                 return {
                     "schema_version": "synaptic-modal-runtime-release-qualification-result/v1",
                     "status_code": "failed",
@@ -285,7 +289,7 @@ def test_cpu_gate_reports_only_closed_post_claim_stage(
     assert "HF_TOKEN" not in str(error)
     assert error.__cause__ is None
     assert events[0] == "claim"
-    if failure_stage in {"parent_setup", "installed_child", "parent_release", "child_result", "unknown_worker"} or failure_stage.startswith("parent_runtime_"):
+    if failure_stage in {"parent_setup", "installed_child", "parent_release", "child_result", "unknown_worker"} or failure_stage.startswith(("parent_runtime_", "local_cpu_")):
         assert "receipt" not in events
 
 
