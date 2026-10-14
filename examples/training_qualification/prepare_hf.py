@@ -286,6 +286,88 @@ def validate_runtime_binding(declaration, source, runtime):
         raise ValueError("hf_runtime_source_mismatch")
 
 
+def authenticated_source(
+    config,
+    context,
+    normalized,
+    identity,
+    declaration,
+    runtime_fields,
+    manifest,
+    *,
+    pushed_sources,
+    authenticator,
+    clock,
+):
+    """Existing source admission shared by checkout-owned provider consumers."""
+    inspected = GitCliLocalSourceInspector().inspect(context=context)
+    if inspected.project_source.dirty or inspected.engine_source.dirty:
+        raise ValueError("hf_sources_dirty")
+    lock = replace(
+        inspected,
+        run_id=config["run_id"],
+        created_at=clock.now(),
+        project=manifest.to_dict(),
+        configuration={"sha256": _sha(normalized.canonical_json.encode())},
+        inputs=(identity.to_dict(),),
+        runtime={"declaration_sha256": _sha(declaration.canonical_json.encode())},
+    )
+    original_binding = lock.binding
+    evidence = pushed_sources.verify(lock)
+    authority = _exact(
+        config["source_authority"], {"secret", "issuer_ref", "key_ref", "audience_ref"}
+    )
+    if (
+        type(evidence) is not AuthenticatedSourceEvidenceV1
+        or lock.binding != original_binding
+        or not evidence.binds(lock)
+        or evidence.issuer_ref != authority["issuer_ref"]
+        or evidence.key_ref != authority["key_ref"]
+        or evidence.audience_ref != authority["audience_ref"]
+    ):
+        raise ValueError("hf_source_evidence_mismatch")
+    payload = evidence.authenticated_payload
+    if (
+        _sha(payload) != evidence.attestation_digest
+        or authenticator.verify(
+            SOURCE_EVIDENCE_PURPOSE,
+            payload,
+            base64.b64decode(evidence.tag_base64),
+            evidence.key_ref,
+        )
+        is not True
+    ):
+        raise ValueError("hf_source_evidence_invalid")
+    validate_evidence_window(
+        verified_at=evidence.verified_at,
+        expires_at=evidence.expires_at,
+        now=clock.now(),
+        policy=SOURCE_EVIDENCE_POLICY,
+    )
+    py = runtime_fields["interpreter"]
+    source = ExecutionSourceV1(
+        run_id=lock.run_id,
+        created_at=lock.created_at,
+        project_source=lock.project_source,
+        engine_source=lock.engine_source,
+        engine_submodule_path=lock.engine_source.submodule_path,
+        source_evidence=evidence,
+        deployment_member_sha256=_sha(declaration.canonical_json.encode()),
+        roots=runtime_fields["roots"],
+        writable_capability_root=runtime_fields["writable_capability_root"],
+        python_implementation=py["implementation"],
+        python_version=py["version"],
+        python_executable=py["executable"],
+        python_executable_digest=py["executable_digest"],
+        environment=runtime_fields["environment"],
+        secret_requirements_digest=runtime_fields["secret_requirements_digest"],
+        provider_runtime_requirements_digest=runtime_fields[
+            "provider_runtime_requirements_digest"
+        ],
+    )
+    return source, lock, inspected
+
+
 def prepare(config, *, pushed_sources, authenticator, clock):
     """Finalize actual caller material through existing source/compiler ports.
 
@@ -364,71 +446,19 @@ def prepare(config, *, pushed_sources, authenticator, clock):
     profile.resolve(model=model["ref"], model_revision=model["revision"], method="sft")
     if model["tokenizer_revision"] != model["revision"]:
         raise ValueError("hf_tokenizer_revision_unsupported")
-    inspected = GitCliLocalSourceInspector().inspect(context=context)
-    if inspected.project_source.dirty or inspected.engine_source.dirty:
-        raise ValueError("hf_sources_dirty")
-    lock = replace(
-        inspected,
-        run_id=config["run_id"],
-        created_at=clock.now(),
-        project=manifest.to_dict(),
-        configuration={"sha256": _sha(normalized.canonical_json.encode())},
-        inputs=(identity.to_dict(),),
-        runtime={"declaration_sha256": _sha(declaration.canonical_json.encode())},
-    )
-    original_binding = lock.binding
-    evidence = pushed_sources.verify(lock)
-    authority = _exact(
-        config["source_authority"], {"secret", "issuer_ref", "key_ref", "audience_ref"}
-    )
-    if (
-        type(evidence) is not AuthenticatedSourceEvidenceV1
-        or lock.binding != original_binding
-        or not evidence.binds(lock)
-        or evidence.issuer_ref != authority["issuer_ref"]
-        or evidence.key_ref != authority["key_ref"]
-        or evidence.audience_ref != authority["audience_ref"]
-    ):
-        raise ValueError("hf_source_evidence_mismatch")
-    payload = evidence.authenticated_payload
-    if (
-        _sha(payload) != evidence.attestation_digest
-        or authenticator.verify(
-            SOURCE_EVIDENCE_PURPOSE,
-            payload,
-            base64.b64decode(evidence.tag_base64),
-            evidence.key_ref,
-        )
-        is not True
-    ):
-        raise ValueError("hf_source_evidence_invalid")
-    validate_evidence_window(
-        verified_at=evidence.verified_at,
-        expires_at=evidence.expires_at,
-        now=clock.now(),
-        policy=SOURCE_EVIDENCE_POLICY,
+    source, lock, inspected = authenticated_source(
+        config,
+        context,
+        normalized,
+        identity,
+        declaration,
+        runtime_fields,
+        manifest,
+        pushed_sources=pushed_sources,
+        authenticator=authenticator,
+        clock=clock,
     )
     py = runtime_fields["interpreter"]
-    source = ExecutionSourceV1(
-        run_id=lock.run_id,
-        created_at=lock.created_at,
-        project_source=lock.project_source,
-        engine_source=lock.engine_source,
-        engine_submodule_path=lock.engine_source.submodule_path,
-        source_evidence=evidence,
-        deployment_member_sha256=_sha(declaration.canonical_json.encode()),
-        roots=runtime_fields["roots"],
-        writable_capability_root=runtime_fields["writable_capability_root"],
-        python_implementation=py["implementation"],
-        python_version=py["version"],
-        python_executable=py["executable"],
-        python_executable_digest=py["executable_digest"],
-        environment=runtime_fields["environment"],
-        secret_requirements_digest=runtime_fields["secret_requirements_digest"],
-        provider_runtime_requirements_digest=runtime_fields[
-            "provider_runtime_requirements_digest"
-        ],
-    )
     runtime = RuntimeSpec(
         profile.image, profile.inventory_sha256.removeprefix("sha256:"), py["version"]
     )
