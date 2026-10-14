@@ -21,6 +21,58 @@
   <sub><i>Training is powered by <a href="https://github.com/unslothai/unsloth">Unsloth</a> — huge thanks to their team.</i></sub>
 </div>
 
+## Public API and host consumers (Beta)
+
+The current source package is **1.1.0 / Beta**. Installed CPU conformance is not
+final-source live provider qualification or a stable release. Start with the
+[operation and qualification matrix](docs/plans/api-v1-support-matrix.md) for
+supported operations and limits, and the [release plan](docs/plans/stable-v1-release.md)
+for remaining gates.
+
+Install a reviewed wheel into your own environment, then check the packaged CLI:
+
+```sh
+python -m pip install /absolute/path/synaptic_tuner-1.1.0-py3-none-any.whl
+synaptic --help
+```
+
+The provider-neutral Python surface is `synaptic_tuner.api.v1`: `DataAPI`,
+`EvaluationAPI`, `TrainingAPI`, `RunsAPI` and `ArtifactsAPI`. The consuming host
+supplies configuration, credentials, grants, stores and selected provider ports;
+importing a facade does not configure or authorize a backend. Optional reference
+composition and caller-owned SQLite are described in the
+[host storage guide](docs/architecture/reference-host-storage.md).
+
+Use the existing **checkout-owned** consumers with the installed engine. From a
+neutral working directory, run their absolute paths with that environment's Python:
+
+```sh
+python -I /absolute/checkout/examples/nontraining/qualification.py plan /absolute/private/consumer.yaml
+python -I /absolute/checkout/examples/training_qualification/launch.py plan /absolute/private/consumer.json
+```
+
+Their [nontraining guide](examples/nontraining/README.md) and
+[SFT guide](examples/training_qualification/README.md) explain explicit templates,
+execution, verification and cold readback. Templates contain placeholders and do
+not authorize effects. A nontraining plan is effect-free; the SFT consumer plan
+is a pure material/profile preview, with full public preflight deferred until
+host composition. Examples, source-owned build declarations and maintenance
+scripts are not installed package assets.
+
+The base package has installed compatibility checks on Ubuntu Python 3.10–3.14
+and Windows/macOS Python 3.12. This does not qualify every workflow on those
+platforms: descriptor-based workers and durable publication require local POSIX
+custody; effectful Modal launching requires the exact copied CPython 3.11.14,
+Modal 1.5.4 and hash-pinned launcher closure. HF and trainer dependencies use
+separate pinned environments. There is no implicit SDK/ML install, local GPU
+requirement for base imports, or universal provider capability. Recovery retains
+known-run status/artifacts and uncertainty without replay; it does not resume
+arbitrary interrupted generation or training.
+
+The utility routes below remain useful legacy/config-first workflows. Their
+completion does not establish public API provider parity or qualify an unreviewed
+recipe, image, model or account.
+
 ## The Problem
 
 Fine-tuning a local LLM is a multi-step pipeline that most people never finish. You need to generate quality training data, format it correctly, pick the right training method, configure dozens of hyperparameters, evaluate the results, then figure out GGUF quantization and deployment. Each step has its own tools, formats, and gotchas. Most tutorials cover one piece — you're left stitching the rest together yourself.
