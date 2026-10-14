@@ -453,7 +453,9 @@ def test_cold_modal_host_reads_retained_state_without_replaying_effects(
             == b"data"
         )
         assert len(stage_calls) == 1
-        assert events == before_events
+        # Artifact readback revalidates the original authenticated scope; it
+        # must not stage, submit, or obtain a replacement provider client.
+        assert events == before_events + [("scope", arguments["client"])]
         assert cold_effects._stage_effects == {}
         assert cold_effects.stages._items == cold_effects.dispatches._items == {}
     finally:
